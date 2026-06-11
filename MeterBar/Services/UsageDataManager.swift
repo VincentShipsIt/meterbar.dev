@@ -28,6 +28,7 @@ class UsageDataManager: ObservableObject {
     private let codexCliService = CodexCliLocalService.shared
     private let authManager = AuthenticationManager.shared
     private let claudeCodeAccountStore = ClaudeCodeAccountStore.shared
+    private let providerVisibilityStore = ProviderVisibilityStore.shared
 
     private var refreshTimer: Timer?
     private let cacheKey = "cached_usage_metrics"
@@ -45,7 +46,7 @@ class UsageDataManager: ObservableObject {
         var newMetrics: [ServiceType: UsageMetrics] = [:]
 
         // Fetch Claude metrics
-        if authManager.isClaudeAuthenticated {
+        if providerVisibilityStore.isEnabled(.claude), authManager.isClaudeAuthenticated {
             do {
                 let metrics = try await claudeService.fetchUsageMetrics()
                 newMetrics[.claude] = metrics
@@ -56,7 +57,7 @@ class UsageDataManager: ObservableObject {
         }
 
         // Fetch Claude Code metrics (local files)
-        if claudeCodeService.hasAccess {
+        if providerVisibilityStore.isEnabled(.claudeCode), claudeCodeService.hasAccess {
             let accountMetrics = await fetchClaudeCodeAccountMetrics()
             claudeCodeAccountMetrics = accountMetrics
 
@@ -65,10 +66,12 @@ class UsageDataManager: ObservableObject {
             } else if let cachedMetrics = self.metrics[.claudeCode] {
                 newMetrics[.claudeCode] = cachedMetrics
             }
+        } else if !providerVisibilityStore.isEnabled(.claudeCode) {
+            claudeCodeAccountMetrics = [:]
         }
 
         // Fetch OpenAI API metrics
-        if authManager.isOpenAIAuthenticated {
+        if providerVisibilityStore.isEnabled(.openai), authManager.isOpenAIAuthenticated {
             do {
                 let metrics = try await openaiService.fetchUsageMetrics()
                 newMetrics[.openai] = metrics
@@ -79,7 +82,7 @@ class UsageDataManager: ObservableObject {
         }
 
         // Fetch Codex CLI metrics (local auth from ~/.codex/auth.json)
-        if codexCliService.hasAccess {
+        if providerVisibilityStore.isEnabled(.codexCli), codexCliService.hasAccess {
             do {
                 let metrics = try await codexCliService.fetchUsageMetrics()
                 newMetrics[.codexCli] = metrics
@@ -94,7 +97,7 @@ class UsageDataManager: ObservableObject {
         }
 
         // Fetch Cursor metrics (local files)
-        if cursorService.hasAccess {
+        if providerVisibilityStore.isEnabled(.cursor), cursorService.hasAccess {
             do {
                 let metrics = try await cursorService.fetchUsageMetrics()
                 newMetrics[.cursor] = metrics
@@ -109,7 +112,7 @@ class UsageDataManager: ObservableObject {
         }
         
         // Merge new metrics with existing cached metrics for services that failed to fetch
-        for service in ServiceType.allCases {
+        for service in ServiceType.allCases where providerVisibilityStore.isEnabled(service) {
             if newMetrics[service] == nil, let cachedMetric = self.metrics[service] {
                 newMetrics[service] = cachedMetric
             }
@@ -124,6 +127,17 @@ class UsageDataManager: ObservableObject {
     func refresh(service: ServiceType) async {
         isLoading = true
         lastError = nil
+
+        guard providerVisibilityStore.isEnabled(service) else {
+            metrics.removeValue(forKey: service)
+            if service == .claudeCode {
+                claudeCodeAccountMetrics = [:]
+            }
+            saveCachedData()
+            sharedStore.saveMetrics(metrics)
+            isLoading = false
+            return
+        }
 
         do {
             let newMetrics: UsageMetrics

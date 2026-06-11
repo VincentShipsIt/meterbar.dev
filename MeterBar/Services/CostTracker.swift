@@ -2,13 +2,15 @@ import Combine
 import Foundation
 import SQLite3
 
-@MainActor
 class CostTracker: ObservableObject {
     static let shared = CostTracker()
 
     @Published var costSummary: CostSummary?
     @Published var isScanning: Bool = false
     @Published var lastScanDate: Date?
+
+    private let providerVisibilityStore = ProviderVisibilityStore.shared
+    private let cacheFileName = "cost-summary-v1.json"
 
     // API-rate estimates per million tokens for local log usage.
     private let pricing: [String: TokenPricing] = [
@@ -27,23 +29,60 @@ class CostTracker: ObservableObject {
         "default": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
     ]
 
-    private init() {}
+    private init() {
+        loadCachedSummary()
+    }
 
     func scanCosts(days: Int = 30) async {
-        isScanning = true
-        defer { isScanning = false }
+        let shouldStart = await MainActor.run {
+            guard !isScanning else { return false }
+            isScanning = true
+            return true
+        }
+        guard shouldStart else { return }
 
+        let includeClaudeCode = providerVisibilityStore.isEnabled(.claudeCode)
+        let includeCodexCli = providerVisibilityStore.isEnabled(.codexCli)
+        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts
+        let summary = await Task.detached(priority: .userInitiated) { [self] in
+            buildCostSummary(
+                days: days,
+                includeClaudeCode: includeClaudeCode,
+                includeCodexCli: includeCodexCli,
+                claudeAccounts: claudeAccounts
+            )
+        }.value
+
+        await MainActor.run {
+            costSummary = summary
+            lastScanDate = Date()
+            saveCachedSummary()
+            isScanning = false
+        }
+    }
+
+    private func buildCostSummary(
+        days: Int,
+        includeClaudeCode: Bool,
+        includeCodexCli: Bool,
+        claudeAccounts: [ClaudeCodeAccount]
+    ) -> CostSummary {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         var allCosts: [TokenCost] = []
         var dailyUsage: [DailyTokenUsage] = []
 
         // Scan Claude Code sessions
-        if let (claudeCost, claudeDailyUsage) = scanClaudeCodeSessions(since: cutoffDate) {
+        if includeClaudeCode,
+           let (claudeCost, claudeDailyUsage) = scanClaudeCodeSessions(
+            since: cutoffDate,
+            claudeAccounts: claudeAccounts
+           ) {
             allCosts.append(claudeCost)
             dailyUsage.append(contentsOf: claudeDailyUsage)
         }
 
-        if let (codexCost, codexDailyUsage) = scanCodexSessions(since: cutoffDate) {
+        if includeCodexCli,
+           let (codexCost, codexDailyUsage) = scanCodexSessions(since: cutoffDate) {
             allCosts.append(codexCost)
             dailyUsage.append(contentsOf: codexDailyUsage)
         }
@@ -52,18 +91,72 @@ class CostTracker: ObservableObject {
         let totalCost = allCosts.reduce(0) { $0 + $1.estimatedCostUSD }
         let totalTokens = allCosts.reduce(0) { $0 + $1.totalTokens }
 
-        costSummary = CostSummary(
+        return CostSummary(
             costs: allCosts,
             totalCostUSD: totalCost,
             totalTokens: totalTokens,
             periodDays: days,
             dailyUsage: dailyUsage.sorted { $0.date < $1.date }
         )
-        lastScanDate = Date()
     }
 
-    private func scanClaudeCodeSessions(since cutoffDate: Date) -> (TokenCost, [DailyTokenUsage])? {
-        let projectRoots = claudeProjectRoots()
+    private var cacheURL: URL? {
+        guard let supportDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return nil
+        }
+
+        return supportDirectory
+            .appendingPathComponent("MeterBar", isDirectory: true)
+            .appendingPathComponent(cacheFileName)
+    }
+
+    private func loadCachedSummary() {
+        guard let cacheURL,
+              let data = try? Data(contentsOf: cacheURL) else {
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        do {
+            let cache = try decoder.decode(CostSummaryCache.self, from: data)
+            costSummary = cache.summary
+            lastScanDate = cache.lastScanDate
+        } catch {
+            print("MeterBar: failed to load cost summary cache: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveCachedSummary() {
+        guard let costSummary,
+              let cacheURL,
+              let lastScanDate else {
+            return
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        do {
+            let directory = cacheURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(CostSummaryCache(summary: costSummary, lastScanDate: lastScanDate))
+            try data.write(to: cacheURL, options: [.atomic])
+        } catch {
+            print("MeterBar: failed to save cost summary cache: \(error.localizedDescription)")
+        }
+    }
+
+    private func scanClaudeCodeSessions(
+        since cutoffDate: Date,
+        claudeAccounts: [ClaudeCodeAccount]
+    ) -> (TokenCost, [DailyTokenUsage])? {
+        let projectRoots = claudeProjectRoots(accounts: claudeAccounts)
         guard !projectRoots.isEmpty else { return nil }
 
         var totalInput = 0
@@ -75,6 +168,8 @@ class CostTracker: ObservableObject {
         var earliestDate = Date()
         var latestDate = cutoffDate
         var dailyTotals: [Date: TokenAccumulator] = [:]
+        var modelTotals: [String: TokenAccumulator] = [:]
+        var originTotals: [String: TokenAccumulator] = [:]
 
         for root in projectRoots {
             guard let enumerator = FileManager.default.enumerator(
@@ -86,11 +181,6 @@ class CostTracker: ObservableObject {
             }
 
             for case let url as URL in enumerator {
-                if url.lastPathComponent == "subagents" {
-                    enumerator.skipDescendants()
-                    continue
-                }
-
                 guard url.pathExtension == "jsonl",
                       let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
                       let modificationDate = values.contentModificationDate,
@@ -98,7 +188,7 @@ class CostTracker: ObservableObject {
                     continue
                 }
 
-                let (input, output, cacheCreate, cacheReadTokens, estimatedCost, dates, daily) = parseSessionFile(
+                let (input, output, cacheCreate, cacheReadTokens, estimatedCost, dates, daily, models, origins) = parseSessionFile(
                     at: url,
                     since: cutoffDate
                 )
@@ -111,6 +201,8 @@ class CostTracker: ObservableObject {
                     totalEstimatedCost += estimatedCost
                     sessionCount += 1
                     mergeDailyTotals(&dailyTotals, with: daily)
+                    mergeNamedTotals(&modelTotals, with: models)
+                    mergeNamedTotals(&originTotals, with: origins)
 
                     if let minDate = dates.min(), minDate < earliestDate {
                         earliestDate = minDate
@@ -143,11 +235,13 @@ class CostTracker: ObservableObject {
             estimatedCostUSD: cost,
             sessionCount: sessionCount,
             periodStart: earliestDate,
-            periodEnd: latestDate
+            periodEnd: latestDate,
+            modelBreakdowns: makeBreakdowns(from: modelTotals, provider: .claudeCode, pricing: pricing),
+            originBreakdowns: makeBreakdowns(from: originTotals, provider: .claudeCode, pricing: pricing)
         ), makeDailyUsage(from: dailyTotals, provider: .claudeCode, pricing: pricing))
     }
 
-    private func claudeProjectRoots() -> [URL] {
+    private func claudeProjectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
         var roots: [URL] = []
@@ -163,7 +257,7 @@ class CostTracker: ObservableObject {
         roots.append(home.appendingPathComponent(".config/claude/projects", isDirectory: true))
         roots.append(home.appendingPathComponent(".claude/projects", isDirectory: true))
 
-        for account in ClaudeCodeAccountStore.shared.accounts {
+        for account in accounts {
             guard let configDirectory = account.configDirectory else { continue }
             roots.append(claudeProjectsURL(forConfigPath: configDirectory))
         }
@@ -208,7 +302,9 @@ class CostTracker: ObservableObject {
         cacheRead: Int,
         estimatedCost: Double,
         dates: [Date],
-        daily: [Date: TokenAccumulator]
+        daily: [Date: TokenAccumulator],
+        models: [String: TokenAccumulator],
+        origins: [String: TokenAccumulator]
     ) {
         var totalInput = 0
         var totalOutput = 0
@@ -217,12 +313,14 @@ class CostTracker: ObservableObject {
         var totalEstimatedCost = 0.0
         var dates: [Date] = []
         var dailyTotals: [Date: TokenAccumulator] = [:]
+        var modelTotals: [String: TokenAccumulator] = [:]
+        var originTotals: [String: TokenAccumulator] = [:]
         var keyedEvents: [String: ClaudeUsageEvent] = [:]
         var unkeyedEvents: [ClaudeUsageEvent] = []
 
         guard let data = try? Data(contentsOf: url),
               let content = String(data: data, encoding: .utf8) else {
-            return (0, 0, 0, 0, 0, [], [:])
+            return (0, 0, 0, 0, 0, [], [:], [:], [:])
         }
 
         let lines = content.components(separatedBy: .newlines)
@@ -249,7 +347,8 @@ class CostTracker: ObservableObject {
                     output: intValue(usage["output_tokens"]),
                     cacheCreation: intValue(usage["cache_creation_input_tokens"]),
                     cacheCreationOneHour: claudeOneHourCacheCreationTokens(in: usage),
-                    cacheRead: intValue(usage["cache_read_input_tokens"])
+                    cacheRead: intValue(usage["cache_read_input_tokens"]),
+                    origin: claudeUsageOrigin(json: json, message: message, url: url)
                 )
 
                 guard event.hasUsage else { continue }
@@ -288,9 +387,23 @@ class CostTracker: ObservableObject {
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
+            modelTotals[displayModelName(event.model), default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            originTotals[event.origin, default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
         }
 
-        return (totalInput, totalOutput, totalCacheCreation, totalCacheRead, totalEstimatedCost, dates, dailyTotals)
+        return (totalInput, totalOutput, totalCacheCreation, totalCacheRead, totalEstimatedCost, dates, dailyTotals, modelTotals, originTotals)
     }
 
     private func parseISO8601(_ value: String) -> Date? {
@@ -376,6 +489,8 @@ class CostTracker: ObservableObject {
         let logsDatabase = codexDir.appendingPathComponent("logs_2.sqlite")
         var totals = TokenAccumulator()
         var dailyTotals: [Date: TokenAccumulator] = [:]
+        var modelTotals: [String: TokenAccumulator] = [:]
+        var originTotals: [String: TokenAccumulator] = [:]
         var eventKeys = Set<String>()
         var sessionIDs = Set<String>()
         var earliestDate = Date()
@@ -386,6 +501,8 @@ class CostTracker: ObservableObject {
             since: cutoffDate,
             totals: &totals,
             dailyTotals: &dailyTotals,
+            modelTotals: &modelTotals,
+            originTotals: &originTotals,
             eventKeys: &eventKeys,
             sessionIDs: &sessionIDs,
             earliestDate: &earliestDate,
@@ -396,6 +513,8 @@ class CostTracker: ObservableObject {
             since: cutoffDate,
             totals: &totals,
             dailyTotals: &dailyTotals,
+            modelTotals: &modelTotals,
+            originTotals: &originTotals,
             eventKeys: &eventKeys,
             sessionIDs: &sessionIDs,
             earliestDate: &earliestDate,
@@ -424,7 +543,9 @@ class CostTracker: ObservableObject {
             estimatedCostUSD: cost,
             sessionCount: sessionIDs.count,
             periodStart: earliestDate,
-            periodEnd: latestDate
+            periodEnd: latestDate,
+            modelBreakdowns: makeBreakdowns(from: modelTotals, provider: .codexCli, pricing: pricing),
+            originBreakdowns: makeBreakdowns(from: originTotals, provider: .codexCli, pricing: pricing)
         ), makeDailyUsage(from: dailyTotals, provider: .codexCli, pricing: pricing))
     }
 
@@ -433,6 +554,8 @@ class CostTracker: ObservableObject {
         since cutoffDate: Date,
         totals: inout TokenAccumulator,
         dailyTotals: inout [Date: TokenAccumulator],
+        modelTotals: inout [String: TokenAccumulator],
+        originTotals: inout [String: TokenAccumulator],
         eventKeys: inout Set<String>,
         sessionIDs: inout Set<String>,
         earliestDate: inout Date,
@@ -477,8 +600,12 @@ class CostTracker: ObservableObject {
                     usage,
                     timestamp: timestamp,
                     sessionID: sessionID,
+                    modelName: codexModelName(from: info, payload: payload),
+                    originName: "Codex CLI",
                     totals: &totals,
                     dailyTotals: &dailyTotals,
+                    modelTotals: &modelTotals,
+                    originTotals: &originTotals,
                     eventKeys: &eventKeys,
                     sessionIDs: &sessionIDs,
                     earliestDate: &earliestDate,
@@ -493,6 +620,8 @@ class CostTracker: ObservableObject {
         since cutoffDate: Date,
         totals: inout TokenAccumulator,
         dailyTotals: inout [Date: TokenAccumulator],
+        modelTotals: inout [String: TokenAccumulator],
+        originTotals: inout [String: TokenAccumulator],
         eventKeys: inout Set<String>,
         sessionIDs: inout Set<String>,
         earliestDate: inout Date,
@@ -530,8 +659,12 @@ class CostTracker: ObservableObject {
                 usage,
                 timestamp: timestamp,
                 sessionID: sessionID,
+                modelName: codexLogValue("model", in: body) ?? codexLogValue("slug", in: body),
+                originName: codexLogValue("originator", in: body) ?? "Codex CLI",
                 totals: &totals,
                 dailyTotals: &dailyTotals,
+                modelTotals: &modelTotals,
+                originTotals: &originTotals,
                 eventKeys: &eventKeys,
                 sessionIDs: &sessionIDs,
                 earliestDate: &earliestDate,
@@ -544,8 +677,12 @@ class CostTracker: ObservableObject {
         _ usage: [String: Any],
         timestamp: Date,
         sessionID: String,
+        modelName: String?,
+        originName: String?,
         totals: inout TokenAccumulator,
         dailyTotals: inout [Date: TokenAccumulator],
+        modelTotals: inout [String: TokenAccumulator],
+        originTotals: inout [String: TokenAccumulator],
         eventKeys: inout Set<String>,
         sessionIDs: inout Set<String>,
         earliestDate: inout Date,
@@ -564,6 +701,18 @@ class CostTracker: ObservableObject {
         totals.add(input: input, output: output, cacheCreation: 0, cacheRead: cached, reasoning: reasoning)
         let day = Calendar.current.startOfDay(for: timestamp)
         dailyTotals[day, default: TokenAccumulator()].add(
+            input: input,
+            output: output + reasoning,
+            cacheCreation: 0,
+            cacheRead: cached
+        )
+        modelTotals[displayModelName(modelName), default: TokenAccumulator()].add(
+            input: input,
+            output: output + reasoning,
+            cacheCreation: 0,
+            cacheRead: cached
+        )
+        originTotals[displayOriginName(originName), default: TokenAccumulator()].add(
             input: input,
             output: output + reasoning,
             cacheCreation: 0,
@@ -600,10 +749,107 @@ class CostTracker: ObservableObject {
         }
     }
 
+    private func makeBreakdowns(
+        from totals: [String: TokenAccumulator],
+        provider: ServiceType,
+        pricing: TokenPricing
+    ) -> [TokenUsageBreakdown] {
+        totals.map { name, tokens in
+            let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
+            let output = tokens.output + tokens.reasoning
+            let cost = tokens.estimatedCostUSD > 0
+                ? tokens.estimatedCostUSD
+                : calculateCost(
+                    input: billableInput,
+                    output: output,
+                    cacheCreation: tokens.cacheCreation,
+                    cacheRead: tokens.cacheRead,
+                    pricing: pricing
+                )
+            return TokenUsageBreakdown(
+                provider: provider,
+                name: name,
+                inputTokens: billableInput,
+                outputTokens: output,
+                cacheCreationTokens: tokens.cacheCreation,
+                cacheReadTokens: tokens.cacheRead,
+                estimatedCostUSD: cost,
+                sessionCount: tokens.events
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.estimatedCostUSD == rhs.estimatedCostUSD {
+                return lhs.totalTokens > rhs.totalTokens
+            }
+            return lhs.estimatedCostUSD > rhs.estimatedCostUSD
+        }
+    }
+
     private func mergeDailyTotals(_ target: inout [Date: TokenAccumulator], with source: [Date: TokenAccumulator]) {
         for (day, tokens) in source {
             target[day, default: TokenAccumulator()].merge(tokens)
         }
+    }
+
+    private func mergeNamedTotals(_ target: inout [String: TokenAccumulator], with source: [String: TokenAccumulator]) {
+        for (name, tokens) in source {
+            target[name, default: TokenAccumulator()].merge(tokens)
+        }
+    }
+
+    private func claudeUsageOrigin(json: [String: Any], message: [String: Any], url: URL) -> String {
+        if url.path.contains("/subagents/") || (json["isSidechain"] as? Bool == true) {
+            return "Agents"
+        }
+
+        let toolNames = toolUseNames(in: message)
+        if toolNames.contains(where: { $0.localizedCaseInsensitiveContains("skill") }) {
+            return "Skills"
+        }
+        if toolNames.contains(where: { name in
+            let lowercased = name.lowercased()
+            return lowercased.contains("agent") || lowercased.contains("task")
+        }) {
+            return "Agents"
+        }
+        if !toolNames.isEmpty {
+            return "Tool use"
+        }
+
+        return "Main chat"
+    }
+
+    private func toolUseNames(in message: [String: Any]) -> [String] {
+        guard let content = message["content"] as? [[String: Any]] else { return [] }
+        return content.compactMap { item in
+            guard item["type"] as? String == "tool_use" else { return nil }
+            return item["name"] as? String
+        }
+    }
+
+    private func codexModelName(from info: [String: Any], payload: [String: Any]) -> String? {
+        (info["model"] as? String)
+            ?? (info["slug"] as? String)
+            ?? (payload["model"] as? String)
+            ?? (payload["slug"] as? String)
+    }
+
+    private func displayModelName(_ raw: String?) -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown model" : normalizeClaudeModel(trimmed)
+    }
+
+    private func displayOriginName(_ raw: String?) -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "Unknown origin" }
+        return trimmed
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { part in
+                part.prefix(1).uppercased() + part.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     private func calculateCost(input: Int, output: Int, cacheCreation: Int, cacheRead: Int, pricing: TokenPricing) -> Double {
@@ -665,6 +911,11 @@ class CostTracker: ObservableObject {
     }
 }
 
+private struct CostSummaryCache: Codable {
+    let summary: CostSummary
+    let lastScanDate: Date
+}
+
 private struct TokenPricing {
     let input: Double      // per million tokens
     let output: Double     // per million tokens
@@ -694,6 +945,7 @@ private struct TokenAccumulator {
     var cacheRead = 0
     var reasoning = 0
     var estimatedCostUSD = 0.0
+    var events = 0
 
     mutating func add(
         input: Int,
@@ -701,7 +953,8 @@ private struct TokenAccumulator {
         cacheCreation: Int,
         cacheRead: Int,
         reasoning: Int = 0,
-        estimatedCostUSD: Double = 0
+        estimatedCostUSD: Double = 0,
+        events: Int = 1
     ) {
         self.input += input
         self.output += output
@@ -709,6 +962,7 @@ private struct TokenAccumulator {
         self.cacheRead += cacheRead
         self.reasoning += reasoning
         self.estimatedCostUSD += estimatedCostUSD
+        self.events += events
     }
 
     mutating func merge(_ other: TokenAccumulator) {
@@ -718,7 +972,8 @@ private struct TokenAccumulator {
             cacheCreation: other.cacheCreation,
             cacheRead: other.cacheRead,
             reasoning: other.reasoning,
-            estimatedCostUSD: other.estimatedCostUSD
+            estimatedCostUSD: other.estimatedCostUSD,
+            events: other.events
         )
     }
 }
@@ -733,6 +988,7 @@ private struct ClaudeUsageEvent {
     let cacheCreation: Int
     let cacheCreationOneHour: Int
     let cacheRead: Int
+    let origin: String
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0

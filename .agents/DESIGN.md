@@ -138,7 +138,7 @@ Prefer a native utility layout:
 - Repeated rows use 8-12px vertical spacing.
 - Radius is usually 8px; 10px is the upper bound for companion-window panels.
 
-The menu bar popover is denser than the companion app. Tabs should fit without making the toolbar feel like a landing page nav.
+The menu bar popover is denser than the companion app. It is a single all-in-one overview, not a provider tab strip.
 
 ## Elevation & Depth
 
@@ -162,6 +162,8 @@ Usage bars are remaining-mode:
 - Pace marker shows expected remaining unless the row is on pace.
 
 Settings belong in the companion app. The popover should expose dashboard and refresh actions only.
+
+Provider visibility belongs in companion Settings. Disabled providers must stop fetching, disappear from the menu popover and dashboard, stop affecting the menu bar percentage, and be excluded from local cost estimates.
 
 ## Do's and Don'ts
 

@@ -10,6 +10,73 @@ enum MeterBarTheme {
     static let toolbarIconBorder = Color.white.opacity(0.14)
 }
 
+enum LucideSymbol {
+    case panelRight
+    case refreshCw
+    case search
+
+    fileprivate func path() -> Path {
+        var path = Path()
+
+        switch self {
+        case .panelRight:
+            path.addRoundedRect(in: CGRect(x: 3, y: 3, width: 18, height: 18), cornerSize: CGSize(width: 2, height: 2))
+            path.move(to: CGPoint(x: 15, y: 3))
+            path.addLine(to: CGPoint(x: 15, y: 21))
+
+        case .refreshCw:
+            path.move(to: CGPoint(x: 21, y: 12))
+            path.addCurve(to: CGPoint(x: 12, y: 3), control1: CGPoint(x: 21, y: 7.03), control2: CGPoint(x: 16.97, y: 3))
+            path.addCurve(to: CGPoint(x: 5.64, y: 5.64), control1: CGPoint(x: 9.52, y: 3), control2: CGPoint(x: 7.27, y: 4.01))
+            path.move(to: CGPoint(x: 3, y: 8))
+            path.addLine(to: CGPoint(x: 3, y: 3))
+            path.move(to: CGPoint(x: 3, y: 8))
+            path.addLine(to: CGPoint(x: 8, y: 8))
+            path.move(to: CGPoint(x: 3, y: 12))
+            path.addCurve(to: CGPoint(x: 12, y: 21), control1: CGPoint(x: 3, y: 16.97), control2: CGPoint(x: 7.03, y: 21))
+            path.addCurve(to: CGPoint(x: 18.36, y: 18.36), control1: CGPoint(x: 14.48, y: 21), control2: CGPoint(x: 16.73, y: 19.99))
+            path.move(to: CGPoint(x: 21, y: 16))
+            path.addLine(to: CGPoint(x: 21, y: 21))
+            path.move(to: CGPoint(x: 21, y: 16))
+            path.addLine(to: CGPoint(x: 16, y: 16))
+
+        case .search:
+            path.addEllipse(in: CGRect(x: 4, y: 4, width: 11, height: 11))
+            path.move(to: CGPoint(x: 14, y: 14))
+            path.addLine(to: CGPoint(x: 20, y: 20))
+        }
+
+        return path
+    }
+}
+
+struct LucideIcon: View {
+    let symbol: LucideSymbol
+    let size: CGFloat
+    let lineWidth: CGFloat
+
+    init(_ symbol: LucideSymbol, size: CGFloat = 18, lineWidth: CGFloat = 2.25) {
+        self.symbol = symbol
+        self.size = size
+        self.lineWidth = lineWidth
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = min(proxy.size.width, proxy.size.height) / 24
+            let xOffset = (proxy.size.width - (24 * scale)) / 2
+            let yOffset = (proxy.size.height - (24 * scale)) / 2
+            let transform = CGAffineTransform(translationX: xOffset, y: yOffset)
+                .scaledBy(x: scale, y: scale)
+
+            symbol.path()
+                .applying(transform)
+                .stroke(style: StrokeStyle(lineWidth: lineWidth * scale, lineCap: .round, lineJoin: .round))
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 struct RefreshIconButton: View {
     let title: String?
     let help: String
@@ -39,8 +106,7 @@ struct RefreshIconButton: View {
             action()
         } label: {
             HStack(spacing: title == nil ? 0 : 7) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .bold))
+                LucideIcon(.refreshCw, size: 17, lineWidth: 2.35)
                     .rotationEffect(.degrees(rotation))
                     .frame(width: 18, height: 18)
 

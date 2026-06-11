@@ -47,6 +47,7 @@ struct MenuBarView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+    @StateObject private var providerVisibility = ProviderVisibilityStore.shared
 
     @State private var contentHeight: CGFloat = 320
 
@@ -69,6 +70,7 @@ struct MenuBarView: View {
                     claudeCodeHasAccess: claudeCodeService.hasAccess,
                     codexCliHasAccess: codexCliService.hasAccess,
                     cursorHasAccess: cursorService.hasAccess,
+                    enabledServices: providerVisibility.enabledServices,
                     openDashboard: openDashboard
                 )
                     .padding(10)
@@ -129,8 +131,7 @@ struct MenuBarView: View {
             Spacer()
 
             Button(action: openDashboard) {
-                Image(systemName: "rectangle.split.2x1")
-                    .font(.system(size: 15, weight: .semibold))
+                LucideIcon(.panelRight, size: 17, lineWidth: 2.25)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -169,50 +170,61 @@ struct PopoverOverviewPanel: View {
     let claudeCodeHasAccess: Bool
     let codexCliHasAccess: Bool
     let cursorHasAccess: Bool
+    let enabledServices: Set<ServiceType>
     let openDashboard: () -> Void
 
     private var snapshots: [PopoverProviderSnapshot] {
         var result: [PopoverProviderSnapshot] = []
 
-        result.append(PopoverProviderSnapshot(
-            title: "Codex",
-            logoKind: .codex,
-            accentColor: .cyan,
-            metrics: metrics[.codexCli],
-            emptyDetail: codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
-        ))
-
-        let accountMetrics = claudeAccountMetrics
-        if !accountMetrics.isEmpty {
-            for account in claudeAccounts {
-                let title = account.isDefault && claudeAccounts.count == 1 ? "Claude" : account.name
-                result.append(PopoverProviderSnapshot(
-                    title: title,
-                    logoKind: .claude,
-                    accentColor: MeterBarTheme.claudeAccent,
-                    metrics: accountMetrics[account.id],
-                    emptyDetail: account.isDefault ? "Waiting for refresh" : "Run claude login"
-                ))
-            }
-        } else {
+        if isEnabled(.codexCli) {
             result.append(PopoverProviderSnapshot(
-                title: "Claude",
-                logoKind: .claude,
-                accentColor: MeterBarTheme.claudeAccent,
-                metrics: metrics[.claudeCode],
-                emptyDetail: claudeCodeHasAccess ? "Waiting for refresh" : "Run claude login"
+                title: "Codex",
+                logoKind: .codex,
+                accentColor: .cyan,
+                metrics: metrics[.codexCli],
+                emptyDetail: codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
             ))
         }
 
-        result.append(PopoverProviderSnapshot(
-            title: "Cursor",
-            logoKind: .cursor,
-            accentColor: .green,
-            metrics: metrics[.cursor],
-            emptyDetail: cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor"
-        ))
+        if isEnabled(.claudeCode) {
+            let accountMetrics = claudeAccountMetrics
+            if !accountMetrics.isEmpty {
+                for account in claudeAccounts {
+                    let title = account.isDefault && claudeAccounts.count == 1 ? "Claude" : account.name
+                    result.append(PopoverProviderSnapshot(
+                        title: title,
+                        logoKind: .claude,
+                        accentColor: MeterBarTheme.claudeAccent,
+                        metrics: accountMetrics[account.id],
+                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run claude login"
+                    ))
+                }
+            } else {
+                result.append(PopoverProviderSnapshot(
+                    title: "Claude",
+                    logoKind: .claude,
+                    accentColor: MeterBarTheme.claudeAccent,
+                    metrics: metrics[.claudeCode],
+                    emptyDetail: claudeCodeHasAccess ? "Waiting for refresh" : "Run claude login"
+                ))
+            }
+        }
+
+        if isEnabled(.cursor) {
+            result.append(PopoverProviderSnapshot(
+                title: "Cursor",
+                logoKind: .cursor,
+                accentColor: .green,
+                metrics: metrics[.cursor],
+                emptyDetail: cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor"
+            ))
+        }
 
         return result
+    }
+
+    private func isEnabled(_ service: ServiceType) -> Bool {
+        enabledServices.contains(service)
     }
 
     private var tightestLimit: PopoverLimit? {
@@ -221,23 +233,39 @@ struct PopoverOverviewPanel: View {
 
     private var statusColor: Color {
         guard let tightestLimit else { return .secondary }
+        if tightestLimit.percentLeft <= 0 { return .red.opacity(0.72) }
         if tightestLimit.percentLeft <= 10 { return .red }
         if tightestLimit.percentLeft <= 25 { return MeterBarTheme.warning }
         return .green
     }
 
     private var statusTitle: String {
+        guard !snapshots.isEmpty else { return "No sources enabled" }
         guard let tightestLimit else { return "Waiting for usage" }
+        if tightestLimit.percentLeft <= 0 { return "Quota exhausted" }
         if tightestLimit.percentLeft <= 10 { return "Quota needs attention" }
         if tightestLimit.percentLeft <= 25 { return "Quota is tight" }
         return "All tracked quotas look healthy"
     }
 
     private var statusDetail: String {
+        guard !snapshots.isEmpty else {
+            return "Enable a provider in Settings."
+        }
         guard let tightestLimit else {
-            return "Refresh to load Codex, Claude, and Cursor."
+            return "Refresh to load enabled providers."
+        }
+        if tightestLimit.percentLeft <= 0 {
+            return "\(tightestLimit.title) is out until reset across \(snapshots.count) sources."
         }
         return "\(tightestLimit.title) has \(tightestLimit.percentLeft)% left across \(snapshots.count) sources."
+    }
+
+    private var statusIconName: String {
+        guard let tightestLimit else { return "clock.fill" }
+        if tightestLimit.percentLeft <= 0 { return "exclamationmark.octagon.fill" }
+        if tightestLimit.percentLeft <= 25 { return "exclamationmark.triangle.fill" }
+        return "checkmark.shield.fill"
     }
 
     var body: some View {
@@ -247,7 +275,7 @@ struct PopoverOverviewPanel: View {
                     Circle()
                         .fill(statusColor.opacity(0.20))
                         .frame(width: 34, height: 34)
-                    Image(systemName: "checkmark.shield.fill")
+                    Image(systemName: statusIconName)
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(statusColor)
                 }
@@ -342,7 +370,8 @@ private struct PopoverLimit: Identifiable {
     }
 
     var percentLeft: Int {
-        Int(max(0, 100 - usedPercent).rounded())
+        let remainingPercent = max(0, 100 - usedPercent)
+        return remainingPercent == 0 ? 0 : max(1, Int(ceil(remainingPercent)))
     }
 }
 
@@ -355,6 +384,7 @@ private struct PopoverProviderStatusCard: View {
 
     private var statusColor: Color {
         guard let primaryLimit else { return .secondary }
+        if primaryLimit.percentLeft <= 0 { return .red.opacity(0.72) }
         if primaryLimit.percentLeft <= 10 { return .red }
         if primaryLimit.percentLeft <= 25 { return MeterBarTheme.warning }
         return .green
@@ -362,9 +392,14 @@ private struct PopoverProviderStatusCard: View {
 
     private var statusText: String {
         guard let primaryLimit else { return "Offline" }
+        if primaryLimit.percentLeft <= 0 { return "Out" }
         if primaryLimit.percentLeft <= 10 { return "Critical" }
         if primaryLimit.percentLeft <= 25 { return "Tight" }
         return "Healthy"
+    }
+
+    private var isOut: Bool {
+        primaryLimit?.percentLeft ?? 100 <= 0
     }
 
     var body: some View {
@@ -412,7 +447,7 @@ private struct PopoverProviderStatusCard: View {
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Text("\(limit.percentLeft)%")
+                            Text(limit.percentLeft <= 0 ? "Out" : "\(limit.percentLeft)%")
                                 .font(.caption2)
                                 .fontWeight(.semibold)
                         }
@@ -432,6 +467,7 @@ private struct PopoverProviderStatusCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
+        .opacity(isOut ? 0.72 : 1)
         .popoverGlassCard()
     }
 
@@ -506,8 +542,14 @@ struct UsageBar: View {
         max(0, 100 - clampedUsedPercentage)
     }
 
+    private var isExhausted: Bool {
+        clampedRemainingPercentage <= 0 || pace?.isExhausted == true
+    }
+
     private var tooltipText: String? {
-        guard let pace else { return nil }
+        guard let pace else {
+            return isExhausted ? "Out of quota\nActual: 100% used\nLeft: 0%" : nil
+        }
 
         var lines = [
             pace.leftLabel,
@@ -518,7 +560,9 @@ struct UsageBar: View {
             "Colored fill is current quota left."
         ]
 
-        if pace.stage == .deficit {
+        if isExhausted {
+            lines.append("Quota is exhausted until the reset window opens.")
+        } else if pace.stage == .deficit {
             lines.append("Red is quota you should still have at this pace.")
         }
 
@@ -537,7 +581,16 @@ struct UsageBar: View {
                     .frame(height: 7)
                     .offset(y: 4)
 
-                if let pace, pace.stage != .onPace {
+                if isExhausted {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.red.opacity(0.26))
+                        .frame(width: proxy.size.width, height: 7)
+                        .offset(y: 4)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.red.opacity(0.82))
+                        .frame(width: 2, height: 13)
+                        .offset(x: max(0, proxy.size.width - 2), y: 1)
+                } else if let pace, pace.stage != .onPace {
                     let expectedRemainingPercent = max(0, 100 - min(max(pace.expectedUsedPercent, 0), 100))
                     let expectedX = proxy.size.width * expectedRemainingPercent / 100
                     let actualX = proxy.size.width * clampedRemainingPercentage / 100

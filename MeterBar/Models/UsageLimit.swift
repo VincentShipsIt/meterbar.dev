@@ -108,7 +108,15 @@ struct UsagePace: Equatable {
         return deltaPercent > 0 ? .deficit : .reserve
     }
 
+    var isExhausted: Bool {
+        etaSeconds == 0 && !willLastToReset
+    }
+
     var leftLabel: String {
+        if isExhausted {
+            return "Out of quota"
+        }
+
         let roundedDelta = Int(abs(deltaPercent).rounded())
         switch stage {
         case .onPace:
@@ -121,6 +129,10 @@ struct UsagePace: Equatable {
     }
 
     func rightLabel(context: PaceLabelContext = .session) -> String? {
+        if isExhausted {
+            return "Out until reset"
+        }
+
         if willLastToReset {
             return "Lasts until reset"
         }

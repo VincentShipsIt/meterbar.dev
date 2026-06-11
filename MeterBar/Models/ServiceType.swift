@@ -1,6 +1,6 @@
 import Foundation
 
-enum ServiceType: String, Codable, CaseIterable, Identifiable {
+enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude = "Claude"
     case claudeCode = "Claude Code"
     case openai = "OpenAI"

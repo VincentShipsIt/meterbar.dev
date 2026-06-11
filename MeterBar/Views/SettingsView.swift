@@ -10,6 +10,7 @@ struct SettingsView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var costTracker = CostTracker.shared
+    @StateObject private var providerVisibility = ProviderVisibilityStore.shared
 
     @State private var claudeAdminKey: String = ""
     @State private var openaiAdminKey: String = ""
@@ -46,14 +47,54 @@ struct SettingsView: View {
 
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            claudeAdminSection
-            claudeCodeSection
-            openAISection
-            cursorSection
+            trackedProvidersSection
+            if providerVisibility.isEnabled(.claude) {
+                claudeAdminSection
+            }
+            if providerVisibility.isEnabled(.claudeCode) {
+                claudeCodeSection
+            }
+            if providerVisibility.isEnabled(.openai) {
+                openAISection
+            }
+            if providerVisibility.isEnabled(.cursor) {
+                cursorSection
+            }
             costTrackingSection
             refreshSection
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+
+    private var trackedProvidersSection: some View {
+        SettingsPanelSection(title: "Tracked Providers", systemImage: "switch.2", color: .cyan) {
+            providerToggleRow(
+                title: "Claude Code",
+                detail: "Track Pro/Max quota via Claude CLI profiles.",
+                service: .claudeCode
+            )
+            providerToggleRow(
+                title: "OpenAI Codex",
+                detail: "Track Codex CLI quota from local Codex auth.",
+                service: .codexCli
+            )
+            providerToggleRow(
+                title: "Cursor",
+                detail: "Track Cursor quota from local Cursor state.",
+                service: .cursor
+            )
+            SettingsDivider()
+            providerToggleRow(
+                title: "Claude Admin API",
+                detail: "Optional organization usage API source.",
+                service: .claude
+            )
+            providerToggleRow(
+                title: "OpenAI Admin API",
+                detail: "Optional platform usage API source.",
+                service: .openai
+            )
+        }
     }
 
     private var claudeAdminSection: some View {
@@ -270,7 +311,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            } else if let summary = costTracker.costSummary {
+            } else if let summary = visibleCostSummary, !summary.costs.isEmpty {
                 SettingsRowView(title: "Total cost") {
                     Text(summary.formattedTotalCost)
                         .font(.subheadline)
@@ -298,18 +339,36 @@ struct SettingsView: View {
                 if let lastScan = costTracker.lastScanDate {
                     SettingsNotice(text: "Last scanned \(formatDate(lastScan)) ago.", color: .secondary)
                 }
+            } else if costTracker.costSummary != nil {
+                SettingsNotice(text: "No cost data for enabled providers.", color: .secondary)
             } else {
                 SettingsNotice(text: "No cost data loaded yet.", color: .secondary)
             }
 
+            if !canScanCosts {
+                SettingsNotice(text: "Enable Claude Code or OpenAI Codex to scan local token logs.", color: MeterBarTheme.warning)
+            }
+
             SettingsRowView(title: "Local sessions") {
-                Button("Scan 30 Days") {
+                Button {
                     Task {
                         await costTracker.scanCosts(days: 30)
                     }
+                } label: {
+                    HStack(spacing: 7) {
+                        if costTracker.isScanning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.75)
+                            Text("Scanning...")
+                        } else {
+                            LucideIcon(.search, size: 13, lineWidth: 2.4)
+                            Text("Scan 30 Days")
+                        }
+                    }
                 }
                 .buttonStyle(SettingsButtonStyle(prominent: true))
-                .disabled(costTracker.isScanning)
+                .disabled(costTracker.isScanning || !canScanCosts)
             }
         }
     }
@@ -343,6 +402,30 @@ struct SettingsView: View {
     private var canAddClaudeAccount: Bool {
         !newClaudeAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !newClaudeConfigDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var visibleCostSummary: CostSummary? {
+        costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
+    }
+
+    private var canScanCosts: Bool {
+        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
+    }
+
+    private func providerToggleRow(title: String, detail: String, service: ServiceType) -> some View {
+        SettingsRowView(title: title, detail: detail) {
+            Toggle("", isOn: Binding(
+                get: { providerVisibility.isEnabled(service) },
+                set: { isEnabled in
+                    providerVisibility.set(service, isEnabled: isEnabled)
+                    Task {
+                        await dataManager.refreshAll()
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
     }
 
     private func formatDate(_ date: Date) -> String {

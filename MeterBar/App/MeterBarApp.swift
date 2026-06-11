@@ -23,6 +23,7 @@ struct MeterBarApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private let providerVisibilityStore = ProviderVisibilityStore.shared
     private var cancellables = Set<AnyCancellable>()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -114,7 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Note: UsageDataManager handles its own 15-minute auto-refresh
         // This loop just checks metrics for notification purposes
         while true {
-            for (_, metrics) in UsageDataManager.shared.metrics {
+            for (service, metrics) in UsageDataManager.shared.metrics where providerVisibilityStore.isEnabled(service) {
                 checkAndNotify(metrics: metrics)
             }
 
@@ -182,6 +183,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        ProviderVisibilityStore.shared.$hiddenServices
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
         updateStatusItem(metrics: UsageDataManager.shared.metrics)
     }
 
@@ -210,13 +219,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func mostConstrainedPrimaryLimit(in metrics: [ServiceType: UsageMetrics]) -> UsageLimit? {
-        let claudeLimits = ClaudeCodeAccountStore.shared.accounts.compactMap {
-            claudeMetrics(for: $0, metrics: metrics)?.sessionLimit
+        let claudeLimits = providerVisibilityStore.isEnabled(.claudeCode)
+            ? ClaudeCodeAccountStore.shared.accounts.compactMap {
+                claudeMetrics(for: $0, metrics: metrics)?.sessionLimit
+            }
+            : []
+
+        var limits = claudeLimits
+        if providerVisibilityStore.isEnabled(.codexCli), let codexLimit = metrics[.codexCli]?.sessionLimit {
+            limits.append(codexLimit)
         }
-        let limits = ([
-            metrics[.codexCli]?.sessionLimit,
-            metrics[.cursor]?.weeklyLimit
-        ] + claudeLimits).compactMap { $0 }
+        if providerVisibilityStore.isEnabled(.cursor), let cursorLimit = metrics[.cursor]?.weeklyLimit {
+            limits.append(cursorLimit)
+        }
 
         return limits.min { lhs, rhs in
             percentLeft(for: lhs) < percentLeft(for: rhs)
