@@ -42,7 +42,7 @@ jobs:
       - name: Checkout homebrew-tap
         uses: actions/checkout@v5
         with:
-          repository: shipshitdev/homebrew-tap
+          repository: VincentShipsIt/homebrew-tap
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
           path: homebrew-tap
 

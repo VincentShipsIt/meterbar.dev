@@ -56,7 +56,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 ### Homebrew (Recommended)
 
 ```bash
-brew tap shipshitdev/tap
+brew tap VincentShipsIt/tap
 brew install --cask meterbar
 ```
 
