@@ -45,6 +45,17 @@ struct UsageLimit: Codable, Equatable {
         }
     }
 
+    func secondsUntilReset(now: Date = Date()) -> TimeInterval? {
+        guard let resetTime else { return nil }
+        return resetTime.timeIntervalSince(now)
+    }
+
+    func resetCountdownText(now: Date = Date()) -> String? {
+        guard let secondsUntilReset = secondsUntilReset(now: now) else { return nil }
+        guard secondsUntilReset > 0 else { return "now" }
+        return UsageDurationText.short(seconds: secondsUntilReset)
+    }
+
     func pace(now: Date = Date()) -> UsagePace? {
         guard let resetTime,
               let windowSeconds,
@@ -145,10 +156,12 @@ struct UsagePace: Equatable {
             return context.emptyNowLabel
         }
 
-        return "\(context.emptyPrefix) \(Self.durationText(seconds: etaSeconds))"
+        return "\(context.emptyPrefix) \(UsageDurationText.short(seconds: etaSeconds))"
     }
+}
 
-    private static func durationText(seconds: TimeInterval) -> String {
+enum UsageDurationText {
+    static func short(seconds: TimeInterval) -> String {
         let wholeSeconds = max(0, Int(seconds.rounded()))
         let hours = wholeSeconds / 3600
         let minutes = (wholeSeconds % 3600) / 60

@@ -352,6 +352,16 @@ private struct PopoverProviderSnapshot: Identifiable {
     var primaryLimit: PopoverLimit? {
         limits.min { $0.percentLeft < $1.percentLeft }
     }
+
+    var resetWindows: [ResetCountdownWindow] {
+        limits.map {
+            ResetCountdownWindow(
+                id: "\(id)-\($0.title)",
+                title: $0.title,
+                limit: $0.usageLimit
+            )
+        }
+    }
 }
 
 private struct PopoverLimit: Identifiable {
@@ -440,6 +450,13 @@ private struct PopoverProviderStatusCard: View {
                     paceContext: primaryLimit.title.localizedCaseInsensitiveContains("weekly") ? .weekly : .session
                 )
 
+                NextResetCountdownLabel(
+                    windows: snapshot.resetWindows,
+                    font: .caption2,
+                    foregroundColor: .secondary,
+                    iconSize: 10
+                )
+
                 VStack(spacing: 5) {
                     ForEach(snapshot.limits.prefix(2)) { limit in
                         HStack {
@@ -476,6 +493,92 @@ private struct PopoverProviderStatusCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return "Updated \(formatter.localizedString(for: updatedAt, relativeTo: Date()))"
+    }
+}
+
+struct ResetCountdownWindow: Identifiable {
+    let id: String
+    let title: String
+    let limit: UsageLimit
+}
+
+struct ResetCountdownLabel: View {
+    let title: String?
+    let limit: UsageLimit
+    var font: Font = .caption
+    var foregroundColor: Color = .secondary
+    var iconSize: CGFloat = 10
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+            Group {
+                if let text = Self.counterText(title: title, limit: limit, now: timeline.date) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: iconSize, weight: .semibold))
+                        Text(text)
+                            .font(font)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundColor(foregroundColor)
+                    .help(text)
+                }
+            }
+        }
+    }
+
+    static func counterText(title: String?, limit: UsageLimit, now: Date) -> String? {
+        guard let countdown = limit.resetCountdownText(now: now) else { return nil }
+        if countdown == "now" {
+            return title.map { "\($0) reset due" } ?? "Reset due"
+        }
+        return title.map { "\($0) reset in \(countdown)" } ?? "Resets in \(countdown)"
+    }
+}
+
+struct NextResetCountdownLabel: View {
+    let windows: [ResetCountdownWindow]
+    var font: Font = .caption
+    var foregroundColor: Color = .secondary
+    var iconSize: CGFloat = 10
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+            Group {
+                if let window = nextWindow(now: timeline.date),
+                   let text = ResetCountdownLabel.counterText(
+                       title: window.title,
+                       limit: window.limit,
+                       now: timeline.date
+                   ) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: iconSize, weight: .semibold))
+                        Text(text)
+                            .font(font)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundColor(foregroundColor)
+                    .help(text)
+                }
+            }
+        }
+    }
+
+    private func nextWindow(now: Date) -> ResetCountdownWindow? {
+        let candidates = windows.compactMap { window -> (window: ResetCountdownWindow, seconds: TimeInterval)? in
+            guard let seconds = window.limit.secondsUntilReset(now: now) else { return nil }
+            return (window, seconds)
+        }
+
+        let futureCandidates = candidates.filter { $0.seconds > 0 }
+        if let next = futureCandidates.min(by: { $0.seconds < $1.seconds }) {
+            return next.window
+        }
+
+        return candidates.max(by: { $0.seconds < $1.seconds })?.window
     }
 }
 

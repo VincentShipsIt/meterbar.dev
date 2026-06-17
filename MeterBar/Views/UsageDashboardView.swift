@@ -489,6 +489,16 @@ private struct DashboardProviderSnapshot: Identifiable {
         ].compactMap { $0 }
     }
 
+    var resetWindows: [ResetCountdownWindow] {
+        limits.map {
+            ResetCountdownWindow(
+                id: "\(id)-\($0.title)",
+                title: $0.title,
+                limit: $0.usageLimit
+            )
+        }
+    }
+
     private static func logoKind(for service: ServiceType) -> ProviderLogoKind {
         switch service {
         case .codexCli, .openai:
@@ -633,6 +643,13 @@ private struct ProviderOverviewStatusCard: View {
                     accentColor: accentColor,
                     pace: primaryLimit.usageLimit.pace(),
                     paceContext: primaryLimit.title.localizedCaseInsensitiveContains("weekly") ? .weekly : .session
+                )
+
+                NextResetCountdownLabel(
+                    windows: snapshot.resetWindows,
+                    font: .caption,
+                    foregroundColor: .secondary,
+                    iconSize: 11
                 )
             }
 
@@ -824,10 +841,14 @@ private struct DashboardLimitRow: View {
                         .foregroundColor(paceLabelColor(pace))
                 }
                 Spacer()
-                if let resetTime = limit.usageLimit.resetTime {
-                    Text("Resets \(relativeDate(resetTime))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                if limit.usageLimit.resetTime != nil {
+                    ResetCountdownLabel(
+                        title: nil,
+                        limit: limit.usageLimit,
+                        font: .caption,
+                        foregroundColor: .secondary,
+                        iconSize: 10
+                    )
                 }
             }
         }
@@ -848,11 +869,6 @@ private struct DashboardLimitRow: View {
         }
     }
 
-    private func relativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
 }
 
 private struct CostScanLoadingChart: View {

@@ -63,4 +63,30 @@ final class UsageLimitTests: XCTestCase {
         XCTAssertEqual(deficitPace?.leftLabel, "25% in deficit")
         XCTAssertEqual(deficitPace?.rightLabel(), "Projected empty in 50m")
     }
+
+    func testResetCountdownText() throws {
+        let now = Date(timeIntervalSince1970: 0)
+        let futureReset = UsageLimit(
+            used: 25,
+            total: 100,
+            resetTime: now.addingTimeInterval(3_660)
+        )
+        let imminentReset = UsageLimit(
+            used: 25,
+            total: 100,
+            resetTime: now.addingTimeInterval(45)
+        )
+        let dueReset = UsageLimit(
+            used: 25,
+            total: 100,
+            resetTime: now.addingTimeInterval(-1)
+        )
+        let noReset = UsageLimit(used: 25, total: 100, resetTime: nil)
+
+        XCTAssertEqual(try XCTUnwrap(futureReset.secondsUntilReset(now: now)), 3_660, accuracy: 0.01)
+        XCTAssertEqual(futureReset.resetCountdownText(now: now), "1h 1m")
+        XCTAssertEqual(imminentReset.resetCountdownText(now: now), "1m")
+        XCTAssertEqual(dueReset.resetCountdownText(now: now), "now")
+        XCTAssertNil(noReset.resetCountdownText(now: now))
+    }
 }
