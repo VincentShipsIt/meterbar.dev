@@ -12,6 +12,9 @@ final class UsageDashboardWindowController {
     func show() {
         if window == nil {
             let hostingController = NSHostingController(rootView: UsageDashboardView())
+            // Surface the SwiftUI NavigationSplitView's toolbar and title (and the
+            // Liquid Glass they carry) through the AppKit window.
+            hostingController.sceneBridgingOptions = [.all]
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -19,14 +22,15 @@ final class UsageDashboardWindowController {
                 defer: false
             )
             window.title = "MeterBar Usage"
+            window.toolbarStyle = .unified
             window.contentMinSize = NSSize(width: 900, height: 600)
             window.contentViewController = hostingController
             window.isReleasedWhenClosed = false
+            window.center()
             self.window = window
         }
 
         NSApp.activate(ignoringOtherApps: true)
-        window?.center()
         window?.makeKeyAndOrderFront(nil)
     }
 }
@@ -59,17 +63,25 @@ struct UsageDashboardView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
 
-    @State private var selectedSection: DashboardSection = .overview
+    @State private var selectedSection: DashboardSection? = .overview
+
+    private var activeSection: DashboardSection { selectedSection ?? .overview }
 
     var body: some View {
-        HStack(spacing: 10) {
-            sidebar
-
+        NavigationSplitView {
+            List(selection: $selectedSection) {
+                ForEach(DashboardSection.allCases) { section in
+                    Label(section.rawValue, systemImage: section.iconName)
+                        .tag(section)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 212, max: 280)
+            .safeAreaInset(edge: .bottom) { sourcesFooter }
+        } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    header
-
-                    switch selectedSection {
+                    switch activeSection {
                     case .overview:
                         overviewContent
                     case .limits:
@@ -81,121 +93,42 @@ struct UsageDashboardView: View {
                     }
                 }
                 .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(MeterBarTheme.graphiteSurface.opacity(0.48))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(MeterBarTheme.border.opacity(0.72), lineWidth: 1)
-            }
-        }
-        .padding(10)
-        .background {
-            ZStack {
-                MeterBarTheme.graphiteBackground
-                Rectangle().fill(.ultraThinMaterial).opacity(0.42)
-            }
-        }
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(MeterBarTheme.appAccent)
-                Text("MeterBar")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 22)
-
-            VStack(spacing: 4) {
-                ForEach(DashboardSection.allCases) { section in
+            .navigationTitle(activeSection.rawValue)
+            .navigationSubtitle(sectionSubtitle)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
-                        selectedSection = section
+                        Task { await refreshDashboard() }
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: section.iconName)
-                                .frame(width: 22)
-                            Text(section.rawValue)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .foregroundColor(selectedSection == section ? .primary : .secondary)
-                        .background(selectedSection == section ? MeterBarTheme.graphiteElevated : Color.clear)
-                        .overlay(alignment: .leading) {
-                            if selectedSection == section {
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(MeterBarTheme.appAccent)
-                                    .frame(width: 3)
-                                    .padding(.vertical, 7)
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
+                        Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.plain)
+                    .help("Refresh usage")
+                    .disabled(dataManager.isLoading || costTracker.isScanning)
                 }
             }
-            .padding(.horizontal, 12)
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Local Sources")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if enabledSourceLabels.isEmpty {
-                    Text("No sources enabled")
-                } else {
-                    ForEach(enabledSourceLabels, id: \.self) { label in
-                        Label(label, systemImage: "checkmark.circle.fill")
-                    }
-                }
-            }
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 18)
-            .padding(.bottom, 18)
-        }
-        .frame(width: 188)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(MeterBarTheme.border, lineWidth: 1)
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(selectedSection.rawValue)
-                    .font(.title)
-                    .fontWeight(.semibold)
-                Text(sectionSubtitle)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            RefreshIconButton(
-                title: "Refresh",
-                help: "Refresh usage",
-                isDisabled: dataManager.isLoading || costTracker.isScanning
-            ) {
-                Task {
-                    await refreshDashboard()
+    private var sourcesFooter: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Local Sources")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if enabledSourceLabels.isEmpty {
+                Text("No sources enabled")
+            } else {
+                ForEach(enabledSourceLabels, id: \.self) { label in
+                    Label(label, systemImage: "checkmark.circle.fill")
                 }
             }
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private var overviewContent: some View {
@@ -277,11 +210,9 @@ struct UsageDashboardView: View {
                                     await costTracker.scanCosts(days: 30)
                                 }
                             } label: {
-                                HStack(spacing: 7) {
-                                    LucideIcon(.search, size: 13, lineWidth: 2.4)
-                                    Text("Scan 30 Days")
-                                }
+                                Label("Scan 30 Days", systemImage: "magnifyingglass")
                             }
+                            .buttonStyle(.bordered)
                             .disabled(costTracker.isScanning)
                         }
                         .frame(height: 220, alignment: .center)
@@ -414,7 +345,7 @@ struct UsageDashboardView: View {
     }
 
     private var sectionSubtitle: String {
-        switch selectedSection {
+        switch activeSection {
         case .overview:
             return "Current health and local token history"
         case .limits:
@@ -427,7 +358,7 @@ struct UsageDashboardView: View {
     }
 
     private func refreshDashboard() async {
-        if selectedSection == .costs {
+        if activeSection == .costs {
             await costTracker.scanCosts(days: 30)
         } else {
             await dataManager.refreshAll()
@@ -542,11 +473,11 @@ private struct DashboardStatusHero: View {
         HStack(alignment: .center, spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.18))
+                    .fill(.quaternary)
                     .frame(width: 46, height: 46)
                 Image(systemName: iconName)
                     .font(.system(size: 23, weight: .semibold))
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -677,7 +608,7 @@ private struct CostOverviewStatusCard: View {
             HStack(alignment: .center, spacing: 9) {
                 Image(systemName: "dollarsign.circle.fill")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(MeterBarTheme.success)
+                    .foregroundStyle(MeterBarTheme.success)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("API-Rate Estimate")
                         .font(.headline)
@@ -854,6 +785,8 @@ private struct DashboardLimitRow: View {
 private struct CostScanLoadingChart: View {
     let compact: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private let barCount = 30
 
     var body: some View {
@@ -884,7 +817,7 @@ private struct CostScanLoadingChart: View {
                         HStack(alignment: .bottom, spacing: spacing) {
                             ForEach(0..<barCount, id: \.self) { index in
                                 let seed = Double(((index * 17) % 11) + 2) / 13
-                                let wave = (sin((time * 3.2) + Double(index) * 0.55) + 1) / 2
+                                let wave = reduceMotion ? 0.5 : (sin((time * 3.2) + Double(index) * 0.55) + 1) / 2
                                 let height = chartHeight * CGFloat(0.14 + (seed * 0.44) + (wave * 0.28))
 
                                 RoundedRectangle(cornerRadius: 3)
@@ -903,16 +836,18 @@ private struct CostScanLoadingChart: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: chartHeight, alignment: .bottomLeading)
 
-                        Rectangle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.clear, Color.white.opacity(0.28), .clear],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                        if !reduceMotion {
+                            Rectangle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.clear, Color.primary.opacity(0.22), .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
-                            )
-                            .frame(width: sweepWidth, height: chartHeight)
-                            .offset(x: sweepX)
+                                .frame(width: sweepWidth, height: chartHeight)
+                                .offset(x: sweepX)
+                        }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 7))
 
@@ -943,12 +878,7 @@ private struct CostScanProgressBadge: View {
                 }
                 .padding(.horizontal, compact ? 9 : 11)
                 .padding(.vertical, compact ? 6 : 8)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                }
+                .glassEffect(.regular, in: .capsule)
 
                 Spacer()
             }
@@ -1159,8 +1089,8 @@ private struct StackedDailyUsageColumn: View {
                 .frame(width: width, height: height, alignment: .bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
             } else {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.white.opacity(0.10))
+                Capsule()
+                    .fill(.quaternary)
                     .frame(width: width, height: 2)
             }
         }
@@ -1351,8 +1281,7 @@ private struct DailyUsageDetailRow: View {
             }
         }
         .padding(10)
-        .background(Color.white.opacity(0.035))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func dateLabel(_ date: Date) -> String {
@@ -1411,8 +1340,7 @@ private struct ProviderCostBreakdown: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func compact(_ value: Int) -> String {
@@ -1538,18 +1466,12 @@ private func color(for provider: ServiceType) -> Color {
 }
 
 private extension View {
+    /// A content surface for dashboard cards. Opaque system control background
+    /// (not a material) on the window's content layer, with concentric corners.
     func dashboardCardBackground() -> some View {
-        self
-            .background {
-                ZStack {
-                    MeterBarTheme.graphiteSurface.opacity(0.78)
-                    Rectangle().fill(.thinMaterial).opacity(0.30)
-                }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(MeterBarTheme.border, lineWidth: 1)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+        background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }

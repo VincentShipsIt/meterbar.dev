@@ -1,224 +1,125 @@
 ---
-version: alpha
+version: beta
 name: MeterBar Native Utility
-description: Compact macOS utility UI for AI quota, usage, and local token spend.
+description: Native macOS menu-bar utility for AI quota, usage, and local token spend, built on Liquid Glass.
+platform:
+  minimum: "macOS 26 (Tahoe)"
+  appearance: "adaptive (light + dark); never force a color scheme"
+principles:
+  - "Glass is a system-owned chrome layer (menu bar, popover, toolbar, sidebar, floating controls). Never put glass in the content layer, never stack glass on glass, use it sparingly."
+  - "Adopt by subtraction: use standard SwiftUI/AppKit containers and REMOVE custom backgrounds/materials/tints so the system supplies Liquid Glass automatically."
+  - "Content uses semantic system colors and standard materials, not fixed hex. Foreground text/symbols on materials use vibrancy."
+  - "Tint sparingly — only the single most important action. Provider/quota colors are semantic indicators, never surface washes."
 colors:
-  primary: "#F2F2F7"
-  secondary: "#AEAEB2"
-  muted: "#8E8E93"
-  background: "#1C1C1E"
-  surface: "#242426"
-  surface-elevated: "#2C2C2E"
-  surface-hover: "#3A3A3C"
-  border: "rgba(255,255,255,0.10)"
-  border-strong: "rgba(255,255,255,0.16)"
-  accent: "#006EDB"
-  accent-foreground: "#FFFFFF"
-  codex: "#64D2FF"
-  claude: "#D18665"
-  cursor: "#63D297"
-  success: "#30D158"
-  warning: "#FFD60A"
-  danger: "#FF453A"
+  note: "Use semantic system colors so everything adapts to light/dark, accent, Increase Contrast, and Reduce Transparency. Do NOT define fixed graphite hex."
+  text-primary: "Color.primary / NSColor.labelColor"
+  text-secondary: "Color.secondary / NSColor.secondaryLabelColor"
+  text-tertiary: ".tertiary"
+  window-background: "Color(nsColor: .windowBackgroundColor)"
+  content-surface: "Color(nsColor: .controlBackgroundColor)  # for non-grouped card fills"
+  separator: "Color(nsColor: .separatorColor) / .quaternary"
+  fill-subtle: ".quaternary  # tracks, inactive chips, zebra rows"
+  accent: "Color.accentColor  # follows the user's system accent"
+  # Brand + status accents are the ONLY custom colors. Define in Assets.xcassets
+  # with Any/Dark + High-Contrast variants so they adapt.
+  codex: "asset 'AccentCodex'  (cyan)"
+  claude: "asset 'AccentClaude' (muted Anthropic orange)"
+  cursor: "asset 'AccentCursor' (green)"
+  success: ".green (asset 'StatusHealthy')"
+  warning: ".yellow (asset 'StatusWarning')"
+  danger: ".red (asset 'StatusDanger')"
 typography:
-  title:
-    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Display, system-ui, sans-serif"
-    fontSize: "28px"
-    fontWeight: 650
-    lineHeight: 1.15
-    letterSpacing: "0px"
-  section-title:
-    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, system-ui, sans-serif"
-    fontSize: "18px"
-    fontWeight: 650
-    lineHeight: 1.25
-    letterSpacing: "0px"
-  body:
-    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, system-ui, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.35
-    letterSpacing: "0px"
-  label:
-    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, system-ui, sans-serif"
-    fontSize: "12px"
-    fontWeight: 600
-    lineHeight: 1.2
-    letterSpacing: "0px"
-  metric:
-    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Display, system-ui, sans-serif"
-    fontSize: "24px"
-    fontWeight: 700
-    lineHeight: 1.1
-    letterSpacing: "0px"
+  family: "system (SF) via SwiftUI Font APIs — never hardcode font names"
+  title: ".title, semibold"
+  section-title: ".title3 / .headline, semibold"
+  body: ".body / .subheadline"
+  label: ".caption, secondary"
+  metric: ".system(size: ~24-26, weight: .bold) — primary text unless exhausted"
+  note: "On materials use Regular/Medium/Semibold/Bold weights; thin glyphs lose legibility. Letter spacing is zero. Never scale text with viewport width."
 rounded:
-  sm: "4px"
-  md: "8px"
-  lg: "10px"
+  note: "Prefer concentric / container-relative radii and Capsule over scattered fixed values. Native containers (List/GroupBox/Form) handle radii for you."
+  control: ".rect(cornerRadius: 8, style: .continuous)"
+  card: ".rect(cornerRadius: 12, style: .continuous) / GroupBox"
+  pill-or-bar: "Capsule()"
 spacing:
   xs: "4px"
   sm: "8px"
   md: "12px"
   lg: "16px"
   xl: "22px"
-components:
-  panel:
-    backgroundColor: "{colors.surface-elevated}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: "{spacing.lg}"
-  sidebar-item:
-    backgroundColor: "transparent"
-    textColor: "{colors.secondary}"
-    rounded: "{rounded.md}"
-    padding: "8px 14px"
-  sidebar-item-active:
-    backgroundColor: "{colors.surface-elevated}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: "8px 14px"
-  sidebar-active-indicator:
-    backgroundColor: "{colors.accent}"
-    rounded: "{rounded.sm}"
-    width: "3px"
-    height: "18px"
-  hairline-border:
-    backgroundColor: "{colors.border}"
-    height: "1px"
-  strong-hairline-border:
-    backgroundColor: "{colors.border-strong}"
-    height: "1px"
-  usage-bar-track:
-    backgroundColor: "{colors.border-strong}"
-    rounded: "{rounded.sm}"
-    height: "7px"
-  usage-bar-fill-codex:
-    backgroundColor: "{colors.codex}"
-    rounded: "{rounded.sm}"
-    height: "7px"
-  usage-bar-fill-claude:
-    backgroundColor: "{colors.claude}"
-    rounded: "{rounded.sm}"
-    height: "7px"
-  usage-bar-fill-cursor:
-    backgroundColor: "{colors.cursor}"
-    rounded: "{rounded.sm}"
-    height: "7px"
-  usage-bar-deficit:
-    backgroundColor: "{colors.danger}"
-    rounded: "{rounded.sm}"
-    height: "7px"
-  status-success:
-    textColor: "{colors.success}"
-    backgroundColor: "transparent"
-    rounded: "{rounded.sm}"
-  status-warning:
-    textColor: "{colors.warning}"
-    backgroundColor: "transparent"
-    rounded: "{rounded.sm}"
-  icon-button:
-    backgroundColor: "{colors.surface-hover}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    size: "32px"
-  accent-button:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.accent-foreground}"
-    rounded: "{rounded.md}"
-    padding: "6px 10px"
-  helper-text:
-    textColor: "{colors.muted}"
-    backgroundColor: "transparent"
-    rounded: "{rounded.sm}"
 ---
 
 ## Overview
 
-MeterBar is a native macOS utility, not a marketing surface. It should feel like a compact Shipcode sibling: dark graphite shell, low-opacity borders, tight controls, restrained accent color, and dense but readable quota information.
+MeterBar is a native macOS 26 utility, not a marketing surface. It should feel like a system app (Mail/Finder/System Settings): native containers, system materials, semantic colors, restrained accent. It has two surfaces:
 
-The app has two surfaces:
+- **Menu bar popover:** immediate quota health and fast refresh/dashboard access.
+- **Companion window:** deeper limits, cost history, and settings, built on `NavigationSplitView`.
 
-- Menu bar popover: immediate quota health and fast refresh/dashboard access.
-- Companion window: deeper limits, cost history, and settings.
+Both surfaces stay lean. Avoid decorative hero layouts, big nested cards, and explanatory copy that does not change the user's decision.
 
-Both surfaces must stay lean. Avoid decorative hero layouts, big cards, nested panels, and explanatory copy that does not change the user's decision.
+## How we adopt Liquid Glass
+
+Liquid Glass is the system's **chrome layer** — the menu bar, the popover surface, toolbars, sidebars, and the occasional floating control. We get it for free by using standard components and **removing** custom chrome. The work is subtraction, not decoration:
+
+- **Do not** paint popover/window backgrounds with a color + material. Let the system popover/window surface (and `NavigationSplitView` sidebar/toolbar) supply the glass.
+- **Do not** wrap content cards in material + a manual hairline border ("fake glass"). Content is **not** a glass layer.
+- **Never** stack a material over another material (glass-on-glass).
+- For genuinely free-floating custom controls only, use a single `.glassEffect(.regular, in:)` inside a `GlassEffectContainer`. Use it sparingly.
 
 ## Colors
 
-Use Apple-style dark graphite tokens as the default. Surfaces are charcoal graphite with subtle elevation, not blue-purple gradients or near-black voids. Borders should remain quiet at 10-16% white.
+Use **semantic system colors** as the default so the UI adapts to light/dark, the user's accent, Increase Contrast, and Reduce Transparency. Never define fixed graphite hex for structural surfaces.
 
-Provider accents are semantic and stable:
-
-- Codex: cyan.
-- Claude: muted Anthropic orange `#d18665`.
-- Cursor: softened green.
-- Deficit: red only where quota is missing versus expected pace.
-- Reserve: green only for positive pace state.
-
-Do not let provider colors take over the whole UI. They are indicators, not themes. Large percentage and cost metrics should use primary text unless the value is exhausted; color belongs on icons, bars, markers, and compact status labels.
+The only custom colors are **provider accents** (Codex cyan, Claude muted orange, Cursor green) and **quota status** (success/warning/danger). Define these in `Assets.xcassets` with light/dark + high-contrast variants. They are semantic indicators — used on glyphs, meter fills, and compact status labels — never as whole-surface themes. Large percentage and cost metrics use `.primary` text unless the value is exhausted.
 
 ## Typography
 
-Use native SF fonts through SwiftUI system font APIs. Keep text compact:
-
-- Dashboard title: `.title`, semibold, not `.largeTitle` unless it is the only focal point.
-- Panel titles: title3/headline semibold.
-- Row labels: subheadline semibold.
-- Metadata: caption, secondary color.
-
-Letter spacing is always zero. Do not scale text with viewport width.
+Native SF fonts via SwiftUI system font APIs. Keep text compact (see frontmatter). On materials, use Regular weight or heavier; avoid thin glyphs. Letter spacing is zero; never scale text with viewport width.
 
 ## Layout & Spacing
 
-Prefer a native utility layout:
-
-- Sidebar width around 178-190px.
-- Dashboard content padding around 22px.
-- Card/panel padding around 14px.
-- Repeated rows use 8-12px vertical spacing.
-- Radius is usually 8px; 10px is the upper bound for companion-window panels.
-
-The menu bar popover is denser than the companion app. It is a single all-in-one overview, not a provider tab strip.
+- Companion window: `NavigationSplitView` with a native `.sidebar` `List`; content in a `ScrollView` with ~22px padding; cards as `GroupBox`.
+- Settings: native `Form` with `.formStyle(.grouped)` and `Section`s.
+- Popover: a single dense overview (native `List`/`Section` or `GroupBox`), not a tab strip. Refresh/dashboard actions only.
+- Repeated rows: 8–12px vertical spacing.
 
 ## Elevation & Depth
 
-Use macOS material sparingly for sidebars and popover chrome. Main content should rely on quiet dark surfaces and thin borders.
-
-Avoid blurred decorative backgrounds, gradient orbs, and nested card stacks. Depth comes from material, border, and spacing, not heavy shadows.
+Depth comes from the system: the glass chrome layer floats above content, and content sits on system grouped/window backgrounds. Convey structure with standard materials, vibrancy, and spacing — not fixed dark surfaces, gradient orbs, or heavy shadows.
 
 ## Shapes
 
-Cards, tabs, and controls use 8px radius. Usage bars use a single clipped rounded track so internal colored segments join seamlessly. Never draw adjacent rounded segments that create cut-looking seams.
+Prefer concentric / container-relative radii (`.rect(cornerRadius:style:.continuous)`, `ConcentricRectangle`, `containerShape`) and `Capsule` for bars/pills. Usage bars use a single clipped rounded (capsule) track so internal colored segments join seamlessly — never draw adjacent rounded segments that create cut-looking seams.
 
 ## Components
 
-Provider labels use `ProviderLogoView` with bundled SVG assets. Do not fall back to generic terminal/system symbols when official provider artwork is available.
+- Use SF Symbols for generic iconography (`Image(systemName:)`). Custom vector artwork is reserved for true brand logos via `ProviderLogoView`.
+- Use native control styles: `.buttonStyle(.borderless/.bordered/.borderedProminent)`, `Button(role: .destructive)`, `.textFieldStyle(.roundedBorder)`, native `Toggle`, `LabeledContent`. Reserve at most one tinted/`.glassProminent` button for the primary action.
+- Use `ContentUnavailableView` for empty/error/no-selection states and `ProgressView` for busy states.
+- Refresh lives in the toolbar (`ToolbarItem(placement: .primaryAction)`), not a hand-animated custom button. Gate any retained animation on `accessibilityReduceMotion`.
 
 Usage bars are remaining-mode:
 
-- Full bar means 100% left.
-- Colored provider fill is current quota left.
+- Full bar means 100% left; colored provider fill is current quota left.
 - Red segment is the quota that should still exist if usage were on pace.
 - Pace marker shows expected remaining unless the row is on pace.
 
-Settings belong in the companion app. The popover should expose dashboard and refresh actions only.
-
-Provider visibility belongs in companion Settings. Disabled providers must stop fetching, disappear from the menu popover and dashboard, stop affecting the menu bar percentage, and be excluded from local cost estimates.
+Provider visibility belongs in companion Settings. Disabled providers must stop fetching, disappear from the popover and dashboard, stop affecting the menu bar percentage, and be excluded from local cost estimates.
 
 ## Do's and Don'ts
 
 Do:
 
-- Keep controls compact and native.
-- Prefer one surface per purpose: popover for quick glance, companion for details/settings.
-- Use official provider logos.
-- Keep dashboards scan-friendly with aligned labels and values.
-- Make expensive scans explicit or backgrounded so windows open immediately.
+- Use native containers and let the system supply glass.
+- Use semantic system colors and vibrancy; keep brand color to provider accents and quota status.
+- Verify every surface in light and dark, and with Reduce Transparency, Increase Contrast, and Reduce Motion enabled.
+- Use official provider logos; keep dashboards scan-friendly with aligned labels and values.
 
 Don't:
 
-- Use web-only shadcn components directly in SwiftUI.
-- Embed React in a web view just to get Tailwind/shadcn styling.
+- Force a color scheme, or paint fixed graphite backgrounds.
+- Wrap content in fake-glass cards, or stack material on material.
 - Use generic SF provider icons where bundled logos exist.
+- Use web-only shadcn/Tailwind components or embed React in a web view.
 - Auto-run heavy filesystem scans during initial window presentation.
-- Let deficit bars look like separated pills.

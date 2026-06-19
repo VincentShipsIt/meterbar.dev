@@ -60,7 +60,6 @@ struct MenuBarView: View {
             popoverHeader
 
             Divider()
-                .opacity(0.35)
 
             ScrollView {
                 PopoverOverviewPanel(
@@ -86,12 +85,6 @@ struct MenuBarView: View {
             .frame(height: scrollHeight)
         }
         .frame(width: popoverWidth, height: popoverHeight)
-        .background {
-            ZStack {
-                MeterBarTheme.graphiteBackground.opacity(0.86)
-                Rectangle().fill(.ultraThinMaterial)
-            }
-        }
         .onAppear {
             notifyContentSize()
         }
@@ -122,7 +115,7 @@ struct MenuBarView: View {
             HStack(spacing: 9) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(MeterBarTheme.appAccent)
+                    .foregroundStyle(MeterBarTheme.appAccent)
                 Text("MeterBar")
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -131,29 +124,22 @@ struct MenuBarView: View {
             Spacer()
 
             Button(action: openDashboard) {
-                LucideIcon(.panelRight, size: 17, lineWidth: 2.25)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
+                Image(systemName: "sidebar.right")
             }
-            .buttonStyle(.plain)
-            .foregroundColor(MeterBarTheme.toolbarIconForeground)
-            .background(MeterBarTheme.toolbarIconBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(MeterBarTheme.toolbarIconBorder, lineWidth: 1)
-            }
+            .buttonStyle(.borderless)
             .help("Open Usage Dashboard")
 
-            RefreshIconButton(help: "Refresh usage") {
-                Task {
-                    await dataManager.refreshAll()
-                }
+            Button {
+                Task { await dataManager.refreshAll() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
             }
+            .buttonStyle(.borderless)
+            .help("Refresh usage")
         }
+        .font(.body)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
     }
 
     private func openDashboard() {
@@ -270,11 +256,11 @@ struct PopoverOverviewPanel: View {
             HStack(alignment: .center, spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(statusColor.opacity(0.20))
+                        .fill(.quaternary)
                         .frame(width: 34, height: 34)
                     Image(systemName: statusIconName)
                         .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(statusColor)
+                        .foregroundStyle(statusColor)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -289,7 +275,7 @@ struct PopoverOverviewPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(12)
-            .popoverGlassCard()
+            .cardSurface()
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
                 ForEach(snapshots) { snapshot in
@@ -312,7 +298,7 @@ struct PopoverOverviewPanel: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .popoverGlassCard()
+            .cardSurface()
         }
     }
 }
@@ -479,7 +465,7 @@ private struct PopoverProviderStatusCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
-        .popoverGlassCard()
+        .cardSurface()
     }
 
     private var updatedText: String {
@@ -673,13 +659,13 @@ struct UsageBar: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(MeterBarTheme.barTrack)
+                Capsule()
+                    .fill(.quaternary)
                     .frame(height: 7)
                     .offset(y: 4)
 
                 if isExhausted {
-                    RoundedRectangle(cornerRadius: 3)
+                    Capsule()
                         .fill(MeterBarTheme.danger.opacity(0.16))
                         .frame(width: proxy.size.width, height: 7)
                         .offset(y: 4)
@@ -704,7 +690,7 @@ struct UsageBar: View {
                                 .offset(x: actualX)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(Capsule())
                     .offset(y: 4)
 
                     RoundedRectangle(cornerRadius: 1)
@@ -737,21 +723,15 @@ struct UsageBar: View {
 }
 
 private extension View {
-    func popoverGlassCard() -> some View {
-        self
-            .background {
-                ZStack {
-                    MeterBarTheme.graphiteSurface.opacity(0.78)
-                    Rectangle().fill(.thinMaterial).opacity(0.35)
-                }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(MeterBarTheme.border, lineWidth: 1)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+    /// A content surface for cards that sit on the popover's glass chrome.
+    /// Uses an opaque system control background (not a material) so it never
+    /// stacks glass on glass, with concentric continuous corners.
+    func cardSurface() -> some View {
+        background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
-
 }
 
 private struct MenuContentHeightPreferenceKey: PreferenceKey {
