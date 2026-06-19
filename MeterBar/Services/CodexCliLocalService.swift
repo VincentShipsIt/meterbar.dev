@@ -176,7 +176,8 @@ class CodexCliLocalService: ObservableObject {
                     service: .codexCli,
                     sessionLimit: nil,
                     weeklyLimit: nil,
-                    codeReviewLimit: nil
+                    codeReviewLimit: nil,
+                    extraUsage: usageResponse.extraUsageStatus
                 )
             }
 
@@ -218,7 +219,8 @@ class CodexCliLocalService: ObservableObject {
                 service: .codexCli,
                 sessionLimit: sessionLimit,
                 weeklyLimit: weeklyLimit,
-                codeReviewLimit: codeReviewLimit
+                codeReviewLimit: codeReviewLimit,
+                extraUsage: usageResponse.extraUsageStatus
             )
         } catch let urlError as URLError {
             let errorMessage: String
@@ -258,12 +260,98 @@ struct CodexCliUsageResponse: Codable {
     let rateLimit: RateLimit?  // Can be null for free accounts
     let codeReviewRateLimit: CodeReviewRateLimit?
     let credits: Credits?  // Can be null for free accounts
+    let spendControl: SpendControl?
 
     enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
         case rateLimit = "rate_limit"
         case codeReviewRateLimit = "code_review_rate_limit"
         case credits
+        case spendControl = "spend_control"
+    }
+
+    /// Maps the Codex credits/spend payload onto the shared extra-usage status.
+    ///
+    /// Codex "extra usage" means pay-as-you-go credits/overage consumed once the plan's
+    /// rate limit is hit. Because a false "Off" gives dangerous false confidence, this is
+    /// safety-biased: we only report `.off` when the payload positively proves overage is
+    /// disabled (the credits object is present and explicitly empty with no overage signal).
+    /// Any positive signal is `.on`; an absent credits object is `.unknown`, never `.off`.
+    var extraUsageStatus: ExtraUsageStatus {
+        // Positive evidence that overage spending is possible / enabled.
+        if let credits {
+            if credits.unlimited {
+                return ExtraUsageStatus(state: .on, detail: "Unlimited credits")
+            }
+
+            let balance = credits.balance ?? 0
+            if credits.hasCredits || balance > 0 {
+                return ExtraUsageStatus(state: .on, detail: onDetail(balance: balance))
+            }
+
+            if credits.overageLimitReached {
+                return ExtraUsageStatus(state: .on, detail: "Overage in use")
+            }
+        }
+
+        // A configured spend cap (or a reached cap) means overage billing is set up.
+        if let limit = spendControl?.individualLimit, limit > 0 {
+            return ExtraUsageStatus(state: .on, detail: "Overage cap \(ExtraUsageStatus.formatAmount(limit))")
+        }
+        if spendControl?.reached == true {
+            return ExtraUsageStatus(state: .on, detail: "Overage in use")
+        }
+
+        // Authoritative evidence overage is disabled: credits object present and explicitly
+        // empty (no balance, not unlimited, overage not in use).
+        if let credits,
+           !credits.unlimited,
+           !credits.hasCredits,
+           (credits.balance ?? 0) == 0,
+           !credits.overageLimitReached {
+            return ExtraUsageStatus(state: .off, detail: nil)
+        }
+
+        // No credits object at all → we cannot determine the state. Never report a false "Off".
+        return ExtraUsageStatus(state: .unknown, detail: nil)
+    }
+
+    private func onDetail(balance: Double) -> String {
+        var detail = "\(ExtraUsageStatus.formatAmount(balance)) in credits"
+        if let limit = spendControl?.individualLimit, limit > 0 {
+            detail += " · cap \(ExtraUsageStatus.formatAmount(limit))"
+        }
+        return detail
+    }
+}
+
+/// Optional per-account spending cap returned by the Codex usage API.
+struct SpendControl: Codable {
+    let reached: Bool
+    let individualLimit: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case reached
+        case individualLimit = "individual_limit"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        reached = (try? container.decode(Bool.self, forKey: .reached)) ?? false
+
+        if let doubleLimit = try? container.decode(Double.self, forKey: .individualLimit) {
+            individualLimit = doubleLimit
+        } else if let stringLimit = try? container.decode(String.self, forKey: .individualLimit) {
+            individualLimit = Double(stringLimit)
+        } else {
+            individualLimit = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(reached, forKey: .reached)
+        try container.encodeIfPresent(individualLimit, forKey: .individualLimit)
     }
 }
 
@@ -312,6 +400,7 @@ struct LimitWindow: Codable {
 struct Credits: Codable {
     let hasCredits: Bool
     let unlimited: Bool
+    let overageLimitReached: Bool
     let balance: Double?
     let approxLocalMessages: Int?
     let approxCloudMessages: Int?
@@ -319,6 +408,7 @@ struct Credits: Codable {
     enum CodingKeys: String, CodingKey {
         case hasCredits = "has_credits"
         case unlimited
+        case overageLimitReached = "overage_limit_reached"
         case balance
         case approxLocalMessages = "approx_local_messages"
         case approxCloudMessages = "approx_cloud_messages"
@@ -328,6 +418,7 @@ struct Credits: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         hasCredits = (try? container.decode(Bool.self, forKey: .hasCredits)) ?? false
         unlimited = (try? container.decode(Bool.self, forKey: .unlimited)) ?? false
+        overageLimitReached = (try? container.decode(Bool.self, forKey: .overageLimitReached)) ?? false
 
         if let doubleBalance = try? container.decode(Double.self, forKey: .balance) {
             balance = doubleBalance
@@ -345,6 +436,7 @@ struct Credits: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(hasCredits, forKey: .hasCredits)
         try container.encode(unlimited, forKey: .unlimited)
+        try container.encode(overageLimitReached, forKey: .overageLimitReached)
         try container.encodeIfPresent(balance, forKey: .balance)
         try container.encodeIfPresent(approxLocalMessages, forKey: .approxLocalMessages)
         try container.encodeIfPresent(approxCloudMessages, forKey: .approxCloudMessages)

@@ -60,10 +60,71 @@ struct SettingsView: View {
             if providerVisibility.isEnabled(.cursor) {
                 cursorSection
             }
+            if showExtraUsageSection {
+                extraUsageSection
+            }
             costTrackingSection
             refreshSection
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+
+    private var showExtraUsageSection: Bool {
+        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
+    }
+
+    private var extraUsageSection: some View {
+        SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
+            SettingsNotice(
+                text: "Extra usage (Claude) and credits (Codex) let a provider bill overage beyond your "
+                    + "plan once your quota is exhausted. \"Off\" means usage is capped at your subscription.",
+                color: .secondary
+            )
+
+            if providerVisibility.isEnabled(.claudeCode) {
+                extraUsageRow(
+                    title: "Claude Code",
+                    status: dataManager.metrics[.claudeCode]?.extraUsage,
+                    manageURL: "https://claude.ai/settings"
+                )
+            }
+
+            if providerVisibility.isEnabled(.codexCli) {
+                extraUsageRow(
+                    title: "OpenAI Codex",
+                    status: dataManager.metrics[.codexCli]?.extraUsage,
+                    manageURL: "https://chatgpt.com"
+                )
+            }
+        }
+    }
+
+    private func extraUsageRow(title: String, status: ExtraUsageStatus?, manageURL: String) -> some View {
+        SettingsRowView(title: title, detail: extraUsageDetailText(status)) {
+            HStack(spacing: 8) {
+                ExtraUsageStatusPill(status: status ?? .unknown)
+
+                Button("Manage") {
+                    if let url = URL(string: manageURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(SettingsButtonStyle())
+                .help("Open \(manageURL) to change extra usage settings")
+            }
+        }
+    }
+
+    private func extraUsageDetailText(_ status: ExtraUsageStatus?) -> String {
+        guard let status else { return "Waiting for refresh." }
+        switch status.state {
+        case .on:
+            return status.detail.map { "Enabled · \($0)" } ?? "Enabled — overage can be billed beyond your plan."
+        case .off:
+            return "Disabled — capped at your subscription quota."
+        case .unknown:
+            return "Could not determine. Sign in to the CLI and refresh."
+        }
     }
 
     private var trackedProvidersSection: some View {

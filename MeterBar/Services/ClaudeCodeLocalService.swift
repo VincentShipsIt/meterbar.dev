@@ -114,7 +114,10 @@ class ClaudeCodeLocalService: ObservableObject {
                     self.authState = .connected(.cli)
                 }
             }
-            return metrics
+            // The CLI usage output does not expose the "extra usage" toggle, so query the
+            // OAuth usage endpoint separately for it. Best-effort: failures degrade to .unknown.
+            let extraUsage = await fetchExtraUsageStatus(account: account)
+            return metrics.withExtraUsage(extraUsage)
         } catch {
             if !account.isDefault || !isOAuthFallbackEnabled {
                 let serviceError = serviceError(from: error)
@@ -213,7 +216,8 @@ class ClaudeCodeLocalService: ObservableObject {
                 service: .claudeCode,
                 sessionLimit: sessionLimit,
                 weeklyLimit: weeklyLimit,
-                codeReviewLimit: sonnetLimit
+                codeReviewLimit: sonnetLimit,
+                extraUsage: usageResponse.extraUsageStatus
             )
         } catch let urlError as URLError {
             let errorMessage: String
@@ -242,6 +246,44 @@ class ClaudeCodeLocalService: ObservableObject {
                 self.authState = .error(serviceError.localizedDescription)
             }
             throw serviceError
+        }
+    }
+
+    /// Best-effort fetch of the Claude "extra usage" on/off state from the OAuth usage endpoint.
+    ///
+    /// Only the default account is supported, since its OAuth token lives in the Keychain.
+    /// Reads credentials without mutating published state and never throws — any missing token,
+    /// expired token, network failure, or decode failure resolves to `.unknown`.
+    private func fetchExtraUsageStatus(account: ClaudeCodeAccount) async -> ExtraUsageStatus {
+        guard account.isDefault else { return .unknown }
+        guard let credentials = getCredentials(),
+              !OAuthTokenExpiry.isExpired(unixTimestamp: credentials.claudeAiOauth.expiresAt) else {
+            return .unknown
+        }
+
+        guard let url = URL(string: usageEndpoint) else { return .unknown }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(credentials.claudeAiOauth.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.timeoutInterval = 15.0
+
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return .unknown
+            }
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let usageResponse = try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+            return usageResponse.extraUsageStatus
+        } catch {
+            return .unknown
         }
     }
 
@@ -356,11 +398,105 @@ struct ClaudeCodeUsageResponse: Codable {
     let fiveHour: UsageWindow
     let sevenDay: UsageWindow
     let sevenDaySonnet: UsageWindow?
+    let extraUsage: ClaudeExtraUsage?
+    let spend: ClaudeSpend?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDaySonnet = "seven_day_sonnet"
+        case extraUsage = "extra_usage"
+        case spend
+    }
+
+    /// Maps the Claude `extra_usage`/`spend` payload onto the shared extra-usage status.
+    ///
+    /// Claude Code "extra usage" lets Max accounts keep working past their plan limits
+    /// by billing overage to their payment method. The authoritative flag is
+    /// `extra_usage.is_enabled`; `spend.enabled` is used as a fallback.
+    var extraUsageStatus: ExtraUsageStatus {
+        if let extraUsage {
+            guard extraUsage.isEnabled else {
+                return ExtraUsageStatus(state: .off, detail: nil)
+            }
+            return ExtraUsageStatus(state: .on, detail: enabledDetail)
+        }
+
+        // `spend.enabled` only positively confirms ON. A false value is not authoritative for
+        // the extra-usage toggle (only `extra_usage.is_enabled` is), so treat it as unknown
+        // rather than risk a false "Off".
+        if spend?.enabled == true {
+            return ExtraUsageStatus(state: .on, detail: enabledDetail)
+        }
+
+        return .unknown
+    }
+
+    private var enabledDetail: String? {
+        var parts: [String] = []
+        if let spend, let used = spend.used?.amount {
+            parts.append("\(ExtraUsageStatus.formatAmount(used, currency: spend.used?.currency)) used")
+        }
+        if let limit = extraUsage?.monthlyLimit, limit > 0 {
+            parts.append("cap \(ExtraUsageStatus.formatAmount(limit, currency: extraUsage?.currency))/mo")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// Claude `extra_usage` object from `/api/oauth/usage`.
+struct ClaudeExtraUsage: Codable {
+    let isEnabled: Bool
+    let monthlyLimit: Double?
+    let usedCredits: Double?
+    let utilization: Double?
+    let currency: String?
+    let disabledReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled = "is_enabled"
+        case monthlyLimit = "monthly_limit"
+        case usedCredits = "used_credits"
+        case utilization
+        case currency
+        case disabledReason = "disabled_reason"
+    }
+}
+
+/// Claude `spend` object from `/api/oauth/usage`.
+struct ClaudeSpend: Codable {
+    let used: ClaudeMoney?
+    let limit: ClaudeMoney?
+    let percent: Double?
+    let enabled: Bool?
+    let disabledReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case used
+        case limit
+        case percent
+        case enabled
+        case disabledReason = "disabled_reason"
+    }
+}
+
+/// Minor-unit money amount (e.g. `amount_minor: 500, exponent: 2` → $5.00).
+struct ClaudeMoney: Codable {
+    let amountMinor: Int?
+    let currency: String?
+    let exponent: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case amountMinor = "amount_minor"
+        case currency
+        case exponent
+    }
+
+    /// Decoded major-unit amount, or nil when no minor amount is present.
+    var amount: Double? {
+        guard let amountMinor else { return nil }
+        let exp = exponent ?? 2
+        return Double(amountMinor) / pow(10, Double(exp))
     }
 }
 
