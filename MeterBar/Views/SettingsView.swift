@@ -11,6 +11,7 @@ struct SettingsView: View {
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
+    @StateObject private var dockVisibility = DockVisibilityStore.shared
 
     @State private var claudeAdminKey: String = ""
     @State private var openaiAdminKey: String = ""
@@ -62,8 +63,25 @@ struct SettingsView: View {
             }
             costTrackingSection
             refreshSection
+            generalSection
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+
+    private var generalSection: some View {
+        SettingsPanelSection(title: "General", systemImage: "dock.rectangle", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Show in Dock",
+                detail: "Show MeterBar's icon in the Dock. MeterBar always stays in the menu bar."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { dockVisibility.showInDock },
+                    set: { dockVisibility.setShowInDock($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+        }
     }
 
     private var trackedProvidersSection: some View {

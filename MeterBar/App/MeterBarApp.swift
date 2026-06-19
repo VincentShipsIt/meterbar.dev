@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import SwiftUI
 import UserNotifications
@@ -24,10 +25,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private let providerVisibilityStore = ProviderVisibilityStore.shared
+    private let dockVisibilityStore = DockVisibilityStore.shared
     private var cancellables = Set<AnyCancellable>()
-    
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Apply the persisted Dock visibility as early as possible so users who
+        // hide MeterBar from the Dock don't see a brief Dock-icon flash.
+        applyActivationPolicy(showInDock: dockVisibilityStore.showInDock)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🚀 MeterBar: Application did finish launching")
+
+        // Keep Dock visibility in sync with the user's preference.
+        observeDockVisibility()
         
         // Create menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -42,8 +53,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         image.isTemplate = true
         button.image = image
         
-        button.action = #selector(togglePopover)
+        button.action = #selector(handleStatusItemClick)
         button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.toolTip = "MeterBar"
         button.imagePosition = .imageLeft
         button.font = .systemFont(ofSize: 14, weight: .semibold)
@@ -66,17 +78,128 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupNotifications()
     }
     
+    /// Left-click opens the popover; right-click (or control-click) opens a
+    /// native menu so Quit stays reachable even when the Dock icon is hidden.
+    @objc private func handleStatusItemClick() {
+        let event = NSApp.currentEvent
+        let isSecondaryClick = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) ?? false)
+
+        if isSecondaryClick {
+            showStatusMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
     @objc func togglePopover() {
         guard let button = statusItem?.button,
               let popover = popover else { return }
-        
+
         if popover.isShown {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
-    
+
+    /// Shows a native menu anchored to the menu bar icon. This is the always-on
+    /// escape hatch for Quit (and Dock visibility), independent of the popover.
+    private func showStatusMenu() {
+        guard let button = statusItem?.button else { return }
+
+        if popover?.isShown == true {
+            popover?.performClose(nil)
+        }
+
+        let menu = makeStatusMenu()
+        let location = NSPoint(x: 0, y: button.bounds.height + 4)
+        menu.popUp(positioning: nil, at: location, in: button)
+    }
+
+    private func makeStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        let dockItem = NSMenuItem(
+            title: "Show in Dock",
+            action: #selector(toggleShowInDock),
+            keyEquivalent: ""
+        )
+        dockItem.target = self
+        dockItem.state = dockVisibilityStore.showInDock ? .on : .off
+        menu.addItem(dockItem)
+
+        let dashboardItem = NSMenuItem(
+            title: "Open Usage Dashboard",
+            action: #selector(openDashboardFromStatusMenu),
+            keyEquivalent: ""
+        )
+        dashboardItem.target = self
+        menu.addItem(dashboardItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit MeterBar",
+            action: #selector(quitApp),
+            keyEquivalent: "q"
+        )
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        return menu
+    }
+
+    @objc private func toggleShowInDock() {
+        dockVisibilityStore.setShowInDock(!dockVisibilityStore.showInDock)
+    }
+
+    @objc private func openDashboardFromStatusMenu() {
+        UsageDashboardWindowController.shared.show()
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
+    }
+
+    /// Closing the dashboard window (or any window) should never quit MeterBar —
+    /// it keeps running in the menu bar until the user explicitly quits.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    /// Clicking the Dock icon (when shown) with no open windows reopens the
+    /// usage dashboard instead of doing nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            UsageDashboardWindowController.shared.show()
+        }
+        return true
+    }
+
+    private func observeDockVisibility() {
+        dockVisibilityStore.$showInDock
+            .sink { [weak self] showInDock in
+                Task { @MainActor in
+                    self?.applyActivationPolicy(showInDock: showInDock)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Shows or hides the Dock icon by switching the app's activation policy.
+    /// The menu bar status item is unaffected and always remains visible.
+    private func applyActivationPolicy(showInDock: Bool) {
+        let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return }
+        NSApp.setActivationPolicy(policy)
+        if showInDock {
+            // Reassert foreground status so menus/windows behave after the
+            // accessory -> regular transition.
+            NSApp.activate(ignoringOtherApps: false)
+        }
+    }
+
     private func setupNotifications() {
         // Check current authorization status first
         UNUserNotificationCenter.current().getNotificationSettings { settings in

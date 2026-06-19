@@ -48,6 +48,7 @@ struct MenuBarView: View {
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
+    @StateObject private var dockVisibility = DockVisibilityStore.shared
 
     @State private var contentHeight: CGFloat = 320
 
@@ -150,10 +151,42 @@ struct MenuBarView: View {
                     await dataManager.refreshAll()
                 }
             }
+
+            optionsMenu
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
+    }
+
+    private var optionsMenu: some View {
+        Menu {
+            Toggle("Show in Dock", isOn: Binding(
+                get: { dockVisibility.showInDock },
+                set: { dockVisibility.setShowInDock($0) }
+            ))
+            Button("Open Usage Dashboard", action: openDashboard)
+            Divider()
+            Button("Quit MeterBar") {
+                NSApp.terminate(nil)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 32, height: 32)
+        .foregroundColor(MeterBarTheme.toolbarIconForeground)
+        .background(MeterBarTheme.toolbarIconBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(MeterBarTheme.toolbarIconBorder, lineWidth: 1)
+        }
+        .help("More options")
     }
 
     private func openDashboard() {
