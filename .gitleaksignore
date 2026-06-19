@@ -1,0 +1,8 @@
+# gitleaks false positives (fingerprint = commit:file:rule:startline).
+# Each entry is scoped to one historical finding, so real future secrets are
+# still caught.
+
+# Illustrative "BAD: hardcoded secret" example (sk-1234567890) inside the
+# .cursor/commands/security-audit.md command doc (since removed from the tree).
+# Not a real credential — it is documentation showing what NOT to do.
+0f6594991c17d6a479ee7adbf383983a83bf84db:.cursor/commands/security-audit.md:generic-api-key:179
