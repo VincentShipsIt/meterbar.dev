@@ -76,6 +76,11 @@ final class UsageLimitTests: XCTestCase {
             total: 100,
             resetTime: now.addingTimeInterval(45)
         )
+        let weeklyReset = UsageLimit(
+            used: 25,
+            total: 100,
+            resetTime: now.addingTimeInterval(6 * 86_400)
+        )
         let dueReset = UsageLimit(
             used: 25,
             total: 100,
@@ -85,7 +90,8 @@ final class UsageLimitTests: XCTestCase {
 
         XCTAssertEqual(try XCTUnwrap(futureReset.secondsUntilReset(now: now)), 3_660, accuracy: 0.01)
         XCTAssertEqual(futureReset.resetCountdownText(now: now), "1h 1m")
-        XCTAssertEqual(imminentReset.resetCountdownText(now: now), "1m")
+        XCTAssertEqual(imminentReset.resetCountdownText(now: now), "<1m")
+        XCTAssertEqual(weeklyReset.resetCountdownText(now: now), "6d")
         XCTAssertEqual(dueReset.resetCountdownText(now: now), "now")
         XCTAssertNil(noReset.resetCountdownText(now: now))
     }

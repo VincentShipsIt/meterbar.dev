@@ -30,7 +30,9 @@ enum MeterBarTheme {
     // MARK: - Quota status (system colors; adapt to appearance + Increase Contrast)
 
     static let success = Color(nsColor: .systemGreen)
-    static let warning = Color(nsColor: .systemYellow)
+    // systemOrange (not systemYellow) keeps the amber "Tight" band visually
+    // distinct from green/red at caption sizes (PR #33).
+    static let warning = Color(nsColor: .systemOrange)
     static let danger = Color(nsColor: .systemRed)
 
     static func accent(for service: ServiceType) -> Color {
@@ -51,7 +53,10 @@ enum MeterBarTheme {
     }
 
     static func metricColor(percentLeft: Int) -> Color {
-        percentLeft <= 0 ? danger : .primary
+        // Match the danger threshold of quotaStatusColor so the prominent "N%"
+        // metric turns red across the whole critical band, agreeing with the
+        // adjacent status label, while staying neutral for healthy quotas.
+        percentLeft <= 10 ? danger : .primary
     }
 }
 

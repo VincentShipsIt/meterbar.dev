@@ -482,6 +482,15 @@ struct ResetCountdownWindow: Identifiable {
     let limit: UsageLimit
 }
 
+/// Shared tick schedule for all reset-countdown labels. Anchoring to a fixed
+/// reference date (a whole-minute boundary) keeps every label in phase so ticks
+/// land on real minute boundaries instead of drifting per-view. A 60s cadence is
+/// sufficient since the displayed granularity is minutes.
+private enum ResetCountdownSchedule {
+    static let anchor = Date(timeIntervalSinceReferenceDate: 0)
+    static let interval: TimeInterval = 60
+}
+
 struct ResetCountdownLabel: View {
     let title: String?
     let limit: UsageLimit
@@ -490,7 +499,7 @@ struct ResetCountdownLabel: View {
     var iconSize: CGFloat = 10
 
     var body: some View {
-        TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             Group {
                 if let text = Self.counterText(title: title, limit: limit, now: timeline.date) {
                     HStack(spacing: 4) {
@@ -523,10 +532,15 @@ struct NextResetCountdownLabel: View {
     var foregroundColor: Color = .secondary
     var iconSize: CGFloat = 10
 
+    /// How long after a window's reset time we keep showing "reset due" before
+    /// treating the data as stale and hiding the label (until a refresh repopulates
+    /// a future reset time). Prevents a perpetual "reset due" when a provider goes offline.
+    static let resetDueGracePeriod: TimeInterval = 5 * 60
+
     var body: some View {
-        TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             Group {
-                if let window = nextWindow(now: timeline.date),
+                if let window = Self.selectNextWindow(windows, now: timeline.date),
                    let text = ResetCountdownLabel.counterText(
                        title: window.title,
                        limit: window.limit,
@@ -547,7 +561,16 @@ struct NextResetCountdownLabel: View {
         }
     }
 
-    private func nextWindow(now: Date) -> ResetCountdownWindow? {
+    /// Picks the window each provider card should count down to: the soonest
+    /// upcoming reset, or — if every window has already passed — the most recently
+    /// due one, but only while it is within `gracePeriod` of now. Beyond that the
+    /// data is treated as stale and `nil` is returned so the label hides instead of
+    /// showing "reset due" indefinitely.
+    static func selectNextWindow(
+        _ windows: [ResetCountdownWindow],
+        now: Date,
+        gracePeriod: TimeInterval = resetDueGracePeriod
+    ) -> ResetCountdownWindow? {
         let candidates = windows.compactMap { window -> (window: ResetCountdownWindow, seconds: TimeInterval)? in
             guard let seconds = window.limit.secondsUntilReset(now: now) else { return nil }
             return (window, seconds)
@@ -558,7 +581,12 @@ struct NextResetCountdownLabel: View {
             return next.window
         }
 
-        return candidates.max(by: { $0.seconds < $1.seconds })?.window
+        if let mostRecent = candidates.max(by: { $0.seconds < $1.seconds }),
+           mostRecent.seconds >= -gracePeriod {
+            return mostRecent.window
+        }
+
+        return nil
     }
 }
 

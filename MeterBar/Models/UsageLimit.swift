@@ -163,14 +163,20 @@ struct UsagePace: Equatable {
 enum UsageDurationText {
     static func short(seconds: TimeInterval) -> String {
         let wholeSeconds = max(0, Int(seconds.rounded()))
-        let hours = wholeSeconds / 3600
-        let minutes = (wholeSeconds % 3600) / 60
+        let days = wholeSeconds / 86_400
+        let hours = (wholeSeconds % 86_400) / 3_600
+        let minutes = (wholeSeconds % 3_600) / 60
 
+        if days > 0 {
+            return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
+        }
         if hours > 0 {
             return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
         }
-
-        return "\(max(1, minutes))m"
+        if wholeSeconds < 60 {
+            return "<1m"
+        }
+        return "\(minutes)m"
     }
 }
 
