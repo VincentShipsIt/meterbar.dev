@@ -515,11 +515,6 @@ private struct ProviderOverviewStatusCard: View {
         return "Healthy"
     }
 
-    private var metricColor: Color {
-        guard let primaryLimit else { return .primary }
-        return MeterBarTheme.metricColor(percentLeft: primaryLimit.percentLeft)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 9) {
@@ -539,45 +534,15 @@ private struct ProviderOverviewStatusCard: View {
                     .foregroundColor(statusColor)
             }
 
-            if let primaryLimit {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(primaryLimit.percentLeft)%")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundColor(metricColor)
-                    Text("left")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(primaryLimit.title)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                UsageBar(
-                    usedPercentage: primaryLimit.usedPercent,
-                    accentColor: accentColor,
-                    pace: primaryLimit.usageLimit.pace(),
-                    paceContext: primaryLimit.title.localizedCaseInsensitiveContains("weekly") ? .weekly : .session
-                )
-
-                NextResetCountdownLabel(
-                    windows: snapshot.resetWindows,
-                    font: .caption,
-                    foregroundColor: .secondary,
-                    iconSize: 11
-                )
-            }
-
-            VStack(spacing: 7) {
-                ForEach(snapshot.limits.prefix(3)) { limit in
-                    HStack {
-                        Text(limit.title)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(limit.percentLeft <= 0 ? "Out" : "\(limit.percentLeft)% left")
-                            .font(.caption)
-                            .fontWeight(.semibold)
+            if snapshot.limits.isEmpty {
+                Text("No quota windows reported")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(snapshot.limits) { limit in
+                        DashboardLimitRow(limit: limit, accentColor: accentColor)
                     }
                 }
             }

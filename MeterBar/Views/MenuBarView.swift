@@ -411,13 +411,8 @@ private struct PopoverProviderStatusCard: View {
         return "Healthy"
     }
 
-    private var metricColor: Color {
-        guard let primaryLimit else { return .primary }
-        return MeterBarTheme.metricColor(percentLeft: primaryLimit.percentLeft)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
                 ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
                 VStack(alignment: .leading, spacing: 1) {
@@ -431,28 +426,23 @@ private struct PopoverProviderStatusCard: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                Text(statusText)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(statusColor)
             }
 
-            if let primaryLimit {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(primaryLimit.percentLeft)%")
-                        .font(.system(size: 25, weight: .bold))
-                        .foregroundColor(metricColor)
-                    Text("left")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Spacer(minLength: 0)
-                    Text(primaryLimit.title)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+            if snapshot.limits.isEmpty {
+                Text(snapshot.emptyDetail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(snapshot.limits) { limit in
+                        PopoverLimitRow(limit: limit, accentColor: snapshot.accentColor)
+                    }
                 }
-
-                UsageBar(
-                    usedPercentage: primaryLimit.usedPercent,
-                    accentColor: snapshot.accentColor,
-                    pace: primaryLimit.usageLimit.pace(),
-                    paceContext: primaryLimit.title.localizedCaseInsensitiveContains("weekly") ? .weekly : .session
-                )
 
                 NextResetCountdownLabel(
                     windows: snapshot.resetWindows,
@@ -460,34 +450,10 @@ private struct PopoverProviderStatusCard: View {
                     foregroundColor: .secondary,
                     iconSize: 10
                 )
-
-                VStack(spacing: 5) {
-                    ForEach(snapshot.limits.prefix(2)) { limit in
-                        HStack {
-                            Text(limit.title)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(limit.percentLeft <= 0 ? "Out" : "\(limit.percentLeft)%")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                }
-            } else {
-                Text(snapshot.emptyDetail)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
             }
-
-            Text(statusText)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundColor(statusColor)
         }
         .padding(11)
-        .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
         .cardSurface()
     }
 
@@ -496,6 +462,43 @@ private struct PopoverProviderStatusCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return "Updated \(formatter.localizedString(for: updatedAt, relativeTo: Date()))"
+    }
+}
+
+private struct PopoverLimitRow: View {
+    let limit: PopoverLimit
+    let accentColor: Color
+
+    private var isOut: Bool {
+        limit.percentLeft <= 0
+    }
+
+    private var paceContext: PaceLabelContext {
+        limit.title.localizedCaseInsensitiveContains("weekly") ? .weekly : .session
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(limit.title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(isOut ? "Out" : "\(limit.percentLeft)% left")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(isOut ? MeterBarTheme.danger : .primary)
+                    .lineLimit(1)
+            }
+
+            UsageBar(
+                usedPercentage: limit.usedPercent,
+                accentColor: accentColor,
+                pace: limit.usageLimit.pace(),
+                paceContext: paceContext
+            )
+        }
     }
 }
 
