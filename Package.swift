@@ -1,10 +1,10 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "MeterBar",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
         .library(
@@ -28,12 +28,17 @@ let package = Package(
                 "App/MeterBar.entitlements",
                 "Assets.xcassets",
                 "Resources"
-            ]
+            ],
+            // Match the Xcode app target (SWIFT_VERSION = 5.0). The views target
+            // macOS 26 for Liquid Glass APIs, but stay in Swift 5 language mode so
+            // existing singletons compile without a concurrency refactor.
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "MeterBarTests",
             dependencies: ["MeterBar"],
-            path: "MeterBarTests"
+            path: "MeterBarTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )

@@ -25,28 +25,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Group {
-            if embeddedInDashboard {
-                settingsContent
-            } else {
-                ScrollView {
-                    settingsContent
-                        .padding(22)
-                }
-                .background(SettingsDesign.background)
-            }
-        }
-        .frame(minWidth: 560, minHeight: 500)
-        .sheet(isPresented: $showingClaudeHelp) {
-            ClaudeHelpView()
-        }
-        .sheet(isPresented: $showingOpenAIHelp) {
-            OpenAIHelpView()
-        }
-    }
-
-    private var settingsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Form {
             trackedProvidersSection
             if providerVisibility.isEnabled(.claude) {
                 claudeAdminSection
@@ -63,7 +42,17 @@ struct SettingsView: View {
             costTrackingSection
             refreshSection
         }
-        .frame(maxWidth: 760, alignment: .leading)
+        .formStyle(.grouped)
+        .frame(
+            minWidth: embeddedInDashboard ? nil : 560,
+            minHeight: embeddedInDashboard ? nil : 500
+        )
+        .sheet(isPresented: $showingClaudeHelp) {
+            ClaudeHelpView()
+        }
+        .sheet(isPresented: $showingOpenAIHelp) {
+            OpenAIHelpView()
+        }
     }
 
     private var trackedProvidersSection: some View {
@@ -108,7 +97,7 @@ struct SettingsView: View {
 
             SettingsRowView(title: "Admin API Key", detail: "Required for organization usage APIs.") {
                 SecureField("sk-ant-admin...", text: $claudeAdminKey)
-                    .textFieldStyle(SettingsTextFieldStyle())
+                    .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 330)
             }
 
@@ -118,19 +107,19 @@ struct SettingsView: View {
                         _ = authManager.setClaudeAdminKey(claudeAdminKey)
                         claudeAdminKey = ""
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                     .disabled(claudeAdminKey.isEmpty)
 
-                    Button("Remove") {
+                    Button("Remove", role: .destructive) {
                         authManager.removeClaudeAdminKey()
                     }
-                    .buttonStyle(SettingsButtonStyle(role: .destructive))
+                    .buttonStyle(.bordered)
                     .disabled(!authManager.isClaudeAuthenticated)
 
                     Button("Help") {
                         showingClaudeHelp = true
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                 }
             }
         }
@@ -150,7 +139,7 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                 }
             }
 
@@ -200,20 +189,20 @@ struct SettingsView: View {
 
             SettingsRowView(title: "New account") {
                 TextField("Account name", text: $newClaudeAccountName)
-                    .textFieldStyle(SettingsTextFieldStyle())
+                    .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
             }
 
             SettingsRowView(title: "Config directory", detail: "Use a separate CLAUDE_CONFIG_DIR for each extra account.") {
                 HStack(spacing: 8) {
                     TextField("Path", text: $newClaudeConfigDirectory)
-                        .textFieldStyle(SettingsTextFieldStyle())
+                        .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 280)
 
                     Button("Choose") {
                         chooseClaudeConfigDirectory()
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                 }
             }
 
@@ -221,7 +210,7 @@ struct SettingsView: View {
                 Button("Add Account") {
                     addClaudeAccount()
                 }
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(.borderedProminent)
                 .disabled(!canAddClaudeAccount)
             }
         }
@@ -238,7 +227,7 @@ struct SettingsView: View {
 
             SettingsRowView(title: "Admin API Key", detail: "Required for platform usage APIs.") {
                 SecureField("Admin API Key", text: $openaiAdminKey)
-                    .textFieldStyle(SettingsTextFieldStyle())
+                    .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 330)
             }
 
@@ -248,19 +237,19 @@ struct SettingsView: View {
                         _ = authManager.setOpenAIAdminKey(openaiAdminKey)
                         openaiAdminKey = ""
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                     .disabled(openaiAdminKey.isEmpty)
 
-                    Button("Remove") {
+                    Button("Remove", role: .destructive) {
                         authManager.removeOpenAIAdminKey()
                     }
-                    .buttonStyle(SettingsButtonStyle(role: .destructive))
+                    .buttonStyle(.bordered)
                     .disabled(!authManager.isOpenAIAuthenticated)
 
                     Button("Help") {
                         showingOpenAIHelp = true
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                 }
             }
         }
@@ -283,7 +272,7 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(.bordered)
                 }
             }
 
@@ -362,12 +351,12 @@ struct SettingsView: View {
                                 .scaleEffect(0.75)
                             Text("Scanning...")
                         } else {
-                            LucideIcon(.search, size: 13, lineWidth: 2.4)
+                            Image(systemName: "magnifyingglass")
                             Text("Scan 30 Days")
                         }
                     }
                 }
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(.borderedProminent)
                 .disabled(costTracker.isScanning || !canScanCosts)
             }
         }
@@ -390,11 +379,14 @@ struct SettingsView: View {
             }
 
             SettingsRowView(title: "Manual refresh") {
-                RefreshIconButton(title: "Refresh Now", help: "Refresh usage") {
+                Button {
                     Task {
                         await dataManager.refreshAll()
                     }
+                } label: {
+                    Label("Refresh Now", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -462,14 +454,6 @@ struct SettingsView: View {
     }
 }
 
-private enum SettingsDesign {
-    static let background = MeterBarTheme.graphiteBackground
-    static let surface = MeterBarTheme.graphiteSurface
-    static let row = Color.white.opacity(0.035)
-    static let border = MeterBarTheme.border.opacity(0.82)
-    static let borderStrong = MeterBarTheme.borderStrong
-}
-
 private struct SettingsPanelSection<Content: View>: View {
     let title: String
     let logoKind: ProviderLogoKind?
@@ -504,38 +488,18 @@ private struct SettingsPanelSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        Section {
+            content
+        } header: {
+            HStack(spacing: 6) {
                 if let logoKind {
-                    ProviderLogoView(kind: logoKind, size: 16, foregroundColor: color)
+                    ProviderLogoView(kind: logoKind, size: 14, foregroundColor: color)
                 } else if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(color)
-                        .frame(width: 16, height: 16)
+                        .foregroundStyle(color)
                 }
-
                 Text(title)
-                    .font(.headline)
-                    .fontWeight(.semibold)
             }
-
-            VStack(alignment: .leading, spacing: 0) {
-                content
-            }
-            .background(SettingsDesign.row)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(SettingsDesign.border, lineWidth: 1)
-            }
-        }
-        .padding(14)
-        .background(SettingsDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(SettingsDesign.border, lineWidth: 1)
         }
     }
 }
@@ -552,29 +516,17 @@ private struct SettingsRowView<Content: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
+        LabeledContent {
+            content
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
                 if let detail {
                     Text(detail)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            content
-                .frame(maxWidth: 380, alignment: .trailing)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(SettingsDesign.border)
-                .frame(height: 1)
-                .padding(.leading, 12)
         }
     }
 }
@@ -586,26 +538,14 @@ private struct SettingsNotice: View {
     var body: some View {
         Text(text)
             .font(.caption)
-            .foregroundColor(color)
+            .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(SettingsDesign.border)
-                    .frame(height: 1)
-                    .padding(.leading, 12)
-            }
     }
 }
 
 private struct SettingsDivider: View {
     var body: some View {
-        Rectangle()
-            .fill(SettingsDesign.borderStrong)
-            .frame(height: 1)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+        Divider()
     }
 }
 
@@ -614,22 +554,9 @@ private struct StatusPill: View {
     let isConnected: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(isConnected ? MeterBarTheme.success : Color.secondary)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.caption)
-                .fontWeight(.semibold)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background((isConnected ? MeterBarTheme.success : Color.secondary).opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .stroke((isConnected ? MeterBarTheme.success : Color.secondary).opacity(0.18), lineWidth: 1)
-        }
+        Label(title, systemImage: isConnected ? "checkmark.circle.fill" : "circle")
+            .foregroundStyle(isConnected ? MeterBarTheme.success : Color.secondary)
+            .font(.subheadline)
     }
 }
 
@@ -640,7 +567,7 @@ private struct AccountProfileRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
-                .foregroundColor(MeterBarTheme.claudeAccent)
+                .foregroundStyle(MeterBarTheme.claudeAccent)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -649,99 +576,18 @@ private struct AccountProfileRow: View {
                     .fontWeight(.semibold)
                 Text(account.configDirectory ?? "Default Claude CLI profile")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
             Spacer()
 
             if !account.isDefault {
-                Button("Remove", action: onRemove)
-                    .buttonStyle(SettingsButtonStyle(role: .destructive))
+                Button("Remove", role: .destructive, action: onRemove)
+                    .buttonStyle(.bordered)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(SettingsDesign.border)
-                .frame(height: 1)
-                .padding(.leading, 12)
-        }
-    }
-}
-
-private struct SettingsButtonStyle: ButtonStyle {
-    enum Role {
-        case normal
-        case destructive
-    }
-
-    @Environment(\.isEnabled) private var isEnabled
-
-    var role: Role = .normal
-    var prominent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundColor(textColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(backgroundColor.opacity(configuration.isPressed ? 0.70 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(borderColor, lineWidth: 1)
-            }
-            .opacity(isEnabled ? 1 : 0.45)
-    }
-
-    private var textColor: Color {
-        if prominent { return .white }
-        switch role {
-        case .normal:
-            return .primary
-        case .destructive:
-            return MeterBarTheme.danger
-        }
-    }
-
-    private var backgroundColor: Color {
-        if prominent { return MeterBarTheme.appAccent }
-        switch role {
-        case .normal:
-            return Color.white.opacity(0.06)
-        case .destructive:
-            return MeterBarTheme.danger.opacity(0.12)
-        }
-    }
-
-    private var borderColor: Color {
-        if prominent { return MeterBarTheme.appAccent.opacity(0.7) }
-        switch role {
-        case .normal:
-            return SettingsDesign.borderStrong
-        case .destructive:
-            return MeterBarTheme.danger.opacity(0.22)
-        }
-    }
-}
-
-private struct SettingsTextFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .textFieldStyle(.plain)
-            .font(.subheadline)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(Color.white.opacity(0.045))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(SettingsDesign.borderStrong, lineWidth: 1)
-            }
+        .padding(.vertical, 4)
     }
 }
 
@@ -771,7 +617,7 @@ struct ClaudeHelpView: View {
 
             Text("Note: You must be an organization admin to create Admin API keys. Individual accounts cannot access the Usage API.")
                 .font(.caption)
-                .foregroundColor(MeterBarTheme.warning)
+                .foregroundStyle(MeterBarTheme.warning)
 
             HStack {
                 Button("Open Claude Console") {
@@ -819,7 +665,7 @@ struct OpenAIHelpView: View {
 
             Text("Note: You must be an organization owner or admin to create Admin keys.")
                 .font(.caption)
-                .foregroundColor(MeterBarTheme.warning)
+                .foregroundStyle(MeterBarTheme.warning)
 
             HStack {
                 Button("Open OpenAI Settings") {
