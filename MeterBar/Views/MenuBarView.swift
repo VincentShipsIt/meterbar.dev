@@ -35,7 +35,7 @@ enum ProviderLogoKind: Equatable {
 }
 
 struct MenuBarView: View {
-    private let popoverWidth: CGFloat = 430
+    private let popoverWidth: CGFloat = 390
     private let maxPopoverHeight: CGFloat = 560
     private let minPopoverHeight: CGFloat = 180
     private let chromeHeight: CGFloat = 56
@@ -300,7 +300,7 @@ struct PopoverOverviewPanel: View {
             .padding(12)
             .cardSurface()
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+            VStack(spacing: 8) {
                 ForEach(snapshots) { snapshot in
                     PopoverProviderStatusCard(snapshot: snapshot)
                 }
@@ -415,6 +415,11 @@ private struct PopoverProviderStatusCard: View {
         return "Healthy"
     }
 
+    private var isOut: Bool {
+        guard let primaryLimit else { return false }
+        return primaryLimit.percentLeft <= 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
@@ -485,6 +490,7 @@ private struct PopoverProviderStatusCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
+        .opacity(isOut ? 0.72 : 1)
         .cardSurface()
     }
 
