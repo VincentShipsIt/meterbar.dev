@@ -27,17 +27,26 @@ jobs:
           fi
           # Remove 'v' prefix for formula version
           FORMULA_VERSION="${VERSION#v}"
-          echo "tag=$VERSION" >> $GITHUB_OUTPUT
-          echo "formula=$FORMULA_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "formula=$FORMULA_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download SHA256
-        run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          curl -sL "https://github.com/VincentShipsIt/meterbar.app/releases/download/${VERSION}/MeterBar-${VERSION}.zip.sha256" -o sha256.txt
-          SHA256=$(cat sha256.txt)
-          echo "SHA256: $SHA256"
-          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
         id: sha
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.tag }}"
+          curl -fsSL \
+            --connect-timeout 15 --max-time 120 --retry 3 \
+            "https://github.com/VincentShipsIt/meterbar.app/releases/download/${VERSION}/MeterBar-${VERSION}.zip.sha256" \
+            -o sha256.txt
+          # Validate the asset is a bare 64-hex SHA256 before trusting it. On a 404 or
+          # redirect-to-error, curl -f fails the step; this guards the case where a 200
+          # body is something other than a digest, so an error body can never be
+          # committed into the cask and break every `brew install` checksum check.
+          SHA256=$(tr -d '[:space:]' < sha256.txt)
+          [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::Downloaded sha256 is not a valid 64-hex digest"; exit 1; }
+          echo "SHA256: $SHA256"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
