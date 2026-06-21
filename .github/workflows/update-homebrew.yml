@@ -27,16 +27,27 @@ jobs:
           fi
           # Remove 'v' prefix for formula version
           FORMULA_VERSION="${VERSION#v}"
-          echo "tag=$VERSION" >> $GITHUB_OUTPUT
-          echo "formula=$FORMULA_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "formula=$FORMULA_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download SHA256
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.tag }}"
-          curl -sL "https://github.com/VincentShipsIt/meterbar.app/releases/download/${VERSION}/MeterBar-${VERSION}.zip.sha256" -o sha256.txt
-          SHA256=$(cat sha256.txt)
+          # --fail so a missing/404 asset is an error (not a 0-exit with an HTML error body),
+          # mirroring secret-scan.yml's curl usage.
+          curl --fail --location --silent --show-error \
+            "https://github.com/VincentShipsIt/meterbar.app/releases/download/${VERSION}/MeterBar-${VERSION}.zip.sha256" \
+            -o sha256.txt
+          # Validate the payload is a bare 64-hex SHA256 before it is written into the cask;
+          # otherwise an unexpected body would be committed as the hash and break `brew install`.
+          SHA256=$(tr -d '[:space:]' < sha256.txt)
+          if [[ ! "$SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Downloaded sha256 is not a valid 64-hex digest: '$SHA256'" >&2
+            exit 1
+          fi
           echo "SHA256: $SHA256"
-          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
         id: sha
 
       - name: Checkout homebrew-tap
