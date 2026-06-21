@@ -21,7 +21,6 @@ let package = Package(
             dependencies: [],
             path: "MeterBar",
             exclude: [
-                "Widget",
                 "App/MeterBarApp.swift",
                 "Info.plist",
                 "MeterBar.entitlements",
