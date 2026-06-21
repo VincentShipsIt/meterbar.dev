@@ -45,6 +45,9 @@ struct UsageMetrics: Codable, Identifiable {
     let weeklyLimit: UsageLimit?
     let codeReviewLimit: UsageLimit?
     let extraUsage: ExtraUsageStatus?
+    /// Number of banked rate-limit resets the account can trigger on demand.
+    /// Codex-only (OpenAI "reset credits"); `nil` for providers/accounts without the feature.
+    let resetCreditsAvailable: Int?
     let lastUpdated: Date
 
     init(
@@ -53,6 +56,7 @@ struct UsageMetrics: Codable, Identifiable {
         weeklyLimit: UsageLimit? = nil,
         codeReviewLimit: UsageLimit? = nil,
         extraUsage: ExtraUsageStatus? = nil,
+        resetCreditsAvailable: Int? = nil,
         lastUpdated: Date = Date()
     ) {
         self.id = UUID()
@@ -61,6 +65,7 @@ struct UsageMetrics: Codable, Identifiable {
         self.weeklyLimit = weeklyLimit
         self.codeReviewLimit = codeReviewLimit
         self.extraUsage = extraUsage
+        self.resetCreditsAvailable = resetCreditsAvailable
         self.lastUpdated = lastUpdated
     }
 
@@ -71,6 +76,7 @@ struct UsageMetrics: Codable, Identifiable {
         weeklyLimit: UsageLimit?,
         codeReviewLimit: UsageLimit?,
         extraUsage: ExtraUsageStatus?,
+        resetCreditsAvailable: Int?,
         lastUpdated: Date
     ) {
         self.id = id
@@ -79,10 +85,12 @@ struct UsageMetrics: Codable, Identifiable {
         self.weeklyLimit = weeklyLimit
         self.codeReviewLimit = codeReviewLimit
         self.extraUsage = extraUsage
+        self.resetCreditsAvailable = resetCreditsAvailable
         self.lastUpdated = lastUpdated
     }
 
-    /// Returns a copy with the given extra-usage status, preserving identity, limits, and timestamp.
+    /// Returns a copy with the given extra-usage status, preserving identity, limits,
+    /// reset credits, and timestamp.
     func withExtraUsage(_ status: ExtraUsageStatus?) -> UsageMetrics {
         UsageMetrics(
             id: id,
@@ -91,6 +99,7 @@ struct UsageMetrics: Codable, Identifiable {
             weeklyLimit: weeklyLimit,
             codeReviewLimit: codeReviewLimit,
             extraUsage: status,
+            resetCreditsAvailable: resetCreditsAvailable,
             lastUpdated: lastUpdated
         )
     }

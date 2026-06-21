@@ -177,7 +177,8 @@ class CodexCliLocalService: ObservableObject {
                     sessionLimit: nil,
                     weeklyLimit: nil,
                     codeReviewLimit: nil,
-                    extraUsage: usageResponse.extraUsageStatus
+                    extraUsage: usageResponse.extraUsageStatus,
+                    resetCreditsAvailable: usageResponse.resetCreditsAvailable
                 )
             }
 
@@ -220,7 +221,8 @@ class CodexCliLocalService: ObservableObject {
                 sessionLimit: sessionLimit,
                 weeklyLimit: weeklyLimit,
                 codeReviewLimit: codeReviewLimit,
-                extraUsage: usageResponse.extraUsageStatus
+                extraUsage: usageResponse.extraUsageStatus,
+                resetCreditsAvailable: usageResponse.resetCreditsAvailable
             )
         } catch let urlError as URLError {
             let errorMessage: String
@@ -261,6 +263,7 @@ struct CodexCliUsageResponse: Codable {
     let codeReviewRateLimit: CodeReviewRateLimit?
     let credits: Credits?  // Can be null for free accounts
     let spendControl: SpendControl?
+    let rateLimitResetCredits: RateLimitResetCredits?
 
     enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
@@ -268,6 +271,14 @@ struct CodexCliUsageResponse: Codable {
         case codeReviewRateLimit = "code_review_rate_limit"
         case credits
         case spendControl = "spend_control"
+        case rateLimitResetCredits = "rate_limit_reset_credits"
+    }
+
+    /// Number of banked "rate-limit resets" the account can trigger on demand
+    /// (OpenAI feature: save a quota reset and use it when you hit a limit).
+    /// `nil` when the field is absent/null — i.e. the account has none banked.
+    var resetCreditsAvailable: Int? {
+        rateLimitResetCredits?.availableCount
     }
 
     /// Maps the Codex credits/spend payload onto the shared extra-usage status.
@@ -352,6 +363,16 @@ struct SpendControl: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(reached, forKey: .reached)
         try container.encodeIfPresent(individualLimit, forKey: .individualLimit)
+    }
+}
+
+/// Banked rate-limit resets the account can trigger on demand, from the Codex usage API.
+struct RateLimitResetCredits: Codable {
+    /// How many resets are currently available to use. `nil` if absent/null.
+    let availableCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case availableCount = "available_count"
     }
 }
 

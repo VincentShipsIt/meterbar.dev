@@ -35,7 +35,7 @@ enum ProviderLogoKind: Equatable {
 }
 
 struct MenuBarView: View {
-    private let popoverWidth: CGFloat = 430
+    private let popoverWidth: CGFloat = 390
     private let maxPopoverHeight: CGFloat = 560
     private let minPopoverHeight: CGFloat = 180
     private let chromeHeight: CGFloat = 56
@@ -300,7 +300,7 @@ struct PopoverOverviewPanel: View {
             .padding(12)
             .cardSurface()
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+            VStack(spacing: 8) {
                 ForEach(snapshots) { snapshot in
                     PopoverProviderStatusCard(snapshot: snapshot)
                 }
@@ -335,6 +335,7 @@ private struct PopoverProviderSnapshot: Identifiable {
     let limits: [PopoverLimit]
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
+    let resetCreditsAvailable: Int?
 
     init(
         title: String,
@@ -350,6 +351,7 @@ private struct PopoverProviderSnapshot: Identifiable {
         self.updatedAt = metrics?.lastUpdated
         self.emptyDetail = emptyDetail
         self.extraUsage = metrics?.extraUsage
+        self.resetCreditsAvailable = metrics?.resetCreditsAvailable
         self.limits = [
             PopoverLimit(title: "Session", limit: metrics?.sessionLimit),
             PopoverLimit(title: "Weekly", limit: metrics?.weeklyLimit),
@@ -413,6 +415,11 @@ private struct PopoverProviderStatusCard: View {
         return "Healthy"
     }
 
+    private var isOut: Bool {
+        guard let primaryLimit else { return false }
+        return primaryLimit.percentLeft <= 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
@@ -454,6 +461,20 @@ private struct PopoverProviderStatusCard: View {
                 )
             }
 
+            if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(snapshot.accentColor)
+                    Text(Self.resetCreditsLabel(resetCount))
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 4)
+                }
+                .help("\(Self.resetCreditsLabel(resetCount)) — banked quota resets you can trigger when you hit a rate limit.")
+            }
+
             if let extraUsage = snapshot.extraUsage {
                 HStack(spacing: 4) {
                     Image(systemName: "creditcard")
@@ -469,7 +490,13 @@ private struct PopoverProviderStatusCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
+        .opacity(isOut ? 0.72 : 1)
         .cardSurface()
+    }
+
+    /// "1 reset available" / "N resets available" — the count of banked rate-limit resets.
+    static func resetCreditsLabel(_ count: Int) -> String {
+        "\(count) reset\(count == 1 ? "" : "s") available"
     }
 
     private var updatedText: String {
