@@ -1,8 +1,17 @@
 name: Update Homebrew
 
 on:
-  release:
-    types: [published]
+  # Called automatically by the Release workflow after it publishes a tag.
+  # (A `release: published` trigger does NOT work here: the release is created
+  # by the Release job's GITHUB_TOKEN, and GitHub will not cascade-trigger
+  # workflows from that token — so the tap would silently never update.)
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to update (e.g., v1.0.0)'
+        required: true
+        type: string
+  # Manual fallback / re-run.
   workflow_dispatch:
     inputs:
       version:
@@ -20,11 +29,8 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${{ github.event.release.tag_name }}"
-          fi
+          # `inputs.version` is populated for both workflow_call and workflow_dispatch.
+          VERSION="${{ inputs.version }}"
           # Remove 'v' prefix for formula version
           FORMULA_VERSION="${VERSION#v}"
           echo "tag=$VERSION" >> "$GITHUB_OUTPUT"

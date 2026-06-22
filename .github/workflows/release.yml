@@ -83,3 +83,13 @@ jobs:
           echo "### Release Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**SHA256:** \`$(cat MeterBar-${{ github.ref_name }}.zip.sha256)\`" >> $GITHUB_STEP_SUMMARY
+
+  # After the release is published, bump the Homebrew cask in VincentShipsIt/homebrew-tap.
+  # Called directly (not via `release: published`) because GITHUB_TOKEN-created releases
+  # do not cascade-trigger workflows — so this guarantees the tap always tracks the release.
+  update-homebrew:
+    needs: build
+    uses: ./.github/workflows/update-homebrew.yml
+    with:
+      version: ${{ github.ref_name }}
+    secrets: inherit
