@@ -105,7 +105,7 @@ struct UsageDashboardView: View {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
                     .help("Refresh usage")
-                    .disabled(dataManager.isLoading || costTracker.isScanning)
+                    .disabled(isRefreshButtonDisabled)
                 }
             }
         }
@@ -197,7 +197,7 @@ struct UsageDashboardView: View {
                         .foregroundColor(.secondary)
 
                     if costTracker.isScanning {
-                        costScanChart(height: 220, compact: false)
+                        costScanChart(height: 220, compact: false, showsProgressBadge: false)
                     } else if let summary = visibleCostSummary {
                         DailyUsageChart(dailyUsage: summary.dailyUsage)
                             .frame(height: 220)
@@ -235,10 +235,15 @@ struct UsageDashboardView: View {
                     }
                 }
             }
+            .overlay {
+                if costTracker.isScanning, visibleCostSummary != nil {
+                    CostRefreshLockOverlay()
+                }
+            }
         }
     }
 
-    private func costScanChart(height: CGFloat, compact: Bool) -> some View {
+    private func costScanChart(height: CGFloat, compact: Bool, showsProgressBadge: Bool = true) -> some View {
         ZStack {
             if let summary = visibleCostSummary, !summary.dailyUsage.isEmpty {
                 DailyUsageChart(dailyUsage: summary.dailyUsage)
@@ -249,7 +254,7 @@ struct UsageDashboardView: View {
                 DailyUsageChart(dailyUsage: [])
             }
 
-            if costTracker.isScanning, visibleCostSummary?.dailyUsage.isEmpty == false {
+            if showsProgressBadge, costTracker.isScanning, visibleCostSummary?.dailyUsage.isEmpty == false {
                 CostScanProgressBadge(compact: compact)
             }
         }
@@ -354,6 +359,15 @@ struct UsageDashboardView: View {
             return "Local 30-day token spend"
         case .settings:
             return "Accounts, refresh, and local sources"
+        }
+    }
+
+    private var isRefreshButtonDisabled: Bool {
+        switch activeSection {
+        case .costs:
+            return costTracker.isScanning
+        case .overview, .limits, .settings:
+            return dataManager.isLoading
         }
     }
 
@@ -585,7 +599,13 @@ private struct CostOverviewStatusCard: View {
                 Spacer()
             }
 
-            if isScanning {
+            if let formattedTotalCost = summary?.formattedTotalCost {
+                Text(formattedTotalCost)
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else if isScanning {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
@@ -596,7 +616,7 @@ private struct CostOverviewStatusCard: View {
                         .minimumScaleFactor(0.75)
                 }
             } else {
-                Text(summary?.formattedTotalCost ?? "Scan needed")
+                Text("Scan needed")
                     .font(.system(size: 34, weight: .bold))
                     .foregroundColor(.primary)
                     .lineLimit(1)
@@ -851,6 +871,39 @@ private struct CostScanProgressBadge: View {
             Spacer()
         }
         .padding(compact ? 8 : 10)
+    }
+}
+
+private struct CostRefreshLockOverlay: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
+                .opacity(0.62)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0), including: .all)
+
+            VStack(spacing: 7) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Refreshing costs")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+
+                Text("Scanning local token logs")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Refreshing costs")
+        .accessibilityHint("Cost results are locked until the local scan finishes.")
     }
 }
 
