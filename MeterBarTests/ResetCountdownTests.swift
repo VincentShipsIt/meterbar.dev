@@ -5,16 +5,21 @@ import XCTest
 final class ResetCountdownTests: XCTestCase {
     private let epoch = Date(timeIntervalSince1970: 0)
 
-    private func limit(resetIn seconds: TimeInterval?) -> UsageLimit {
+    private func limit(resetIn seconds: TimeInterval?, used: Double = 25) -> UsageLimit {
         UsageLimit(
-            used: 25,
+            used: used,
             total: 100,
             resetTime: seconds.map { epoch.addingTimeInterval($0) }
         )
     }
 
-    private func window(_ id: String, _ title: String, resetIn seconds: TimeInterval?) -> ResetCountdownWindow {
-        ResetCountdownWindow(id: id, title: title, limit: limit(resetIn: seconds))
+    private func window(
+        _ id: String,
+        _ title: String,
+        resetIn seconds: TimeInterval?,
+        used: Double = 25
+    ) -> ResetCountdownWindow {
+        ResetCountdownWindow(id: id, title: title, limit: limit(resetIn: seconds, used: used))
     }
 
     // MARK: - UsageDurationText.short
@@ -98,5 +103,59 @@ final class ResetCountdownTests: XCTestCase {
     func testSelectNextWindowReturnsNilWhenNoResetTimes() {
         XCTAssertNil(NextResetCountdownLabel.selectNextWindow([window("n", "Session", resetIn: nil)], now: epoch))
         XCTAssertNil(NextResetCountdownLabel.selectNextWindow([], now: epoch))
+    }
+
+    // MARK: - BlockingLimitResetCounter.selectBlockingWindow
+
+    func testBlockingResetPicksExhaustedWeeklyOverHealthySession() {
+        let session = window("s", "Session", resetIn: 3_600, used: 19)
+        let weekly = window("w", "Weekly", resetIn: 4 * 86_400, used: 100)
+        let sonnet = window("m", "Sonnet", resetIn: 12 * 3_600, used: 21)
+
+        XCTAssertEqual(
+            BlockingLimitResetCounter.selectBlockingWindow([session, weekly, sonnet], now: epoch)?.id,
+            "w"
+        )
+    }
+
+    func testBlockingResetPicksLatestFutureResetWhenMultipleLimitsAreExhausted() {
+        let session = window("s", "Session", resetIn: 2 * 3_600, used: 100)
+        let weekly = window("w", "Weekly", resetIn: 3 * 86_400, used: 100)
+
+        XCTAssertEqual(BlockingLimitResetCounter.selectBlockingWindow([session, weekly], now: epoch)?.id, "w")
+    }
+
+    func testBlockingResetReturnsNilWhenExhaustedWindowHasUnknownReset() {
+        let session = window("s", "Session", resetIn: 2 * 3_600, used: 100)
+        let weekly = window("w", "Weekly", resetIn: nil, used: 100)
+
+        XCTAssertNil(BlockingLimitResetCounter.selectBlockingWindow([session, weekly], now: epoch))
+    }
+
+    func testBlockingResetIgnoresHealthyWindowWithUnknownReset() {
+        let session = window("s", "Session", resetIn: 2 * 3_600, used: 100)
+        let weekly = window("w", "Weekly", resetIn: nil, used: 25)
+
+        XCTAssertEqual(BlockingLimitResetCounter.selectBlockingWindow([session, weekly], now: epoch)?.id, "s")
+    }
+
+    func testBlockingResetIgnoresHealthyWindows() {
+        let session = window("s", "Session", resetIn: 900, used: 25)
+        let weekly = window("w", "Weekly", resetIn: 4 * 86_400, used: 80)
+
+        XCTAssertNil(BlockingLimitResetCounter.selectBlockingWindow([session, weekly], now: epoch))
+    }
+
+    func testBlockingCounterText() {
+        let weekly = window("w", "Weekly", resetIn: 90_000, used: 100)
+
+        XCTAssertEqual(
+            BlockingLimitResetCounter.titleText(for: weekly, in: [weekly]),
+            "Weekly reset"
+        )
+        XCTAssertEqual(
+            BlockingLimitResetCounter.counterText(for: weekly, now: epoch),
+            "in 1d 1h"
+        )
     }
 }
