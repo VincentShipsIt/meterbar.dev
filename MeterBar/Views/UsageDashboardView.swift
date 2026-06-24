@@ -410,16 +410,6 @@ private struct DashboardProviderSnapshot: Identifiable {
         ].compactMap { $0 }
     }
 
-    var resetWindows: [ResetCountdownWindow] {
-        limits.map {
-            ResetCountdownWindow(
-                id: "\(id)-\($0.title)",
-                title: $0.title,
-                limit: $0.usageLimit
-            )
-        }
-    }
-
     private static func logoKind(for service: ServiceType) -> ProviderLogoKind {
         switch service {
         case .codexCli, .openai:

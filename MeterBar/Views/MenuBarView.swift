@@ -452,13 +452,6 @@ private struct PopoverProviderStatusCard: View {
                         PopoverLimitRow(limit: limit, accentColor: snapshot.accentColor)
                     }
                 }
-
-                NextResetCountdownLabel(
-                    windows: snapshot.resetWindows,
-                    font: .caption2,
-                    foregroundColor: .secondary,
-                    iconSize: 10
-                )
             }
 
             if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
@@ -540,6 +533,16 @@ private struct PopoverLimitRow: View {
                 pace: limit.usageLimit.pace(),
                 paceContext: paceContext
             )
+
+            if limit.usageLimit.resetTime != nil {
+                ResetCountdownLabel(
+                    title: limit.title,
+                    limit: limit.usageLimit,
+                    font: .caption2,
+                    foregroundColor: .secondary,
+                    iconSize: 9
+                )
+            }
         }
     }
 }
