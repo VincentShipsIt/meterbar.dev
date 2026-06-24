@@ -372,6 +372,10 @@ private struct PopoverProviderSnapshot: Identifiable {
             )
         }
     }
+
+    var hasExhaustedLimit: Bool {
+        limits.contains { $0.usageLimit.isAtLimit }
+    }
 }
 
 private struct PopoverLimit: Identifiable {
@@ -446,6 +450,11 @@ private struct PopoverProviderStatusCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            } else if snapshot.hasExhaustedLimit {
+                BlockingLimitResetCounter(
+                    windows: snapshot.resetWindows,
+                    accentColor: snapshot.accentColor
+                )
             } else {
                 VStack(alignment: .leading, spacing: 9) {
                     ForEach(snapshot.limits) { limit in
@@ -472,7 +481,10 @@ private struct PopoverProviderStatusCard: View {
                         .foregroundColor(.primary)
                     Spacer(minLength: 4)
                 }
-                .help("\(Self.resetCreditsLabel(resetCount)) — banked quota resets you can trigger when you hit a rate limit.")
+                .help(
+                    "\(Self.resetCreditsLabel(resetCount)) - banked quota resets you can trigger " +
+                    "when you hit a rate limit."
+                )
             }
 
             if let extraUsage = snapshot.extraUsage {
@@ -655,6 +667,110 @@ struct NextResetCountdownLabel: View {
         }
 
         return nil
+    }
+}
+
+struct BlockingLimitResetCounter: View {
+    let windows: [ResetCountdownWindow]
+    let accentColor: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+            let blockingWindow = Self.selectBlockingWindow(windows, now: timeline.date)
+            let title = Self.titleText(for: blockingWindow, in: windows)
+            let counter = Self.counterText(for: blockingWindow, now: timeline.date)
+            let detail = Self.detailText(for: blockingWindow, in: windows)
+
+            HStack(alignment: .center, spacing: 9) {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(accentColor)
+                    .frame(width: 20, height: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    Text(counter)
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .help("\(title) \(counter)")
+        }
+    }
+
+    /// Selects the exhausted window that actually gates usage. Unknown reset
+    /// times are treated as blocking because they may outlast known reset windows.
+    static func selectBlockingWindow(
+        _ windows: [ResetCountdownWindow],
+        now: Date,
+        gracePeriod: TimeInterval = NextResetCountdownLabel.resetDueGracePeriod
+    ) -> ResetCountdownWindow? {
+        let exhaustedWindows = windows.filter { $0.limit.isAtLimit }
+        guard !exhaustedWindows.isEmpty else { return nil }
+
+        let candidates = exhaustedWindows.compactMap { window -> (window: ResetCountdownWindow, seconds: TimeInterval)? in
+            guard let seconds = window.limit.secondsUntilReset(now: now) else { return nil }
+            return (window, seconds)
+        }
+
+        guard candidates.count == exhaustedWindows.count else { return nil }
+
+        let futureCandidates = candidates.filter { $0.seconds > 0 }
+        if let blocking = futureCandidates.max(by: { $0.seconds < $1.seconds }) {
+            return blocking.window
+        }
+
+        if let mostRecent = candidates.max(by: { $0.seconds < $1.seconds }),
+           mostRecent.seconds >= -gracePeriod {
+            return mostRecent.window
+        }
+
+        return nil
+    }
+
+    static func titleText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {
+        if let window {
+            return "\(window.title) reset"
+        }
+
+        let exhaustedCount = windows.filter { $0.limit.isAtLimit }.count
+        return exhaustedCount > 1 ? "Limits exhausted" : "Limit exhausted"
+    }
+
+    static func counterText(for window: ResetCountdownWindow?, now: Date) -> String {
+        guard let window,
+              let countdown = window.limit.resetCountdownText(now: now) else {
+            return "Reset time unavailable"
+        }
+
+        return countdown == "now" ? "due now" : "in \(countdown)"
+    }
+
+    static func detailText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {
+        guard window != nil else {
+            return "Usage is unavailable until the reset is reported."
+        }
+
+        let exhaustedCount = windows.filter { $0.limit.isAtLimit }.count
+        return exhaustedCount > 1
+            ? "Usage resumes after exhausted limits reset."
+            : "Usage is unavailable until this limit resets."
     }
 }
 
