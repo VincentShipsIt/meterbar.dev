@@ -53,16 +53,24 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 
 ## Installation
 
+### Agent Install Prompt
+
+Paste this into your local coding agent to have it install MeterBar for you:
+
+```text
+Install MeterBar on this Mac. First verify this is macOS 13 or newer and that Homebrew is available. Install with: brew tap VincentShipsIt/tap && brew install --cask VincentShipsIt/tap/meterbar. If Homebrew is missing, ask before installing Homebrew. After installing, verify /Applications/MeterBar.app exists and that the meterbar CLI is linked, then open MeterBar. If macOS blocks the first launch because the app is unsigned, remove quarantine with xattr -cr /Applications/MeterBar.app and open it again. Do not ask me for API keys or paste secrets; for usage data, tell me to run claude login, codex login, and log into Cursor if I want those providers tracked.
+```
+
 ### Homebrew (Recommended)
 
 ```bash
 brew tap VincentShipsIt/tap
-brew install --cask meterbar
+brew install --cask VincentShipsIt/tap/meterbar
 ```
 
 To update:
 ```bash
-brew upgrade --cask meterbar
+brew upgrade --cask VincentShipsIt/tap/meterbar
 ```
 
 ### Manual Download
@@ -80,7 +88,7 @@ Prerequisites: macOS 13.0+, Xcode 15.0+
 
 ```bash
 git clone https://github.com/VincentShipsIt/meterbar.app.git
-cd meterbarapp
+cd meterbar.app
 open MeterBar.xcodeproj
 # Build and run (Cmd+R)
 ```

@@ -1,4 +1,5 @@
 import ArgumentParser
+import Darwin
 import Foundation
 
 @main
@@ -6,10 +7,51 @@ struct MeterBarCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "meterbar",
         abstract: "Track AI coding assistant usage from the command line",
-        version: "1.0.0",
+        version: MeterBarCLIVersion.current,
         subcommands: [Usage.self, Cost.self],
         defaultSubcommand: Usage.self
     )
+}
+
+private enum MeterBarCLIVersion {
+    static var current: String {
+        appBundleVersion ?? "development"
+    }
+
+    private static var appBundleVersion: String? {
+        guard let executableURL = processExecutableURL else {
+            return nil
+        }
+
+        let contentsURL = executableURL
+            .deletingLastPathComponent() // meterbar
+            .deletingLastPathComponent() // Helpers
+
+        let infoURL = contentsURL.appendingPathComponent("Info.plist")
+        guard let data = try? Data(contentsOf: infoURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let version = plist["CFBundleShortVersionString"] as? String,
+              !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        return version
+    }
+
+    private static var processExecutableURL: URL? {
+        var size = UInt32(PATH_MAX)
+        var buffer = [CChar](repeating: 0, count: Int(size))
+
+        if _NSGetExecutablePath(&buffer, &size) == -1 {
+            buffer = [CChar](repeating: 0, count: Int(size))
+            guard _NSGetExecutablePath(&buffer, &size) == 0 else {
+                return nil
+            }
+        }
+
+        return URL(fileURLWithPath: String(cString: buffer))
+            .resolvingSymlinksInPath()
+    }
 }
 
 struct Usage: ParsableCommand {
