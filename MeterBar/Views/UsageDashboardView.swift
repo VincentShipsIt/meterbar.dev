@@ -71,6 +71,13 @@ struct UsageDashboardView: View {
 
     private var activeSection: DashboardSection { selectedSection }
 
+    private var overviewGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(minimum: 320), spacing: 12, alignment: .top),
+            count: 2
+        )
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
@@ -163,7 +170,7 @@ struct UsageDashboardView: View {
                 color: tightestWindowColor
             )
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2), spacing: 12) {
+            LazyVGrid(columns: overviewGridColumns, alignment: .leading, spacing: 12) {
                 ForEach(providerSnapshots) { snapshot in
                     ProviderOverviewStatusCard(snapshot: snapshot)
                 }
@@ -174,6 +181,7 @@ struct UsageDashboardView: View {
                     formattedTokens: formattedTokenCount(visibleCostSummary?.totalTokens ?? 0)
                 )
             }
+            .frame(maxWidth: .infinity)
 
             DashboardCard(title: "Last 30 Days", trailing: costTracker.isScanning ? "Scanning..." : nil) {
                 costScanChart(height: 180, compact: true)
@@ -182,34 +190,36 @@ struct UsageDashboardView: View {
     }
 
     private var limitsContent: some View {
-        DashboardCard(title: "All Quota Windows", trailing: dataManager.isLoading ? "Refreshing..." : nil) {
-            VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("All Quota Windows")
+                    .font(.title3)
+                    .bold()
+                Spacer()
+                if dataManager.isLoading {
+                    Text("Refreshing...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if providerSnapshots.isEmpty {
+                DashboardCard(title: "No Quota Windows") {
+                    Text("Enable providers in Settings to show quota windows.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            } else {
                 ForEach(providerSnapshots) { snapshot in
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            ProviderTitle(
-                                title: snapshot.title,
-                                logoKind: snapshot.logoKind,
-                                color: color(for: snapshot.service),
-                                font: .title3
-                            )
-                            Spacer()
-                            Text("Updated \(relativeDate(snapshot.lastUpdated))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        ForEach(snapshot.limits) { limit in
-                            DashboardLimitRow(limit: limit, accentColor: color(for: snapshot.service))
-                        }
-                    }
-
-                    if snapshot.id != providerSnapshots.last?.id {
-                        Divider()
-                    }
+                    ProviderLimitsCard(
+                        snapshot: snapshot,
+                        accentColor: color(for: snapshot.service),
+                        updatedText: "Updated \(relativeDate(snapshot.lastUpdated))"
+                    )
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var costsContent: some View {
@@ -287,7 +297,7 @@ struct UsageDashboardView: View {
 
     private var settingsContent: some View {
         SettingsView(embeddedInDashboard: true)
-            .frame(maxWidth: 760, minHeight: 520, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 520, alignment: .leading)
     }
 
     private var providerSnapshots: [DashboardProviderSnapshot] {
@@ -481,7 +491,7 @@ private struct DashboardLimit: Identifiable {
     }
 }
 
-private let overviewTileHeight: CGFloat = 260
+private let overviewTileMinHeight: CGFloat = 220
 
 private struct DashboardStatusHero: View {
     let title: String
@@ -580,8 +590,7 @@ private struct ProviderOverviewStatusCard: View {
         .padding(14)
         .frame(
             maxWidth: .infinity,
-            minHeight: overviewTileHeight,
-            maxHeight: overviewTileHeight,
+            minHeight: overviewTileMinHeight,
             alignment: .topLeading
         )
         .dashboardCardBackground()
@@ -669,10 +678,45 @@ private struct CostOverviewStatusCard: View {
         .padding(14)
         .frame(
             maxWidth: .infinity,
-            minHeight: overviewTileHeight,
-            maxHeight: overviewTileHeight,
+            minHeight: overviewTileMinHeight,
             alignment: .topLeading
         )
+        .dashboardCardBackground()
+    }
+}
+
+private struct ProviderLimitsCard: View {
+    let snapshot: DashboardProviderSnapshot
+    let accentColor: Color
+    let updatedText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ProviderTitle(
+                    title: snapshot.title,
+                    logoKind: snapshot.logoKind,
+                    color: accentColor,
+                    font: .title3
+                )
+                Spacer()
+                Text(updatedText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if snapshot.limits.isEmpty {
+                Text("No quota windows reported")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(snapshot.limits) { limit in
+                    DashboardLimitRow(limit: limit, accentColor: accentColor)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .dashboardCardBackground()
     }
 }
@@ -704,6 +748,7 @@ private struct DashboardCard<Content: View>: View {
             content
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .dashboardCardBackground()
     }
 }

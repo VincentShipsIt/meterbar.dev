@@ -48,6 +48,8 @@ struct SettingsView: View {
             generalSection
         }
         .formStyle(.grouped)
+        .scrollContentBackground(embeddedInDashboard ? .hidden : .automatic)
+        .background(embeddedInDashboard ? Color.clear : Color(nsColor: .windowBackgroundColor))
         .frame(
             minWidth: embeddedInDashboard ? nil : 560,
             minHeight: embeddedInDashboard ? nil : 500
