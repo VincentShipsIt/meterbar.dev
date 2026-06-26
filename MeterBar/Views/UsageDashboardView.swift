@@ -25,6 +25,8 @@ final class UsageDashboardWindowController {
             window.title = "MeterBar Usage"
             window.titleVisibility = .visible
             window.titlebarAppearsTransparent = true
+            window.isOpaque = false
+            window.backgroundColor = .clear
             window.isRestorable = false
             window.contentMinSize = NSSize(width: 900, height: 600)
             window.contentViewController = hostingController
@@ -58,6 +60,11 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
             return "gearshape.fill"
         }
     }
+}
+
+private enum DashboardChrome {
+    static let sidebarInset: CGFloat = 10
+    static let sidebarCornerRadius: CGFloat = 22
 }
 
 struct UsageDashboardView: View {
@@ -107,16 +114,24 @@ struct UsageDashboardView: View {
     }
 
     private var sidebar: some View {
-        List(selection: $selectedSection) {
-            ForEach(DashboardSection.allCases) { section in
-                Label(section.rawValue, systemImage: section.iconName)
-                    .tag(section)
+        ZStack {
+            DashboardSidebarGlassSurface()
+
+            List(selection: $selectedSection) {
+                ForEach(DashboardSection.allCases) { section in
+                    Label(section.rawValue, systemImage: section.iconName)
+                        .tag(section)
+                        .listRowBackground(Color.clear)
+                }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .safeAreaInset(edge: .bottom) { sourcesFooter }
+            .clipShape(RoundedRectangle(cornerRadius: DashboardChrome.sidebarCornerRadius, style: .continuous))
         }
-        .listStyle(.sidebar)
-        // Keep the sidebar system-owned. Custom backgrounds belong in the detail
-        // pane so the native Liquid Glass sidebar material and selection remain intact.
-        .safeAreaInset(edge: .bottom) { sourcesFooter }
+        .padding(DashboardChrome.sidebarInset)
+        .background(Color.clear)
     }
 
     private var detailContent: some View {
@@ -753,6 +768,21 @@ private struct DashboardCard<Content: View>: View {
     }
 }
 
+private struct DashboardSidebarGlassSurface: View {
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DashboardChrome.sidebarCornerRadius, style: .continuous)
+
+        shape
+            .fill(Color.clear)
+            .glassEffect(.regular, in: shape)
+            .overlay(
+                shape
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+            .allowsHitTesting(false)
+    }
+}
+
 private struct ProviderTitle: View {
     let title: String
     let logoKind: ProviderLogoKind
@@ -1256,6 +1286,8 @@ private struct DailyUsageProviderSegment: Identifiable {
 private struct DailyUsageBreakdownList: View {
     let dailyUsage: [DailyTokenUsage]
 
+    @State private var expandedDayIDs: Set<Date> = []
+
     private var days: [DailyProviderUsageDay] {
         let grouped = Dictionary(grouping: dailyUsage) { Calendar.current.startOfDay(for: $0.date) }
         return grouped.map { day, rows in
@@ -1279,8 +1311,22 @@ private struct DailyUsageBreakdownList: View {
 
             VStack(spacing: 8) {
                 ForEach(days) { day in
-                    DailyUsageDetailRow(day: day)
+                    DailyUsageDetailRow(
+                        day: day,
+                        isExpanded: expandedDayIDs.contains(day.id),
+                        toggle: { toggleExpansion(for: day.id) }
+                    )
                 }
+            }
+        }
+    }
+
+    private func toggleExpansion(for dayID: Date) {
+        withAnimation(.snappy(duration: 0.18)) {
+            if expandedDayIDs.contains(dayID) {
+                expandedDayIDs.remove(dayID)
+            } else {
+                expandedDayIDs.insert(dayID)
             }
         }
     }
@@ -1334,51 +1380,98 @@ private struct DailyProviderUsageSummary: Identifiable {
 
 private struct DailyUsageDetailRow: View {
     let day: DailyProviderUsageDay
+    let isExpanded: Bool
+    let toggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(dateLabel(day.date))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Spacer()
-                Text(UsageFormat.tokens(day.totalTokens))
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text(UsageFormat.cost(day.estimatedCostUSD))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+        VStack(alignment: .leading, spacing: isExpanded ? 8 : 0) {
+            Button(action: toggle) {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.secondary)
+                        .frame(width: 12)
 
-            ForEach(day.providers) { provider in
-                HStack(spacing: 10) {
-                    ProviderLogoView(
-                        kind: logoKind(for: provider.provider),
-                        size: 14,
-                        foregroundColor: color(for: provider.provider)
-                    )
-                    Text(provider.provider.displayName)
-                        .font(.caption)
+                    Text(dateLabel(day.date))
+                        .font(.subheadline)
                         .fontWeight(.semibold)
-                        .frame(width: 110, alignment: .leading)
-                    UsageDetailMetric(label: "Input", value: UsageFormat.tokens(provider.inputTokens))
-                    UsageDetailMetric(label: "Output", value: UsageFormat.tokens(provider.outputTokens))
-                    UsageDetailMetric(label: "Cache", value: UsageFormat.tokens(provider.cacheReadTokens))
+
+                    Text(providerCountLabel)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
                     Spacer()
-                    Text(UsageFormat.cost(provider.estimatedCostUSD))
+
+                    Text("\(UsageFormat.tokens(day.totalTokens)) tokens")
                         .font(.caption)
                         .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+
+                    Text(UsageFormat.cost(day.estimatedCostUSD))
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilitySummary)
+            .accessibilityHint(isExpanded ? "Collapse day details" : "Show day details")
+
+            if isExpanded {
+                VStack(spacing: 8) {
+                    ForEach(day.providers) { provider in
+                        DailyProviderUsageSummaryRow(provider: provider)
+                    }
+                }
+                .padding(.top, 6)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(10)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private var providerCountLabel: String {
+        let count = day.providers.count
+        return count == 1 ? "1 source" : "\(count) sources"
+    }
+
+    private var accessibilitySummary: String {
+        "\(dateLabel(day.date)), \(UsageFormat.tokens(day.totalTokens)) tokens, \(UsageFormat.cost(day.estimatedCostUSD))"
+    }
+
     private func dateLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE, MMM d"
         return formatter.string(from: date)
+    }
+}
+
+private struct DailyProviderUsageSummaryRow: View {
+    let provider: DailyProviderUsageSummary
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProviderLogoView(
+                kind: logoKind(for: provider.provider),
+                size: 14,
+                foregroundColor: color(for: provider.provider)
+            )
+            Text(provider.provider.displayName)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .frame(width: 110, alignment: .leading)
+            UsageDetailMetric(label: "Input", value: UsageFormat.tokens(provider.inputTokens))
+            UsageDetailMetric(label: "Output", value: UsageFormat.tokens(provider.outputTokens))
+            UsageDetailMetric(label: "Cache", value: UsageFormat.tokens(provider.cacheReadTokens))
+            Spacer()
+            Text(UsageFormat.cost(provider.estimatedCostUSD))
+                .font(.caption)
+                .fontWeight(.semibold)
+        }
     }
 }
 

@@ -7,7 +7,7 @@ import SwiftUI
 /// adapts to light/dark, the user's accent, Increase Contrast, and Reduce
 /// Transparency. The only custom colors are the per-provider brand accents and
 /// quota status — and those are kept appearance-adaptive too. Glass/material is
-/// supplied by the system chrome layer (popover, sidebar, toolbar), not here.
+/// supplied by the app's chrome layer (popover, dashboard sidebar, toolbar), not here.
 enum MeterBarTheme {
     // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
