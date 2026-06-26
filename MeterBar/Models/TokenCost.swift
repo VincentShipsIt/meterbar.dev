@@ -1,5 +1,31 @@
 import Foundation
 
+enum TokenCostFormat {
+    static func usd(_ value: Double) -> String {
+        let sign = value < 0 ? "-" : ""
+        return "\(sign)$\(decimal(abs(value), fractionDigits: 2))"
+    }
+
+    static func tokens(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private static func decimal(_ value: Double, fractionDigits: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = fractionDigits
+        formatter.maximumFractionDigits = fractionDigits
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.\(fractionDigits)f", value)
+    }
+}
+
 struct TokenCost: Codable, Identifiable, Sendable {
     var id: String { provider.rawValue }
 
@@ -20,13 +46,11 @@ struct TokenCost: Codable, Identifiable, Sendable {
     }
 
     var formattedCost: String {
-        String(format: "$%.2f", estimatedCostUSD)
+        TokenCostFormat.usd(estimatedCostUSD)
     }
 
     var formattedTokens: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: totalTokens)) ?? "\(totalTokens)"
+        TokenCostFormat.tokens(totalTokens)
     }
 }
 
@@ -47,13 +71,11 @@ struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
     }
 
     var formattedCost: String {
-        String(format: "$%.2f", estimatedCostUSD)
+        TokenCostFormat.usd(estimatedCostUSD)
     }
 
     var formattedTokens: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: totalTokens)) ?? "\(totalTokens)"
+        TokenCostFormat.tokens(totalTokens)
     }
 }
 
@@ -101,7 +123,7 @@ struct CostSummary: Codable, Sendable {
     }
 
     var formattedTotalCost: String {
-        String(format: "$%.2f", totalCostUSD)
+        TokenCostFormat.usd(totalCostUSD)
     }
 
     var averageDailyCost: Double {
@@ -110,7 +132,33 @@ struct CostSummary: Codable, Sendable {
     }
 
     var formattedDailyCost: String {
-        String(format: "$%.2f/day", averageDailyCost)
+        "\(TokenCostFormat.usd(averageDailyCost))/day"
+    }
+
+    func needsMissingDailyUsageRefresh(
+        days: Int,
+        lastScanDate: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard !costs.isEmpty, totalTokens > 0 else { return false }
+        guard !dailyUsage.isEmpty else { return true }
+
+        let today = calendar.startOfDay(for: now)
+        if let lastScanDate,
+           calendar.startOfDay(for: lastScanDate) >= today {
+            return false
+        }
+
+        let daysToCheck = max(1, days)
+        let startDate = calendar.date(byAdding: .day, value: -(daysToCheck - 1), to: today) ?? today
+        let populatedDays = Set(dailyUsage.compactMap { usage -> Date? in
+            let day = calendar.startOfDay(for: usage.date)
+            guard day >= startDate, day <= today else { return nil }
+            return day
+        })
+
+        return populatedDays.count < daysToCheck
     }
 
     func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {

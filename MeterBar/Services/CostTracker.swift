@@ -7,10 +7,15 @@ class CostTracker: ObservableObject {
 
     @Published var costSummary: CostSummary?
     @Published var isScanning: Bool = false
+    @Published var isRefreshingMissingDays: Bool = false
     @Published var lastScanDate: Date?
 
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private let cacheFileName = "cost-summary-v1.json"
+
+    var isRefreshInProgress: Bool {
+        isScanning || isRefreshingMissingDays
+    }
 
     // API-rate estimates per million tokens for local log usage.
     private let pricing: [String: TokenPricing] = [
@@ -35,23 +40,13 @@ class CostTracker: ObservableObject {
 
     func scanCosts(days: Int = 30) async {
         let shouldStart = await MainActor.run {
-            guard !isScanning else { return false }
+            guard !isRefreshInProgress else { return false }
             isScanning = true
             return true
         }
         guard shouldStart else { return }
 
-        let includeClaudeCode = providerVisibilityStore.isEnabled(.claudeCode)
-        let includeCodexCli = providerVisibilityStore.isEnabled(.codexCli)
-        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts
-        let summary = await Task.detached(priority: .userInitiated) { [self] in
-            buildCostSummary(
-                days: days,
-                includeClaudeCode: includeClaudeCode,
-                includeCodexCli: includeCodexCli,
-                claudeAccounts: claudeAccounts
-            )
-        }.value
+        let summary = await makeCostSummary(days: days, priority: .userInitiated)
 
         await MainActor.run {
             costSummary = summary
@@ -59,6 +54,43 @@ class CostTracker: ObservableObject {
             saveCachedSummary()
             isScanning = false
         }
+    }
+
+    func refreshMissingDaysInBackground(days: Int = 30) async {
+        let shouldStart = await MainActor.run {
+            guard !isRefreshInProgress,
+                  let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
+                  visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate) else {
+                return false
+            }
+
+            isRefreshingMissingDays = true
+            return true
+        }
+        guard shouldStart else { return }
+
+        let summary = await makeCostSummary(days: days, priority: .utility)
+
+        await MainActor.run {
+            costSummary = summary
+            lastScanDate = Date()
+            saveCachedSummary()
+            isRefreshingMissingDays = false
+        }
+    }
+
+    private func makeCostSummary(days: Int, priority: TaskPriority) async -> CostSummary {
+        let includeClaudeCode = providerVisibilityStore.isEnabled(.claudeCode)
+        let includeCodexCli = providerVisibilityStore.isEnabled(.codexCli)
+        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts
+        return await Task.detached(priority: priority) { [self] in
+            buildCostSummary(
+                days: days,
+                includeClaudeCode: includeClaudeCode,
+                includeCodexCli: includeCodexCli,
+                claudeAccounts: claudeAccounts
+            )
+        }.value
     }
 
     private func buildCostSummary(

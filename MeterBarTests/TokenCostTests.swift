@@ -33,6 +33,9 @@ final class TokenCostTests: XCTestCase {
 
         let cost3 = makeTokenCost(estimatedCostUSD: 123.456)
         XCTAssertEqual(cost3.formattedCost, "$123.46")
+
+        let cost4 = makeTokenCost(estimatedCostUSD: 8_385.09)
+        XCTAssertEqual(cost4.formattedCost, "$8,385.09")
     }
 
     func testFormattedTokens() {
@@ -42,9 +45,7 @@ final class TokenCostTests: XCTestCase {
             cacheCreationTokens: 0,
             cacheReadTokens: 0
         )
-        // Should be formatted with decimal separators
-        XCTAssertTrue(cost.formattedTokens.contains("1"))
-        XCTAssertTrue(cost.formattedTokens.contains("234"))
+        XCTAssertEqual(cost.formattedTokens, "1,234,567")
     }
 
     func testIdProperty() {
@@ -88,10 +89,22 @@ final class TokenCostTests: XCTestCase {
         XCTAssertEqual(summary.formattedTotalCost, "$4.25")
     }
 
+    func testCostSummaryTotalCostUsesThousandsSeparator() {
+        let summary = CostSummary(costs: [], totalCostUSD: 12_345.60, totalTokens: 10000, periodDays: 30)
+
+        XCTAssertEqual(summary.formattedTotalCost, "$12,345.60")
+    }
+
     func testCostSummaryAverageDailyCost() {
         let summary = CostSummary(costs: [], totalCostUSD: 30.0, totalTokens: 100000, periodDays: 30)
         XCTAssertEqual(summary.averageDailyCost, 1.0, accuracy: 0.01)
         XCTAssertEqual(summary.formattedDailyCost, "$1.00/day")
+    }
+
+    func testCostSummaryDailyCostUsesThousandsSeparator() {
+        let summary = CostSummary(costs: [], totalCostUSD: 37_036.80, totalTokens: 100000, periodDays: 30)
+
+        XCTAssertEqual(summary.formattedDailyCost, "$1,234.56/day")
     }
 
     func testCostSummaryAverageDailyCostZeroDays() {
@@ -106,7 +119,61 @@ final class TokenCostTests: XCTestCase {
         XCTAssertEqual(summary.formattedTotalCost, "$0.00")
     }
 
+    func testMissingDailyUsageRefreshIsNeededForLegacyCostCache() {
+        let now = makeDate(year: 2026, month: 6, day: 26)
+        let summary = CostSummary(
+            costs: [makeTokenCost()],
+            totalCostUSD: 10,
+            totalTokens: 1_000,
+            periodDays: 30,
+            dailyUsage: []
+        )
+
+        XCTAssertTrue(summary.needsMissingDailyUsageRefresh(days: 30, lastScanDate: now, now: now, calendar: utcCalendar))
+    }
+
+    func testMissingDailyUsageRefreshIsNeededWhenScannedBeforeTodayAndWindowHasGaps() {
+        let now = makeDate(year: 2026, month: 6, day: 26)
+        let previousScan = makeDate(year: 2026, month: 6, day: 25)
+        let summary = CostSummary(
+            costs: [makeTokenCost()],
+            totalCostUSD: 10,
+            totalTokens: 1_000,
+            periodDays: 3,
+            dailyUsage: [
+                makeDailyUsage(date: makeDate(year: 2026, month: 6, day: 24)),
+                makeDailyUsage(date: makeDate(year: 2026, month: 6, day: 26)),
+            ]
+        )
+
+        XCTAssertTrue(
+            summary.needsMissingDailyUsageRefresh(days: 3, lastScanDate: previousScan, now: now, calendar: utcCalendar)
+        )
+    }
+
+    func testMissingDailyUsageRefreshIsSkippedAfterTodayScan() {
+        let now = makeDate(year: 2026, month: 6, day: 26)
+        let summary = CostSummary(
+            costs: [makeTokenCost()],
+            totalCostUSD: 10,
+            totalTokens: 1_000,
+            periodDays: 3,
+            dailyUsage: [
+                makeDailyUsage(date: makeDate(year: 2026, month: 6, day: 24)),
+                makeDailyUsage(date: makeDate(year: 2026, month: 6, day: 26)),
+            ]
+        )
+
+        XCTAssertFalse(summary.needsMissingDailyUsageRefresh(days: 3, lastScanDate: now, now: now, calendar: utcCalendar))
+    }
+
     // MARK: - Helpers
+
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
 
     private func makeTokenCost(
         provider: ServiceType = .claudeCode,
@@ -128,5 +195,34 @@ final class TokenCostTests: XCTestCase {
             periodStart: Date().addingTimeInterval(-86400 * 30),
             periodEnd: Date()
         )
+    }
+
+    private func makeDailyUsage(
+        date: Date,
+        provider: ServiceType = .claudeCode,
+        inputTokens: Int = 1_000,
+        outputTokens: Int = 0,
+        cacheReadTokens: Int = 0,
+        estimatedCostUSD: Double = 1
+    ) -> DailyTokenUsage {
+        DailyTokenUsage(
+            date: date,
+            provider: provider,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens,
+            estimatedCostUSD: estimatedCostUSD
+        )
+    }
+
+    private func makeDate(year: Int, month: Int, day: Int) -> Date {
+        DateComponents(
+            calendar: utcCalendar,
+            timeZone: TimeZone(secondsFromGMT: 0),
+            year: year,
+            month: month,
+            day: day,
+            hour: 12
+        ).date!
     }
 }

@@ -104,6 +104,14 @@ struct UsageDashboardView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .task {
+            await refreshCostsIfMissingDays()
+        }
+        .onChange(of: selectedSection) {
+            Task {
+                await refreshCostsIfMissingDays()
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -178,12 +186,13 @@ struct UsageDashboardView: View {
                 CostOverviewStatusCard(
                     summary: visibleCostSummary,
                     isScanning: costTracker.isScanning,
-                    formattedTokens: formattedTokenCount(visibleCostSummary?.totalTokens ?? 0)
+                    isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
+                    formattedTokens: TokenCostFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
                 )
             }
             .frame(maxWidth: .infinity)
 
-            DashboardCard(title: "Last 30 Days", trailing: costTracker.isScanning ? "Scanning..." : nil) {
+            DashboardCard(title: "Last 30 Days", trailing: costRefreshStatusText) {
                 costScanChart(height: 180, compact: true)
             }
         }
@@ -224,7 +233,7 @@ struct UsageDashboardView: View {
 
     private var costsContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(title: "30 Day API-Rate Token Spend", trailing: costTracker.isScanning ? "Scanning..." : nil) {
+            DashboardCard(title: "30 Day API-Rate Token Spend", trailing: costRefreshStatusText) {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Local subscription logs are estimated using API token rates so Codex and Claude can be compared.")
                         .font(.caption)
@@ -247,7 +256,7 @@ struct UsageDashboardView: View {
                                 Label("Scan 30 Days", systemImage: "magnifyingglass")
                             }
                             .buttonStyle(.bordered)
-                            .disabled(costTracker.isScanning)
+                            .disabled(costTracker.isRefreshInProgress)
                         }
                         .frame(height: 220, alignment: .center)
                     }
@@ -396,10 +405,20 @@ struct UsageDashboardView: View {
         }
     }
 
+    private var costRefreshStatusText: String? {
+        if costTracker.isScanning {
+            return "Scanning..."
+        }
+        if costTracker.isRefreshingMissingDays {
+            return "Updating..."
+        }
+        return nil
+    }
+
     private var isRefreshButtonDisabled: Bool {
         switch activeSection {
         case .costs:
-            return costTracker.isScanning
+            return costTracker.isRefreshInProgress
         case .overview, .limits, .settings:
             return dataManager.isLoading
         }
@@ -413,6 +432,11 @@ struct UsageDashboardView: View {
         }
     }
 
+    private func refreshCostsIfMissingDays() async {
+        guard activeSection == .overview || activeSection == .costs else { return }
+        await costTracker.refreshMissingDaysInBackground(days: 30)
+    }
+
     private func color(for service: ServiceType) -> Color {
         MeterBarTheme.accent(for: service)
     }
@@ -421,19 +445,6 @@ struct UsageDashboardView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
-    private func formattedTokenCount(_ value: Int) -> String {
-        if value >= 1_000_000_000 {
-            return String(format: "%.1fB", Double(value) / 1_000_000_000)
-        }
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return "\(value)"
     }
 }
 
@@ -611,6 +622,7 @@ private struct ProviderOverviewStatusCard: View {
 private struct CostOverviewStatusCard: View {
     let summary: CostSummary?
     let isScanning: Bool
+    let isRefreshingMissingDays: Bool
     let formattedTokens: String
 
     var body: some View {
@@ -623,7 +635,7 @@ private struct CostOverviewStatusCard: View {
                     Text("API-Rate Estimate")
                         .font(.headline)
                         .fontWeight(.semibold)
-                    Text(isScanning ? "Scanning local logs" : "Last 30 days")
+                    Text(statusText)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -682,6 +694,16 @@ private struct CostOverviewStatusCard: View {
             alignment: .topLeading
         )
         .dashboardCardBackground()
+    }
+
+    private var statusText: String {
+        if isScanning {
+            return "Scanning local logs"
+        }
+        if isRefreshingMissingDays {
+            return "Updating missing days"
+        }
+        return "Last 30 days"
     }
 }
 
@@ -837,7 +859,6 @@ private struct DashboardLimitRow: View {
             return .secondary
         }
     }
-
 }
 
 private struct CostScanLoadingChart: View {
@@ -856,7 +877,9 @@ private struct CostScanLoadingChart: View {
                 let barWidth = max(4, (proxy.size.width - CGFloat(barCount - 1) * spacing) / CGFloat(barCount))
                 let time = timeline.date.timeIntervalSinceReferenceDate
                 let sweepWidth = max(42, proxy.size.width * 0.18)
-                let sweepX = CGFloat(time.truncatingRemainder(dividingBy: 1.8) / 1.8) * (proxy.size.width + sweepWidth) - sweepWidth
+                let sweepX = CGFloat(time.truncatingRemainder(dividingBy: 1.8) / 1.8)
+                    * (proxy.size.width + sweepWidth)
+                    - sweepWidth
 
                 VStack(alignment: .leading, spacing: compact ? 8 : 11) {
                     HStack(spacing: 8) {
@@ -1120,7 +1143,7 @@ private struct DailyUsageChart: View {
         var lines = [
             fullDateLabel(day.date),
             "\(formatTokens(day.totalTokens)) tokens",
-            String(format: "$%.2f", day.cost)
+            TokenCostFormat.usd(day.cost)
         ]
 
         if day.segments.isEmpty {
@@ -1128,7 +1151,8 @@ private struct DailyUsageChart: View {
         } else {
             lines.append("")
             for segment in day.segments {
-                lines.append("\(segment.provider.displayName): \(formatTokens(segment.tokens)) · \(String(format: "$%.2f", segment.cost))")
+                let segmentUsage = "\(formatTokens(segment.tokens)) · \(TokenCostFormat.usd(segment.cost))"
+                lines.append("\(segment.provider.displayName): \(segmentUsage)")
             }
         }
 
@@ -1147,13 +1171,7 @@ private struct DailyUsageChart: View {
     }
 
     private func formatTokens(_ value: Int) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return "\(value)"
+        TokenCostFormat.tokens(value)
     }
 }
 
@@ -1435,16 +1453,7 @@ private struct ProviderCostBreakdown: View {
     }
 
     private func compact(_ value: Int) -> String {
-        if value >= 1_000_000_000 {
-            return String(format: "%.1fB", Double(value) / 1_000_000_000)
-        }
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return "\(value)"
+        TokenCostFormat.tokens(value)
     }
 }
 
@@ -1524,20 +1533,11 @@ private struct UsageDetailMetric: View {
 
 private enum UsageFormat {
     static func tokens(_ value: Int) -> String {
-        if value >= 1_000_000_000 {
-            return String(format: "%.1fB", Double(value) / 1_000_000_000)
-        }
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return "\(value)"
+        TokenCostFormat.tokens(value)
     }
 
     static func cost(_ value: Double) -> String {
-        String(format: "$%.2f", value)
+        TokenCostFormat.usd(value)
     }
 }
 

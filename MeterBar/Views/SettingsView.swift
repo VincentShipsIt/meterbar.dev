@@ -426,11 +426,11 @@ struct SettingsView: View {
                     }
                 } label: {
                     HStack(spacing: 7) {
-                        if costTracker.isScanning {
+                        if costTracker.isRefreshInProgress {
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.75)
-                            Text("Scanning...")
+                            Text(costTracker.isRefreshingMissingDays ? "Updating..." : "Scanning...")
                         } else {
                             Image(systemName: "magnifyingglass")
                             Text("Scan 30 Days")
@@ -438,7 +438,7 @@ struct SettingsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(costTracker.isScanning || !canScanCosts)
+                .disabled(costTracker.isRefreshInProgress || !canScanCosts)
             }
         }
     }
