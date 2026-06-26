@@ -133,10 +133,10 @@ struct MenuBarView: View {
             Button {
                 Task { await dataManager.refreshAll() }
             } label: {
-                Image(systemName: "arrow.clockwise")
+                RefreshingIcon(isRefreshing: dataManager.isLoading)
             }
             .buttonStyle(.borderless)
-            .help("Refresh usage")
+            .help(dataManager.isLoading ? "Refreshing usage" : "Refresh usage")
 
             optionsMenu
         }

@@ -96,9 +96,9 @@ struct UsageDashboardView: View {
                     Button {
                         Task { await refreshDashboard() }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        RefreshingIcon(isRefreshing: isRefreshButtonAnimating)
                     }
-                    .help("Refresh usage")
+                    .help(isRefreshButtonAnimating ? "Refreshing usage" : "Refresh usage")
                     .disabled(isRefreshButtonDisabled)
                 }
             }
@@ -397,6 +397,10 @@ struct UsageDashboardView: View {
     }
 
     private var isRefreshButtonDisabled: Bool {
+        isRefreshButtonAnimating
+    }
+
+    private var isRefreshButtonAnimating: Bool {
         switch activeSection {
         case .costs:
             return costTracker.isScanning
