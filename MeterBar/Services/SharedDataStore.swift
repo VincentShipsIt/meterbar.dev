@@ -1,4 +1,5 @@
 import Foundation
+import os
 #if canImport(WidgetKit)
 import WidgetKit
 #endif

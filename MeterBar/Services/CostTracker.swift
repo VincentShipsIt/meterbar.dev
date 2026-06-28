@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 import SQLite3
 
 class CostTracker: ObservableObject {
