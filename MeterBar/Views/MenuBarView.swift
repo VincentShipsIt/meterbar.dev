@@ -441,7 +441,7 @@ private struct PopoverProviderStatusCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: snapshot.hasExhaustedLimit ? 8 : 10) {
             HStack(spacing: 7) {
                 ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
                 VStack(alignment: .leading, spacing: 1) {
@@ -467,7 +467,7 @@ private struct PopoverProviderStatusCard: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
             } else if snapshot.hasExhaustedLimit {
-                BlockingLimitResetCounter(
+                CompactBlockingLimitResetRow(
                     windows: snapshot.resetWindows,
                     accentColor: snapshot.accentColor
                 )
@@ -496,7 +496,7 @@ private struct PopoverProviderStatusCard: View {
                 )
             }
 
-            if let extraUsage = snapshot.extraUsage {
+            if !snapshot.hasExhaustedLimit, let extraUsage = snapshot.extraUsage {
                 HStack(spacing: 4) {
                     Image(systemName: "creditcard")
                         .font(.system(size: 9, weight: .semibold))
@@ -509,8 +509,8 @@ private struct PopoverProviderStatusCard: View {
                 }
             }
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
+        .padding(snapshot.hasExhaustedLimit ? 9 : 11)
+        .frame(maxWidth: .infinity, minHeight: snapshot.hasExhaustedLimit ? 78 : 124, alignment: .topLeading)
         .opacity(isOut ? 0.72 : 1)
         .cardSurface()
     }
@@ -569,6 +569,45 @@ private struct PopoverLimitRow: View {
                     iconSize: 9
                 )
             }
+        }
+    }
+}
+
+private struct CompactBlockingLimitResetRow: View {
+    let windows: [ResetCountdownWindow]
+    let accentColor: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+            let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(windows, now: timeline.date)
+            let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: windows)
+            let counter = BlockingLimitResetCounter.counterText(for: blockingWindow, now: timeline.date)
+            let detail = BlockingLimitResetCounter.detailText(for: blockingWindow, in: windows)
+
+            HStack(alignment: .center, spacing: 7) {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(accentColor)
+                    .frame(width: 14, height: 14)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(title) \(counter)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help("\(title) \(counter)")
         }
     }
 }

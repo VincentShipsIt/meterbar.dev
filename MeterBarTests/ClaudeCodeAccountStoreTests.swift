@@ -82,6 +82,39 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(store.accounts.first?.id, ClaudeCodeAccount.defaultID)
     }
 
+    func testAccountOrderCanMoveDefaultProfileAndPersists() {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "shipshitdev", configDirectory: "/tmp/shipshitdev")
+        store.addAccount(name: "genfeedai", configDirectory: "/tmp/genfeedai")
+
+        let initialIDs = store.accounts.map(\.id)
+        XCTAssertEqual(initialIDs.first, ClaudeCodeAccount.defaultID)
+
+        store.moveAccounts(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+
+        let reorderedIDs = store.accounts.map(\.id)
+        XCTAssertEqual(reorderedIDs, [initialIDs[1], initialIDs[2], initialIDs[0]])
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.accounts.map(\.id), reorderedIDs)
+    }
+
+    func testRemovingCustomProfilePrunesStoredAccountOrder() {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "shipshitdev", configDirectory: "/tmp/shipshitdev")
+        store.addAccount(name: "genfeedai", configDirectory: "/tmp/genfeedai")
+
+        let initialIDs = store.accounts.map(\.id)
+        store.moveAccounts(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+        store.removeAccount(id: initialIDs[1])
+
+        XCTAssertFalse(store.accounts.map(\.id).contains(initialIDs[1]))
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertFalse(reloaded.accounts.map(\.id).contains(initialIDs[1]))
+        XCTAssertEqual(reloaded.accounts.map(\.id), [initialIDs[2], initialIDs[0]])
+    }
+
     func testInvalidCustomProfileEditIsIgnored() {
         let store = ClaudeCodeAccountStore(userDefaults: defaults)
         store.addAccount(name: "genfeedai", configDirectory: "/tmp/genfeed-claude-profile")

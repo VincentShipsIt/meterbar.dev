@@ -106,6 +106,10 @@ struct SettingsView: View {
         providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
     }
 
+    private var claudeAccountListHeight: CGFloat {
+        min(320, max(84, CGFloat(claudeAccountStore.accounts.count) * 84))
+    }
+
     private var generalSection: some View {
         SettingsPanelSection(title: "General", systemImage: "dock.rectangle", color: MeterBarTheme.appAccent) {
             SettingsRowView(
@@ -266,26 +270,39 @@ struct SettingsView: View {
             SettingsDivider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Claude Accounts")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                ForEach(claudeAccountStore.accounts) { account in
-                    AccountProfileRow(account: account) { name, configDirectory in
-                        updateClaudeAccount(
-                            id: account.id,
-                            name: name,
-                            configDirectory: configDirectory
-                        )
-                    } onReconnect: {
-                        reconnectClaudeAccount(account)
-                    } onRemove: {
-                        claudeAccountStore.removeAccount(id: account.id)
-                        Task {
-                            await dataManager.refreshAll()
-                        }
-                    }
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Claude Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text("Drag to reorder")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+
+                List {
+                    ForEach(claudeAccountStore.accounts) { account in
+                        AccountProfileRow(account: account) { name, configDirectory in
+                            updateClaudeAccount(
+                                id: account.id,
+                                name: name,
+                                configDirectory: configDirectory
+                            )
+                        } onReconnect: {
+                            reconnectClaudeAccount(account)
+                        } onRemove: {
+                            claudeAccountStore.removeAccount(id: account.id)
+                            Task {
+                                await dataManager.refreshAll()
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    }
+                    .onMove(perform: moveClaudeAccounts)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(height: claudeAccountListHeight)
             }
 
             SettingsRowView(title: "New account") {
@@ -589,6 +606,10 @@ struct SettingsView: View {
         }
     }
 
+    private func moveClaudeAccounts(from source: IndexSet, to destination: Int) {
+        claudeAccountStore.moveAccounts(fromOffsets: source, toOffset: destination)
+    }
+
     private func reconnectClaudeAccount(_ account: ClaudeCodeAccount) {
         do {
             try ClaudeCodeReconnectService.openReconnectTerminal(for: account)
@@ -753,6 +774,12 @@ private struct AccountProfileRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .frame(width: 14)
+                .padding(.top, 8)
+                .help("Drag to reorder")
+
             Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
                 .foregroundStyle(MeterBarTheme.claudeAccent)
                 .frame(width: 18)
@@ -774,7 +801,7 @@ private struct AccountProfileRow: View {
                     TextField("Config directory", text: $configDirectoryDraft)
                         .font(.caption)
                         .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
+                        .frame(maxWidth: 300)
                         .onSubmit(saveChanges)
                 }
             }
@@ -782,16 +809,25 @@ private struct AccountProfileRow: View {
             Spacer()
 
             HStack(spacing: 8) {
-                Button("Reconnect", action: onReconnect)
-                    .buttonStyle(.bordered)
+                Button(action: onReconnect) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .help("Reconnect Claude profile")
 
-                Button("Save", action: saveChanges)
-                    .buttonStyle(.bordered)
-                    .disabled(!hasChanges || !canSave)
+                Button(action: saveChanges) {
+                    Image(systemName: "checkmark")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!hasChanges || !canSave)
+                .help("Save account changes")
 
                 if !account.isDefault {
-                    Button("Delete", role: .destructive, action: onRemove)
-                        .buttonStyle(.bordered)
+                    Button(role: .destructive, action: onRemove) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Delete account")
                 }
             }
         }

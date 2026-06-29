@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - ClaudeCodeAccount
 
-struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable {
+struct ClaudeCodeAccount: Codable, Equatable, Identifiable {
     static let defaultName = "Default CLI Profile"
 
     /// Fixed sentinel id for the default CLI profile. Built from raw bytes
@@ -44,15 +44,16 @@ final class ClaudeCodeAccountStore: ObservableObject {
 
     @Published private(set) var customAccounts: [ClaudeCodeAccount] = []
     @Published private(set) var defaultAccountName = ClaudeCodeAccount.defaultName
+    @Published private(set) var accountOrder: [UUID] = []
 
     var accounts: [ClaudeCodeAccount] {
-        [
+        orderedAccounts(from: [
             ClaudeCodeAccount(
                 id: ClaudeCodeAccount.defaultID,
                 name: defaultAccountName,
                 configDirectory: nil
             ),
-        ] + customAccounts
+        ] + customAccounts)
     }
 
     func addAccount(name: String, configDirectory: String) {
@@ -68,6 +69,10 @@ final class ClaudeCodeAccountStore: ObservableObject {
             configDirectory: (trimmedDirectory as NSString).standardizingPath
         )
         customAccounts.append(account)
+        if !accountOrder.isEmpty {
+            accountOrder.append(account.id)
+            saveAccountOrder()
+        }
         saveCustomAccounts()
     }
 
@@ -115,7 +120,33 @@ final class ClaudeCodeAccountStore: ObservableObject {
             return
         }
         customAccounts.removeAll { $0.id == id }
+        accountOrder.removeAll { $0 == id }
+        saveAccountOrder()
         saveCustomAccounts()
+    }
+
+    func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
+        var orderedAccounts = accounts
+        guard !orderedAccounts.isEmpty else {
+            return
+        }
+
+        let movingIndexes = source.sorted()
+        guard movingIndexes.allSatisfy({ orderedAccounts.indices.contains($0) }) else {
+            return
+        }
+
+        let movingAccounts = movingIndexes.map { orderedAccounts[$0] }
+        for index in movingIndexes.reversed() {
+            orderedAccounts.remove(at: index)
+        }
+
+        let removedBeforeDestination = movingIndexes.filter { $0 < destination }.count
+        let adjustedDestination = max(0, min(destination - removedBeforeDestination, orderedAccounts.count))
+        orderedAccounts.insert(contentsOf: movingAccounts, at: adjustedDestination)
+
+        accountOrder = orderedAccounts.map(\.id)
+        saveAccountOrder()
     }
 
     // MARK: Private
@@ -123,6 +154,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     private let userDefaults: UserDefaults
     private let storageKey = "ClaudeCodeCustomAccounts"
     private let defaultNameStorageKey = "ClaudeCodeDefaultAccountName"
+    private let accountOrderStorageKey = "ClaudeCodeAccountOrder"
 
     private func load() {
         let storedDefaultName = userDefaults.string(forKey: defaultNameStorageKey)?
@@ -131,12 +163,16 @@ final class ClaudeCodeAccountStore: ObservableObject {
             defaultAccountName = storedDefaultName
         }
 
+        accountOrder = userDefaults.stringArray(forKey: accountOrderStorageKey)?
+            .compactMap(UUID.init(uuidString:)) ?? []
+
         guard let data = userDefaults.data(forKey: storageKey),
               let decoded = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data) else {
             return
         }
 
         customAccounts = decoded.filter { !$0.isDefault }
+        pruneAccountOrder()
     }
 
     private func saveCustomAccounts() {
@@ -151,6 +187,39 @@ final class ClaudeCodeAccountStore: ObservableObject {
             userDefaults.removeObject(forKey: defaultNameStorageKey)
         } else {
             userDefaults.set(defaultAccountName, forKey: defaultNameStorageKey)
+        }
+    }
+
+    private func saveAccountOrder() {
+        if accountOrder.isEmpty {
+            userDefaults.removeObject(forKey: accountOrderStorageKey)
+        } else {
+            userDefaults.set(accountOrder.map(\.uuidString), forKey: accountOrderStorageKey)
+        }
+    }
+
+    private func orderedAccounts(from unorderedAccounts: [ClaudeCodeAccount]) -> [ClaudeCodeAccount] {
+        guard !accountOrder.isEmpty else {
+            return unorderedAccounts
+        }
+
+        let accountsByID = Dictionary(uniqueKeysWithValues: unorderedAccounts.map { ($0.id, $0) })
+        let ordered = accountOrder.compactMap { accountsByID[$0] }
+        let orderedIDs = Set(ordered.map(\.id))
+        let unordered = unorderedAccounts.filter { !orderedIDs.contains($0.id) }
+        return ordered + unordered
+    }
+
+    private func pruneAccountOrder() {
+        guard !accountOrder.isEmpty else {
+            return
+        }
+
+        let validIDs = Set([ClaudeCodeAccount.defaultID] + customAccounts.map(\.id))
+        let prunedOrder = accountOrder.filter { validIDs.contains($0) }
+        if prunedOrder != accountOrder {
+            accountOrder = prunedOrder
+            saveAccountOrder()
         }
     }
 }
