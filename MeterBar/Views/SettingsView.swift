@@ -1,29 +1,19 @@
-import SwiftUI
 import AppKit
+import SwiftUI
+
+// MARK: - SettingsView
 
 struct SettingsView: View {
-    let embeddedInDashboard: Bool
 
-    @StateObject private var authManager = AuthenticationManager.shared
-    @StateObject private var dataManager = UsageDataManager.shared
-    @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
-    @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
-    @StateObject private var cursorService = CursorLocalService.shared
-    @StateObject private var costTracker = CostTracker.shared
-    @StateObject private var providerVisibility = ProviderVisibilityStore.shared
-    @StateObject private var dockVisibility = DockVisibilityStore.shared
-
-    @State private var claudeAdminKey: String = ""
-    @State private var openaiAdminKey: String = ""
-    @State private var newClaudeAccountName: String = ""
-    @State private var newClaudeConfigDirectory: String = ""
-
-    @State private var showingClaudeHelp = false
-    @State private var showingOpenAIHelp = false
+    // MARK: Lifecycle
 
     init(embeddedInDashboard: Bool = false) {
         self.embeddedInDashboard = embeddedInDashboard
     }
+
+    // MARK: Internal
+
+    let embeddedInDashboard: Bool
 
     var body: some View {
         Form {
@@ -60,6 +50,60 @@ struct SettingsView: View {
         .sheet(isPresented: $showingOpenAIHelp) {
             OpenAIHelpView()
         }
+        .alert(
+            "Claude Reconnect Failed",
+            isPresented: Binding(
+                get: { claudeReconnectError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        claudeReconnectError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                claudeReconnectError = nil
+            }
+        } message: {
+            Text(claudeReconnectError ?? "Could not open the Claude reconnect flow.")
+        }
+    }
+
+    // MARK: Private
+
+    @StateObject private var authManager = AuthenticationManager.shared
+    @StateObject private var dataManager = UsageDataManager.shared
+    @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
+    @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+    @StateObject private var cursorService = CursorLocalService.shared
+    @StateObject private var costTracker = CostTracker.shared
+    @StateObject private var providerVisibility = ProviderVisibilityStore.shared
+    @StateObject private var dockVisibility = DockVisibilityStore.shared
+
+    @State private var claudeAdminKey = ""
+    @State private var openaiAdminKey = ""
+    @State private var newClaudeAccountName = ""
+    @State private var newClaudeConfigDirectory = ""
+
+    @State private var showingClaudeHelp = false
+    @State private var showingOpenAIHelp = false
+    @State private var claudeReconnectError: String?
+
+    private var showExtraUsageSection: Bool {
+        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
+    }
+
+    private var canAddClaudeAccount: Bool {
+        !newClaudeAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !newClaudeConfigDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var visibleCostSummary: CostSummary? {
+        costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
+    }
+
+    private var canScanCosts: Bool {
+        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
     }
 
     private var generalSection: some View {
@@ -76,10 +120,6 @@ struct SettingsView: View {
                 .toggleStyle(.switch)
             }
         }
-    }
-
-    private var showExtraUsageSection: Bool {
-        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
     }
 
     private var extraUsageSection: some View {
@@ -105,34 +145,6 @@ struct SettingsView: View {
                     manageURL: "https://chatgpt.com"
                 )
             }
-        }
-    }
-
-    private func extraUsageRow(title: String, status: ExtraUsageStatus?, manageURL: String) -> some View {
-        SettingsRowView(title: title, detail: extraUsageDetailText(status)) {
-            HStack(spacing: 8) {
-                ExtraUsageStatusPill(status: status ?? .unknown)
-
-                Button("Manage") {
-                    if let url = URL(string: manageURL) {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .help("Open \(manageURL) to change extra usage settings")
-            }
-        }
-    }
-
-    private func extraUsageDetailText(_ status: ExtraUsageStatus?) -> String {
-        guard let status else { return "Waiting for refresh." }
-        switch status.state {
-        case .on:
-            return status.detail.map { "Enabled · \($0)" } ?? "Enabled — overage can be billed beyond your plan."
-        case .off:
-            return "Disabled — capped at your subscription quota."
-        case .unknown:
-            return "Could not determine. Sign in to the CLI and refresh."
         }
     }
 
@@ -259,7 +271,15 @@ struct SettingsView: View {
                     .fontWeight(.semibold)
 
                 ForEach(claudeAccountStore.accounts) { account in
-                    AccountProfileRow(account: account) {
+                    AccountProfileRow(account: account) { name, configDirectory in
+                        updateClaudeAccount(
+                            id: account.id,
+                            name: name,
+                            configDirectory: configDirectory
+                        )
+                    } onReconnect: {
+                        reconnectClaudeAccount(account)
+                    } onRemove: {
                         claudeAccountStore.removeAccount(id: account.id)
                         Task {
                             await dataManager.refreshAll()
@@ -274,7 +294,10 @@ struct SettingsView: View {
                     .frame(maxWidth: 220)
             }
 
-            SettingsRowView(title: "Config directory", detail: "Use a separate CLAUDE_CONFIG_DIR for each extra account.") {
+            SettingsRowView(
+                title: "Config directory",
+                detail: "Use a separate CLAUDE_CONFIG_DIR for each extra account."
+            ) {
                 HStack(spacing: 8) {
                     TextField("Path", text: $newClaudeConfigDirectory)
                         .textFieldStyle(.roundedBorder)
@@ -364,7 +387,10 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                 }
             } else if !cursorService.hasAccess {
-                SettingsNotice(text: "Reads Cursor IDE credentials from Cursor's local state database.", color: .secondary)
+                SettingsNotice(
+                    text: "Reads Cursor IDE credentials from Cursor's local state database.",
+                    color: .secondary
+                )
                 SettingsNotice(text: "Log in to Cursor IDE first, then check again.", color: MeterBarTheme.warning)
             }
         }
@@ -416,7 +442,10 @@ struct SettingsView: View {
             }
 
             if !canScanCosts {
-                SettingsNotice(text: "Enable Claude Code or OpenAI Codex to scan local token logs.", color: MeterBarTheme.warning)
+                SettingsNotice(
+                    text: "Enable Claude Code or OpenAI Codex to scan local token logs.",
+                    color: MeterBarTheme.warning
+                )
             }
 
             SettingsRowView(title: "Local sessions") {
@@ -472,17 +501,20 @@ struct SettingsView: View {
         }
     }
 
-    private var canAddClaudeAccount: Bool {
-        !newClaudeAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !newClaudeConfigDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+    private func extraUsageRow(title: String, status: ExtraUsageStatus?, manageURL: String) -> some View {
+        SettingsRowView(title: title, detail: extraUsageDetailText(status)) {
+            HStack(spacing: 8) {
+                ExtraUsageStatusPill(status: status ?? .unknown)
 
-    private var visibleCostSummary: CostSummary? {
-        costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
-    }
-
-    private var canScanCosts: Bool {
-        providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
+                Button("Manage") {
+                    if let url = URL(string: manageURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Open \(manageURL) to change extra usage settings")
+            }
+        }
     }
 
     private func providerToggleRow(title: String, detail: String, service: ServiceType) -> some View {
@@ -498,6 +530,20 @@ struct SettingsView: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
+        }
+    }
+
+    private func extraUsageDetailText(_ status: ExtraUsageStatus?) -> String {
+        guard let status else {
+            return "Waiting for refresh."
+        }
+        switch status.state {
+        case .on:
+            return status.detail.map { "Enabled · \($0)" } ?? "Enabled — overage can be billed beyond your plan."
+        case .off:
+            return "Disabled — capped at your subscription quota."
+        case .unknown:
+            return "Could not determine. Sign in to the CLI and refresh."
         }
     }
 
@@ -531,14 +577,32 @@ struct SettingsView: View {
             }
         }
     }
+
+    private func updateClaudeAccount(id: UUID, name: String, configDirectory: String?) {
+        claudeAccountStore.updateAccount(
+            id: id,
+            name: name,
+            configDirectory: configDirectory
+        )
+        Task {
+            await dataManager.refreshAll()
+        }
+    }
+
+    private func reconnectClaudeAccount(_ account: ClaudeCodeAccount) {
+        do {
+            try ClaudeCodeReconnectService.openReconnectTerminal(for: account)
+        } catch {
+            claudeReconnectError = error.localizedDescription
+        }
+    }
 }
 
+// MARK: - SettingsPanelSection
+
 private struct SettingsPanelSection<Content: View>: View {
-    let title: String
-    let logoKind: ProviderLogoKind?
-    let systemImage: String?
-    let color: Color
-    let content: Content
+
+    // MARK: Lifecycle
 
     init(
         title: String,
@@ -566,6 +630,14 @@ private struct SettingsPanelSection<Content: View>: View {
         self.content = content()
     }
 
+    // MARK: Internal
+
+    let title: String
+    let logoKind: ProviderLogoKind?
+    let systemImage: String?
+    let color: Color
+    let content: Content
+
     var body: some View {
         Section {
             content
@@ -583,16 +655,23 @@ private struct SettingsPanelSection<Content: View>: View {
     }
 }
 
+// MARK: - SettingsRowView
+
 private struct SettingsRowView<Content: View>: View {
-    let title: String
-    let detail: String?
-    let content: Content
+
+    // MARK: Lifecycle
 
     init(title: String, detail: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.detail = detail
         self.content = content()
     }
+
+    // MARK: Internal
+
+    let title: String
+    let detail: String?
+    let content: Content
 
     var body: some View {
         LabeledContent {
@@ -610,6 +689,8 @@ private struct SettingsRowView<Content: View>: View {
     }
 }
 
+// MARK: - SettingsNotice
+
 private struct SettingsNotice: View {
     let text: String
     let color: Color
@@ -622,11 +703,15 @@ private struct SettingsNotice: View {
     }
 }
 
+// MARK: - SettingsDivider
+
 private struct SettingsDivider: View {
     var body: some View {
         Divider()
     }
 }
+
+// MARK: - StatusPill
 
 private struct StatusPill: View {
     let title: String
@@ -639,36 +724,115 @@ private struct StatusPill: View {
     }
 }
 
+// MARK: - AccountProfileRow
+
 private struct AccountProfileRow: View {
+
+    // MARK: Lifecycle
+
+    init(
+        account: ClaudeCodeAccount,
+        onSave: @escaping (String, String?) -> Void,
+        onReconnect: @escaping () -> Void,
+        onRemove: @escaping () -> Void
+    ) {
+        self.account = account
+        self.onSave = onSave
+        self.onReconnect = onReconnect
+        self.onRemove = onRemove
+        _nameDraft = State(initialValue: account.name)
+        _configDirectoryDraft = State(initialValue: account.configDirectory ?? "")
+    }
+
+    // MARK: Internal
+
     let account: ClaudeCodeAccount
+    let onSave: (String, String?) -> Void
+    let onReconnect: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
                 .foregroundStyle(MeterBarTheme.claudeAccent)
                 .frame(width: 18)
+                .padding(.top, 4)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(account.name)
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Account label", text: $nameDraft)
                     .font(.subheadline)
-                    .fontWeight(.semibold)
-                Text(account.configDirectory ?? "Default Claude CLI profile")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 240)
+                    .onSubmit(saveChanges)
+
+                if account.isDefault {
+                    Text("Default Claude CLI profile")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    TextField("Config directory", text: $configDirectoryDraft)
+                        .font(.caption)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onSubmit(saveChanges)
+                }
             }
 
             Spacer()
 
-            if !account.isDefault {
-                Button("Remove", role: .destructive, action: onRemove)
+            HStack(spacing: 8) {
+                Button("Reconnect", action: onReconnect)
                     .buttonStyle(.bordered)
+
+                Button("Save", action: saveChanges)
+                    .buttonStyle(.bordered)
+                    .disabled(!hasChanges || !canSave)
+
+                if !account.isDefault {
+                    Button("Delete", role: .destructive, action: onRemove)
+                        .buttonStyle(.bordered)
+                }
             }
         }
         .padding(.vertical, 4)
+        .onChange(of: account) { _, updatedAccount in
+            nameDraft = updatedAccount.name
+            configDirectoryDraft = updatedAccount.configDirectory ?? ""
+        }
+    }
+
+    // MARK: Private
+
+    @State private var nameDraft: String
+    @State private var configDirectoryDraft: String
+
+    private var trimmedName: String {
+        nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedConfigDirectory: String {
+        configDirectoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasChanges: Bool {
+        trimmedName != account.name ||
+            (!account.isDefault && trimmedConfigDirectory != (account.configDirectory ?? ""))
+    }
+
+    private var canSave: Bool {
+        !trimmedName.isEmpty && (account.isDefault || !trimmedConfigDirectory.isEmpty)
+    }
+
+    private func saveChanges() {
+        guard hasChanges, canSave else {
+            return
+        }
+        onSave(trimmedName, account.isDefault ? nil : trimmedConfigDirectory)
     }
 }
+
+// MARK: - AdminKeyHelpView
 
 /// Shared admin-key help sheet. The Claude and OpenAI variants only differ by
 /// copy and the console URL, so they share one layout.
@@ -725,6 +889,8 @@ private struct AdminKeyHelpView: View {
     }
 }
 
+// MARK: - ClaudeHelpView
+
 struct ClaudeHelpView: View {
     var body: some View {
         AdminKeyHelpView(
@@ -735,7 +901,7 @@ struct ClaudeHelpView: View {
                 "Navigate to Settings → Admin Keys",
                 "Click 'Create Admin Key'",
                 "Copy the key (starts with sk-ant-admin...)",
-                "Paste it in the field above"
+                "Paste it in the field above",
             ],
             note: "Note: You must be an organization admin to create Admin API keys. Individual accounts cannot access the Usage API.",
             consoleButtonTitle: "Open Claude Console",
@@ -743,6 +909,8 @@ struct ClaudeHelpView: View {
         )
     }
 }
+
+// MARK: - OpenAIHelpView
 
 struct OpenAIHelpView: View {
     var body: some View {
@@ -754,7 +922,7 @@ struct OpenAIHelpView: View {
                 "Navigate to Settings → Organization → Admin Keys",
                 "Click 'Create new admin key'",
                 "Copy the key",
-                "Paste it in the field above"
+                "Paste it in the field above",
             ],
             note: "Note: You must be an organization owner or admin to create Admin keys.",
             consoleButtonTitle: "Open OpenAI Settings",
