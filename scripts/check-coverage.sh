@@ -30,12 +30,20 @@ if [ ! -f "$TEST_BINARY" ]; then
   exit 1
 fi
 
-COVERAGE_PERCENT="$(xcrun llvm-cov report "$TEST_BINARY" -instr-profile "$PROFDATA" -ignore-filename-regex ".*Tests.*" | awk '/^TOTAL/ {print $NF}' | tr -d '%')"
-if [ -z "$COVERAGE_PERCENT" ]; then
+# JSON summary + jq instead of scraping the text report: the TOTAL row's last
+# column is branch coverage ("-" when nothing is branch-instrumented), which
+# made the old awk parse read "-%" and fail the gate even on a green suite.
+COVERAGE_PERCENT="$(xcrun llvm-cov export "$TEST_BINARY" \
+  -instr-profile "$PROFDATA" \
+  -summary-only \
+  -ignore-filename-regex ".*Tests.*" \
+  | jq -r '.data[0].totals.lines.percent')"
+
+if [ -z "$COVERAGE_PERCENT" ] || [ "$COVERAGE_PERCENT" = "null" ]; then
   echo "Failed to parse coverage report." >&2
   exit 1
 fi
 
-printf "Coverage: %s%% (threshold: %s%%)\n" "$COVERAGE_PERCENT" "$THRESHOLD"
+printf "Line coverage: %.2f%% (threshold: %s%%)\n" "$COVERAGE_PERCENT" "$THRESHOLD"
 
 awk -v coverage="$COVERAGE_PERCENT" -v threshold="$THRESHOLD" 'BEGIN {exit !(coverage+0 >= threshold+0)}'
