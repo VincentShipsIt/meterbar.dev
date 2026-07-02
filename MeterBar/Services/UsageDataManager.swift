@@ -12,7 +12,7 @@ class UsageDataManager: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
 
-    @AppStorage("refreshInterval") private var refreshIntervalRaw: Int = RefreshInterval.fifteenMinutes.rawValue
+    @AppStorage(StorageKeys.refreshInterval) private var refreshIntervalRaw: Int = RefreshInterval.fifteenMinutes.rawValue
 
     var refreshInterval: RefreshInterval {
         get { RefreshInterval(rawValue: refreshIntervalRaw) ?? .fifteenMinutes }
@@ -29,7 +29,7 @@ class UsageDataManager: ObservableObject {
     private let providerVisibilityStore = ProviderVisibilityStore.shared
 
     private var refreshTimer: Timer?
-    private let cacheKey = "cached_usage_metrics"
+    private let cacheKey = StorageKeys.cachedUsageMetrics
     private let sharedStore = SharedDataStore.shared
 
     private init() {

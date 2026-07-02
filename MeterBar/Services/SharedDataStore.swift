@@ -11,7 +11,7 @@ public class SharedDataStore {
     public static let shared = SharedDataStore()
     
     private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = "cached_usage_metrics"
+    private let metricsKey = StorageKeys.cachedUsageMetrics
 
     /// Serial queue for off-main disk writes so callers on the MainActor don't
     /// block on file I/O, while still serializing writes to the shared file.

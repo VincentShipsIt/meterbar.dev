@@ -10,7 +10,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
     private let keychainService = "Claude Code-credentials"
     private let cliUsageService = ClaudeCodeCLIUsageService.shared
-    private let oauthFallbackUserDefaultsKey = "ClaudeCodeEnableOAuthFallback"
+    private let oauthFallbackUserDefaultsKey = StorageKeys.claudeCodeOAuthFallback
 
     private let urlSession = ServiceSupport.session
 

@@ -24,19 +24,6 @@ class CursorLocalService: ObservableObject {
     // Display headroom estimate when no explicit on-demand limit is returned by the API
     private let onDemandHeadroomMultiplier: Double = 1.5
 
-    // Cached ISO8601 date formatters to avoid repeated allocations
-    private static let fractionalISO8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let plainISO8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
     @Published private(set) var lastError: ServiceError?
@@ -164,28 +151,7 @@ class CursorLocalService: ObservableObject {
 
     /// Extract userId from JWT token's 'sub' claim
     private func extractUserIdFromJWT(_ token: String) -> String? {
-        let parts = token.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
-
-        // Decode the payload (second part)
-        var payload = String(parts[1])
-
-        // Add padding if needed for base64
-        let remainder = payload.count % 4
-        if remainder > 0 {
-            payload += String(repeating: "=", count: 4 - remainder)
-        }
-
-        // Convert base64url to base64
-        payload = payload
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-
-        guard let data = Data(base64Encoded: payload),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let sub = json["sub"] as? String else {
-            return nil
-        }
+        guard let sub = JWT.claimString("sub", in: token) else { return nil }
 
         // Extract userId from sub claim
         // Format may be "auth0|userId" or similar
@@ -242,7 +208,7 @@ class CursorLocalService: ObservableObject {
         // Parse billing cycle end date for reset time
         var resetTime: Date? = nil
         if let billingEnd = summaryData.billingCycleEnd {
-            resetTime = Self.fractionalISO8601.date(from: billingEnd) ?? Self.plainISO8601.date(from: billingEnd)
+            resetTime = FlexibleISO8601.date(from: billingEnd)
         }
 
         // Extract usage from individual plan

@@ -18,7 +18,7 @@ struct SettingsView: View {
     /// Same key ClaudeCodeLocalService reads. Previously this flag was only
     /// settable via `defaults write`; exposing it here makes the legacy OAuth
     /// fallback discoverable instead of a hidden switch.
-    @AppStorage("ClaudeCodeEnableOAuthFallback") private var oauthFallbackEnabled = false
+    @AppStorage(StorageKeys.claudeCodeOAuthFallback) private var oauthFallbackEnabled = false
 
     init(embeddedInDashboard: Bool = false) {
         self.embeddedInDashboard = embeddedInDashboard

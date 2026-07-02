@@ -30,7 +30,7 @@ public struct ExtraUsageStatus: Codable, Equatable, Sendable {
     public static func formatAmount(_ amount: Double, currency: String? = "USD") -> String {
         let normalized = (currency ?? "USD").uppercased()
         if normalized == "USD" {
-            return String(format: "$%.2f", amount)
+            return UsageFormat.cost(amount)
         }
         return String(format: "%.2f %@", amount, normalized)
     }
