@@ -13,12 +13,14 @@ let package = Package(
         ),
     ],
     dependencies: [
-        // Add external dependencies here if needed
+        .package(path: "Packages/MeterBarShared")
     ],
     targets: [
         .target(
             name: "MeterBar",
-            dependencies: [],
+            dependencies: [
+                .product(name: "MeterBarShared", package: "MeterBarShared")
+            ],
             path: "MeterBar",
             exclude: [
                 "App/MeterBarApp.swift",
@@ -34,7 +36,10 @@ let package = Package(
         ),
         .testTarget(
             name: "MeterBarTests",
-            dependencies: ["MeterBar"],
+            dependencies: [
+                "MeterBar",
+                .product(name: "MeterBarShared", package: "MeterBarShared")
+            ],
             path: "MeterBarTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

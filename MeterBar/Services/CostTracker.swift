@@ -1,4 +1,5 @@
 import Combine
+import MeterBarShared
 import Foundation
 import os
 import SQLite3

@@ -1,4 +1,5 @@
 import XCTest
+import MeterBarShared
 @testable import MeterBar
 
 final class ServiceTypeTests: XCTestCase {

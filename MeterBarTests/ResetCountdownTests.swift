@@ -1,4 +1,5 @@
 import SwiftUI
+import MeterBarShared
 import XCTest
 @testable import MeterBar
 

@@ -1,4 +1,5 @@
 import AppKit
+import MeterBarShared
 import SwiftUI
 
 enum ProviderLogoKind: Equatable {

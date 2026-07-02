@@ -1,4 +1,5 @@
 import XCTest
+import MeterBarShared
 @testable import MeterBar
 
 /// Tests for parsing and carrying Codex "banked rate-limit resets" — the

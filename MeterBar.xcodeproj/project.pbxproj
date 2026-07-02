@@ -10,6 +10,8 @@
 		5259E4402F032E77001001CF /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5259E43F2F032E77001001CF /* WidgetKit.framework */; };
 		5259E4422F032E77001001CF /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5259E4412F032E77001001CF /* SwiftUI.framework */; };
 		5259E44F2F032E78001001CF /* MeterBarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5259E43D2F032E77001001CF /* MeterBarWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		52ABC1022F0400010036036C /* MeterBarShared in Frameworks */ = {isa = PBXBuildFile; productRef = 52ABC1012F0400010036036C /* MeterBarShared */; };
+		52ABC1042F0400010036036C /* MeterBarShared in Frameworks */ = {isa = PBXBuildFile; productRef = 52ABC1032F0400010036036C /* MeterBarShared */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +78,7 @@
 			files = (
 				5259E4422F032E77001001CF /* SwiftUI.framework in Frameworks */,
 				5259E4402F032E77001001CF /* WidgetKit.framework in Frameworks */,
+				52ABC1042F0400010036036C /* MeterBarShared in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -83,6 +86,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				52ABC1022F0400010036036C /* MeterBarShared in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +141,7 @@
 			);
 			name = MeterBarWidgetExtension;
 			packageProductDependencies = (
+				52ABC1032F0400010036036C /* MeterBarShared */,
 			);
 			productName = MeterBarWidgetExtension;
 			productReference = 5259E43D2F032E77001001CF /* MeterBarWidgetExtension.appex */;
@@ -161,6 +166,7 @@
 			);
 			name = MeterBar;
 			packageProductDependencies = (
+				52ABC1012F0400010036036C /* MeterBarShared */,
 			);
 			productName = MeterBar;
 			productReference = 52CFA5002F0323EF0036036C /* MeterBar.app */;
@@ -193,6 +199,9 @@
 			);
 			mainGroup = 52CFA4F72F0323EF0036036C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				52ABC1002F0400010036036C /* XCLocalSwiftPackageReference "Packages/MeterBarShared" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 52CFA5012F0323EF0036036C /* Products */;
 			projectDirPath = "";
@@ -580,6 +589,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		52ABC1002F0400010036036C /* XCLocalSwiftPackageReference "Packages/MeterBarShared" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MeterBarShared;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		52ABC1012F0400010036036C /* MeterBarShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MeterBarShared;
+		};
+		52ABC1032F0400010036036C /* MeterBarShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MeterBarShared;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 52CFA4F82F0323EF0036036C /* Project object */;
 }

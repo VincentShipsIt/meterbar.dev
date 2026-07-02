@@ -1,4 +1,5 @@
 import XCTest
+import MeterBarShared
 @testable import MeterBar
 
 /// Integration tests to verify API access for Claude, OpenAI, Cursor, Claude Code, and Codex CLI services.

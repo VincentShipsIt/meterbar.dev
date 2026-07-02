@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 import Combine
 
 class ClaudeService {

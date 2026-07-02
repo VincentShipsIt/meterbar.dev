@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 struct TokenCost: Codable, Identifiable, Sendable {
     var id: String { provider.rawValue }

@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 import os
 #if canImport(WidgetKit)
 import WidgetKit

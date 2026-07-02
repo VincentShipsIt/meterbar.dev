@@ -1,141 +1,16 @@
+import MeterBarShared
 import WidgetKit
 import SwiftUI
 
-// MARK: - Shared Types (duplicated for Widget target)
+// MARK: - Status Colors (widget presentation for the shared UsageStatus)
 
-enum ServiceType: String, Codable, CaseIterable, Identifiable {
-    case claude = "Claude"
-    case claudeCode = "Claude Code"
-    case openai = "OpenAI"
-    case codexCli = "Codex CLI"
-    case cursor = "Cursor"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .claude: return "Claude API"
-        case .claudeCode: return "Claude Code"
-        case .openai: return "OpenAI"
-        case .codexCli: return "OpenAI Codex"
-        case .cursor: return "Cursor"
-        }
-    }
-
-    var iconName: String {
-        switch self {
-        case .claude: return "ClaudeIcon"
-        case .claudeCode: return "ClaudeIcon"
-        case .openai: return "OpenAIIcon"
-        case .codexCli: return "CodexIcon"
-        case .cursor: return "CursorIcon"
-        }
-    }
-
-    var sortOrder: Int {
-        switch self {
-        case .claudeCode: return 0
-        case .claude: return 1
-        case .codexCli: return 2
-        case .cursor: return 3
-        case .openai: return 4
-        }
-    }
-}
-
-enum UsageStatus {
-    case good
-    case warning
-    case critical
-
+extension UsageStatus {
     var color: Color {
         switch self {
         case .good: return .green
         case .warning: return .orange
         case .critical: return .red
         }
-    }
-}
-
-struct UsageLimit: Codable, Equatable {
-    let used: Double
-    let total: Double
-    let resetTime: Date?
-
-    var percentage: Double {
-        guard total > 0 else { return 0 }
-        return min(100, max(0, (used / total) * 100))
-    }
-
-    var clampedUsed: Double {
-        return max(0, min(used, total))
-    }
-
-    var clampedTotal: Double {
-        return max(0.001, total)
-    }
-
-    var remaining: Double {
-        return max(0, total - used)
-    }
-
-    var isNearLimit: Bool {
-        return percentage >= 80
-    }
-
-    var isAtLimit: Bool {
-        return percentage >= 100
-    }
-
-    var statusColor: UsageStatus {
-        if isAtLimit {
-            return .critical
-        } else if isNearLimit {
-            return .warning
-        } else {
-            return .good
-        }
-    }
-}
-
-struct UsageMetrics: Codable, Identifiable {
-    let id: UUID
-    let service: ServiceType
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
-    let lastUpdated: Date
-
-    init(
-        service: ServiceType,
-        sessionLimit: UsageLimit? = nil,
-        weeklyLimit: UsageLimit? = nil,
-        codeReviewLimit: UsageLimit? = nil,
-        lastUpdated: Date = Date()
-    ) {
-        self.id = UUID()
-        self.service = service
-        self.sessionLimit = sessionLimit
-        self.weeklyLimit = weeklyLimit
-        self.codeReviewLimit = codeReviewLimit
-        self.lastUpdated = lastUpdated
-    }
-
-    var overallStatus: UsageStatus {
-        let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
-        guard !limits.isEmpty else { return .good }
-
-        if limits.contains(where: { $0.isAtLimit }) {
-            return .critical
-        } else if limits.contains(where: { $0.isNearLimit }) {
-            return .warning
-        } else {
-            return .good
-        }
-    }
-
-    var hasData: Bool {
-        return sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
     }
 }
 
@@ -281,7 +156,7 @@ struct ServiceMiniView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(metrics.service.iconName)
+            Image(metrics.service.assetName)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 14, height: 14)
@@ -361,7 +236,7 @@ struct ServiceCompactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(metrics.service.iconName)
+                Image(metrics.service.assetName)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 18, height: 18)
@@ -390,7 +265,7 @@ struct ServiceDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(metrics.service.iconName)
+                Image(metrics.service.assetName)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 20, height: 20)

@@ -1,4 +1,5 @@
 import AppKit
+import MeterBarShared
 import Combine
 import os
 import SwiftUI

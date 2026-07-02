@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 final class ClaudeCodeCLIUsageService: Sendable {
     static let shared = ClaudeCodeCLIUsageService()

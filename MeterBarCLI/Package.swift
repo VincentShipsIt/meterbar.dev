@@ -8,13 +8,15 @@ let package = Package(
         .executable(name: "meterbar", targets: ["MeterBarCLI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(path: "../Packages/MeterBarShared")
     ],
     targets: [
         .executableTarget(
             name: "MeterBarCLI",
             dependencies: [
-                .product(name: "ArgumentParser", package: "swift-argument-parser")
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "MeterBarShared", package: "MeterBarShared")
             ],
             path: "Sources"
         )

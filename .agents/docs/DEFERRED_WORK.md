@@ -8,9 +8,13 @@ detail to pick up later (e.g. on a machine with full Xcode). See
 
 ## 1. Extract a `MeterBarShared` package (end the struct drift)
 
-**Status:** deferred — needs Xcode project-file changes that can't be verified
-without full Xcode. The narrow *decode* bugs it would fix were already fixed in
-place (CLI `Int`→`Double`, widget layout). This is the structural follow-up.
+**Status:** done (2026-07-02) — `Packages/MeterBarShared` created and consumed by
+the app, widget, and CLI targets; the three forked copies were deleted and the
+Xcode project links the local package. Local verification: `swift build` on the
+package/root/CLI + widget typecheck + live CLI smoke test; the xcodebuild
+app+widget build is exercised by CI (no full Xcode on the dev machine). See
+`.agents/SESSIONS/2026-07-02.md`. Original problem statement kept below for
+context.
 
 ### Problem
 

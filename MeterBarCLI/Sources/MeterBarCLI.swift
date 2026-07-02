@@ -1,6 +1,7 @@
 import ArgumentParser
 import Darwin
 import Foundation
+import MeterBarShared
 
 @main
 struct MeterBarCLI: ParsableCommand {
@@ -78,7 +79,7 @@ struct Usage: ParsableCommand {
             return
         }
 
-        let filtered: [String: ServiceMetrics]
+        let filtered: [String: UsageMetrics]
         if let provider = provider?.lowercased() {
             filtered = metrics.filter { $0.key.lowercased().contains(provider) }
         } else {
@@ -92,7 +93,7 @@ struct Usage: ParsableCommand {
         }
     }
 
-    private func loadCachedMetrics() -> [String: ServiceMetrics] {
+    private func loadCachedMetrics() -> [String: UsageMetrics] {
         // Try app group container first
         let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.dev.shipshit.meterbar"
@@ -107,7 +108,7 @@ struct Usage: ParsableCommand {
         // Fallback to UserDefaults cache
         if metricsPath == nil || !FileManager.default.fileExists(atPath: metricsPath!.path) {
             if let data = UserDefaults.standard.data(forKey: "cached_usage_metrics"),
-               let decoded = try? JSONDecoder().decode([String: ServiceMetrics].self, from: data) {
+               let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) {
                 return decoded
             }
             return [:]
@@ -115,14 +116,14 @@ struct Usage: ParsableCommand {
 
         guard let path = metricsPath,
               let data = try? Data(contentsOf: path),
-              let decoded = try? JSONDecoder().decode([String: ServiceMetrics].self, from: data) else {
+              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
             return [:]
         }
 
         return decoded
     }
 
-    private func printJSON(_ metrics: [String: ServiceMetrics]) {
+    private func printJSON(_ metrics: [String: UsageMetrics]) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(metrics),
@@ -131,14 +132,15 @@ struct Usage: ParsableCommand {
         }
     }
 
-    private func printText(_ metrics: [String: ServiceMetrics]) {
+    private func printText(_ metrics: [String: UsageMetrics]) {
         print("╭─────────────────────────────────────────╮")
         print("│             MeterBar Usage              │")
         print("╰─────────────────────────────────────────╯")
         print()
 
         for (service, metric) in metrics.sorted(by: { $0.key < $1.key }) {
-            let displayName = service.replacingOccurrences(of: "_", with: " ").capitalized
+            let displayName = ServiceType(rawValue: service)?.displayName
+                ?? service.replacingOccurrences(of: "_", with: " ").capitalized
             print("▸ \(displayName)")
 
             if let session = metric.sessionLimit {
@@ -310,25 +312,6 @@ struct Cost: ParsableCommand {
 }
 
 // MARK: - Models
-
-struct ServiceMetrics: Codable {
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
-}
-
-struct UsageLimit: Codable {
-    // The app serializes these as JSON doubles (e.g. 42.0). Decoding them as Int
-    // fails, which silently produced empty CLI output, so they must be Double.
-    let used: Double
-    let total: Double
-    let resetTime: Date?
-
-    var percentage: Double {
-        guard total > 0 else { return 0 }
-        return (used / total) * 100
-    }
-}
 
 struct CostResult: Codable {
     let provider: String

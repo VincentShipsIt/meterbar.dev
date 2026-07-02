@@ -1,4 +1,5 @@
 import SwiftUI
+import MeterBarShared
 import AppKit
 
 struct SettingsView: View {

@@ -1,41 +1,51 @@
 import Foundation
-import SwiftUI
 
-struct UsageLimit: Codable, Equatable {
-    let used: Double
-    let total: Double
-    let resetTime: Date?
-    let windowSeconds: TimeInterval?
+public struct UsageLimit: Codable, Equatable, Sendable {
+    public let used: Double
+    public let total: Double
+    public let resetTime: Date?
+    public let windowSeconds: TimeInterval?
 
-    init(used: Double, total: Double, resetTime: Date?, windowSeconds: TimeInterval? = nil) {
+    public init(used: Double, total: Double, resetTime: Date?, windowSeconds: TimeInterval? = nil) {
         self.used = used
         self.total = total
         self.resetTime = resetTime
         self.windowSeconds = windowSeconds
     }
 
-    var rawPercentage: Double {
+    public var rawPercentage: Double {
         guard total > 0 else { return 0 }
         return max(0, (used / total) * 100)
     }
-    
-    var percentage: Double {
+
+    public var percentage: Double {
         return min(100, rawPercentage)
     }
-    
-    var remaining: Double {
+
+    /// `used` clamped into `0...total`, for progress bars that reject
+    /// out-of-range values (e.g. `ProgressView`).
+    public var clampedUsed: Double {
+        return max(0, min(used, total))
+    }
+
+    /// `total` clamped away from zero so progress-bar math never divides by 0.
+    public var clampedTotal: Double {
+        return max(0.001, total)
+    }
+
+    public var remaining: Double {
         return max(0, total - used)
     }
-    
-    var isNearLimit: Bool {
+
+    public var isNearLimit: Bool {
         return percentage >= 80
     }
-    
-    var isAtLimit: Bool {
+
+    public var isAtLimit: Bool {
         return percentage >= 100
     }
-    
-    var statusColor: UsageStatus {
+
+    public var statusColor: UsageStatus {
         if isAtLimit {
             return .critical
         } else if isNearLimit {
@@ -45,18 +55,18 @@ struct UsageLimit: Codable, Equatable {
         }
     }
 
-    func secondsUntilReset(now: Date = Date()) -> TimeInterval? {
+    public func secondsUntilReset(now: Date = Date()) -> TimeInterval? {
         guard let resetTime else { return nil }
         return resetTime.timeIntervalSince(now)
     }
 
-    func resetCountdownText(now: Date = Date()) -> String? {
+    public func resetCountdownText(now: Date = Date()) -> String? {
         guard let secondsUntilReset = secondsUntilReset(now: now) else { return nil }
         guard secondsUntilReset > 0 else { return "now" }
         return UsageDurationText.short(seconds: secondsUntilReset)
     }
 
-    func pace(now: Date = Date()) -> UsagePace? {
+    public func pace(now: Date = Date()) -> UsagePace? {
         guard let resetTime,
               let windowSeconds,
               windowSeconds > 0 else {
@@ -100,30 +110,42 @@ struct UsageLimit: Codable, Equatable {
     }
 }
 
-struct UsagePace: Equatable {
-    enum Stage {
+public struct UsagePace: Equatable, Sendable {
+    public enum Stage: Sendable {
         case onPace
         case reserve
         case deficit
     }
 
-    let expectedUsedPercent: Double
-    let deltaPercent: Double
-    let etaSeconds: TimeInterval?
-    let willLastToReset: Bool
+    public let expectedUsedPercent: Double
+    public let deltaPercent: Double
+    public let etaSeconds: TimeInterval?
+    public let willLastToReset: Bool
 
-    var stage: Stage {
+    public init(
+        expectedUsedPercent: Double,
+        deltaPercent: Double,
+        etaSeconds: TimeInterval?,
+        willLastToReset: Bool
+    ) {
+        self.expectedUsedPercent = expectedUsedPercent
+        self.deltaPercent = deltaPercent
+        self.etaSeconds = etaSeconds
+        self.willLastToReset = willLastToReset
+    }
+
+    public var stage: Stage {
         if abs(deltaPercent) <= 2 {
             return .onPace
         }
         return deltaPercent > 0 ? .deficit : .reserve
     }
 
-    var isExhausted: Bool {
+    public var isExhausted: Bool {
         etaSeconds == 0 && !willLastToReset
     }
 
-    var leftLabel: String {
+    public var leftLabel: String {
         if isExhausted {
             return "Out of quota"
         }
@@ -139,7 +161,7 @@ struct UsagePace: Equatable {
         }
     }
 
-    func rightLabel(context: PaceLabelContext = .session) -> String? {
+    public func rightLabel(context: PaceLabelContext = .session) -> String? {
         if isExhausted {
             return "Out until reset"
         }
@@ -160,8 +182,8 @@ struct UsagePace: Equatable {
     }
 }
 
-enum UsageDurationText {
-    static func short(seconds: TimeInterval) -> String {
+public enum UsageDurationText {
+    public static func short(seconds: TimeInterval) -> String {
         let wholeSeconds = max(0, Int(seconds.rounded()))
         let days = wholeSeconds / 86_400
         let hours = (wholeSeconds % 86_400) / 3_600
@@ -180,11 +202,11 @@ enum UsageDurationText {
     }
 }
 
-enum PaceLabelContext {
+public enum PaceLabelContext: Sendable {
     case session
     case weekly
 
-    var emptyNowLabel: String {
+    public var emptyNowLabel: String {
         switch self {
         case .session:
             return "Projected empty now"
@@ -193,26 +215,12 @@ enum PaceLabelContext {
         }
     }
 
-    var emptyPrefix: String {
+    public var emptyPrefix: String {
         switch self {
         case .session:
             return "Projected empty in"
         case .weekly:
             return "Runs out in"
-        }
-    }
-}
-
-enum UsageStatus {
-    case good
-    case warning
-    case critical
-
-    var color: Color {
-        switch self {
-        case .good: return MeterBarTheme.success
-        case .warning: return MeterBarTheme.warning
-        case .critical: return MeterBarTheme.danger
         }
     }
 }

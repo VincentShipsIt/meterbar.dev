@@ -1,4 +1,5 @@
 import Combine
+import MeterBarShared
 import Foundation
 
 final class ProviderVisibilityStore: ObservableObject {

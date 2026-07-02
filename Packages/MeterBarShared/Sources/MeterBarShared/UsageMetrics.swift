@@ -5,8 +5,8 @@ import Foundation
 /// Both Claude Code ("extra usage") and Codex ("credits") let an account spend
 /// beyond its subscription quota once exhausted. Surfacing this lets users confirm
 /// at a glance whether they can be billed for overage, or whether usage is hard-capped.
-struct ExtraUsageStatus: Codable, Equatable {
-    enum State: String, Codable {
+public struct ExtraUsageStatus: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable {
         /// Extra paid usage / credits are enabled — overage spending is possible.
         case on
         /// Disabled — usage is capped at the subscription quota.
@@ -15,21 +15,21 @@ struct ExtraUsageStatus: Codable, Equatable {
         case unknown
     }
 
-    let state: State
+    public let state: State
     /// Short human-readable detail, e.g. "$0.00 used", "$5.00 in credits".
-    let detail: String?
+    public let detail: String?
 
-    init(state: State, detail: String? = nil) {
+    public init(state: State, detail: String? = nil) {
         self.state = state
         self.detail = detail
     }
 
-    static let unknown = ExtraUsageStatus(state: .unknown, detail: nil)
+    public static let unknown = ExtraUsageStatus(state: .unknown, detail: nil)
 
-    var isOn: Bool { state == .on }
+    public var isOn: Bool { state == .on }
 
     /// Formats an amount as USD ("$5.00"); falls back to "<amount> <currency>" for others.
-    static func formatAmount(_ amount: Double, currency: String? = "USD") -> String {
+    public static func formatAmount(_ amount: Double, currency: String? = "USD") -> String {
         let normalized = (currency ?? "USD").uppercased()
         if normalized == "USD" {
             return String(format: "$%.2f", amount)
@@ -38,19 +38,19 @@ struct ExtraUsageStatus: Codable, Equatable {
     }
 }
 
-struct UsageMetrics: Codable, Identifiable {
-    let id: UUID
-    let service: ServiceType
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
-    let extraUsage: ExtraUsageStatus?
+public struct UsageMetrics: Codable, Identifiable, Sendable {
+    public let id: UUID
+    public let service: ServiceType
+    public let sessionLimit: UsageLimit?
+    public let weeklyLimit: UsageLimit?
+    public let codeReviewLimit: UsageLimit?
+    public let extraUsage: ExtraUsageStatus?
     /// Number of banked rate-limit resets the account can trigger on demand.
     /// Codex-only (OpenAI "reset credits"); `nil` for providers/accounts without the feature.
-    let resetCreditsAvailable: Int?
-    let lastUpdated: Date
+    public let resetCreditsAvailable: Int?
+    public let lastUpdated: Date
 
-    init(
+    public init(
         service: ServiceType,
         sessionLimit: UsageLimit? = nil,
         weeklyLimit: UsageLimit? = nil,
@@ -91,7 +91,7 @@ struct UsageMetrics: Codable, Identifiable {
 
     /// Returns a copy with the given extra-usage status, preserving identity, limits,
     /// reset credits, and timestamp.
-    func withExtraUsage(_ status: ExtraUsageStatus?) -> UsageMetrics {
+    public func withExtraUsage(_ status: ExtraUsageStatus?) -> UsageMetrics {
         UsageMetrics(
             id: id,
             service: service,
@@ -103,11 +103,11 @@ struct UsageMetrics: Codable, Identifiable {
             lastUpdated: lastUpdated
         )
     }
-    
-    var overallStatus: UsageStatus {
+
+    public var overallStatus: UsageStatus {
         let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
-        
+
         if limits.contains(where: { $0.isAtLimit }) {
             return .critical
         } else if limits.contains(where: { $0.isNearLimit }) {
@@ -116,9 +116,8 @@ struct UsageMetrics: Codable, Identifiable {
             return .good
         }
     }
-    
-    var hasData: Bool {
+
+    public var hasData: Bool {
         return sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
     }
 }
-

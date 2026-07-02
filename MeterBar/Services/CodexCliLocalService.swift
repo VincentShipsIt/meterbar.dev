@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 import AppKit
 import Combine
 import os

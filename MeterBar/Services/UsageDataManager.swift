@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 import os
 import Combine
 import SwiftUI
