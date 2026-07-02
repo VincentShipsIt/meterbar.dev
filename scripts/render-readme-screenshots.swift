@@ -204,7 +204,7 @@ struct MenuBarSnapshotView: View {
 
     private var header: some View {
         HStack {
-            Text("Quota Guard")
+            Text("MeterBar")
                 .font(.headline)
             Spacer()
             Image(systemName: "arrow.clockwise")
@@ -416,7 +416,7 @@ struct WidgetMediumSnapshotView: View {
             MacOSWidgetBackground()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 12) {
-                Text("Quota Guard")
+                Text("MeterBar")
                     .font(.headline)
 
                 ForEach(metrics) { entry in

@@ -8,7 +8,7 @@ final class ProviderVisibilityStore: ObservableObject {
     @Published private(set) var hiddenServices: Set<ServiceType> = []
 
     private let userDefaults: UserDefaults
-    private let storageKey = "HiddenProviderServices"
+    private let storageKey = StorageKeys.hiddenProviderServices
 
     var enabledServices: Set<ServiceType> {
         Set(ServiceType.allCases).subtracting(hiddenServices)

@@ -13,6 +13,5 @@ enum AppLog {
     static let app = Logger(subsystem: subsystem, category: "app")
     static let usage = Logger(subsystem: subsystem, category: "usage")
     static let cost = Logger(subsystem: subsystem, category: "cost")
-    static let network = Logger(subsystem: subsystem, category: "network")
     static let storage = Logger(subsystem: subsystem, category: "storage")
 }

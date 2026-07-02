@@ -5,12 +5,14 @@ import os
 import WidgetKit
 #endif
 
-/// Shared data store using App Groups for Widget extension access
-class SharedDataStore {
-    static let shared = SharedDataStore()
+/// Shared data store using App Groups for Widget extension access.
+/// Public so the meterbar CLI reads the same file through the same code path
+/// instead of maintaining its own copy of the location and decode logic.
+public class SharedDataStore {
+    public static let shared = SharedDataStore()
 
     private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = "cached_usage_metrics"
+    private let metricsKey = StorageKeys.cachedUsageMetrics
 
     /// Serial queue for off-main disk writes so callers on the MainActor don't
     /// block on file I/O, while still serializing writes to the shared file.
@@ -30,11 +32,7 @@ class SharedDataStore {
 
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
-        let encoded = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
-            result[pair.key.rawValue] = pair.value
-        }
-
-        guard let data = try? JSONEncoder().encode(encoded) else {
+        guard let data = MetricsCodec.encode(metrics) else {
             AppLog.storage.error("Failed to encode shared metrics")
             return
         }
@@ -51,21 +49,13 @@ class SharedDataStore {
         }
     }
 
-    func loadMetrics() -> [ServiceType: UsageMetrics] {
+    public func loadMetrics() -> [ServiceType: UsageMetrics] {
         guard let containerURL = containerURL else { return [:] }
 
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
-            return [:]
-        }
-
-        return decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
-            }
-        }
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
+        return MetricsCodec.decode(data)
     }
 
     private func reloadWidgetTimelines() {

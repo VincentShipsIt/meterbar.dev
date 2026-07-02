@@ -31,16 +31,12 @@ class SharedDataStore {
 
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
-            return [:]
-        }
-
-        return decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
-            }
-        }
+        // Tolerant per-entry decode via the shared codec: an unknown service
+        // key or malformed entry drops that entry, not the whole cache — so a
+        // cache written by an older build (e.g. with a removed provider) still
+        // renders the providers that remain.
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
+        return MetricsCodec.decode(data)
     }
 }
 

@@ -38,9 +38,9 @@ enum MeterBarTheme {
 
     static func accent(for service: ServiceType) -> Color {
         switch service {
-        case .claude, .claudeCode:
+        case .claudeCode:
             return claudeAccent
-        case .codexCli, .openai:
+        case .codexCli:
             return codexAccent
         case .cursor:
             return cursorAccent
@@ -48,16 +48,19 @@ enum MeterBarTheme {
     }
 
     static func quotaStatusColor(percentLeft: Int) -> Color {
-        if percentLeft <= 10 { return danger }
-        if percentLeft <= 25 { return warning }
-        return success
+        QuotaBand.forPercentLeft(percentLeft).color
     }
+}
 
-    static func metricColor(percentLeft: Int) -> Color {
-        // Match the danger threshold of quotaStatusColor so the prominent "N%"
-        // metric turns red across the whole critical band, agreeing with the
-        // adjacent status label, while staying neutral for healthy quotas.
-        percentLeft <= 10 ? danger : .primary
+extension QuotaBand {
+    /// Appearance-adaptive color for the band (single place where severity
+    /// maps to color, shared by every surface).
+    var color: Color {
+        switch self {
+        case .healthy: return MeterBarTheme.success
+        case .tight: return MeterBarTheme.warning
+        case .critical, .exhausted: return MeterBarTheme.danger
+        }
     }
 }
 

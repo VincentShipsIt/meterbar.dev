@@ -1,5 +1,5 @@
 {
-  "name": "quotaguard-scripts",
+  "name": "meterbar-scripts",
   "private": true,
   "scripts": {
     "social-preview": "bun run generate-social-preview.ts"

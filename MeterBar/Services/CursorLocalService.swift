@@ -15,27 +15,14 @@ class CursorLocalService: ObservableObject {
     // API endpoint (from Vibeviewer: https://github.com/MarveleE/Vibeviewer)
     private let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
 
-    // URLSession shared via ServiceSupport for consistent timeout/connectivity config
-    private let urlSession = ServiceSupport.makeUsageSession()
+    // Shared URLSession with the standard usage-request timeouts
+    private let urlSession = ServiceSupport.session
 
     // Assumed default monthly request quota when the API omits a plan total
     private let defaultPlanTotal: Double = 500
 
     // Display headroom estimate when no explicit on-demand limit is returned by the API
     private let onDemandHeadroomMultiplier: Double = 1.5
-
-    // Cached ISO8601 date formatters to avoid repeated allocations
-    private static let fractionalISO8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let plainISO8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
@@ -160,28 +147,7 @@ class CursorLocalService: ObservableObject {
 
     /// Extract userId from JWT token's 'sub' claim
     private func extractUserIdFromJWT(_ token: String) -> String? {
-        let parts = token.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
-
-        // Decode the payload (second part)
-        var payload = String(parts[1])
-
-        // Add padding if needed for base64
-        let remainder = payload.count % 4
-        if remainder > 0 {
-            payload += String(repeating: "=", count: 4 - remainder)
-        }
-
-        // Convert base64url to base64
-        payload = payload
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-
-        guard let data = Data(base64Encoded: payload),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let sub = json["sub"] as? String else {
-            return nil
-        }
+        guard let sub = JWT.claimString("sub", in: token) else { return nil }
 
         // Extract userId from sub claim
         // Format may be "auth0|userId" or similar
@@ -202,12 +168,11 @@ class CursorLocalService: ObservableObject {
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
     func checkAccess(forceRescan: Bool = false) {
         let hasToken = getAccessTokenFromDatabase(forceRescan: forceRescan) != nil
-        let apply = { [weak self] in
+        ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
             self.hasAccess = hasToken
             if !hasToken { self.subscriptionType = nil }
         }
-        if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
     }
 
     // MARK: - Usage Fetching
@@ -240,7 +205,7 @@ class CursorLocalService: ObservableObject {
         // Parse billing cycle end date for reset time
         var resetTime: Date?
         if let billingEnd = summaryData.billingCycleEnd {
-            resetTime = Self.fractionalISO8601.date(from: billingEnd) ?? Self.plainISO8601.date(from: billingEnd)
+            resetTime = FlexibleISO8601.date(from: billingEnd)
         }
 
         // Extract usage from individual plan
@@ -287,13 +252,13 @@ class CursorLocalService: ObservableObject {
             "Cookie": "WorkosCursorSessionToken=\(authCookie)",
             "Origin": "https://cursor.com",
             "Referer": "https://cursor.com/dashboard?tab=usage",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            "User-Agent": ServiceSupport.browserUserAgent
         ]
     }
 
     private func fetchUsageSummary(userId: String, token: String) async throws -> CursorUsageSummaryResponse {
         guard let url = URL(string: usageSummaryEndpoint) else {
-            throw ServiceError.apiError("Invalid usage summary URL")
+            throw ServiceError.invalidURL
         }
 
         var request = URLRequest(url: url)
@@ -305,33 +270,20 @@ class CursorLocalService: ObservableObject {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, response) = try await urlSession.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ServiceError.apiError("Invalid response type")
-        }
-
-        if httpResponse.statusCode == 401 {
-            await MainActor.run {
-                self.hasAccess = false
-                self.lastError = ServiceError.notAuthenticated
-            }
-            throw ServiceError.notAuthenticated
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            AppLog.usage.error("Cursor usage-summary HTTP \(httpResponse.statusCode, privacy: .public)")
-            throw ServiceError.apiError("HTTP \(httpResponse.statusCode)")
-        }
-
-        // Parse the response
-        let decoder = JSONDecoder()
         do {
-            let summaryResponse = try decoder.decode(CursorUsageSummaryResponse.self, from: data)
-            return summaryResponse
+            let (data, response) = try await urlSession.data(for: request)
+            try ServiceSupport.validate(response, data: data)
+            return try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
         } catch {
-            AppLog.usage.error("Cursor usage-summary decode failed")
-            throw ServiceError.parsingError
+            let serviceError = ServiceSupport.serviceError(from: error)
+            AppLog.usage.error("Cursor usage-summary fetch failed: \(serviceError.localizedDescription)")
+            await MainActor.run {
+                self.lastError = serviceError
+                if case .notAuthenticated = serviceError {
+                    self.hasAccess = false
+                }
+            }
+            throw serviceError
         }
     }
 }

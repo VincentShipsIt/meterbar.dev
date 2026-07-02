@@ -40,14 +40,14 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 - **Multi-Service Support**: Track Claude Code, Codex CLI, and Cursor
 - **Zero Configuration**: Automatically reads credentials from CLI tools (no API keys needed)
 - **Real-time Updates**: Background refresh every 15 minutes
-- **Accordion UI**: Collapsible cards show compact progress bars
-- **Color-coded Status**: Green (good), Yellow (warning), Red (critical)
+- **Pace-aware Bars**: Usage bars show quota left with an expected-pace marker and burn-rate projection
+- **Color-coded Status**: Green (healthy), Orange (tight), Red (critical/exhausted)
 
 ## Supported Services
 
 | Service | Auth Method | Metrics Tracked |
 |---------|-------------|-----------------|
-| **Claude Code** | OAuth token from `claude login` | 5h session, 7-day all models, 7-day Sonnet |
+| **Claude Code** | Claude CLI `/usage` output | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
 | **Cursor** | Local SQLite database | Monthly usage |
 
@@ -116,27 +116,24 @@ open MeterBar.xcodeproj
 
 ## Usage
 
-1. **Launch the app** - It appears in your menu bar
-2. **Click the icon** - See all your usage metrics
-3. **Click a card header** - Expand/collapse to see details
+1. **Launch the app** - It appears in your menu bar with the tightest quota's percent left
+2. **Click the icon** - The popover shows every provider's quota windows
+3. **Open the dashboard** - Full view with limits, 30-day token costs, and settings
 4. **Refresh** - Click the refresh icon to update metrics
 
 ### Understanding the Display
 
-**Collapsed view**: Shows service name + compact progress bar for quick status
-
-**Expanded view**: Shows detailed metrics:
-- Usage percentage and progress bar
-- Reset time (when limits refresh)
-- Subscription type badge
+Each quota window shows the percent **left**, a pace marker for where usage
+should be at this point in the window, reset countdowns, and — when a limit is
+exhausted — a countdown to when usage resumes.
 
 ### Status Colors
 
 | Color | Meaning |
 |-------|---------|
-| Green | < 50% used - plenty remaining |
-| Yellow | 50-80% used - approaching limit |
-| Red | > 80% used - near or at limit |
+| Green | more than 25% of the quota left |
+| Orange | 25% or less left - quota is tight |
+| Red | 10% or less left - critical or exhausted |
 
 ## CLI Tool
 
@@ -149,15 +146,18 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider
+# Filter by provider (claude, codex, cursor)
 meterbar usage --provider claude
 
-# Show token costs (last 30 days)
+# Show token costs from the app's last local scan
 meterbar cost
 
-# Cost for specific period
-meterbar cost --days 7 --json
+# JSON output
+meterbar cost --json
 ```
+
+`meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
+the app's Costs tab), so the CLI and the app always show the same numbers.
 
 The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
 ```
@@ -177,10 +177,10 @@ macOS Keychain           # Legacy Claude Code OAuth fallback only
 ```
 
 It then uses the respective local source or API to fetch current usage data:
-- Claude: `https://api.anthropic.com/settings/usage`
+- Claude Code (legacy OAuth fallback only): `https://api.anthropic.com/api/oauth/usage`
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
 
-Claude Code usage uses `claude /usage` first so MeterBar does not need to read Claude Code's OAuth token during normal operation. A legacy OAuth fallback can be enabled with the `ClaudeCodeEnableOAuthFallback` UserDefaults key for local debugging.
+Claude Code usage uses `claude /usage` first so MeterBar does not need to read Claude Code's OAuth token during normal operation. A legacy OAuth fallback can be enabled in Settings under Claude Code.
 - Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR`.
 - Cursor: Local SQLite queries
 

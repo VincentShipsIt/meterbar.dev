@@ -1,5 +1,6 @@
 import XCTest
 @testable import MeterBar
+import MeterBarShared
 
 /// Locks the on-disk JSON contract of the shared metrics cache against
 /// PREVIOUSLY SHIPPED readers.

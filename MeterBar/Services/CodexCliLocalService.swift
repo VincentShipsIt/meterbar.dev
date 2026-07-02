@@ -24,8 +24,8 @@ class CodexCliLocalService: ObservableObject {
         return "\(homeDir)/.codex/auth.json"
     }
 
-    // URLSession with timeout configuration
-    private let urlSession = ServiceSupport.makeUsageSession()
+    // Shared URLSession with the standard usage-request timeouts
+    private let urlSession = ServiceSupport.session
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var lastError: ServiceError?
@@ -69,12 +69,11 @@ class CodexCliLocalService: ObservableObject {
     /// Check and update access status
     func checkAccess() {
         let hasToken = getAuthToken() != nil
-        let apply = { [weak self] in
+        ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
             self.hasAccess = hasToken
             if !hasToken { self.subscriptionType = nil }
         }
-        if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
     }
 
     // MARK: - Usage Fetching
@@ -90,7 +89,7 @@ class CodexCliLocalService: ObservableObject {
         }
 
         guard let url = URL(string: usageEndpoint) else {
-            throw ServiceError.apiError("Invalid usage endpoint URL")
+            throw ServiceError.invalidURL
         }
 
         var request = URLRequest(url: url)
@@ -109,33 +108,12 @@ class CodexCliLocalService: ObservableObject {
         request.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
         request.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
         request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-                + "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
+        request.setValue(ServiceSupport.browserUserAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 30.0
 
         do {
             let (data, response) = try await urlSession.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw ServiceError.apiError("Invalid response type")
-            }
-
-            if httpResponse.statusCode == 401 {
-                await MainActor.run {
-                    self.hasAccess = false
-                    self.lastError = ServiceError.notAuthenticated
-                }
-                throw ServiceError.notAuthenticated
-            }
-
-            guard (200...299).contains(httpResponse.statusCode) else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                AppLog.usage.error("Codex usage HTTP \(httpResponse.statusCode, privacy: .public)")
-                throw ServiceError.apiError("HTTP \(httpResponse.statusCode): \(errorMessage.prefix(100))")
-            }
+            try ServiceSupport.validate(response, data: data)
 
             let decoder = JSONDecoder()
             // Note: Codex CLI API uses Unix timestamps (Int64), not ISO8601 dates
@@ -200,21 +178,15 @@ class CodexCliLocalService: ObservableObject {
                 extraUsage: usageResponse.extraUsageStatus,
                 resetCreditsAvailable: usageResponse.resetCreditsAvailable
             )
-        } catch let urlError as URLError {
-            let errorMessage = ServiceSupport.message(for: urlError)
-            let error = ServiceError.apiError(errorMessage)
-            await MainActor.run { self.lastError = error }
-            throw error
-        } catch let error as ServiceError {
-            throw error
-        } catch is DecodingError {
-            AppLog.usage.error("Codex usage decode failed")
-            let serviceError = ServiceError.parsingError
-            await MainActor.run { self.lastError = serviceError }
-            throw serviceError
         } catch {
-            let serviceError = ServiceError.parsingError
-            await MainActor.run { self.lastError = serviceError }
+            let serviceError = ServiceSupport.serviceError(from: error)
+            AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
+            await MainActor.run {
+                self.lastError = serviceError
+                if case .notAuthenticated = serviceError {
+                    self.hasAccess = false
+                }
+            }
             throw serviceError
         }
     }

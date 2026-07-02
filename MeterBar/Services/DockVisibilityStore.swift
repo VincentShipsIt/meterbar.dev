@@ -14,7 +14,7 @@ final class DockVisibilityStore: ObservableObject {
     @Published private(set) var showInDock: Bool
 
     private let userDefaults: UserDefaults
-    private let storageKey = "ShowMeterBarInDock"
+    private let storageKey = StorageKeys.showInDock
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults

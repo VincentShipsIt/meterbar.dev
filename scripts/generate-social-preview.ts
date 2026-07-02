@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Social Preview Generator for Quota Guard
+ * Social Preview Generator for MeterBar
  *
  * Generates a GitHub-style social preview image (1280x640).
  *

@@ -1,70 +1,134 @@
 import Foundation
 import MeterBarShared
 
-struct TokenCost: Codable, Identifiable, Sendable {
-    var id: String { provider.rawValue }
+// Public: part of the MeterBar library's API surface consumed by the
+// meterbar CLI (`meterbar cost` reads the app's cached CostSummary).
+public struct TokenCost: Codable, Identifiable, Sendable {
+    public var id: String { provider.rawValue }
 
-    let provider: ServiceType
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheCreationTokens: Int
-    let cacheReadTokens: Int
-    let estimatedCostUSD: Double
-    let sessionCount: Int
-    let periodStart: Date
-    let periodEnd: Date
-    var modelBreakdowns: [TokenUsageBreakdown] = []
-    var originBreakdowns: [TokenUsageBreakdown] = []
+    public let provider: ServiceType
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheCreationTokens: Int
+    public let cacheReadTokens: Int
+    public let estimatedCostUSD: Double
+    public let sessionCount: Int
+    public let periodStart: Date
+    public let periodEnd: Date
+    public var modelBreakdowns: [TokenUsageBreakdown]
+    public var originBreakdowns: [TokenUsageBreakdown]
 
-    var totalTokens: Int {
+    public init(
+        provider: ServiceType,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double,
+        sessionCount: Int,
+        periodStart: Date,
+        periodEnd: Date,
+        modelBreakdowns: [TokenUsageBreakdown] = [],
+        originBreakdowns: [TokenUsageBreakdown] = []
+    ) {
+        self.provider = provider
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+        self.sessionCount = sessionCount
+        self.periodStart = periodStart
+        self.periodEnd = periodEnd
+        self.modelBreakdowns = modelBreakdowns
+        self.originBreakdowns = originBreakdowns
+    }
+
+    public var totalTokens: Int {
         inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
     }
 
-    var formattedCost: String {
+    public var formattedCost: String {
         UsageFormat.cost(estimatedCostUSD)
     }
 
-    var formattedTokens: String {
+    public var formattedTokens: String {
         UsageFormat.groupedTokens(totalTokens)
     }
 }
 
-struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
-    var id: String { "\(provider.rawValue)-\(name)" }
+public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
+    public var id: String { "\(provider.rawValue)-\(name)" }
 
-    let provider: ServiceType
-    let name: String
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheCreationTokens: Int
-    let cacheReadTokens: Int
-    let estimatedCostUSD: Double
-    let sessionCount: Int
+    public let provider: ServiceType
+    public let name: String
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheCreationTokens: Int
+    public let cacheReadTokens: Int
+    public let estimatedCostUSD: Double
+    public let sessionCount: Int
 
-    var totalTokens: Int {
+    public init(
+        provider: ServiceType,
+        name: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double,
+        sessionCount: Int
+    ) {
+        self.provider = provider
+        self.name = name
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+        self.sessionCount = sessionCount
+    }
+
+    public var totalTokens: Int {
         inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
     }
 
-    var formattedCost: String {
+    public var formattedCost: String {
         UsageFormat.cost(estimatedCostUSD)
     }
 
-    var formattedTokens: String {
+    public var formattedTokens: String {
         UsageFormat.groupedTokens(totalTokens)
     }
 }
 
-struct DailyTokenUsage: Codable, Identifiable, Sendable {
-    var id: String { "\(provider.rawValue)-\(Self.dayFormatter.string(from: date))" }
+public struct DailyTokenUsage: Codable, Identifiable, Sendable {
+    public var id: String { "\(provider.rawValue)-\(Self.dayFormatter.string(from: date))" }
 
-    let date: Date
-    let provider: ServiceType
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheReadTokens: Int
-    let estimatedCostUSD: Double
+    public let date: Date
+    public let provider: ServiceType
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let estimatedCostUSD: Double
 
-    var totalTokens: Int {
+    public init(
+        date: Date,
+        provider: ServiceType,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double
+    ) {
+        self.date = date
+        self.provider = provider
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+    }
+
+    public var totalTokens: Int {
         inputTokens + outputTokens + cacheReadTokens
     }
 
@@ -76,14 +140,14 @@ struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }()
 }
 
-struct CostSummary: Codable, Sendable {
-    let costs: [TokenCost]
-    let totalCostUSD: Double
-    let totalTokens: Int
-    let periodDays: Int
-    let dailyUsage: [DailyTokenUsage]
+public struct CostSummary: Codable, Sendable {
+    public let costs: [TokenCost]
+    public let totalCostUSD: Double
+    public let totalTokens: Int
+    public let periodDays: Int
+    public let dailyUsage: [DailyTokenUsage]
 
-    init(
+    public init(
         costs: [TokenCost],
         totalCostUSD: Double,
         totalTokens: Int,
@@ -97,16 +161,16 @@ struct CostSummary: Codable, Sendable {
         self.dailyUsage = dailyUsage
     }
 
-    var formattedTotalCost: String {
+    public var formattedTotalCost: String {
         UsageFormat.cost(totalCostUSD)
     }
 
-    var averageDailyCost: Double {
+    public var averageDailyCost: Double {
         guard periodDays > 0 else { return 0 }
         return totalCostUSD / Double(periodDays)
     }
 
-    var formattedDailyCost: String {
+    public var formattedDailyCost: String {
         "\(UsageFormat.cost(averageDailyCost))/day"
     }
 
@@ -140,7 +204,7 @@ struct CostSummary: Codable, Sendable {
         return populatedDays.count < daysToCheck
     }
 
-    func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {
+    public func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {
         let visibleCosts = costs.filter { enabledServices.contains($0.provider) }
         let visibleDailyUsage = dailyUsage.filter { enabledServices.contains($0.provider) }
 

@@ -104,13 +104,15 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         )
     }
 
+    /// Worst three-level status across this service's limits, derived from the
+    /// shared `QuotaBand` thresholds. Used by the widget's status dots.
     public var overallStatus: UsageStatus {
         let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
 
-        if limits.contains(where: { $0.isAtLimit }) {
+        if limits.contains(where: { $0.statusColor == .critical }) {
             return .critical
-        } else if limits.contains(where: { $0.isNearLimit }) {
+        } else if limits.contains(where: { $0.statusColor == .warning }) {
             return .warning
         } else {
             return .good
@@ -118,6 +120,6 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     }
 
     public var hasData: Bool {
-        return sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
+        sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
     }
 }

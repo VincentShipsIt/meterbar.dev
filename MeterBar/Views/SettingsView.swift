@@ -1,11 +1,10 @@
 import SwiftUI
-import MeterBarShared
 import AppKit
+import MeterBarShared
 
 struct SettingsView: View {
     let embeddedInDashboard: Bool
 
-    @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
@@ -14,13 +13,14 @@ struct SettingsView: View {
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
 
-    @State private var claudeAdminKey: String = ""
-    @State private var openaiAdminKey: String = ""
     @State private var newClaudeAccountName: String = ""
     @State private var newClaudeConfigDirectory: String = ""
 
-    @State private var showingClaudeHelp = false
-    @State private var showingOpenAIHelp = false
+    /// Same key ClaudeCodeLocalService reads. Previously this flag was only
+    /// settable via `defaults write`; exposing it here makes the legacy OAuth
+    /// fallback discoverable instead of a hidden switch.
+    @AppStorage(StorageKeys.claudeCodeOAuthFallback)
+    private var oauthFallbackEnabled = false
 
     init(embeddedInDashboard: Bool = false) {
         self.embeddedInDashboard = embeddedInDashboard
@@ -29,14 +29,8 @@ struct SettingsView: View {
     var body: some View {
         Form {
             trackedProvidersSection
-            if providerVisibility.isEnabled(.claude) {
-                claudeAdminSection
-            }
             if providerVisibility.isEnabled(.claudeCode) {
                 claudeCodeSection
-            }
-            if providerVisibility.isEnabled(.openai) {
-                openAISection
             }
             if providerVisibility.isEnabled(.cursor) {
                 cursorSection
@@ -55,12 +49,6 @@ struct SettingsView: View {
             minWidth: embeddedInDashboard ? nil : 560,
             minHeight: embeddedInDashboard ? nil : 500
         )
-        .sheet(isPresented: $showingClaudeHelp) {
-            ClaudeHelpView()
-        }
-        .sheet(isPresented: $showingOpenAIHelp) {
-            OpenAIHelpView()
-        }
     }
 
     private var generalSection: some View {
@@ -154,56 +142,6 @@ struct SettingsView: View {
                 detail: "Track Cursor quota from local Cursor state.",
                 service: .cursor
             )
-            SettingsDivider()
-            providerToggleRow(
-                title: "Claude Admin API",
-                detail: "Optional organization usage API source.",
-                service: .claude
-            )
-            providerToggleRow(
-                title: "OpenAI Admin API",
-                detail: "Optional platform usage API source.",
-                service: .openai
-            )
-        }
-    }
-
-    private var claudeAdminSection: some View {
-        SettingsPanelSection(title: "Claude (Anthropic)", logoKind: .claude, color: MeterBarTheme.claudeAccent) {
-            SettingsRowView(title: "Connection") {
-                StatusPill(
-                    title: authManager.isClaudeAuthenticated ? "Connected" : "Not Connected",
-                    isConnected: authManager.isClaudeAuthenticated
-                )
-            }
-
-            SettingsRowView(title: "Admin API Key", detail: "Required for organization usage APIs.") {
-                SecureField("sk-ant-admin...", text: $claudeAdminKey)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 330)
-            }
-
-            SettingsRowView(title: "Actions") {
-                HStack(spacing: 8) {
-                    Button("Save") {
-                        _ = authManager.setClaudeAdminKey(claudeAdminKey)
-                        claudeAdminKey = ""
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(claudeAdminKey.isEmpty)
-
-                    Button("Remove", role: .destructive) {
-                        authManager.removeClaudeAdminKey()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!authManager.isClaudeAuthenticated)
-
-                    Button("Help") {
-                        showingClaudeHelp = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
         }
     }
 
@@ -252,6 +190,21 @@ struct SettingsView: View {
                 )
             }
 
+            SettingsRowView(
+                title: "Legacy OAuth fallback",
+                detail: "When the Claude CLI is unavailable, read usage via Claude Code's OAuth token."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { oauthFallbackEnabled },
+                    set: { enabled in
+                        oauthFallbackEnabled = enabled
+                        claudeCodeService.checkAccess()
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
             SettingsDivider()
 
             VStack(alignment: .leading, spacing: 8) {
@@ -297,45 +250,6 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canAddClaudeAccount)
-            }
-        }
-    }
-
-    private var openAISection: some View {
-        SettingsPanelSection(title: "OpenAI", logoKind: .codex, color: MeterBarTheme.codexAccent) {
-            SettingsRowView(title: "Connection") {
-                StatusPill(
-                    title: authManager.isOpenAIAuthenticated ? "Connected" : "Not Connected",
-                    isConnected: authManager.isOpenAIAuthenticated
-                )
-            }
-
-            SettingsRowView(title: "Admin API Key", detail: "Required for platform usage APIs.") {
-                SecureField("Admin API Key", text: $openaiAdminKey)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 330)
-            }
-
-            SettingsRowView(title: "Actions") {
-                HStack(spacing: 8) {
-                    Button("Save") {
-                        _ = authManager.setOpenAIAdminKey(openaiAdminKey)
-                        openaiAdminKey = ""
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(openaiAdminKey.isEmpty)
-
-                    Button("Remove", role: .destructive) {
-                        authManager.removeOpenAIAdminKey()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!authManager.isOpenAIAuthenticated)
-
-                    Button("Help") {
-                        showingOpenAIHelp = true
-                    }
-                    .buttonStyle(.bordered)
-                }
             }
         }
     }
@@ -677,100 +591,5 @@ private struct AccountProfileRow: View {
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-/// Shared admin-key help sheet. The Claude and OpenAI variants only differ by
-/// copy and the console URL, so they share one layout.
-private struct AdminKeyHelpView: View {
-    @Environment(\.dismiss)
-    var dismiss
-
-    let title: String
-    let intro: String
-    let steps: [String]
-    let note: String
-    let consoleButtonTitle: String
-    let consoleURL: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title)
-                .font(.title2)
-                .bold()
-
-            Text(intro)
-                .foregroundColor(.secondary)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                    Text("\(index + 1). \(step)")
-                }
-            }
-
-            Divider()
-
-            Text(note)
-                .font(.caption)
-                .foregroundStyle(MeterBarTheme.warning)
-
-            HStack {
-                Button(consoleButtonTitle) {
-                    if let url = URL(string: consoleURL) {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-
-                Spacer()
-
-                Button("Close") {
-                    dismiss()
-                }
-            }
-        }
-        .padding()
-        .frame(width: 500, height: 400)
-    }
-}
-
-struct ClaudeHelpView: View {
-    var body: some View {
-        AdminKeyHelpView(
-            title: "How to get Claude Admin API Key",
-            intro: "The Usage API requires an Admin API key, which is different from a regular API key.",
-            steps: [
-                "Go to the Claude Console",
-                "Navigate to Settings → Admin Keys",
-                "Click 'Create Admin Key'",
-                "Copy the key (starts with sk-ant-admin...)",
-                "Paste it in the field above"
-            ],
-            note: "Note: You must be an organization admin to create Admin API keys. "
-                + "Individual accounts cannot access the Usage API.",
-            consoleButtonTitle: "Open Claude Console",
-            consoleURL: "https://console.anthropic.com/settings/admin-keys"
-        )
-    }
-}
-
-struct OpenAIHelpView: View {
-    var body: some View {
-        AdminKeyHelpView(
-            title: "How to get OpenAI Admin API Key",
-            intro: "The Usage API requires an Admin key from your organization settings.",
-            steps: [
-                "Go to OpenAI Platform",
-                "Navigate to Settings → Organization → Admin Keys",
-                "Click 'Create new admin key'",
-                "Copy the key",
-                "Paste it in the field above"
-            ],
-            note: "Note: You must be an organization owner or admin to create Admin keys.",
-            consoleButtonTitle: "Open OpenAI Settings",
-            consoleURL: "https://platform.openai.com/settings/organization/admin-keys"
-        )
     }
 }

@@ -280,7 +280,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let warnKey = "\(baseKey)-warn"
             let criticalKey = "\(baseKey)-critical"
 
-            if limit.percentage >= 100 {
+            // Same bands as every other surface: warn in the critical band
+            // (≤10% left ≡ the old ≥90% used), alert when exhausted.
+            switch QuotaBand.forLimit(limit) {
+            case .exhausted:
                 // Only fire once per crossing; supersede any pending warn alert.
                 notifiedLimitKeys.remove(warnKey)
                 if notifiedLimitKeys.insert(criticalKey).inserted {
@@ -290,7 +293,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         body: "You've reached your usage limit"
                     )
                 }
-            } else if limit.percentage >= 90 {
+            case .critical:
                 if notifiedLimitKeys.insert(warnKey).inserted {
                     sendNotification(
                         identifier: warnKey,
@@ -298,7 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         body: "You're at \(Int(limit.percentage))% of your limit"
                     )
                 }
-            } else {
+            case .healthy, .tight:
                 // Usage fell back below the threshold; allow the next crossing to
                 // notify again.
                 notifiedLimitKeys.remove(warnKey)
@@ -365,7 +368,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusItem(metrics: [ServiceType: UsageMetrics]) {
         guard let button = statusItem?.button else { return }
 
-        guard let status = selectedStatus(in: metrics), let limit = status.limit else {
+        guard let limit = mostConstrainedPrimaryLimit(in: metrics) else {
             button.title = ""
             button.imagePosition = .imageOnly
             button.toolTip = "MeterBar"
@@ -375,13 +378,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let percent = percentLeft(for: limit)
         button.imagePosition = .imageLeft
         button.title = " \(percent)%"
-        button.toolTip = "MeterBar: \(percent)% left · \(status.label)"
-        button.setAccessibilityLabel("MeterBar \(percent)% left, \(status.label)")
-    }
-
-    @MainActor
-    private func selectedStatus(in metrics: [ServiceType: UsageMetrics]) -> (label: String, limit: UsageLimit?)? {
-        ("overview primary quota", mostConstrainedPrimaryLimit(in: metrics))
+        button.toolTip = "MeterBar: \(percent)% left on the tightest quota"
+        button.setAccessibilityLabel("MeterBar \(percent)% left on the tightest quota")
     }
 
     @MainActor
@@ -411,9 +409,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func percentLeft(for limit: UsageLimit) -> Int {
-        guard limit.total > 0 else { return 100 }
-        let rawPercentage = max(0, (limit.used / limit.total) * 100)
-        return Int(max(0, 100 - rawPercentage).rounded())
+        // Shared math so the menu-bar title always agrees with the popover and
+        // dashboard (the previous copy rounded instead of ceiling and could
+        // disagree by 1%).
+        QuotaMath.percentLeft(for: limit)
     }
 
     private func createMenuBarIcon() -> NSImage {

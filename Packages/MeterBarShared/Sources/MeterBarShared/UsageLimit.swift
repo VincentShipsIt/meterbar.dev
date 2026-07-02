@@ -33,26 +33,16 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         return max(0.001, total)
     }
 
-    public var remaining: Double {
-        return max(0, total - used)
-    }
-
-    public var isNearLimit: Bool {
-        return percentage >= 80
-    }
-
+    // Severity thresholds and "% left" live in `QuotaBands` — the single
+    // source of truth for every surface. Only the hard at-limit check stays.
     public var isAtLimit: Bool {
         return percentage >= 100
     }
 
+    /// Three-level status derived from the shared `QuotaBand` thresholds, for
+    /// surfaces (widget) that render good/warning/critical directly.
     public var statusColor: UsageStatus {
-        if isAtLimit {
-            return .critical
-        } else if isNearLimit {
-            return .warning
-        } else {
-            return .good
-        }
+        QuotaBand.forLimit(self).status
     }
 
     public func secondsUntilReset(now: Date = Date()) -> TimeInterval? {

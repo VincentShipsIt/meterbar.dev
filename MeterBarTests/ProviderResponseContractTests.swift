@@ -1,5 +1,6 @@
 import XCTest
 @testable import MeterBar
+import MeterBarShared
 
 /// Contract tests for the provider response models.
 ///

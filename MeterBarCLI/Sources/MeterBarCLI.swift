@@ -1,6 +1,7 @@
 import ArgumentParser
 import Darwin
 import Foundation
+import MeterBar
 import MeterBarShared
 
 @main
@@ -63,11 +64,12 @@ struct Usage: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output as JSON")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Filter by provider (claude, openai, cursor, codex)")
+    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor)")
     var provider: String?
 
     func run() throws {
-        let metrics = loadCachedMetrics()
+        // Same app-group file, codec, and models as the app and widget.
+        let metrics = SharedDataStore.shared.loadMetrics()
 
         if metrics.isEmpty {
             if json {
@@ -79,9 +81,12 @@ struct Usage: ParsableCommand {
             return
         }
 
-        let filtered: [String: UsageMetrics]
+        let filtered: [ServiceType: UsageMetrics]
         if let provider = provider?.lowercased() {
-            filtered = metrics.filter { $0.key.lowercased().contains(provider) }
+            filtered = metrics.filter {
+                $0.key.rawValue.lowercased().contains(provider)
+                    || $0.key.displayName.lowercased().contains(provider)
+            }
         } else {
             filtered = metrics
         }
@@ -93,55 +98,26 @@ struct Usage: ParsableCommand {
         }
     }
 
-    private func loadCachedMetrics() -> [String: UsageMetrics] {
-        // Try app group container first
-        let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.dev.shipshit.meterbar"
-        )
-
-        var metricsPath: URL?
-
-        if let containerURL = containerURL {
-            metricsPath = containerURL.appendingPathComponent("cached_usage_metrics.json")
+    private func printJSON(_ metrics: [ServiceType: UsageMetrics]) {
+        let keyed = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
+            result[pair.key.rawValue] = pair.value
         }
-
-        // Fallback to UserDefaults cache
-        if metricsPath == nil || !FileManager.default.fileExists(atPath: metricsPath!.path) {
-            if let data = UserDefaults.standard.data(forKey: "cached_usage_metrics"),
-               let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) {
-                return decoded
-            }
-            return [:]
-        }
-
-        guard let path = metricsPath,
-              let data = try? Data(contentsOf: path),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
-            return [:]
-        }
-
-        return decoded
-    }
-
-    private func printJSON(_ metrics: [String: UsageMetrics]) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(metrics),
+        if let data = try? encoder.encode(keyed),
            let str = String(data: data, encoding: .utf8) {
             print(str)
         }
     }
 
-    private func printText(_ metrics: [String: UsageMetrics]) {
+    private func printText(_ metrics: [ServiceType: UsageMetrics]) {
         print("╭─────────────────────────────────────────╮")
         print("│             MeterBar Usage              │")
         print("╰─────────────────────────────────────────╯")
         print()
 
-        for (service, metric) in metrics.sorted(by: { $0.key < $1.key }) {
-            let displayName = ServiceType(rawValue: service)?.displayName
-                ?? service.replacingOccurrences(of: "_", with: " ").capitalized
-            print("▸ \(displayName)")
+        for (service, metric) in metrics.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            print("▸ \(service.displayName)")
 
             if let session = metric.sessionLimit {
                 printLimit("  Session", session)
@@ -150,7 +126,7 @@ struct Usage: ParsableCommand {
                 printLimit("  Weekly", weekly)
             }
             if let codeReview = metric.codeReviewLimit {
-                printLimit("  Code Review", codeReview)
+                printLimit(service == .claudeCode ? "  Sonnet" : "  Code Review", codeReview)
             }
             print()
         }
@@ -159,12 +135,12 @@ struct Usage: ParsableCommand {
     private func printLimit(_ label: String, _ limit: UsageLimit) {
         let percent = limit.percentage
         let bar = progressBar(percent: percent, width: 20)
-        let status = statusEmoji(percent: percent)
+        let status = statusEmoji(for: limit)
 
         print("\(label): \(bar) \(String(format: "%.0f%%", percent)) \(status)")
         print("    \(Int(limit.used))/\(Int(limit.total)) used")
         if let reset = limit.resetTime {
-            print("    Resets: \(formatDate(reset))")
+            print("    Resets: \(UsageFormat.relative(reset))")
         }
     }
 
@@ -174,154 +150,77 @@ struct Usage: ParsableCommand {
         return "[" + String(repeating: "█", count: filled) + String(repeating: "░", count: empty) + "]"
     }
 
-    private func statusEmoji(percent: Double) -> String {
-        if percent < 50 { return "✓" }
-        if percent < 80 { return "⚠" }
-        return "✗"
-    }
-
-    private func formatDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+    /// Same severity bands as the app (previously the CLI warned at 50% used
+    /// while the app warned at 75%).
+    private func statusEmoji(for limit: UsageLimit) -> String {
+        switch QuotaBand.forLimit(limit) {
+        case .healthy: return "✓"
+        case .tight: return "⚠"
+        case .critical, .exhausted: return "✗"
+        }
     }
 }
 
 struct Cost: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Show token costs from local sessions"
+        abstract: "Show token costs from the MeterBar app's last local scan"
     )
 
     @Flag(name: .shortAndLong, help: "Output as JSON")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Number of days to scan (default: 30)")
-    var days: Int = 30
-
     func run() throws {
-        let costs = scanClaudeCosts(days: days)
+        // Reports the app's cached scan instead of re-implementing it. The old
+        // CLI scanner diverged from the app (no event dedup, one scan root,
+        // file-mtime-only cutoff, hardcoded Sonnet pricing) so `meterbar cost`
+        // and the app's Costs tab showed different numbers for the same logs.
+        guard let cache = CostSummaryStore.load() else {
+            if json {
+                print("{\"error\": \"No cost data cached. Open MeterBar and run a scan (Costs tab).\"}")
+            } else {
+                print("No cost data cached.")
+                print("Open MeterBar and run a scan (Costs tab), then try again.")
+            }
+            return
+        }
 
         if json {
             let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            if let data = try? encoder.encode(costs),
+            if let data = try? encoder.encode(cache),
                let str = String(data: data, encoding: .utf8) {
                 print(str)
             }
         } else {
-            printCosts(costs)
+            printCosts(cache)
         }
     }
 
-    private func scanClaudeCosts(days: Int) -> CostResult {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude")
-            .appendingPathComponent("projects")
+    private func printCosts(_ cache: CostSummaryCache) {
+        let summary = cache.summary
 
-        var totalInput = 0
-        var totalOutput = 0
-        var totalCacheCreation = 0
-        var totalCacheRead = 0
-        var sessionCount = 0
-
-        guard FileManager.default.fileExists(atPath: claudeDir.path) else {
-            return CostResult(provider: "claude_code", inputTokens: 0, outputTokens: 0,
-                            cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCostUSD: 0,
-                            sessionCount: 0, periodDays: days)
-        }
-
-        do {
-            let projectDirs = try FileManager.default.contentsOfDirectory(at: claudeDir, includingPropertiesForKeys: nil)
-
-            for projectDir in projectDirs {
-                let jsonlFiles = (try? FileManager.default.contentsOfDirectory(at: projectDir, includingPropertiesForKeys: nil)) ?? []
-
-                for jsonlFile in jsonlFiles where jsonlFile.pathExtension == "jsonl" {
-                    let attrs = try? jsonlFile.resourceValues(forKeys: [.contentModificationDateKey])
-                    guard let modDate = attrs?.contentModificationDate, modDate >= cutoffDate else { continue }
-
-                    if let data = try? Data(contentsOf: jsonlFile),
-                       let content = String(data: data, encoding: .utf8) {
-                        for line in content.components(separatedBy: .newlines) where !line.isEmpty {
-                            if let lineData = line.data(using: .utf8),
-                               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                               let message = json["message"] as? [String: Any],
-                               let usage = message["usage"] as? [String: Any] {
-                                totalInput += usage["input_tokens"] as? Int ?? 0
-                                totalOutput += usage["output_tokens"] as? Int ?? 0
-                                totalCacheCreation += usage["cache_creation_input_tokens"] as? Int ?? 0
-                                totalCacheRead += usage["cache_read_input_tokens"] as? Int ?? 0
-                            }
-                        }
-                        sessionCount += 1
-                    }
-                }
-            }
-        } catch {
-            // Ignore errors
-        }
-
-        // Calculate cost (Sonnet pricing). Mirrors the "claude-sonnet" entry in the
-        // app's CostTracker pricing table — keep both in sync until a shared package
-        // exists (.agents/docs/DEFERRED_WORK.md §1).
-        let inputCost = Double(totalInput) / 1_000_000 * 3.0
-        let outputCost = Double(totalOutput) / 1_000_000 * 15.0
-        let cacheCreationCost = Double(totalCacheCreation) / 1_000_000 * 3.75
-        let cacheReadCost = Double(totalCacheRead) / 1_000_000 * 0.30
-        let totalCost = inputCost + outputCost + cacheCreationCost + cacheReadCost
-
-        return CostResult(
-            provider: "claude_code",
-            inputTokens: totalInput,
-            outputTokens: totalOutput,
-            cacheCreationTokens: totalCacheCreation,
-            cacheReadTokens: totalCacheRead,
-            estimatedCostUSD: totalCost,
-            sessionCount: sessionCount,
-            periodDays: days
-        )
-    }
-
-    private func printCosts(_ costs: CostResult) {
         print("╭─────────────────────────────────────────╮")
         print("│          MeterBar Cost Tracker          │")
         print("╰─────────────────────────────────────────╯")
         print()
-        print("Provider: Claude Code")
-        print("Period: Last \(costs.periodDays) days")
-        print("Files scanned: \(costs.sessionCount)")
+        print("Period: Last \(summary.periodDays) days")
+        print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
         print()
-        print("Tokens:")
-        print("  Input:          \(formatNumber(costs.inputTokens))")
-        print("  Output:         \(formatNumber(costs.outputTokens))")
-        print("  Cache Creation: \(formatNumber(costs.cacheCreationTokens))")
-        print("  Cache Read:     \(formatNumber(costs.cacheReadTokens))")
-        print()
-        print("Estimated Cost: $\(String(format: "%.2f", costs.estimatedCostUSD))")
-        print("Daily Average:  $\(String(format: "%.2f", costs.estimatedCostUSD / Double(costs.periodDays)))/day")
+
+        for cost in summary.costs {
+            print("▸ \(cost.provider.displayName)")
+            print("  Sessions:       \(cost.sessionCount)")
+            print("  Input:          \(UsageFormat.groupedTokens(cost.inputTokens))")
+            print("  Output:         \(UsageFormat.groupedTokens(cost.outputTokens))")
+            print("  Cache Creation: \(UsageFormat.groupedTokens(cost.cacheCreationTokens))")
+            print("  Cache Read:     \(UsageFormat.groupedTokens(cost.cacheReadTokens))")
+            print("  Estimated Cost: \(cost.formattedCost)")
+            print()
+        }
+
+        print("Total:          \(summary.formattedTotalCost)")
+        print("Daily Average:  \(summary.formattedDailyCost)")
+        print("Tokens:         \(UsageFormat.groupedTokens(summary.totalTokens))")
     }
-
-    private static let numberFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-
-    private func formatNumber(_ num: Int) -> String {
-        Self.numberFormatter.string(from: NSNumber(value: num)) ?? "\(num)"
-    }
-}
-
-// MARK: - Models
-
-struct CostResult: Codable {
-    let provider: String
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheCreationTokens: Int
-    let cacheReadTokens: Int
-    let estimatedCostUSD: Double
-    let sessionCount: Int
-    let periodDays: Int
 }

@@ -8,3 +8,15 @@ public enum UsageStatus: Sendable {
     case warning
     case critical
 }
+
+public extension QuotaBand {
+    /// Coarse three-level status for surfaces (widget) that only render
+    /// good/warning/critical rather than the full four-band scheme.
+    var status: UsageStatus {
+        switch self {
+        case .healthy: return .good
+        case .tight: return .warning
+        case .critical, .exhausted: return .critical
+        }
+    }
+}

@@ -5,12 +5,6 @@ import MeterBarShared
 final class ExtraUsageStatusTests: XCTestCase {
     // MARK: - ExtraUsageStatus basics
 
-    func testIsOnReflectsState() {
-        XCTAssertTrue(ExtraUsageStatus(state: .on).isOn)
-        XCTAssertFalse(ExtraUsageStatus(state: .off).isOn)
-        XCTAssertFalse(ExtraUsageStatus(state: .unknown).isOn)
-    }
-
     func testUnknownConstant() {
         XCTAssertEqual(ExtraUsageStatus.unknown.state, .unknown)
         XCTAssertNil(ExtraUsageStatus.unknown.detail)

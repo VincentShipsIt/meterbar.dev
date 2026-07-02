@@ -28,7 +28,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     @Published private(set) var customAccounts: [ClaudeCodeAccount] = []
 
     private let userDefaults: UserDefaults
-    private let storageKey = "ClaudeCodeCustomAccounts"
+    private let storageKey = StorageKeys.claudeCodeCustomAccounts
 
     var accounts: [ClaudeCodeAccount] {
         [ClaudeCodeAccount.defaultAccount] + customAccounts
