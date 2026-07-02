@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class UsageDashboardWindowController {
@@ -48,6 +49,7 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case limits = "Limits"
     case costs = "Costs"
+    case share = "Share"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -60,6 +62,8 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
             return "chart.bar.fill"
         case .costs:
             return "dollarsign.circle.fill"
+        case .share:
+            return "square.and.arrow.up.fill"
         case .settings:
             return "gearshape.fill"
         }
@@ -74,6 +78,8 @@ struct UsageDashboardView: View {
 
     @State private var selectedSection: DashboardSection = .overview
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var socialCardGeneratedAt = Date()
+    @State private var socialShareStatus: String?
 
     private var activeSection: DashboardSection { selectedSection }
 
@@ -157,6 +163,8 @@ struct UsageDashboardView: View {
                     limitsContent
                 case .costs:
                     costsContent
+                case .share:
+                    shareContent
                 case .settings:
                     settingsContent
                 }
@@ -284,6 +292,67 @@ struct UsageDashboardView: View {
         }
     }
 
+    private var shareContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SocialShareCardPreview(content: socialShareCardContent)
+                .frame(maxWidth: 860)
+                .accessibilityLabel("MeterBar social share card preview")
+
+            HStack(spacing: 10) {
+                Button {
+                    copySocialCardImage()
+                } label: {
+                    Label("Copy PNG", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    saveSocialCardImage()
+                } label: {
+                    Label("Save PNG", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    copyTweetText()
+                } label: {
+                    Label("Copy Text", systemImage: "text.quote")
+                }
+                .buttonStyle(.bordered)
+
+                if visibleCostSummary?.dailyUsage.isEmpty ?? true {
+                    Button {
+                        Task {
+                            await costTracker.scanCosts(days: 30)
+                            socialCardGeneratedAt = Date()
+                        }
+                    } label: {
+                        Label("Scan 30 Days", systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(costTracker.isRefreshInProgress)
+                }
+
+                Spacer()
+
+                if let socialShareStatus {
+                    Text(socialShareStatus)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .transition(.opacity)
+                }
+            }
+
+            DashboardCard(title: "Tweet Text") {
+                Text(socialShareCardContent.tweetText)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func costScanChart(height: CGFloat, compact: Bool, showsProgressBadge: Bool = true) -> some View {
         ZStack {
             if let summary = visibleCostSummary, !summary.dailyUsage.isEmpty {
@@ -300,6 +369,28 @@ struct UsageDashboardView: View {
             }
         }
         .frame(height: height)
+    }
+
+    private func makeSocialShareCardContent(generatedAt: Date) -> SocialShareCardContent {
+        let tightestLimit = tightestDashboardLimit
+        return SocialShareCardContent(
+            tokenTotal: visibleCostSummary?.totalTokens,
+            estimatedCostUSD: visibleCostSummary?.totalCostUSD,
+            sourceCount: socialSourceCount,
+            providerNames: socialProviderNames,
+            tightestLimitTitle: tightestLimit?.title,
+            tightestPercentLeft: tightestLimit?.percentLeft,
+            dailyTokenTotals: socialDailyTokenTotals(generatedAt: generatedAt),
+            generatedAt: generatedAt
+        )
+    }
+
+    private func socialDailyTokenTotals(generatedAt: Date) -> [Int] {
+        guard let visibleCostSummary else { return [] }
+        return SocialShareCardContent.dailyTokenTotals(
+            from: visibleCostSummary.dailyUsage,
+            now: generatedAt
+        )
     }
 
     private var settingsContent: some View {
@@ -342,6 +433,31 @@ struct UsageDashboardView: View {
         costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
     }
 
+    private var socialShareCardContent: SocialShareCardContent {
+        makeSocialShareCardContent(generatedAt: socialCardGeneratedAt)
+    }
+
+    private var socialSourceCount: Int {
+        max(providerSnapshots.count, visibleCostSummary?.costs.count ?? 0)
+    }
+
+    private var socialProviderNames: [String] {
+        if let costs = visibleCostSummary?.costs, !costs.isEmpty {
+            return costs.map(\.provider.displayName)
+        }
+
+        let snapshotTitles = providerSnapshots.map(\.title)
+        if !snapshotTitles.isEmpty {
+            return snapshotTitles
+        }
+
+        return enabledSourceLabels
+    }
+
+    private var tightestDashboardLimit: DashboardLimit? {
+        providerSnapshots.flatMap(\.limits).min { $0.percentLeft < $1.percentLeft }
+    }
+
     private var enabledSourceLabels: [String] {
         var labels: [String] = []
         if providerVisibility.isEnabled(.codexCli) {
@@ -360,7 +476,7 @@ struct UsageDashboardView: View {
     }
 
     private var tightestWindowColor: Color {
-        guard let limit = providerSnapshots.flatMap(\.limits).min(by: { $0.percentLeft < $1.percentLeft }) else {
+        guard let limit = tightestDashboardLimit else {
             return .secondary
         }
         return MeterBarTheme.quotaStatusColor(percentLeft: limit.percentLeft)
@@ -368,7 +484,7 @@ struct UsageDashboardView: View {
 
     private var overviewStatusTitle: String {
         guard !providerSnapshots.isEmpty else { return "No sources enabled" }
-        guard let limit = providerSnapshots.flatMap(\.limits).min(by: { $0.percentLeft < $1.percentLeft }) else {
+        guard let limit = tightestDashboardLimit else {
             return "Waiting for usage"
         }
         if limit.percentLeft <= 0 { return "Quota exhausted" }
@@ -381,7 +497,7 @@ struct UsageDashboardView: View {
         guard !providerSnapshots.isEmpty else {
             return "Enable providers in Settings to show quota status."
         }
-        guard let limit = providerSnapshots.flatMap(\.limits).min(by: { $0.percentLeft < $1.percentLeft }) else {
+        guard let limit = tightestDashboardLimit else {
             return "Refresh to load enabled provider status."
         }
         if limit.percentLeft <= 0 {
@@ -398,6 +514,8 @@ struct UsageDashboardView: View {
             return "Every tracked quota window"
         case .costs:
             return "Local 30-day token spend"
+        case .share:
+            return "Social card export"
         case .settings:
             return "Accounts, refresh, and local sources"
         }
@@ -419,7 +537,7 @@ struct UsageDashboardView: View {
 
     private var isRefreshButtonAnimating: Bool {
         switch activeSection {
-        case .costs:
+        case .costs, .share:
             return costTracker.isRefreshInProgress
         case .overview, .limits, .settings:
             return dataManager.isLoading
@@ -427,16 +545,101 @@ struct UsageDashboardView: View {
     }
 
     private func refreshDashboard() async {
-        if activeSection == .costs {
+        if activeSection == .costs || activeSection == .share {
             await costTracker.scanCosts(days: 30)
+            socialCardGeneratedAt = Date()
         } else {
             await dataManager.refreshAll()
         }
     }
 
     private func refreshCostsIfMissingDays() async {
-        guard activeSection == .overview || activeSection == .costs else { return }
+        guard activeSection == .overview || activeSection == .costs || activeSection == .share else { return }
         await costTracker.refreshMissingDaysInBackground(days: 30)
+    }
+
+    private func copySocialCardImage() {
+        let generatedAt = Date()
+        let content = makeSocialShareCardContent(generatedAt: generatedAt)
+        socialCardGeneratedAt = generatedAt
+
+        guard let image = renderSocialCardImage(content: content) else {
+            setSocialShareStatus("PNG render failed")
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.writeObjects([image]) {
+            setSocialShareStatus("PNG copied")
+        } else {
+            setSocialShareStatus("Copy failed")
+        }
+    }
+
+    private func saveSocialCardImage() {
+        let generatedAt = Date()
+        let content = makeSocialShareCardContent(generatedAt: generatedAt)
+        socialCardGeneratedAt = generatedAt
+
+        guard let pngData = renderSocialCardPNGData(content: content) else {
+            setSocialShareStatus("PNG render failed")
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = content.defaultFilename
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try pngData.write(to: url, options: .atomic)
+                setSocialShareStatus("PNG saved")
+            } catch {
+                setSocialShareStatus("Save failed")
+            }
+        }
+    }
+
+    private func copyTweetText() {
+        let generatedAt = Date()
+        let content = makeSocialShareCardContent(generatedAt: generatedAt)
+        socialCardGeneratedAt = generatedAt
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content.tweetText, forType: .string)
+        setSocialShareStatus("Text copied")
+    }
+
+    private func renderSocialCardImage(content: SocialShareCardContent) -> NSImage? {
+        let exportSize = SocialShareCardLayout.exportSize
+        let renderer = ImageRenderer(
+            content: SocialShareCard(content: content)
+                .frame(width: exportSize.width, height: exportSize.height)
+        )
+        renderer.proposedSize = ProposedViewSize(width: exportSize.width, height: exportSize.height)
+        renderer.scale = 1
+        return renderer.nsImage
+    }
+
+    private func renderSocialCardPNGData(content: SocialShareCardContent) -> Data? {
+        guard
+            let image = renderSocialCardImage(content: content),
+            let tiffData = image.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiffData)
+        else {
+            return nil
+        }
+
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    private func setSocialShareStatus(_ status: String) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            socialShareStatus = status
+        }
     }
 
     private func color(for service: ServiceType) -> Color {
@@ -488,6 +691,355 @@ private struct DashboardLimit: Identifiable {
     var percentLeft: Int {
         let remainingPercent = max(0, 100 - usedPercent)
         return remainingPercent == 0 ? 0 : max(1, Int(ceil(remainingPercent)))
+    }
+}
+
+private enum SocialShareCardLayout {
+    static let exportSize = CGSize(width: 1_200, height: 675)
+    static let aspectRatio: CGFloat = exportSize.width / exportSize.height
+}
+
+private struct SocialShareCardPreview: View {
+    let content: SocialShareCardContent
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(SocialShareCardLayout.aspectRatio, contentMode: .fit)
+            .overlay {
+                SocialShareCard(content: content)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.14), radius: 16, x: 0, y: 8)
+    }
+}
+
+private struct SocialShareCard: View {
+    let content: SocialShareCardContent
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = max(0.1, min(
+                proxy.size.width / SocialShareCardLayout.exportSize.width,
+                proxy.size.height / SocialShareCardLayout.exportSize.height
+            ))
+
+            ZStack {
+                SocialShareCardBackground(scale: scale)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    header(scale: scale)
+
+                    Spacer(minLength: 18 * scale)
+
+                    HStack(alignment: .bottom, spacing: 34 * scale) {
+                        heroCopy(scale: scale)
+                        Spacer(minLength: 16 * scale)
+                        SocialShareTokenChart(
+                            values: content.dailyTokenTotals,
+                            accent: MeterBarTheme.codexAccent,
+                            scale: scale
+                        )
+                        .frame(width: 390 * scale, height: 214 * scale)
+                    }
+
+                    Spacer(minLength: 24 * scale)
+
+                    footer(scale: scale)
+                }
+                .padding(.horizontal, 54 * scale)
+                .padding(.vertical, 46 * scale)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .background(Color(red: 0.025, green: 0.027, blue: 0.033))
+    }
+
+    private func header(scale: CGFloat) -> some View {
+        HStack(alignment: .top) {
+            HStack(spacing: 14 * scale) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 15 * scale, style: .continuous)
+                        .fill(Color.white.opacity(0.10))
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 27 * scale, weight: .bold))
+                        .foregroundStyle(MeterBarTheme.appAccent)
+                }
+                .frame(width: 58 * scale, height: 58 * scale)
+
+                VStack(alignment: .leading, spacing: 3 * scale) {
+                    Text(SocialShareCardContent.appName)
+                        .font(.system(size: 29 * scale, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("local AI usage from the macOS menu bar")
+                        .font(.system(size: 17 * scale, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+            }
+
+            Spacer()
+
+            Text("TOKEN MAXING RECEIPTS")
+                .font(.system(size: 15 * scale, weight: .black, design: .monospaced))
+                .tracking(1.8 * scale)
+                .foregroundStyle(.white.opacity(0.68))
+                .padding(.horizontal, 15 * scale)
+                .padding(.vertical, 9 * scale)
+                .background(Color.white.opacity(0.08), in: Capsule())
+        }
+    }
+
+    private func heroCopy(scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 16 * scale) {
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                Text(content.tokenHeroValue)
+                    .font(.system(size: 63 * scale, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                Text(content.tokenHeroCaption.uppercased())
+                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
+                    .tracking(1.2 * scale)
+                    .foregroundStyle(MeterBarTheme.codexAccent)
+            }
+
+            HStack(spacing: 10 * scale) {
+                SocialShareMetricPill(title: "Providers", value: content.sourceLabel, scale: scale)
+                SocialShareMetricPill(title: "Estimate", value: content.costLabel, scale: scale)
+            }
+
+            VStack(alignment: .leading, spacing: 7 * scale) {
+                Text(content.providerLine)
+                    .font(.system(size: 20 * scale, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(content.quotaLine)
+                    .font(.system(size: 18 * scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .frame(maxWidth: 620 * scale, alignment: .leading)
+    }
+
+    private func footer(scale: CGFloat) -> some View {
+        VStack(spacing: 10 * scale) {
+            SocialShareMetadataRow(
+                iconName: "chevron.left.forwardslash.chevron.right",
+                title: "Repo",
+                value: SocialShareCardContent.repositoryDisplay,
+                scale: scale
+            )
+            SocialShareMetadataRow(
+                iconName: "terminal.fill",
+                title: "Install",
+                value: SocialShareCardContent.installCommand,
+                scale: scale
+            )
+        }
+    }
+}
+
+private struct SocialShareCardBackground: View {
+    let scale: CGFloat
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.022, green: 0.024, blue: 0.030),
+                    Color(red: 0.040, green: 0.046, blue: 0.052),
+                    Color(red: 0.025, green: 0.030, blue: 0.036)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            SocialShareGridPattern(scale: scale)
+                .stroke(Color.white.opacity(0.055), lineWidth: max(0.5, scale))
+
+            VStack {
+                Spacer()
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                MeterBarTheme.codexAccent.opacity(0.0),
+                                MeterBarTheme.codexAccent.opacity(0.20),
+                                MeterBarTheme.cursorAccent.opacity(0.14)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 5 * scale)
+            }
+        }
+    }
+}
+
+private struct SocialShareGridPattern: Shape {
+    let scale: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let spacing = max(22, 44 * scale)
+
+        var x = rect.minX
+        while x <= rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+            x += spacing
+        }
+
+        var y = rect.minY
+        while y <= rect.maxY {
+            path.move(to: CGPoint(x: rect.minX, y: y))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y))
+            y += spacing
+        }
+
+        return path
+    }
+}
+
+private struct SocialShareMetricPill: View {
+    let title: String
+    let value: String
+    let scale: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3 * scale) {
+            Text(title.uppercased())
+                .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
+                .tracking(0.7 * scale)
+                .foregroundStyle(.white.opacity(0.44))
+            Text(value)
+                .font(.system(size: 16 * scale, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+        }
+        .padding(.horizontal, 13 * scale)
+        .padding(.vertical, 10 * scale)
+        .frame(minWidth: 135 * scale, alignment: .leading)
+        .background(Color.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 11 * scale, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11 * scale, style: .continuous)
+                .stroke(Color.white.opacity(0.11), lineWidth: max(0.5, scale))
+        }
+    }
+}
+
+private struct SocialShareTokenChart: View {
+    let values: [Int]
+    let accent: Color
+    let scale: CGFloat
+
+    private var chartValues: [Int] {
+        if values.contains(where: { $0 > 0 }) {
+            return values
+        }
+        return [4, 7, 5, 10, 8, 14, 9, 17, 13, 20, 12, 18, 24, 16, 28]
+    }
+
+    private var maxValue: Int {
+        max(chartValues.max() ?? 1, 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12 * scale) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3 * scale) {
+                    Text("30d local tokens")
+                        .font(.system(size: 17 * scale, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text(values.contains(where: { $0 > 0 }) ? "tracked history" : "waiting for scan")
+                        .font(.system(size: 12 * scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.54))
+                }
+                Spacer()
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 18 * scale, weight: .bold))
+                    .foregroundStyle(accent)
+            }
+
+            GeometryReader { proxy in
+                let spacing = max(3 * scale, 2)
+                let barWidth = max(
+                    4 * scale,
+                    (proxy.size.width - CGFloat(max(0, chartValues.count - 1)) * spacing)
+                        / CGFloat(max(1, chartValues.count))
+                )
+
+                HStack(alignment: .bottom, spacing: spacing) {
+                    ForEach(chartValues.indices, id: \.self) { index in
+                        let value = chartValues[index]
+                        let percent = CGFloat(value) / CGFloat(maxValue)
+                        let opacity = values.contains(where: { $0 > 0 }) ? 0.92 : 0.38
+
+                        RoundedRectangle(cornerRadius: 4 * scale, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        accent.opacity(opacity),
+                                        MeterBarTheme.cursorAccent.opacity(max(0.18, opacity - 0.18))
+                                    ],
+                                    startPoint: .bottom,
+                                    endPoint: .top
+                                )
+                            )
+                            .frame(width: barWidth, height: max(6 * scale, proxy.size.height * percent))
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
+            }
+        }
+        .padding(16 * scale)
+        .background(Color.white.opacity(0.072), in: RoundedRectangle(cornerRadius: 18 * scale, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: max(0.5, scale))
+        }
+    }
+}
+
+private struct SocialShareMetadataRow: View {
+    let iconName: String
+    let title: String
+    let value: String
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 12 * scale) {
+            Image(systemName: iconName)
+                .font(.system(size: 15 * scale, weight: .bold))
+                .foregroundStyle(MeterBarTheme.codexAccent)
+                .frame(width: 24 * scale)
+            Text(title.uppercased())
+                .font(.system(size: 12 * scale, weight: .black, design: .monospaced))
+                .tracking(0.8 * scale)
+                .foregroundStyle(.white.opacity(0.48))
+                .frame(width: 64 * scale, alignment: .leading)
+            Text(value)
+                .font(.system(size: 18 * scale, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.52)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 15 * scale)
+        .padding(.vertical, 11 * scale)
+        .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: max(0.5, scale))
+        }
     }
 }
 
