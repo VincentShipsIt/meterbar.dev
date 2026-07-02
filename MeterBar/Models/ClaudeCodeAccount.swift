@@ -50,7 +50,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
         ] + customAccounts)
     }
 
-    private init(userDefaults: UserDefaults = .standard) {
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         load()
     }

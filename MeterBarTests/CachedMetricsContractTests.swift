@@ -114,3 +114,5 @@ final class CachedMetricsContractTests: XCTestCase {
         let limit = try JSONDecoder().decode(UsageLimit.self, from: Data(json.utf8))
         XCTAssertEqual(limit.used, 42.0)
         XCTAssertEqual(limit.total, 100.0)
+    }
+}

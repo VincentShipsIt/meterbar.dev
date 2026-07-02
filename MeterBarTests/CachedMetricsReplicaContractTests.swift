@@ -121,3 +121,5 @@ final class CachedMetricsReplicaContractTests: XCTestCase {
         XCTAssertEqual(entry.extraUsage?.state, .on)
         XCTAssertEqual(entry.resetCreditsAvailable, 2)
         XCTAssertEqual(entry.sessionLimit?.windowSeconds, 5 * 60 * 60)
+    }
+}
