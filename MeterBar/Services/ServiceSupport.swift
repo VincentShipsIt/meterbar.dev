@@ -48,6 +48,22 @@ enum ServiceSupport {
         return httpResponse
     }
 
+    /// Performs a request on the shared session, validates the HTTP response,
+    /// and decodes the body — mapping every failure onto `ServiceError`. Used by
+    /// the org API-usage services.
+    static func fetchDecoded<T: Decodable>(
+        _ request: URLRequest,
+        decoder: JSONDecoder = JSONDecoder()
+    ) async throws -> T {
+        do {
+            let (data, response) = try await session.data(for: request)
+            try validate(response, data: data)
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw serviceError(from: error)
+        }
+    }
+
     /// Maps an arbitrary fetch error onto `ServiceError` consistently.
     /// (Catch-alls previously mislabeled network failures as `.parsingError`,
     /// so users saw "Failed to parse response" for connectivity problems.)

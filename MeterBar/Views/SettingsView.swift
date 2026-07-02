@@ -12,10 +12,14 @@ struct SettingsView: View {
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
+    @StateObject private var authManager = AuthenticationManager.shared
+    @StateObject private var apiUsageStore = ApiUsageStore.shared
 
     @State private var newClaudeAccountName: String = ""
     @State private var newClaudeConfigDirectory: String = ""
     @State private var claudeReconnectError: String?
+    @State private var claudeAdminKeyDraft: String = ""
+    @State private var openaiAdminKeyDraft: String = ""
 
     /// Same key ClaudeCodeLocalService reads. Previously this flag was only
     /// settable via `defaults write`; exposing it here makes the legacy OAuth
@@ -39,6 +43,7 @@ struct SettingsView: View {
             if showExtraUsageSection {
                 extraUsageSection
             }
+            apiUsageSection
             costTrackingSection
             refreshSection
             generalSection
@@ -137,6 +142,85 @@ struct SettingsView: View {
         case .unknown:
             return "Could not determine. Sign in to the CLI and refresh."
         }
+    }
+
+    private var apiUsageSection: some View {
+        SettingsPanelSection(
+            title: "API Usage (organization)",
+            systemImage: "network",
+            color: MeterBarTheme.appAccent
+        ) {
+            SettingsNotice(
+                text: "Paste an organization admin key to show your pay-as-you-go API spend "
+                    + "(Anthropic / OpenAI) as its own card, separate from subscription quotas. "
+                    + "Keys are stored in the macOS Keychain and only used against the provider's usage API.",
+                color: .secondary
+            )
+
+            adminKeyRow(
+                provider: .anthropic,
+                draft: $claudeAdminKeyDraft,
+                placeholder: "sk-ant-admin...",
+                helpURL: "https://console.anthropic.com/settings/admin-keys"
+            )
+
+            SettingsDivider()
+
+            adminKeyRow(
+                provider: .openai,
+                draft: $openaiAdminKeyDraft,
+                placeholder: "OpenAI admin key",
+                helpURL: "https://platform.openai.com/settings/organization/admin-keys"
+            )
+        }
+    }
+
+    private func adminKeyRow(
+        provider: ApiProvider,
+        draft: Binding<String>,
+        placeholder: String,
+        helpURL: String
+    ) -> some View {
+        let connected = authManager.isAuthenticated(provider)
+        return SettingsRowView(
+            title: provider.displayName,
+            detail: connected ? "Connected. Usage appears on the API card." : "Required for organization usage."
+        ) {
+            HStack(spacing: 8) {
+                StatusPill(title: connected ? "Connected" : "Not Connected", isConnected: connected)
+
+                SecureField(placeholder, text: draft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 200)
+
+                Button("Save") {
+                    saveAdminKey(provider, draft: draft)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Remove") {
+                    authManager.removeAdminKey(for: provider)
+                    Task { await apiUsageStore.refresh() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!connected)
+
+                Button("Help") {
+                    if let url = URL(string: helpURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Open \(helpURL)")
+            }
+        }
+    }
+
+    private func saveAdminKey(_ provider: ApiProvider, draft: Binding<String>) {
+        guard authManager.setAdminKey(draft.wrappedValue, for: provider) else { return }
+        draft.wrappedValue = ""
+        Task { await apiUsageStore.refresh() }
     }
 
     private var trackedProvidersSection: some View {

@@ -150,6 +150,8 @@ struct PopoverOverviewPanel: View {
     let snapshots: [ProviderSnapshot]
     let openDashboard: () -> Void
 
+    @StateObject private var apiUsageStore = ApiUsageStore.shared
+
     private var tightestLimit: SnapshotLimit? {
         snapshots.tightestLimit
     }
@@ -221,6 +223,8 @@ struct PopoverOverviewPanel: View {
                 }
             }
 
+            ApiUsageSection(store: apiUsageStore, compact: true)
+
             Button(action: openDashboard) {
                 HStack {
                     Label("Open Usage Dashboard", systemImage: "rectangle.split.2x1")
@@ -237,6 +241,9 @@ struct PopoverOverviewPanel: View {
             }
             .buttonStyle(.plain)
             .cardSurface()
+        }
+        .task {
+            await apiUsageStore.refresh()
         }
     }
 }

@@ -24,6 +24,10 @@ enum MeterBarTheme {
         light: NSColor(srgbRed: 34 / 255, green: 150 / 255, blue: 92 / 255, alpha: 1),
         dark: NSColor(srgbRed: 99 / 255, green: 210 / 255, blue: 151 / 255, alpha: 1)
     )
+    static let openaiAccent = Color.adaptive(
+        light: NSColor(srgbRed: 16 / 255, green: 163 / 255, blue: 127 / 255, alpha: 1),
+        dark: NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
+    )
 
     /// The app's own accent. Follows the user's system accent color.
     static let appAccent = Color.accentColor
@@ -44,6 +48,15 @@ enum MeterBarTheme {
             return codexAccent
         case .cursor:
             return cursorAccent
+        }
+    }
+
+    static func accent(for provider: ApiProvider) -> Color {
+        switch provider {
+        case .anthropic:
+            return claudeAccent
+        case .openai:
+            return openaiAccent
         }
     }
 

@@ -75,6 +75,7 @@ struct UsageDashboardView: View {
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
+    @StateObject private var apiUsageStore = ApiUsageStore.shared
 
     @State private var selectedSection: DashboardSection = .overview
     @State private var columnVisibility = NavigationSplitViewVisibility.all
@@ -195,9 +196,18 @@ struct UsageDashboardView: View {
             }
             .frame(maxWidth: .infinity)
 
+            if apiUsageStore.hasAnyAuthenticated {
+                DashboardCard(title: "Organization API Spend", trailing: "") {
+                    ApiUsageSection(store: apiUsageStore, embedded: true)
+                }
+            }
+
             DashboardCard(title: "Last 30 Days", trailing: costRefreshStatusText) {
                 costScanChart(height: 180, compact: true)
             }
+        }
+        .task {
+            await apiUsageStore.refresh()
         }
     }
 
