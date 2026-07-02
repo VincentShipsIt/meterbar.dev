@@ -353,9 +353,6 @@ struct UsageDashboardView: View {
         if providerVisibility.isEnabled(.cursor) {
             labels.append("Cursor local state")
         }
-        if providerVisibility.isEnabled(.claude) || providerVisibility.isEnabled(.openai) {
-            labels.append("Quota APIs")
-        }
         return labels
     }
 
@@ -1010,7 +1007,7 @@ private struct DailyUsageChart: View {
         self.days = Self.buildDays(from: dailyUsage, daysToShow: daysToShow)
     }
 
-    private static let providerOrder: [ServiceType] = [.claudeCode, .codexCli, .cursor, .claude, .openai]
+    private static let providerOrder: [ServiceType] = [.claudeCode, .codexCli, .cursor]
 
     private static func buildDays(from dailyUsage: [DailyTokenUsage], daysToShow: Int) -> [DailyUsageDay] {
         let calendar = Calendar.current
@@ -1590,9 +1587,9 @@ private enum DashboardDateFormat {
 
 private func providerLogoKind(for provider: ServiceType) -> ProviderLogoKind {
     switch provider {
-    case .codexCli, .openai:
+    case .codexCli:
         return .codex
-    case .claude, .claudeCode:
+    case .claudeCode:
         return .claude
     case .cursor:
         return .cursor

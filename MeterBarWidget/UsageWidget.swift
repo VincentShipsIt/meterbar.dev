@@ -4,9 +4,7 @@ import SwiftUI
 // MARK: - Shared Types (duplicated for Widget target)
 
 enum ServiceType: String, Codable, CaseIterable, Identifiable {
-    case claude = "Claude"
     case claudeCode = "Claude Code"
-    case openai = "OpenAI"
     case codexCli = "Codex CLI"
     case cursor = "Cursor"
 
@@ -14,19 +12,16 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .claude: return "Claude API"
         case .claudeCode: return "Claude Code"
-        case .openai: return "OpenAI"
         case .codexCli: return "OpenAI Codex"
         case .cursor: return "Cursor"
         }
     }
 
+    /// Asset-catalog image name (NOT an SF Symbol like the app's `iconName`).
     var iconName: String {
         switch self {
-        case .claude: return "ClaudeIcon"
         case .claudeCode: return "ClaudeIcon"
-        case .openai: return "OpenAIIcon"
         case .codexCli: return "CodexIcon"
         case .cursor: return "CursorIcon"
         }
@@ -35,10 +30,8 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
     var sortOrder: Int {
         switch self {
         case .claudeCode: return 0
-        case .claude: return 1
-        case .codexCli: return 2
-        case .cursor: return 3
-        case .openai: return 4
+        case .codexCli: return 1
+        case .cursor: return 2
         }
     }
 }
@@ -156,16 +149,26 @@ class SharedDataStore {
 
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
+        // Tolerant per-entry decode (mirrors the app's MetricsCodec): an unknown
+        // service key or malformed entry drops that entry, not the whole cache.
         guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
+              let decoded = try? JSONDecoder().decode([String: FailableBox<UsageMetrics>].self, from: data) else {
             return [:]
         }
 
         return decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
+            if let service = ServiceType(rawValue: pair.key), let metrics = pair.value.value {
+                result[service] = metrics
             }
         }
+    }
+}
+
+private struct FailableBox<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: Decoder) throws {
+        value = try? T(from: decoder)
     }
 }
 

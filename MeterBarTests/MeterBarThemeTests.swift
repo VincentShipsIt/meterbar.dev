@@ -26,9 +26,7 @@ final class MeterBarThemeTests: XCTestCase {
     }
 
     func testAccentForEveryService() {
-        XCTAssertEqual(MeterBarTheme.accent(for: .claude), MeterBarTheme.claudeAccent)
         XCTAssertEqual(MeterBarTheme.accent(for: .claudeCode), MeterBarTheme.claudeAccent)
-        XCTAssertEqual(MeterBarTheme.accent(for: .openai), MeterBarTheme.codexAccent)
         XCTAssertEqual(MeterBarTheme.accent(for: .codexCli), MeterBarTheme.codexAccent)
         XCTAssertEqual(MeterBarTheme.accent(for: .cursor), MeterBarTheme.cursorAccent)
     }

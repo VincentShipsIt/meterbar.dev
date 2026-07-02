@@ -1,7 +1,7 @@
 import XCTest
 @testable import MeterBar
 
-/// Integration tests to verify API access for Claude, OpenAI, Cursor, Claude Code, and Codex CLI services.
+/// Integration tests to verify API access for Claude Code, Codex CLI, and Cursor services.
 /// These tests make real API calls and require valid credentials to be set up.
 final class APIIntegrationTests: XCTestCase {
 
@@ -9,100 +9,6 @@ final class APIIntegrationTests: XCTestCase {
 
     /// Timeout for API calls (30 seconds)
     let apiTimeout: TimeInterval = 30.0
-
-    // MARK: - Claude (Anthropic Admin API) Tests
-
-    func testClaudeAPIAccess() async throws {
-        print("\n" + String(repeating: "=", count: 60))
-        print("🔵 CLAUDE (Anthropic) API TEST")
-        print(String(repeating: "=", count: 60))
-
-        let authManager = AuthenticationManager.shared
-
-        // Check if credentials exist
-        guard authManager.isClaudeAuthenticated else {
-            print("⚠️  SKIPPED: No Claude Admin API key configured")
-            print("   To test: Add your Claude Admin API key in Settings")
-            throw XCTSkip("Claude Admin API key not configured")
-        }
-
-        print("✓ Claude Admin API key found")
-
-        // Attempt to fetch usage metrics
-        let claudeService = ClaudeService.shared
-
-        do {
-            let metrics = try await claudeService.fetchUsageMetrics()
-
-            print("✅ SUCCESS: Claude API access verified!")
-            print("\nUsage Data Retrieved:")
-            print("  Service: \(metrics.service.displayName)")
-
-            if let weekly = metrics.weeklyLimit {
-                print("  Weekly Usage:")
-                print("    - Used: \(formatTokens(weekly.used)) tokens")
-                print("    - Total: \(formatTokens(weekly.total)) tokens")
-                print("    - Percentage: \(String(format: "%.1f", weekly.percentage))%")
-                if let resetTime = weekly.resetTime {
-                    print("    - Resets: \(formatDate(resetTime))")
-                }
-            }
-
-            XCTAssertEqual(metrics.service, .claude)
-            XCTAssertNotNil(metrics.weeklyLimit)
-
-        } catch {
-            print("❌ FAILED: \(error.localizedDescription)")
-            XCTFail("Claude API call failed: \(error)")
-        }
-    }
-
-    // MARK: - OpenAI (Codex) Tests
-
-    func testOpenAIAPIAccess() async throws {
-        print("\n" + String(repeating: "=", count: 60))
-        print("🟢 OPENAI (Codex) API TEST")
-        print(String(repeating: "=", count: 60))
-
-        let authManager = AuthenticationManager.shared
-
-        // Check if credentials exist
-        guard authManager.isOpenAIAuthenticated else {
-            print("⚠️  SKIPPED: No OpenAI Admin API key configured")
-            print("   To test: Add your OpenAI Admin API key in Settings")
-            throw XCTSkip("OpenAI Admin API key not configured")
-        }
-
-        print("✓ OpenAI Admin API key found")
-
-        // Attempt to fetch usage metrics
-        let openaiService = OpenAIService.shared
-
-        do {
-            let metrics = try await openaiService.fetchUsageMetrics()
-
-            print("✅ SUCCESS: OpenAI API access verified!")
-            print("\nUsage Data Retrieved:")
-            print("  Service: \(metrics.service.displayName)")
-
-            if let weekly = metrics.weeklyLimit {
-                print("  Weekly Usage:")
-                print("    - Used: \(formatTokens(weekly.used)) tokens")
-                print("    - Total: \(formatTokens(weekly.total)) tokens")
-                print("    - Percentage: \(String(format: "%.1f", weekly.percentage))%")
-                if let resetTime = weekly.resetTime {
-                    print("    - Resets: \(formatDate(resetTime))")
-                }
-            }
-
-            XCTAssertEqual(metrics.service, .openai)
-            XCTAssertNotNil(metrics.weeklyLimit)
-
-        } catch {
-            print("❌ FAILED: \(error.localizedDescription)")
-            XCTFail("OpenAI API call failed: \(error)")
-        }
-    }
 
     // MARK: - Claude Code (OAuth) Tests
 
@@ -338,38 +244,11 @@ final class APIIntegrationTests: XCTestCase {
         print("📊 ALL SERVICES STATUS SUMMARY")
         print(String(repeating: "=", count: 60))
 
-        let authManager = AuthenticationManager.shared
         let claudeCodeService = ClaudeCodeLocalService.shared
         let codexCliService = CodexCliLocalService.shared
         let cursorService = CursorLocalService.shared
 
         var results: [(String, String, String)] = []
-
-        // Claude
-        if authManager.isClaudeAuthenticated {
-            do {
-                let metrics = try await ClaudeService.shared.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
-                results.append(("Claude", "✅ Connected", usage))
-            } catch {
-                results.append(("Claude", "❌ Error", error.localizedDescription))
-            }
-        } else {
-            results.append(("Claude", "⚪ Not Configured", "Add Admin API key"))
-        }
-
-        // OpenAI
-        if authManager.isOpenAIAuthenticated {
-            do {
-                let metrics = try await OpenAIService.shared.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
-                results.append(("OpenAI", "✅ Connected", usage))
-            } catch {
-                results.append(("OpenAI", "❌ Error", error.localizedDescription))
-            }
-        } else {
-            results.append(("OpenAI", "⚪ Not Configured", "Add Admin API key"))
-        }
 
         // Claude Code
         if claudeCodeService.hasAccess {
@@ -422,16 +301,6 @@ final class APIIntegrationTests: XCTestCase {
     }
 
     // MARK: - Helper Methods
-
-    private func formatTokens(_ count: Double) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.2fM", count / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", count / 1_000)
-        } else {
-            return String(format: "%.0f", count)
-        }
-    }
 
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()

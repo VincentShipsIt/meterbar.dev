@@ -37,9 +37,9 @@ enum MeterBarTheme {
 
     static func accent(for service: ServiceType) -> Color {
         switch service {
-        case .claude, .claudeCode:
+        case .claudeCode:
             return claudeAccent
-        case .codexCli, .openai:
+        case .codexCli:
             return codexAccent
         case .cursor:
             return cursorAccent

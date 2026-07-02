@@ -22,12 +22,9 @@ class UsageDataManager: ObservableObject {
         }
     }
 
-    private let claudeService = ClaudeService.shared
     private let claudeCodeService = ClaudeCodeLocalService.shared
     private let cursorService = CursorLocalService.shared
-    private let openaiService = OpenAIService.shared
     private let codexCliService = CodexCliLocalService.shared
-    private let authManager = AuthenticationManager.shared
     private let claudeCodeAccountStore = ClaudeCodeAccountStore.shared
     private let providerVisibilityStore = ProviderVisibilityStore.shared
 
@@ -46,17 +43,6 @@ class UsageDataManager: ObservableObject {
 
         var newMetrics: [ServiceType: UsageMetrics] = [:]
 
-        // Fetch Claude metrics
-        if providerVisibilityStore.isEnabled(.claude), authManager.isClaudeAuthenticated {
-            do {
-                let metrics = try await claudeService.fetchUsageMetrics()
-                newMetrics[.claude] = metrics
-            } catch {
-                lastError = error
-                AppLog.usage.error("Failed to fetch Claude metrics: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-
         // Fetch Claude Code metrics (local files)
         if providerVisibilityStore.isEnabled(.claudeCode), claudeCodeService.hasAccess {
             let accountMetrics = await fetchClaudeCodeAccountMetrics()
@@ -69,17 +55,6 @@ class UsageDataManager: ObservableObject {
             }
         } else if !providerVisibilityStore.isEnabled(.claudeCode) {
             claudeCodeAccountMetrics = [:]
-        }
-
-        // Fetch OpenAI API metrics
-        if providerVisibilityStore.isEnabled(.openai), authManager.isOpenAIAuthenticated {
-            do {
-                let metrics = try await openaiService.fetchUsageMetrics()
-                newMetrics[.openai] = metrics
-            } catch {
-                lastError = error
-                AppLog.usage.error("Failed to fetch OpenAI metrics: \(error.localizedDescription, privacy: .public)")
-            }
         }
 
         // Fetch Codex CLI metrics (local auth from ~/.codex/auth.json)
@@ -144,11 +119,6 @@ class UsageDataManager: ObservableObject {
             let newMetrics: UsageMetrics
 
             switch service {
-            case .claude:
-                guard authManager.isClaudeAuthenticated else {
-                    throw ServiceError.notAuthenticated
-                }
-                newMetrics = try await claudeService.fetchUsageMetrics()
             case .claudeCode:
                 guard claudeCodeService.hasAccess else {
                     throw ServiceError.notAuthenticated
@@ -165,11 +135,6 @@ class UsageDataManager: ObservableObject {
                     // hold a stale error from an unrelated provider/account.
                     throw ServiceError.notAuthenticated
                 }
-            case .openai:
-                guard authManager.isOpenAIAuthenticated else {
-                    throw ServiceError.notAuthenticated
-                }
-                newMetrics = try await openaiService.fetchUsageMetrics()
             case .codexCli:
                 guard codexCliService.hasAccess else {
                     throw ServiceError.notAuthenticated
@@ -229,24 +194,14 @@ class UsageDataManager: ObservableObject {
 
     /// Decode cached metrics from disk without modifying instance state.
     private func loadCachedMetricsFromDisk() -> [ServiceType: UsageMetrics] {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey) else {
             return [:]
         }
-
-        return decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
-            }
-        }
+        return MetricsCodec.decode(data)
     }
 
     private func saveCachedData() {
-        let encoded = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
-            result[pair.key.rawValue] = pair.value
-        }
-
-        if let data = try? JSONEncoder().encode(encoded) {
+        if let data = MetricsCodec.encode(metrics) {
             UserDefaults.standard.set(data, forKey: cacheKey)
         }
     }

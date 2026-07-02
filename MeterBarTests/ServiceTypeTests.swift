@@ -3,39 +3,31 @@ import XCTest
 
 final class ServiceTypeTests: XCTestCase {
     func testRawValues() {
-        XCTAssertEqual(ServiceType.claude.rawValue, "Claude")
         XCTAssertEqual(ServiceType.claudeCode.rawValue, "Claude Code")
-        XCTAssertEqual(ServiceType.openai.rawValue, "OpenAI")
         XCTAssertEqual(ServiceType.codexCli.rawValue, "Codex CLI")
         XCTAssertEqual(ServiceType.cursor.rawValue, "Cursor")
     }
 
     func testDisplayNames() {
-        XCTAssertEqual(ServiceType.claude.displayName, "Claude API")
         XCTAssertEqual(ServiceType.claudeCode.displayName, "Claude Code")
-        XCTAssertEqual(ServiceType.openai.displayName, "OpenAI")
         XCTAssertEqual(ServiceType.codexCli.displayName, "OpenAI Codex")
         XCTAssertEqual(ServiceType.cursor.displayName, "Cursor")
     }
 
     func testIconNames() {
-        XCTAssertEqual(ServiceType.claude.iconName, "sparkles")
         XCTAssertEqual(ServiceType.claudeCode.iconName, "terminal")
-        XCTAssertEqual(ServiceType.openai.iconName, "brain")
         XCTAssertEqual(ServiceType.codexCli.iconName, "terminal.fill")
         XCTAssertEqual(ServiceType.cursor.iconName, "cursorarrow.click")
     }
 
     func testIdProperty() {
-        XCTAssertEqual(ServiceType.claude.id, "Claude")
         XCTAssertEqual(ServiceType.claudeCode.id, "Claude Code")
-        XCTAssertEqual(ServiceType.openai.id, "OpenAI")
         XCTAssertEqual(ServiceType.codexCli.id, "Codex CLI")
         XCTAssertEqual(ServiceType.cursor.id, "Cursor")
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 5)
+        XCTAssertEqual(ServiceType.allCases.count, 3)
     }
 
     func testCodable() throws {
@@ -52,9 +44,9 @@ final class ServiceTypeTests: XCTestCase {
     func testDecodingFromRawValue() throws {
         let decoder = JSONDecoder()
 
-        let claudeJSON = "\"Claude\"".data(using: .utf8)!
-        let claude = try decoder.decode(ServiceType.self, from: claudeJSON)
-        XCTAssertEqual(claude, .claude)
+        let claudeCodeJSON = "\"Claude Code\"".data(using: .utf8)!
+        let claudeCode = try decoder.decode(ServiceType.self, from: claudeCodeJSON)
+        XCTAssertEqual(claudeCode, .claudeCode)
 
         let cursorJSON = "\"Cursor\"".data(using: .utf8)!
         let cursor = try decoder.decode(ServiceType.self, from: cursorJSON)

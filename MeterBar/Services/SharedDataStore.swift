@@ -29,11 +29,7 @@ class SharedDataStore {
 
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
-        let encoded = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
-            result[pair.key.rawValue] = pair.value
-        }
-
-        guard let data = try? JSONEncoder().encode(encoded) else {
+        guard let data = MetricsCodec.encode(metrics) else {
             AppLog.storage.error("Failed to encode shared metrics")
             return
         }
@@ -52,19 +48,11 @@ class SharedDataStore {
     
     func loadMetrics() -> [ServiceType: UsageMetrics] {
         guard let containerURL = containerURL else { return [:] }
-        
+
         let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
-        
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
-            return [:]
-        }
-        
-        return decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
-            }
-        }
+
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
+        return MetricsCodec.decode(data)
     }
 
     private func reloadWidgetTimelines() {
