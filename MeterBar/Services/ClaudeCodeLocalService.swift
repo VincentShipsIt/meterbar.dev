@@ -54,6 +54,16 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     private func getCredentials() -> ClaudeCodeCredentials? {
+        guard let data = credentialsData() else { return nil }
+        return try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data)
+    }
+
+    /// The raw "Claude Code-credentials" keychain blob, or nil if absent/unreadable.
+    ///
+    /// Exposed for provider-readiness diagnostics, which pass the bytes to the
+    /// pure readiness core (it reads only the expiry claim — never surfaces the
+    /// token). Reading the raw blob here keeps the keychain query in one place.
+    func credentialsData() -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -64,18 +74,11 @@ class ClaudeCodeLocalService: ObservableObject {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let jsonString = String(data: data, encoding: .utf8) else {
+        guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
 
-        guard let jsonData = jsonString.data(using: .utf8),
-              let credentials = try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: jsonData) else {
-            return nil
-        }
-
-        return credentials
+        return data
     }
 
     /// Check and update access status

@@ -4,6 +4,19 @@ import os
 import Combine
 import SwiftUI
 
+/// The single-account provider surface `UsageDataManager` orchestrates (Codex,
+/// Cursor). Behind a protocol so the manager's merge / graceful-degradation
+/// logic can be tested with stub providers instead of the real network + local
+/// credential files. Claude Code has its own account-aware path and is not part
+/// of this seam.
+protocol SimpleUsageProviding: AnyObject {
+    var hasAccess: Bool { get }
+    func fetchUsageMetrics() async throws -> UsageMetrics
+}
+
+extension CodexCliLocalService: SimpleUsageProviding {}
+extension CursorLocalService: SimpleUsageProviding {}
+
 @MainActor
 class UsageDataManager: ObservableObject {
     static let shared = UsageDataManager()
@@ -24,19 +37,41 @@ class UsageDataManager: ObservableObject {
         }
     }
 
-    private let claudeCodeService = ClaudeCodeLocalService.shared
-    private let cursorService = CursorLocalService.shared
-    private let codexCliService = CodexCliLocalService.shared
-    private let claudeCodeAccountStore = ClaudeCodeAccountStore.shared
-    private let providerVisibilityStore = ProviderVisibilityStore.shared
+    private let claudeCodeService: ClaudeCodeLocalService
+    private let cursorService: SimpleUsageProviding
+    private let codexCliService: SimpleUsageProviding
+    private let claudeCodeAccountStore: ClaudeCodeAccountStore
+    private let providerVisibilityStore: ProviderVisibilityStore
 
     private var refreshTimer: Timer?
     private let cacheKey = StorageKeys.cachedUsageMetrics
-    private let sharedStore = SharedDataStore.shared
+    private let sharedStore: SharedDataStore
+    private let cacheDefaults: UserDefaults
 
-    private init() {
+    /// Defaults wire the production singletons so `shared` behaves exactly as
+    /// before; tests inject stub providers, an isolated `UserDefaults` suite, a
+    /// temp-directory `SharedDataStore`, and disable the auto-refresh timer.
+    init(
+        codexCliService: SimpleUsageProviding = CodexCliLocalService.shared,
+        cursorService: SimpleUsageProviding = CursorLocalService.shared,
+        claudeCodeService: ClaudeCodeLocalService = .shared,
+        claudeCodeAccountStore: ClaudeCodeAccountStore = .shared,
+        providerVisibilityStore: ProviderVisibilityStore = .shared,
+        sharedStore: SharedDataStore = .shared,
+        cacheDefaults: UserDefaults = .standard,
+        schedulesAutoRefresh: Bool = true
+    ) {
+        self.codexCliService = codexCliService
+        self.cursorService = cursorService
+        self.claudeCodeService = claudeCodeService
+        self.claudeCodeAccountStore = claudeCodeAccountStore
+        self.providerVisibilityStore = providerVisibilityStore
+        self.sharedStore = sharedStore
+        self.cacheDefaults = cacheDefaults
         loadCachedData()
-        setupAutoRefresh()
+        if schedulesAutoRefresh {
+            setupAutoRefresh()
+        }
     }
 
     func refreshAll() async {
@@ -164,7 +199,7 @@ class UsageDataManager: ObservableObject {
 
     /// Decode cached metrics from disk without modifying instance state.
     private func loadCachedMetricsFromDisk() -> [ServiceType: UsageMetrics] {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey) else {
+        guard let data = cacheDefaults.data(forKey: cacheKey) else {
             return [:]
         }
         return MetricsCodec.decode(data)
@@ -172,7 +207,7 @@ class UsageDataManager: ObservableObject {
 
     private func saveCachedData() {
         if let data = MetricsCodec.encode(metrics) {
-            UserDefaults.standard.set(data, forKey: cacheKey)
+            cacheDefaults.set(data, forKey: cacheKey)
         }
     }
 

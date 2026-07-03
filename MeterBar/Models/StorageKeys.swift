@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// Every UserDefaults key the app persists, in one place.
 ///
@@ -6,8 +7,9 @@ import Foundation
 /// a typo in any one of them silently reads/writes the wrong key.
 enum StorageKeys {
     /// Cached `[ServiceType: UsageMetrics]` blob (also the app-group file's
-    /// base name — see SharedDataStore).
-    static let cachedUsageMetrics = "cached_usage_metrics"
+    /// base name — see SharedDataStore). Single-sourced from `MeterBarShared`
+    /// so the app, widget, and CLI can't drift on the key.
+    static let cachedUsageMetrics = SharedMetricsStore.metricsKey
     /// Auto-refresh interval raw value (RefreshInterval).
     static let refreshInterval = "refreshInterval"
     /// Raw values of ServiceTypes the user has hidden.
@@ -22,4 +24,10 @@ enum StorageKeys {
     static let claudeCodeDefaultAccountName = "ClaudeCodeDefaultAccountName"
     /// Persisted account display order (array of UUID strings).
     static let claudeCodeAccountOrder = "ClaudeCodeAccountOrder"
+    /// Global on/off switch for usage notifications.
+    static let notificationsEnabled = "NotificationsEnabled"
+    /// Raw value of the `NotificationThreshold` at which a warning notifies.
+    static let notificationWarningThreshold = "NotificationWarningThreshold"
+    /// Raw value of the `NotificationThreshold` at which a critical alert notifies.
+    static let notificationCriticalThreshold = "NotificationCriticalThreshold"
 }

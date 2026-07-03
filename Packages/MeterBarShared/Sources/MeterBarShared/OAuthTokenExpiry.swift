@@ -1,7 +1,7 @@
 import Foundation
 
-enum OAuthTokenExpiry {
-    static func isExpired(jwt token: String, graceInterval: TimeInterval = 60, now: Date = Date()) -> Bool {
+public enum OAuthTokenExpiry {
+    public static func isExpired(jwt token: String, graceInterval: TimeInterval = 60, now: Date = Date()) -> Bool {
         // If the token has no parseable `exp` claim we cannot prove it is expired,
         // so we treat it as not-expired and let the server be the source of truth
         // (a truly invalid token simply 401s on the next request). This is a
@@ -14,17 +14,17 @@ enum OAuthTokenExpiry {
         return expirationDate <= now.addingTimeInterval(graceInterval)
     }
 
-    static func isExpired(unixTimestamp rawTimestamp: Int64, graceInterval: TimeInterval = 60, now: Date = Date()) -> Bool {
+    public static func isExpired(unixTimestamp rawTimestamp: Int64, graceInterval: TimeInterval = 60, now: Date = Date()) -> Bool {
         expirationDate(fromUnixTimestamp: rawTimestamp) <= now.addingTimeInterval(graceInterval)
     }
 
-    static func expirationDate(fromUnixTimestamp rawTimestamp: Int64) -> Date {
+    public static func expirationDate(fromUnixTimestamp rawTimestamp: Int64) -> Date {
         let timestamp = Double(rawTimestamp)
         let seconds = timestamp > 10_000_000_000 ? timestamp / 1_000 : timestamp
         return Date(timeIntervalSince1970: seconds)
     }
 
-    static func expirationDate(fromJWT token: String) -> Date? {
+    public static func expirationDate(fromJWT token: String) -> Date? {
         guard let payloadData = JWT.payloadData(token),
               let payload = try? JSONDecoder().decode(JWTPayload.self, from: payloadData),
               let expiration = payload.exp else {
@@ -43,16 +43,16 @@ private struct JWTPayload: Decodable {
 /// tokens are only read locally to extract claims, never validated).
 /// Shared by OAuthTokenExpiry (`exp`) and CursorLocalService (`sub`), which
 /// previously each hand-rolled the same base64url decode.
-enum JWT {
+public enum JWT {
     /// The decoded payload (second segment) of a JWT, or nil if malformed.
-    static func payloadData(_ token: String) -> Data? {
+    public static func payloadData(_ token: String) -> Data? {
         let parts = token.split(separator: ".")
         guard parts.count >= 2 else { return nil }
         return decodeBase64URL(String(parts[1]))
     }
 
     /// A string claim from the JWT payload, e.g. `claimString("sub", in: token)`.
-    static func claimString(_ claim: String, in token: String) -> String? {
+    public static func claimString(_ claim: String, in token: String) -> String? {
         guard let data = payloadData(token),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil

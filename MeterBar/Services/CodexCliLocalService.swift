@@ -18,21 +18,30 @@ class CodexCliLocalService: ObservableObject {
     // API endpoint for Codex CLI usage
     private let usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
 
-    // Path to Codex CLI auth file
-    private var authFilePath: String {
-        let homeDir = ServiceSupport.realHomeDirectory()
-        return "\(homeDir)/.codex/auth.json"
-    }
-
     // Shared URLSession with the standard usage-request timeouts
     private let urlSession = ServiceSupport.session
+
+    /// Raw bytes of `~/.codex/auth.json`, behind a closure so tests can supply a
+    /// fixture without a real credential file on disk (the auth file never
+    /// exists on CI). Defaults to reading the real path.
+    private let authFileDataProvider: () -> Data?
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
 
-    private init() {
+    /// Defaults reproduce the production singleton; tests inject a fixture
+    /// auth-file provider.
+    init(authFileDataProvider: (() -> Data?)? = nil) {
+        self.authFileDataProvider = authFileDataProvider ?? CodexCliLocalService.defaultAuthFileDataProvider
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess() }
+    }
+
+    /// Reads `~/.codex/auth.json` from the real (non-sandboxed) home directory.
+    private static func defaultAuthFileDataProvider() -> Data? {
+        let path = "\(ServiceSupport.realHomeDirectory())/.codex/auth.json"
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        return FileManager.default.contents(atPath: path)
     }
 
     // MARK: - Auth File Access
@@ -58,11 +67,7 @@ class CodexCliLocalService: ObservableObject {
     }
 
     private func readAuthFile() -> CodexAuthFile? {
-        guard FileManager.default.fileExists(atPath: authFilePath),
-              let data = FileManager.default.contents(atPath: authFilePath) else {
-            return nil
-        }
-
+        guard let data = authFileDataProvider() else { return nil }
         return try? JSONDecoder().decode(CodexAuthFile.self, from: data)
     }
 
@@ -127,57 +132,10 @@ class CodexCliLocalService: ObservableObject {
                 self.subscriptionType = usageResponse.planType
             }
 
-            // Check if rate limits exist (free accounts have null rate_limit)
-            guard let rateLimit = usageResponse.rateLimit else {
-                // Return empty metrics for free accounts
-                return UsageMetrics(
-                    service: .codexCli,
-                    sessionLimit: nil,
-                    weeklyLimit: nil,
-                    codeReviewLimit: nil,
-                    extraUsage: usageResponse.extraUsageStatus,
-                    resetCreditsAvailable: usageResponse.resetCreditsAvailable
-                )
-            }
-
-            // Map the response to UsageMetrics
-            // Primary window (5 hours = 18000 seconds) = session limit
-            let primaryWindow = rateLimit.primaryWindow
-            let sessionLimit = UsageLimit(
-                used: primaryWindow.usedPercent,
-                total: 100.0,
-                resetTime: Date(timeIntervalSince1970: Double(primaryWindow.resetAt)),
-                windowSeconds: TimeInterval(primaryWindow.limitWindowSeconds)
-            )
-
-            // Secondary window (7 days = 604800 seconds) = weekly limit
-            let secondaryWindow = rateLimit.secondaryWindow
-            let weeklyLimit = UsageLimit(
-                used: secondaryWindow?.usedPercent ?? 0.0,
-                total: 100.0,
-                resetTime: secondaryWindow.map { Date(timeIntervalSince1970: Double($0.resetAt)) } ?? Date(),
-                windowSeconds: secondaryWindow.map { TimeInterval($0.limitWindowSeconds) }
-            )
-
-            // Code review rate limit (7 days window) = code review limit
-            var codeReviewLimit: UsageLimit?
-            if let codeReviewPrimary = usageResponse.codeReviewRateLimit?.primaryWindow {
-                codeReviewLimit = UsageLimit(
-                    used: codeReviewPrimary.usedPercent,
-                    total: 100.0,
-                    resetTime: Date(timeIntervalSince1970: Double(codeReviewPrimary.resetAt)),
-                    windowSeconds: TimeInterval(codeReviewPrimary.limitWindowSeconds)
-                )
-            }
-
-            return UsageMetrics(
-                service: .codexCli,
-                sessionLimit: sessionLimit,
-                weeklyLimit: weeklyLimit,
-                codeReviewLimit: codeReviewLimit,
-                extraUsage: usageResponse.extraUsageStatus,
-                resetCreditsAvailable: usageResponse.resetCreditsAvailable
-            )
+            // Pure response→UsageMetrics mapping (window math, code-review limit,
+            // extra-usage + reset-credit derivation) lives on the response type
+            // so it's unit-testable with fixture JSON, no network.
+            return usageResponse.toUsageMetrics()
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
             AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
@@ -189,6 +147,16 @@ class CodexCliLocalService: ObservableObject {
             }
             throw serviceError
         }
+    }
+
+    // MARK: - Response Mapping
+
+    /// Maps a decoded Codex usage response onto the shared `UsageMetrics` shape.
+    /// Thin alias over `CodexCliUsageResponse.toUsageMetrics()` — the single
+    /// implementation of the window/limit derivation — kept so both fixture
+    /// test suites exercise the same code path.
+    static func mapUsageResponse(_ usageResponse: CodexCliUsageResponse) -> UsageMetrics {
+        usageResponse.toUsageMetrics()
     }
 }
 
@@ -271,6 +239,69 @@ struct CodexCliUsageResponse: Codable {
             detail += " · cap \(ExtraUsageStatus.formatAmount(limit))"
         }
         return detail
+    }
+}
+
+// MARK: - Response → UsageMetrics mapping
+
+extension CodexCliUsageResponse {
+    /// Pure mapping from the decoded Codex usage payload to the shared
+    /// `UsageMetrics`. Extracted from `fetchUsageMetrics()` so the window/limit
+    /// derivation is unit-testable with fixture JSON, no network.
+    ///
+    /// Windows map as: primary (5h) → session, secondary (7d) → weekly,
+    /// code-review primary (7d) → code-review limit. Free accounts (null
+    /// `rate_limit`) carry no windows, only the extra-usage/reset-credit signals.
+    func toUsageMetrics() -> UsageMetrics {
+        guard let rateLimit else {
+            // Free accounts have a null rate_limit — no quota windows to report.
+            return UsageMetrics(
+                service: .codexCli,
+                sessionLimit: nil,
+                weeklyLimit: nil,
+                codeReviewLimit: nil,
+                extraUsage: extraUsageStatus,
+                resetCreditsAvailable: resetCreditsAvailable
+            )
+        }
+
+        // Primary window (5 hours = 18000 seconds) = session limit
+        let primaryWindow = rateLimit.primaryWindow
+        let sessionLimit = UsageLimit(
+            used: primaryWindow.usedPercent,
+            total: 100.0,
+            resetTime: Date(timeIntervalSince1970: Double(primaryWindow.resetAt)),
+            windowSeconds: TimeInterval(primaryWindow.limitWindowSeconds)
+        )
+
+        // Secondary window (7 days = 604800 seconds) = weekly limit
+        let secondaryWindow = rateLimit.secondaryWindow
+        let weeklyLimit = UsageLimit(
+            used: secondaryWindow?.usedPercent ?? 0.0,
+            total: 100.0,
+            resetTime: secondaryWindow.map { Date(timeIntervalSince1970: Double($0.resetAt)) } ?? Date(),
+            windowSeconds: secondaryWindow.map { TimeInterval($0.limitWindowSeconds) }
+        )
+
+        // Code review rate limit (7 days window) = code review limit
+        var codeReviewLimit: UsageLimit?
+        if let codeReviewPrimary = codeReviewRateLimit?.primaryWindow {
+            codeReviewLimit = UsageLimit(
+                used: codeReviewPrimary.usedPercent,
+                total: 100.0,
+                resetTime: Date(timeIntervalSince1970: Double(codeReviewPrimary.resetAt)),
+                windowSeconds: TimeInterval(codeReviewPrimary.limitWindowSeconds)
+            )
+        }
+
+        return UsageMetrics(
+            service: .codexCli,
+            sessionLimit: sessionLimit,
+            weeklyLimit: weeklyLimit,
+            codeReviewLimit: codeReviewLimit,
+            extraUsage: extraUsageStatus,
+            resetCreditsAvailable: resetCreditsAvailable
+        )
     }
 }
 

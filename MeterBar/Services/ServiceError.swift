@@ -1,13 +1,13 @@
 import Foundation
 
 /// Shared error type for all provider usage services.
-enum ServiceError: LocalizedError {
+public enum ServiceError: LocalizedError, Sendable {
     case notAuthenticated
     case invalidURL
     case apiError(String)
     case parsingError
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .notAuthenticated:
             return "Not authenticated. Sign in to the provider's CLI and refresh."

@@ -24,7 +24,6 @@ let package = Package(
             path: "MeterBar",
             exclude: [
                 "App/MeterBarApp.swift",
-                "Info.plist",
                 "MeterBar.entitlements",
                 "Assets.xcassets",
                 "Resources"

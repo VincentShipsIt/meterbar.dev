@@ -151,6 +151,18 @@ struct PopoverOverviewPanel: View {
     let openDashboard: () -> Void
 
     @StateObject private var apiUsageStore = ApiUsageStore.shared
+    @State private var setupReports: [ProviderReadiness] = []
+
+    /// The enabled providers currently shown in the popover.
+    private var enabledProviders: Set<ServiceType> {
+        Set(snapshots.map(\.service))
+    }
+
+    /// Enabled providers that still need setup — drives the first-run checklist.
+    /// The section collapses (renders nothing) once these are all healthy.
+    private var providersNeedingSetup: [ProviderReadiness] {
+        setupReports.filter { enabledProviders.contains($0.provider) && !$0.isHealthy }
+    }
 
     private var tightestLimit: SnapshotLimit? {
         snapshots.tightestLimit
@@ -217,6 +229,10 @@ struct PopoverOverviewPanel: View {
             .padding(12)
             .cardSurface()
 
+            if !providersNeedingSetup.isEmpty {
+                setupChecklist
+            }
+
             VStack(spacing: 8) {
                 ForEach(snapshots) { snapshot in
                     PopoverProviderStatusCard(snapshot: snapshot)
@@ -245,6 +261,36 @@ struct PopoverOverviewPanel: View {
         .task {
             await apiUsageStore.refresh()
         }
+        .task {
+            await loadSetupReports()
+        }
+    }
+
+    /// First-run/empty-state checklist: per-provider readiness checks with
+    /// recovery actions for enabled providers that aren't healthy yet. Collapses
+    /// automatically once every enabled provider reports healthy.
+    private var setupChecklist: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MeterBarTheme.appAccent)
+                Text("Finish setup")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer(minLength: 0)
+            }
+            ReadinessChecklist(reports: providersNeedingSetup, compact: true)
+        }
+    }
+
+    /// Runs the readiness inspector off the main actor (keychain / file / SQLite
+    /// I/O) and publishes the reports back for the checklist.
+    private func loadSetupReports() async {
+        let reports = await Task.detached(priority: .utility) {
+            ProviderReadinessInspector.reports()
+        }.value
+        setupReports = reports
     }
 }
 
@@ -302,45 +348,15 @@ private struct PopoverProviderStatusCard: View {
                 }
             }
 
-            if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(snapshot.accentColor)
-                    Text(Self.resetCreditsLabel(resetCount))
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer(minLength: 4)
-                }
-                .help(
-                    "\(Self.resetCreditsLabel(resetCount)) - banked quota resets you can trigger " +
-                    "when you hit a rate limit."
-                )
-            }
-
-            if !snapshot.hasExhaustedLimit, let extraUsage = snapshot.extraUsage {
-                HStack(spacing: 4) {
-                    Image(systemName: "creditcard")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                    Text("Extra usage")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Spacer(minLength: 4)
-                    ExtraUsageStatusPill(status: extraUsage)
-                }
+            let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
+            if badges.hasContent {
+                badges
             }
         }
         .padding(snapshot.hasExhaustedLimit ? 9 : 11)
         .frame(maxWidth: .infinity, minHeight: snapshot.hasExhaustedLimit ? 78 : 124, alignment: .topLeading)
         .opacity(isOut ? 0.72 : 1)
         .cardSurface()
-    }
-
-    /// "1 reset available" / "N resets available" — the count of banked rate-limit resets.
-    static func resetCreditsLabel(_ count: Int) -> String {
-        "\(count) reset\(count == 1 ? "" : "s") available"
     }
 
     private var updatedText: String {

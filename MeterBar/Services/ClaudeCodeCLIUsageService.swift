@@ -30,31 +30,7 @@ final class ClaudeCodeCLIUsageService: Sendable {
     }
 
     private func resolveClaudeBinaryPath() -> String? {
-        let environment = ProcessInfo.processInfo.environment
-        let fileManager = FileManager.default
-
-        if let override = environment["CLAUDE_CLI_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !override.isEmpty,
-           fileManager.isExecutableFile(atPath: override) {
-            return override
-        }
-
-        let pathCandidates = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map { "\($0)/claude" }
-
-        let homeDir = ServiceSupport.realHomeDirectory()
-        let fallbackCandidates = [
-            "/opt/homebrew/bin/claude",
-            "/usr/local/bin/claude",
-            "\(homeDir)/.local/bin/claude",
-            "\(homeDir)/.npm-global/bin/claude",
-            "\(homeDir)/.yarn/bin/claude",
-            "\(homeDir)/.bun/bin/claude",
-            "\(homeDir)/.volta/bin/claude",
-        ]
-
-        return (pathCandidates + fallbackCandidates).first { fileManager.isExecutableFile(atPath: $0) }
+        CLIBinaryLocator.resolve(command: "claude", overrideEnvVar: "CLAUDE_CLI_PATH")
     }
 
     /// Async wrapper that runs the blocking process invocation on `processQueue`

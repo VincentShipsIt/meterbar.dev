@@ -182,3 +182,53 @@ Once basic functionality is verified:
 - Verify network connectivity
 - Check that services are returning data
 
+---
+
+## Automated smoke / e2e suite
+
+The deterministic app-level smoke suite runs through SwiftPM (no Xcode UI
+automation, no credentials — it drives the real `UsageDataManager` and the
+widget rendering contract with fixtures).
+
+**Single command:**
+
+```bash
+swift test --filter 'MenuBarSmokeTests|WidgetRenderingTests'
+```
+
+(Requires full Xcode — Command Line Tools lack the XCTest module. In CI the
+whole suite runs via `scripts/check-coverage.sh`.)
+
+**What it covers:**
+
+- `MenuBarSmokeTests` — launch → inject fixture usage data → refresh → assert the
+  metrics snapshot, the App Group widget-bridge file, the persisted cache blob,
+  and refresh-interval persistence; plus relaunch-restores-cache.
+- `WidgetRenderingTests` — small/medium/large widget layouts render non-empty rows
+  for Claude Code, OpenAI Codex, and Cursor fixtures (view-model-level: validates
+  the `MeterBarShared` data→presentation contract the widget renders from), stable
+  sort order, and the empty state.
+
+**CI:** the full suite runs on every PR (the `test` job) and once daily via the
+scheduled `e2e.yml` workflow (fixtures only, no credentials).
+
+## Manual widget QA checklist
+
+The automated tests validate the widget's *data contract* but not its live
+SwiftUI rendering (the extension target isn't in the SwiftPM package). Before a
+release, verify the actual widget in the WidgetKit simulator / on the desktop for
+each state:
+
+- [ ] **Populated** — with all three providers connected, add the small, medium,
+      and large widgets; each shows provider icons, progress bars, and `%` labels.
+- [ ] **Single provider** — with only one provider enabled, the widget renders
+      that one row without empty gaps.
+- [ ] **Empty** — with no providers connected (fresh install / all hidden), small
+      shows "No data", medium/large show "No services connected".
+- [ ] **Stale** — leave the app closed past the refresh window; the widget keeps
+      showing the last cached values (does not blank out).
+- [ ] **Error** — revoke/expire a provider's auth; the widget continues to render
+      the remaining providers rather than going fully empty.
+- [ ] **Reload** — change the refresh interval or force a refresh in the app and
+      confirm the widget updates (via `WidgetCenter.reloadTimelines`).
+

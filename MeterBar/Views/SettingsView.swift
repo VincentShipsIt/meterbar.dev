@@ -12,6 +12,8 @@ struct SettingsView: View {
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
+    @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
+    @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
 
@@ -46,6 +48,7 @@ struct SettingsView: View {
             apiUsageSection
             costTrackingSection
             refreshSection
+            notificationsSection
             generalSection
         }
         .formStyle(.grouped)
@@ -70,8 +73,77 @@ struct SettingsView: View {
         }
     }
 
+    private var notificationsSection: some View {
+        SettingsPanelSection(title: "Notifications", systemImage: "bell.badge", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Usage notifications",
+                detail: "Notify when a tracked quota crosses a threshold. "
+                    + "Disabled providers and stale data never notify."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { notificationPreferences.isEnabled },
+                    set: { notificationPreferences.setEnabled($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
+            if notificationPreferences.isEnabled {
+                SettingsRowView(
+                    title: "Warn me",
+                    detail: "First heads-up as a quota tightens."
+                ) {
+                    Picker("", selection: Binding(
+                        get: { notificationPreferences.warningThreshold },
+                        set: { notificationPreferences.setWarningThreshold($0) }
+                    )) {
+                        ForEach(NotificationThreshold.warningOptions) { threshold in
+                            Text(threshold.displayName).tag(threshold)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 240)
+                }
+
+                SettingsRowView(
+                    title: "Alert me",
+                    detail: "Stronger alert as a quota runs out."
+                ) {
+                    Picker("", selection: Binding(
+                        get: { notificationPreferences.criticalThreshold },
+                        set: { notificationPreferences.setCriticalThreshold($0) }
+                    )) {
+                        ForEach(NotificationThreshold.criticalOptions) { threshold in
+                            Text(threshold.displayName).tag(threshold)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 240)
+                }
+            }
+        }
+    }
+
     private var generalSection: some View {
         SettingsPanelSection(title: "General", systemImage: "dock.rectangle", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Launch at Login",
+                detail: launchAtLogin.detailText
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
+            if let error = launchAtLogin.lastError {
+                SettingsNotice(text: error, color: MeterBarTheme.warning)
+            }
+
             SettingsRowView(
                 title: "Show in Dock",
                 detail: "Show MeterBar's icon in the Dock. MeterBar always stays in the menu bar."
@@ -83,6 +155,11 @@ struct SettingsView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
             }
+        }
+        .onAppear {
+            // The login-item status can change behind the app's back in System
+            // Settings, so re-read it whenever settings is shown.
+            launchAtLogin.refreshStatus()
         }
     }
 

@@ -166,4 +166,88 @@ final class CostTrackerTests: XCTestCase {
 
         XCTAssertEqual(result.input, 5)
     }
+
+    // MARK: - Codex archived-session scan
+
+    /// Writes a `.jsonl` into an `archived_sessions` directory and returns that
+    /// directory (the argument `scanCodexArchivedSessions` expects). The file's
+    /// modification date is "now", so it passes the per-file mtime cutoff.
+    private func writeCodexArchive(lines: [String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexArchive-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("archived_sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("rollout.jsonl")
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return dir
+    }
+
+    private func codexTokenLine(
+        timestamp: String,
+        conversationID: String = "conv-1",
+        model: String = "gpt-5.5",
+        input: Int = 1_000,
+        output: Int = 500,
+        cached: Int = 200,
+        reasoning: Int = 50
+    ) -> String {
+        """
+        {"timestamp": "\(timestamp)", "payload": {"type": "token_count", \
+        "rate_limits": {"conversation_id": "\(conversationID)"}, \
+        "info": {"model": "\(model)", "last_token_usage": \
+        {"input_tokens": \(input), "output_tokens": \(output), \
+        "cached_input_tokens": \(cached), "reasoning_output_tokens": \(reasoning)}}}}
+        """
+    }
+
+    private func makeContext(cutoff: Date) -> CodexScanContext {
+        CodexScanContext(earliestDate: Date(), latestDate: cutoff)
+    }
+
+    func testScanCodexArchivedSessionsAccumulatesTokenCounts() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z")
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 1_000)
+        // output accumulates the reasoning tokens on the daily/model rollups, but
+        // `totals` keeps output and reasoning separate.
+        XCTAssertEqual(context.totals.output, 500)
+        XCTAssertEqual(context.totals.reasoning, 50)
+        XCTAssertEqual(context.totals.cacheRead, 200)
+        XCTAssertEqual(context.sessionIDs, ["conv-1"])
+    }
+
+    func testScanCodexArchivedSessionsDeduplicatesIdenticalEvents() throws {
+        let line = codexTokenLine(timestamp: "2026-06-15T10:00:00Z")
+        let dir = try writeCodexArchive(lines: [line, line])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+
+        // Identical events collapse to one via the dedup key.
+        XCTAssertEqual(context.totals.input, 1_000)
+        XCTAssertEqual(context.totals.output, 500)
+    }
+
+    func testScanCodexArchivedSessionsHonorsPerLineCutoff() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexTokenLine(timestamp: "2025-01-01T00:00:00Z", conversationID: "old", input: 9_999),
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "new", input: 100)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+
+        // Only the post-cutoff line is counted.
+        XCTAssertEqual(context.totals.input, 100)
+        XCTAssertEqual(context.sessionIDs, ["new"])
+    }
 }

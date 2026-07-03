@@ -40,12 +40,14 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 20
     env:
-      # Coverage floor enforced by scripts/check-coverage.sh. Measured baseline on
-      # 2026-07-02 was 9.0% line coverage (tests cover models/parsers; the ~3.5k
-      # lines of Views and most Services are untested — docs/audits/00-repo-map.md §5).
-      # Floor sits just under the baseline as a regression gate. Ratchet this up as
-      # coverage improves; never lower it to make a PR pass.
-      COVERAGE_THRESHOLD: 8
+      # Coverage floor enforced by scripts/check-coverage.sh. Baseline was 9.0% on
+      # 2026-07-02; the service-layer test pass (#71 Tier 3a, 2026-07-03) raised the
+      # measured line coverage to 19.2% by seaming + fixture-testing KeychainManager,
+      # SharedDataStore, Codex/Cursor mapping + auth, UsageDataManager orchestration,
+      # and the Codex cost scan. Floor sits just under the measured baseline as a
+      # regression gate. Ratchet this up as coverage improves; never lower it to make
+      # a PR pass.
+      COVERAGE_THRESHOLD: 19
 
     steps:
       - name: Checkout

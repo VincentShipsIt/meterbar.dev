@@ -11,26 +11,41 @@ import WidgetKit
 public class SharedDataStore {
     public static let shared = SharedDataStore()
 
-    private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = StorageKeys.cachedUsageMetrics
-
     /// Serial queue for off-main disk writes so callers on the MainActor don't
     /// block on file I/O, while still serializing writes to the shared file.
     private let ioQueue = DispatchQueue(label: "dev.shipshit.meterbar.SharedDataStore.io", qos: .utility)
 
-    private var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+    /// Overrides the App Group container location. `nil` in production (the
+    /// container is resolved via `SharedMetricsStore`); tests inject a temp
+    /// directory so the encode → atomic-write → decode round-trip can run
+    /// without the App Group entitlement (unavailable to `swift test`).
+    private let directoryOverride: URL?
+
+    /// Invoked after a successful write. Defaults to reloading the widget
+    /// timelines; tests inject a spy to assert the write completed.
+    private let didWrite: () -> Void
+
+    /// Location (app-group id + file name) is single-sourced in MeterBarShared
+    /// so the widget and CLI readers can't drift from this writer.
+    private var metricsFileURL: URL? {
+        if let directoryOverride {
+            return directoryOverride.appendingPathComponent("\(SharedMetricsStore.metricsKey).json")
+        }
+        return SharedMetricsStore.metricsFileURL
     }
 
-    private init() {}
+    /// Defaults reproduce the production singleton exactly; tests inject a
+    /// directory + write spy.
+    init(directoryOverride: URL? = nil, didWrite: (() -> Void)? = nil) {
+        self.directoryOverride = directoryOverride
+        self.didWrite = didWrite ?? SharedDataStore.reloadWidgetTimelines
+    }
 
     func saveMetrics(_ metrics: [ServiceType: UsageMetrics]) {
-        guard let containerURL = containerURL else {
+        guard let fileURL = metricsFileURL else {
             AppLog.storage.error("App Group container unavailable; enable App Groups for the app and widget targets.")
             return
         }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
         guard let data = MetricsCodec.encode(metrics) else {
             AppLog.storage.error("Failed to encode shared metrics")
@@ -42,23 +57,32 @@ public class SharedDataStore {
         ioQueue.async { [weak self] in
             do {
                 try data.write(to: fileURL, options: [.atomic])
-                self?.reloadWidgetTimelines()
+                self?.didWrite()
             } catch {
                 AppLog.storage.error("Failed to save shared metrics: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
 
+    /// Reads through the shared reader so the app, widget, and CLI decode the
+    /// same file the same way. The test override reads the same file name from
+    /// the injected directory.
     public func loadMetrics() -> [ServiceType: UsageMetrics] {
-        guard let containerURL = containerURL else { return [:] }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
-
-        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
-        return MetricsCodec.decode(data)
+        guard directoryOverride == nil else {
+            guard let fileURL = metricsFileURL,
+                  let data = try? Data(contentsOf: fileURL) else { return [:] }
+            return MetricsCodec.decode(data)
+        }
+        return SharedMetricsStore.loadMetrics()
     }
 
-    private func reloadWidgetTimelines() {
+    /// Blocks until any in-flight async write has completed. Test-only: lets a
+    /// test observe the on-disk result of `saveMetrics` deterministically.
+    func flushPendingWrites() {
+        ioQueue.sync {}
+    }
+
+    private static func reloadWidgetTimelines() {
         #if canImport(WidgetKit)
         if #available(macOS 11.0, *) {
             WidgetCenter.shared.reloadTimelines(ofKind: "UsageWidget")

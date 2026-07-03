@@ -14,7 +14,9 @@ final class ProviderVisibilityStore: ObservableObject {
         Set(ServiceType.allCases).subtracting(hiddenServices)
     }
 
-    private init(userDefaults: UserDefaults = .standard) {
+    /// Internal (not private) so tests can construct an instance backed by an
+    /// isolated `UserDefaults` suite; production code uses `shared`.
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         load()
     }

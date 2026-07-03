@@ -1,5 +1,6 @@
 import XCTest
 @testable import MeterBar
+import MeterBarShared
 
 final class OAuthTokenExpiryTests: XCTestCase {
     func testJWTExpiryUsesGraceInterval() {

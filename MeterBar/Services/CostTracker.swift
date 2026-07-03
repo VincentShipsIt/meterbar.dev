@@ -551,7 +551,10 @@ class CostTracker: ObservableObject {
         ), makeDailyUsage(from: context.dailyTotals, provider: .codexCli, pricing: pricing))
     }
 
-    private func scanCodexArchivedSessions(
+    /// Internal (not private) so the archived-session parsing — the Codex
+    /// counterpart to `parseSessionFile`, and where CLI-vs-app cost divergence
+    /// hides — can be fixture-tested against a temp directory.
+    func scanCodexArchivedSessions(
         directory: URL,
         since cutoffDate: Date,
         context: inout CodexScanContext
@@ -894,7 +897,9 @@ class CostTracker: ObservableObject {
 /// value collapses `addCodexUsage`/`scanCodexArchivedSessions`/`scanCodexSQLiteLogs`
 /// from 10–13 parameters (a SwiftLint `function_parameter_count` error) down to
 /// a single `inout` argument.
-private struct CodexScanContext {
+///
+/// Internal (not private) so `scanCodexArchivedSessions` can be fixture-tested.
+struct CodexScanContext {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
     var modelTotals: [String: TokenAccumulator] = [:]

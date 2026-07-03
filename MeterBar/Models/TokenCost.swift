@@ -204,6 +204,69 @@ public struct CostSummary: Codable, Sendable {
         return populatedDays.count < daysToCheck
     }
 
+    /// Aggregates the cached daily rows into per-provider totals over the last
+    /// `days` calendar days (inclusive of today). Pure and rescan-free: it reads
+    /// only `dailyUsage`, so it can report input/output/cache-read tokens and
+    /// cost — not cache-creation tokens or session counts, which daily rows
+    /// don't carry. Powers `meterbar cost --days N` (issue #26).
+    ///
+    /// `coveredDays` is bounded by the last scan window (`periodDays`) *and* the
+    /// actual span of cached daily rows (earliest row → today). `periodDays`
+    /// alone is just the requested scan width — a fresh install scanned with
+    /// `days: 30` but holding 2 real days of rows must still report 2, not 30,
+    /// so callers can surface under-coverage rather than imply a full window.
+    public func dailyCostWindow(
+        lastDays days: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> DailyCostWindow {
+        let requestedDays = max(1, days)
+        let today = calendar.startOfDay(for: now)
+        let startDate = calendar.date(byAdding: .day, value: -(requestedDays - 1), to: today) ?? today
+
+        let windowRows = dailyUsage.filter { row in
+            let day = calendar.startOfDay(for: row.date)
+            return day >= startDate && day <= today
+        }
+
+        var byProvider: [ServiceType: ProviderDailyTotal] = [:]
+        for row in windowRows {
+            let existing = byProvider[row.provider]
+            byProvider[row.provider] = ProviderDailyTotal(
+                provider: row.provider,
+                inputTokens: (existing?.inputTokens ?? 0) + row.inputTokens,
+                outputTokens: (existing?.outputTokens ?? 0) + row.outputTokens,
+                cacheReadTokens: (existing?.cacheReadTokens ?? 0) + row.cacheReadTokens,
+                estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + row.estimatedCostUSD
+            )
+        }
+
+        let providers = byProvider.values.sorted { $0.provider.rawValue < $1.provider.rawValue }
+
+        // Days the cache demonstrably spans: earliest daily row through today,
+        // inclusive. Zero-usage days inside that span carry no row, so this is
+        // a conservative lower bound — better a spurious "only N days" notice
+        // than silently presenting 2 days of data as a 30-day total.
+        let cachedSpanDays: Int
+        let pastDays = dailyUsage
+            .map { calendar.startOfDay(for: $0.date) }
+            .filter { $0 <= today }
+        if let earliestDay = pastDays.min() {
+            let dayGap = calendar.dateComponents([.day], from: earliestDay, to: today).day ?? 0
+            cachedSpanDays = max(0, dayGap) + 1
+        } else {
+            cachedSpanDays = 0
+        }
+
+        return DailyCostWindow(
+            requestedDays: requestedDays,
+            coveredDays: min(requestedDays, min(periodDays, cachedSpanDays)),
+            providers: providers,
+            totalCostUSD: providers.reduce(0) { $0 + $1.estimatedCostUSD },
+            totalTokens: providers.reduce(0) { $0 + $1.totalTokens }
+        )
+    }
+
     public func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {
         let visibleCosts = costs.filter { enabledServices.contains($0.provider) }
         let visibleDailyUsage = dailyUsage.filter { enabledServices.contains($0.provider) }
@@ -215,5 +278,80 @@ public struct CostSummary: Codable, Sendable {
             periodDays: periodDays,
             dailyUsage: visibleDailyUsage
         )
+    }
+}
+
+/// Per-provider token/cost totals summed over a day window (see
+/// `CostSummary.dailyCostWindow`). Public: part of the `meterbar cost --days`
+/// output surface.
+public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
+    public var id: String { provider.rawValue }
+
+    public let provider: ServiceType
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let estimatedCostUSD: Double
+
+    public init(
+        provider: ServiceType,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double
+    ) {
+        self.provider = provider
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+    }
+
+    /// Daily rows omit cache-creation tokens, so this is input + output + cache-read.
+    public var totalTokens: Int {
+        inputTokens + outputTokens + cacheReadTokens
+    }
+
+    public var formattedCost: String {
+        UsageFormat.cost(estimatedCostUSD)
+    }
+}
+
+/// Result of windowing the cached daily cost rows to the last N days
+/// (`CostSummary.dailyCostWindow`). Codable so `meterbar cost --days N --json`
+/// can emit it directly.
+public struct DailyCostWindow: Codable, Sendable {
+    /// Days requested via `--days N` (clamped to ≥ 1).
+    public let requestedDays: Int
+    /// Days the cache can actually cover: the requested window clamped to both
+    /// the last scan width (`periodDays`) and the real span of cached daily rows.
+    public let coveredDays: Int
+    /// Per-provider totals over the window, sorted by provider raw value.
+    public let providers: [ProviderDailyTotal]
+    public let totalCostUSD: Double
+    public let totalTokens: Int
+
+    public init(
+        requestedDays: Int,
+        coveredDays: Int,
+        providers: [ProviderDailyTotal],
+        totalCostUSD: Double,
+        totalTokens: Int
+    ) {
+        self.requestedDays = requestedDays
+        self.coveredDays = coveredDays
+        self.providers = providers
+        self.totalCostUSD = totalCostUSD
+        self.totalTokens = totalTokens
+    }
+
+    /// The cache spans fewer days than requested — output should say so rather
+    /// than imply the full window was covered.
+    public var isTruncated: Bool {
+        coveredDays < requestedDays
+    }
+
+    public var formattedTotalCost: String {
+        UsageFormat.cost(totalCostUSD)
     }
 }

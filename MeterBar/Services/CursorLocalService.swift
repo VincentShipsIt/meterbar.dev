@@ -18,11 +18,12 @@ class CursorLocalService: ObservableObject {
     // Shared URLSession with the standard usage-request timeouts
     private let urlSession = ServiceSupport.session
 
-    // Assumed default monthly request quota when the API omits a plan total
-    private let defaultPlanTotal: Double = 500
+    // Assumed default monthly request quota when the API omits a plan total.
+    // Static so the pure `mapSummary` mapping can share the same constant.
+    private static let defaultPlanTotal: Double = 500
 
     // Display headroom estimate when no explicit on-demand limit is returned by the API
-    private let onDemandHeadroomMultiplier: Double = 1.5
+    private static let onDemandHeadroomMultiplier: Double = 1.5
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
@@ -137,7 +138,7 @@ class CursorLocalService: ObservableObject {
         let token = String(cString: tokenCString)
 
         // Decode JWT to extract userId from 'sub' claim
-        guard let userId = extractUserIdFromJWT(token) else {
+        guard let userId = Self.extractUserIdFromJWT(token) else {
             AppLog.usage.error("Cursor JWT userId extraction failed")
             return nil
         }
@@ -145,8 +146,46 @@ class CursorLocalService: ObservableObject {
         return (userId: userId, token: token)
     }
 
-    /// Extract userId from JWT token's 'sub' claim
-    private func extractUserIdFromJWT(_ token: String) -> String? {
+    /// Probe the Cursor state database for provider-readiness diagnostics,
+    /// mapping the SQLite read onto the shared `CursorDatabaseProbe` states.
+    /// Uses the same path scan and read-only open as `getAccessTokenFromDatabase`,
+    /// but reports *why* auth is unavailable (not found / unreadable / no token)
+    /// instead of just a token, and never returns the token value itself.
+    func probeReadinessDatabase() -> CursorDatabaseProbe {
+        guard let dbPath = getCursorDatabasePath(forceRescan: false)
+            ?? getCursorDatabasePath(forceRescan: true) else {
+            return .notFound
+        }
+
+        guard FileManager.default.isReadableFile(atPath: dbPath) else {
+            return .unreadable
+        }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return .unreadable
+        }
+        defer { sqlite3_close(db) }
+
+        let query = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            return .unreadable
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let tokenCString = sqlite3_column_text(statement, 0) else {
+            return .missingToken
+        }
+
+        return String(cString: tokenCString).isEmpty ? .missingToken : .tokenPresent
+    }
+
+    /// Extract userId from JWT token's 'sub' claim.
+    /// Static + internal so it is unit-testable without a Cursor DB or network.
+    static func extractUserIdFromJWT(_ token: String) -> String? {
         guard let sub = JWT.claimString("sub", in: token) else { return nil }
 
         // Extract userId from sub claim
@@ -202,6 +241,16 @@ class CursorLocalService: ObservableObject {
             self.subscriptionType = summaryData.membershipType
         }
 
+        return CursorLocalService.mapSummary(summaryData)
+    }
+
+    /// Maps a decoded Cursor usage-summary response onto the shared
+    /// `UsageMetrics` shape. Pure and side-effect-free so it can be fixture-tested
+    /// without the network or Cursor's SQLite DB: individual plan → weekly limit,
+    /// enabled on-demand usage → session limit. When the API omits a plan total
+    /// the assumed monthly quota is substituted; when on-demand has no explicit
+    /// limit a headroom estimate is used.
+    static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
         // Parse billing cycle end date for reset time
         var resetTime: Date?
         if let billingEnd = summaryData.billingCycleEnd {
