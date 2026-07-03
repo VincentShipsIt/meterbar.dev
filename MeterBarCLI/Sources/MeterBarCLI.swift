@@ -169,6 +169,18 @@ struct Cost: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output as JSON")
     var json: Bool = false
 
+    @Option(
+        name: .shortAndLong,
+        help: "Limit to the last N days using the cached daily breakdown (no rescan)."
+    )
+    var days: Int?
+
+    func validate() throws {
+        if let days, days < 1 {
+            throw ValidationError("--days must be 1 or greater.")
+        }
+    }
+
     func run() throws {
         // Reports the app's cached scan instead of re-implementing it. The old
         // CLI scanner diverged from the app (no event dedup, one scan root,
@@ -184,6 +196,18 @@ struct Cost: ParsableCommand {
             return
         }
 
+        // `--days N` reports a windowed view derived purely from the cached daily
+        // rows — no rescan. Falls through to the full cached summary otherwise.
+        if let days {
+            let window = cache.summary.dailyCostWindow(lastDays: days)
+            if json {
+                printJSON(window)
+            } else {
+                printWindow(window, cache: cache)
+            }
+            return
+        }
+
         if json {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -195,6 +219,56 @@ struct Cost: ParsableCommand {
         } else {
             printCosts(cache)
         }
+    }
+
+    private func printJSON<T: Encodable>(_ value: T) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(value),
+           let str = String(data: data, encoding: .utf8) {
+            print(str)
+        }
+    }
+
+    private func printWindow(_ window: DailyCostWindow, cache: CostSummaryCache) {
+        print("╭─────────────────────────────────────────╮")
+        print("│          MeterBar Cost Tracker          │")
+        print("╰─────────────────────────────────────────╯")
+        print()
+        print("Period: Last \(window.requestedDays) days (from cached daily data)")
+        print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
+
+        // The cache holds fewer days than asked for — don't imply full coverage.
+        if window.isTruncated {
+            print()
+            print("⚠ Cache only covers \(window.coveredDays) day(s); "
+                + "showing what's available. Open MeterBar and rescan for a longer window.")
+        }
+        print()
+
+        if window.providers.isEmpty {
+            if cache.summary.costs.isEmpty {
+                print("No usage in the last \(window.requestedDays) days.")
+            } else {
+                // Legacy caches carry totals but no per-day rows.
+                print("No cached daily breakdown for this window.")
+                print("Open MeterBar and rescan (Costs tab) to record per-day usage.")
+            }
+            return
+        }
+
+        for provider in window.providers {
+            print("▸ \(provider.provider.displayName)")
+            print("  Input:          \(UsageFormat.groupedTokens(provider.inputTokens))")
+            print("  Output:         \(UsageFormat.groupedTokens(provider.outputTokens))")
+            print("  Cache Read:     \(UsageFormat.groupedTokens(provider.cacheReadTokens))")
+            print("  Estimated Cost: \(provider.formattedCost)")
+            print()
+        }
+
+        print("Total:          \(window.formattedTotalCost)")
+        print("Tokens:         \(UsageFormat.groupedTokens(window.totalTokens))")
     }
 
     private func printCosts(_ cache: CostSummaryCache) {

@@ -11,26 +11,19 @@ import WidgetKit
 public class SharedDataStore {
     public static let shared = SharedDataStore()
 
-    private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = StorageKeys.cachedUsageMetrics
-
     /// Serial queue for off-main disk writes so callers on the MainActor don't
     /// block on file I/O, while still serializing writes to the shared file.
     private let ioQueue = DispatchQueue(label: "dev.shipshit.meterbar.SharedDataStore.io", qos: .utility)
 
-    private var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
-    }
-
     private init() {}
 
     func saveMetrics(_ metrics: [ServiceType: UsageMetrics]) {
-        guard let containerURL = containerURL else {
+        // Location (app-group id + file name) is single-sourced in MeterBarShared
+        // so the widget and CLI readers can't drift from this writer.
+        guard let fileURL = SharedMetricsStore.metricsFileURL else {
             AppLog.storage.error("App Group container unavailable; enable App Groups for the app and widget targets.")
             return
         }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
 
         guard let data = MetricsCodec.encode(metrics) else {
             AppLog.storage.error("Failed to encode shared metrics")
@@ -49,13 +42,10 @@ public class SharedDataStore {
         }
     }
 
+    /// Reads through the shared reader so the app, widget, and CLI decode the
+    /// same file the same way.
     public func loadMetrics() -> [ServiceType: UsageMetrics] {
-        guard let containerURL = containerURL else { return [:] }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
-
-        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
-        return MetricsCodec.decode(data)
+        SharedMetricsStore.loadMetrics()
     }
 
     private func reloadWidgetTimelines() {

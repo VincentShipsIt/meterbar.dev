@@ -302,45 +302,15 @@ private struct PopoverProviderStatusCard: View {
                 }
             }
 
-            if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(snapshot.accentColor)
-                    Text(Self.resetCreditsLabel(resetCount))
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer(minLength: 4)
-                }
-                .help(
-                    "\(Self.resetCreditsLabel(resetCount)) - banked quota resets you can trigger " +
-                    "when you hit a rate limit."
-                )
-            }
-
-            if !snapshot.hasExhaustedLimit, let extraUsage = snapshot.extraUsage {
-                HStack(spacing: 4) {
-                    Image(systemName: "creditcard")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                    Text("Extra usage")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Spacer(minLength: 4)
-                    ExtraUsageStatusPill(status: extraUsage)
-                }
+            let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
+            if badges.hasContent {
+                badges
             }
         }
         .padding(snapshot.hasExhaustedLimit ? 9 : 11)
         .frame(maxWidth: .infinity, minHeight: snapshot.hasExhaustedLimit ? 78 : 124, alignment: .topLeading)
         .opacity(isOut ? 0.72 : 1)
         .cardSurface()
-    }
-
-    /// "1 reset available" / "N resets available" — the count of banked rate-limit resets.
-    static func resetCreditsLabel(_ count: Int) -> String {
-        "\(count) reset\(count == 1 ? "" : "s") available"
     }
 
     private var updatedText: String {

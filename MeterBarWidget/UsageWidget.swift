@@ -14,32 +14,6 @@ extension UsageStatus {
     }
 }
 
-// MARK: - Shared Data Store (simplified for Widget)
-
-class SharedDataStore {
-    static let shared = SharedDataStore()
-
-    private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = "cached_usage_metrics"
-
-    private var containerURL: URL? {
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
-    }
-
-    func loadMetrics() -> [ServiceType: UsageMetrics] {
-        guard let containerURL = containerURL else { return [:] }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
-
-        // Tolerant per-entry decode via the shared codec: an unknown service
-        // key or malformed entry drops that entry, not the whole cache — so a
-        // cache written by an older build (e.g. with a removed provider) still
-        // renders the providers that remain.
-        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
-        return MetricsCodec.decode(data)
-    }
-}
-
 // MARK: - Widget
 
 struct UsageWidget: Widget {
@@ -88,13 +62,13 @@ struct UsageWidgetProvider: TimelineProvider {
     func getSnapshot(in context: Context, completion: @escaping (UsageWidgetEntry) -> Void) {
         let entry = UsageWidgetEntry(
             date: Date(),
-            metrics: SharedDataStore.shared.loadMetrics()
+            metrics: SharedMetricsStore.loadMetrics()
         )
         completion(entry)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<UsageWidgetEntry>) -> Void) {
-        let cachedMetrics = SharedDataStore.shared.loadMetrics()
+        let cachedMetrics = SharedMetricsStore.loadMetrics()
         let entry = UsageWidgetEntry(
             date: Date(),
             metrics: cachedMetrics

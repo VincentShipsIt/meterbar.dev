@@ -102,6 +102,47 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertNil(metrics.resetCreditsAvailable)
     }
 
+    // MARK: - Shared App Group location (issue #13 — a rename must break CI)
+
+    func testSharedMetricsStoreConstantsAreStable() {
+        // The widget and CLI read the app-group file through these constants
+        // instead of their own forked literals. Renaming either splits the
+        // writer from the readers, so pin the wire values here.
+        XCTAssertEqual(SharedMetricsStore.appGroupIdentifier, "group.dev.shipshit.meterbar")
+        XCTAssertEqual(SharedMetricsStore.metricsKey, "cached_usage_metrics")
+    }
+
+    func testAppStorageKeyIsSingleSourcedFromShared() {
+        // The app's in-process UserDefaults cache key and the shared app-group
+        // file name are one source of truth (StorageKeys re-exports the shared
+        // constant); a divergence would split the caches.
+        XCTAssertEqual(StorageKeys.cachedUsageMetrics, SharedMetricsStore.metricsKey)
+    }
+
+    func testMetricsFileURLResolvesSharedKey() throws {
+        // When App Groups are provisioned the reader resolves
+        // "<metricsKey>.json" inside the shared container. Skip on hosts without
+        // the app-group entitlement (some CI runners).
+        guard let fileURL = SharedMetricsStore.metricsFileURL else {
+            throw XCTSkip("App Group container unavailable in this test host")
+        }
+        XCTAssertEqual(fileURL.lastPathComponent, "\(SharedMetricsStore.metricsKey).json")
+    }
+
+    func testSharedReaderCodecRoundTripsMetrics() throws {
+        // The widget and CLI decode exclusively through MetricsCodec (via
+        // SharedMetricsStore.loadMetrics); a payload the app writes must survive
+        // that exact path, including the newer optional fields.
+        let written: [ServiceType: UsageMetrics] = [.claudeCode: makeMetrics()]
+        let data = try XCTUnwrap(MetricsCodec.encode(written))
+
+        let decoded = MetricsCodec.decode(data)
+        let metrics = try XCTUnwrap(decoded[.claudeCode])
+        XCTAssertEqual(metrics.resetCreditsAvailable, 2)
+        XCTAssertEqual(metrics.extraUsage, ExtraUsageStatus(state: .on, detail: "$0.00 used"))
+        XCTAssertEqual(metrics.sessionLimit, written[.claudeCode]?.sessionLimit)
+    }
+
     // MARK: - Historical regression: used/total are JSON doubles, not ints
 
     func testUsedAndTotalDecodeAsDoubles() throws {
