@@ -45,13 +45,58 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertTrue((report.check("installed")?.recovery ?? "").contains("claude login"))
     }
 
-    func testClaudeMissingCredentialsFailsAuth() {
+    func testClaudeMissingCredentialsWithCLIInstalledWarnsAuth() {
+        // Standard `claude login` flow: the CLI session's credentials are not
+        // readable by the app, so "no keychain blob" is inconclusive — warn,
+        // never a hard fail (the old fail here false-negatived every CLI-login
+        // user whose usage hadn't been fetched yet).
         let input = ClaudeReadinessInput(isCLIInstalled: true, credentialsJSON: nil, now: now)
+        let report = ProviderReadinessEvaluator.claudeCode(input)
+
+        XCTAssertEqual(report.check("auth")?.level, .warn)
+        XCTAssertTrue((report.check("auth")?.recovery ?? "").contains("claude login"))
+        XCTAssertEqual(report.overall, .warn)
+    }
+
+    func testClaudeMissingCredentialsWithoutCLIFailsAuth() {
+        let input = ClaudeReadinessInput(isCLIInstalled: false, credentialsJSON: nil, now: now)
         let report = ProviderReadinessEvaluator.claudeCode(input)
 
         XCTAssertEqual(report.check("auth")?.level, .fail)
         XCTAssertTrue((report.check("auth")?.recovery ?? "").contains("claude login"))
         XCTAssertEqual(report.overall, .fail)
+    }
+
+    func testClaudeRecentUsageFetchPassesAuthWithoutCredentials() {
+        // A recent successful usage fetch runs through the CLI session, so it
+        // is direct proof of sign-in even with no readable keychain blob.
+        let input = ClaudeReadinessInput(
+            isCLIInstalled: true,
+            credentialsJSON: nil,
+            hasRecentUsageFetch: true,
+            now: now
+        )
+        let report = ProviderReadinessEvaluator.claudeCode(input)
+
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .pass)
+        XCTAssertEqual(report.overall, .pass)
+        XCTAssertTrue(report.isHealthy)
+    }
+
+    func testClaudeRecentUsageFetchOverridesExpiredLegacyCredentials() {
+        // The legacy keychain blob can sit expired while the CLI session works
+        // fine; live fetch evidence wins over stale credential inspection.
+        let input = ClaudeReadinessInput(
+            isCLIInstalled: true,
+            credentialsJSON: claudeCredentials(accessToken: secret, expiresAtUnix: 500_000), // past
+            hasRecentUsageFetch: true,
+            now: now
+        )
+        let report = ProviderReadinessEvaluator.claudeCode(input)
+
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        assertNoSecretLeak(report)
     }
 
     func testClaudeExpiredTokenFailsAuth() {

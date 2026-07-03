@@ -95,6 +95,8 @@ final class CostWindowTests: XCTestCase {
     // MARK: - Truncation notice
 
     func testFlagsTruncationWhenCacheSpansFewerDays() {
+        // Coverage is the tighter of the scan width (periodDays: 2) and the
+        // actual row span (today only → 1 day).
         let summary = summary(
             dailyUsage: [row(daysAgo: 0, provider: .claudeCode, input: 1, output: 1, cacheRead: 0, cost: 0.1)],
             periodDays: 2
@@ -104,7 +106,50 @@ final class CostWindowTests: XCTestCase {
 
         XCTAssertTrue(window.isTruncated)
         XCTAssertEqual(window.requestedDays, 30)
+        XCTAssertEqual(window.coveredDays, 1)
+    }
+
+    func testFlagsTruncationWhenRowSpanIsShorterThanScanWindow() {
+        // Production scenario: every scan requests 30 days (periodDays: 30),
+        // but a fresh install only has 2 real days of rows. The old
+        // periodDays-only derivation reported coveredDays == 30 here and the
+        // CLI notice never fired.
+        let summary = summary(
+            dailyUsage: [
+                row(daysAgo: 0, provider: .claudeCode, input: 5, output: 2, cacheRead: 0, cost: 0.5),
+                row(daysAgo: 1, provider: .claudeCode, input: 7, output: 3, cacheRead: 0, cost: 0.7)
+            ],
+            periodDays: 30
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 30, now: now, calendar: calendar)
+
+        XCTAssertTrue(window.isTruncated)
         XCTAssertEqual(window.coveredDays, 2)
+    }
+
+    func testDoesNotFlagTruncationWhenRowsSpanTheFullWindow() {
+        let summary = summary(
+            dailyUsage: [
+                row(daysAgo: 0, provider: .claudeCode, input: 5, output: 2, cacheRead: 0, cost: 0.5),
+                row(daysAgo: 6, provider: .claudeCode, input: 7, output: 3, cacheRead: 0, cost: 0.7)
+            ],
+            periodDays: 30
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 7, now: now, calendar: calendar)
+
+        XCTAssertFalse(window.isTruncated)
+        XCTAssertEqual(window.coveredDays, 7)
+    }
+
+    func testReportsZeroCoverageForEmptyCache() {
+        let summary = summary(dailyUsage: [], periodDays: 30)
+
+        let window = summary.dailyCostWindow(lastDays: 30, now: now, calendar: calendar)
+
+        XCTAssertTrue(window.isTruncated)
+        XCTAssertEqual(window.coveredDays, 0)
     }
 
     // MARK: - Clamping

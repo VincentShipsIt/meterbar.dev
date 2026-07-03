@@ -210,9 +210,11 @@ public struct CostSummary: Codable, Sendable {
     /// cost — not cache-creation tokens or session counts, which daily rows
     /// don't carry. Powers `meterbar cost --days N` (issue #26).
     ///
-    /// `coveredDays` is `min(days, periodDays)`: when the cache spans fewer days
-    /// than requested, callers should surface that rather than imply full
-    /// coverage.
+    /// `coveredDays` is bounded by the last scan window (`periodDays`) *and* the
+    /// actual span of cached daily rows (earliest row → today). `periodDays`
+    /// alone is just the requested scan width — a fresh install scanned with
+    /// `days: 30` but holding 2 real days of rows must still report 2, not 30,
+    /// so callers can surface under-coverage rather than imply a full window.
     public func dailyCostWindow(
         lastDays days: Int,
         now: Date = Date(),
@@ -241,9 +243,24 @@ public struct CostSummary: Codable, Sendable {
 
         let providers = byProvider.values.sorted { $0.provider.rawValue < $1.provider.rawValue }
 
+        // Days the cache demonstrably spans: earliest daily row through today,
+        // inclusive. Zero-usage days inside that span carry no row, so this is
+        // a conservative lower bound — better a spurious "only N days" notice
+        // than silently presenting 2 days of data as a 30-day total.
+        let cachedSpanDays: Int
+        let pastDays = dailyUsage
+            .map { calendar.startOfDay(for: $0.date) }
+            .filter { $0 <= today }
+        if let earliestDay = pastDays.min() {
+            let dayGap = calendar.dateComponents([.day], from: earliestDay, to: today).day ?? 0
+            cachedSpanDays = max(0, dayGap) + 1
+        } else {
+            cachedSpanDays = 0
+        }
+
         return DailyCostWindow(
             requestedDays: requestedDays,
-            coveredDays: min(requestedDays, periodDays),
+            coveredDays: min(requestedDays, min(periodDays, cachedSpanDays)),
             providers: providers,
             totalCostUSD: providers.reduce(0) { $0 + $1.estimatedCostUSD },
             totalTokens: providers.reduce(0) { $0 + $1.totalTokens }
@@ -306,7 +323,8 @@ public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
 public struct DailyCostWindow: Codable, Sendable {
     /// Days requested via `--days N` (clamped to ≥ 1).
     public let requestedDays: Int
-    /// Days the cache can actually cover: `min(requestedDays, periodDays)`.
+    /// Days the cache can actually cover: the requested window clamped to both
+    /// the last scan width (`periodDays`) and the real span of cached daily rows.
     public let coveredDays: Int
     /// Per-provider totals over the window, sorted by provider raw value.
     public let providers: [ProviderDailyTotal]

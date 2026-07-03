@@ -48,6 +48,14 @@ final class MenuBarSmokeTests: XCTestCase {
         } else {
             UserDefaults.standard.removeObject(forKey: StorageKeys.refreshInterval)
         }
+        // Drop the UUID-scoped suites so repeated runs don't accumulate
+        // plist-backed preference domains (same convention as the other
+        // suite-based tests, e.g. NotificationPreferencesStoreTests).
+        if let suiteName {
+            for suite in [suiteName, "\(suiteName)-vis"] {
+                UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            }
+        }
         tempDirectory = nil
         suiteName = nil
         savedRefreshInterval = nil

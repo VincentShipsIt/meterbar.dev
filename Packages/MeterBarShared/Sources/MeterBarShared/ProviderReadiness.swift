@@ -106,7 +106,15 @@ public struct ClaudeReadinessInput: Sendable {
     /// `claude` resolvable on PATH.
     public var isCLIInstalled: Bool
     /// Raw keychain blob for the "Claude Code-credentials" item (nil if absent).
+    /// This is the *legacy OAuth fallback* path only — the standard `claude
+    /// login` CLI session stores credentials the app cannot read, so a nil
+    /// blob must not by itself mean "not signed in".
     public var credentialsJSON: Data?
+    /// Usage metrics for Claude Code were successfully fetched recently.
+    /// Fetches run through the `claude` CLI session, so a recent success is
+    /// direct proof of a working sign-in even when no keychain blob is
+    /// readable (the standard CLI-login flow).
+    public var hasRecentUsageFetch: Bool
     /// Pre-sanitized last-refresh error (safe to display), nil on success.
     public var refreshError: String?
     public var now: Date
@@ -114,11 +122,13 @@ public struct ClaudeReadinessInput: Sendable {
     public init(
         isCLIInstalled: Bool,
         credentialsJSON: Data? = nil,
+        hasRecentUsageFetch: Bool = false,
         refreshError: String? = nil,
         now: Date = Date()
     ) {
         self.isCLIInstalled = isCLIInstalled
         self.credentialsJSON = credentialsJSON
+        self.hasRecentUsageFetch = hasRecentUsageFetch
         self.refreshError = refreshError
         self.now = now
     }
@@ -215,33 +225,60 @@ public enum ProviderReadinessEvaluator {
     private static func claudeAuthCheck(_ input: ClaudeReadinessInput) -> ReadinessCheck {
         let loginRecovery = "Run `claude login`."
 
-        guard let data = input.credentialsJSON,
-              let credentials = try? JSONDecoder().decode(ClaudeCredentialsFixture.self, from: data) else {
+        // Direct proof beats credential inspection: usage fetches run through
+        // the `claude` CLI session, so a recent success means the sign-in
+        // works — regardless of whether the legacy keychain blob is readable
+        // (it usually isn't for the standard CLI-login flow).
+        if input.hasRecentUsageFetch {
             return ReadinessCheck(
                 id: ReadinessCheckID.auth,
                 title: "Signed in",
-                level: .fail,
-                detail: "Not signed in — no Claude Code credentials found.",
-                recovery: loginRecovery
+                level: .pass,
+                detail: "Signed in — usage was recently read through the Claude CLI session."
             )
         }
 
-        if let expiresAt = credentials.claudeAiOauth.expiresAt,
-           OAuthTokenExpiry.isExpired(unixTimestamp: expiresAt, now: input.now) {
+        if let data = input.credentialsJSON,
+           let credentials = try? JSONDecoder().decode(ClaudeCredentialsFixture.self, from: data) {
+            if let expiresAt = credentials.claudeAiOauth.expiresAt,
+               OAuthTokenExpiry.isExpired(unixTimestamp: expiresAt, now: input.now) {
+                return ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Signed in",
+                    level: .fail,
+                    detail: "Claude Code session has expired.",
+                    recovery: loginRecovery
+                )
+            }
+
             return ReadinessCheck(
                 id: ReadinessCheckID.auth,
                 title: "Signed in",
-                level: .fail,
-                detail: "Claude Code session has expired.",
-                recovery: loginRecovery
+                level: .pass,
+                detail: "Signed in to Claude Code."
+            )
+        }
+
+        // No working fetch and no readable credentials. If the CLI is
+        // installed this is inconclusive rather than a proven logout — the
+        // CLI-login session isn't inspectable from here — so warn instead of
+        // reporting a hard failure for a setup that may be perfectly healthy.
+        if input.isCLIInstalled {
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Signed in",
+                level: .warn,
+                detail: "Sign-in not verified yet — no recent usage fetch and no readable credentials.",
+                recovery: "Open MeterBar to trigger a refresh, or run `claude login` if usage stays empty."
             )
         }
 
         return ReadinessCheck(
             id: ReadinessCheckID.auth,
             title: "Signed in",
-            level: .pass,
-            detail: "Signed in to Claude Code."
+            level: .fail,
+            detail: "Not signed in — no Claude Code credentials found.",
+            recovery: loginRecovery
         )
     }
 

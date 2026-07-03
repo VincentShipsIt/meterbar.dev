@@ -32,14 +32,34 @@ public enum ProviderReadinessInspector {
 
     // MARK: - Per-provider gathering
 
+    /// How recent a cached Claude usage fetch must be to count as proof of a
+    /// working CLI sign-in. Generous on purpose: any successful fetch implies
+    /// login, and a later breakage surfaces through the refresh-error check.
+    static let recentUsageFetchWindow: TimeInterval = 24 * 60 * 60
+
     static func claudeReport(refreshError: ServiceError? = nil, now: Date = Date()) -> ProviderReadiness {
         let input = ClaudeReadinessInput(
             isCLIInstalled: CLIBinaryLocator.isAvailable(command: "claude", overrideEnvVar: "CLAUDE_CLI_PATH"),
             credentialsJSON: ClaudeCodeLocalService.shared.credentialsData(),
+            hasRecentUsageFetch: hasRecentClaudeUsageFetch(now: now),
             refreshError: sanitize(refreshError),
             now: now
         )
         return ProviderReadinessEvaluator.claudeCode(input)
+    }
+
+    /// Whether the shared metrics cache holds a Claude Code entry fetched
+    /// recently. Fetches go through the `claude` CLI session, so this is direct
+    /// sign-in evidence for the standard CLI-login flow, whose credentials the
+    /// app cannot read (issue: keychain-only check false-negatived every
+    /// `claude login` user). The cache is the same file `meterbar cost` and the
+    /// widget already read, so the app and `meterbar doctor` agree.
+    private static func hasRecentClaudeUsageFetch(now: Date) -> Bool {
+        guard let metrics = SharedDataStore.shared.loadMetrics()[.claudeCode] else {
+            return false
+        }
+        let age = now.timeIntervalSince(metrics.lastUpdated)
+        return age >= 0 && age <= recentUsageFetchWindow
     }
 
     static func codexReport(refreshError: ServiceError? = nil, now: Date = Date()) -> ProviderReadiness {

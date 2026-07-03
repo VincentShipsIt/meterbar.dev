@@ -31,6 +31,7 @@ final class UsageDataManagerTests: XCTestCase {
     private enum StubError: Error { case fetchFailed }
 
     private var tempDirectory: URL!
+    private var createdSuiteNames: [String] = []
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -41,6 +42,13 @@ final class UsageDataManagerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDirectory { try? FileManager.default.removeItem(at: tempDirectory) }
+        // Drop the UUID-scoped suites so repeated runs don't accumulate
+        // plist-backed preference domains (same convention as the other
+        // suite-based tests, e.g. NotificationPreferencesStoreTests).
+        for suite in createdSuiteNames {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        createdSuiteNames = []
         tempDirectory = nil
         try super.tearDownWithError()
     }
@@ -55,6 +63,7 @@ final class UsageDataManagerTests: XCTestCase {
         preload: [ServiceType: UsageMetrics] = [:]
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
+        createdSuiteNames.append(contentsOf: [suiteName, "\(suiteName)-vis"])
         let cacheDefaults = UserDefaults(suiteName: suiteName)!
         if !preload.isEmpty, let data = MetricsCodec.encode(preload) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedUsageMetrics)
