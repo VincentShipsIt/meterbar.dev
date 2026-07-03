@@ -217,16 +217,15 @@ struct OptimizationInsights: Equatable, Sendable {
         )
 
         if summary.totalTokens > 0 {
-            self.recommendations = Self.buildRecommendations(
+            self.recommendations = Self.buildRecommendations(RecommendationInputs(
                 premiumShare: premiumTokenShare,
                 inputOutputRatio: inputOutputRatio,
                 cacheReuseRatio: cacheReuseRatio,
                 cacheCreationTokens: cacheCreation,
                 topOrigin: topOrigins.first,
-                topModel: topModels.first,
                 tokens7Day: tokens7Day,
                 tokens30Day: tokens30Day
-            )
+            ))
         } else {
             self.recommendations = []
         }
@@ -275,16 +274,27 @@ struct OptimizationInsights: Equatable, Sendable {
         return Int((clamp01(weighted) * 100).rounded())
     }
 
-    static func buildRecommendations(
-        premiumShare: Double,
-        inputOutputRatio: Double?,
-        cacheReuseRatio: Double?,
-        cacheCreationTokens: Int,
-        topOrigin: RankedTokenEntry?,
-        topModel: RankedTokenEntry?,
-        tokens7Day: Int,
-        tokens30Day: Int
-    ) -> [OptimizationRecommendation] {
+    /// Grouped inputs for `buildRecommendations` — keeps the derived signals
+    /// together and the function parameter count in check.
+    struct RecommendationInputs {
+        let premiumShare: Double
+        let inputOutputRatio: Double?
+        let cacheReuseRatio: Double?
+        let cacheCreationTokens: Int
+        let topOrigin: RankedTokenEntry?
+        let tokens7Day: Int
+        let tokens30Day: Int
+    }
+
+    static func buildRecommendations(_ inputs: RecommendationInputs) -> [OptimizationRecommendation] {
+        let premiumShare = inputs.premiumShare
+        let inputOutputRatio = inputs.inputOutputRatio
+        let cacheReuseRatio = inputs.cacheReuseRatio
+        let cacheCreationTokens = inputs.cacheCreationTokens
+        let topOrigin = inputs.topOrigin
+        let tokens7Day = inputs.tokens7Day
+        let tokens30Day = inputs.tokens30Day
+
         var recommendations: [OptimizationRecommendation] = []
 
         // Premium-model routing.
