@@ -24,4 +24,10 @@ enum StorageKeys {
     static let claudeCodeDefaultAccountName = "ClaudeCodeDefaultAccountName"
     /// Persisted account display order (array of UUID strings).
     static let claudeCodeAccountOrder = "ClaudeCodeAccountOrder"
+    /// Global on/off switch for usage notifications.
+    static let notificationsEnabled = "NotificationsEnabled"
+    /// Raw value of the `NotificationThreshold` at which a warning notifies.
+    static let notificationWarningThreshold = "NotificationWarningThreshold"
+    /// Raw value of the `NotificationThreshold` at which a critical alert notifies.
+    static let notificationCriticalThreshold = "NotificationCriticalThreshold"
 }

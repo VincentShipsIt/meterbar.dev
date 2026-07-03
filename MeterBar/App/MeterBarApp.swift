@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover?
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
+    private let notificationPreferences = NotificationPreferencesStore.shared
     private var cancellables = Set<AnyCancellable>()
     private var monitorTask: Task<Void, Never>?
 
@@ -254,9 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Note: UsageDataManager handles its own auto-refresh; this loop only
         // checks metrics for notification purposes.
         while !Task.isCancelled {
-            for (service, metrics) in UsageDataManager.shared.metrics where providerVisibilityStore.isEnabled(service) {
-                checkAndNotify(metrics: metrics)
-            }
+            checkAndNotify()
 
             // Wait 5 minutes before next notification check. A thrown
             // CancellationError exits the loop instead of busy-looping.
@@ -268,46 +267,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func checkAndNotify(metrics: UsageMetrics) {
-        let limits: [(limit: UsageLimit, type: String)] = [
-            (metrics.sessionLimit, "session"),
-            (metrics.weeklyLimit, "weekly"),
-            (metrics.codeReviewLimit, "codeReview")
-        ].compactMap { pair in pair.0.map { ($0, pair.1) } }
+    /// Evaluates every tracked service's metrics against the user's notification
+    /// preferences and posts any warning/critical crossings. All decision logic
+    /// lives in the pure, unit-tested `NotificationDecider`; this method only
+    /// threads the dedup key set and turns fired decisions into banners.
+    private func checkAndNotify() {
+        let decider = NotificationDecider(preferences: notificationPreferences.preferences)
+        let now = Date()
+        var keys = notifiedLimitKeys
 
-        for (limit, limitType) in limits {
-            let baseKey = "\(metrics.service.rawValue)-\(limitType)"
-            let warnKey = "\(baseKey)-warn"
-            let criticalKey = "\(baseKey)-critical"
-
-            // Same bands as every other surface: warn in the critical band
-            // (≤10% left ≡ the old ≥90% used), alert when exhausted.
-            switch QuotaBand.forLimit(limit) {
-            case .exhausted:
-                // Only fire once per crossing; supersede any pending warn alert.
-                notifiedLimitKeys.remove(warnKey)
-                if notifiedLimitKeys.insert(criticalKey).inserted {
-                    sendNotification(
-                        identifier: criticalKey,
-                        title: "\(metrics.service.displayName) Limit Reached",
-                        body: "You've reached your usage limit"
-                    )
-                }
-            case .critical:
-                if notifiedLimitKeys.insert(warnKey).inserted {
-                    sendNotification(
-                        identifier: warnKey,
-                        title: "\(metrics.service.displayName) Usage Warning",
-                        body: "You're at \(Int(limit.percentage))% of your limit"
-                    )
-                }
-            case .healthy, .tight:
-                // Usage fell back below the threshold; allow the next crossing to
-                // notify again.
-                notifiedLimitKeys.remove(warnKey)
-                notifiedLimitKeys.remove(criticalKey)
+        for (service, metrics) in UsageDataManager.shared.metrics {
+            let evaluation = decider.evaluate(
+                metrics: metrics,
+                providerEnabled: providerVisibilityStore.isEnabled(service),
+                alreadyNotified: keys,
+                now: now
+            )
+            keys = evaluation.notifiedKeys
+            for fired in evaluation.notifications {
+                postNotification(fired)
             }
         }
+
+        notifiedLimitKeys = keys
+    }
+
+    private func postNotification(_ fired: FiredNotification) {
+        let title: String
+        let body: String
+        switch fired.level {
+        case .warning:
+            title = "\(fired.serviceDisplayName) Usage Warning"
+            body = "You're at \(fired.percentUsed)% of your limit"
+        case .critical:
+            title = "\(fired.serviceDisplayName) Limit Reached"
+            body = "You've reached your usage limit"
+        }
+        sendNotification(identifier: fired.key, title: title, body: body)
     }
 
     private func sendNotification(identifier: String, title: String, body: String) {
