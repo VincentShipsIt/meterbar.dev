@@ -103,7 +103,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
 
     func testUnknownPreviousKeyFallsBackToTightest() {
         let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: 2)
-        let codex = candidate(key: "codex", percentUsed: 40, activeMinutesAgo: 1)
+        let codex = candidate(key: "codex", percentUsed: 80, activeMinutesAgo: 1)
         XCTAssertEqual(select([claude, codex], previousKey: "cursor")?.key, "codex")
     }
 
