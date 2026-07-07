@@ -81,4 +81,33 @@ final class AccountActivityInspectorTests: XCTestCase {
             tempDir.appendingPathComponent("nope.db").path
         ]))
     }
+
+    // MARK: - Provider probes
+
+    func testCodexCliActivityHonorsCodexHomeOverride() throws {
+        let previousCodexHome = getenv("CODEX_HOME").map { String(cString: $0) }
+        defer {
+            if let previousCodexHome {
+                setenv("CODEX_HOME", previousCodexHome, 1)
+            } else {
+                unsetenv("CODEX_HOME")
+            }
+        }
+
+        let codexHome = tempDir.appendingPathComponent("custom-codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let newest = Date(timeIntervalSinceNow: -90)
+        let history = codexHome.appendingPathComponent("history.jsonl")
+        try Data("{}".utf8).write(to: history)
+        try FileManager.default.setAttributes([.modificationDate: newest], ofItemAtPath: history.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -3_600)],
+            ofItemAtPath: codexHome.path
+        )
+
+        setenv("CODEX_HOME", codexHome.path, 1)
+
+        let activity = try XCTUnwrap(AccountActivityInspector.codexCliActivity())
+        XCTAssertEqual(activity.timeIntervalSince1970, newest.timeIntervalSince1970, accuracy: 2)
+    }
 }
