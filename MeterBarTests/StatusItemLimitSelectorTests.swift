@@ -1,0 +1,118 @@
+import XCTest
+@testable import MeterBar
+import MeterBarShared
+
+final class StatusItemLimitSelectorTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_750_000_000)
+
+    private func candidate(
+        key: String,
+        percentUsed: Double,
+        activeMinutesAgo: Double? = nil,
+        displayName: String? = nil
+    ) -> StatusLimitCandidate {
+        StatusLimitCandidate(
+            key: key,
+            displayName: displayName ?? key,
+            limit: UsageLimit(used: percentUsed, total: 100, resetTime: nil),
+            lastActivity: activeMinutesAgo.map { now.addingTimeInterval(-$0 * 60) }
+        )
+    }
+
+    private func select(
+        _ candidates: [StatusLimitCandidate],
+        previousKey: String? = nil
+    ) -> StatusLimitCandidate? {
+        StatusItemLimitSelector.select(candidates: candidates, previousKey: previousKey, now: now)
+    }
+
+    // MARK: - Basics
+
+    func testEmptyCandidatesReturnsNil() {
+        XCTAssertNil(select([]))
+    }
+
+    func testSingleCandidateIsSelectedEvenWhenIdle() {
+        let only = candidate(key: "codex", percentUsed: 20, activeMinutesAgo: nil)
+        XCTAssertEqual(select([only])?.key, "codex")
+    }
+
+    // MARK: - Active-account filtering
+
+    func testTightestAmongActiveWinsOverTighterIdleAccount() {
+        // The idle account is far tighter (10% left) but hasn't been used;
+        // the menu bar should follow the accounts actually in use.
+        let idleTight = candidate(key: "claude:old", percentUsed: 90, activeMinutesAgo: nil)
+        let activeLoose = candidate(key: "claude:ship", percentUsed: 40, activeMinutesAgo: 5)
+        XCTAssertEqual(select([idleTight, activeLoose])?.key, "claude:ship")
+    }
+
+    func testStaleActivityBeyondWindowCountsAsIdle() {
+        let stale = candidate(key: "claude:old", percentUsed: 90, activeMinutesAgo: 31)
+        let active = candidate(key: "codex", percentUsed: 40, activeMinutesAgo: 5)
+        XCTAssertEqual(select([stale, active])?.key, "codex")
+    }
+
+    func testActivityExactlyAtWindowBoundaryCountsAsActive() {
+        let boundary = candidate(key: "claude:ship", percentUsed: 90, activeMinutesAgo: 30)
+        let active = candidate(key: "codex", percentUsed: 40, activeMinutesAgo: 5)
+        XCTAssertEqual(select([boundary, active])?.key, "claude:ship")
+    }
+
+    func testFallsBackToTightestOverallWhenNothingIsActive() {
+        // Preserves the pre-feature behavior when no account shows recent use.
+        let loose = candidate(key: "codex", percentUsed: 20, activeMinutesAgo: nil)
+        let tight = candidate(key: "claude:ship", percentUsed: 80, activeMinutesAgo: 120)
+        XCTAssertEqual(select([loose, tight])?.key, "claude:ship")
+    }
+
+    // MARK: - Sticky selection (hysteresis)
+
+    func testKeepsPreviousActiveAccountWithinHysteresis() {
+        // codex is tighter by 4 points — inside the 5-point band, so no flip.
+        let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: 2)
+        let codex = candidate(key: "codex", percentUsed: 64, activeMinutesAgo: 1)
+        XCTAssertEqual(select([claude, codex], previousKey: "claude:ship")?.key, "claude:ship")
+    }
+
+    func testKeepsPreviousAtExactHysteresisBoundary() {
+        let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: 2)
+        let codex = candidate(key: "codex", percentUsed: 65, activeMinutesAgo: 1)
+        XCTAssertEqual(select([claude, codex], previousKey: "claude:ship")?.key, "claude:ship")
+    }
+
+    func testSwitchesWhenPreviousIsClearlyLooserThanTightestActive() {
+        let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: 2)
+        let codex = candidate(key: "codex", percentUsed: 70, activeMinutesAgo: 1)
+        XCTAssertEqual(select([claude, codex], previousKey: "claude:ship")?.key, "codex")
+    }
+
+    func testSwitchesAwayFromPreviousWhenItGoesIdle() {
+        let claude = candidate(key: "claude:ship", percentUsed: 90, activeMinutesAgo: nil)
+        let codex = candidate(key: "codex", percentUsed: 40, activeMinutesAgo: 1)
+        XCTAssertEqual(select([claude, codex], previousKey: "claude:ship")?.key, "codex")
+    }
+
+    func testStickyAlsoAppliesToIdleFallbackPool() {
+        // Nothing active: pool is "all", and the previously shown account stays
+        // put while within the hysteresis band.
+        let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: nil)
+        let codex = candidate(key: "codex", percentUsed: 63, activeMinutesAgo: nil)
+        XCTAssertEqual(select([claude, codex], previousKey: "claude:ship")?.key, "claude:ship")
+    }
+
+    func testUnknownPreviousKeyFallsBackToTightest() {
+        let claude = candidate(key: "claude:ship", percentUsed: 60, activeMinutesAgo: 2)
+        let codex = candidate(key: "codex", percentUsed: 80, activeMinutesAgo: 1)
+        XCTAssertEqual(select([claude, codex], previousKey: "cursor")?.key, "codex")
+    }
+
+    // MARK: - Determinism
+
+    func testEqualPercentagesTieBreakByKeyForStableOutput() {
+        let a = candidate(key: "claude:a", percentUsed: 50, activeMinutesAgo: 1)
+        let b = candidate(key: "claude:b", percentUsed: 50, activeMinutesAgo: 1)
+        XCTAssertEqual(select([b, a])?.key, "claude:a")
+        XCTAssertEqual(select([a, b])?.key, "claude:a")
+    }
+}

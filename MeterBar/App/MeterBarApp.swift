@@ -36,6 +36,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// above a threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
+    /// The account whose quota the menu bar title currently shows; feeds the
+    /// sticky selection so concurrent Claude + Codex use doesn't flip the title.
+    private var shownStatusItemKey: String?
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Apply the persisted Dock visibility as early as possible so users who
         // hide MeterBar from the Dock don't see a brief Dock-icon flash.
@@ -110,6 +114,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Opening the popover always pulls fresh data — providers read
+            // local files, so this is cheap and the popover never shows a
+            // stale snapshot from the last timer tick.
+            Task { await UsageDataManager.shared.refreshAll() }
         }
     }
 
@@ -364,39 +372,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusItem(metrics: [ServiceType: UsageMetrics]) {
         guard let button = statusItem?.button else { return }
 
-        guard let limit = mostConstrainedPrimaryLimit(in: metrics) else {
+        guard let selection = StatusItemLimitSelector.select(
+            candidates: statusLimitCandidates(in: metrics),
+            previousKey: shownStatusItemKey
+        ) else {
+            shownStatusItemKey = nil
             button.title = ""
             button.imagePosition = .imageOnly
             button.toolTip = "MeterBar"
             return
         }
 
-        let percent = percentLeft(for: limit)
+        shownStatusItemKey = selection.key
+        let percent = percentLeft(for: selection.limit)
         button.imagePosition = .imageLeft
         button.title = " \(percent)%"
-        button.toolTip = "MeterBar: \(percent)% left on the tightest quota"
-        button.setAccessibilityLabel("MeterBar \(percent)% left on the tightest quota")
+        button.toolTip = "MeterBar: \(percent)% left on \(selection.displayName)"
+        button.setAccessibilityLabel("MeterBar \(percent)% left on \(selection.displayName)")
     }
 
+    /// Every enabled account/provider quota that may own the menu bar title,
+    /// tagged with its latest on-disk activity so `StatusItemLimitSelector`
+    /// can follow the accounts actually in use.
     @MainActor
-    private func mostConstrainedPrimaryLimit(in metrics: [ServiceType: UsageMetrics]) -> UsageLimit? {
-        let claudeLimits = providerVisibilityStore.isEnabled(.claudeCode)
-            ? ClaudeCodeAccountStore.shared.accounts.compactMap {
-                claudeMetrics(for: $0, metrics: metrics)?.sessionLimit
-            }
-            : []
+    private func statusLimitCandidates(in metrics: [ServiceType: UsageMetrics]) -> [StatusLimitCandidate] {
+        var candidates: [StatusLimitCandidate] = []
 
-        var limits = claudeLimits
+        if providerVisibilityStore.isEnabled(.claudeCode) {
+            for account in ClaudeCodeAccountStore.shared.accounts {
+                guard let limit = claudeMetrics(for: account, metrics: metrics)?.sessionLimit else { continue }
+                candidates.append(StatusLimitCandidate(
+                    key: "claude:\(account.id.uuidString)",
+                    displayName: "\(account.name) (\(ServiceType.claudeCode.displayName))",
+                    limit: limit,
+                    lastActivity: AccountActivityInspector.claudeCodeActivity(
+                        configDirectory: account.configDirectory
+                    )
+                ))
+            }
+        }
         if providerVisibilityStore.isEnabled(.codexCli), let codexLimit = metrics[.codexCli]?.sessionLimit {
-            limits.append(codexLimit)
+            candidates.append(StatusLimitCandidate(
+                key: "codex",
+                displayName: ServiceType.codexCli.displayName,
+                limit: codexLimit,
+                lastActivity: AccountActivityInspector.codexCliActivity()
+            ))
         }
         if providerVisibilityStore.isEnabled(.cursor), let cursorLimit = metrics[.cursor]?.weeklyLimit {
-            limits.append(cursorLimit)
+            candidates.append(StatusLimitCandidate(
+                key: "cursor",
+                displayName: ServiceType.cursor.displayName,
+                limit: cursorLimit,
+                lastActivity: AccountActivityInspector.cursorActivity()
+            ))
         }
 
-        return limits.min { lhs, rhs in
-            percentLeft(for: lhs) < percentLeft(for: rhs)
-        }
+        return candidates
     }
 
     @MainActor
