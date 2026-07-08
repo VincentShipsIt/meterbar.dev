@@ -47,10 +47,10 @@ enum MeterBarTheme {
   )
 
   static let glassCardStroke = Color.adaptive(
-    light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.12),
-    dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.15),
-    lightHighContrast: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.24),
-    darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.28)
+    light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.08),
+    dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10),
+    lightHighContrast: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.18),
+    darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.20)
   )
 
   static func accent(for service: ServiceType) -> Color {
@@ -140,7 +140,7 @@ struct MeterBarCompanionSurface: View {
         .clipShape(shape)
       }
       .overlay {
-        shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 1)
+        shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
       }
   }
 }

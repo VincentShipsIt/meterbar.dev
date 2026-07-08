@@ -41,6 +41,7 @@ final class UsageFormattingTests: XCTestCase {
         XCTAssertEqual(UsageFormat.cost(0), "$0.00")
         XCTAssertEqual(UsageFormat.cost(1.5), "$1.50")
         XCTAssertEqual(UsageFormat.cost(123.456), "$123.46")
+        XCTAssertEqual(UsageFormat.cost(6_954.07), "$6,954.07")
     }
 
     // MARK: - Relative date

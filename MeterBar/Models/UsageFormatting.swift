@@ -17,6 +17,16 @@ public enum UsageFormat {
         return formatter
     }()
 
+    private static let currencyNumber: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
+
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -44,7 +54,7 @@ public enum UsageFormat {
 
     /// Currency string, e.g. `$12.34`.
     public static func cost(_ value: Double) -> String {
-        String(format: "$%.2f", value)
+        "$\(currencyNumber.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value))"
     }
 
     /// Abbreviated relative time, e.g. `2h ago`, using a cached formatter.

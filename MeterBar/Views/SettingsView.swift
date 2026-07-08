@@ -17,8 +17,7 @@ struct SettingsView: View {
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
 
-    @State private var newClaudeAccountName: String = ""
-    @State private var newClaudeConfigDirectory: String = ""
+    @State private var isAddingClaudeAccount = false
     @State private var claudeReconnectError: String?
     @State private var claudeAdminKeyDraft: String = ""
     @State private var openaiAdminKeyDraft: String = ""
@@ -70,6 +69,12 @@ struct SettingsView: View {
             Button("OK") { claudeReconnectError = nil }
         } message: {
             Text(claudeReconnectError ?? "Could not open the Claude reconnect flow.")
+        }
+        .sheet(isPresented: $isAddingClaudeAccount) {
+            AddClaudeAccountSheet { name, configDirectory in
+                addClaudeAccount(name: name, configDirectory: configDirectory)
+                isAddingClaudeAccount = false
+            }
         }
     }
 
@@ -269,39 +274,24 @@ struct SettingsView: View {
         helpURL: String
     ) -> some View {
         let connected = authManager.isAuthenticated(provider)
-        return SettingsRowView(
-            title: provider.displayName,
-            detail: connected ? "Connected. Usage appears on the API card." : "Required for organization usage."
-        ) {
-            HStack(spacing: 8) {
-                StatusPill(title: connected ? "Connected" : "Not Connected", isConnected: connected)
-
-                SecureField(placeholder, text: draft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 200)
-
-                Button("Save") {
-                    saveAdminKey(provider, draft: draft)
+        return AdminKeySettingsRow(
+            provider: provider,
+            connected: connected,
+            draft: draft,
+            placeholder: placeholder,
+            onSave: {
+                saveAdminKey(provider, draft: draft)
+            },
+            onRemove: {
+                authManager.removeAdminKey(for: provider)
+                Task { await apiUsageStore.refresh() }
+            },
+            onHelp: {
+                if let url = URL(string: helpURL) {
+                    NSWorkspace.shared.open(url)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("Remove") {
-                    authManager.removeAdminKey(for: provider)
-                    Task { await apiUsageStore.refresh() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!connected)
-
-                Button("Help") {
-                    if let url = URL(string: helpURL) {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .help("Open \(helpURL)")
             }
-        }
+        )
     }
 
     private func saveAdminKey(_ provider: ApiProvider, draft: Binding<String>) {
@@ -392,10 +382,22 @@ struct SettingsView: View {
 
             SettingsDivider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Claude Accounts")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    Text("Claude Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
+                    Button {
+                        isAddingClaudeAccount = true
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
 
                 List {
                     ForEach(claudeAccountStore.accounts) { account in
@@ -418,36 +420,6 @@ struct SettingsView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .frame(height: claudeAccountListHeight)
-            }
-
-            SettingsRowView(title: "New account") {
-                TextField("Account name", text: $newClaudeAccountName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 220)
-            }
-
-            SettingsRowView(
-                title: "Config directory",
-                detail: "Use a separate CLAUDE_CONFIG_DIR for each extra account."
-            ) {
-                HStack(spacing: 8) {
-                    TextField("Path", text: $newClaudeConfigDirectory)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 280)
-
-                    Button("Choose") {
-                        chooseClaudeConfigDirectory()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-
-            SettingsRowView(title: "Add profile") {
-                Button("Add Account") {
-                    addClaudeAccount()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canAddClaudeAccount)
             }
         }
     }
@@ -594,11 +566,6 @@ struct SettingsView: View {
         }
     }
 
-    private var canAddClaudeAccount: Bool {
-        !newClaudeAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !newClaudeConfigDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var visibleCostSummary: CostSummary? {
         costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
     }
@@ -627,35 +594,18 @@ struct SettingsView: View {
         UsageFormat.relative(date)
     }
 
-    private func addClaudeAccount() {
+    private func addClaudeAccount(name: String, configDirectory: String) {
         claudeAccountStore.addAccount(
-            name: newClaudeAccountName,
-            configDirectory: newClaudeConfigDirectory
+            name: name,
+            configDirectory: configDirectory
         )
-        newClaudeAccountName = ""
-        newClaudeConfigDirectory = ""
         Task {
             await dataManager.refreshAll()
         }
     }
 
-    private func chooseClaudeConfigDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            newClaudeConfigDirectory = url.path
-            if newClaudeAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                newClaudeAccountName = url.lastPathComponent
-            }
-        }
-    }
-
     private var claudeAccountListHeight: CGFloat {
-        min(320, max(84, CGFloat(claudeAccountStore.accounts.count) * 84))
+        min(420, max(118, CGFloat(claudeAccountStore.accounts.count) * 118))
     }
 
     private func updateClaudeAccount(id: UUID, name: String, configDirectory: String?) {
@@ -782,6 +732,153 @@ private struct StatusPill: View {
     }
 }
 
+private struct AdminKeySettingsRow: View {
+    let provider: ApiProvider
+    let connected: Bool
+    @Binding var draft: String
+    let placeholder: String
+    let onSave: () -> Void
+    let onRemove: () -> Void
+    let onHelp: () -> Void
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(provider.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text(connected ? "Connected. Usage appears on the billed API card." : "Required for organization usage.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                StatusPill(title: connected ? "Connected" : "Not Connected", isConnected: connected)
+                    .font(.caption)
+            }
+
+            HStack(spacing: 8) {
+                SecureField(placeholder, text: $draft)
+                    .settingsInput()
+                    .frame(minWidth: 220, maxWidth: 340)
+
+                Button("Save", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(trimmedDraft.isEmpty)
+
+                Button("Remove", action: onRemove)
+                    .buttonStyle(.bordered)
+                    .disabled(!connected)
+
+                Button("Help", action: onHelp)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct AddClaudeAccountSheet: View {
+    @Environment(\.dismiss)
+    private var dismiss
+
+    @State private var accountName = ""
+    @State private var configDirectory = ""
+
+    let onAdd: (String, String) -> Void
+
+    private var trimmedName: String {
+        accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedConfigDirectory: String {
+        configDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canAdd: Bool {
+        !trimmedName.isEmpty && !trimmedConfigDirectory.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                ProviderLogoView(kind: .claude, size: 18, foregroundColor: MeterBarTheme.claudeAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add Claude Account")
+                        .font(.headline)
+                    Text("Use a separate CLAUDE_CONFIG_DIR for this profile.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Account name")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("shipshitdev", text: $accountName)
+                        .settingsInput()
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Config directory")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        TextField("Path", text: $configDirectory)
+                            .settingsInput()
+                        Button("Choose") {
+                            chooseConfigDirectory()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Add Account") {
+                    guard canAdd else { return }
+                    onAdd(trimmedName, trimmedConfigDirectory)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canAdd)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+    }
+
+    private func chooseConfigDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            configDirectory = url.path
+            if trimmedName.isEmpty {
+                accountName = url.lastPathComponent
+            }
+        }
+    }
+}
+
 private struct AccountProfileRow: View {
     let account: ClaudeCodeAccount
     let onSave: (String, String?) -> Void
@@ -806,36 +903,56 @@ private struct AccountProfileRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
-                .padding(.top, 8)
+                .padding(.top, 10)
                 .help("Drag to reorder")
 
             Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
                 .foregroundStyle(MeterBarTheme.claudeAccent)
                 .frame(width: 18)
-                .padding(.top, 4)
+                .padding(.top, 8)
 
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Account label", text: $nameDraft)
-                    .font(.subheadline)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 240)
-                    .onSubmit(saveChanges)
-
-                if account.isDefault {
-                    Text("Default Claude CLI profile")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    TextField("Config directory", text: $configDirectoryDraft)
-                        .font(.caption)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 300)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Account label", text: $nameDraft)
+                        .settingsInput(width: 260)
                         .onSubmit(saveChanges)
+
+                    Text(account.isDefault ? "Default" : "Profile")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.thinMaterial, in: Capsule())
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.isDefault ? "Default config directory" : "Config directory")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+
+                    if account.isDefault {
+                        SettingsReadonlyField(text: displayConfigDirectory)
+                    } else {
+                        HStack(spacing: 8) {
+                            TextField("Config directory", text: $configDirectoryDraft)
+                                .settingsInput(width: 320)
+                                .onSubmit(saveChanges)
+
+                            Button {
+                                chooseConfigDirectory()
+                            } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Choose config directory")
+                        }
+                    }
                 }
             }
 
@@ -864,7 +981,7 @@ private struct AccountProfileRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
             configDirectoryDraft = updatedAccount.configDirectory ?? ""
@@ -879,6 +996,12 @@ private struct AccountProfileRow: View {
         configDirectoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var displayConfigDirectory: String {
+        account.configDirectory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? account.configDirectory ?? ""
+            : "\(ServiceSupport.realHomeDirectory())/.claude"
+    }
+
     private var hasChanges: Bool {
         trimmedName != account.name ||
             (!account.isDefault && trimmedConfigDirectory != (account.configDirectory ?? ""))
@@ -891,5 +1014,62 @@ private struct AccountProfileRow: View {
     private func saveChanges() {
         guard hasChanges, canSave else { return }
         onSave(trimmedName, account.isDefault ? nil : trimmedConfigDirectory)
+    }
+
+    private func chooseConfigDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            configDirectoryDraft = url.path
+        }
+    }
+}
+
+private struct SettingsReadonlyField: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(width: 320, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
+            .help(text)
+    }
+}
+
+private struct SettingsInputModifier: ViewModifier {
+    let width: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .font(.subheadline)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(width: width)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
+    }
+}
+
+private extension View {
+    func settingsInput(width: CGFloat? = nil) -> some View {
+        modifier(SettingsInputModifier(width: width))
     }
 }

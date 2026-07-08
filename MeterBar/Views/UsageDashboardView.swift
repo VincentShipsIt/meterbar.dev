@@ -28,7 +28,8 @@ final class UsageDashboardWindowController {
                 defer: false
             )
             window.title = DashboardNavigationStore.shared.selectedSection.rawValue
-            window.subtitle = DashboardNavigationStore.shared.selectedSection.titlebarSubtitle
+            window.subtitle = ""
+            window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none
             window.backgroundColor = .windowBackgroundColor
@@ -151,10 +152,8 @@ struct UsageDashboardView: View {
             sidebarList
         } detail: {
             detailContent
-                .navigationTitle(activeSection.rawValue)
-                .navigationSubtitle(activeSection.titlebarSubtitle)
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
+                    ToolbarItem(placement: .navigation) {
                         refreshToolbarButton
                     }
                 }
@@ -164,7 +163,8 @@ struct UsageDashboardView: View {
             MeterBarMenuWindowAccessor { window in
                 guard let window else { return }
                 window.title = activeSection.rawValue
-                window.subtitle = activeSection.titlebarSubtitle
+                window.subtitle = ""
+                window.titleVisibility = .hidden
             }
         }
         .task {
@@ -189,7 +189,6 @@ struct UsageDashboardView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("MeterBar")
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
@@ -225,7 +224,7 @@ struct UsageDashboardView: View {
                 }
             }
             .padding(.horizontal, 22)
-            .padding(.top, 22)
+            .padding(.top, 12)
             .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -240,11 +239,12 @@ struct UsageDashboardView: View {
 
     private var overviewContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DashboardStatusHero(
-                title: overviewStatusTitle,
-                detail: overviewStatusDetail,
-                iconName: overviewStatusIconName,
-                color: overviewBand?.color ?? .secondary
+            OverviewSummaryStrip(
+                tightestLimit: tightestLimit,
+                sourceCount: providerSnapshots.count,
+                enabledSourceCount: enabledQuotaSourceCount,
+                estimatedCost: visibleCostSummary?.formattedTotalCost,
+                formattedTokens: UsageFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
             )
 
             LazyVGrid(columns: overviewGridColumns, alignment: .leading, spacing: 12) {
@@ -546,39 +546,22 @@ struct UsageDashboardView: View {
         return labels
     }
 
+    private var enabledQuotaSourceCount: Int {
+        var count = 0
+        if providerVisibility.isEnabled(.codexCli) {
+            count += 1
+        }
+        if providerVisibility.isEnabled(.claudeCode) {
+            count += claudeAccountStore.accounts.count
+        }
+        if providerVisibility.isEnabled(.cursor) {
+            count += 1
+        }
+        return count
+    }
+
     private var tightestLimit: SnapshotLimit? {
         providerSnapshots.tightestLimit
-    }
-
-    private var overviewBand: QuotaBand? {
-        tightestLimit.map { QuotaBand.forPercentLeft($0.percentLeft) }
-    }
-
-    private var overviewStatusTitle: String {
-        guard !providerSnapshots.isEmpty else { return "No sources enabled" }
-        guard let overviewBand else { return "Waiting for usage" }
-        return overviewBand.overviewTitle
-    }
-
-    private var overviewStatusIconName: String {
-        // Neutral states (no providers enabled / no usage yet) should not show
-        // the healthy green shield, which falsely implies tracked quotas look good.
-        overviewBand?.iconName ?? "circle.dashed"
-    }
-
-    private var overviewStatusDetail: String {
-        guard !providerSnapshots.isEmpty else {
-            return "Enable providers in Settings to show quota status."
-        }
-        guard let tightestLimit else {
-            return "Refresh to load enabled provider status."
-        }
-        if tightestLimit.percentLeft <= 0 {
-            return "\(tightestLimit.title) is out until reset. "
-                + "Tracking \(providerSnapshots.count) local provider sources."
-        }
-        return "\(tightestLimit.title) has \(tightestLimit.percentLeft)% left. "
-            + "Tracking \(providerSnapshots.count) local provider sources."
     }
 
     private var diagnosticsContent: some View {
@@ -784,6 +767,122 @@ struct UsageDashboardView: View {
     private func setSocialShareStatus(_ status: String) {
         withAnimation(.easeInOut(duration: 0.15)) {
             socialShareStatus = status
+        }
+    }
+}
+
+private struct OverviewSummaryStrip: View {
+    let tightestLimit: SnapshotLimit?
+    let sourceCount: Int
+    let enabledSourceCount: Int
+    let estimatedCost: String?
+    let formattedTokens: String
+
+    private let columns = [
+        GridItem(.flexible(minimum: 180), spacing: 12),
+        GridItem(.flexible(minimum: 180), spacing: 12),
+        GridItem(.flexible(minimum: 180), spacing: 12)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+                OverviewSummaryTile(
+                    title: "Tightest window",
+                    value: tightestValue(now: timeline.date),
+                    caption: tightestCaption,
+                    systemImage: tightestIconName,
+                    tint: tightestColor
+                )
+            }
+
+            OverviewSummaryTile(
+                title: "30-day estimate",
+                value: estimatedCost ?? "Scan needed",
+                caption: "\(formattedTokens) tokens",
+                systemImage: "chart.bar.xaxis",
+                tint: MeterBarTheme.success
+            )
+
+            OverviewSummaryTile(
+                title: "Tracked sources",
+                value: "\(sourceCount)",
+                caption: sourceCaption,
+                systemImage: "checklist.checked",
+                tint: MeterBarTheme.appAccent
+            )
+        }
+    }
+
+    private var tightestBand: QuotaBand? {
+        tightestLimit.map { QuotaBand.forPercentLeft($0.percentLeft) }
+    }
+
+    private var tightestColor: Color {
+        tightestBand?.color ?? .secondary
+    }
+
+    private var tightestIconName: String {
+        tightestBand?.iconName ?? "circle.dashed"
+    }
+
+    private var tightestCaption: String {
+        guard let tightestLimit else { return "Waiting for provider refresh" }
+        return "\(tightestLimit.title) quota"
+    }
+
+    private var sourceCaption: String {
+        if enabledSourceCount == 0 {
+            return "Enable providers in Settings"
+        }
+        if sourceCount == enabledSourceCount {
+            return "All enabled sources reporting"
+        }
+        return "\(sourceCount) of \(enabledSourceCount) enabled reporting"
+    }
+
+    private func tightestValue(now: Date) -> String {
+        guard let tightestLimit else { return "No data" }
+        guard tightestLimit.usageLimit.isAtLimit else {
+            return "\(tightestLimit.percentLeft)% left"
+        }
+        guard let countdown = tightestLimit.usageLimit.resetCountdownText(now: now) else {
+            return "Reset unknown"
+        }
+        return countdown == "now" ? "Reset due" : "Resets in \(countdown)"
+    }
+}
+
+private struct OverviewSummaryTile: View {
+    let title: String
+    let value: String
+    let caption: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        DashboardTile(minHeight: 104) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(title, systemImage: systemImage)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(value)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .contentTransition(.numericText())
+
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
     }
 }

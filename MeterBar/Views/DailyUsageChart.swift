@@ -435,47 +435,47 @@ struct DailyUsageDetailRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Button(action: toggle) {
-        HStack(spacing: 8) {
-          HStack(spacing: 7) {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-              .font(.caption2)
-              .fontWeight(.bold)
-              .foregroundColor(.secondary)
-              .frame(width: 12)
-
-            Text(dateLabel(day.date))
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .lineLimit(1)
-          }
-          .frame(
-            minWidth: DailyUsageTableLayout.dayColumnMinWidth, maxWidth: .infinity,
-            alignment: .leading)
-
-          Text(providerCountLabel)
-            .font(.caption)
+      HStack(spacing: 8) {
+        HStack(spacing: 7) {
+          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.caption2)
+            .fontWeight(.bold)
             .foregroundColor(.secondary)
-            .lineLimit(1)
-            .frame(width: DailyUsageTableLayout.sourceColumnWidth, alignment: .leading)
+            .frame(width: 12)
 
-          DailyUsageMetricCell(value: UsageFormat.tokens(day.inputTokens))
-          DailyUsageMetricCell(value: UsageFormat.tokens(day.outputTokens))
-          DailyUsageMetricCell(value: UsageFormat.tokens(day.cacheReadTokens))
-          DailyUsageMetricCell(value: UsageFormat.tokens(day.totalTokens), isPrimary: true)
-          DailyUsageMetricCell(
-            value: UsageFormat.cost(day.estimatedCostUSD),
-            width: DailyUsageTableLayout.costColumnWidth,
-            isPrimary: true
-          )
+          Text(dateLabel(day.date))
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .lineLimit(1)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
+        .frame(
+          minWidth: DailyUsageTableLayout.dayColumnMinWidth, maxWidth: .infinity,
+          alignment: .leading)
+
+        Text(providerCountLabel)
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+          .frame(width: DailyUsageTableLayout.sourceColumnWidth, alignment: .leading)
+
+        DailyUsageMetricCell(value: UsageFormat.tokens(day.inputTokens))
+        DailyUsageMetricCell(value: UsageFormat.tokens(day.outputTokens))
+        DailyUsageMetricCell(value: UsageFormat.tokens(day.cacheReadTokens))
+        DailyUsageMetricCell(value: UsageFormat.tokens(day.totalTokens), isPrimary: true)
+        DailyUsageMetricCell(
+          value: UsageFormat.cost(day.estimatedCostUSD),
+          width: DailyUsageTableLayout.costColumnWidth,
+          isPrimary: true
+        )
       }
-      .buttonStyle(.plain)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .contentShape(Rectangle())
+      .onTapGesture(perform: toggle)
       .accessibilityLabel(accessibilitySummary)
       .accessibilityHint(isExpanded ? "Collapse day details" : "Show day details")
+      .accessibilityAddTraits(.isButton)
+      .accessibilityAction(named: Text(isExpanded ? "Collapse" : "Expand"), toggle)
 
       if isExpanded {
         VStack(spacing: 0) {
