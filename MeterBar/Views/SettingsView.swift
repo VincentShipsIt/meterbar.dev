@@ -839,7 +839,7 @@ private struct AddClaudeAccountSheet: View {
                     Text("Account name")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("shipshitdev", text: $accountName)
+                    TextField("Work", text: $accountName)
                         .settingsInput()
                 }
 

@@ -113,6 +113,10 @@ final class MeterBarMenuPanelController {
                 return nil
             }
 
+            if eventIsInsideStatusButton(event) {
+                return event
+            }
+
             if event.window === panel || MeterBarMenuDetailPanel.shared.owns(window: event.window) {
                 return event
             }
@@ -120,6 +124,18 @@ final class MeterBarMenuPanelController {
             dismiss()
             return event
         }
+    }
+
+    private func eventIsInsideStatusButton(_ event: NSEvent) -> Bool {
+        guard
+            let button = statusButtonProvider(),
+            event.window === button.window
+        else {
+            return false
+        }
+
+        let location = button.convert(event.locationInWindow, from: nil)
+        return button.bounds.contains(location)
     }
 
     private func stopEventMonitoring() {

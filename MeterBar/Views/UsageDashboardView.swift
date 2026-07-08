@@ -336,7 +336,7 @@ struct UsageDashboardView: View {
             }
         }
         .task {
-            if apiUsageStore.hasAnyAuthenticated {
+            if apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
             }
         }
@@ -670,7 +670,9 @@ struct UsageDashboardView: View {
 
     private var isRefreshButtonAnimating: Bool {
         switch activeSection {
-        case .costs, .share, .optimize:
+        case .costs:
+            return costTracker.isRefreshInProgress || apiUsageStore.isLoading
+        case .share, .optimize:
             return costTracker.isRefreshInProgress
         case .overview, .limits, .diagnostics, .settings:
             return dataManager.isLoading
@@ -680,7 +682,7 @@ struct UsageDashboardView: View {
     private func refreshDashboard() async {
         if activeSection == .costs || activeSection == .share || activeSection == .optimize {
             await costTracker.scanCosts(days: 30)
-            if activeSection == .costs, apiUsageStore.hasAnyAuthenticated {
+            if activeSection == .costs, apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
             }
             socialCardGeneratedAt = Date()

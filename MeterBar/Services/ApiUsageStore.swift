@@ -33,6 +33,8 @@ final class ApiUsageStore: ObservableObject {
     }
 
     func refresh() async {
+        guard !isLoading else { return }
+
         let providers = authenticatedProviders
         guard !providers.isEmpty else {
             usage = [:]
