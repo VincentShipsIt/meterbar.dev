@@ -14,7 +14,7 @@ struct DashboardTile<Content: View>: View {
   @ViewBuilder let content: Content
 
   init(
-    cornerRadius: CGFloat = 6,
+    cornerRadius: CGFloat = 12,
     padding: CGFloat = 14,
     minHeight: CGFloat? = nil,
     alignment: Alignment = .topLeading,
@@ -67,29 +67,108 @@ struct DashboardCard<Content: View>: View {
 }
 
 struct DashboardMetricTile: View {
+  enum Style {
+    case regular
+    case compact
+
+    var minHeight: CGFloat? {
+      switch self {
+      case .regular:
+        return nil
+      case .compact:
+        return 104
+      }
+    }
+
+    var spacing: CGFloat {
+      switch self {
+      case .regular:
+        return 6
+      case .compact:
+        return 10
+      }
+    }
+
+    var titleFont: Font {
+      .caption
+    }
+
+    var titleWeight: Font.Weight? {
+      switch self {
+      case .regular:
+        return nil
+      case .compact:
+        return .semibold
+      }
+    }
+
+    var valueFont: Font {
+      switch self {
+      case .regular:
+        return .title2
+      case .compact:
+        return .title3
+      }
+    }
+
+    var captionFont: Font {
+      switch self {
+      case .regular:
+        return .caption2
+      case .compact:
+        return .caption
+      }
+    }
+
+    var valueMinimumScaleFactor: CGFloat {
+      switch self {
+      case .regular:
+        return 1
+      case .compact:
+        return 0.72
+      }
+    }
+
+    var captionMinimumScaleFactor: CGFloat {
+      switch self {
+      case .regular:
+        return 1
+      case .compact:
+        return 0.8
+      }
+    }
+  }
+
   let title: String
   let value: String
   let caption: String
   let systemImage: String
   let tint: Color
+  var style: Style = .regular
 
   var body: some View {
-    DashboardTile {
-      VStack(alignment: .leading, spacing: 6) {
+    DashboardTile(minHeight: style.minHeight) {
+      VStack(alignment: .leading, spacing: style.spacing) {
         Label(title, systemImage: systemImage)
-          .font(.caption)
+          .font(style.titleFont)
+          .fontWeight(style.titleWeight)
           .foregroundColor(.secondary)
           .labelStyle(.titleAndIcon)
+          .lineLimit(1)
 
         Text(value)
-          .font(.title2)
+          .font(style.valueFont)
           .fontWeight(.semibold)
           .foregroundStyle(tint)
+          .lineLimit(1)
+          .minimumScaleFactor(style.valueMinimumScaleFactor)
           .contentTransition(.numericText())
 
         Text(caption)
-          .font(.caption2)
+          .font(style.captionFont)
           .foregroundColor(.secondary)
+          .lineLimit(1)
+          .minimumScaleFactor(style.captionMinimumScaleFactor)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }

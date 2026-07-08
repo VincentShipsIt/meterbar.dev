@@ -28,8 +28,8 @@ struct MenuBarView: View {
   var body: some View {
     mainColumn
     .frame(width: popoverWidth, height: popoverHeight)
-    .background(MeterBarCompanionSurface(radius: 16))
-    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .background(MeterBarCompanionSurface(radius: MeterBarTheme.companionShellRadius))
+    .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.companionShellRadius, style: .continuous))
     .background(
       MeterBarMenuWindowAccessor { window in
         menuWindow = window
@@ -118,10 +118,8 @@ struct MenuBarView: View {
       Button(action: openDashboard) {
         Image(systemName: MenuBarOverlayIcons.dashboard)
           .font(.system(size: 12, weight: .semibold))
-          .frame(width: 28, height: 24)
       }
-      .buttonStyle(.glass)
-      .controlSize(.small)
+      .meterBarGlassIconButton()
       .help("Open Usage Dashboard")
 
       Button {
@@ -129,11 +127,10 @@ struct MenuBarView: View {
       } label: {
         RefreshingIcon(isRefreshing: dataManager.isLoading)
           .font(.system(size: 12, weight: .semibold))
-          .frame(width: 28, height: 24)
       }
-      .buttonStyle(.glass)
-      .controlSize(.small)
+      .meterBarGlassIconButton()
       .help(dataManager.isLoading ? "Refreshing usage" : "Refresh usage")
+      .disabled(dataManager.isLoading)
     }
     .font(.body)
     .padding(.horizontal, 14)
@@ -172,6 +169,15 @@ struct MenuBarView: View {
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = true
+  }
+}
+
+private extension View {
+  func meterBarGlassIconButton() -> some View {
+    frame(width: 30, height: 30)
+      .contentShape(Circle())
+      .glassEffect(.regular, in: Circle())
+      .buttonStyle(.plain)
   }
 }
 

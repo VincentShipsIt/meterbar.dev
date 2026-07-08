@@ -47,6 +47,7 @@ final class MeterBarMenuDetailPanel {
       rootView: content
         .frame(width: width, height: height)
     )
+    panel.applyCompanionClipping()
     panel.setFrame(
       NSRect(
         x: anchorFrame.minX - width - MeterBarMenuDetailPanelLayout.panelGap,
@@ -85,13 +86,14 @@ final class MeterBarMenuDetailPanel {
     self.panel = panel
     return panel
   }
+
 }
 
 enum MeterBarMenuDetailPanelLayout {
   static let detailWidth: CGFloat = 340
-  static let cornerRadius: CGFloat = 16
+  static let cornerRadius = MeterBarTheme.companionShellRadius
   static let minDetailHeight: CGFloat = 120
-  static let panelGap: CGFloat = 10
+  static let panelGap: CGFloat = 12
   static let screenPadding: CGFloat = 8
 }
 

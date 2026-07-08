@@ -9,6 +9,9 @@ import SwiftUI
 /// Transparency. The only custom colors are the per-provider brand accents and
 /// quota status — and those are kept appearance-adaptive too.
 enum MeterBarTheme {
+  /// Matches MacSweep's companion popover and detail-panel shell radius.
+  static let companionShellRadius: CGFloat = 16
+
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
   static let codexAccent = Color.adaptive(
@@ -30,6 +33,20 @@ enum MeterBarTheme {
 
   /// The app's own accent. Follows the user's system accent color.
   static let appAccent = Color.accentColor
+
+  static let sidebarMenuTint = Color.adaptive(
+    light: NSColor(srgbRed: 82 / 255, green: 108 / 255, blue: 118 / 255, alpha: 1),
+    dark: NSColor(srgbRed: 112 / 255, green: 143 / 255, blue: 154 / 255, alpha: 1),
+    lightHighContrast: NSColor(srgbRed: 50 / 255, green: 78 / 255, blue: 90 / 255, alpha: 1),
+    darkHighContrast: NSColor(srgbRed: 145 / 255, green: 176 / 255, blue: 188 / 255, alpha: 1)
+  )
+
+  static let companionTint = Color.adaptive(
+    light: NSColor(srgbRed: 0.50, green: 0.66, blue: 0.72, alpha: 0.16),
+    dark: NSColor(srgbRed: 0.08, green: 0.20, blue: 0.24, alpha: 0.18),
+    lightHighContrast: NSColor(srgbRed: 0.50, green: 0.66, blue: 0.72, alpha: 0.20),
+    darkHighContrast: NSColor(srgbRed: 0.08, green: 0.20, blue: 0.24, alpha: 0.20)
+  )
 
   // MARK: - Quota status (system colors; adapt to appearance + Increase Contrast)
 
@@ -118,14 +135,23 @@ struct MeterBarDetailBackground: View {
 
 struct MeterBarCompanionSurface: View {
   var radius: CGFloat = 16
+  @Environment(\.accessibilityReduceTransparency)
+  private var reduceTransparency
 
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
 
     shape
-      .fill(.ultraThinMaterial)
+      .fill(reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color.clear)
+      .background {
+        if !reduceTransparency {
+          shape.fill(.ultraThinMaterial)
+        }
+      }
       .overlay {
-        shape.fill(MeterBarTheme.glassCardTint)
+        if !reduceTransparency {
+          shape.fill(MeterBarTheme.companionTint)
+        }
       }
       .overlay(alignment: .topLeading) {
         LinearGradient(
@@ -142,6 +168,15 @@ struct MeterBarCompanionSurface: View {
       .overlay {
         shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
       }
+  }
+}
+
+extension NSPanel {
+  func applyCompanionClipping(radius: CGFloat = MeterBarTheme.companionShellRadius) {
+    contentView?.wantsLayer = true
+    contentView?.layer?.cornerRadius = radius
+    contentView?.layer?.cornerCurve = .continuous
+    contentView?.layer?.masksToBounds = true
   }
 }
 

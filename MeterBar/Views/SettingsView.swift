@@ -33,26 +33,18 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            trackedProvidersSection
-            if providerVisibility.isEnabled(.claudeCode) {
-                claudeCodeSection
+        Group {
+            if embeddedInDashboard {
+                settingsStack
+            } else {
+                ScrollView {
+                    settingsStack
+                        .padding(22)
+                }
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .windowBackgroundColor))
             }
-            if providerVisibility.isEnabled(.cursor) {
-                cursorSection
-            }
-            if showExtraUsageSection {
-                extraUsageSection
-            }
-            apiUsageSection
-            costTrackingSection
-            refreshSection
-            notificationsSection
-            generalSection
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(embeddedInDashboard ? .hidden : .automatic)
-        .background(embeddedInDashboard ? Color.clear : Color(nsColor: .windowBackgroundColor))
         .frame(
             minWidth: embeddedInDashboard ? nil : 560,
             minHeight: embeddedInDashboard ? nil : 500
@@ -76,6 +68,27 @@ struct SettingsView: View {
                 isAddingClaudeAccount = false
             }
         }
+    }
+
+    private var settingsStack: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            trackedProvidersSection
+            if providerVisibility.isEnabled(.claudeCode) {
+                claudeCodeSection
+            }
+            if providerVisibility.isEnabled(.cursor) {
+                cursorSection
+            }
+            if showExtraUsageSection {
+                extraUsageSection
+            }
+            apiUsageSection
+            costTrackingSection
+            refreshSection
+            notificationsSection
+            generalSection
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var notificationsSection: some View {
@@ -660,9 +673,7 @@ private struct SettingsPanelSection<Content: View>: View {
     }
 
     var body: some View {
-        Section {
-            content
-        } header: {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 if let logoKind {
                     ProviderLogoView(kind: logoKind, size: 14, foregroundColor: color)
@@ -671,6 +682,15 @@ private struct SettingsPanelSection<Content: View>: View {
                         .foregroundStyle(color)
                 }
                 Text(title)
+            }
+            .font(.subheadline)
+            .fontWeight(.semibold)
+
+            DashboardTile(padding: 12) {
+                VStack(alignment: .leading, spacing: 10) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -700,6 +720,7 @@ private struct SettingsRowView<Content: View>: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -925,9 +946,11 @@ private struct AccountProfileRow: View {
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.thinMaterial, in: Capsule())
+                        .settingsInputSurface(
+                            horizontalPadding: 8,
+                            verticalPadding: 4,
+                            shape: .capsule
+                        )
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1037,14 +1060,7 @@ private struct SettingsReadonlyField: View {
             .font(.caption)
             .lineLimit(1)
             .truncationMode(.middle)
-            .frame(width: 320, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-            }
+            .settingsInputSurface(width: 320)
             .help(text)
     }
 }
@@ -1057,19 +1073,66 @@ private struct SettingsInputModifier: ViewModifier {
             .textFieldStyle(.plain)
             .font(.subheadline)
             .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(width: width)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-            }
+            .settingsInputSurface(width: width)
+    }
+}
+
+private enum SettingsInputSurfaceShape {
+    case roundedRectangle
+    case capsule
+}
+
+private struct SettingsInputSurfaceModifier: ViewModifier {
+    let width: CGFloat?
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+    let shape: SettingsInputSurfaceShape
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch shape {
+        case .roundedRectangle:
+            let roundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
+
+            content
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .frame(width: width)
+                .background(.thinMaterial, in: roundedRectangle)
+                .overlay {
+                    roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+                }
+        case .capsule:
+            content
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .frame(width: width)
+                .background(.thinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+                }
+        }
     }
 }
 
 private extension View {
     func settingsInput(width: CGFloat? = nil) -> some View {
         modifier(SettingsInputModifier(width: width))
+    }
+
+    func settingsInputSurface(
+        width: CGFloat? = nil,
+        horizontalPadding: CGFloat = 10,
+        verticalPadding: CGFloat = 6,
+        shape: SettingsInputSurfaceShape = .roundedRectangle
+    ) -> some View {
+        modifier(
+            SettingsInputSurfaceModifier(
+                width: width,
+                horizontalPadding: horizontalPadding,
+                verticalPadding: verticalPadding,
+                shape: shape
+            )
+        )
     }
 }

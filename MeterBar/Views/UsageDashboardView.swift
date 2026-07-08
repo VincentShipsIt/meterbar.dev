@@ -5,6 +5,16 @@ import MeterBarShared
 import UniformTypeIdentifiers
 
 @MainActor
+private func applyWindowChrome(_ window: NSWindow, section _: DashboardSection? = nil) {
+    window.title = ""
+    window.subtitle = ""
+    window.titleVisibility = .visible
+    window.titlebarAppearsTransparent = true
+    window.titlebarSeparatorStyle = .none
+    window.toolbarStyle = .unified
+}
+
+@MainActor
 final class UsageDashboardWindowController {
     static let shared = UsageDashboardWindowController()
 
@@ -27,11 +37,7 @@ final class UsageDashboardWindowController {
                 backing: .buffered,
                 defer: false
             )
-            window.title = DashboardNavigationStore.shared.selectedSection.rawValue
-            window.subtitle = ""
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.titlebarSeparatorStyle = .none
+            applyWindowChrome(window, section: DashboardNavigationStore.shared.selectedSection)
             window.backgroundColor = .windowBackgroundColor
             window.isRestorable = false
             window.contentMinSize = NSSize(width: 900, height: 600)
@@ -148,23 +154,11 @@ struct UsageDashboardView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebarList
-        } detail: {
-            detailContent
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        refreshToolbarButton
-                    }
-                }
-        }
-        .navigationSplitViewStyle(.balanced)
+        dashboardSplitView
         .background {
             MeterBarMenuWindowAccessor { window in
                 guard let window else { return }
-                window.title = activeSection.rawValue
-                window.subtitle = ""
-                window.titleVisibility = .hidden
+                applyWindowChrome(window, section: activeSection)
             }
         }
         .task {
@@ -181,6 +175,20 @@ struct UsageDashboardView: View {
         }
     }
 
+    private var dashboardSplitView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarList
+        } detail: {
+            detailContent
+                .toolbar {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        refreshToolbarButton
+                    }
+                }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
     private var sidebarList: some View {
         List(selection: selectedSection) {
             ForEach(DashboardSection.allCases) { section in
@@ -189,6 +197,7 @@ struct UsageDashboardView: View {
             }
         }
         .listStyle(.sidebar)
+        .tint(MeterBarTheme.sidebarMenuTint)
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
@@ -197,7 +206,6 @@ struct UsageDashboardView: View {
             Task { await refreshDashboard() }
         } label: {
             RefreshingIcon(isRefreshing: isRefreshButtonAnimating)
-                .frame(width: 18, height: 18)
         }
         .help(isRefreshButtonAnimating ? "Refreshing usage" : "Refresh usage")
         .disabled(isRefreshButtonDisabled)
@@ -205,7 +213,7 @@ struct UsageDashboardView: View {
 
     private var detailContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 switch activeSection {
                 case .overview:
                     overviewContent
@@ -234,6 +242,8 @@ struct UsageDashboardView: View {
             MeterBarDetailBackground()
                 .ignoresSafeArea()
         }
+        .navigationTitle("")
+        .navigationSubtitle("")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -295,7 +305,6 @@ struct UsageDashboardView: View {
                 isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
                 formattedTokens: UsageFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
             )
-            .frame(maxWidth: 420, alignment: .leading)
 
             costTrendCard
 
@@ -787,29 +796,32 @@ private struct OverviewSummaryStrip: View {
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
-                OverviewSummaryTile(
+                DashboardMetricTile(
                     title: "Tightest window",
                     value: tightestValue(now: timeline.date),
                     caption: tightestCaption,
                     systemImage: tightestIconName,
-                    tint: tightestColor
+                    tint: tightestColor,
+                    style: .compact
                 )
             }
 
-            OverviewSummaryTile(
+            DashboardMetricTile(
                 title: "30-day estimate",
                 value: estimatedCost ?? "Scan needed",
                 caption: "\(formattedTokens) tokens",
                 systemImage: "chart.bar.xaxis",
-                tint: MeterBarTheme.success
+                tint: MeterBarTheme.success,
+                style: .compact
             )
 
-            OverviewSummaryTile(
+            DashboardMetricTile(
                 title: "Tracked sources",
                 value: "\(sourceCount)",
                 caption: sourceCaption,
                 systemImage: "checklist.checked",
-                tint: MeterBarTheme.appAccent
+                tint: MeterBarTheme.appAccent,
+                style: .compact
             )
         }
     }
@@ -850,39 +862,5 @@ private struct OverviewSummaryStrip: View {
             return "Reset unknown"
         }
         return countdown == "now" ? "Reset due" : "Resets in \(countdown)"
-    }
-}
-
-private struct OverviewSummaryTile: View {
-    let title: String
-    let value: String
-    let caption: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        DashboardTile(minHeight: 104) {
-            VStack(alignment: .leading, spacing: 10) {
-                Label(title, systemImage: systemImage)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text(value)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .contentTransition(.numericText())
-
-                Text(caption)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
     }
 }

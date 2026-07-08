@@ -59,11 +59,13 @@ final class MeterBarMenuPanelController {
         panel.hidesOnDeactivate = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: MenuBarView { [weak self] size in
                 self?.resize(to: size)
             }
         )
+        panel.contentViewController = hostingController
+        panel.applyCompanionClipping()
 
         self.panel = panel
         return panel

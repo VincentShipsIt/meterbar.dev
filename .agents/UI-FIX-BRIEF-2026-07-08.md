@@ -276,3 +276,38 @@ Cleanup:
 Non-goals: do not touch the data layer, providers, cost scanning, snapshot
 builders, or card content/copy beyond what's listed. Do not redesign cards.
 Do not add new surface recipes.
+
+---
+
+## Part D — Quality pass on sessions 6–13 output (added after audit #4)
+
+DRY fixes, all small and behavior-preserving:
+
+1. Delete `OverviewSummaryTile` (private, bottom of `UsageDashboardView.swift`)
+   — it clones `DashboardMetricTile` (`DashboardCard.swift:69-97`) with the
+   same props and anatomy. Extend `DashboardMetricTile` with an optional
+   size/style variant (value font, spacing, minHeight, lineLimit/minScale)
+   and use it in `OverviewSummaryStrip`.
+2. `configurePanelClipping(_:)` is duplicated byte-for-byte in
+   `MeterBar/App/MeterBarMenuPanelController.swift` and
+   `MeterBar/Views/MenuBarDetailPanel.swift`. Extract ONE shared helper
+   (e.g. `extension NSPanel { func applyCompanionClipping() }`) driven by
+   `MeterBarTheme.companionShellRadius`.
+3. `SettingsView.swift`: the path-pill view (~line 1055) hand-inlines the same
+   thinMaterial + glassCardStroke recipe as `SettingsInputModifier`; reuse
+   `settingsInput()` or extract the surface part of the modifier. Also fold
+   the one-off material capsule at ~line 951 into the same helper if visually
+   identical.
+4. Window chrome is configured twice (creation in
+   `UsageDashboardWindowController.show()` and updates in the
+   `MeterBarMenuWindowAccessor` callback) — title, subtitle, titleVisibility,
+   toolbarStyle in both. Extract `applyWindowChrome(_ window:, section:)` and
+   call it from both sites.
+
+Acceptance: grep shows one `DashboardMetricTile`-based tile family, one
+panel-clipping helper, zero inline thinMaterial recipes in SettingsView
+outside the shared modifier, and window title/toolbar config written in
+exactly one function. `swift test` + Release build still pass.
+
+Deferred (post-release, do NOT do now): split `SettingsView.swift` (~1,100
+lines) and `UsageDashboardView.swift` (~890 lines) into per-section files.
