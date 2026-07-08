@@ -5,40 +5,38 @@ import XCTest
 /// audit found ~1,000 lines of money math with zero tests, which is exactly
 /// where the CLI-vs-app cost divergence hid.
 final class CostTrackerTests: XCTestCase {
-    private let tracker = CostTracker.shared
-
     // MARK: - Model-id normalization
 
     func testNormalizeClaudeModelStripsDateSuffix() {
-        XCTAssertEqual(tracker.normalizeClaudeModel("claude-opus-4-8-20260101"), "claude-opus-4-8")
-        XCTAssertEqual(tracker.normalizeClaudeModel("claude-fable-5-20260315"), "claude-fable-5")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("claude-opus-4-8-20260101"), "claude-opus-4-8")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("claude-fable-5-20260315"), "claude-fable-5")
     }
 
     func testNormalizeClaudeModelStripsBedrockStylePrefixes() {
-        XCTAssertEqual(tracker.normalizeClaudeModel("anthropic.claude-sonnet-4-5"), "claude-sonnet-4-5")
-        XCTAssertEqual(tracker.normalizeClaudeModel("us.anthropic.claude-opus-4-8"), "claude-opus-4-8")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("anthropic.claude-sonnet-4-5"), "claude-sonnet-4-5")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("us.anthropic.claude-opus-4-8"), "claude-opus-4-8")
     }
 
     func testNormalizeClaudeModelStripsVersionSuffix() {
-        XCTAssertEqual(tracker.normalizeClaudeModel("anthropic.claude-sonnet-4-5-v1:0"), "claude-sonnet-4-5")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("anthropic.claude-sonnet-4-5-v1:0"), "claude-sonnet-4-5")
     }
 
     func testNormalizeClaudeModelPassesThroughCleanIds() {
-        XCTAssertEqual(tracker.normalizeClaudeModel("claude-fable-5"), "claude-fable-5")
-        XCTAssertEqual(tracker.normalizeClaudeModel("  claude-haiku-4-5 "), "claude-haiku-4-5")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("claude-fable-5"), "claude-fable-5")
+        XCTAssertEqual(CostTracker.normalizeClaudeModel("  claude-haiku-4-5 "), "claude-haiku-4-5")
     }
 
     // MARK: - Pricing lookup
 
     func testClaudePricingExactAndFamilyMatches() {
-        XCTAssertEqual(tracker.claudePricing(for: "claude-fable-5").input, 10.0)
+        XCTAssertEqual(CostTracker.claudePricing(for: "claude-fable-5").input, 10.0)
         // Dated ids normalize onto the base id.
-        XCTAssertEqual(tracker.claudePricing(for: "claude-opus-4-8-20260101").input, 5.0)
+        XCTAssertEqual(CostTracker.claudePricing(for: "claude-opus-4-8-20260101").input, 5.0)
         // Family fallback for unknown fable variants.
-        XCTAssertEqual(tracker.claudePricing(for: "claude-fable-9").input, 10.0)
+        XCTAssertEqual(CostTracker.claudePricing(for: "claude-fable-9").input, 10.0)
         // Unknown models get the default (sonnet-rate) pricing.
-        XCTAssertEqual(tracker.claudePricing(for: "mystery-model").input, 3.0)
-        XCTAssertEqual(tracker.claudePricing(for: nil).input, 3.0)
+        XCTAssertEqual(CostTracker.claudePricing(for: "mystery-model").input, 3.0)
+        XCTAssertEqual(CostTracker.claudePricing(for: nil).input, 3.0)
     }
 
     // MARK: - Cost formula
@@ -46,10 +44,10 @@ final class CostTrackerTests: XCTestCase {
     func testCalculateCostMatchesClaudeCostWithoutOneHourTier() {
         let pricing = TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
 
-        let simple = tracker.calculateCost(
+        let simple = CostTracker.calculateCost(
             input: 1_000_000, output: 2_000_000, cacheCreation: 500_000, cacheRead: 4_000_000, pricing: pricing
         )
-        let claude = tracker.calculateClaudeCost(
+        let claude = CostTracker.calculateClaudeCost(
             input: 1_000_000, output: 2_000_000, cacheCreation: 500_000,
             cacheCreationOneHour: 0, cacheRead: 4_000_000, pricing: pricing
         )
@@ -64,13 +62,13 @@ final class CostTrackerTests: XCTestCase {
         // to zero instead of producing negative dollars (previously only the
         // Claude variant clamped).
         let pricing = TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
-        let cost = tracker.calculateCost(input: -500, output: -1, cacheCreation: -2, cacheRead: -3, pricing: pricing)
+        let cost = CostTracker.calculateCost(input: -500, output: -1, cacheCreation: -2, cacheRead: -3, pricing: pricing)
         XCTAssertEqual(cost, 0, accuracy: 0.0001)
     }
 
     func testOneHourCacheTierPricedSeparately() {
         let pricing = TokenPricing(input: 5.0, output: 25.0, cacheCreation: 6.25, cacheRead: 0.50, cacheCreationOneHour: 10.0)
-        let cost = tracker.calculateClaudeCost(
+        let cost = CostTracker.calculateClaudeCost(
             input: 0, output: 0,
             cacheCreation: 2_000_000, cacheCreationOneHour: 1_000_000,
             cacheRead: 0, pricing: pricing
@@ -120,7 +118,7 @@ final class CostTrackerTests: XCTestCase {
         ])
 
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
-        let result = tracker.parseSessionFile(at: url, since: cutoff)
+        let result = CostTracker.parseSessionFile(at: url, since: cutoff)
 
         XCTAssertEqual(result.input, 107)
         XCTAssertEqual(result.output, 53)
@@ -135,7 +133,7 @@ final class CostTrackerTests: XCTestCase {
         ])
 
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
-        let result = tracker.parseSessionFile(at: url, since: cutoff)
+        let result = CostTracker.parseSessionFile(at: url, since: cutoff)
 
         XCTAssertEqual(result.input, 42)
         XCTAssertEqual(result.output, 8)
@@ -148,7 +146,7 @@ final class CostTrackerTests: XCTestCase {
         ])
 
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
-        let result = tracker.parseSessionFile(at: url, since: cutoff)
+        let result = CostTracker.parseSessionFile(at: url, since: cutoff)
 
         XCTAssertEqual(result.estimatedCost, 3.0, accuracy: 0.0001)
         XCTAssertEqual(Array(result.models.keys), ["claude-sonnet-4-5"])
@@ -162,7 +160,7 @@ final class CostTrackerTests: XCTestCase {
         ])
 
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
-        let result = tracker.parseSessionFile(at: url, since: cutoff)
+        let result = CostTracker.parseSessionFile(at: url, since: cutoff)
 
         XCTAssertEqual(result.input, 5)
     }
@@ -212,7 +210,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+        CostTracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.totals.input, 1_000)
         // output accumulates the reasoning tokens on the daily/model rollups, but
@@ -229,7 +227,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+        CostTracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
 
         // Identical events collapse to one via the dedup key.
         XCTAssertEqual(context.totals.input, 1_000)
@@ -244,7 +242,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        tracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
+        CostTracker.scanCodexArchivedSessions(directory: dir, since: cutoff, context: &context)
 
         // Only the post-cutoff line is counted.
         XCTAssertEqual(context.totals.input, 100)

@@ -56,9 +56,13 @@ struct ProviderOverviewStatusCard: View {
           cardContent
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(snapshot.title), \(statusText), \(snapshot.updatedText)")
         .accessibilityHint("Open \(snapshot.title) quota overview")
       } else {
         cardContent
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("\(snapshot.title), \(statusText), \(snapshot.updatedText)")
       }
     }
   }
@@ -72,7 +76,7 @@ struct ProviderOverviewStatusCard: View {
             Text(snapshot.title)
               .font(.headline)
               .fontWeight(.semibold)
-            Text(updatedText)
+            Text(snapshot.updatedText)
               .font(.caption)
               .foregroundColor(.secondary)
           }
@@ -83,23 +87,7 @@ struct ProviderOverviewStatusCard: View {
             .foregroundColor(statusColor)
         }
 
-        if snapshot.limits.isEmpty {
-          Text("No quota windows reported")
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
-        } else if snapshot.hasExhaustedWeeklyLimit {
-          BlockingLimitResetCounter(
-            windows: snapshot.resetWindows,
-            accentColor: snapshot.accentColor
-          )
-        } else {
-          VStack(alignment: .leading, spacing: 12) {
-            ForEach(snapshot.limits) { limit in
-              DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
-            }
-          }
-        }
+        ProviderLimitsBody(snapshot: snapshot, emptyMinHeight: 54, rowSpacing: 12)
 
         // Reset-credits + extra-usage badges, matching the popover card
         // (shared component so the two surfaces can't drift — issue #40).
@@ -110,11 +98,6 @@ struct ProviderOverviewStatusCard: View {
       }
     }
     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private var updatedText: String {
-    guard let updatedAt = snapshot.updatedAt else { return "No data" }
-    return "Updated \(UsageFormat.relative(updatedAt))"
   }
 }
 
@@ -132,25 +115,12 @@ struct ProviderLimitsCard: View {
             font: .title3
           )
           Spacer()
-          Text(updatedText)
+          Text(snapshot.updatedText)
             .font(.caption)
             .foregroundColor(.secondary)
         }
 
-        if snapshot.limits.isEmpty {
-          Text("No quota windows reported")
-            .font(.subheadline)
-            .foregroundColor(.secondary)
-        } else if snapshot.hasExhaustedWeeklyLimit {
-          BlockingLimitResetCounter(
-            windows: snapshot.resetWindows,
-            accentColor: snapshot.accentColor
-          )
-        } else {
-          ForEach(snapshot.limits) { limit in
-            DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
-          }
-        }
+        ProviderLimitsBody(snapshot: snapshot, emptyFont: .subheadline, rowSpacing: 12)
 
         // Same reset-credits + extra-usage badges as the popover card.
         let badges = ProviderStatusBadges(snapshot: snapshot, style: .regular)
@@ -160,10 +130,32 @@ struct ProviderLimitsCard: View {
       }
     }
   }
+}
 
-  private var updatedText: String {
-    guard let updatedAt = snapshot.updatedAt else { return "No data" }
-    return "Updated \(UsageFormat.relative(updatedAt))"
+private struct ProviderLimitsBody: View {
+  let snapshot: ProviderSnapshot
+  var emptyFont: Font = .caption
+  var emptyMinHeight: CGFloat?
+  var rowSpacing: CGFloat = 12
+
+  var body: some View {
+    if snapshot.limits.isEmpty {
+      Text("No quota windows reported")
+        .font(emptyFont)
+        .foregroundColor(.secondary)
+        .frame(maxWidth: .infinity, minHeight: emptyMinHeight, alignment: .topLeading)
+    } else if snapshot.hasExhaustedWeeklyLimit {
+      BlockingLimitResetCounter(
+        windows: snapshot.resetWindows,
+        accentColor: snapshot.accentColor
+      )
+    } else {
+      VStack(alignment: .leading, spacing: rowSpacing) {
+        ForEach(snapshot.limits) { limit in
+          DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+        }
+      }
+    }
   }
 }
 

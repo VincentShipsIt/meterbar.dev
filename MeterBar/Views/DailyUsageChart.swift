@@ -463,7 +463,11 @@ struct DailyUsageDetailRow: View {
           DailyUsageMetricCell(value: UsageFormat.tokens(day.outputTokens))
           DailyUsageMetricCell(value: UsageFormat.tokens(day.cacheReadTokens))
           DailyUsageMetricCell(value: UsageFormat.tokens(day.totalTokens), isPrimary: true)
-          DailyUsageCostCell(value: UsageFormat.cost(day.estimatedCostUSD), isPrimary: true)
+          DailyUsageMetricCell(
+            value: UsageFormat.cost(day.estimatedCostUSD),
+            width: DailyUsageTableLayout.costColumnWidth,
+            isPrimary: true
+          )
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -532,7 +536,10 @@ struct DailyProviderUsageSummaryRow: View {
       DailyUsageMetricCell(value: UsageFormat.tokens(provider.outputTokens))
       DailyUsageMetricCell(value: UsageFormat.tokens(provider.cacheReadTokens))
       DailyUsageMetricCell(value: UsageFormat.tokens(provider.totalTokens))
-      DailyUsageCostCell(value: UsageFormat.cost(provider.estimatedCostUSD))
+      DailyUsageMetricCell(
+        value: UsageFormat.cost(provider.estimatedCostUSD),
+        width: DailyUsageTableLayout.costColumnWidth
+      )
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 5)
@@ -552,6 +559,7 @@ struct DailyProviderUsageSummaryRow: View {
 
 private struct DailyUsageMetricCell: View {
   let value: String
+  var width = DailyUsageTableLayout.metricColumnWidth
   var isPrimary = false
 
   var body: some View {
@@ -562,23 +570,7 @@ private struct DailyUsageMetricCell: View {
       .lineLimit(1)
       .minimumScaleFactor(0.75)
       .foregroundColor(isPrimary ? .primary : .secondary)
-      .frame(width: DailyUsageTableLayout.metricColumnWidth, alignment: .trailing)
-  }
-}
-
-private struct DailyUsageCostCell: View {
-  let value: String
-  var isPrimary = false
-
-  var body: some View {
-    Text(value)
-      .font(.caption)
-      .fontWeight(isPrimary ? .semibold : .regular)
-      .monospacedDigit()
-      .lineLimit(1)
-      .minimumScaleFactor(0.75)
-      .foregroundColor(isPrimary ? .primary : .secondary)
-      .frame(width: DailyUsageTableLayout.costColumnWidth, alignment: .trailing)
+      .frame(width: width, alignment: .trailing)
   }
 }
 

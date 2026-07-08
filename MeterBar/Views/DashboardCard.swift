@@ -31,7 +31,7 @@ struct DashboardTile<Content: View>: View {
     content
       .padding(padding)
       .frame(maxWidth: .infinity, minHeight: minHeight, alignment: alignment)
-      .dashboardCardBackground(cornerRadius: cornerRadius)
+      .meterBarCardSurface(cornerRadius: cornerRadius)
   }
 }
 
@@ -93,13 +93,5 @@ struct DashboardMetricTile: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-  }
-}
-
-extension View {
-  /// Dashboard content-card surface. Delegates to the shared `meterBarCardSurface`
-  /// so the dashboard and popover cards stay visually identical.
-  func dashboardCardBackground(cornerRadius: CGFloat = 12) -> some View {
-    meterBarCardSurface(cornerRadius: cornerRadius)
   }
 }

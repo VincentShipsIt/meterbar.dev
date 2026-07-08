@@ -150,7 +150,7 @@ struct MenuBarProviderDetailContent: View {
             accentColor: snapshot.accentColor
           )
           .padding(10)
-          .dashboardCardBackground(cornerRadius: 10)
+          .meterBarCardSurface(cornerRadius: 10)
         }
 
         VStack(alignment: .leading, spacing: 10) {
@@ -256,7 +256,7 @@ private struct MenuBarProviderLimitDetailRow: View {
       }
     }
     .padding(10)
-    .dashboardCardBackground(cornerRadius: 10)
+    .meterBarCardSurface(cornerRadius: 10)
   }
 
   private func paceLabelColor(_ pace: UsagePace) -> Color {

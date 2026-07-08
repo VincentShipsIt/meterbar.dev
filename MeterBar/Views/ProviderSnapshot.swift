@@ -25,6 +25,11 @@ struct ProviderSnapshot: Identifiable {
         ExtraUsageDisplayPolicy.visibleStatus(for: service, status: extraUsage)
     }
 
+    var updatedText: String {
+        guard let updatedAt else { return "No data" }
+        return "Updated \(UsageFormat.relative(updatedAt))"
+    }
+
     /// Whether the provider has reported metrics at all (drives whether the
     /// dashboard renders a card for it).
     var hasMetrics: Bool { updatedAt != nil }
