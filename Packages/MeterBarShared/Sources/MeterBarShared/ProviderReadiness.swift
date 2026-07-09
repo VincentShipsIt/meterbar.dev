@@ -84,6 +84,24 @@ public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// Rolled-up provider counts shared by dashboard diagnostics and tests.
+public struct ProviderReadinessSummary: Sendable, Equatable {
+    public let ready: Int
+    public let warning: Int
+    public let attention: Int
+
+    public init(reports: [ProviderReadiness]) {
+        ready = reports.filter { $0.overall == .pass }.count
+        warning = reports.filter { $0.overall == .warn }.count
+        attention = reports.filter { $0.overall == .fail }.count
+    }
+
+    public var displayText: String {
+        "\(ready) ready · \(warning) \(warning == 1 ? "warning" : "warnings") · " +
+            "\(attention) \(attention == 1 ? "needs attention" : "need attention")"
+    }
+}
+
 // MARK: - Inputs
 
 /// Outcome of probing Cursor's local SQLite state database. Modeled as an enum
@@ -240,6 +258,18 @@ public enum ProviderReadinessEvaluator {
 
         if let data = input.credentialsJSON,
            let credentials = try? JSONDecoder().decode(ClaudeCredentialsFixture.self, from: data) {
+            guard let accessToken = credentials.claudeAiOauth.accessToken?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !accessToken.isEmpty else {
+                return ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Signed in",
+                    level: .fail,
+                    detail: "Claude Code credentials do not contain a usable access token.",
+                    recovery: loginRecovery
+                )
+            }
+
             if let expiresAt = credentials.claudeAiOauth.expiresAt,
                OAuthTokenExpiry.isExpired(unixTimestamp: expiresAt, now: input.now) {
                 return ReadinessCheck(

@@ -317,7 +317,7 @@ struct Doctor: ParsableCommand {
         let reports = filtered(ProviderReadinessInspector.reports())
 
         if json {
-            printJSON(reports)
+            try printJSON(reports)
         } else {
             printText(reports)
         }
@@ -332,14 +332,22 @@ struct Doctor: ParsableCommand {
         }
     }
 
-    private func printJSON(_ reports: [ProviderReadiness]) {
+    private func printJSON(_ reports: [ProviderReadiness]) throws {
         let dtos = reports.map(DoctorReportDTO.init)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(dtos),
-           let str = String(data: data, encoding: .utf8) {
-            print(str)
+        let data: Data
+        do {
+            data = try encoder.encode(dtos)
+        } catch {
+            throw ValidationError("Failed to encode doctor JSON: \(error.localizedDescription)")
         }
+
+        guard let str = String(data: data, encoding: .utf8) else {
+            throw ValidationError("Failed to encode doctor JSON as UTF-8.")
+        }
+
+        print(str)
     }
 
     private func printText(_ reports: [ProviderReadiness]) {
