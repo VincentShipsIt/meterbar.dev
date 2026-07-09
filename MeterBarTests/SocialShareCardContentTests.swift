@@ -3,15 +3,15 @@ import XCTest
 
 final class SocialShareCardContentTests: XCTestCase {
     func testPublicInstallMetadataMatchesReadme() {
-        XCTAssertEqual(SocialShareCardContent.repositoryURL, "https://github.com/VincentShipsIt/meterbar.app")
-        XCTAssertEqual(SocialShareCardContent.repositoryDisplay, "github.com/VincentShipsIt/meterbar.app")
+        XCTAssertEqual(SocialShareCardContent.websiteURL, "https://meterbar.dev")
+        XCTAssertEqual(SocialShareCardContent.websiteDisplay, "meterbar.dev")
         XCTAssertEqual(
             SocialShareCardContent.installCommand,
             "brew tap VincentShipsIt/tap && brew install --cask VincentShipsIt/tap/meterbar"
         )
     }
 
-    func testTweetTextIncludesRepositoryAndInstallCommand() {
+    func testTweetTextIncludesWebsiteAndInstallCommand() {
         let content = SocialShareCardContent(
             tokenTotal: 1_234_567,
             estimatedCostUSD: 12.34,
@@ -24,7 +24,7 @@ final class SocialShareCardContentTests: XCTestCase {
         )
 
         XCTAssertTrue(content.tweetText.contains("1.2M tokens"))
-        XCTAssertTrue(content.tweetText.contains(SocialShareCardContent.repositoryURL))
+        XCTAssertTrue(content.tweetText.contains(SocialShareCardContent.websiteURL))
         XCTAssertTrue(content.tweetText.contains(SocialShareCardContent.installCommand))
     }
 

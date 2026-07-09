@@ -1,4 +1,4 @@
-# 00 — Repo Map: MeterBar (meterbarapp)
+# 00 — Repo Map: MeterBar
 
 **Audit date:** 2026-07-02
 **Scope:** Full repository (201 tracked files, ~10,800 lines of Swift across app + widget + CLI + tests)
@@ -21,7 +21,7 @@ What it does (verified in code, not just README):
 - Fires local notifications at 90%/100% of any limit (`MeterBar/App/MeterBarApp.swift:239-299`).
 - Ships a small `meterbar` CLI that prints the app's cached metrics and does its own (simplified, drifted) cost scan (`MeterBarCLI/Sources/MeterBarCLI.swift`).
 
-**Product identity note:** three different identifiers coexist — bundle `dev.shipshit.MeterBar`, app group `group.dev.shipshit.meterbar`, keychain service `com.agenticindiedev.quotaguard` (`MeterBar/Services/KeychainManager.swift:7`), and copyright "Agentic Indie Dev" (`MeterBar/Info.plist:28`). Legacy naming ("Quota Guard", "agenticindiedev") survives in the keychain namespace, `scripts/package.json:2` (`quotaguard-scripts`), `.swiftformat:1`, and `CLAUDE.md`.
+**Product identity note:** the public site is `meterbar.dev`. Existing bundle IDs (`dev.shipshit.MeterBar` / `dev.shipshit.MeterBar.Widget`), app group (`group.dev.shipshit.meterbar`), and keychain service (`dev.shipshit.meterbar`) remain unchanged because those identifiers are migration-sensitive. Historical naming may still appear in archived audit and session material.
 
 ---
 
@@ -92,7 +92,7 @@ All of these except the two admin APIs are **undocumented/private endpoints** su
 - `UserDefaults.standard`: metrics cache (`cached_usage_metrics`), refresh interval, hidden providers (`HiddenProviderServices`), dock flag (`ShowMeterBarInDock`), custom Claude accounts (`ClaudeCodeCustomAccounts`), OAuth-fallback flag.
 - App group container `group.dev.shipshit.meterbar`: `cached_usage_metrics.json`, atomic writes on a serial queue, triggers `WidgetCenter.reloadTimelines` (`SharedDataStore.swift`). Read by widget and CLI (`MeterBarCLI.swift:95-123`).
 - `~/Library/Application Support/MeterBar/cost-summary-v1.json` cost cache (`CostTracker.swift:175-225`).
-- Own keychain service `com.agenticindiedev.quotaguard` for the two optional admin keys (`KeychainManager.swift:7`, `AuthenticationManager.swift`).
+- Own keychain service `dev.shipshit.meterbar` for the two optional admin keys (`KeychainManager.swift:7`, `AuthenticationManager.swift`).
 
 **No database, no auth provider, no job queue** in the server sense. "Auth" is entirely: two admin keys in keychain + scavenged CLI credentials.
 

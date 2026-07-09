@@ -28,7 +28,7 @@ issues are already done.
 - **[#26](https://github.com/VincentShipsIt/meterbar.app/issues/26)** — mostly done. `meterbar cost` reports Claude+Codex (via the app's cached `CostSummaryStore`) and supports `--json`. Remaining: `--days` (Tier 1).
 - **[#23](https://github.com/VincentShipsIt/meterbar.app/issues/23)** — dedup/cooldown already implemented (`MeterBarApp.swift:271-311`, band-crossing keyed `notifiedLimitKeys`). Remaining: user preferences (Tier 2).
 - **[#29](https://github.com/VincentShipsIt/meterbar.app/issues/29)** — wire-format contract tests exist (`CachedMetricsContractTests`, `CachedMetricsReplicaContractTests`) and reload-on-write is verified. Remaining: widget *rendering* validation — merged into #18's spec (Tier 3).
-- **[#31](https://github.com/VincentShipsIt/meterbar.app/issues/31) website refactor** — **unactionable in this repo.** The meterbar.app site source is not here (no `website/` dir, no gh-pages branch, no separate GitHub repo under VincentShipsIt). Either transfer the issue to wherever the site lives or add the location to the issue body. Do not start it from this repo.
+- **[#31](https://github.com/VincentShipsIt/meterbar.app/issues/31) website refactor** — **unactionable in this repo.** The meterbar.dev site source is not here (no `website/` dir, no gh-pages branch, no separate GitHub repo under VincentShipsIt). Either transfer the issue to wherever the site lives or add the location to the issue body. Do not start it from this repo.
 - **[#47](https://github.com/VincentShipsIt/meterbar.app/issues/47) signing/notarization** — keep deferred as labeled. Body is accurate and self-contained; no action.
 
 ---

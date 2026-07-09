@@ -8,7 +8,7 @@
 ## Directory Overview
 
 ```
-meterbarapp/
+meterbar/
 ├── .agents/                    # AI documentation (SESSIONS/, SYSTEM/, docs/, skills/)
 ├── .claude/ .codex/ .cursor/   # Per-agent tool config (commands, hooks, skills)
 ├── .github/workflows/          # ci.yml, release.yml, update-homebrew.yml, secret-scan.yml
