@@ -75,7 +75,7 @@ brew upgrade --cask VincentShipsIt/tap/meterbar
 
 ### Manual Download
 
-Download the latest release from the [Releases](https://github.com/VincentShipsIt/meterbar.app/releases) page.
+Download the latest release from [meterbar.dev](https://meterbar.dev).
 
 > **Note**: Since the app isn't notarized, you may need to right-click and select "Open" the first time, or run:
 > ```bash

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "quotaguard-scripts",
+      "name": "meterbar-scripts",
       "devDependencies": {
         "playwright": "1.57.0",
       },

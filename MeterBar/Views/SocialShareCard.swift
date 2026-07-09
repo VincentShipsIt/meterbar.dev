@@ -148,9 +148,9 @@ struct SocialShareCard: View {
     private func footer(scale: CGFloat) -> some View {
         VStack(spacing: 10 * scale) {
             SocialShareMetadataRow(
-                iconName: "chevron.left.forwardslash.chevron.right",
-                title: "Repo",
-                value: SocialShareCardContent.repositoryDisplay,
+                iconName: "globe",
+                title: "Website",
+                value: SocialShareCardContent.websiteDisplay,
                 scale: scale
             )
             SocialShareMetadataRow(

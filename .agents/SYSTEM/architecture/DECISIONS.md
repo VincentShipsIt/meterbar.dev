@@ -153,7 +153,7 @@ Widget extension needs access to usage metrics from main app. Extensions can't d
 
 #### Decision
 Use App Groups capability:
-- Shared UserDefaults container: `group.com.agenticindiedev.meterbar`
+- Shared UserDefaults container: `group.dev.shipshit.meterbar`
 - `SharedDataStore` manages shared data
 - Both targets have same App Group identifier
 

@@ -41,7 +41,7 @@ Key settings (from `MeterBar.xcodeproj/project.pbxproj`):
 ## Layout
 
 ```
-meterbarapp/
+meterbar/
 ├── MeterBar/                 # App target sources
 │   ├── App/MeterBarApp.swift # @main + AppDelegate (NSStatusItem, popover, notifications)
 │   ├── Models/               # ServiceType, UsageMetrics, UsageLimit(+pace), TokenCost,
@@ -69,7 +69,7 @@ meterbarapp/
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **ClaudeService / OpenAIService** — admin-key usage reports (paginated, 50-page cap) via `ServiceSupport.fetchDecoded`.
 - **CostTracker** (1,029 lines) — JSONL/SQLite log scanning, per-model pricing table, per-day/model/origin breakdowns, cache at `~/Library/Application Support/MeterBar/cost-summary-v1.json`.
-- **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `com.agenticindiedev.quotaguard` (legacy name, kept for existing installs).
+- **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.shipshit.meterbar`.
 - **SharedDataStore** — app-group JSON file (`cached_usage_metrics.json`), atomic writes on a serial queue, `WidgetCenter.reloadTimelines` after save.
 - **ProviderVisibilityStore / DockVisibilityStore / ClaudeCodeAccountStore** — UserDefaults-backed preference stores.
 - **OAuthTokenExpiry** — JWT/unix-timestamp expiry checks (60 s grace; unparseable ⇒ not-expired by design).

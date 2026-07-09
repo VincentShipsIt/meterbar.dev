@@ -34,7 +34,7 @@ swift package generate-xcodeproj
 2. Go to "Signing & Capabilities"
 3. Click "+ Capability"
 4. Add "App Groups"
-5. Create/select group: `group.com.agenticindiedev.meterbar`
+5. Create/select group: `group.dev.shipshit.meterbar`
 6. Enable it
 
 ### 2. Add Widget Extension Target
@@ -49,7 +49,7 @@ swift package generate-xcodeproj
 
 1. Select the `UsageWidgetExtension` target
 2. Go to "Signing & Capabilities"
-3. Add the same App Group: `group.com.agenticindiedev.meterbar`
+3. Add the same App Group: `group.dev.shipshit.meterbar`
 4. Set Deployment Target to macOS 13.0
 
 ### 4. Add Source Files
@@ -131,4 +131,3 @@ After setting up the project:
 2. Test widget functionality
 3. Test menu bar functionality
 4. Verify notifications work
-

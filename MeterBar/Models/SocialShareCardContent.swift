@@ -28,8 +28,8 @@ struct SocialShareCardContent: Equatable {
     // MARK: Internal
 
     static let appName = "MeterBar"
-    static let repositoryURL = "https://github.com/VincentShipsIt/meterbar.app"
-    static let repositoryDisplay = "github.com/VincentShipsIt/meterbar.app"
+    static let websiteURL = "https://meterbar.dev"
+    static let websiteDisplay = "meterbar.dev"
     static let installCommand = "brew tap VincentShipsIt/tap && brew install --cask VincentShipsIt/tap/meterbar"
 
     let tokenTotal: Int?
@@ -96,7 +96,7 @@ struct SocialShareCardContent: Equatable {
     var tweetText: String {
         [
             "\(Self.appName) token maxing receipts: \(compactTokenHeroValue) tokens tracked locally.",
-            "Repo: \(Self.repositoryURL)",
+            "Website: \(Self.websiteURL)",
             "Install: \(Self.installCommand)",
         ].joined(separator: "\n")
     }
