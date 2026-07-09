@@ -26,7 +26,7 @@ brew upgrade --cask VincentShipsIt/tap/meterbar
 Download the latest release from:
 
 ```text
-https://github.com/VincentShipsIt/meterbar.app/releases
+https://meterbar.dev
 ```
 
 The release build is currently unsigned/not notarized. If macOS blocks the first launch, right-click `MeterBar.app` and choose Open, or run:

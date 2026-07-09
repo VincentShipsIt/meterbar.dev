@@ -1,4 +1,4 @@
-# 00 — Repo Map: MeterBar (meterbarapp)
+# 00 — Repo Map: MeterBar
 
 **Audit date:** 2026-07-02
 **Scope:** Full repository (201 tracked files, ~10,800 lines of Swift across app + widget + CLI + tests)
@@ -21,7 +21,7 @@ What it does (verified in code, not just README):
 - Fires local notifications at 90%/100% of any limit (`MeterBar/App/MeterBarApp.swift:239-299`).
 - Ships a small `meterbar` CLI that prints the app's cached metrics and does its own (simplified, drifted) cost scan (`MeterBarCLI/Sources/MeterBarCLI.swift`).
 
-**Product identity note:** the public site is `meterbar.dev`. Existing bundle IDs (`dev.shipshit.MeterBar` / `dev.shipshit.MeterBar.Widget`), app group (`group.dev.shipshit.meterbar`), and keychain service (`dev.shipshit.meterbar`) remain unchanged because those identifiers are migration-sensitive. Legacy naming ("Quota Guard", "agenticindiedev") still survives in `scripts/package.json:2` (`quotaguard-scripts`), `.swiftformat:1`, and `CLAUDE.md`.
+**Product identity note:** the public site is `meterbar.dev`. Existing bundle IDs (`dev.shipshit.MeterBar` / `dev.shipshit.MeterBar.Widget`), app group (`group.dev.shipshit.meterbar`), and keychain service (`dev.shipshit.meterbar`) remain unchanged because those identifiers are migration-sensitive. Historical naming may still appear in archived audit and session material.
 
 ---
 
