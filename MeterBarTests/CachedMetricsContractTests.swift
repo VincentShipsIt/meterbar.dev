@@ -108,7 +108,7 @@ final class CachedMetricsContractTests: XCTestCase {
         // The widget and CLI read the app-group file through these constants
         // instead of their own forked literals. Renaming either splits the
         // writer from the readers, so pin the wire values here.
-        XCTAssertEqual(SharedMetricsStore.appGroupIdentifier, "group.dev.shipshit.meterbar")
+        XCTAssertEqual(SharedMetricsStore.appGroupIdentifier, "group.dev.meterbar.app")
         XCTAssertEqual(SharedMetricsStore.metricsKey, "cached_usage_metrics")
     }
 

@@ -36,7 +36,7 @@ struct SecItemKeychainBackend: KeychainBackend {
 final class KeychainManager {
     static let shared = KeychainManager()
 
-    private let service = "dev.shipshit.meterbar"
+    private let service = "dev.meterbar.app"
     private let backend: KeychainBackend
 
     /// Defaults to the real Security-framework backend so `shared` behaves
