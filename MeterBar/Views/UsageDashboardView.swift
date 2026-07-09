@@ -621,21 +621,22 @@ struct UsageDashboardView: View {
 
     private var diagnosticsSummary: String? {
         guard !readinessReports.isEmpty else { return nil }
-        let ready = readinessReports.filter(\.isHealthy).count
-        let attention = readinessReports.filter { $0.overall == .fail }.count
-        return "\(ready) ready · \(attention) need attention"
+        return ProviderReadinessSummary(reports: readinessReports).displayText
     }
 
     /// Runs the readiness inspector off the main actor (it does keychain / file /
     /// SQLite I/O) and publishes the reports back on the main actor.
+    @MainActor
     private func runDiagnostics() async {
+        guard !isRunningDiagnostics else { return }
         isRunningDiagnostics = true
+        defer { isRunningDiagnostics = false }
+
         let errors = currentRefreshErrors()
         let reports = await Task.detached(priority: .userInitiated) {
             ProviderReadinessInspector.reports(refreshErrors: errors)
         }.value
         readinessReports = reports
-        isRunningDiagnostics = false
     }
 
     /// Each provider's live last-refresh error, fed into the readiness core so the
