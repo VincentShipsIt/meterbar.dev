@@ -113,6 +113,37 @@ final class ProviderReadinessTests: XCTestCase {
         assertNoSecretLeak(report)
     }
 
+    func testClaudeMissingAccessTokenFailsAuth() {
+        let credentials = """
+        {"claudeAiOauth":{"refreshToken":"refresh","expiresAt":2000000,\
+        "scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"default"}}
+        """
+        let input = ClaudeReadinessInput(
+            isCLIInstalled: true,
+            credentialsJSON: Data(credentials.utf8),
+            now: now
+        )
+        let report = ProviderReadinessEvaluator.claudeCode(input)
+
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        XCTAssertTrue((report.check("auth")?.detail ?? "").contains("usable access token"))
+        XCTAssertTrue((report.check("auth")?.recovery ?? "").contains("claude login"))
+        XCTAssertEqual(report.overall, .fail)
+    }
+
+    func testClaudeBlankAccessTokenFailsAuth() {
+        let input = ClaudeReadinessInput(
+            isCLIInstalled: true,
+            credentialsJSON: claudeCredentials(accessToken: "   ", expiresAtUnix: 2_000_000),
+            now: now
+        )
+        let report = ProviderReadinessEvaluator.claudeCode(input)
+
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        XCTAssertTrue((report.check("auth")?.detail ?? "").contains("usable access token"))
+        XCTAssertEqual(report.overall, .fail)
+    }
+
     // MARK: - Codex CLI
 
     func testCodexHealthy() {
@@ -268,6 +299,28 @@ final class ProviderReadinessTests: XCTestCase {
         let data = try JSONEncoder().encode(report)
         let decoded = try JSONDecoder().decode(ProviderReadiness.self, from: data)
         XCTAssertEqual(decoded, report)
+    }
+
+    func testSummaryCountsWarningsSeparatelyFromAttention() {
+        let ready = ProviderReadiness(
+            provider: .claudeCode,
+            checks: [ReadinessCheck(id: "ready", title: "Ready", level: .pass, detail: "Ready.")]
+        )
+        let warning = ProviderReadiness(
+            provider: .codexCli,
+            checks: [ReadinessCheck(id: "warning", title: "Warning", level: .warn, detail: "Warning.")]
+        )
+        let attention = ProviderReadiness(
+            provider: .cursor,
+            checks: [ReadinessCheck(id: "attention", title: "Attention", level: .fail, detail: "Attention.")]
+        )
+
+        let summary = ProviderReadinessSummary(reports: [ready, warning, attention])
+
+        XCTAssertEqual(summary.ready, 1)
+        XCTAssertEqual(summary.warning, 1)
+        XCTAssertEqual(summary.attention, 1)
+        XCTAssertEqual(summary.displayText, "1 ready · 1 warning · 1 needs attention")
     }
 
     // MARK: - Fixtures
