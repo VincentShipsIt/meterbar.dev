@@ -358,6 +358,7 @@ final class ProviderStatusMonitor: ObservableObject {
                     reports[service] = report
                     errors.removeValue(forKey: service)
                 case .failure(let error):
+                    reports.removeValue(forKey: service)
                     errors[service] = ProviderStatusMonitor.message(for: error)
                 }
             }
