@@ -87,6 +87,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Setup notifications (also handles initial data refresh)
         setupNotifications()
+        Task {
+            await ProviderStatusMonitor.shared.refreshAllIfNeeded()
+        }
 
         if CommandLine.arguments.contains("--open-dashboard") {
             UsageDashboardWindowController.shared.show()
@@ -155,6 +158,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
+        let statusItem = NSMenuItem(title: "Status Pages", action: nil, keyEquivalent: "")
+        statusItem.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: nil)
+        statusItem.submenu = makeProviderStatusMenu()
+        menu.addItem(statusItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -168,6 +176,154 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private func makeProviderStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+        let monitor = ProviderStatusMonitor.shared
+
+        if monitor.reports.isEmpty, !monitor.isRefreshing {
+            Task {
+                await monitor.refreshAllIfNeeded()
+            }
+        }
+
+        for service in ServiceType.allCases {
+            let item = NSMenuItem(
+                title: providerStatusMenuTitle(for: service),
+                action: nil,
+                keyEquivalent: ""
+            )
+            item.image = statusDotImage(for: providerStatusMenuIndicator(for: service))
+            item.submenu = makeProviderStatusSubmenu(for: service)
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+
+        let refreshItem = NSMenuItem(
+            title: "Refresh Status Pages",
+            action: #selector(refreshProviderStatusesFromStatusMenu),
+            keyEquivalent: ""
+        )
+        refreshItem.target = self
+        refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        refreshItem.isEnabled = !monitor.isRefreshing
+        menu.addItem(refreshItem)
+
+        return menu
+    }
+
+    private func makeProviderStatusSubmenu(for service: ServiceType) -> NSMenu {
+        let menu = NSMenu()
+        let monitor = ProviderStatusMonitor.shared
+
+        if let report = monitor.reports[service] {
+            let summaryItem = disabledMenuItem(
+                title: report.summary.description ?? report.summary.indicator.summaryLabel,
+                image: statusDotImage(for: report.summary.indicator)
+            )
+            menu.addItem(summaryItem)
+
+            if !report.components.isEmpty {
+                menu.addItem(.separator())
+                for component in report.components {
+                    menu.addItem(makeStatusComponentMenuItem(component))
+                }
+            }
+        } else if let error = monitor.errors[service] {
+            menu.addItem(disabledMenuItem(title: error, image: statusDotImage(for: .critical)))
+        } else {
+            menu.addItem(disabledMenuItem(title: "Checking status...", image: statusDotImage(for: .unknown)))
+        }
+
+        menu.addItem(.separator())
+
+        let openItem = NSMenuItem(
+            title: "Open \(service.statusPageDisplayName) Status Page",
+            action: #selector(openProviderStatusPageFromStatusMenu(_:)),
+            keyEquivalent: ""
+        )
+        openItem.target = self
+        openItem.representedObject = service.rawValue
+        openItem.image = NSImage(systemSymbolName: "arrow.up.right.square", accessibilityDescription: nil)
+        menu.addItem(openItem)
+
+        return menu
+    }
+
+    private func makeStatusComponentMenuItem(_ component: ProviderStatusComponent) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "\(component.name)  \(component.statusLabel)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.image = statusDotImage(for: component.indicator)
+
+        if component.isGroup {
+            let submenu = NSMenu()
+            for child in component.children {
+                submenu.addItem(makeStatusComponentMenuItem(child))
+            }
+            item.submenu = submenu
+        } else {
+            item.isEnabled = false
+        }
+
+        return item
+    }
+
+    private func providerStatusMenuTitle(for service: ServiceType) -> String {
+        let monitor = ProviderStatusMonitor.shared
+        if let report = monitor.reports[service] {
+            let summary = report.summary.description ?? report.summary.indicator.summaryLabel
+            return "\(service.statusPageDisplayName) — \(summary)"
+        }
+        if monitor.errors[service] != nil {
+            return "\(service.statusPageDisplayName) — Unavailable"
+        }
+        return "\(service.statusPageDisplayName) — Checking..."
+    }
+
+    private func providerStatusMenuIndicator(for service: ServiceType) -> ProviderStatusIndicator {
+        let monitor = ProviderStatusMonitor.shared
+        if let report = monitor.reports[service] {
+            return report.summary.indicator
+        }
+        if monitor.errors[service] != nil {
+            return .critical
+        }
+        return .unknown
+    }
+
+    private func disabledMenuItem(title: String, image: NSImage? = nil) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.image = image
+        item.isEnabled = false
+        return item
+    }
+
+    private func statusDotImage(for indicator: ProviderStatusIndicator) -> NSImage {
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        statusDotColor(for: indicator).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
+    }
+
+    private func statusDotColor(for indicator: ProviderStatusIndicator) -> NSColor {
+        switch indicator {
+        case .none:
+            return .systemGreen
+        case .minor, .maintenance:
+            return .systemOrange
+        case .major, .critical:
+            return .systemRed
+        case .unknown:
+            return .tertiaryLabelColor
+        }
+    }
+
     @objc
     private func toggleShowInDock() {
         dockVisibilityStore.setShowInDock(!dockVisibilityStore.showInDock)
@@ -176,6 +332,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func openDashboardFromStatusMenu() {
         UsageDashboardWindowController.shared.show()
+    }
+
+    @objc
+    private func refreshProviderStatusesFromStatusMenu() {
+        Task {
+            await ProviderStatusMonitor.shared.refreshAll()
+        }
+    }
+
+    @objc
+    private func openProviderStatusPageFromStatusMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let service = ServiceType(rawValue: rawValue),
+              let url = service.statusPageURL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc

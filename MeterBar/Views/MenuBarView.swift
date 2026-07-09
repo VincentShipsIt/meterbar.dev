@@ -69,6 +69,7 @@ struct MenuBarView: View {
               cursorHasAccess: cursorService.hasAccess
             )),
           openDashboard: openDashboard,
+          openStatusDashboard: openStatusDashboard,
           openProviderOverview: openProviderDetail
         )
         .padding(10)
@@ -143,6 +144,12 @@ struct MenuBarView: View {
     UsageDashboardWindowController.shared.show()
   }
 
+  private func openStatusDashboard() {
+    expandedProviderID = nil
+    MeterBarMenuDetailPanel.shared.dismiss()
+    UsageDashboardWindowController.shared.show(section: .status)
+  }
+
   private func openProviderDetail(_ snapshot: ProviderSnapshot) {
     if expandedProviderID == snapshot.id {
       expandedProviderID = nil
@@ -190,6 +197,7 @@ private enum MenuBarOverlayIcons {
 struct PopoverOverviewPanel: View {
   let snapshots: [ProviderSnapshot]
   let openDashboard: () -> Void
+  let openStatusDashboard: () -> Void
   let openProviderOverview: (ProviderSnapshot) -> Void
 
   @State private var setupReports: [ProviderReadiness] = []
@@ -231,6 +239,8 @@ struct PopoverOverviewPanel: View {
       if !providersNeedingSetup.isEmpty {
         setupChecklist
       }
+
+      PopoverProviderStatusSummaryCard(openStatusDashboard: openStatusDashboard)
 
       VStack(spacing: 8) {
         ForEach(snapshots) { snapshot in
