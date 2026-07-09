@@ -55,6 +55,7 @@ final class UsageDashboardWindowController {
 enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview = "Overview"
     case limits = "Limits"
+    case status = "Status"
     case costs = "Costs"
     case optimize = "Optimize"
     case diagnostics = "Diagnostics"
@@ -69,6 +70,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "gauge.with.dots.needle.bottom.50percent"
         case .limits:
             return "chart.bar.fill"
+        case .status:
+            return "waveform.path.ecg"
         case .costs:
             return "dollarsign.circle.fill"
         case .optimize:
@@ -88,6 +91,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "Current health and local token history"
         case .limits:
             return "Every tracked quota window"
+        case .status:
+            return "Provider service health"
         case .costs:
             return "Local 30-day token spend"
         case .optimize:
@@ -126,6 +131,7 @@ struct UsageDashboardView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
+    @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
 
     @State private var readinessReports: [ProviderReadiness] = []
@@ -219,6 +225,8 @@ struct UsageDashboardView: View {
                     overviewContent
                 case .limits:
                     limitsContent
+                case .status:
+                    statusPagesContent
                 case .costs:
                     costsContent
                 case .optimize:
@@ -340,6 +348,60 @@ struct UsageDashboardView: View {
                 await apiUsageStore.refresh()
             }
         }
+    }
+
+    private var statusPagesContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            DashboardCard(title: "Provider Status Pages", trailing: statusPagesSummary) {
+                HStack(alignment: .center, spacing: 10) {
+                    Text("Live status from each provider's public status page.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        Task { await providerStatusMonitor.refreshAll() }
+                    } label: {
+                        Label("Refresh Status", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(providerStatusMonitor.isRefreshing)
+                }
+            }
+
+            ForEach(ServiceType.allCases) { service in
+                ProviderStatusDashboardCard(
+                    service: service,
+                    report: providerStatusMonitor.reports[service],
+                    error: providerStatusMonitor.errors[service],
+                    openStatusPage: openStatusPage
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task {
+            await providerStatusMonitor.refreshAllIfNeeded()
+        }
+    }
+
+    private var statusPagesSummary: String? {
+        if providerStatusMonitor.isRefreshing {
+            return "Refreshing..."
+        }
+
+        let issueCount = providerStatusMonitor.reports.values.filter(\.hasIssue).count
+        if issueCount == 0, providerStatusMonitor.reports.count == ServiceType.allCases.count {
+            return "All operational"
+        }
+        if issueCount == 1 {
+            return "1 issue"
+        }
+        if issueCount > 1 {
+            return "\(issueCount) issues"
+        }
+        return nil
     }
 
     private var costTrendCard: some View {
@@ -675,13 +737,17 @@ struct UsageDashboardView: View {
             return costTracker.isRefreshInProgress || apiUsageStore.isLoading
         case .share, .optimize:
             return costTracker.isRefreshInProgress
+        case .status:
+            return providerStatusMonitor.isRefreshing
         case .overview, .limits, .diagnostics, .settings:
             return dataManager.isLoading
         }
     }
 
     private func refreshDashboard() async {
-        if activeSection == .costs || activeSection == .share || activeSection == .optimize {
+        if activeSection == .status {
+            await providerStatusMonitor.refreshAll()
+        } else if activeSection == .costs || activeSection == .share || activeSection == .optimize {
             await costTracker.scanCosts(days: 30)
             if activeSection == .costs, apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
@@ -690,6 +756,11 @@ struct UsageDashboardView: View {
         } else {
             await dataManager.refreshAll()
         }
+    }
+
+    private func openStatusPage(for service: ServiceType) {
+        guard let url = service.statusPageURL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func refreshCostsIfMissingDays() async {
