@@ -8,6 +8,7 @@ private enum SettingsPane: Hashable, Identifiable {
     case general
     case apiUsage
     case costTracking
+    case automation
     case provider(ServiceType)
 
     // MARK: Internal
@@ -16,7 +17,7 @@ private enum SettingsPane: Hashable, Identifiable {
     static let windowMinHeight: CGFloat = 560
     static let sidebarWidth: CGFloat = 238
     static let detailMaxWidth: CGFloat = 760
-    static let appPanes: [SettingsPane] = [.general, .apiUsage, .costTracking]
+    static let appPanes: [SettingsPane] = [.general, .apiUsage, .costTracking, .automation]
     static let providerPanes: [SettingsPane] = ServiceType.allCases
         .sorted { $0.sortOrder < $1.sortOrder }
         .map(SettingsPane.provider)
@@ -29,6 +30,8 @@ private enum SettingsPane: Hashable, Identifiable {
             "api-usage"
         case .costTracking:
             "cost-tracking"
+        case .automation:
+            "automation"
         case let .provider(service):
             "provider-\(service.rawValue)"
         }
@@ -42,6 +45,8 @@ private enum SettingsPane: Hashable, Identifiable {
             "API Usage"
         case .costTracking:
             "Cost Tracking"
+        case .automation:
+            "Automation"
         case let .provider(service):
             service.displayName
         }
@@ -55,6 +60,8 @@ private enum SettingsPane: Hashable, Identifiable {
             "Admin keys and overage"
         case .costTracking:
             "Local token spend"
+        case .automation:
+            "Session Wake auto-resume"
         case let .provider(service):
             switch service {
             case .claudeCode:
@@ -75,6 +82,8 @@ private enum SettingsPane: Hashable, Identifiable {
             "network"
         case .costTracking:
             "chart.bar.xaxis"
+        case .automation:
+            "moon.zzz.fill"
         case .provider:
             nil
         }
@@ -90,7 +99,8 @@ private enum SettingsPane: Hashable, Identifiable {
     var color: Color {
         switch self {
         case .general,
-             .apiUsage:
+             .apiUsage,
+             .automation:
             MeterBarTheme.appAccent
         case .costTracking:
             MeterBarTheme.success
@@ -340,6 +350,8 @@ struct SettingsView: View {
                 apiUsageSection
             case .costTracking:
                 costTrackingSection
+            case .automation:
+                SessionWakeSettingsView()
             case let .provider(service):
                 providerSettingsPane(for: service)
             }
