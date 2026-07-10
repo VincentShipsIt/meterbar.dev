@@ -11,6 +11,9 @@ on:
     - cron: "17 9 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: Full suite + coverage + app/widget build

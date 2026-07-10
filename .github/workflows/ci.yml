@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 # The branch-protection-required `build` context includes the full Xcode app and
 # widget build. This keeps entry-point, project wiring, entitlements, and widget
 # regressions from merging behind a SwiftPM-only green check.
@@ -14,10 +17,23 @@ jobs:
   # Required PR gate. Keep this job name stable for branch protection.
   build:
     name: build
+    needs: [test, lint]
+    if: ${{ always() }}
     runs-on: macos-26
     timeout-minutes: 40
 
     steps:
+      - name: Require tests and lint
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$TEST_RESULT" != "success" || "$LINT_RESULT" != "success" ]]; then
+            echo "::error::Required prerequisites failed (tests=$TEST_RESULT, lint=$LINT_RESULT)"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
