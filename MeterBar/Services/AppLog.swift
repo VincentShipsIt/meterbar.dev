@@ -8,7 +8,7 @@ import os
 /// out of release stdout, lets the OS apply privacy redaction, and avoids logging
 /// raw API response bodies or token-bearing strings to the console.
 enum AppLog {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "app.meterbar"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "dev.meterbar.app"
 
     static let app = Logger(subsystem: subsystem, category: "app")
     static let usage = Logger(subsystem: subsystem, category: "usage")

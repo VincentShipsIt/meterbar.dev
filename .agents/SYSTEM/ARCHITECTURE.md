@@ -34,7 +34,7 @@ Three build systems coexist (see `docs/audits/00-repo-map.md` §2):
 Key settings (from `MeterBar.xcodeproj/project.pbxproj`):
 - `MACOSX_DEPLOYMENT_TARGET = 26.0` (Liquid Glass APIs), `SWIFT_VERSION = 5.0` (Swift 5 language mode)
 - App: `ENABLE_APP_SANDBOX = NO` (the app must read other tools' credential/log files and spawn the `claude` binary). Widget: sandboxed. Hardened runtime on for both.
-- Bundle ids `dev.shipshit.MeterBar` / `dev.shipshit.MeterBar.Widget`; app group `group.dev.shipshit.meterbar`.
+- Bundle ids `dev.meterbar.app` / `dev.meterbar.app.Widget`; app group `group.dev.meterbar.app`.
 
 ---
 
@@ -69,7 +69,7 @@ meterbar/
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **ClaudeService / OpenAIService** — admin-key usage reports (paginated, 50-page cap) via `ServiceSupport.fetchDecoded`.
 - **CostTracker** (1,029 lines) — JSONL/SQLite log scanning, per-model pricing table, per-day/model/origin breakdowns, cache at `~/Library/Application Support/MeterBar/cost-summary-v1.json`.
-- **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.shipshit.meterbar`. Reads migrate the shipped v1.0-v1.6 service `com.agenticindiedev.quotaguard` into the current service, and removals delete both so a legacy key cannot reappear.
+- **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.meterbar.app`. Reads migrate the older `dev.shipshit.meterbar` (v1.6.x) and `com.agenticindiedev.quotaguard` (v1.0-v1.6) services into the current one, and removals delete all three so a legacy key cannot reappear.
 - **SharedDataStore** — app-group JSON file (`cached_usage_metrics.json`), atomic writes on a serial queue, `WidgetCenter.reloadTimelines` after save.
 - **ProviderVisibilityStore / DockVisibilityStore / ClaudeCodeAccountStore** — UserDefaults-backed preference stores.
 - **OAuthTokenExpiry** — JWT/unix-timestamp expiry checks (60 s grace; unparseable ⇒ not-expired by design).

@@ -7,8 +7,9 @@ import XCTest
 /// CI runners, so the `KeychainBackend` seam lets us verify the update-then-add
 /// fallback, UTF-8 round-tripping, and the not-found → nil path deterministically.
 final class KeychainManagerTests: XCTestCase {
-    private static let currentService = "dev.shipshit.meterbar"
-    private static let legacyService = "com.agenticindiedev.quotaguard"
+    private static let currentService = "dev.meterbar.app"
+    private static let legacyService = "dev.shipshit.meterbar"
+    private static let oldestLegacyService = "com.agenticindiedev.quotaguard"
 
     /// Minimal in-memory stand-in for the Security framework, keyed by service
     /// and account. Mirrors the real semantics the manager relies on: update on
@@ -147,6 +148,42 @@ final class KeychainManagerTests: XCTestCase {
         XCTAssertTrue(manager.delete(key: "openai"))
         XCTAssertNil(manager.get(key: "openai"))
         XCTAssertEqual(manager.get(key: "anthropic"), "b")
+    }
+
+    func testGetMigratesOldestLegacyItemAcrossTheFullChain() {
+        let (manager, backend) = makeManager()
+        backend.seed(service: Self.oldestLegacyService, account: "anthropic", value: "v1-key")
+
+        XCTAssertEqual(manager.get(key: "anthropic"), "v1-key")
+        XCTAssertEqual(
+            backend.value(service: Self.currentService, account: "anthropic"),
+            "v1-key"
+        )
+        XCTAssertNil(backend.value(service: Self.oldestLegacyService, account: "anthropic"))
+    }
+
+    func testNewerLegacyServiceWinsOverOldest() {
+        let (manager, backend) = makeManager()
+        backend.seed(service: Self.legacyService, account: "anthropic", value: "v16-key")
+        backend.seed(service: Self.oldestLegacyService, account: "anthropic", value: "v1-key")
+
+        XCTAssertEqual(manager.get(key: "anthropic"), "v16-key")
+        XCTAssertEqual(
+            backend.value(service: Self.currentService, account: "anthropic"),
+            "v16-key"
+        )
+    }
+
+    func testDeleteRemovesEveryServiceInTheChain() {
+        let (manager, backend) = makeManager()
+        XCTAssertTrue(manager.save(key: "anthropic", value: "current"))
+        backend.seed(service: Self.legacyService, account: "anthropic", value: "v16-key")
+        backend.seed(service: Self.oldestLegacyService, account: "anthropic", value: "v1-key")
+
+        XCTAssertTrue(manager.delete(key: "anthropic"))
+        XCTAssertNil(backend.value(service: Self.currentService, account: "anthropic"))
+        XCTAssertNil(backend.value(service: Self.legacyService, account: "anthropic"))
+        XCTAssertNil(backend.value(service: Self.oldestLegacyService, account: "anthropic"))
     }
 
     func testGetMigratesLegacyItemAfterCurrentWriteSucceeds() {

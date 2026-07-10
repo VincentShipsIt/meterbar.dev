@@ -21,7 +21,7 @@ What it does (verified in code, not just README):
 - Fires local notifications at 90%/100% of any limit (`MeterBar/App/MeterBarApp.swift:239-299`).
 - Ships a small `meterbar` CLI that prints the app's cached metrics and does its own (simplified, drifted) cost scan (`MeterBarCLI/Sources/MeterBarCLI.swift`).
 
-**Product identity note:** the public site is `meterbar.dev`. Existing bundle IDs (`dev.shipshit.MeterBar` / `dev.shipshit.MeterBar.Widget`), app group (`group.dev.shipshit.meterbar`), and keychain service (`dev.shipshit.meterbar`) remain unchanged because those identifiers are migration-sensitive. Historical naming may still appear in archived audit and session material.
+**Product identity note:** the public site is `meterbar.dev`. As of 2026-07-10 the bundle IDs (`dev.meterbar.app` / `dev.meterbar.app.Widget`), app group (`group.dev.meterbar.app`), and keychain service (`dev.meterbar.app`) match the domain; the keychain migration chain still reads the older `dev.shipshit.meterbar` and `com.agenticindiedev.quotaguard` services. Historical naming may still appear in archived audit and session material.
 
 ---
 

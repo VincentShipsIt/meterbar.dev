@@ -37,7 +37,7 @@ meterbar/
 | Provider fetch logic | `MeterBar/Services/{ClaudeCodeCLIUsageService,ClaudeCodeLocalService,CodexCliLocalService,CursorLocalService,ClaudeService,OpenAIService}.swift` |
 | Refresh orchestration + cache | `MeterBar/Services/UsageDataManager.swift` |
 | Cost estimation | `MeterBar/Services/CostTracker.swift` (+ `Models/TokenCost.swift`) |
-| Widget data handoff | `MeterBar/Services/SharedDataStore.swift` → app group `group.dev.shipshit.meterbar` |
+| Widget data handoff | `MeterBar/Services/SharedDataStore.swift` → app group `group.dev.meterbar.app` |
 | Admin API keys | `MeterBar/Services/{AuthenticationManager,KeychainManager}.swift` |
 | Notifications | `MeterBar/App/MeterBarApp.swift` (AppDelegate) |
 | UI | `MeterBar/Views/` |

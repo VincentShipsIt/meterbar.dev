@@ -39,7 +39,7 @@ swift package generate-xcodeproj
 2. Go to "Signing & Capabilities"
 3. Click "+ Capability"
 4. Add "App Groups"
-5. Create/select group: `group.dev.shipshit.meterbar`
+5. Create/select group: `group.dev.meterbar.app`
 6. Enable it
 
 ### 2. Add Widget Extension Target
@@ -54,7 +54,7 @@ swift package generate-xcodeproj
 
 1. Select the `UsageWidgetExtension` target
 2. Go to "Signing & Capabilities"
-3. Add the same App Group: `group.dev.shipshit.meterbar`
+3. Add the same App Group: `group.dev.meterbar.app`
 4. Set Deployment Target to macOS 13.0
 
 ### 4. Add Source Files
