@@ -112,11 +112,60 @@ final class AccountActivityInspectorTests: XCTestCase {
             "\(home)/.codex"
         )
         XCTAssertEqual(
+            CodexHomeDirectory.path(environment: ["CODEX_HOME": "~"], realHomeDirectory: home),
+            home
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFilePath(environment: ["CODEX_HOME": "~"], realHomeDirectory: home),
+            "\(home)/auth.json"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.path(environment: ["CODEX_HOME": "/custom/codex"], realHomeDirectory: home),
+            "/custom/codex"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFilePath(
+                environment: ["CODEX_HOME": "/custom/codex"],
+                realHomeDirectory: home
+            ),
+            "/custom/codex/auth.json"
+        )
+        XCTAssertEqual(
             CodexHomeDirectory.authFilePath(
                 environment: ["CODEX_HOME": "~/custom-codex"],
                 realHomeDirectory: home
             ),
             "\(home)/custom-codex/auth.json"
+        )
+    }
+
+    func testCodexAuthFileDisplayPathReflectsResolvedCodexHome() {
+        let home = tempDir.path
+
+        XCTAssertEqual(
+            CodexHomeDirectory.authFileDisplayPath(environment: [:], realHomeDirectory: home),
+            "~/.codex/auth.json"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFileDisplayPath(
+                environment: ["CODEX_HOME": "~/custom-codex"],
+                realHomeDirectory: home
+            ),
+            "~/custom-codex/auth.json"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFileDisplayPath(
+                environment: ["CODEX_HOME": "~"],
+                realHomeDirectory: home
+            ),
+            "~/auth.json"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFileDisplayPath(
+                environment: ["CODEX_HOME": "/custom/codex"],
+                realHomeDirectory: home
+            ),
+            "/custom/codex/auth.json"
         )
     }
 }

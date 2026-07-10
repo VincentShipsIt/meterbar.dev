@@ -327,12 +327,7 @@ struct Doctor: ParsableCommand {
     }
 
     private func filtered(_ reports: [ProviderReadiness]) -> [ProviderReadiness] {
-        let ordered = reports.sorted { $0.provider.sortOrder < $1.provider.sortOrder }
-        guard let needle = provider?.lowercased() else { return ordered }
-        return ordered.filter {
-            $0.provider.rawValue.lowercased().contains(needle)
-                || $0.provider.displayName.lowercased().contains(needle)
-        }
+        reports.sorted { $0.provider.sortOrder < $1.provider.sortOrder }
     }
 
     private func matchingProviders() -> Set<ServiceType> {

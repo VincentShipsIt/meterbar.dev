@@ -32,4 +32,24 @@ enum CodexHomeDirectory {
         (path(environment: environment, realHomeDirectory: realHomeDirectory) as NSString)
             .appendingPathComponent("auth.json")
     }
+
+    /// The resolved auth-file path for user-facing copy, compacting paths under
+    /// the real home directory back to `~/...` while retaining absolute custom
+    /// `CODEX_HOME` paths outside it.
+    static func authFileDisplayPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
+        let resolvedPath = (authFilePath(
+            environment: environment,
+            realHomeDirectory: realHomeDirectory
+        ) as NSString).standardizingPath
+        let standardizedHome = (realHomeDirectory as NSString).standardizingPath
+        let homePrefix = standardizedHome.hasSuffix("/") ? standardizedHome : "\(standardizedHome)/"
+
+        guard resolvedPath.hasPrefix(homePrefix) else {
+            return resolvedPath
+        }
+        return "~/\(resolvedPath.dropFirst(homePrefix.count))"
+    }
 }

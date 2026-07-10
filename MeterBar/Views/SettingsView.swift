@@ -233,6 +233,10 @@ struct SettingsView: View {
         providerVisibility.isEnabled(.claudeCode) || providerVisibility.isEnabled(.codexCli)
     }
 
+    private var codexAuthFileDisplayPath: String {
+        CodexHomeDirectory.authFileDisplayPath()
+    }
+
     private var settingsWindow: some View {
         HStack(spacing: 0) {
             settingsSidebar
@@ -396,7 +400,7 @@ struct SettingsView: View {
         SettingsPanelSection(title: "OpenAI Codex", logoKind: .codex, color: MeterBarTheme.codexAccent) {
             SettingsRowView(
                 title: "Connection",
-                detail: "Reads the OAuth session from ~/.codex/auth.json."
+                detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
             ) {
                 HStack(spacing: 8) {
                     StatusPill(
@@ -1095,7 +1099,7 @@ struct SettingsView: View {
         case .claudeCode:
             "Claude CLI /usage"
         case .codexCli:
-            "~/.codex/auth.json + ChatGPT usage API"
+            "\(codexAuthFileDisplayPath) + ChatGPT usage API"
         case .cursor:
             "Cursor local state + usage API"
         }

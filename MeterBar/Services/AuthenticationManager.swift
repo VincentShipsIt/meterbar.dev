@@ -9,9 +9,15 @@ final class AuthenticationManager: ObservableObject {
     @Published var claudeAdminKey: String?
     @Published var openaiAdminKey: String?
 
-    private let keychain = KeychainManager.shared
+    private let keychain: KeychainManager
 
-    private init() {
+    private convenience init() {
+        self.init(keychain: .shared)
+    }
+
+    /// Injectable for Keychain failure-path tests; production uses `shared`.
+    init(keychain: KeychainManager) {
+        self.keychain = keychain
         claudeAdminKey = keychain.get(key: ApiProvider.anthropic.keychainKey)
         openaiAdminKey = keychain.get(key: ApiProvider.openai.keychainKey)
     }
@@ -41,12 +47,15 @@ final class AuthenticationManager: ObservableObject {
         return success
     }
 
-    func removeAdminKey(for provider: ApiProvider) {
-        keychain.delete(key: provider.keychainKey)
+    @discardableResult
+    func removeAdminKey(for provider: ApiProvider) -> Bool {
+        let deleted = keychain.delete(key: provider.keychainKey)
+        let remainingValue = deleted ? nil : keychain.get(key: provider.keychainKey)
         switch provider {
-        case .anthropic: claudeAdminKey = nil
-        case .openai: openaiAdminKey = nil
+        case .anthropic: claudeAdminKey = remainingValue
+        case .openai: openaiAdminKey = remainingValue
         }
+        return deleted
     }
 
     var isClaudeAuthenticated: Bool { claudeAdminKey != nil }
