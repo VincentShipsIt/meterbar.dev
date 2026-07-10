@@ -44,8 +44,8 @@ final class KeychainManager {
     /// exactly as before; tests inject an in-memory fake and service names.
     init(
         backend: KeychainBackend = SecItemKeychainBackend(),
-        currentService: String = "dev.shipshit.meterbar",
-        legacyServices: [String] = ["com.agenticindiedev.quotaguard"]
+        currentService: String = "dev.meterbar.app",
+        legacyServices: [String] = ["dev.shipshit.meterbar", "com.agenticindiedev.quotaguard"]
     ) {
         self.backend = backend
         self.currentService = currentService

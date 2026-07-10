@@ -13,7 +13,7 @@ public class SharedDataStore {
 
     /// Serial queue for off-main disk writes so callers on the MainActor don't
     /// block on file I/O, while still serializing writes to the shared file.
-    private let ioQueue = DispatchQueue(label: "dev.shipshit.meterbar.SharedDataStore.io", qos: .utility)
+    private let ioQueue = DispatchQueue(label: "dev.meterbar.app.SharedDataStore.io", qos: .utility)
 
     /// Overrides the App Group container location. `nil` in production (the
     /// container is resolved via `SharedMetricsStore`); tests inject a temp

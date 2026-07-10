@@ -13,7 +13,7 @@ import Foundation
 /// reloads; every reader (widget, CLI) loads through this type.
 public enum SharedMetricsStore {
     /// App Group identifier configured on the app and widget entitlements.
-    public static let appGroupIdentifier = "group.dev.shipshit.meterbar"
+    public static let appGroupIdentifier = "group.dev.meterbar.app"
 
     /// Base name (no extension) of the cached-metrics blob. Also the app's
     /// in-process UserDefaults cache key (see `StorageKeys.cachedUsageMetrics`).

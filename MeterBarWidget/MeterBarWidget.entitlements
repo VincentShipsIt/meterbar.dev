@@ -6,7 +6,7 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.dev.shipshit.meterbar</string>
+		<string>group.dev.meterbar.app</string>
 	</array>
 </dict>
 </plist>
