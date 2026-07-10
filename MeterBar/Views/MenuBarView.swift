@@ -57,21 +57,25 @@ struct MenuBarView: View {
       Divider()
 
       ScrollView {
-        PopoverOverviewPanel(
-          snapshots: ProviderSnapshotBuilder.snapshots(
-            ProviderSnapshotBuilder.Input(
-              metrics: dataManager.metrics,
-              claudeAccounts: claudeAccountStore.accounts,
-              claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-              enabledServices: providerVisibility.enabledServices,
-              claudeCodeHasAccess: claudeCodeService.hasAccess,
-              codexCliHasAccess: codexCliService.hasAccess,
-              cursorHasAccess: cursorService.hasAccess
-            )),
-          openDashboard: openDashboard,
-          openStatusDashboard: openStatusDashboard,
-          openProviderOverview: openProviderDetail
-        )
+        VStack(spacing: 10) {
+          PopoverOverviewPanel(
+            snapshots: ProviderSnapshotBuilder.snapshots(
+              ProviderSnapshotBuilder.Input(
+                metrics: dataManager.metrics,
+                claudeAccounts: claudeAccountStore.accounts,
+                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                enabledServices: providerVisibility.enabledServices,
+                claudeCodeHasAccess: claudeCodeService.hasAccess,
+                codexCliHasAccess: codexCliService.hasAccess,
+                cursorHasAccess: cursorService.hasAccess
+              )),
+            openDashboard: openDashboard,
+            openStatusDashboard: openStatusDashboard,
+            openProviderOverview: openProviderDetail
+          )
+
+          SessionWakePopoverCard()
+        }
         .padding(10)
         .background(
           GeometryReader { proxy in

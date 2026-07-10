@@ -6,6 +6,7 @@ import SwiftUI
 
 private enum SettingsPane: Hashable, Identifiable {
     case general
+    case automation
     case apiUsage
     case costTracking
     case provider(ServiceType)
@@ -16,7 +17,7 @@ private enum SettingsPane: Hashable, Identifiable {
     static let windowMinHeight: CGFloat = 560
     static let sidebarWidth: CGFloat = 238
     static let detailMaxWidth: CGFloat = 760
-    static let appPanes: [SettingsPane] = [.general, .apiUsage, .costTracking]
+    static let appPanes: [SettingsPane] = [.general, .automation, .apiUsage, .costTracking]
     static let providerPanes: [SettingsPane] = ServiceType.allCases
         .sorted { $0.sortOrder < $1.sortOrder }
         .map(SettingsPane.provider)
@@ -25,6 +26,8 @@ private enum SettingsPane: Hashable, Identifiable {
         switch self {
         case .general:
             "general"
+        case .automation:
+            "automation"
         case .apiUsage:
             "api-usage"
         case .costTracking:
@@ -38,6 +41,8 @@ private enum SettingsPane: Hashable, Identifiable {
         switch self {
         case .general:
             "General"
+        case .automation:
+            "Automation"
         case .apiUsage:
             "API Usage"
         case .costTracking:
@@ -51,6 +56,8 @@ private enum SettingsPane: Hashable, Identifiable {
         switch self {
         case .general:
             "Launch, refresh, notifications"
+        case .automation:
+            "Session Wake"
         case .apiUsage:
             "Admin keys and overage"
         case .costTracking:
@@ -71,6 +78,8 @@ private enum SettingsPane: Hashable, Identifiable {
         switch self {
         case .general:
             "gearshape.fill"
+        case .automation:
+            "powersleep"
         case .apiUsage:
             "network"
         case .costTracking:
@@ -90,6 +99,7 @@ private enum SettingsPane: Hashable, Identifiable {
     var color: Color {
         switch self {
         case .general,
+             .automation,
              .apiUsage:
             MeterBarTheme.appAccent
         case .costTracking:
@@ -153,6 +163,35 @@ struct SettingsView: View {
                 isAddingClaudeAccount = false
             }
         }
+        .sheet(isPresented: $isPresentingWakeFirstEnable) {
+            SessionWakeFirstEnableSheet {
+                sessionWakeSettings.acknowledgeFirstEnable()
+                sessionWakeSettings.setFeatureEnabled(true)
+                isPresentingWakeFirstEnable = false
+            } onCancel: {
+                isPresentingWakeFirstEnable = false
+            }
+        }
+        .confirmationDialog(
+            "Skip permission prompts?",
+            isPresented: $isConfirmingWakeBypass,
+            titleVisibility: .visible
+        ) {
+            Button("Skip Permission Prompts", role: .destructive) {
+                sessionWakeSettings.setPermissionBypassAcknowledged(true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Resumed sessions will run with --dangerously-skip-permissions, so they can "
+                    + "act without asking. Only enable this for accounts and projects you trust."
+            )
+        }
+        .onChange(of: claudeAccountStore.accounts) {
+            sessionWakeSettings.reconcile(
+                availableAccountIDs: Set(claudeAccountStore.accounts.map(\.id))
+            )
+        }
     }
 
     // MARK: Private
@@ -166,11 +205,15 @@ struct SettingsView: View {
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
+    @StateObject private var sessionWakeSettings = SessionWakeSettingsStore.shared
+    @StateObject private var sessionWakeCoordinator = SessionWakeCoordinator.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
 
     @State private var isAddingClaudeAccount = false
+    @State private var isPresentingWakeFirstEnable = false
+    @State private var isConfirmingWakeBypass = false
     @State private var claudeReconnectError: String?
     @State private var claudeAdminKeyDraft = ""
     @State private var openaiAdminKeyDraft = ""
@@ -333,6 +376,8 @@ struct SettingsView: View {
                 refreshSection
                 notificationsSection
                 generalSection
+            case .automation:
+                automationSection
             case .apiUsage:
                 if showExtraUsageSection {
                     extraUsageSection
@@ -391,6 +436,9 @@ struct SettingsView: View {
             costTrackingSection
             refreshSection
             notificationsSection
+            if providerVisibility.isEnabled(.claudeCode) {
+                automationSection
+            }
             generalSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -428,6 +476,126 @@ struct SettingsView: View {
                 }
             } else if !codexCliService.hasAccess {
                 SettingsNotice(text: "Run codex login, then check again.", color: MeterBarTheme.warning)
+            }
+        }
+    }
+
+    private var automationSection: some View {
+        SettingsPanelSection(title: "Session Wake", systemImage: "powersleep", color: MeterBarTheme.appAccent) {
+            SettingsNotice(
+                text: "Session Wake resumes Claude Code sessions that stopped on a usage limit, "
+                    + "once your quota window reopens. Claude Code only. Preview is a read-only "
+                    + "dry run and never changes anything.",
+                color: .secondary
+            )
+
+            SettingsRowView(
+                title: "Enable Session Wake",
+                detail: "Master switch. When off, nothing runs in the background."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { sessionWakeSettings.isFeatureEnabled },
+                    set: { enabled in
+                        if enabled {
+                            if sessionWakeSettings.hasAcknowledgedFirstEnable {
+                                sessionWakeSettings.setFeatureEnabled(true)
+                            } else {
+                                isPresentingWakeFirstEnable = true
+                            }
+                        } else {
+                            sessionWakeSettings.setFeatureEnabled(false)
+                        }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
+            if sessionWakeSettings.isFeatureEnabled {
+                SettingsDivider()
+
+                SettingsRowView(
+                    title: "Wake account",
+                    detail: "Explicitly choose which Claude profile to resume. Never inferred."
+                ) {
+                    Picker("", selection: Binding(
+                        get: { sessionWakeSettings.wakeAccountID },
+                        set: { sessionWakeSettings.selectWakeAccount($0) }
+                    )) {
+                        Text("None").tag(UUID?.none)
+                        ForEach(claudeAccountStore.accounts) { account in
+                            Text(account.name).tag(Optional(account.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 240)
+                }
+
+                SessionWakeStatusView(
+                    coordinator: sessionWakeCoordinator,
+                    settings: sessionWakeSettings,
+                    accountStore: claudeAccountStore
+                )
+                .padding(.top, 2)
+
+                SessionWakeWatcherControl(
+                    coordinator: sessionWakeCoordinator,
+                    settings: sessionWakeSettings
+                )
+
+                SettingsDivider()
+
+                SettingsRowView(
+                    title: "Skip permission prompts",
+                    detail: "Resumes run with --dangerously-skip-permissions. Off by default; "
+                        + "turning it on needs a separate confirmation."
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { sessionWakeSettings.hasAcknowledgedPermissionBypass },
+                        set: { enabled in
+                            if enabled {
+                                isConfirmingWakeBypass = true
+                            } else {
+                                sessionWakeSettings.setPermissionBypassAcknowledged(false)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+
+                SettingsRowView(
+                    title: "Notify on completion",
+                    detail: "Summarize resumed / skipped / failed counts when a run finishes."
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { sessionWakeSettings.notifyOnCompletion },
+                        set: { sessionWakeSettings.setNotifyOnCompletion($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+
+                SettingsRowView(
+                    title: "Notify when watching starts",
+                    detail: "Let you know the watcher is waiting for the quota reset."
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { sessionWakeSettings.notifyOnWatchStart },
+                        set: { sessionWakeSettings.setNotifyOnWatchStart($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+
+                if !notificationPreferences.isEnabled {
+                    SettingsNotice(
+                        text: "Global notifications are off, so Session Wake will not post banners "
+                            + "until you re-enable them under Notifications.",
+                        color: MeterBarTheme.warning
+                    )
+                }
             }
         }
     }
@@ -1608,6 +1776,64 @@ private struct AdminKeySettingsRow: View {
 }
 
 // MARK: - AddClaudeAccountSheet
+
+private struct SessionWakeFirstEnableSheet: View {
+    let onAcknowledge: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: "powersleep")
+                    .font(.title2)
+                    .foregroundStyle(MeterBarTheme.appAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Enable Session Wake")
+                        .font(.headline)
+                    Text("Automatically resume blocked Claude Code sessions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                bullet("Session Wake runs the Claude CLI headlessly to resume sessions that "
+                    + "stopped on a usage limit.")
+                bullet("It only ever touches the Claude account you explicitly select.")
+                bullet("Resumes happen one at a time, after your quota window reopens, within "
+                    + "conservative limits.")
+                bullet("You can stop the watcher at any time from Settings or the menu bar.")
+            }
+            .font(.callout)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Enable") {
+                    onAcknowledge()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 480)
+    }
+
+    private func bullet(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(MeterBarTheme.success)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
 
 private struct AddClaudeAccountSheet: View {
     // MARK: Internal

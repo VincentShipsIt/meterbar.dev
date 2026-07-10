@@ -30,4 +30,23 @@ enum StorageKeys {
     static let notificationWarningThreshold = "NotificationWarningThreshold"
     /// Raw value of the `NotificationThreshold` at which a critical alert notifies.
     static let notificationCriticalThreshold = "NotificationCriticalThreshold"
+
+    // MARK: Session Wake (issue #98)
+
+    /// Master switch: whether the Session Wake feature is enabled at all.
+    static let sessionWakeFeatureEnabled = "SessionWakeFeatureEnabled"
+    /// Runtime intent: whether the quota watcher is armed. Separate from feature
+    /// enablement so a user can keep the feature configured but the watcher off.
+    static let sessionWakeWatcherArmed = "SessionWakeWatcherArmed"
+    /// UUID string of the explicitly-selected wake account. Never inferred from
+    /// account order or recent activity.
+    static let sessionWakeAccountID = "SessionWakeAccountID"
+    /// Whether the user completed the first-enable safety acknowledgement.
+    static let sessionWakeFirstEnableAcknowledged = "SessionWakeFirstEnableAcknowledged"
+    /// Whether the user separately acknowledged permission bypass for resumes.
+    static let sessionWakePermissionBypassAcknowledged = "SessionWakePermissionBypassAcknowledged"
+    /// Whether to notify when a wake run completes.
+    static let sessionWakeNotifyOnCompletion = "SessionWakeNotifyOnCompletion"
+    /// Whether to notify when the watcher starts waiting for a reset.
+    static let sessionWakeNotifyOnWatchStart = "SessionWakeNotifyOnWatchStart"
 }
