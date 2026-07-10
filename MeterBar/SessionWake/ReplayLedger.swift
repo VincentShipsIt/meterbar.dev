@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Durable record of handled block fingerprints so a resumed session is never
 /// rediscovered and resumed again after the app relaunches.
