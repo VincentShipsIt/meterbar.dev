@@ -18,7 +18,8 @@ struct MenuBarView: View {
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
 
   @State private var contentHeight: CGFloat = 320
-  @State private var expandedProviderID: ProviderSnapshot.ID?
+  @State private var expandedDetailID: String?
+  @State private var cardFrames: [String: CGRect] = [:]
   @State private var menuWindow: NSWindow?
 
   init(onContentSizeChange: @escaping (NSSize) -> Void = { _ in }) {
@@ -40,13 +41,16 @@ struct MenuBarView: View {
       notifyContentSize()
     }
     .onDisappear {
-      expandedProviderID = nil
+      expandedDetailID = nil
       MeterBarMenuDetailPanel.shared.dismiss()
     }
     .onPreferenceChange(MenuContentHeightPreferenceKey.self) { height in
       guard height > 0, abs(height - contentHeight) > 1 else { return }
       contentHeight = height
       notifyContentSize(height: height)
+    }
+    .onPreferenceChange(PopoverCardFramesPreferenceKey.self) { frames in
+      cardFrames = frames
     }
   }
 
@@ -69,7 +73,7 @@ struct MenuBarView: View {
               cursorHasAccess: cursorService.hasAccess
             )),
           openDashboard: openDashboard,
-          openStatusDashboard: openStatusDashboard,
+          openStatusDetail: openStatusDetail,
           openProviderOverview: openProviderDetail
         )
         .padding(10)
@@ -139,36 +143,48 @@ struct MenuBarView: View {
   }
 
   private func openDashboard() {
-    expandedProviderID = nil
+    expandedDetailID = nil
     MeterBarMenuDetailPanel.shared.dismiss()
     UsageDashboardWindowController.shared.show()
   }
 
-  private func openStatusDashboard() {
-    expandedProviderID = nil
-    MeterBarMenuDetailPanel.shared.dismiss()
-    UsageDashboardWindowController.shared.show(section: .status)
+  private func openStatusDetail() {
+    presentDetail(
+      id: PopoverCardID.providerStatus,
+      content: AnyView(MenuBarStatusDetailContent())
+    )
   }
 
   private func openProviderDetail(_ snapshot: ProviderSnapshot) {
-    if expandedProviderID == snapshot.id {
-      expandedProviderID = nil
+    presentDetail(
+      id: snapshot.id,
+      content: AnyView(MenuBarProviderDetailContent(snapshot: snapshot))
+    )
+  }
+
+  /// Presents (or toggles off) the secondary detail card, top-aligned with the
+  /// popover card that opened it.
+  private func presentDetail(id: String, content: AnyView) {
+    if expandedDetailID == id {
+      expandedDetailID = nil
       MeterBarMenuDetailPanel.shared.dismiss()
       return
     }
 
     guard let menuWindow else { return }
-    expandedProviderID = snapshot.id
+    expandedDetailID = id
     MeterBarMenuDetailPanel.shared.present(
       anchor: menuWindow,
-      content: AnyView(
-        MenuBarProviderDetailContent(snapshot: snapshot) {
-          UsageDashboardWindowController.shared.show(section: .limits, focusedProviderID: snapshot.id)
-          expandedProviderID = nil
-          MeterBarMenuDetailPanel.shared.dismiss()
-        }
-      )
+      content: content,
+      preferredTopY: screenTopY(forCardID: id)
     )
+  }
+
+  /// Converts a card's SwiftUI global frame (top-left origin, window space)
+  /// into the card top's AppKit screen Y so the detail panel can align to it.
+  private func screenTopY(forCardID id: String) -> CGFloat? {
+    guard let menuWindow, let frame = cardFrames[id] else { return nil }
+    return menuWindow.frame.maxY - frame.minY
   }
 
   private func configureMenuWindow(_ window: NSWindow?) {
@@ -197,7 +213,7 @@ private enum MenuBarOverlayIcons {
 struct PopoverOverviewPanel: View {
   let snapshots: [ProviderSnapshot]
   let openDashboard: () -> Void
-  let openStatusDashboard: () -> Void
+  let openStatusDetail: () -> Void
   let openProviderOverview: (ProviderSnapshot) -> Void
 
   @State private var setupReports: [ProviderReadiness] = []
@@ -240,13 +256,15 @@ struct PopoverOverviewPanel: View {
         setupChecklist
       }
 
-      PopoverProviderStatusSummaryCard(openStatusDashboard: openStatusDashboard)
+      PopoverProviderStatusSummaryCard(openStatusDetail: openStatusDetail)
+        .reportPopoverCardFrame(id: PopoverCardID.providerStatus)
 
       VStack(spacing: 8) {
         ForEach(snapshots) { snapshot in
           PopoverProviderStatusCard(snapshot: snapshot) {
             openProviderOverview(snapshot)
           }
+          .reportPopoverCardFrame(id: snapshot.id)
         }
       }
     }
@@ -471,5 +489,35 @@ private struct MenuContentHeightPreferenceKey: PreferenceKey {
 
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
     value = max(value, nextValue())
+  }
+}
+
+// MARK: - Card frame tracking
+
+/// IDs for popover cards that are not provider snapshots.
+enum PopoverCardID {
+  static let providerStatus = "popover-provider-status"
+}
+
+/// Live frames (SwiftUI global space) of the popover cards, keyed by card ID,
+/// so the secondary detail panel can top-align with the clicked card.
+struct PopoverCardFramesPreferenceKey: PreferenceKey {
+  static var defaultValue: [String: CGRect] = [:]
+
+  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+    value.merge(nextValue()) { _, new in new }
+  }
+}
+
+extension View {
+  func reportPopoverCardFrame(id: String) -> some View {
+    background(
+      GeometryReader { proxy in
+        Color.clear.preference(
+          key: PopoverCardFramesPreferenceKey.self,
+          value: [id: proxy.frame(in: .global)]
+        )
+      }
+    )
   }
 }

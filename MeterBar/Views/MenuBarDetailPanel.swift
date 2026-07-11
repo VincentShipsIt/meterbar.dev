@@ -22,7 +22,10 @@ final class MeterBarMenuDetailPanel {
 
   private var panel: NSPanel?
 
-  func present(anchor: NSWindow, content: AnyView) {
+  /// Presents the detail card next to `anchor`. `preferredTopY` (screen
+  /// coordinates) top-aligns the card with the row that opened it; without it
+  /// the card aligns with the anchor's top edge.
+  func present(anchor: NSWindow, content: AnyView, preferredTopY: CGFloat? = nil) {
     let width = MeterBarMenuDetailPanelLayout.detailWidth
     let panel = ensurePanel()
     panel.level = anchor.level
@@ -34,29 +37,19 @@ final class MeterBarMenuDetailPanel {
 
     let anchorFrame = anchor.frame
     let visibleFrame = anchor.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? anchorFrame
-    let maxHeight = max(
-      MeterBarMenuDetailPanelLayout.minDetailHeight,
-      visibleFrame.height - (MeterBarMenuDetailPanelLayout.screenPadding * 2)
+    let frame = MeterBarMenuDetailPanelLayout.panelFrame(
+      anchorFrame: anchorFrame,
+      visibleFrame: visibleFrame,
+      measuredHeight: measuringView.fittingSize.height,
+      preferredTopY: preferredTopY
     )
-    let measuredHeight = measuringView.fittingSize.height
-    let height = min(max(measuredHeight, MeterBarMenuDetailPanelLayout.minDetailHeight), maxHeight)
-    let topY = min(anchorFrame.maxY, visibleFrame.maxY - MeterBarMenuDetailPanelLayout.screenPadding)
-    let y = max(visibleFrame.minY + MeterBarMenuDetailPanelLayout.screenPadding, topY - height)
 
     panel.contentView = NSHostingView(
       rootView: content
-        .frame(width: width, height: height)
+        .frame(width: frame.width, height: frame.height)
     )
     panel.applyCompanionClipping()
-    panel.setFrame(
-      NSRect(
-        x: anchorFrame.minX - width - MeterBarMenuDetailPanelLayout.panelGap,
-        y: y,
-        width: width,
-        height: height
-      ),
-      display: true
-    )
+    panel.setFrame(frame, display: true)
     panel.orderFront(nil)
   }
 
@@ -94,11 +87,32 @@ enum MeterBarMenuDetailPanelLayout {
   static let minDetailHeight: CGFloat = 120
   static let panelGap: CGFloat = 12
   static let screenPadding: CGFloat = 8
+
+  /// Screen frame for the detail card: left of the anchor with a gap,
+  /// top-aligned with `preferredTopY` (or the anchor's top), clamped to the
+  /// visible frame. All rects use AppKit screen coordinates.
+  static func panelFrame(
+    anchorFrame: CGRect,
+    visibleFrame: CGRect,
+    measuredHeight: CGFloat,
+    preferredTopY: CGFloat? = nil
+  ) -> CGRect {
+    let maxHeight = max(minDetailHeight, visibleFrame.height - (screenPadding * 2))
+    let height = min(max(measuredHeight, minDetailHeight), maxHeight)
+    let desiredTop = preferredTopY ?? anchorFrame.maxY
+    let topY = min(desiredTop, visibleFrame.maxY - screenPadding)
+    let y = max(visibleFrame.minY + screenPadding, topY - height)
+    return CGRect(
+      x: anchorFrame.minX - detailWidth - panelGap,
+      y: y,
+      width: detailWidth,
+      height: height
+    )
+  }
 }
 
 struct MenuBarProviderDetailContent: View {
   let snapshot: ProviderSnapshot
-  let onOpenFull: () -> Void
 
   private var detailLimits: [SnapshotLimit] {
     snapshot.detailLimits
@@ -192,13 +206,6 @@ struct MenuBarProviderDetailContent: View {
       }
 
       Spacer(minLength: 0)
-
-      Button(action: onOpenFull) {
-        Label("Open Full View", systemImage: "rectangle.split.2x1")
-      }
-        .buttonStyle(.plain)
-        .font(.caption)
-        .foregroundStyle(MeterBarTheme.appAccent)
     }
   }
 }

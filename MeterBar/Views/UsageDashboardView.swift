@@ -19,6 +19,7 @@ final class UsageDashboardWindowController {
     static let shared = UsageDashboardWindowController()
 
     private var window: NSWindow?
+    private var closeObserver: NSObjectProtocol?
 
     private init() {}
 
@@ -45,10 +46,37 @@ final class UsageDashboardWindowController {
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window
+
+            // Discard the window on close instead of resurrecting it forever.
+            // A long-lived cached window can accumulate stale window-server
+            // state (observed: a corner radius stuck at ~35pt instead of the
+            // standard ~26pt after display changes during a long uptime);
+            // recreating per open keeps the chrome fresh, matching the
+            // lifecycle a SwiftUI Window scene gives MacSweep.
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { _ in
+                // Delivered on the main queue; tear down synchronously so a
+                // reopen between close and a deferred hop can't order-front
+                // the dying window and orphan it.
+                MainActor.assumeIsolated {
+                    UsageDashboardWindowController.shared.windowDidClose()
+                }
+            }
         }
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func windowDidClose() {
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
+        }
+        closeObserver = nil
+        window = nil
     }
 }
 
@@ -394,14 +422,11 @@ struct UsageDashboardView: View {
                 }
             }
 
-            ForEach(ServiceType.allCases) { service in
-                ProviderStatusDashboardCard(
-                    service: service,
-                    report: providerStatusMonitor.reports[service],
-                    error: providerStatusMonitor.errors[service],
-                    openStatusPage: openStatusPage
-                )
-            }
+            ProviderStatusTable(
+                reports: providerStatusMonitor.reports,
+                errors: providerStatusMonitor.errors,
+                openStatusPage: openStatusPage
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task {

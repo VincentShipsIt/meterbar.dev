@@ -195,10 +195,15 @@ private struct MeterBarCardSurfaceModifier: ViewModifier {
     content
       .background(.ultraThinMaterial, in: shape)
       .overlay {
+        // Decorative only — filled shapes hit-test, and these sit above the
+        // card content, so they must not swallow clicks meant for buttons
+        // inside the card (e.g. the Costs daily-detail disclosure rows).
         shape.fill(MeterBarTheme.glassCardTint)
+          .allowsHitTesting(false)
       }
       .overlay {
         shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+          .allowsHitTesting(false)
       }
   }
 }
