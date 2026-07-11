@@ -34,13 +34,29 @@ nonisolated enum TranscriptResetParser {
     //                "resets Jan 2, 2027 at 9am"
 
     /// Legacy Claude blocks state the reset as a unix epoch after a pipe:
-    /// "… usage limit reached|1752130800". 9–12 digits spans 2001 onward and
+    /// "… usage limit reached|1752130800". 9–12 digits spans 1973 onward and
     /// rejects millisecond epochs; the trailing lookahead keeps a 13+ digit
     /// run from being silently truncated into a bogus in-range value.
     private static let legacyEpochPattern = try? NSRegularExpression(
         pattern: #"usage limit reached\|(\d{9,12})(?!\d)"#,
         options: [.caseInsensitive]
     )
+    /// A legacy synthetic limit line is EXACTLY the marker — classification
+    /// must anchor to the whole trimmed text so an assistant message that
+    /// merely quotes the marker in prose or code never reads as blocked.
+    private static let legacyMarkerLinePattern = try? NSRegularExpression(
+        pattern: #"^(?:claude(?: ai)?\s+)?usage limit reached\|\d{9,12}$"#,
+        options: [.caseInsensitive]
+    )
+
+    /// True when the entire trimmed message text is a legacy pipe-epoch limit
+    /// marker (nothing but the marker), as legacy transcripts emit it.
+    static func isLegacyLimitMarkerLine(_ messageText: String) -> Bool {
+        guard let legacyMarkerLinePattern else { return false }
+        let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        return legacyMarkerLinePattern.firstMatch(in: trimmed, range: range) != nil
+    }
     private static let pattern = try? NSRegularExpression(
         pattern: #"resets\s*\**\s*"# +
             #"(?:(?<month>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+"# +

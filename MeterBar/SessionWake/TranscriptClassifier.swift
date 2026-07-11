@@ -161,10 +161,12 @@ nonisolated enum TranscriptClassifier {
         guard record.isApiError else {
             // Legacy transcripts ("… usage limit reached|<epoch>") predate the
             // structured isApiErrorMessage/apiErrorStatus fields entirely.
-            // Only a synthetic *assistant* line is a limit event; a user line
-            // quoting the marker proves nothing about quota.
+            // Only a synthetic *assistant* line that is EXACTLY the marker is
+            // a limit event; an assistant or user message quoting the marker
+            // in prose/code proves nothing about quota (hint extraction stays
+            // lenient — blocking classification must not).
             return record.type == "assistant"
-                && TranscriptResetParser.legacyEpochReset(in: record.text) != nil
+                && TranscriptResetParser.isLegacyLimitMarkerLine(record.text)
         }
         if record.apiErrorStatus == 429 { return true }
         // Some builds omit the status code; fall back to the message body.

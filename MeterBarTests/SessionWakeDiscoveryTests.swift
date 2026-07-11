@@ -567,6 +567,45 @@ final class SessionWakeDiscoveryTests: XCTestCase {
         XCTAssertEqual(resetHint?.resetAt, Date(timeIntervalSince1970: 1_752_130_800))
     }
 
+    func testLegacyMarkerQuotedInAssistantProseDoesNotBlock() {
+        // An assistant message QUOTING the marker (prose, code, summaries of
+        // MeterBar development sessions...) is not a synthetic limit line —
+        // blocking anchors to the whole trimmed text being exactly the marker.
+        let object: [String: Any] = [
+            "type": "assistant",
+            "timestamp": "2026-07-10T04:14:15.000Z",
+            "cwd": tempDir.path,
+            "sessionId": "s",
+            "message": [
+                "role": "assistant",
+                "content": "I added a fixture using \"Claude AI usage limit reached|1752130800\" to the tests."
+            ]
+        ]
+        let summary = TranscriptClassifier.classify(sessionID: "s", lines: [jsonLine(object)])
+        if case .blocked = summary.state {
+            XCTFail("Assistant prose quoting the legacy marker must not classify as blocked")
+        }
+    }
+
+    func testExactLegacyMarkerLineWithPrefixBlocks() {
+        // The genuine synthetic line — nothing but the marker (optionally
+        // prefixed "Claude AI") — still classifies as blocked.
+        let object: [String: Any] = [
+            "type": "assistant",
+            "timestamp": "2026-07-10T04:14:15.000Z",
+            "cwd": tempDir.path,
+            "sessionId": "s",
+            "message": [
+                "role": "assistant",
+                "content": "Claude AI usage limit reached|1752130800"
+            ]
+        ]
+        let summary = TranscriptClassifier.classify(sessionID: "s", lines: [jsonLine(object)])
+        guard case .blocked = summary.state else {
+            return XCTFail("Exact legacy marker line must classify as blocked")
+        }
+    }
+
     func testLegacyMarkerQuotedInUserLineDoesNotBlock() {
         // Only an assistant line is a synthetic limit message; a user merely
         // quoting the marker text proves nothing about quota.

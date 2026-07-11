@@ -140,9 +140,14 @@ actor SessionDiscovery {
         let oldestAllowed = now.addingTimeInterval(-configuration.maxTranscriptAge)
         var found: [(url: URL, modified: Date)] = []
         for case let url as URL in enumerator {
+            // Subagent transcripts live under a `subagents/` directory and are
+            // never resume targets — prune the whole subtree so its children
+            // are never even stat'd.
+            if url.lastPathComponent == "subagents", url.hasDirectoryPath {
+                enumerator.skipDescendants()
+                continue
+            }
             guard url.pathExtension == "jsonl",
-                  // Subagent transcripts live under a `subagents/` directory
-                  // and are never resume targets — skip before reading a byte.
                   !url.pathComponents.contains("subagents"),
                   let values = try? url.resourceValues(
                       forKeys: [.isRegularFileKey, .contentModificationDateKey]
