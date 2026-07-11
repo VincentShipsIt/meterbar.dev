@@ -113,6 +113,22 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Sidebar layout: frequency-ordered monitoring pages first, then health
+    /// checks, then utilities. Settings is reached via the toolbar gear, not
+    /// the sidebar (app-level function, not a content destination).
+    struct SidebarGroup: Identifiable {
+        let title: String?
+        let sections: [DashboardSection]
+
+        var id: String { sections.first?.id ?? title ?? "" }
+    }
+
+    static let sidebarGroups: [SidebarGroup] = [
+        SidebarGroup(title: nil, sections: [.overview, .limits, .costs, .optimize]),
+        SidebarGroup(title: "Health", sections: [.status, .diagnostics]),
+        SidebarGroup(title: "Utilities", sections: [.share]),
+    ]
+
     var titlebarSubtitle: String {
         switch self {
         case .overview:
@@ -216,6 +232,7 @@ struct UsageDashboardView: View {
             detailContent
                 .toolbar {
                     ToolbarItemGroup(placement: .primaryAction) {
+                        settingsToolbarButton
                         refreshToolbarButton
                     }
                 }
@@ -225,9 +242,17 @@ struct UsageDashboardView: View {
 
     private var sidebarList: some View {
         List(selection: selectedSection) {
-            ForEach(DashboardSection.allCases) { section in
-                Label(section.rawValue, systemImage: section.iconName)
-                    .tag(section)
+            ForEach(DashboardSection.sidebarGroups) { group in
+                Section {
+                    ForEach(group.sections) { section in
+                        Label(section.rawValue, systemImage: section.iconName)
+                            .tag(section)
+                    }
+                } header: {
+                    if let title = group.title {
+                        Text(title)
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
@@ -243,6 +268,16 @@ struct UsageDashboardView: View {
         }
         .help(isRefreshButtonAnimating ? "Refreshing usage" : "Refresh usage")
         .disabled(isRefreshButtonDisabled)
+    }
+
+    private var settingsToolbarButton: some View {
+        Button {
+            navigation.navigate(to: .settings)
+        } label: {
+            Image(systemName: "gearshape")
+                .symbolVariant(activeSection == .settings ? .fill : .none)
+        }
+        .help("Settings")
     }
 
     private var detailContent: some View {
@@ -305,19 +340,7 @@ struct UsageDashboardView: View {
     }
 
     private var limitsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("All Quota Windows")
-                    .font(.title3)
-                    .bold()
-                Spacer()
-                if dataManager.isLoading {
-                    Text("Refreshing...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
             if providerSnapshots.isEmpty {
                 DashboardCard(title: "No Quota Windows") {
                     Text("Enable providers in Settings to show quota windows.")

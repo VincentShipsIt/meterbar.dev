@@ -17,7 +17,7 @@ struct CostOverviewStatusCard: View {
   }
 
   var body: some View {
-    DashboardTile(minHeight: overviewTileMinHeight) {
+    DashboardTile {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           Image(systemName: "dollarsign.circle.fill")

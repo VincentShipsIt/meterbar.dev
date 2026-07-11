@@ -95,32 +95,30 @@ struct OptimizeInsightsView: View {
   }
 
   private var tokenBurnCard: some View {
-    DashboardCard(title: "Token Burn", trailing: nil) {
-      VStack(alignment: .leading, spacing: 12) {
-        Picker("Window", selection: $chartDays) {
-          Text("7 days").tag(7)
-          Text("30 days").tag(30)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: 220)
-
-        if let summary = visibleSummary, !summary.dailyUsage.isEmpty {
-          DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: chartDays)
-            .frame(height: 200)
-        } else {
-          Text("No daily token history yet.")
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .frame(height: 200, alignment: .center)
-            .frame(maxWidth: .infinity)
-        }
+    DashboardCard(title: "Token Burn") {
+      Picker("Window", selection: $chartDays) {
+        Text("7 days").tag(7)
+        Text("30 days").tag(30)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .fixedSize()
+    } content: {
+      if let summary = visibleSummary, !summary.dailyUsage.isEmpty {
+        DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: chartDays)
+          .frame(height: 200)
+      } else {
+        Text("No daily token history yet.")
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .frame(height: 200, alignment: .center)
+          .frame(maxWidth: .infinity)
       }
     }
   }
 
   private func modelBreakdownCard(for insights: OptimizationInsights) -> some View {
-    DashboardCard(title: "Token Burn by Model", trailing: nil) {
+    DashboardCard(title: "Token Burn by Model") {
       if insights.topModels.isEmpty {
         Text("No per-model breakdown available in the current scan.")
           .font(.caption)
@@ -136,7 +134,7 @@ struct OptimizeInsightsView: View {
   }
 
   private func originBreakdownCard(for insights: OptimizationInsights) -> some View {
-    DashboardCard(title: "Top Usage Origins", trailing: nil) {
+    DashboardCard(title: "Top Usage Origins") {
       VStack(alignment: .leading, spacing: 10) {
         Text("Where tokens are spent — agents, tool use, skills, and main chat.")
           .font(.caption)
@@ -156,7 +154,7 @@ struct OptimizeInsightsView: View {
   }
 
   private func recommendationsCard(for insights: OptimizationInsights) -> some View {
-    DashboardCard(title: "Recommendations", trailing: nil) {
+    DashboardCard(title: "Recommendations") {
       VStack(alignment: .leading, spacing: 12) {
         ForEach(insights.recommendations) { recommendation in
           RecommendationRow(recommendation: recommendation)
@@ -178,7 +176,7 @@ struct OptimizeInsightsView: View {
   // MARK: - Empty / loading states
 
   private var emptyStateCard: some View {
-    DashboardCard(title: "Optimize Your Token Usage", trailing: nil) {
+    DashboardCard(title: "Optimize Your Token Usage") {
       VStack(alignment: .leading, spacing: 14) {
         Text(
           "Run a local scan to see which models and workflows burn the most tokens, "

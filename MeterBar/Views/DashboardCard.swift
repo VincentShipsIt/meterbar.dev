@@ -35,14 +35,18 @@ struct DashboardTile<Content: View>: View {
   }
 }
 
-struct DashboardCard<Content: View>: View {
+struct DashboardCard<Content: View, Trailing: View>: View {
   let title: String
-  let trailing: String?
+  let trailing: Trailing
   @ViewBuilder let content: Content
 
-  init(title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) {
+  init(
+    title: String,
+    @ViewBuilder trailing: () -> Trailing,
+    @ViewBuilder content: () -> Content
+  ) {
     self.title = title
-    self.trailing = trailing
+    self.trailing = trailing()
     self.content = content()
   }
 
@@ -54,14 +58,32 @@ struct DashboardCard<Content: View>: View {
             .font(.title3)
             .bold()
           Spacer()
-          if let trailing {
-            Text(trailing)
-              .font(.caption)
-              .foregroundColor(.secondary)
-          }
+          trailing
         }
         content
       }
+    }
+  }
+}
+
+extension DashboardCard where Trailing == DashboardCardCaption {
+  init(title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) {
+    self.init(title: title) {
+      DashboardCardCaption(text: trailing)
+    } content: {
+      content()
+    }
+  }
+}
+
+struct DashboardCardCaption: View {
+  let text: String?
+
+  var body: some View {
+    if let text {
+      Text(text)
+        .font(.caption)
+        .foregroundColor(.secondary)
     }
   }
 }
