@@ -51,7 +51,7 @@ jobs:
           # below and destroyed in cleanup — it is generated at runtime, never stored
           # as a secret. Mask it so it is redacted from all step logs, then persist it
           # via $GITHUB_ENV so later steps can unlock the same keychain.
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
           echo "::add-mask::$KEYCHAIN_PASSWORD"
           {
             echo "CERT_PATH=$RUNNER_TEMP/build_certificate.p12"
