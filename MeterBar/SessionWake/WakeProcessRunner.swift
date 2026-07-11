@@ -16,6 +16,11 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
     let account: ClaudeCodeAccount
     private let baseEnvironment: [String: String]
     private let lockFactory: @Sendable () -> WakeLock
+    /// True when the caller (the CLI engine) already holds the shared wake
+    /// lock for the whole pass. flock treats a second descriptor in the SAME
+    /// process as a distinct holder, so re-acquiring here would self-contend
+    /// and fail every real CLI resume — skip locking entirely instead.
+    private let assumesExternalLock: Bool
     private let logger: WakeRunLogger
     private let now: @Sendable () -> Date
 
@@ -27,6 +32,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         prompt: String = WakeCommandBuilder.defaultPrompt,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         lockFactory: @escaping @Sendable () -> WakeLock = { WakeLock() },
+        assumesExternalLock: Bool = false,
         logger: WakeRunLogger = WakeRunLogger(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -37,6 +43,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         self.prompt = prompt
         self.baseEnvironment = baseEnvironment
         self.lockFactory = lockFactory
+        self.assumesExternalLock = assumesExternalLock
         self.logger = logger
         self.now = now
     }
@@ -55,21 +62,27 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             return .failed(reason: "claude binary not found")
         }
 
-        // Take the shared lock only now, when we are actually ready to launch.
-        let lock = lockFactory()
-        switch lock.acquire() {
+        // Take the shared lock only now, when we are actually ready to launch
+        // — unless the caller already holds it for the whole pass.
+        let lock = assumesExternalLock ? nil : lockFactory()
+        switch lock?.acquire() ?? .acquired {
         case .acquired:
             break
-        case .contended:
-            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active")
+        case let .contended(holder):
+            let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
+            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
             record(candidate: candidate, outcome: outcome, result: nil, start: now())
             return outcome
         case let .legacyHeld(guidance):
             let outcome = WakeRunOutcome.failed(reason: guidance)
             record(candidate: candidate, outcome: outcome, result: nil, start: now())
             return outcome
+        case let .unavailable(reason):
+            let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
+            record(candidate: candidate, outcome: outcome, result: nil, start: now())
+            return outcome
         }
-        defer { lock.release() }
+        defer { lock?.release() }
 
         let command = WakeCommandBuilder.build(
             executable: resolved,
@@ -97,7 +110,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             cancellation.cancel()
         }
 
-        let outcome = Self.mapOutcome(result.termination)
+        let outcome = Self.mapOutcome(result, permissionMode: permissionMode)
         record(candidate: candidate, outcome: outcome, result: result, start: start)
         return outcome
     }
@@ -129,11 +142,17 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
-    static func mapOutcome(_ termination: ManagedProcess.Result.Termination) -> WakeRunOutcome {
-        switch termination {
+    static func mapOutcome(_ result: ManagedProcess.Result, permissionMode: WakePermissionMode) -> WakeRunOutcome {
+        switch result.termination {
         case .exited(0):
             return .succeeded
         case let .exited(code):
+            // Classification only — the bounded capture is inspected here and
+            // never logged or retained beyond this call. Bypass runs skip the
+            // permission gate entirely, so a denial label can't apply there.
+            if permissionMode != .bypass, indicatesPermissionDenial(result) {
+                return .permissionDenied
+            }
             return .failed(reason: "claude exited with status \(code)")
         case let .signalled(signal):
             return .failed(reason: "claude terminated by signal \(signal)")
@@ -144,6 +163,22 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         case let .launchFailed(message):
             return .failed(reason: message)
         }
+    }
+
+    /// Whether a non-zero exit reads as a stop at the permission-approval gate.
+    /// The captured output exists only in memory on `result`; nothing here (or
+    /// downstream) writes it anywhere.
+    private static func indicatesPermissionDenial(_ result: ManagedProcess.Result) -> Bool {
+        // Lossy decode: a capture truncated at the byte cap can split a
+        // multibyte character, and strict decoding would drop the WHOLE
+        // capture — disabling classification in exactly the long-output case
+        // the bounded sink exists for.
+        // swiftlint:disable optional_data_string_conversion
+        let combined = String(decoding: result.stdoutCapture, as: UTF8.self)
+            + "\n"
+            + String(decoding: result.stderrCapture, as: UTF8.self)
+        // swiftlint:enable optional_data_string_conversion
+        return PermissionDenialDetector.indicatesDenial(in: combined)
     }
 
     private func record(
@@ -179,6 +214,7 @@ nonisolated extension WakeRunOutcome {
         case .failed: return "failed"
         case .skipped: return "skipped"
         case .cancelled: return "cancelled"
+        case .permissionDenied: return "permission-denied"
         }
     }
 }

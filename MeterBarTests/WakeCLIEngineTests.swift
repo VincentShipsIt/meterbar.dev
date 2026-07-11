@@ -119,6 +119,43 @@ final class WakeCLIEngineTests: XCTestCase {
         XCTAssertEqual(response.summary.failed, 1)
     }
 
+    func testPermissionDenialCountsAsFailureNotSuccess() async throws {
+        try writeBlockedSession()
+        let runner = RecordingRunner(outcome: .permissionDenied)
+        let engine = makeEngine(provider: FixedProvider(.open), runner: runner)
+        let response = await engine.run(provider: "claude", account: account(), dryRun: false, limit: nil)
+        XCTAssertEqual(response.outcome, .partialFailure)
+        XCTAssertEqual(response.summary.failed, 1)
+        XCTAssertEqual(response.summary.resumed, 0)
+
+        // A denied session was never resumed — it must stay retryable.
+        let ledger = ReplayLedger(fileURL: tempDir.appendingPathComponent("l.json"))
+        let rescan = await SessionDiscovery().discover(configDirectory: tempDir.path, ledger: ledger)
+        XCTAssertNil(rescan.first?.skipReason, "denied session must not be marked handled")
+    }
+
+    func testLockContentionNamesTheHolder() async throws {
+        try writeBlockedSession()
+        // Pre-hold the engine's lock file as a CLI-kind holder.
+        let holder = WakeLock(
+            lockURL: tempDir.appendingPathComponent("wake.lock"),
+            legacyLockURLs: [],
+            holderKind: .cli
+        )
+        XCTAssertEqual(holder.acquire(), .acquired)
+        defer { holder.release() }
+
+        let runner = RecordingRunner()
+        let engine = makeEngine(provider: FixedProvider(.open), runner: runner)
+        let response = await engine.run(provider: "claude", account: account(), dryRun: false, limit: nil)
+        XCTAssertEqual(response.outcome, .validationFailure)
+        let message = try XCTUnwrap(response.message)
+        XCTAssertTrue(message.contains("cli"), "message should name the holder kind: \(message)")
+        XCTAssertTrue(message.contains("\(getpid())"), "message should name the holder pid: \(message)")
+        let ran = await runner.ran
+        XCTAssertTrue(ran.isEmpty)
+    }
+
     // MARK: - Outcome + JSON contract
 
     func testExitCodesAreDistinct() {

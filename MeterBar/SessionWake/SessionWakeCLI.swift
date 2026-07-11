@@ -65,7 +65,11 @@ public enum SessionWakeCLI {
                 WakeProcessRunner(
                     account: runnerAccount,
                     permissionMode: mode,
-                    bypassAcknowledged: request.bypassAcknowledged
+                    bypassAcknowledged: request.bypassAcknowledged,
+                    // The engine holds the shared lock for the whole pass; a
+                    // second same-process flock would self-contend (fd-level
+                    // holders), failing every real resume.
+                    assumesExternalLock: true
                 )
             },
             shouldCancel: request.shouldCancel

@@ -19,7 +19,7 @@ struct WakeCLIEngine {
         authority: WakeQuotaAuthority = WakeQuotaAuthority(),
         makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting,
         ledgerFactory: @escaping @Sendable () -> ReplayLedger = { ReplayLedger() },
-        lock: WakeLock = WakeLock(),
+        lock: WakeLock = WakeLock(holderKind: .cli),
         bounds: WakeBounds = .default,
         shouldCancel: @escaping @Sendable () -> Bool = { false }
     ) {
@@ -65,14 +65,15 @@ struct WakeCLIEngine {
         switch lock.acquire() {
         case .acquired:
             break
-        case .contended:
+        case let .contended(holder):
+            let who = holder.map { " (\($0.shortDescription))" } ?? " (app or CLI)"
             return .from(
                 candidates: candidates,
                 outcome: .validationFailure,
                 provider: normalizedProvider,
                 dryRun: false,
                 account: account.configDirectory,
-                message: "Another Session Wake holder (app or CLI) is already running."
+                message: "Another Session Wake holder\(who) is already running."
             )
         case let .legacyHeld(guidance):
             return .from(
@@ -82,6 +83,15 @@ struct WakeCLIEngine {
                 dryRun: false,
                 account: account.configDirectory,
                 message: guidance
+            )
+        case let .unavailable(reason):
+            return .from(
+                candidates: candidates,
+                outcome: .validationFailure,
+                provider: normalizedProvider,
+                dryRun: false,
+                account: account.configDirectory,
+                message: "Session Wake lock unavailable: \(reason)"
             )
         }
         defer { lock.release() }
@@ -141,7 +151,9 @@ struct WakeCLIEngine {
             case .succeeded:
                 summary.resumed += 1
                 await ledger.record(candidate.fingerprint)
-            case .failed:
+            case .failed, .permissionDenied:
+                // A denial is a failure for tally purposes; the ledger is not
+                // written, so the session stays retryable once the user acts.
                 summary.failed += 1
             case .skipped:
                 summary.skipped += 1
