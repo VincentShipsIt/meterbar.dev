@@ -27,12 +27,24 @@ final class WakeCLIEngineTests: XCTestCase {
             "message": ["role": "assistant", "content": [["type": "text", "text": "session limit resets 3:00am (UTC)"]]]
         ]
         let data = try JSONSerialization.data(withJSONObject: object)
-        try String(decoding: data, as: UTF8.self)
-            .write(to: projects.appendingPathComponent("\(id).jsonl"), atomically: true, encoding: .utf8)
+        try data.write(to: projects.appendingPathComponent("\(id).jsonl"))
     }
 
     private func account() -> ClaudeCodeAccount {
         ClaudeCodeAccount(id: UUID(), name: "acct", configDirectory: tempDir.path)
+    }
+
+    /// A minimal executable that stands in for the real `claude` binary so the
+    /// runner can exec something real without launching Claude.
+    private func makeFakeClaude(exitCode: Int32) throws -> String {
+        let script = """
+        #!/bin/bash
+        exit \(exitCode)
+        """
+        let url = tempDir.appendingPathComponent("fake-claude.sh")
+        try script.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url.path
     }
 
     private func makeEngine(
@@ -119,6 +131,42 @@ final class WakeCLIEngineTests: XCTestCase {
         XCTAssertEqual(response.summary.failed, 1)
     }
 
+    /// Regression: the live `meterbar wake` path pairs the engine's lock with a
+    /// *separate* `WakeLock` instance inside the real `WakeProcessRunner`, both on
+    /// the same lock file. If the engine holds its lock across `resume()`, the
+    /// runner's `flock` on a second descriptor in the same process is denied on
+    /// macOS, so every real resume fails with "another holder is active". Driving
+    /// the engine with a real runner (fake `claude`) proves the resume actually
+    /// launches instead of self-contending.
+    func testRealRunnerResumesWithoutSelfContendingOnSharedLock() async throws {
+        try writeBlockedSession()
+        let fake = try makeFakeClaude(exitCode: 0)
+        // Same lock file as the engine, but a distinct instance with the runner's
+        // own holder kind — exactly how the app-group CLI wires it in production.
+        let sharedLockURL = tempDir.appendingPathComponent("wake.lock")
+        let engine = WakeCLIEngine(
+            discovery: SessionDiscovery(),
+            authority: WakeQuotaAuthority(provider: FixedProvider(.open), maxAge: 3600, now: { Date() }),
+            makeRunner: { runnerAccount in
+                WakeProcessRunner(
+                    account: runnerAccount,
+                    executable: fake,
+                    baseEnvironment: ["PATH": "/usr/bin:/bin"],
+                    lockFactory: { WakeLock(lockURL: sharedLockURL, legacyLockURLs: [], holderKind: .app) },
+                    logger: WakeRunLogger(directory: self.tempDir.appendingPathComponent("logs"))
+                )
+            },
+            ledgerFactory: { ReplayLedger(fileURL: self.tempDir.appendingPathComponent("l.json")) },
+            lock: WakeLock(lockURL: sharedLockURL, legacyLockURLs: [], holderKind: .cli),
+            bounds: .default
+        )
+
+        let response = await engine.run(provider: "claude", account: account(), dryRun: false, limit: nil)
+        XCTAssertEqual(response.outcome, .success, "Real resume must not self-contend on the shared wake lock")
+        XCTAssertEqual(response.summary.resumed, 1)
+        XCTAssertEqual(response.summary.failed, 0)
+    }
+
     func testPermissionDenialCountsAsFailureNotSuccess() async throws {
         try writeBlockedSession()
         let runner = RecordingRunner(outcome: .permissionDenied)
@@ -172,7 +220,7 @@ final class WakeCLIEngineTests: XCTestCase {
             candidates: [], outcome: .success, provider: "claude", dryRun: true, account: "/x/.claude"
         )
         let data = try response.jsonData()
-        let text = String(decoding: data, as: UTF8.self)
+        let text = try XCTUnwrap(String(bytes: data, encoding: .utf8))
         XCTAssertTrue(text.contains("\"schemaVersion\" : 1"))
         let decoded = try JSONDecoder().decode(WakeCLIResponse.self, from: data)
         XCTAssertEqual(decoded, response)

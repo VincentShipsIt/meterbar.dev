@@ -61,10 +61,17 @@ struct WakeCLIEngine {
             )
         }
 
-        // Detect legacy watcher / another holder before doing anything live.
+        // Pre-flight probe only: detect a legacy watcher / another live holder
+        // for a distinct, actionable message before the quota fetch — then
+        // release at once. The per-run runner takes the shared lock when a
+        // launch is actually ready (matching the app watcher, where the runner,
+        // not the coordinator, owns the lock). Holding this engine lock across
+        // resume() would self-contend: `flock` via a second descriptor in the
+        // same process is denied on macOS, so every real resume would fail with
+        // "another holder is active".
         switch lock.acquire() {
         case .acquired:
-            break
+            lock.release()
         case let .contended(holder):
             let who = holder.map { " (\($0.shortDescription))" } ?? " (app or CLI)"
             return .from(
@@ -94,7 +101,6 @@ struct WakeCLIEngine {
                 message: "Session Wake lock unavailable: \(reason)"
             )
         }
-        defer { lock.release() }
 
         // Fresh quota before any launch.
         let quota = await authority.freshQuota(account: account)
