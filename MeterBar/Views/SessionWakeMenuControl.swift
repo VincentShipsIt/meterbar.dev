@@ -29,15 +29,17 @@ struct SessionWakeMenuControl: View {
             Toggle("", isOn: watcherBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .disabled(!store.canArmWatcher || store.wakeAccountID == nil)
+                // The one-time first-run confirmation happens in Settings, so
+                // the menu toggle is a quick kill-switch once enabled there.
+                .disabled(!store.isOn && (!store.canTurnOn || store.needsFirstRunConfirmation))
         }
     }
 
     private var label: SessionWakeStatusLabel {
-        status.label(featureEnabled: store.featureEnabled)
+        status.label(isOn: store.isOn)
     }
 
     private var watcherBinding: Binding<Bool> {
-        Binding(get: { store.watcherArmed }, set: { store.setWatcherArmed($0) })
+        Binding(get: { store.isOn }, set: { store.setOn($0) })
     }
 }

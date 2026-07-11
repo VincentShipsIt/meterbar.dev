@@ -19,15 +19,15 @@ final class SessionWakeStatusTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
-    func testLabelIsOffWhenFeatureDisabled() {
-        XCTAssertEqual(SessionWakeStatusLabel.from(state: .running(sessionID: "s"), featureEnabled: false), .off)
+    func testLabelIsOffWhenToggleOff() {
+        XCTAssertEqual(SessionWakeStatusLabel.from(state: .running(sessionID: "s"), isOn: false), .off)
     }
 
     func testRealStatesAreNotCollapsed() {
-        XCTAssertEqual(SessionWakeStatusLabel.from(state: .running(sessionID: "s"), featureEnabled: true), .running)
-        XCTAssertEqual(SessionWakeStatusLabel.from(state: .stopping, featureEnabled: true), .stopping)
-        XCTAssertEqual(SessionWakeStatusLabel.from(state: .quotaUnknown(reason: "x"), featureEnabled: true), .quotaUnknown)
-        XCTAssertEqual(SessionWakeStatusLabel.from(state: .failed(reason: "x"), featureEnabled: true), .needsAttention)
+        XCTAssertEqual(SessionWakeStatusLabel.from(state: .running(sessionID: "s"), isOn: true), .running)
+        XCTAssertEqual(SessionWakeStatusLabel.from(state: .stopping, isOn: true), .stopping)
+        XCTAssertEqual(SessionWakeStatusLabel.from(state: .quotaUnknown(reason: "x"), isOn: true), .quotaUnknown)
+        XCTAssertEqual(SessionWakeStatusLabel.from(state: .failed(reason: "x"), isOn: true), .needsAttention)
         XCTAssertTrue(SessionWakeStatusLabel.needsAttention.isAttention)
     }
 
@@ -67,7 +67,8 @@ final class SessionWakeStatusTests: XCTestCase {
     func testSettingsPaneHosts() {
         let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
         let store = SessionWakeSettingsStore(userDefaults: defaults)
-        store.setFeatureEnabled(true)
+        store.setWakeAccountID(UUID())
+        store.acknowledgeFirstRunAndTurnOn()
         let view = SessionWakeSettingsView(store: store, status: SessionWakeStatus(), accounts: ClaudeCodeAccountStore(userDefaults: defaults))
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 520, height: 700)

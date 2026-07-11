@@ -83,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             observeUsageMetrics()
+            // Bring the Session Wake watcher online: it re-arms if the toggle was
+            // left on and starts/stops as the user flips it.
+            SessionWakeController.shared.activate()
         }
 
         // Setup notifications (also handles initial data refresh)

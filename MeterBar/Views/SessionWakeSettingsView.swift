@@ -2,13 +2,15 @@ import SwiftUI
 
 /// Settings → Automation pane for Session Wake.
 ///
-/// The view is intentionally thin: it renders shared store/status state and
-/// routes every mutation back through `SessionWakeSettingsStore`, which owns the
-/// safety toggle rules. No automation logic lives here.
+/// A single ON/OFF switch drives the watcher; the first time it is turned on a
+/// one-time confirmation explains what it does. The view is thin: every
+/// mutation routes back through `SessionWakeSettingsStore`, which owns the
+/// safety rules, and the live watcher is run by `SessionWakeController`.
 struct SessionWakeSettingsView: View {
     @ObservedObject private var store: SessionWakeSettingsStore
     @ObservedObject private var status: SessionWakeStatus
     @ObservedObject private var accounts: ClaudeCodeAccountStore
+    @State private var showingFirstRunConfirmation = false
 
     @MainActor
     init(
@@ -23,30 +25,42 @@ struct SessionWakeSettingsView: View {
 
     var body: some View {
         Form {
-            enablementSection
+            switchSection
             accountSection
-            watcherSection
             previewSection
             limitsSection
             permissionSection
             notificationSection
         }
         .formStyle(.grouped)
+        .confirmationDialog(
+            "Turn on Session Wake?",
+            isPresented: $showingFirstRunConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Turn On") { store.acknowledgeFirstRunAndTurnOn() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("""
+            While on, MeterBar watches this account's usage limits and, after a \
+            limit resets, automatically resumes your blocked Claude Code sessions \
+            one at a time. It only runs while MeterBar is open.
+            """)
+        }
     }
 
     // MARK: - Sections
 
-    private var enablementSection: some View {
+    private var switchSection: some View {
         Section("Session Wake") {
-            Toggle("Enable Session Wake", isOn: binding(store.featureEnabled, store.setFeatureEnabled))
-            if store.featureEnabled {
-                Toggle(
-                    "I understand MeterBar will resume blocked sessions automatically",
-                    isOn: binding(store.firstEnableAcknowledged, store.setFirstEnableAcknowledged)
-                )
-                .font(.callout)
+            Toggle("Session Wake", isOn: onBinding)
+                .disabled(!store.canTurnOn && !store.isOn)
+            if store.wakeAccountID == nil {
+                Text("Choose a wake account below to enable Session Wake.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            LabeledContent("Status", value: status.label(featureEnabled: store.featureEnabled).title)
+            LabeledContent("Status", value: status.label(isOn: store.isOn).title)
         }
     }
 
@@ -57,19 +71,6 @@ struct SessionWakeSettingsView: View {
                 ForEach(accounts.accounts) { account in
                     Text(account.name).tag(UUID?.some(account.id))
                 }
-            }
-            .disabled(!store.featureEnabled)
-        }
-    }
-
-    private var watcherSection: some View {
-        Section("Watcher") {
-            Toggle("Watcher active", isOn: binding(store.watcherArmed, store.setWatcherArmed))
-                .disabled(!store.canArmWatcher || store.wakeAccountID == nil)
-            if !store.canArmWatcher && store.featureEnabled {
-                Text("Acknowledge the safety note above to arm the watcher.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -132,6 +133,25 @@ struct SessionWakeSettingsView: View {
     }
 
     // MARK: - Bindings
+
+    /// The single toggle. Turning on the first time defers to the confirmation;
+    /// once acknowledged it toggles directly.
+    private var onBinding: Binding<Bool> {
+        Binding(
+            get: { store.isOn },
+            set: { newValue in
+                if newValue {
+                    if store.needsFirstRunConfirmation {
+                        showingFirstRunConfirmation = true
+                    } else {
+                        store.setOn(true)
+                    }
+                } else {
+                    store.setOn(false)
+                }
+            }
+        )
+    }
 
     private var accountBinding: Binding<UUID?> {
         Binding(get: { store.wakeAccountID }, set: { store.setWakeAccountID($0) })

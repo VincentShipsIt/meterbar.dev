@@ -1,8 +1,9 @@
 import XCTest
 @testable import MeterBar
 
-/// Coverage for #98: settings toggle rules, account reconciliation, and the
-/// notification gate.
+/// Coverage for the single ON/OFF Session Wake toggle: first-run gate, account
+/// requirement, permission gating, account reconciliation, and the notification
+/// gate.
 final class SessionWakeSettingsTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
@@ -20,78 +21,89 @@ final class SessionWakeSettingsTests: XCTestCase {
         SessionWakeSettingsStore(userDefaults: defaults)
     }
 
-    func testDefaultsAreOffAndConservative() {
+    func testDefaultsAreOff() {
         let store = makeStore()
-        XCTAssertFalse(store.featureEnabled)
-        XCTAssertFalse(store.watcherArmed)
+        XCTAssertFalse(store.isOn)
         XCTAssertNil(store.wakeAccountID)
-        XCTAssertFalse(store.canArmWatcher)
+        XCTAssertFalse(store.canTurnOn)
+        XCTAssertTrue(store.needsFirstRunConfirmation)
     }
 
-    func testWatcherCannotArmWithoutFeatureAndAcknowledgement() {
+    func testCannotTurnOnWithoutAccount() {
         let store = makeStore()
-        store.setWatcherArmed(true)
-        XCTAssertFalse(store.watcherArmed, "Arming must be refused while the feature is off")
-
-        store.setFeatureEnabled(true)
-        store.setWatcherArmed(true)
-        XCTAssertFalse(store.watcherArmed, "Arming must be refused without the first-enable ack")
-
-        store.setFirstEnableAcknowledged(true)
-        store.setWatcherArmed(true)
-        XCTAssertTrue(store.watcherArmed)
+        store.acknowledgeFirstRunAndTurnOn() // no account yet
+        XCTAssertFalse(store.isOn)
     }
 
-    func testFeatureOffForcesWatcherOff() {
+    func testCannotTurnOnBeforeFirstRunAcknowledged() {
         let store = makeStore()
-        store.setFeatureEnabled(true)
-        store.setFirstEnableAcknowledged(true)
-        store.setWatcherArmed(true)
-        XCTAssertTrue(store.watcherArmed)
-
-        store.setFeatureEnabled(false)
-        XCTAssertFalse(store.watcherArmed, "Master off must cancel watcher intent")
+        store.setWakeAccountID(UUID())
+        store.setOn(true) // not acknowledged yet
+        XCTAssertFalse(store.isOn)
     }
 
-    func testBypassModeWithoutAcknowledgementCannotArm() {
+    func testAcknowledgeAndTurnOnWithAccount() {
         let store = makeStore()
-        store.setFeatureEnabled(true)
-        store.setFirstEnableAcknowledged(true)
+        store.setWakeAccountID(UUID())
+        XCTAssertTrue(store.canTurnOn)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+        XCTAssertFalse(store.needsFirstRunConfirmation)
+        // Subsequent toggles no longer need confirmation.
+        store.setOn(false)
+        store.setOn(true)
+        XCTAssertTrue(store.isOn)
+    }
+
+    func testBypassModeWithoutAcknowledgementCannotTurnOn() {
+        let store = makeStore()
+        store.setWakeAccountID(UUID())
         store.setPermissionMode(.bypass)
-        XCTAssertFalse(store.canArmWatcher)
-        store.setWatcherArmed(true)
-        XCTAssertFalse(store.watcherArmed)
+        XCTAssertFalse(store.canTurnOn)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertFalse(store.isOn)
 
         store.setBypassAcknowledged(true)
-        XCTAssertTrue(store.canArmWatcher)
-        store.setWatcherArmed(true)
-        XCTAssertTrue(store.watcherArmed)
+        XCTAssertTrue(store.canTurnOn)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
 
-        // Revoking the ack while armed under bypass disarms.
+        // Revoking the bypass acknowledgement turns it off.
         store.setBypassAcknowledged(false)
-        XCTAssertFalse(store.watcherArmed)
+        XCTAssertFalse(store.isOn)
     }
 
-    func testWakeAccountPersistsAcrossRelaunch() {
+    func testPersistsOnAcrossRelaunch() {
         let id = UUID()
         let store = makeStore()
         store.setWakeAccountID(id)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
         let reloaded = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertTrue(reloaded.isOn)
         XCTAssertEqual(reloaded.wakeAccountID, id)
+        XCTAssertFalse(reloaded.needsFirstRunConfirmation)
     }
 
-    func testRemovingSelectedAccountClearsItAndDisarms() {
+    func testRemovingSelectedAccountClearsItAndTurnsOff() {
         let id = UUID()
         let store = makeStore()
-        store.setFeatureEnabled(true)
-        store.setFirstEnableAcknowledged(true)
         store.setWakeAccountID(id)
-        store.setWatcherArmed(true)
-        XCTAssertTrue(store.watcherArmed)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
 
         store.reconcileAccounts(available: [UUID(), UUID()]) // selected id gone
         XCTAssertNil(store.wakeAccountID)
-        XCTAssertFalse(store.watcherArmed)
+        XCTAssertFalse(store.isOn)
+    }
+
+    func testStaleOnWithoutAccountIsCorrectedAtLoad() {
+        // Simulate a persisted "on" with no account (should not stay on).
+        defaults.set(true, forKey: StorageKeys.sessionWakeWatcherArmed)
+        defaults.set(true, forKey: StorageKeys.sessionWakeFirstEnableAcknowledged)
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(store.isOn)
     }
 
     func testBoundsClampThroughStore() {
@@ -102,8 +114,6 @@ final class SessionWakeSettingsTests: XCTestCase {
         XCTAssertEqual(store.maxTurns, WakeBounds.maxTurnsRange.lowerBound)
         XCTAssertEqual(store.bounds.maxSessionsPerRun, store.maxSessionsPerRun)
     }
-
-    // MARK: - Notification gate
 
     func testNotificationRequiresGlobalProviderAndWakePreference() {
         func decide(_ global: Bool, _ provider: Bool, _ wake: Bool) -> Bool {

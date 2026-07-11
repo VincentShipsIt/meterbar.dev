@@ -35,9 +35,9 @@ enum SessionWakeStatusLabel: Equatable {
     /// Whether this label represents a failure the user should look at.
     var isAttention: Bool { self == .needsAttention || self == .quotaUnknown }
 
-    /// Derive the label from the watcher state and whether the feature is on.
-    static func from(state: WakeWatcherState, featureEnabled: Bool) -> SessionWakeStatusLabel {
-        guard featureEnabled else { return .off }
+    /// Derive the label from the watcher state and whether the toggle is on.
+    static func from(state: WakeWatcherState, isOn: Bool) -> SessionWakeStatusLabel {
+        guard isOn else { return .off }
         switch state {
         case .off: return .idle
         case .idle: return .idle
@@ -100,7 +100,7 @@ final class SessionWakeStatus: ObservableObject {
         }
     }
 
-    func label(featureEnabled: Bool) -> SessionWakeStatusLabel {
-        SessionWakeStatusLabel.from(state: watcherState, featureEnabled: featureEnabled)
+    func label(isOn: Bool) -> SessionWakeStatusLabel {
+        SessionWakeStatusLabel.from(state: watcherState, isOn: isOn)
     }
 }

@@ -19,6 +19,7 @@ actor WakeCoordinator {
     private let bounds: WakeBounds
     private let sleep: @Sendable (TimeInterval) async throws -> Void
     private let now: @Sendable () -> Date
+    private let onState: (@Sendable (WakeWatcherState) -> Void)?
 
     private(set) var state: WakeWatcherState = .off
     private(set) var stateHistory: [WakeWatcherState] = []
@@ -33,7 +34,8 @@ actor WakeCoordinator {
         now: @escaping @Sendable () -> Date = { Date() },
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
             try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-        }
+        },
+        onState: (@Sendable (WakeWatcherState) -> Void)? = nil
     ) {
         self.discovery = discovery
         self.authority = authority
@@ -42,6 +44,7 @@ actor WakeCoordinator {
         self.bounds = bounds
         self.now = now
         self.sleep = sleep
+        self.onState = onState
     }
 
     /// Arm the watcher for `account`. No-op if already running.
@@ -200,5 +203,6 @@ actor WakeCoordinator {
     private func transition(_ next: WakeWatcherState) {
         state = next
         stateHistory.append(next)
+        onState?(next)
     }
 }
