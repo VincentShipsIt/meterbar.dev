@@ -26,6 +26,8 @@ final class ManagedProcessTests: XCTestCase {
         if [ -n "$WAKE_TEST_OUT" ]; then
           { echo "ARGS:$*"; echo "PWD:$(pwd)"; echo "CFG:${CLAUDE_CONFIG_DIR}"; echo "TERM:${TERM}"; } >> "$WAKE_TEST_OUT"
         fi
+        if [ -n "$WAKE_STDOUT_MSG" ]; then echo "$WAKE_STDOUT_MSG"; fi
+        if [ -n "$WAKE_STDERR_MSG" ]; then echo "$WAKE_STDERR_MSG" >&2; fi
         if [ -n "$WAKE_SPAWN_CHILD" ]; then
           sleep 30 &
           echo $! > "$WAKE_CHILD_PID"
@@ -139,6 +141,46 @@ final class ManagedProcessTests: XCTestCase {
         // …while the stream is reported as truncated past the capture cap.
         XCTAssertTrue(result.stdoutTruncated, "stream beyond the cap must report truncation")
         XCTAssertFalse(result.stderrTruncated)
+        // The retained capture never grows past the cap, no matter the stream size.
+        XCTAssertLessThanOrEqual(result.stdoutCapture.count, 64 * 1024,
+                                 "bounded capture must never exceed maxCaptureBytes")
+        XCTAssertEqual(result.stderrCapture.count, 0)
+    }
+
+    func testBoundedCaptureRetainsStreamContent() async throws {
+        let fake = try makeFake()
+        let result = await run(
+            fake,
+            env: [
+                "WAKE_STDOUT_MSG": "resuming session sid",
+                "WAKE_STDERR_MSG": "this tool requires approval before running",
+                "WAKE_EXIT": "1"
+            ],
+            timeout: 10
+        )
+        XCTAssertEqual(result.termination, .exited(code: 1))
+        let stdout = String(data: result.stdoutCapture, encoding: .utf8) ?? ""
+        let stderr = String(data: result.stderrCapture, encoding: .utf8) ?? ""
+        XCTAssertTrue(stdout.contains("resuming session sid"), "stdout capture missing: \(stdout)")
+        XCTAssertTrue(stderr.contains("requires approval"), "stderr capture missing: \(stderr)")
+        XCTAssertFalse(result.stdoutTruncated)
+        XCTAssertFalse(result.stderrTruncated)
+    }
+
+    func testCaptureRetainsLeadingBytesWhenTruncated() async throws {
+        let fake = try makeFake()
+        // A marker printed *before* the flood must survive: the sink keeps the
+        // leading bytes and discards everything past the cap.
+        let result = await run(
+            fake,
+            env: ["WAKE_STDOUT_MSG": "MARKER-HEAD", "WAKE_STDOUT_BYTES": "500000"],
+            timeout: 20
+        )
+        XCTAssertEqual(result.termination, .exited(code: 0))
+        XCTAssertTrue(result.stdoutTruncated)
+        XCTAssertLessThanOrEqual(result.stdoutCapture.count, 64 * 1024)
+        let head = String(data: result.stdoutCapture.prefix(64), encoding: .utf8) ?? ""
+        XCTAssertTrue(head.contains("MARKER-HEAD"), "leading bytes must be retained, got: \(head)")
     }
 
     func testDrainDoesNotHangWhenGrandchildHoldsStdoutOpen() async throws {

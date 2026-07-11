@@ -44,6 +44,11 @@ nonisolated enum WakeRunOutcome: Equatable, Sendable {
     case failed(reason: String)
     case skipped(reason: WakeSkipReason)
     case cancelled
+    /// The run was stopped at Claude's permission-approval gate (a tool needed
+    /// interactive approval and the headless run failed closed). Reported as a
+    /// distinct outcome so the user can act on it — never auto-escalated to
+    /// `--dangerously-skip-permissions`.
+    case permissionDenied
 }
 
 /// The execution seam the coordinator drives. #96 owns orchestration and state;

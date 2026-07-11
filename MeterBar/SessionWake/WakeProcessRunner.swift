@@ -60,12 +60,17 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         switch lock.acquire() {
         case .acquired:
             break
-        case .contended:
-            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active")
+        case let .contended(holder):
+            let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
+            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
             record(candidate: candidate, outcome: outcome, result: nil, start: now())
             return outcome
         case let .legacyHeld(guidance):
             let outcome = WakeRunOutcome.failed(reason: guidance)
+            record(candidate: candidate, outcome: outcome, result: nil, start: now())
+            return outcome
+        case let .unavailable(reason):
+            let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
             record(candidate: candidate, outcome: outcome, result: nil, start: now())
             return outcome
         }
@@ -97,7 +102,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             cancellation.cancel()
         }
 
-        let outcome = Self.mapOutcome(result.termination)
+        let outcome = Self.mapOutcome(result)
         record(candidate: candidate, outcome: outcome, result: result, start: start)
         return outcome
     }
@@ -129,11 +134,16 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
-    static func mapOutcome(_ termination: ManagedProcess.Result.Termination) -> WakeRunOutcome {
-        switch termination {
+    static func mapOutcome(_ result: ManagedProcess.Result) -> WakeRunOutcome {
+        switch result.termination {
         case .exited(0):
             return .succeeded
         case let .exited(code):
+            // Classification only — the bounded capture is inspected here and
+            // never logged or retained beyond this call.
+            if indicatesPermissionDenial(result) {
+                return .permissionDenied
+            }
             return .failed(reason: "claude exited with status \(code)")
         case let .signalled(signal):
             return .failed(reason: "claude terminated by signal \(signal)")
@@ -144,6 +154,16 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         case let .launchFailed(message):
             return .failed(reason: message)
         }
+    }
+
+    /// Whether a non-zero exit reads as a stop at the permission-approval gate.
+    /// The captured output exists only in memory on `result`; nothing here (or
+    /// downstream) writes it anywhere.
+    private static func indicatesPermissionDenial(_ result: ManagedProcess.Result) -> Bool {
+        let combined = (String(data: result.stdoutCapture, encoding: .utf8) ?? "")
+            + "\n"
+            + (String(data: result.stderrCapture, encoding: .utf8) ?? "")
+        return PermissionDenialDetector.indicatesDenial(in: combined)
     }
 
     private func record(
@@ -179,6 +199,7 @@ nonisolated extension WakeRunOutcome {
         case .failed: return "failed"
         case .skipped: return "skipped"
         case .cancelled: return "cancelled"
+        case .permissionDenied: return "permission-denied"
         }
     }
 }

@@ -1,34 +1,64 @@
 import Darwin
 import Foundation
 
+/// The descriptor the current holder writes into the lock file so a contender
+/// can report *who* holds it instead of a bare "contended".
+nonisolated struct WakeLockHolder: Codable, Equatable, Sendable {
+    /// Who is holding the shared lock.
+    enum Kind: String, Codable, Equatable, Sendable {
+        case app
+        case cli
+    }
+
+    let kind: Kind
+    let pid: Int32
+    let host: String
+    let startedAtEpoch: Double
+
+    var startedAt: Date { Date(timeIntervalSince1970: startedAtEpoch) }
+
+    /// A compact, log-safe label ("cli, pid 123 on host") for user-facing
+    /// contention messages.
+    var shortDescription: String {
+        "\(kind.rawValue), pid \(pid) on \(host)"
+    }
+}
+
 /// One advisory-lock protocol shared by MeterBar, `meterbar wake`, and the
 /// legacy watcher during migration.
 ///
 /// Uses `flock(LOCK_EX|LOCK_NB)` on a fixed lock file so any two holders — the
 /// app and the CLI, or either and a still-loaded legacy job — mutually exclude.
 /// The lock is acquired only when a run is actually ready, never held across a
-/// long quota wait.
+/// long quota wait. The holder writes a JSON descriptor into the lock file so a
+/// contender can say who is running.
 nonisolated final class WakeLock: @unchecked Sendable {
     /// The outcome of trying to acquire the shared lock.
     enum Acquisition: Equatable {
         case acquired
-        /// Held by another MeterBar/CLI holder.
-        case contended
+        /// Held by another MeterBar/CLI holder; `holder` is present when its
+        /// descriptor could be read from the lock file.
+        case contended(holder: WakeLockHolder?)
         /// A known legacy watcher lock is present — actionable guidance.
         case legacyHeld(guidance: String)
+        /// The lock file or its directory could not be created/opened at all —
+        /// an environment failure, distinct from another holder being active.
+        case unavailable(reason: String)
     }
 
     private let lockURL: URL
     private let legacyLockURLs: [URL]
+    private let holderKind: WakeLockHolder.Kind
     /// Guards `fileDescriptor`: the class is `@unchecked Sendable` and its
     /// descriptor may be touched from `acquire()`, `release()`, and `deinit` on
     /// different threads, so every read/write of it goes through this lock.
     private let stateLock = NSLock()
     private var fileDescriptor: Int32 = -1
 
-    init(lockURL: URL? = nil, legacyLockURLs: [URL]? = nil) {
+    init(lockURL: URL? = nil, legacyLockURLs: [URL]? = nil, holderKind: WakeLockHolder.Kind = .app) {
         self.lockURL = lockURL
             ?? WakePaths.defaultBaseDirectory().appendingPathComponent("wake.lock")
+        self.holderKind = holderKind
         // Conventional legacy watcher lock locations from the Python/launchd era.
         self.legacyLockURLs = legacyLockURLs ?? [
             URL(fileURLWithPath: "\(ServiceSupport.realHomeDirectory())/.claude/wake-watcher.lock"),
@@ -50,35 +80,80 @@ nonisolated final class WakeLock: @unchecked Sendable {
         do {
             try WakePaths.ensurePrivateDirectory(lockURL.deletingLastPathComponent())
         } catch {
-            return .contended
+            return .unavailable(reason: "lock directory: \(error.localizedDescription)")
         }
 
-        // The whole open/flock/store sequence runs under `stateLock` so a
-        // concurrent `release()` can't slip between a successful `flock` and
-        // the descriptor store (which would leak the held lock), and a second
-        // `acquire()` can't overwrite an already-held descriptor. `LOCK_NB`
-        // keeps the critical section non-blocking.
-        let acquired: Bool = stateLock.withLock {
-            guard fileDescriptor < 0 else { return true }
+        // The whole open/flock/write-holder/store sequence runs under
+        // `stateLock` so a concurrent `release()` can't slip between a
+        // successful `flock` and the descriptor store (which would leak the
+        // held lock), and a second `acquire()` can't overwrite an already-held
+        // descriptor. `LOCK_NB` keeps the critical section non-blocking.
+        return stateLock.withLock {
+            guard fileDescriptor < 0 else { return .acquired }
             let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
-            guard descriptor >= 0 else { return false }
-            if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
-                close(descriptor)
-                return false
+            guard descriptor >= 0 else {
+                return .unavailable(reason: "open lock: \(String(cString: strerror(errno)))")
             }
+            if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+                let blocked = errno == EWOULDBLOCK
+                close(descriptor)
+                return blocked
+                    ? .contended(holder: readHolder())
+                    : .unavailable(reason: "flock: \(String(cString: strerror(errno)))")
+            }
+            writeHolder(to: descriptor)
             fileDescriptor = descriptor
-            return true
+            return .acquired
         }
-        return acquired ? .acquired : .contended
     }
 
-    /// Release the lock and remove the descriptor. Safe to call repeatedly.
+    /// Release the lock, clearing the holder descriptor so a later contender
+    /// does not attribute the (now free) lock to us. Safe to call repeatedly.
     func release() {
         stateLock.withLock {
             guard fileDescriptor >= 0 else { return }
+            ftruncate(fileDescriptor, 0)
             flock(fileDescriptor, LOCK_UN)
             close(fileDescriptor)
             fileDescriptor = -1
+        }
+    }
+
+    // MARK: - Holder descriptor
+
+    /// Read the current holder's descriptor without taking the lock. `nil` when
+    /// the file is empty (released, or a holder that has not written yet) or
+    /// does not decode.
+    private func readHolder() -> WakeLockHolder? {
+        guard let data = try? Data(contentsOf: lockURL), !data.isEmpty else { return nil }
+        return try? JSONDecoder().decode(WakeLockHolder.self, from: data)
+    }
+
+    /// Write our descriptor into the freshly-locked file for contenders to read.
+    /// Best-effort: a failed write degrades a contender's message, never the lock.
+    private func writeHolder(to descriptor: Int32) {
+        let holder = WakeLockHolder(
+            kind: holderKind,
+            pid: getpid(),
+            host: ProcessInfo.processInfo.hostName,
+            startedAtEpoch: Date().timeIntervalSince1970
+        )
+        guard let data = try? JSONEncoder().encode(holder) else { return }
+        ftruncate(descriptor, 0)
+        lseek(descriptor, 0, SEEK_SET)
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var written = 0
+            while written < raw.count {
+                let count = write(descriptor, base + written, raw.count - written)
+                if count > 0 {
+                    written += count
+                } else if count == -1 && errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
         }
     }
 

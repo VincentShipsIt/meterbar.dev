@@ -178,7 +178,9 @@ actor WakeCoordinator {
             // Only a real resume marks the block handled, so a failed attempt
             // can be retried on a later run.
             await ledger.record(candidate.fingerprint)
-        case .failed:
+        case .failed, .permissionDenied:
+            // A permission denial tallies as a failure and is NOT recorded in
+            // the ledger, so the session stays retryable once the user acts.
             summary.failed += 1
         case .skipped:
             summary.skipped += 1

@@ -33,10 +33,30 @@ nonisolated enum ManagedProcess {
         /// counted but discarded, so a caller knows the capture is incomplete).
         let stdoutTruncated: Bool
         let stderrTruncated: Bool
+        /// The leading `maxCaptureBytes` of each stream, retained in memory for
+        /// the caller to *classify* the run (e.g. permission-denial detection).
+        /// PRIVACY: this content must never be written to logs or persisted —
+        /// only metadata (byte counts, truncation flags, outcome labels) may be
+        /// recorded. It lives exactly as long as this `Result` value.
+        let stdoutCapture: Data
+        let stderrCapture: Data
 
         var isSuccess: Bool {
             if case .exited(0) = termination { return true }
             return false
+        }
+
+        /// A content-free result for failures before any stream existed.
+        fileprivate static func empty(_ termination: Termination) -> Result {
+            Result(
+                termination: termination,
+                stdoutByteCount: 0,
+                stderrByteCount: 0,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                stdoutCapture: Data(),
+                stderrCapture: Data()
+            )
         }
     }
 
@@ -97,13 +117,7 @@ nonisolated enum ManagedProcess {
         let errPipe = UnsafeMutablePointer<Int32>.allocate(capacity: 2)
         defer { outPipe.deallocate(); errPipe.deallocate() }
         guard pipe(outPipe) == 0, pipe(errPipe) == 0 else {
-            return Result(
-                termination: .launchFailed("pipe() failed"),
-                stdoutByteCount: 0,
-                stderrByteCount: 0,
-                stdoutTruncated: false,
-                stderrTruncated: false
-            )
+            return .empty(.launchFailed("pipe() failed"))
         }
 
         // Child: stdin from /dev/null, stdout/stderr to the pipe write ends.
@@ -149,22 +163,16 @@ nonisolated enum ManagedProcess {
         close(outPipe[1]); close(errPipe[1])
         guard spawnResult == 0 else {
             close(outPipe[0]); close(errPipe[0])
-            return Result(
-                termination: .launchFailed("posix_spawn failed (\(spawnResult))"),
-                stdoutByteCount: 0,
-                stderrByteCount: 0,
-                stdoutTruncated: false,
-                stderrTruncated: false
-            )
+            return .empty(.launchFailed("posix_spawn failed (\(spawnResult))"))
         }
 
         cancellation.attach(pgid: pid)
 
-        let outCounter = StreamCounter(cap: maxCaptureBytes)
-        let errCounter = StreamCounter(cap: maxCaptureBytes)
+        let outSink = BoundedSink(cap: maxCaptureBytes)
+        let errSink = BoundedSink(cap: maxCaptureBytes)
         let drains = DispatchGroup()
-        drain(fd: outPipe[0], into: outCounter, group: drains)
-        drain(fd: errPipe[0], into: errCounter, group: drains)
+        drain(fd: outPipe[0], into: outSink, group: drains)
+        drain(fd: errPipe[0], into: errSink, group: drains)
 
         let termination = wait(pid: pid, timeout: timeout, cancellation: cancellation)
 
@@ -184,28 +192,36 @@ nonisolated enum ManagedProcess {
 
         return Result(
             termination: termination,
-            stdoutByteCount: outCounter.count,
-            stderrByteCount: errCounter.count,
-            stdoutTruncated: outCounter.truncated,
-            stderrTruncated: errCounter.truncated
+            stdoutByteCount: outSink.count,
+            stderrByteCount: errSink.count,
+            stdoutTruncated: outSink.truncated,
+            stderrTruncated: errSink.truncated,
+            stdoutCapture: outSink.capturedData,
+            stderrCapture: errSink.capturedData
         )
     }
 
     // MARK: - Draining
 
-    /// Thread-safe byte tally for one drained stream. Every byte read is counted
-    /// so the caller learns the true stream size; `cap` bounds only what is
-    /// conceptually retained, and `truncated` reports whether the stream exceeded
-    /// it.
-    private final class StreamCounter: @unchecked Sendable {
+    /// Thread-safe bounded collector for one drained stream. Every byte read is
+    /// counted so the caller learns the true stream size, but only the leading
+    /// `cap` bytes are retained — the buffer can never grow past the cap, so a
+    /// runaway child cannot exhaust memory. Draining always continues past the
+    /// cap (excess is counted and discarded, never blocking the pipe).
+    private final class BoundedSink: @unchecked Sendable {
         private let lock = NSLock()
         private let cap: Int
         private var total = 0
+        private var storage = Data()
 
-        init(cap: Int) { self.cap = cap }
+        init(cap: Int) { self.cap = max(0, cap) }
 
-        func add(_ count: Int) {
-            lock.lock(); total += count; lock.unlock()
+        func append(_ buffer: [UInt8], count: Int) {
+            lock.lock(); defer { lock.unlock() }
+            total += count
+            let remaining = cap - storage.count
+            guard remaining > 0 else { return }
+            storage.append(contentsOf: buffer[0..<min(remaining, count)])
         }
 
         var count: Int {
@@ -215,11 +231,16 @@ nonisolated enum ManagedProcess {
 
         var truncated: Bool {
             lock.lock(); defer { lock.unlock() }
-            return total > cap
+            return total > storage.count
+        }
+
+        var capturedData: Data {
+            lock.lock(); defer { lock.unlock() }
+            return storage
         }
     }
 
-    private static func drain(fd: Int32, into counter: StreamCounter, group: DispatchGroup) {
+    private static func drain(fd: Int32, into sink: BoundedSink, group: DispatchGroup) {
         let queue = DispatchQueue(label: "dev.meterbar.app.wake.drain.\(fd)")
         group.enter()
         queue.async {
@@ -228,8 +249,8 @@ nonisolated enum ManagedProcess {
             while true {
                 let n = read(fd, &buffer, buffer.count)
                 if n > 0 {
-                    // Count everything; only the cap bounds memory pressure.
-                    counter.add(n)
+                    // Retain up to the cap; count everything past it.
+                    sink.append(buffer, count: n)
                 } else if n == 0 {
                     break
                 } else if errno == EINTR {

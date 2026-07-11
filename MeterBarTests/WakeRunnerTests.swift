@@ -23,6 +23,7 @@ final class WakeRunnerTests: XCTestCase {
         if [ -n "$WAKE_TEST_OUT" ]; then
           { echo "ARGS:$*"; echo "PWD:$(pwd)"; echo "CFG:${CLAUDE_CONFIG_DIR}"; } >> "$WAKE_TEST_OUT"
         fi
+        if [ -n "$WAKE_STDERR_MSG" ]; then echo "$WAKE_STDERR_MSG" >&2; fi
         exit "${WAKE_EXIT:-0}"
         """
         let url = tempDir.appendingPathComponent("fake.sh")
@@ -148,17 +149,170 @@ final class WakeRunnerTests: XCTestCase {
         XCTAssertFalse(recorded.contains("--dangerously-skip-permissions"))
     }
 
+    // MARK: - Permission-denial classification
+
+    func testPermissionDenialOnNonZeroExitIsStructuredOutcome() async throws {
+        let fake = try makeFake()
+        let runner = makeRunner(
+            fake: fake,
+            env: ["WAKE_STDERR_MSG": "Bash requires approval before it can run", "WAKE_EXIT": "1"]
+        )
+        let outcome = await runner.run(candidate(cwd: tempDir.path), bounds: .default)
+        XCTAssertEqual(outcome, .permissionDenied,
+                       "A non-zero exit whose output signals the approval gate must classify as permissionDenied")
+    }
+
+    func testDenialPhrasesOnSuccessfulExitStaySuccess() async throws {
+        let fake = try makeFake()
+        // A run that *mentions* permissions but exits 0 succeeded — classification
+        // only applies to non-zero exits.
+        let runner = makeRunner(
+            fake: fake,
+            env: ["WAKE_STDERR_MSG": "permission denied earlier, but recovered", "WAKE_EXIT": "0"]
+        )
+        let outcome = await runner.run(candidate(cwd: tempDir.path), bounds: .default)
+        XCTAssertEqual(outcome, .succeeded)
+    }
+
+    func testNonDenialFailureStaysGenericFailure() async throws {
+        let fake = try makeFake()
+        let runner = makeRunner(
+            fake: fake,
+            env: ["WAKE_STDERR_MSG": "fatal: repository not found", "WAKE_EXIT": "5"]
+        )
+        let outcome = await runner.run(candidate(cwd: tempDir.path), bounds: .default)
+        if case .failed = outcome {} else {
+            XCTFail("Unrelated failure must not classify as permissionDenied, got \(outcome)")
+        }
+    }
+
+    func testPermissionDenialContentNeverReachesLogs() async throws {
+        let fake = try makeFake()
+        let logDir = tempDir.appendingPathComponent("denial-logs")
+        let runner = makeRunner(
+            fake: fake,
+            env: ["WAKE_STDERR_MSG": "SecretToolName requires approval", "WAKE_EXIT": "1"],
+            logDir: logDir
+        )
+        let outcome = await runner.run(candidate(sessionID: "sid-denied", cwd: tempDir.path), bounds: .default)
+        XCTAssertEqual(outcome, .permissionDenied)
+
+        let logFile = try XCTUnwrap(FileManager.default
+            .contentsOfDirectory(at: logDir, includingPropertiesForKeys: nil)
+            .first(where: { $0.pathExtension == "log" }))
+        let contents = try String(contentsOf: logFile, encoding: .utf8)
+        // The structured label is logged; the captured output never is.
+        XCTAssertTrue(contents.contains("\"outcome\":\"permission-denied\""), "log missing label: \(contents)")
+        XCTAssertFalse(contents.contains("SecretToolName"), "raw output leaked into the log")
+        XCTAssertFalse(contents.contains("requires approval"), "raw output leaked into the log")
+    }
+
+    func testDetectorMatchesApprovalGatePhrases() {
+        for phrase in [
+            "Error: Permission Denied while running Bash",
+            "This tool requires approval",
+            "the command needs approval before continuing",
+            "run with --dangerously-skip-permissions to skip",
+            "status: PERMISSION_DENIED",
+            "Claude requires permission to use Write"
+        ] {
+            XCTAssertTrue(PermissionDenialDetector.indicatesDenial(in: phrase), "should match: \(phrase)")
+        }
+    }
+
+    func testDetectorIgnoresUnrelatedFailures() {
+        for phrase in [
+            "",
+            "fatal: repository not found",
+            "error: ENOENT no such file or directory",
+            "session limit reached, resets 3:00am"
+        ] {
+            XCTAssertFalse(PermissionDenialDetector.indicatesDenial(in: phrase), "should not match: \(phrase)")
+        }
+    }
+
     // MARK: - Lock
 
-    func testSharedLockRejectsContention() {
+    func testSharedLockRejectsContentionAndReportsHolder() {
         let url = tempDir.appendingPathComponent("shared.lock")
         let first = WakeLock(lockURL: url, legacyLockURLs: [])
         let second = WakeLock(lockURL: url, legacyLockURLs: [])
         XCTAssertEqual(first.acquire(), .acquired)
-        XCTAssertEqual(second.acquire(), .contended)
+        guard case let .contended(holder) = second.acquire() else {
+            return XCTFail("Expected contention while first holds the lock")
+        }
+        // The holder descriptor written by `first` is readable by the contender.
+        XCTAssertEqual(holder?.kind, .app)
+        XCTAssertEqual(holder?.pid, getpid())
+        XCTAssertEqual(holder?.host.isEmpty, false)
         first.release()
         XCTAssertEqual(second.acquire(), .acquired)
         second.release()
+    }
+
+    func testLockHolderCarriesCLIKind() {
+        let url = tempDir.appendingPathComponent("cli.lock")
+        let cli = WakeLock(lockURL: url, legacyLockURLs: [], holderKind: .cli)
+        XCTAssertEqual(cli.acquire(), .acquired)
+        defer { cli.release() }
+        let contender = WakeLock(lockURL: url, legacyLockURLs: [])
+        guard case let .contended(holder) = contender.acquire() else {
+            return XCTFail("Expected contention")
+        }
+        XCTAssertEqual(holder?.kind, .cli)
+    }
+
+    func testReleaseClearsHolderDescriptor() throws {
+        let url = tempDir.appendingPathComponent("clear.lock")
+        let lock = WakeLock(lockURL: url, legacyLockURLs: [])
+        XCTAssertEqual(lock.acquire(), .acquired)
+        lock.release()
+        // A released lock must not leave a stale descriptor that a later
+        // contender would misattribute the (now free) lock to.
+        let data = try Data(contentsOf: url)
+        XCTAssertTrue(data.isEmpty, "released lock left a stale holder descriptor")
+    }
+
+    func testLockDirectoryCreationFailureIsUnavailableNotContended() {
+        // The lock's parent path runs through a regular file, so the private
+        // directory cannot be created. That is an environment failure, not
+        // another holder.
+        let blocker = tempDir.appendingPathComponent("blocker-file")
+        FileManager.default.createFile(atPath: blocker.path, contents: nil)
+        let lock = WakeLock(
+            lockURL: blocker.appendingPathComponent("sub").appendingPathComponent("wake.lock"),
+            legacyLockURLs: []
+        )
+        guard case .unavailable = lock.acquire() else {
+            return XCTFail("Directory-creation failure must be .unavailable, not contention")
+        }
+    }
+
+    func testUnopenableLockFileIsUnavailableNotContended() throws {
+        // The lock path itself is a directory: open(O_RDWR) fails outright.
+        let dir = tempDir.appendingPathComponent("lock-is-a-dir", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let lock = WakeLock(lockURL: dir, legacyLockURLs: [])
+        guard case .unavailable = lock.acquire() else {
+            return XCTFail("Open failure must be .unavailable, not contention")
+        }
+    }
+
+    func testRunnerContentionFailureNamesTheHolder() async throws {
+        let fake = try makeFake()
+        // Pre-hold the exact lock the runner uses, as a CLI-kind holder.
+        let lockURL = tempDir.appendingPathComponent("wake.lock")
+        let holder = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
+        XCTAssertEqual(holder.acquire(), .acquired)
+        defer { holder.release() }
+
+        let runner = makeRunner(fake: fake, env: [:])
+        let outcome = await runner.run(candidate(cwd: tempDir.path), bounds: .default)
+        guard case let .failed(reason) = outcome else {
+            return XCTFail("Expected structured failure on contention, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("cli"), "reason should name the holder kind: \(reason)")
+        XCTAssertTrue(reason.contains("\(getpid())"), "reason should name the holder pid: \(reason)")
     }
 
     func testReacquireWhileHeldIsIdempotent() {
