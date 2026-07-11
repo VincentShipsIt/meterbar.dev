@@ -17,7 +17,7 @@ import MeterBar
 /// - Configuration comes from explicit flags or the shared app-group domain,
 ///   never the CLI process's own `UserDefaults.standard`.
 /// - Codex is not exposed.
-struct Wake: ParsableCommand {
+struct Wake: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Resume Claude Code sessions blocked on usage limits"
     )
@@ -43,7 +43,7 @@ struct Wake: ParsableCommand {
     @Flag(name: .long, help: "Acknowledge permission-bypass mode (required for --permission-mode bypass).")
     var yesBypass: Bool = false
 
-    func run() throws {
+    func run() async throws {
         let cancelBox = CancelBox()
         let signalSource = installSignalHandler(cancelBox)
         defer { signalSource.cancel() }
@@ -57,7 +57,10 @@ struct Wake: ParsableCommand {
             bypassAcknowledged: yesBypass,
             shouldCancel: { cancelBox.isCancelled }
         )
-        let result = runBlocking { await SessionWakeCLI.run(request) }
+        // Await directly instead of parking the main thread on a semaphore:
+        // under MainActor default isolation the engine's jobs need the main
+        // thread, so a blocked main thread deadlocks `meterbar wake`.
+        let result = await SessionWakeCLI.run(request)
 
         emit(result)
         throw ExitCode(result.exitCode)
@@ -82,21 +85,6 @@ struct Wake: ParsableCommand {
         source.resume()
         return source
     }
-
-    private func runBlocking(
-        _ operation: @escaping @Sendable () async -> SessionWakeCLI.Result
-    ) -> SessionWakeCLI.Result {
-        let semaphore = DispatchSemaphore(value: 0)
-        let holder = ResultHolder()
-        Task {
-            holder.value = await operation()
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return holder.value ?? SessionWakeCLI.Result(
-            jsonOutput: "{}", summaryLine: "Session Wake: internal error", message: "internal error", exitCode: 12
-        )
-    }
 }
 
 /// Thread-safe cancellation flag toggled by the SIGINT handler.
@@ -105,10 +93,6 @@ private final class CancelBox: @unchecked Sendable {
     private var cancelled = false
     var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     func cancel() { lock.lock(); cancelled = true; lock.unlock() }
-}
-
-private final class ResultHolder: @unchecked Sendable {
-    var value: SessionWakeCLI.Result?
 }
 
 /// Minimal stderr text stream so diagnostics never contaminate JSON stdout.

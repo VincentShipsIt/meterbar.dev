@@ -5,7 +5,7 @@ import MeterBar
 import MeterBarShared
 
 @main
-struct MeterBarCLI: ParsableCommand {
+struct MeterBarCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "meterbar",
         abstract: "Track AI coding assistant usage from the command line",
