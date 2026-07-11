@@ -99,6 +99,11 @@ struct SessionWakeSettingsView: View {
                     Text(account.name).tag(UUID?.some(account.id))
                 }
             }
+            if store.isOn {
+                Text("Changing the wake account turns Session Wake off.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

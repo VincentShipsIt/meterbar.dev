@@ -53,6 +53,11 @@ enum SessionWakeNotificationDecider {
         context: SessionWakeNotificationContext
     ) -> FiredWakeNotification? {
         guard shouldNotifyOnCompletion(context) else { return nil }
+        // The continuous watcher ends EVERY rescan pass in .completed, and an
+        // idle pass produces an all-zero summary — without this gate an armed
+        // watcher with nothing to do would post (and replace any meaningful
+        // banner with) "Resumed 0 of 0" every rescan interval, with sound.
+        guard summary.attempted > 0 || summary.remaining > 0 else { return nil }
 
         let sessionNoun = summary.attempted == 1 ? "session" : "sessions"
         var body = "Resumed \(summary.resumed) of \(summary.attempted) Claude \(sessionNoun)."

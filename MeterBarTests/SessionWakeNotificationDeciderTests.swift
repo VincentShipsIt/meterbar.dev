@@ -28,6 +28,26 @@ final class SessionWakeNotificationDeciderTests: XCTestCase {
         }
     }
 
+    func testIdlePassSummaryIsSuppressed() {
+        // The continuous watcher ends every rescan pass in .completed; an idle
+        // pass (nothing attempted, nothing queued) must not post "0 of 0".
+        let fired = SessionWakeNotificationDecider.completionNotification(
+            summary: WakeRunSummary(),
+            context: allowingContext()
+        )
+        XCTAssertNil(fired)
+    }
+
+    func testRequeuedOnlySummaryStillNotifies() {
+        // Quota re-exhausted before anything launched: attempted 0 but work
+        // remains queued — that is worth telling the user about.
+        let fired = SessionWakeNotificationDecider.completionNotification(
+            summary: WakeRunSummary(remaining: 2),
+            context: allowingContext()
+        )
+        XCTAssertEqual(fired?.body, "Resumed 0 of 0 Claude sessions. 2 still queued.")
+    }
+
     func testCompletionSingularCopy() {
         let summary = WakeRunSummary(resumed: 1)
         let fired = SessionWakeNotificationDecider.completionNotification(summary: summary, context: allowingContext())
