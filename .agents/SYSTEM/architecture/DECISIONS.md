@@ -321,11 +321,11 @@ stopping after one resume. The whole thing is tied to the app process lifetime:
   left on, the controller reconciles and re-arms on launch. #95's replay ledger
   guarantees a block already handled before the quit is not resumed again after
   relaunch.
-- **Sleep / wake:** waits are driven in poll-interval-bounded chunks against a
-  wall-clock deadline, and **every** launch is gated on a *fresh* quota fetch.
-  A timer that is paused across system sleep therefore costs at most one extra
-  poll cycle; the watcher never launches on a stale timer — it re-proves quota
-  on wake.
+- **Sleep / wake:** a known reset waits in a single bounded sleep until that
+  instant (an unknown reset polls in interval-sized steps), and **every**
+  launch is gated on a *fresh* quota fetch. A sleep that overshoots after the
+  machine wakes therefore costs only latency, never correctness; the watcher
+  never launches on a stale timer — it re-proves quota on wake.
 
 **Active-child cancellation: cooperative-cancel, preserve, never record.**
 
@@ -340,8 +340,10 @@ teardown) while a child session is running:
   stays retryable on a later armed run. The in-flight candidate has already been
   removed from the local queue for the attempt, but because nothing was recorded
   a subsequent re-scan rediscovers it.
-- `stop()` awaits the task's full unwind before reporting `.off`, so "watcher
-  off" is deterministic rather than best-effort.
+- `stop()` requests cancellation and returns; the run loop — not `stop()` —
+  owns the final transition, and the coordinator only enters `.off` after the
+  task fully unwinds (observable via `waitUntilFinished()`), so "watcher off"
+  is deterministic rather than best-effort.
 
 #### Consequences
 
