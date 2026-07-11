@@ -12,27 +12,27 @@ struct SessionWakeSettingsView: View {
     @ObservedObject private var accounts: ClaudeCodeAccountStore
     @State private var showingFirstRunConfirmation = false
 
+    /// When embedded in the dashboard settings stack (itself inside a ScrollView)
+    /// the grouped `Form` — a nested scroll container — must be dropped for a
+    /// plain vertical layout, or the sections collapse. The standalone Settings
+    /// pane keeps the `Form` styling.
+    private let embeddedInDashboard: Bool
+
     @MainActor
     init(
+        embeddedInDashboard: Bool = false,
         store: SessionWakeSettingsStore? = nil,
         status: SessionWakeStatus? = nil,
         accounts: ClaudeCodeAccountStore? = nil
     ) {
+        self.embeddedInDashboard = embeddedInDashboard
         self.store = store ?? .shared
         self.status = status ?? .shared
         self.accounts = accounts ?? .shared
     }
 
     var body: some View {
-        Form {
-            switchSection
-            accountSection
-            previewSection
-            limitsSection
-            permissionSection
-            notificationSection
-        }
-        .formStyle(.grouped)
+        layout
         .confirmationDialog(
             "Turn on Session Wake?",
             isPresented: $showingFirstRunConfirmation,
@@ -47,6 +47,33 @@ struct SessionWakeSettingsView: View {
             one at a time. It only runs while MeterBar is open.
             """)
         }
+    }
+
+    // MARK: - Layout
+
+    /// Grouped `Form` when standalone; a plain stack when embedded in the
+    /// dashboard's own ScrollView (a nested Form would collapse there).
+    @ViewBuilder private var layout: some View {
+        if embeddedInDashboard {
+            VStack(alignment: .leading, spacing: 12) {
+                sections
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Form {
+                sections
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    @ViewBuilder private var sections: some View {
+        switchSection
+        accountSection
+        previewSection
+        limitsSection
+        permissionSection
+        notificationSection
     }
 
     // MARK: - Sections

@@ -35,6 +35,16 @@ struct SessionWakeMenuControl: View {
         }
     }
 
+    /// Whether the compact control belongs in the menu-bar popover right now.
+    ///
+    /// Shown when the watcher is on — so the stop-the-watcher kill switch is
+    /// always one click away — or when it is ready to be armed (a wake account is
+    /// configured). Hidden when unconfigured, so users who never touch Session
+    /// Wake (e.g. Codex-only) don't see an inert row.
+    static func shouldShow(isOn: Bool, canTurnOn: Bool) -> Bool {
+        isOn || canTurnOn
+    }
+
     private var label: SessionWakeStatusLabel {
         status.label(isOn: store.isOn)
     }

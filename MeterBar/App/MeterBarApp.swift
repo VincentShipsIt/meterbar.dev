@@ -90,6 +90,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
+            // Surface a banner when a wake run finishes (gated by the global,
+            // provider, and Session Wake notification switches).
+            observeSessionWakeCompletion()
         }
 
         // Setup notifications (also handles initial data refresh)
@@ -484,6 +487,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func postNotification(_ fired: FiredNotification) {
+        sendNotification(identifier: fired.key, title: fired.title, body: fired.body)
+    }
+
+    /// Observes the shared Session Wake status and posts a completion banner each
+    /// time a run settles. The decision (gates + copy) lives in the pure,
+    /// unit-tested `SessionWakeNotificationDecider`; this only turns a fired
+    /// decision into a banner, mirroring `checkAndNotify`.
+    @MainActor
+    private func observeSessionWakeCompletion() {
+        SessionWakeStatus.shared.$watcherState
+            .sink { [weak self] state in
+                guard case let .completed(summary) = state else { return }
+                self?.postSessionWakeCompletion(summary: summary)
+            }
+            .store(in: &cancellables)
+    }
+
+    @MainActor
+    private func postSessionWakeCompletion(summary: WakeRunSummary) {
+        let context = SessionWakeNotificationContext(
+            globalNotificationsEnabled: notificationPreferences.isEnabled,
+            claudeProviderEnabled: providerVisibilityStore.isEnabled(.claudeCode),
+            notifyOnCompletion: SessionWakeSettingsStore.shared.notifyOnCompletion
+        )
+        guard let fired = SessionWakeNotificationDecider.completionNotification(
+            summary: summary,
+            context: context
+        ) else { return }
         sendNotification(identifier: fired.key, title: fired.title, body: fired.body)
     }
 

@@ -80,6 +80,44 @@ final class SessionWakeControllerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
     }
 
+    func testSwitchingAccountWhileArmedStopsTheWatcher() {
+        // Two real, resolvable accounts: the always-present default (A) plus a
+        // custom one (B), so the controller can start a watch against either.
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Second", configDirectory: "/tmp/session-wake-second")
+        guard let accountB = accounts.customAccounts.first?.id else {
+            return XCTFail("adding a custom account should yield a resolvable id")
+        }
+
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        store.setWakeAccountID(ClaudeCodeAccount.defaultID) // account A
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: accounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+        )
+        controller.activate()
+        XCTAssertTrue(controller.isWatching)
+        poll { recorder.startCount >= 1 } // watch against A is genuinely in-flight
+        XCTAssertGreaterThanOrEqual(recorder.startCount, 1)
+
+        // Switch the wake account while the watcher is ON. The live watcher must
+        // not stay bound to the old account: the store disarms and the controller
+        // tears the watch down.
+        store.setWakeAccountID(accountB)
+        poll { !controller.isWatching }
+        XCTAssertFalse(controller.isWatching)
+        XCTAssertFalse(store.isOn)
+        poll { recorder.stopCount >= 1 }
+        XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
+    }
+
     func testStaysOffWhenToggleOff() {
         let store = SessionWakeSettingsStore(userDefaults: defaults) // off
         let recorder = WatchRecorder()

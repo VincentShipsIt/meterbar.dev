@@ -98,6 +98,38 @@ final class SessionWakeSettingsTests: XCTestCase {
         XCTAssertFalse(store.isOn)
     }
 
+    func testSwitchingAccountWhileArmedDisarms() {
+        let accountA = UUID()
+        let accountB = UUID()
+        let store = makeStore()
+        store.setWakeAccountID(accountA)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        // Switching the wake target while armed must disarm: automation may never
+        // keep running against the old account, nor silently retarget the new one.
+        store.setWakeAccountID(accountB)
+        XCTAssertEqual(store.wakeAccountID, accountB)
+        XCTAssertFalse(store.isOn)
+
+        // The persisted flag is off too, so a relaunch stays off until re-armed.
+        let reloaded = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(reloaded.isOn)
+        XCTAssertEqual(reloaded.wakeAccountID, accountB)
+    }
+
+    func testReselectingSameAccountWhileArmedStaysOn() {
+        let account = UUID()
+        let store = makeStore()
+        store.setWakeAccountID(account)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        // A no-op re-selection of the already-selected account must not disarm.
+        store.setWakeAccountID(account)
+        XCTAssertTrue(store.isOn)
+    }
+
     func testStaleOnWithoutAccountIsCorrectedAtLoad() {
         // Simulate a persisted "on" with no account (should not stay on).
         defaults.set(true, forKey: StorageKeys.sessionWakeWatcherArmed)

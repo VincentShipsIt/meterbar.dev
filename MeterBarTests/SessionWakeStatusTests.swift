@@ -76,6 +76,34 @@ final class SessionWakeStatusTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 100)
     }
 
+    func testSettingsPaneHostsEmbeddedInDashboard() {
+        // The dashboard embeds the settings inside its own ScrollView, so the
+        // embedded variant must render without the grouped Form's nested scroll.
+        let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        store.setWakeAccountID(UUID())
+        store.acknowledgeFirstRunAndTurnOn()
+        let view = SessionWakeSettingsView(
+            embeddedInDashboard: true,
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults)
+        )
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 520, height: 700)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 100)
+    }
+
+    func testMenuControlVisibility() {
+        // On ⇒ shown (kill switch must stay reachable), even mid-run.
+        XCTAssertTrue(SessionWakeMenuControl.shouldShow(isOn: true, canTurnOn: false))
+        // Off but armable (account configured) ⇒ shown for quick access.
+        XCTAssertTrue(SessionWakeMenuControl.shouldShow(isOn: false, canTurnOn: true))
+        // Off and unconfigured ⇒ hidden, no inert row.
+        XCTAssertFalse(SessionWakeMenuControl.shouldShow(isOn: false, canTurnOn: false))
+    }
+
     func testMenuControlHosts() {
         let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
         let view = SessionWakeMenuControl(

@@ -16,6 +16,7 @@ struct MenuBarView: View {
   @StateObject private var cursorService = CursorLocalService.shared
   @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
+  @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
   @State private var contentHeight: CGFloat = 320
   @State private var expandedDetailID: String?
@@ -61,21 +62,31 @@ struct MenuBarView: View {
       Divider()
 
       ScrollView {
-        PopoverOverviewPanel(
-          snapshots: ProviderSnapshotBuilder.snapshots(
-            ProviderSnapshotBuilder.Input(
-              metrics: dataManager.metrics,
-              claudeAccounts: claudeAccountStore.accounts,
-              claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-              enabledServices: providerVisibility.enabledServices,
-              claudeCodeHasAccess: claudeCodeService.hasAccess,
-              codexCliHasAccess: codexCliService.hasAccess,
-              cursorHasAccess: cursorService.hasAccess
-            )),
-          openDashboard: openDashboard,
-          openStatusDetail: openStatusDetail,
-          openProviderOverview: openProviderDetail
-        )
+        VStack(spacing: 10) {
+          PopoverOverviewPanel(
+            snapshots: ProviderSnapshotBuilder.snapshots(
+              ProviderSnapshotBuilder.Input(
+                metrics: dataManager.metrics,
+                claudeAccounts: claudeAccountStore.accounts,
+                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                enabledServices: providerVisibility.enabledServices,
+                claudeCodeHasAccess: claudeCodeService.hasAccess,
+                codexCliHasAccess: codexCliService.hasAccess,
+                cursorHasAccess: cursorService.hasAccess
+              )),
+            openDashboard: openDashboard,
+            openStatusDetail: openStatusDetail,
+            openProviderOverview: openProviderDetail
+          )
+
+          if SessionWakeMenuControl.shouldShow(
+            isOn: sessionWakeStore.isOn,
+            canTurnOn: sessionWakeStore.canTurnOn
+          ) {
+            Divider()
+            SessionWakeMenuControl()
+          }
+        }
         .padding(10)
         .background(
           GeometryReader { proxy in

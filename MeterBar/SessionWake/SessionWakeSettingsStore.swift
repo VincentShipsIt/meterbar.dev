@@ -105,8 +105,13 @@ final class SessionWakeSettingsStore: ObservableObject {
             userDefaults.set(id.uuidString, forKey: StorageKeys.sessionWakeAccountID)
         } else {
             userDefaults.removeObject(forKey: StorageKeys.sessionWakeAccountID)
-            forceOff()
         }
+        // Any change of the wake target disarms the watcher. Otherwise a live
+        // watcher would stay bound to the *old* account (the controller only
+        // starts a watch when none is running), and automation must never keep
+        // running against — or silently retarget to — an account the user did
+        // not just explicitly arm. Re-arming with the new account is one toggle.
+        forceOff()
     }
 
     func setPermissionMode(_ mode: WakePermissionMode) {

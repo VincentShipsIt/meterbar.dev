@@ -403,9 +403,18 @@ struct SettingsView: View {
             costTrackingSection
             refreshSection
             notificationsSection
+            automationSection
             generalSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Session Wake automation. Mirrors the standalone `.automation` pane (always
+    /// available) so the dashboard settings surface can reach it too.
+    private var automationSection: some View {
+        SettingsPanelSection(title: "Automation", systemImage: "moon.zzz", color: MeterBarTheme.appAccent) {
+            SessionWakeSettingsView(embeddedInDashboard: true)
+        }
     }
 
     private var codexCliSection: some View {
