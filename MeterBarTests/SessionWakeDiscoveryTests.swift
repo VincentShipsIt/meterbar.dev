@@ -333,4 +333,194 @@ final class SessionWakeDiscoveryTests: XCTestCase {
         let contained = await ledger.contains(fingerprint)
         XCTAssertFalse(contained)
     }
+
+    // MARK: - Reset parser: explicit month/day (weekly limits)
+
+    func testMonthDayResetForm() throws {
+        // Weekly limits state a calendar date, not just a clock time.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T04:14:15Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jul 15 at 10pm (Europe/Malta)",
+            eventTimestamp: event
+        ))
+        // 10pm Malta (UTC+2 in July) on Jul 15 == 20:00Z.
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2026-07-15T20:00:00Z"))
+        XCTAssertEqual(result.timeZoneIdentifier, "Europe/Malta")
+    }
+
+    func testMonthDayResetRollsToNextYearWhenBeforeEvent() throws {
+        // A December block whose reset reads "Jan 2" is next January, not this
+        // year's already-elapsed January (December → January window).
+        let event = ISO8601DateFormatter().date(from: "2026-12-30T12:00:00Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jan 2 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2027-01-02T09:00:00Z"))
+    }
+
+    func testSlightlyElapsedMonthDayResetStaysPastInsteadOfRollingAYear() throws {
+        // Display rounding or a timezone fallback can put the resolved reset
+        // minutes before the event; that must read as "already elapsed,
+        // re-check now" — not as next year's reset.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T09:05:00Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jul 10 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2026-07-10T09:00:00Z"))
+    }
+
+    func testStatedYearIsAuthoritativeEvenWhenPast() throws {
+        // An explicit year never rolls forward, even if it is long elapsed.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T04:14:15Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jan 2, 2026 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2026-01-02T09:00:00Z"))
+    }
+
+    func testImpossibleDayOfMonthIsRejected() {
+        // Calendar would silently normalize "Jul 32" to Aug 1; the parser must
+        // refuse instead of inventing a date the message never stated.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T04:14:15Z")!
+        XCTAssertNil(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jul 32 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+    }
+
+    func testWeeklyMonthDayMessageClassifiesBlockedWithReset() throws {
+        let cwd = tempDir.path
+        let lines = [
+            rateLimit(
+                "You've hit your weekly limit · resets Jul 15 at 10pm (Europe/Malta)",
+                timestamp: "2026-07-10T04:00:00.000Z",
+                cwd: cwd
+            )
+        ]
+        let summary = TranscriptClassifier.classify(sessionID: "s", lines: lines)
+        guard case let .blocked(reason, _, resetHint) = summary.state else {
+            return XCTFail("Expected blocked, got \(summary.state)")
+        }
+        XCTAssertEqual(reason, .weeklyLimit)
+        XCTAssertEqual(resetHint?.resetAt, ISO8601DateFormatter().date(from: "2026-07-15T20:00:00Z"))
+    }
+
+    // MARK: - Tail read: multi-byte UTF-8 boundary
+
+    func testTailReadSplittingMultibyteCharStillDiscoversBlock() async throws {
+        let cwd = tempDir.path
+        let block = rateLimit(
+            "session limit resets 2:10am (UTC)",
+            timestamp: "2026-07-10T02:00:00.000Z",
+            cwd: cwd
+        )
+        // Prefix ends with a 2-byte character ("é") and the tail window is sized
+        // so the read begins on its continuation byte. A failable
+        // String(data:encoding:) would reject the whole buffer and drop the
+        // transcript's decisive event; lossy decoding must keep the block line.
+        let content = "Xé\n" + block
+        let dir = tempDir
+            .appendingPathComponent("acct")
+            .appendingPathComponent("projects")
+            .appendingPathComponent("-Users-me-proj")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try content.write(to: dir.appendingPathComponent("session-a.jsonl"), atomically: true, encoding: .utf8)
+
+        let discovery = SessionDiscovery(
+            configuration: .init(maxTailBytes: block.utf8.count + 2)
+        )
+        let ledger = ReplayLedger(fileURL: tempDir.appendingPathComponent("ledger.json"))
+        let candidates = await discovery.discover(configDirectory: accountConfigDir(), ledger: ledger)
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertEqual(candidates.first?.reason, .sessionLimit)
+    }
+
+    // MARK: - Classifier: sidechain lines only exclude all-subagent transcripts
+
+    func testSidechainLinesAreIgnoredForClassification() {
+        // A mainline session that finished after spawning a subagent (whose
+        // transcript tail is a sidechain block) is active, not a subagent.
+        let cwd = tempDir.path
+        let lines = [
+            assistantText("Resumed and finished the task.", timestamp: "2026-07-10T03:00:00.000Z", cwd: cwd),
+            rateLimit("session limit resets 2:10am (UTC)", timestamp: "2026-07-10T04:00:00.000Z", cwd: cwd, sidechain: true)
+        ]
+        let summary = TranscriptClassifier.classify(sessionID: "s", lines: lines)
+        XCTAssertFalse(summary.isSidechain, "a mainline session with subagent lines is not a subagent transcript")
+        if case .active = summary.state {} else {
+            XCTFail("A sidechain block must not classify the mainline session, got \(summary.state)")
+        }
+    }
+
+    func testAllSidechainTranscriptIsFlaggedSubagent() {
+        let cwd = tempDir.path
+        let lines = [
+            assistantText("subagent working", timestamp: "2026-07-10T03:00:00.000Z", cwd: cwd, sidechain: true),
+            rateLimit("session limit resets 2:10am (UTC)", timestamp: "2026-07-10T04:00:00.000Z", cwd: cwd, sidechain: true)
+        ]
+        let summary = TranscriptClassifier.classify(sessionID: "s", lines: lines)
+        XCTAssertTrue(summary.isSidechain)
+        if case .indeterminate = summary.state {} else {
+            XCTFail("An all-sidechain transcript has no mainline terminal state, got \(summary.state)")
+        }
+    }
+
+    // MARK: - Deterministic dedupe & read-only preview
+
+    func testDuplicateSessionTieBreaksOnLexicographicallyFirstPath() async throws {
+        let cwd = tempDir.path
+        // Same session and same block instant across two project directories:
+        // the winner must be deterministic regardless of enumeration order.
+        try writeTranscript(project: "-proj-b", lines: [
+            rateLimit("session limit resets 2:10am (UTC)", timestamp: "2026-07-10T02:00:00.000Z", cwd: cwd)
+        ])
+        try writeTranscript(project: "-proj-a", lines: [
+            rateLimit("session limit resets 2:10am (UTC)", timestamp: "2026-07-10T02:00:00.000Z", cwd: cwd)
+        ])
+        let discovery = SessionDiscovery()
+        let ledger = ReplayLedger(fileURL: tempDir.appendingPathComponent("ledger.json"))
+        let candidates = await discovery.discover(configDirectory: accountConfigDir(), ledger: ledger)
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertTrue(
+            candidates.first?.transcriptPath.contains("-proj-a") == true,
+            "equal-timestamp duplicates must tie-break on the lexicographically first path"
+        )
+    }
+
+    func testDiscoveryPerformsZeroFilesystemMutations() async throws {
+        let cwd = tempDir.path
+        try writeTranscript(lines: [
+            rateLimit("session limit resets 2:10am (UTC)", timestamp: "2026-07-10T02:00:00.000Z", cwd: cwd)
+        ])
+        let ledgerURL = tempDir.appendingPathComponent("ledger.json")
+
+        let before = try snapshot(of: tempDir)
+        let discovery = SessionDiscovery()
+        _ = await discovery.discover(configDirectory: accountConfigDir(), ledger: ReplayLedger(fileURL: ledgerURL))
+        let after = try snapshot(of: tempDir)
+
+        XCTAssertEqual(before, after, "discovery is a preview and must not create, modify, or delete any file")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: ledgerURL.path),
+            "discovery must not write the replay ledger"
+        )
+    }
+
+    /// Recursive path → "size|modification-date" map used to prove read-only behavior.
+    private func snapshot(of root: URL) throws -> [String: String] {
+        var result: [String: String] = [:]
+        let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+        )
+        while let url = enumerator?.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let stamp = values.contentModificationDate.map { String($0.timeIntervalSinceReferenceDate) } ?? "-"
+            result[url.path] = "\(values.fileSize ?? -1)|\(stamp)"
+        }
+        return result
+    }
 }

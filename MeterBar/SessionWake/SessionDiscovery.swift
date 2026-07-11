@@ -85,13 +85,25 @@ actor SessionDiscovery {
                 skipReason: skip
             )
 
-            if let existing = bySession[summary.sessionID], existing.blockedAt >= blockedAt {
+            if let existing = bySession[summary.sessionID], !supersedes(candidate, existing) {
                 continue
             }
             bySession[summary.sessionID] = candidate
         }
 
-        return bySession.values.sorted { $0.blockedAt > $1.blockedAt }
+        // `supersedes` is a strict total order over (blockedAt desc, path asc);
+        // reusing it keeps the dedupe winner and the output order one rule.
+        return bySession.values.sorted(by: supersedes)
+    }
+
+    /// Deterministic dedupe: the latest block wins; equal block instants
+    /// tie-break on the lexicographically first transcript path so the winner
+    /// never depends on filesystem enumeration order.
+    private func supersedes(_ candidate: WakeSessionCandidate, _ existing: WakeSessionCandidate) -> Bool {
+        if candidate.blockedAt != existing.blockedAt {
+            return candidate.blockedAt > existing.blockedAt
+        }
+        return candidate.transcriptPath < existing.transcriptPath
     }
 
     // MARK: - Filesystem
@@ -123,7 +135,15 @@ actor SessionDiscovery {
             : 0
         try? handle.seek(toOffset: start)
         let data = (try? handle.readToEnd()) ?? Data()
-        guard let string = String(data: data, encoding: .utf8) else { return [] }
+        // A bounded tail read can begin mid-multibyte-character. A failable
+        // String(data:encoding:) would reject the whole buffer and silently
+        // drop the transcript's decisive event; lossy decoding turns only the
+        // split leading bytes into U+FFFD (that partial line is skipped as
+        // malformed JSON) and keeps every complete line intact. The lint rule
+        // prefers the failable initializer — exactly the nil-dropping behavior
+        // this fix removes — so it is disabled here deliberately.
+        // swiftlint:disable:next optional_data_string_conversion
+        let string = String(decoding: data, as: UTF8.self)
         return string.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
     }
 
