@@ -67,3 +67,14 @@ nonisolated extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+
+nonisolated extension FloatingPoint {
+    /// Clamp a floating-point value into a closed range, failing safe on a
+    /// non-finite input: NaN and ±∞ map to the range's lower (narrowest) bound
+    /// rather than passing through, so an invalid preference can never survive
+    /// as NaN/∞ and trap later in e.g. `UInt64(seconds * 1e9)`.
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        guard isFinite else { return range.lowerBound }
+        return Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
+}

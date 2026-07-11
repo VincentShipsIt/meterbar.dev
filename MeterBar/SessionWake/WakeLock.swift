@@ -20,6 +20,10 @@ nonisolated final class WakeLock: @unchecked Sendable {
 
     private let lockURL: URL
     private let legacyLockURLs: [URL]
+    /// Guards `fileDescriptor`: the class is `@unchecked Sendable` and its
+    /// descriptor may be touched from `acquire()`, `release()`, and `deinit` on
+    /// different threads, so every read/write of it goes through this lock.
+    private let stateLock = NSLock()
     private var fileDescriptor: Int32 = -1
 
     init(lockURL: URL? = nil, legacyLockURLs: [URL]? = nil) {
@@ -55,16 +59,18 @@ nonisolated final class WakeLock: @unchecked Sendable {
             close(descriptor)
             return .contended
         }
-        fileDescriptor = descriptor
+        stateLock.withLock { fileDescriptor = descriptor }
         return .acquired
     }
 
     /// Release the lock and remove the descriptor. Safe to call repeatedly.
     func release() {
-        guard fileDescriptor >= 0 else { return }
-        flock(fileDescriptor, LOCK_UN)
-        close(fileDescriptor)
-        fileDescriptor = -1
+        stateLock.withLock {
+            guard fileDescriptor >= 0 else { return }
+            flock(fileDescriptor, LOCK_UN)
+            close(fileDescriptor)
+            fileDescriptor = -1
+        }
     }
 
     /// Whether any known legacy lock file is currently `flock`-held by another

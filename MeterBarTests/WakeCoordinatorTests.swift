@@ -188,6 +188,44 @@ final class WakeCoordinatorTests: XCTestCase {
         XCTAssertTrue(ran.isEmpty, "No session should launch while blocked")
     }
 
+    func testActiveChildCancellationPreservesCandidateAndDoesNotRecord() async throws {
+        try writeBlockedSessions(1)
+        let runner = CancellingRunner()
+        let provider = SequencedProvider(repeating: .open)
+        // Real sleep so cancellation must actually unwind the running child.
+        let coordinator = makeCoordinator(
+            provider: provider,
+            runner: runner,
+            sleep: { seconds in try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        )
+
+        await coordinator.start(account: account())
+
+        // Wait until the child is actually running before we stop the watcher.
+        var running = false
+        for _ in 0..<200 {
+            if case .running = await coordinator.state { running = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(running, "A session should be running before we cancel")
+
+        await coordinator.stop()
+        await coordinator.waitUntilFinished()
+
+        let ran = await runner.ran
+        XCTAssertEqual(ran, ["s0"], "The candidate should have been attempted exactly once")
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .off, "Cancelling mid-child settles the watcher to off")
+
+        // The interrupted block must NOT be recorded, so a later run rediscovers
+        // it as an executable candidate rather than skipping it as handled.
+        let ledger = ReplayLedger(fileURL: ledgerURL)
+        let candidates = await SessionDiscovery().discover(configDirectory: accountDir.path, ledger: ledger)
+        XCTAssertEqual(candidates.first?.sessionID, "s0")
+        XCTAssertNil(candidates.first?.skipReason, "Interrupted candidate must stay retryable")
+        XCTAssertTrue(candidates.first?.isExecutable ?? false)
+    }
+
     func testSuccessfulResumeIsRecordedInLedger() async throws {
         try writeBlockedSessions(1)
         let runner = RecordingRunner(outcome: .succeeded)
@@ -213,6 +251,20 @@ private actor RecordingRunner: WakeExecuting {
     func run(_ candidate: WakeSessionCandidate, bounds: WakeBounds) async -> WakeRunOutcome {
         ran.append(candidate.sessionID)
         return outcome
+    }
+}
+
+/// Blocks inside `run` until the surrounding structured task is cancelled, then
+/// reports `.cancelled` — mirroring a real child that honors cooperative
+/// cancellation when the watcher is stopped mid-run.
+private actor CancellingRunner: WakeExecuting {
+    private(set) var ran: [String] = []
+    func run(_ candidate: WakeSessionCandidate, bounds: WakeBounds) async -> WakeRunOutcome {
+        ran.append(candidate.sessionID)
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return .cancelled
     }
 }
 
