@@ -11,7 +11,7 @@ import Foundation
 /// (#96). The parser deliberately does **not** decide whether quota is
 /// available; a returned instant in the past means "already elapsed, re-check",
 /// never "proven available".
-enum TranscriptResetParser {
+nonisolated enum TranscriptResetParser {
     struct Result: Equatable, Sendable {
         /// The absolute reset instant, anchored to the event timestamp.
         let resetAt: Date

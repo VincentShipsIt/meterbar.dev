@@ -5,7 +5,7 @@ import Foundation
 /// Shared by the hot scan paths (CostTracker parses tens of thousands of log
 /// lines) and CursorLocalService, which previously each maintained their own
 /// identical formatter pair. `ISO8601DateFormatter` is thread-safe to share.
-enum FlexibleISO8601 {
+nonisolated enum FlexibleISO8601 {
     static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

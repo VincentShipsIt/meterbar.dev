@@ -5,7 +5,7 @@ import Foundation
 /// Everything lives under one base directory created with `0700` so ledger and
 /// (later) log files inherit private permissions. The base is overridable so
 /// tests never touch the real Application Support tree.
-enum WakePaths {
+nonisolated enum WakePaths {
     /// Default base: `~/Library/Application Support/MeterBar/session-wake`.
     static func defaultBaseDirectory() -> URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

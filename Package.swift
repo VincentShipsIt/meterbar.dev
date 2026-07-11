@@ -28,10 +28,16 @@ let package = Package(
                 "Assets.xcassets",
                 "Resources"
             ],
-            // Match the Xcode app target (SWIFT_VERSION = 5.0). The views target
+            // Match the Xcode app target (SWIFT_VERSION = 5.0,
+            // SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor). The views target
             // macOS 26 for Liquid Glass APIs, but stay in Swift 5 language mode so
             // existing singletons compile without a concurrency refactor.
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            // MainActor default isolation must match the app build, or tests
+            // compile with different threading semantics than what ships.
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .defaultIsolation(MainActor.self)
+            ]
         ),
         .testTarget(
             name: "MeterBarTests",
@@ -40,7 +46,10 @@ let package = Package(
                 .product(name: "MeterBarShared", package: "MeterBarShared")
             ],
             path: "MeterBarTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .defaultIsolation(MainActor.self)
+            ]
         ),
     ]
 )

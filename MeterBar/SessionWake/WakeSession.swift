@@ -7,7 +7,7 @@ import Foundation
 /// It intentionally keys on the *event* (session + block instant + reason), not
 /// the file, so re-scanning the same transcript yields the same fingerprint,
 /// while a genuinely new block later in the same session produces a new one.
-struct BlockFingerprint: Codable, Equatable, Hashable, Sendable {
+nonisolated struct BlockFingerprint: Codable, Equatable, Hashable, Sendable {
     let value: String
 
     init(sessionID: String, blockedAt: Date, reason: WakeBlockReason) {
@@ -20,7 +20,7 @@ struct BlockFingerprint: Codable, Equatable, Hashable, Sendable {
 }
 
 /// Why a discovered candidate cannot be executed as-is.
-enum WakeSkipReason: String, Codable, Equatable, Sendable {
+nonisolated enum WakeSkipReason: String, Codable, Equatable, Sendable {
     /// The transcript's resolved cwd no longer exists (deleted worktree).
     case missingWorkingDirectory
     /// The transcript never recorded a working directory.
@@ -37,7 +37,7 @@ enum WakeSkipReason: String, Codable, Equatable, Sendable {
 /// means it is preview-only and must never be launched. Discovery records the
 /// reason rather than silently dropping the candidate so the UI/CLI can explain
 /// why a visible blocked session was not resumed.
-struct WakeSessionCandidate: Equatable, Sendable, Identifiable {
+nonisolated struct WakeSessionCandidate: Equatable, Sendable, Identifiable {
     let sessionID: String
     let transcriptPath: String
     /// Canonicalized (symlinks resolved) working directory, if resolvable.

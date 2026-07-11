@@ -25,7 +25,7 @@ class CostTracker: ObservableObject {
     // NOTE: MeterBarCLI/Sources/MeterBarCLI.swift carries a simplified copy of the
     // "claude-sonnet" entry; keep the two in sync until a shared package exists
     // (.agents/docs/DEFERRED_WORK.md §1).
-    private static let pricing: [String: TokenPricing] = [
+    nonisolated private static let pricing: [String: TokenPricing] = [
         "claude-sonnet": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30),
         "claude-opus": TokenPricing(input: 15.0, output: 75.0, cacheCreation: 18.75, cacheRead: 1.50),
         "claude-haiku": TokenPricing(input: 0.25, output: 1.25, cacheCreation: 0.30, cacheRead: 0.03),
@@ -51,7 +51,7 @@ class CostTracker: ObservableObject {
 
     /// Non-optional fallback so pricing lookups never need a force-unwrap of
     /// `pricing["default"]`. Mirrors the `"default"` entry above.
-    private static let defaultPricing = TokenPricing(
+    nonisolated private static let defaultPricing = TokenPricing(
         input: 3.0,
         output: 15.0,
         cacheCreation: 3.75,
@@ -61,7 +61,7 @@ class CostTracker: ObservableObject {
     // Cached regexes. The scan parses tens of thousands of log lines, so
     // allocating an NSRegularExpression per call was a measurable hot-path
     // cost. Date parsing shares the cached FlexibleISO8601 formatters.
-    private static let codexLogValueRegexes: [String: NSRegularExpression] = {
+    nonisolated private static let codexLogValueRegexes: [String: NSRegularExpression] = {
         let keys = [
             "event.timestamp", "input_token_count", "output_token_count",
             "cached_token_count", "reasoning_token_count", "conversation.id",
@@ -138,7 +138,7 @@ class CostTracker: ObservableObject {
         }.value
     }
 
-    private static func buildCostSummary(
+    nonisolated private static func buildCostSummary(
         days: Int,
         includeClaudeCode: Bool,
         includeCodexCli: Bool,
@@ -193,7 +193,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func scanClaudeCodeSessions(
+    nonisolated private static func scanClaudeCodeSessions(
         since cutoffDate: Date,
         claudeAccounts: [ClaudeCodeAccount]
     ) -> (TokenCost, [DailyTokenUsage])? {
@@ -282,7 +282,7 @@ class CostTracker: ObservableObject {
         ), Self.makeDailyUsage(from: dailyTotals, provider: .claudeCode, pricing: pricing))
     }
 
-    private static func claudeProjectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
+    nonisolated private static func claudeProjectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
         let fileManager = FileManager.default
         // realHomeDirectory, not homeDirectoryForCurrentUser: in sandboxed
         // builds the latter is the app container, and the scan would silently
@@ -327,7 +327,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func claudeProjectsURL(forConfigPath rawPath: String) -> URL {
+    nonisolated private static func claudeProjectsURL(forConfigPath rawPath: String) -> URL {
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let url = URL(fileURLWithPath: (trimmed as NSString).standardizingPath)
         if url.lastPathComponent == "projects" {
@@ -336,7 +336,7 @@ class CostTracker: ObservableObject {
         return url.appendingPathComponent("projects", isDirectory: true)
     }
 
-    static func parseSessionFile(
+    nonisolated static func parseSessionFile(
         at url: URL,
         since cutoffDate: Date
     ) -> (
@@ -451,14 +451,14 @@ class CostTracker: ObservableObject {
                 dates, dailyTotals, modelTotals, originTotals)
     }
 
-    private static func claudeOneHourCacheCreationTokens(in usage: [String: Any]) -> Int {
+    nonisolated private static func claudeOneHourCacheCreationTokens(in usage: [String: Any]) -> Int {
         guard let cacheCreation = usage["cache_creation"] as? [String: Any] else { return 0 }
         let total = intValue(usage["cache_creation_input_tokens"])
         let oneHour = intValue(cacheCreation["ephemeral_1h_input_tokens"])
         return min(total, max(0, oneHour))
     }
 
-    static func claudePricing(for model: String?) -> TokenPricing {
+    nonisolated static func claudePricing(for model: String?) -> TokenPricing {
         guard let model else {
             return Self.pricing["claude-sonnet"] ?? Self.defaultPricing
         }
@@ -494,7 +494,7 @@ class CostTracker: ObservableObject {
         return Self.defaultPricing
     }
 
-    static func normalizeClaudeModel(_ raw: String) -> String {
+    nonisolated static func normalizeClaudeModel(_ raw: String) -> String {
         var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("anthropic.") {
             trimmed = String(trimmed.dropFirst("anthropic.".count))
@@ -519,7 +519,7 @@ class CostTracker: ObservableObject {
         return trimmed
     }
 
-    private static func scanCodexSessions(since cutoffDate: Date) -> (TokenCost, [DailyTokenUsage])? {
+    nonisolated private static func scanCodexSessions(since cutoffDate: Date) -> (TokenCost, [DailyTokenUsage])? {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
         let archivedDir = codexDir.appendingPathComponent("archived_sessions")
         let logsDatabase = codexDir.appendingPathComponent("logs_2.sqlite")
@@ -560,7 +560,7 @@ class CostTracker: ObservableObject {
     /// Internal (not private) so the archived-session parsing — the Codex
     /// counterpart to `parseSessionFile`, and where CLI-vs-app cost divergence
     /// hides — can be fixture-tested against a temp directory.
-    static func scanCodexArchivedSessions(
+    nonisolated static func scanCodexArchivedSessions(
         directory: URL,
         since cutoffDate: Date,
         context: inout CodexScanContext
@@ -611,7 +611,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func isLocalDirectory(_ url: URL) -> Bool {
+    nonisolated private static func isLocalDirectory(_ url: URL) -> Bool {
         let standardized = url.standardizedFileURL
         var isDirectory: ObjCBool = false
 
@@ -626,7 +626,7 @@ class CostTracker: ObservableObject {
         return values?.volumeIsLocal != false
     }
 
-    private static func scanCodexSQLiteLogs(
+    nonisolated private static func scanCodexSQLiteLogs(
         database: URL,
         since cutoffDate: Date,
         context: inout CodexScanContext
@@ -672,7 +672,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func addCodexUsage(
+    nonisolated private static func addCodexUsage(
         _ usage: [String: Any],
         timestamp: Date,
         sessionID: String,
@@ -718,7 +718,7 @@ class CostTracker: ObservableObject {
         if timestamp > context.latestDate { context.latestDate = timestamp }
     }
 
-    private static func makeDailyUsage(
+    nonisolated private static func makeDailyUsage(
         from dailyTotals: [Date: TokenAccumulator],
         provider: ServiceType,
         pricing: TokenPricing
@@ -745,7 +745,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func makeBreakdowns(
+    nonisolated private static func makeBreakdowns(
         from totals: [String: TokenAccumulator],
         provider: ServiceType,
         pricing: TokenPricing
@@ -781,7 +781,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func mergeDailyTotals(
+    nonisolated private static func mergeDailyTotals(
         _ target: inout [Date: TokenAccumulator],
         with source: [Date: TokenAccumulator]
     ) {
@@ -790,7 +790,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func mergeNamedTotals(
+    nonisolated private static func mergeNamedTotals(
         _ target: inout [String: TokenAccumulator],
         with source: [String: TokenAccumulator]
     ) {
@@ -799,7 +799,7 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func claudeUsageOrigin(json: [String: Any], message: [String: Any], url: URL) -> String {
+    nonisolated private static func claudeUsageOrigin(json: [String: Any], message: [String: Any], url: URL) -> String {
         if url.path.contains("/subagents/") || (json["isSidechain"] as? Bool == true) {
             return "Agents"
         }
@@ -821,7 +821,7 @@ class CostTracker: ObservableObject {
         return "Main chat"
     }
 
-    private static func toolUseNames(in message: [String: Any]) -> [String] {
+    nonisolated private static func toolUseNames(in message: [String: Any]) -> [String] {
         guard let content = message["content"] as? [[String: Any]] else { return [] }
         return content.compactMap { item in
             guard item["type"] as? String == "tool_use" else { return nil }
@@ -829,19 +829,19 @@ class CostTracker: ObservableObject {
         }
     }
 
-    private static func codexModelName(from info: [String: Any], payload: [String: Any]) -> String? {
+    nonisolated private static func codexModelName(from info: [String: Any], payload: [String: Any]) -> String? {
         (info["model"] as? String)
             ?? (info["slug"] as? String)
             ?? (payload["model"] as? String)
             ?? (payload["slug"] as? String)
     }
 
-    private static func displayModelName(_ raw: String?) -> String {
+    nonisolated private static func displayModelName(_ raw: String?) -> String {
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Unknown model" : Self.normalizeClaudeModel(trimmed)
     }
 
-    private static func displayOriginName(_ raw: String?) -> String {
+    nonisolated private static func displayOriginName(_ raw: String?) -> String {
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else { return "Unknown origin" }
         return trimmed
@@ -857,7 +857,7 @@ class CostTracker: ObservableObject {
     /// Cost without a one-hour cache tier — delegates to `calculateClaudeCost`
     /// so there is exactly one pricing formula. (These were near-duplicates
     /// that had drifted: only the Claude variant clamped negative inputs.)
-    static func calculateCost(
+    nonisolated static func calculateCost(
         input: Int,
         output: Int,
         cacheCreation: Int,
@@ -874,7 +874,7 @@ class CostTracker: ObservableObject {
         )
     }
 
-    static func calculateClaudeCost(
+    nonisolated static func calculateClaudeCost(
         input: Int,
         output: Int,
         cacheCreation: Int,
@@ -894,7 +894,7 @@ class CostTracker: ObservableObject {
         return inputCost + outputCost + cacheCreationCost + oneHourCacheCreationCost + cacheReadCost
     }
 
-    private static func intValue(_ value: Any?) -> Int {
+    nonisolated private static func intValue(_ value: Any?) -> Int {
         if let value = value as? Int { return value }
         if let value = value as? Int64 { return Int(value) }
         if let value = value as? Double { return Int(value) }
@@ -902,17 +902,17 @@ class CostTracker: ObservableObject {
         return 0
     }
 
-    private static func codexLogDate(in text: String) -> Date? {
+    nonisolated private static func codexLogDate(in text: String) -> Date? {
         guard let value = Self.codexLogValue("event.timestamp", in: text) else { return nil }
         return FlexibleISO8601.date(from: value)
     }
 
-    private static func codexLogInt(_ key: String, in text: String) -> Int {
+    nonisolated private static func codexLogInt(_ key: String, in text: String) -> Int {
         guard let value = Self.codexLogValue(key, in: text) else { return 0 }
         return Int(value) ?? 0
     }
 
-    private static func codexLogValue(_ key: String, in text: String) -> String? {
+    nonisolated private static func codexLogValue(_ key: String, in text: String) -> String? {
         let regex: NSRegularExpression
         if let cached = Self.codexLogValueRegexes[key] {
             regex = cached
@@ -936,7 +936,7 @@ class CostTracker: ObservableObject {
 /// a single `inout` argument.
 ///
 /// Internal (not private) so `scanCodexArchivedSessions` can be fixture-tested.
-struct CodexScanContext: Sendable {
+nonisolated struct CodexScanContext: Sendable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
     var modelTotals: [String: TokenAccumulator] = [:]
@@ -947,7 +947,7 @@ struct CodexScanContext: Sendable {
     var latestDate: Date
 }
 
-struct TokenPricing: Sendable {
+nonisolated struct TokenPricing: Sendable {
     let input: Double      // per million tokens
     let output: Double     // per million tokens
     let cacheCreation: Double
@@ -969,7 +969,7 @@ struct TokenPricing: Sendable {
     }
 }
 
-struct TokenAccumulator: Sendable {
+nonisolated struct TokenAccumulator: Sendable {
     var input = 0
     var output = 0
     var cacheCreation = 0
@@ -1009,7 +1009,7 @@ struct TokenAccumulator: Sendable {
     }
 }
 
-private struct ClaudeUsageEvent: Sendable {
+nonisolated private struct ClaudeUsageEvent: Sendable {
     let timestamp: Date
     let model: String?
     let messageID: String?

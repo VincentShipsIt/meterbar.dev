@@ -8,7 +8,7 @@ import Foundation
 /// app and the CLI, or either and a still-loaded legacy job — mutually exclude.
 /// The lock is acquired only when a run is actually ready, never held across a
 /// long quota wait.
-final class WakeLock: @unchecked Sendable {
+nonisolated final class WakeLock: @unchecked Sendable {
     /// The outcome of trying to acquire the shared lock.
     enum Acquisition: Equatable {
         case acquired

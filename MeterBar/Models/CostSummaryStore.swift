@@ -4,7 +4,7 @@ import Foundation
 /// CostTracker after each scan; read back by the app on launch and by
 /// `meterbar cost` (which reports the app's scan instead of re-implementing
 /// a divergent one).
-public struct CostSummaryCache: Codable, Sendable {
+nonisolated public struct CostSummaryCache: Codable, Sendable {
     public let summary: CostSummary
     public let lastScanDate: Date
 
@@ -16,7 +16,7 @@ public struct CostSummaryCache: Codable, Sendable {
 
 /// Single owner of the cost-summary cache location and encoding
 /// (`~/Library/Application Support/MeterBar/cost-summary-v1.json`).
-public enum CostSummaryStore {
+nonisolated public enum CostSummaryStore {
     static let cacheFileName = "cost-summary-v1.json"
 
     public static var cacheURL: URL? {

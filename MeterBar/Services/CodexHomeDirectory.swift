@@ -5,7 +5,7 @@ import Foundation
 /// Codex honors `CODEX_HOME`; MeterBar must therefore use the same directory for
 /// activity, auth, readiness, and cost scans. Keeping this path logic pure also
 /// lets tests exercise custom homes without mutating the process environment.
-enum CodexHomeDirectory {
+nonisolated enum CodexHomeDirectory {
     static func path(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         realHomeDirectory: String = ServiceSupport.realHomeDirectory()

@@ -4,7 +4,7 @@ import AppKit
 import Combine
 
 class ClaudeCodeLocalService: ObservableObject {
-    static let shared = ClaudeCodeLocalService()
+    nonisolated static let shared = ClaudeCodeLocalService()
 
     // Working endpoint (discovered via testing)
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
@@ -21,7 +21,7 @@ class ClaudeCodeLocalService: ObservableObject {
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var authState: ClaudeCodeAuthState = .unavailable
 
-    private init() {
+    nonisolated private init() {
         // Defer keychain/filesystem I/O off the init thread, like the other
         // local services (this previously ran synchronously in init).
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess() }
@@ -30,7 +30,7 @@ class ClaudeCodeLocalService: ObservableObject {
     // MARK: - Keychain Access
 
     /// Get OAuth token from Claude Code's keychain storage
-    func getOAuthToken() -> String? {
+    nonisolated func getOAuthToken() -> String? {
         guard let credentials = getCredentials() else {
             return nil
         }
@@ -53,7 +53,7 @@ class ClaudeCodeLocalService: ObservableObject {
         return credentials.claudeAiOauth.accessToken
     }
 
-    private func getCredentials() -> ClaudeCodeCredentials? {
+    nonisolated private func getCredentials() -> ClaudeCodeCredentials? {
         guard let data = credentialsData() else { return nil }
         return try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data)
     }
@@ -63,7 +63,7 @@ class ClaudeCodeLocalService: ObservableObject {
     /// Exposed for provider-readiness diagnostics, which pass the bytes to the
     /// pure readiness core (it reads only the expiry claim — never surfaces the
     /// token). Reading the raw blob here keeps the keychain query in one place.
-    func credentialsData() -> Data? {
+    nonisolated func credentialsData() -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -82,17 +82,19 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     /// Check and update access status
-    func checkAccess() {
+    nonisolated func checkAccess() {
         let newHasAccess: Bool
         let newAuthState: ClaudeCodeAuthState
-        var clearsSubscription = false
+        let clearsSubscription: Bool
 
         if cliUsageService.isAvailable() {
             newHasAccess = true
             newAuthState = .cliAvailable
+            clearsSubscription = false
         } else if isOAuthFallbackEnabled, getOAuthToken() != nil {
             newHasAccess = true
             newAuthState = .connected(.legacyOAuth)
+            clearsSubscription = false
         } else {
             newHasAccess = false
             newAuthState = .unavailable
@@ -266,7 +268,7 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
-    private var isOAuthFallbackEnabled: Bool {
+    nonisolated private var isOAuthFallbackEnabled: Bool {
         UserDefaults.standard.bool(forKey: oauthFallbackUserDefaultsKey)
     }
 
@@ -356,11 +358,11 @@ enum ClaudeCodeAuthState: Equatable {
 
 // MARK: - Response Models
 
-struct ClaudeCodeCredentials: Codable {
+nonisolated struct ClaudeCodeCredentials: Codable {
     let claudeAiOauth: ClaudeAiOAuth
 }
 
-struct ClaudeAiOAuth: Codable {
+nonisolated struct ClaudeAiOAuth: Codable {
     let accessToken: String
     let refreshToken: String
     let expiresAt: Int64

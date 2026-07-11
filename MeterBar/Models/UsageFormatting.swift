@@ -7,7 +7,7 @@ import Foundation
 /// formatting, currency formatting, and a cached `RelativeDateTimeFormatter`.
 /// The formatters are created once and reused so hot UI/scan paths don't
 /// reallocate a `NumberFormatter`/`RelativeDateTimeFormatter` on every call.
-public enum UsageFormat {
+nonisolated public enum UsageFormat {
     private static let groupedInteger: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

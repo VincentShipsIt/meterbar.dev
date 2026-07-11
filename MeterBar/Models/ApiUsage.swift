@@ -5,7 +5,7 @@ import Foundation
 /// A pay-as-you-go API account whose *organization usage* MeterBar reports,
 /// distinct from the flat-rate subscription providers (`ServiceType`). These
 /// have no quota/reset — only spend and tokens over a chosen window.
-enum ApiProvider: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum ApiProvider: String, CaseIterable, Identifiable, Sendable {
     case anthropic
     case openai
 
@@ -31,7 +31,7 @@ enum ApiProvider: String, CaseIterable, Identifiable, Sendable {
 
 /// The reporting window for an API-usage card. `custom` carries an explicit
 /// day range the user picked.
-enum ApiUsageWindow: Equatable, Sendable {
+nonisolated enum ApiUsageWindow: Equatable, Sendable {
     case last7Days
     case last30Days
     case custom(start: Date, end: Date)
@@ -64,7 +64,7 @@ enum ApiUsageWindow: Equatable, Sendable {
 
 // MARK: - ApiModelUsage
 
-struct ApiModelUsage: Identifiable, Sendable {
+nonisolated struct ApiModelUsage: Identifiable, Sendable {
     var id: String { model }
     let model: String
     let inputTokens: Int
@@ -77,7 +77,7 @@ struct ApiModelUsage: Identifiable, Sendable {
 // MARK: - ApiUsage
 
 /// Aggregated organization API usage for one provider over one window.
-struct ApiUsage: Sendable {
+nonisolated struct ApiUsage: Sendable {
     let provider: ApiProvider
     let windowStart: Date
     let windowEnd: Date
@@ -100,7 +100,7 @@ struct ApiUsage: Sendable {
 ///
 /// Prices are approximate list rates verified 2026-07-02 — they rot; update
 /// against the providers' pricing pages.
-enum ApiUsagePricing {
+nonisolated enum ApiUsagePricing {
     struct Rate {
         let input: Double
         let output: Double

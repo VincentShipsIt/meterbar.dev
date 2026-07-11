@@ -51,12 +51,15 @@ class UsageDataManager: ObservableObject {
     /// Defaults wire the production singletons so `shared` behaves exactly as
     /// before; tests inject stub providers, an isolated `UserDefaults` suite, a
     /// temp-directory `SharedDataStore`, and disable the auto-refresh timer.
+    /// The store defaults are `nil` sentinels resolved in the body because the
+    /// MainActor-isolated singletons cannot appear in (nonisolated) default
+    /// argument position.
     init(
         codexCliService: SimpleUsageProviding = CodexCliLocalService.shared,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
         claudeCodeService: ClaudeCodeLocalService = .shared,
-        claudeCodeAccountStore: ClaudeCodeAccountStore = .shared,
-        providerVisibilityStore: ProviderVisibilityStore = .shared,
+        claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
+        providerVisibilityStore: ProviderVisibilityStore? = nil,
         sharedStore: SharedDataStore = .shared,
         cacheDefaults: UserDefaults = .standard,
         schedulesAutoRefresh: Bool = true
@@ -64,8 +67,8 @@ class UsageDataManager: ObservableObject {
         self.codexCliService = codexCliService
         self.cursorService = cursorService
         self.claudeCodeService = claudeCodeService
-        self.claudeCodeAccountStore = claudeCodeAccountStore
-        self.providerVisibilityStore = providerVisibilityStore
+        self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
+        self.providerVisibilityStore = providerVisibilityStore ?? .shared
         self.sharedStore = sharedStore
         self.cacheDefaults = cacheDefaults
         loadCachedData()

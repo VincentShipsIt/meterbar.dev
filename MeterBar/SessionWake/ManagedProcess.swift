@@ -10,7 +10,7 @@ import Foundation
 /// leader so cancellation or timeout can `kill(-pgid)` the whole tree, and
 /// drains both pipes on background queues with a byte cap so a chatty child can
 /// never fill a pipe buffer and hang.
-enum ManagedProcess {
+nonisolated enum ManagedProcess {
     struct Result: Sendable {
         enum Termination: Equatable, Sendable {
             case exited(code: Int32)

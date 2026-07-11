@@ -130,7 +130,7 @@ final class CodexCliLocalServiceTests: XCTestCase {
 
     // MARK: - Auth-file / token-expiry gating
 
-    private func authFileJSON(accessToken: String, accountId: String) -> Data {
+    nonisolated private func authFileJSON(accessToken: String, accountId: String) -> Data {
         Data("""
         {
           "OPENAI_API_KEY": null,

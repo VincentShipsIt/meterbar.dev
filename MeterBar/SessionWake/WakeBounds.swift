@@ -6,7 +6,7 @@ import Foundation
 /// per-session turn and timeout caps, and no "unlimited" default anywhere.
 /// Every field is clamped into a sane range at construction so an invalid
 /// preference can never widen the blast radius of automated resumes.
-struct WakeBounds: Equatable, Sendable {
+nonisolated struct WakeBounds: Equatable, Sendable {
     /// Seconds between live quota polls while waiting.
     let pollInterval: TimeInterval
     /// Seconds to wait past a reset instant before treating quota as open.
@@ -61,7 +61,7 @@ struct WakeBounds: Equatable, Sendable {
     }
 }
 
-extension Comparable {
+nonisolated extension Comparable {
     /// Clamp a value into a closed range.
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)

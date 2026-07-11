@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - ClaudeCodeAccount
 
-struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable {
+nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable {
     static let defaultName = "Default CLI Profile"
 
     /// Fixed sentinel id for the default CLI profile. Built from raw bytes

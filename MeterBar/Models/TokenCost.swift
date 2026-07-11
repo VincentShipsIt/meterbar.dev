@@ -3,7 +3,7 @@ import MeterBarShared
 
 // Public: part of the MeterBar library's API surface consumed by the
 // meterbar CLI (`meterbar cost` reads the app's cached CostSummary).
-public struct TokenCost: Codable, Identifiable, Sendable {
+nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
     public var id: String { provider.rawValue }
 
     public let provider: ServiceType
@@ -57,7 +57,7 @@ public struct TokenCost: Codable, Identifiable, Sendable {
     }
 }
 
-public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
+nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
     public var id: String { "\(provider.rawValue)-\(name)" }
 
     public let provider: ServiceType
@@ -102,7 +102,7 @@ public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
     }
 }
 
-public struct DailyTokenUsage: Codable, Identifiable, Sendable {
+nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     public var id: String { "\(provider.rawValue)-\(Self.dayFormatter.string(from: date))" }
 
     public let date: Date
@@ -140,7 +140,7 @@ public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }()
 }
 
-public struct CostSummary: Codable, Sendable {
+nonisolated public struct CostSummary: Codable, Sendable {
     public let costs: [TokenCost]
     public let totalCostUSD: Double
     public let totalTokens: Int
@@ -284,7 +284,7 @@ public struct CostSummary: Codable, Sendable {
 /// Per-provider token/cost totals summed over a day window (see
 /// `CostSummary.dailyCostWindow`). Public: part of the `meterbar cost --days`
 /// output surface.
-public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
+nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
     public var id: String { provider.rawValue }
 
     public let provider: ServiceType
@@ -320,7 +320,7 @@ public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
 /// Result of windowing the cached daily cost rows to the last N days
 /// (`CostSummary.dailyCostWindow`). Codable so `meterbar cost --days N --json`
 /// can emit it directly.
-public struct DailyCostWindow: Codable, Sendable {
+nonisolated public struct DailyCostWindow: Codable, Sendable {
     /// Days requested via `--days N` (clamped to ≥ 1).
     public let requestedDays: Int
     /// Days the cache can actually cover: the requested window clamped to both

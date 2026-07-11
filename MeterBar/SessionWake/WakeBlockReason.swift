@@ -5,7 +5,7 @@ import Foundation
 /// The transcript only ever spells the reason in prose ("session limit",
 /// "usage limit", "weekly limit"), so discovery maps that prose onto a closed
 /// set the rest of Session Wake can gate on without re-parsing strings.
-enum WakeBlockReason: String, Codable, Equatable, Sendable, CaseIterable {
+nonisolated enum WakeBlockReason: String, Codable, Equatable, Sendable, CaseIterable {
     /// The rolling 5-hour session window ("You've hit your session limit").
     case sessionLimit
     /// A generic usage limit that is not explicitly the weekly window.

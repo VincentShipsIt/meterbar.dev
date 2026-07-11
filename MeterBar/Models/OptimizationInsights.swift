@@ -8,7 +8,7 @@ import MeterBarShared
 /// Classification is a pure, name-only heuristic — no network, no prompt
 /// contents. New frontier/economy ids are matched by family substring so the
 /// tiering keeps working as providers ship dated variants.
-enum ModelTier: String, Sendable, Equatable {
+nonisolated enum ModelTier: String, Sendable, Equatable {
     case premium
     case standard
     case economy
@@ -47,7 +47,7 @@ enum ModelTier: String, Sendable, Equatable {
 // MARK: - Ranked entry
 
 /// One row of a ranked token breakdown (by model or by usage origin).
-struct RankedTokenEntry: Identifiable, Equatable, Sendable {
+nonisolated struct RankedTokenEntry: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let provider: ServiceType
@@ -66,7 +66,7 @@ struct RankedTokenEntry: Identifiable, Equatable, Sendable {
 
 // MARK: - Recommendation
 
-enum RecommendationSeverity: Int, Comparable, Sendable {
+nonisolated enum RecommendationSeverity: Int, Comparable, Sendable {
     case positive = 0
     case info = 1
     case suggestion = 2
@@ -79,7 +79,7 @@ enum RecommendationSeverity: Int, Comparable, Sendable {
 
 /// A single plain-English optimization recommendation. Every field is derived
 /// from local aggregates only — never prompt contents.
-struct OptimizationRecommendation: Identifiable, Equatable, Sendable {
+nonisolated struct OptimizationRecommendation: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let detail: String
@@ -97,7 +97,7 @@ struct OptimizationRecommendation: Identifiable, Equatable, Sendable {
 /// from the same cache the Costs page already renders. Kept as a pure model
 /// (no SwiftUI, no I/O) so the recommendation logic is unit-testable, matching
 /// the `SocialShareCardContent` pattern.
-struct OptimizationInsights: Equatable, Sendable {
+nonisolated struct OptimizationInsights: Equatable, Sendable {
     // MARK: Tunable scoring constants
 
     private enum Score {

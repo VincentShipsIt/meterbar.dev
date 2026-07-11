@@ -4,7 +4,7 @@ import Foundation
 /// The lifecycle abstraction the controller drives. `WakeCoordinator` is the
 /// production conformer; tests substitute a fake to assert start/stop without
 /// spawning a subprocess.
-protocol WakeWatching: Sendable {
+nonisolated protocol WakeWatching: Sendable {
     func start(account: ClaudeCodeAccount) async
     func stop() async
     func waitUntilFinished() async
@@ -42,18 +42,21 @@ final class SessionWakeController: ObservableObject {
     private var watchTask: Task<Void, Never>?
     private var started = false
 
+    /// The store defaults are `nil` sentinels resolved in the body because the
+    /// MainActor-isolated singletons cannot appear in (nonisolated) default
+    /// argument position.
     init(
-        store: SessionWakeSettingsStore = .shared,
-        status: SessionWakeStatus = .shared,
-        accounts: ClaudeCodeAccountStore = .shared,
+        store: SessionWakeSettingsStore? = nil,
+        status: SessionWakeStatus? = nil,
+        accounts: ClaudeCodeAccountStore? = nil,
         rescanInterval: TimeInterval = 300,
         makeWatcher: @escaping WakeWatcherFactory = { runner, bounds, onState in
             WakeCoordinator(runner: runner, bounds: bounds, onState: onState)
         }
     ) {
-        self.store = store
-        self.status = status
-        self.accounts = accounts
+        self.store = store ?? .shared
+        self.status = status ?? .shared
+        self.accounts = accounts ?? .shared
         self.rescanInterval = rescanInterval
         self.makeWatcher = makeWatcher
     }

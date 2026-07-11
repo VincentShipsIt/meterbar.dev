@@ -6,7 +6,7 @@ import Foundation
 /// A transcript that hit a limit and then made further progress is `.active`,
 /// not `.blocked` — the historical limit is stale. Only a limit that is the
 /// last decisive event makes a session eligible for wake.
-enum TranscriptState: Equatable, Sendable {
+nonisolated enum TranscriptState: Equatable, Sendable {
     /// The last decisive event is a usage limit.
     case blocked(reason: WakeBlockReason, blockedAt: Date, resetHint: TranscriptResetParser.Result?)
     /// The last decisive event is successful assistant/tool activity.
@@ -16,7 +16,7 @@ enum TranscriptState: Equatable, Sendable {
 }
 
 /// Metadata a classified transcript exposes to discovery.
-struct TranscriptSummary: Equatable, Sendable {
+nonisolated struct TranscriptSummary: Equatable, Sendable {
     let sessionID: String
     let cwd: String?
     let gitBranch: String?
@@ -27,7 +27,7 @@ struct TranscriptSummary: Equatable, Sendable {
 
 /// Classifies raw JSONL transcript lines. Pure and side-effect free so it can
 /// run off the main actor and be exhaustively fixture-tested.
-enum TranscriptClassifier {
+nonisolated enum TranscriptClassifier {
     /// A single decoded transcript record, tolerant of the widely varying
     /// Claude Code JSONL schema. Non-object or malformed lines are dropped by
     /// the caller before reaching here.

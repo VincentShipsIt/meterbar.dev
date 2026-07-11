@@ -1,7 +1,7 @@
 import Foundation
 import MeterBarShared
 
-final class ClaudeCodeCLIUsageService: Sendable {
+nonisolated final class ClaudeCodeCLIUsageService: Sendable {
     static let shared = ClaudeCodeCLIUsageService()
 
     private let commandTimeout: TimeInterval = 12
@@ -103,7 +103,7 @@ final class ClaudeCodeCLIUsageService: Sendable {
     }
 }
 
-enum ClaudeCodeCLIUsageParser {
+nonisolated enum ClaudeCodeCLIUsageParser {
     static func parseMetrics(from text: String, now: Date = Date()) throws -> UsageMetrics {
         let sanitized = stripANSICodes(from: text)
         let lines = sanitized
@@ -237,7 +237,7 @@ enum ClaudeCodeCLIUsageParser {
     }
 }
 
-enum ClaudeCodeCLIUsageError: LocalizedError {
+nonisolated enum ClaudeCodeCLIUsageError: LocalizedError {
     case cliNotFound
     case launchFailed(String)
     case timedOut
@@ -261,7 +261,7 @@ enum ClaudeCodeCLIUsageError: LocalizedError {
     }
 }
 
-private extension Array where Element == String {
+nonisolated private extension Array where Element == String {
     subscript(safe index: Int) -> String? {
         indices.contains(index) ? self[index] : nil
     }

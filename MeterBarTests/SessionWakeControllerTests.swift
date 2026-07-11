@@ -98,7 +98,7 @@ final class SessionWakeControllerTests: XCTestCase {
 
 // MARK: - Doubles
 
-private final class WatchRecorder: @unchecked Sendable {
+nonisolated private final class WatchRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var starts = 0
     private var stops = 0
@@ -108,7 +108,7 @@ private final class WatchRecorder: @unchecked Sendable {
     func recordStop() { lock.lock(); stops += 1; lock.unlock() }
 }
 
-private struct FakeWatcher: WakeWatching {
+nonisolated private struct FakeWatcher: WakeWatching {
     let recorder: WatchRecorder
     let onState: @Sendable (WakeWatcherState) -> Void
 

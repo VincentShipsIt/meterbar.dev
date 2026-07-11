@@ -5,7 +5,7 @@ import Foundation
 /// v1 default is `.safe`. `.bypass` maps to `--dangerously-skip-permissions`
 /// and is only ever emitted when the caller has separately acknowledged it —
 /// the builder refuses to silently escalate.
-enum WakePermissionMode: String, Codable, Equatable, Sendable {
+nonisolated enum WakePermissionMode: String, Codable, Equatable, Sendable {
     case safe
     case bypass
 }
@@ -13,7 +13,7 @@ enum WakePermissionMode: String, Codable, Equatable, Sendable {
 /// A fully-resolved child invocation: executable + argument array + environment
 /// + working directory. Built as arrays, never a shell string — nothing here is
 /// ever passed through `/bin/sh`.
-struct WakeCommand: Equatable, Sendable {
+nonisolated struct WakeCommand: Equatable, Sendable {
     let executable: String
     let arguments: [String]
     let environment: [String: String]
@@ -21,7 +21,7 @@ struct WakeCommand: Equatable, Sendable {
 }
 
 /// Builds the `claude` resume invocation for a candidate.
-enum WakeCommandBuilder {
+nonisolated enum WakeCommandBuilder {
     /// The resume prompt default. Deliberately minimal.
     static let defaultPrompt = "continue"
 

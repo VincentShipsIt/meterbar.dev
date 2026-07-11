@@ -6,7 +6,7 @@ import Foundation
 /// This was previously private to `ClaudeCodeCLIUsageService`; it is factored
 /// out so provider-readiness diagnostics can ask "is `codex` / `claude` on
 /// PATH?" without re-deriving the same fallback list.
-enum CLIBinaryLocator {
+nonisolated enum CLIBinaryLocator {
     /// The install-location fallbacks checked after `PATH`, for `command`.
     private static func fallbackCandidates(for command: String, home: String) -> [String] {
         [

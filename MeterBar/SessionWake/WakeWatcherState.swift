@@ -6,7 +6,7 @@ import Foundation
 /// "Watching" — the UI (#98) and CLI (#99) must be able to tell a caller
 /// exactly why nothing is launching (waiting on reset vs quota-unknown vs
 /// stopping) rather than papering over failures.
-enum WakeWatcherState: Equatable, Sendable {
+nonisolated enum WakeWatcherState: Equatable, Sendable {
     /// Feature disabled or watcher not armed.
     case off
     /// Feature on, watcher idle/armed but not currently working.
@@ -28,7 +28,7 @@ enum WakeWatcherState: Equatable, Sendable {
 }
 
 /// Tally of a completed (or preserved) wake run.
-struct WakeRunSummary: Equatable, Sendable {
+nonisolated struct WakeRunSummary: Equatable, Sendable {
     var resumed: Int = 0
     var failed: Int = 0
     var skipped: Int = 0
@@ -39,7 +39,7 @@ struct WakeRunSummary: Equatable, Sendable {
 }
 
 /// The outcome of running one session, reported by the execution layer (#97).
-enum WakeRunOutcome: Equatable, Sendable {
+nonisolated enum WakeRunOutcome: Equatable, Sendable {
     case succeeded
     case failed(reason: String)
     case skipped(reason: WakeSkipReason)
@@ -49,6 +49,6 @@ enum WakeRunOutcome: Equatable, Sendable {
 /// The execution seam the coordinator drives. #96 owns orchestration and state;
 /// the concrete process runner arrives in #97. Keeping it a protocol lets the
 /// state machine be tested without spawning a subprocess.
-protocol WakeExecuting: Sendable {
+nonisolated protocol WakeExecuting: Sendable {
     func run(_ candidate: WakeSessionCandidate, bounds: WakeBounds) async -> WakeRunOutcome
 }

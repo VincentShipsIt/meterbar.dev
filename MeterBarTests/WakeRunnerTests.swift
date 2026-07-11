@@ -59,13 +59,14 @@ final class WakeRunnerTests: XCTestCase {
     ) -> WakeProcessRunner {
         var env = env
         env["PATH"] = env["PATH"] ?? "/usr/bin:/bin"
+        let lockURL = tempDir.appendingPathComponent("wake.lock")
         return WakeProcessRunner(
             account: account(),
             executable: fake,
             permissionMode: permissionMode,
             bypassAcknowledged: bypassAcknowledged,
             baseEnvironment: env,
-            lockFactory: { WakeLock(lockURL: self.tempDir.appendingPathComponent("wake.lock"), legacyLockURLs: []) },
+            lockFactory: { WakeLock(lockURL: lockURL, legacyLockURLs: []) },
             logger: WakeRunLogger(directory: logDir ?? self.tempDir.appendingPathComponent("logs"))
         )
     }

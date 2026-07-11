@@ -4,13 +4,13 @@ import MeterBarShared
 /// Source of *fresh* account-scoped quota. Cached UI metrics are never passed
 /// here — the authority always pulls a live reading so a launch decision can
 /// never rest on stale numbers.
-protocol WakeQuotaProviding: Sendable {
+nonisolated protocol WakeQuotaProviding: Sendable {
     func fetchMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics
 }
 
 /// Default provider: the same `claude /usage` service the app and CLI already
 /// use, scoped to the selected account's `CLAUDE_CONFIG_DIR`.
-struct LiveWakeQuotaProvider: WakeQuotaProviding {
+nonisolated struct LiveWakeQuotaProvider: WakeQuotaProviding {
     func fetchMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics {
         try await ClaudeCodeCLIUsageService.shared.fetchUsageMetrics(account: account)
     }
@@ -18,7 +18,7 @@ struct LiveWakeQuotaProvider: WakeQuotaProviding {
 
 /// Resolves a fresh quota decision for the selected account, failing closed on
 /// any error, staleness, or ambiguity.
-struct WakeQuotaAuthority: Sendable {
+nonisolated struct WakeQuotaAuthority: Sendable {
     private let provider: WakeQuotaProviding
     /// Metrics older than this are not accepted as execution authority even if
     /// a fetch returned them.

@@ -5,7 +5,7 @@ import MeterBarShared
 ///
 /// These were previously inline string literals scattered across six files —
 /// a typo in any one of them silently reads/writes the wrong key.
-enum StorageKeys {
+nonisolated enum StorageKeys {
     /// Cached `[ServiceType: UsageMetrics]` blob (also the app-group file's
     /// base name — see SharedDataStore). Single-sourced from `MeterBarShared`
     /// so the app, widget, and CLI can't drift on the key.

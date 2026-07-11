@@ -8,7 +8,7 @@ import os
 /// transcript, tool output, credentials, or any raw stdout/stderr tail. The log
 /// directory is `0700` and every file `0600`, with day-based rotation and a
 /// bounded retention window.
-struct WakeRunLogger: Sendable {
+nonisolated struct WakeRunLogger: Sendable {
     /// One structured record. No free-form content fields exist by design.
     struct Record: Codable, Equatable, Sendable {
         let timestamp: Date
@@ -88,7 +88,7 @@ struct WakeRunLogger: Sendable {
     }
 }
 
-private extension JSONEncoder {
+nonisolated private extension JSONEncoder {
     static let wakeEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

@@ -5,7 +5,7 @@ import Foundation
 /// Centralizes the URLSession configuration, HTTP response validation, error
 /// mapping, browser-spoof headers, main-thread state application, and the real
 /// (non-sandboxed) home directory lookup so all services behave consistently.
-enum ServiceSupport {
+nonisolated enum ServiceSupport {
     /// The one `URLSession` all usage requests share, configured with the
     /// standard MeterBar timeouts. Previously each service built its own
     /// session — and some code paths silently used `URLSession.shared`,
@@ -140,11 +140,11 @@ enum ServiceSupport {
     /// Runs `block` on the main thread — synchronously when already there, so
     /// callers on the main thread observe the state change immediately
     /// (SettingsView reads `hasAccess` right after calling `checkAccess()`).
-    static func applyOnMain(_ block: @escaping () -> Void) {
+    static func applyOnMain(_ block: @escaping @MainActor @Sendable () -> Void) {
         if Thread.isMainThread {
-            block()
+            MainActor.assumeIsolated(block)
         } else {
-            DispatchQueue.main.async(execute: block)
+            DispatchQueue.main.async { block() }
         }
     }
 

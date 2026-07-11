@@ -7,7 +7,7 @@ import Foundation
 /// array (never a shell), enforce a timeout with process-tree cleanup, honor
 /// structured-task cancellation, and record a metadata-only log line. A dead
 /// worktree is a structured skip, not a failure that aborts the queue.
-struct WakeProcessRunner: WakeExecuting {
+nonisolated struct WakeProcessRunner: WakeExecuting {
     /// Explicit executable path; when nil the `claude` binary is resolved.
     let executable: String?
     let permissionMode: WakePermissionMode
@@ -171,7 +171,7 @@ struct WakeProcessRunner: WakeExecuting {
     }
 }
 
-extension WakeRunOutcome {
+nonisolated extension WakeRunOutcome {
     /// Stable label for structured logs (never includes content).
     var logLabel: String {
         switch self {

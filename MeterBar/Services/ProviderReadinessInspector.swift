@@ -13,7 +13,7 @@ import MeterBarShared
 ///
 /// All provider error text is sanitized here (`sanitize`) so nothing that could
 /// contain a token, account id, or raw response body reaches a pasteable report.
-public enum ProviderReadinessInspector {
+nonisolated public enum ProviderReadinessInspector {
     /// Readiness reports for the requested providers, in stable display order.
     ///
     /// - Parameter refreshErrors: each provider's live last-refresh error. The app

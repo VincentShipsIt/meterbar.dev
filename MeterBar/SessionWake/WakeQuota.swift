@@ -7,7 +7,7 @@ import MeterBarShared
 /// block or any doubt at all — refuses to launch. This is the fail-closed
 /// contract: missing, stale, failed, or ambiguous quota is `.unknown`, never
 /// silently treated as available.
-enum WakeQuota: Equatable, Sendable {
+nonisolated enum WakeQuota: Equatable, Sendable {
     /// A hard window is open and fresh enough to authorize one launch.
     case available
     /// A hard window is exhausted; `until` is its reset instant when known.

@@ -10,7 +10,7 @@ import SQLite3
 /// Reads authentication token from Cursor's local SQLite database and calls dashboard APIs.
 /// Based on: https://github.com/darzhang/cursor-stats-lite
 class CursorLocalService: ObservableObject {
-    static let shared = CursorLocalService()
+    nonisolated static let shared = CursorLocalService()
 
     // API endpoint (from Vibeviewer: https://github.com/MarveleE/Vibeviewer)
     private let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
@@ -29,7 +29,7 @@ class CursorLocalService: ObservableObject {
     @Published private(set) var subscriptionType: String?
     @Published private(set) var lastError: ServiceError?
 
-    private init() {
+    nonisolated private init() {
         // Defer I/O off main thread; only @Published mutations land on main actor
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess(forceRescan: false) }
     }
@@ -38,7 +38,7 @@ class CursorLocalService: ObservableObject {
 
     /// Get the path to Cursor's state database
     /// Scans multiple possible locations and optionally searches recursively
-    private func getCursorDatabasePath(forceRescan: Bool = false) -> String? {
+    nonisolated private func getCursorDatabasePath(forceRescan: Bool = false) -> String? {
         let homeDir = ServiceSupport.realHomeDirectory()
         let fileManager = FileManager.default
 
@@ -75,7 +75,7 @@ class CursorLocalService: ObservableObject {
     }
 
     /// Recursively search for a database file in a directory
-    private func findDatabaseRecursively(in directory: String, filename: String) -> String? {
+    nonisolated private func findDatabaseRecursively(in directory: String, filename: String) -> String? {
         let fileManager = FileManager.default
 
         guard fileManager.fileExists(atPath: directory),
@@ -95,7 +95,7 @@ class CursorLocalService: ObservableObject {
 
     /// Read access token from Cursor's SQLite database
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
-    func getAccessTokenFromDatabase(forceRescan: Bool = false) -> (userId: String, token: String)? {
+    nonisolated func getAccessTokenFromDatabase(forceRescan: Bool = false) -> (userId: String, token: String)? {
         guard let dbPath = getCursorDatabasePath(forceRescan: forceRescan) else {
             // Database not found - Cursor may not be installed, which is okay
             return nil
@@ -151,7 +151,7 @@ class CursorLocalService: ObservableObject {
     /// Uses the same path scan and read-only open as `getAccessTokenFromDatabase`,
     /// but reports *why* auth is unavailable (not found / unreadable / no token)
     /// instead of just a token, and never returns the token value itself.
-    func probeReadinessDatabase() -> CursorDatabaseProbe {
+    nonisolated func probeReadinessDatabase() -> CursorDatabaseProbe {
         guard let dbPath = getCursorDatabasePath(forceRescan: false)
             ?? getCursorDatabasePath(forceRescan: true) else {
             return .notFound
@@ -185,7 +185,7 @@ class CursorLocalService: ObservableObject {
 
     /// Extract userId from JWT token's 'sub' claim.
     /// Static + internal so it is unit-testable without a Cursor DB or network.
-    static func extractUserIdFromJWT(_ token: String) -> String? {
+    nonisolated static func extractUserIdFromJWT(_ token: String) -> String? {
         guard let sub = JWT.claimString("sub", in: token) else { return nil }
 
         // Extract userId from sub claim
@@ -205,7 +205,7 @@ class CursorLocalService: ObservableObject {
 
     /// Check and update access status
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
-    func checkAccess(forceRescan: Bool = false) {
+    nonisolated func checkAccess(forceRescan: Bool = false) {
         let hasToken = getAccessTokenFromDatabase(forceRescan: forceRescan) != nil
         ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }

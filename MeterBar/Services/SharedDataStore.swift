@@ -8,7 +8,9 @@ import WidgetKit
 /// Shared data store using App Groups for Widget extension access.
 /// Public so the meterbar CLI reads the same file through the same code path
 /// instead of maintaining its own copy of the location and decode logic.
-public class SharedDataStore {
+/// `@unchecked Sendable`: all stored properties are immutable and disk writes
+/// are serialized on `ioQueue`.
+nonisolated public final class SharedDataStore: @unchecked Sendable {
     public static let shared = SharedDataStore()
 
     /// Serial queue for off-main disk writes so callers on the MainActor don't

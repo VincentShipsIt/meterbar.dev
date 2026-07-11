@@ -7,7 +7,7 @@ import os
 /// SwiftLint rule) with the unified logging system. Using `Logger` keeps diagnostics
 /// out of release stdout, lets the OS apply privacy redaction, and avoids logging
 /// raw API response bodies or token-bearing strings to the console.
-enum AppLog {
+nonisolated enum AppLog {
     private static let subsystem = Bundle.main.bundleIdentifier ?? "dev.meterbar.app"
 
     static let app = Logger(subsystem: subsystem, category: "app")
