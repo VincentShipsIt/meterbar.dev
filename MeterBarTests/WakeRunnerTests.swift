@@ -161,6 +161,15 @@ final class WakeRunnerTests: XCTestCase {
         second.release()
     }
 
+    func testLockFileIsCreatedWithPrivatePermissions() throws {
+        let url = tempDir.appendingPathComponent("perm.lock")
+        let lock = WakeLock(lockURL: url, legacyLockURLs: [])
+        XCTAssertEqual(lock.acquire(), .acquired)
+        defer { lock.release() }
+        let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        XCTAssertEqual(perms, 0o600, "Lock file must be owner-only (0600)")
+    }
+
     func testLegacyWatcherContentionIsReported() {
         let legacy = tempDir.appendingPathComponent("legacy.lock")
         FileManager.default.createFile(atPath: legacy.path, contents: nil)
@@ -199,5 +208,33 @@ final class WakeRunnerTests: XCTestCase {
         // No prompt, no raw output tails.
         XCTAssertFalse(contents.contains("continue"))
         XCTAssertFalse(contents.lowercased().contains("stdout\":\""))
+    }
+
+    func testPruneOldLogsRemovesFilesBeyondRetention() throws {
+        let logDir = tempDir.appendingPathComponent("prune-logs")
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let fileManager = FileManager.default
+
+        // One log aged past the 14-day window, one comfortably inside it. Pruning
+        // keys off file modification time, so set those explicitly.
+        let expired = logDir.appendingPathComponent("session-wake-old.log")
+        let fresh = logDir.appendingPathComponent("session-wake-new.log")
+        fileManager.createFile(atPath: expired.path, contents: Data("x".utf8))
+        fileManager.createFile(atPath: fresh.path, contents: Data("y".utf8))
+        try fileManager.setAttributes(
+            [.modificationDate: fixedNow.addingTimeInterval(-30 * 86_400)], ofItemAtPath: expired.path)
+        try fileManager.setAttributes(
+            [.modificationDate: fixedNow.addingTimeInterval(-1 * 86_400)], ofItemAtPath: fresh.path)
+
+        // Appending triggers pruneOldLogs against the injected clock.
+        let logger = WakeRunLogger(directory: logDir, retentionDays: 14, now: { fixedNow })
+        logger.append(WakeRunLogger.Record(
+            timestamp: fixedNow, event: "wake", sessionID: "sid", reason: "sessionLimit",
+            outcome: "succeeded", exitCode: 0, durationMilliseconds: 10, stdoutBytes: 1, stderrBytes: 0
+        ))
+
+        XCTAssertFalse(fileManager.fileExists(atPath: expired.path), "Log older than retention must be pruned")
+        XCTAssertTrue(fileManager.fileExists(atPath: fresh.path), "Log within retention must be kept")
     }
 }
