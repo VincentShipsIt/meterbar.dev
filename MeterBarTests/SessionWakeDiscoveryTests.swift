@@ -359,6 +359,38 @@ final class SessionWakeDiscoveryTests: XCTestCase {
         XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2027-01-02T09:00:00Z"))
     }
 
+    func testSlightlyElapsedMonthDayResetStaysPastInsteadOfRollingAYear() throws {
+        // Display rounding or a timezone fallback can put the resolved reset
+        // minutes before the event; that must read as "already elapsed,
+        // re-check now" — not as next year's reset.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T09:05:00Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jul 10 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2026-07-10T09:00:00Z"))
+    }
+
+    func testStatedYearIsAuthoritativeEvenWhenPast() throws {
+        // An explicit year never rolls forward, even if it is long elapsed.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T04:14:15Z")!
+        let result = try XCTUnwrap(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jan 2, 2026 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+        XCTAssertEqual(result.resetAt, ISO8601DateFormatter().date(from: "2026-01-02T09:00:00Z"))
+    }
+
+    func testImpossibleDayOfMonthIsRejected() {
+        // Calendar would silently normalize "Jul 32" to Aug 1; the parser must
+        // refuse instead of inventing a date the message never stated.
+        let event = ISO8601DateFormatter().date(from: "2026-07-10T04:14:15Z")!
+        XCTAssertNil(TranscriptResetParser.parse(
+            messageText: "You've hit your weekly limit · resets Jul 32 at 9am (UTC)",
+            eventTimestamp: event
+        ))
+    }
+
     func testWeeklyMonthDayMessageClassifiesBlockedWithReset() throws {
         let cwd = tempDir.path
         let lines = [

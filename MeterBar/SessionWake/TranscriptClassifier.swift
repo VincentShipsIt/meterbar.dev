@@ -20,7 +20,9 @@ nonisolated struct TranscriptSummary: Equatable, Sendable {
     let sessionID: String
     let cwd: String?
     let gitBranch: String?
-    /// True when any decisive entry was a subagent/sidechain entry.
+    /// True when every event line is a subagent/sidechain entry — the whole
+    /// transcript belongs to a subagent run (individual sidechain lines are
+    /// skipped for classification, not disqualifying).
     let isSidechain: Bool
     let state: TranscriptState
 }

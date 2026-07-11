@@ -106,8 +106,8 @@ nonisolated enum TranscriptResetParser {
 
     /// Resolve an explicit month/day(/year) reset. With no stated year the date
     /// is anchored to the event's year and rolled forward a *whole year* when it
-    /// lands before the event — a December block whose reset reads "Jan 2" is
-    /// next January, never this year's elapsed one.
+    /// lands well before the event — a December block whose reset reads "Jan 2"
+    /// is next January, never this year's elapsed one.
     private static func explicitDate(
         month: Int,
         day: Int?,
@@ -118,13 +118,27 @@ nonisolated enum TranscriptResetParser {
     ) -> Date? {
         var components = base
         components.month = month
-        if let day { components.day = day }
+        if let day {
+            // Calendar.date(from:) silently normalizes overflow ("Jul 32" →
+            // Aug 1); reject impossible days like the hour/minute guards do.
+            guard (1...31).contains(day) else { return nil }
+            components.day = day
+        }
         if let explicitYear { components.year = explicitYear }
         guard let resolved = calendar.date(from: components) else { return nil }
-        // A stated year is authoritative; only an inferred year rolls forward.
-        guard explicitYear == nil, resolved < eventTimestamp else { return resolved }
+        // A stated year is authoritative; only an inferred year rolls forward,
+        // and only when the shortfall exceeds what display rounding or a
+        // timezone-fallback skew could explain. Within the tolerance the past
+        // instant is returned as-is — the contract treats an elapsed reset as
+        // "re-check now", which is safe; a +1-year instant is not.
+        guard explicitYear == nil,
+              resolved < eventTimestamp - rolloverSkewTolerance else { return resolved }
         return calendar.date(byAdding: .year, value: 1, to: resolved)
     }
+
+    /// How far in the past an inferred-year month/day reset may land before we
+    /// assume it means *next* year rather than clock/display skew (2 days).
+    private static let rolloverSkewTolerance: TimeInterval = 2 * 86_400
 
     /// Resolve a bare clock time to whichever of {yesterday, today, tomorrow}
     /// lands closest to the event instant. Choosing the nearest occurrence —

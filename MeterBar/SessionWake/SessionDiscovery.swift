@@ -91,12 +91,9 @@ actor SessionDiscovery {
             bySession[summary.sessionID] = candidate
         }
 
-        return bySession.values.sorted { lhs, rhs in
-            if lhs.blockedAt != rhs.blockedAt {
-                return lhs.blockedAt > rhs.blockedAt
-            }
-            return lhs.transcriptPath < rhs.transcriptPath
-        }
+        // `supersedes` is a strict total order over (blockedAt desc, path asc);
+        // reusing it keeps the dedupe winner and the output order one rule.
+        return bySession.values.sorted(by: supersedes)
     }
 
     /// Deterministic dedupe: the latest block wins; equal block instants
