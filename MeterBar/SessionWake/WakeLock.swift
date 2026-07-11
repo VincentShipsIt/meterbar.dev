@@ -20,6 +20,10 @@ nonisolated final class WakeLock: @unchecked Sendable {
 
     private let lockURL: URL
     private let legacyLockURLs: [URL]
+    /// Guards `fileDescriptor`: the class is `@unchecked Sendable` and its
+    /// descriptor may be touched from `acquire()`, `release()`, and `deinit` on
+    /// different threads, so every read/write of it goes through this lock.
+    private let stateLock = NSLock()
     private var fileDescriptor: Int32 = -1
 
     init(lockURL: URL? = nil, legacyLockURLs: [URL]? = nil) {
@@ -49,22 +53,33 @@ nonisolated final class WakeLock: @unchecked Sendable {
             return .contended
         }
 
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else { return .contended }
-        if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
-            close(descriptor)
-            return .contended
+        // The whole open/flock/store sequence runs under `stateLock` so a
+        // concurrent `release()` can't slip between a successful `flock` and
+        // the descriptor store (which would leak the held lock), and a second
+        // `acquire()` can't overwrite an already-held descriptor. `LOCK_NB`
+        // keeps the critical section non-blocking.
+        let acquired: Bool = stateLock.withLock {
+            guard fileDescriptor < 0 else { return true }
+            let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+            guard descriptor >= 0 else { return false }
+            if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+                close(descriptor)
+                return false
+            }
+            fileDescriptor = descriptor
+            return true
         }
-        fileDescriptor = descriptor
-        return .acquired
+        return acquired ? .acquired : .contended
     }
 
     /// Release the lock and remove the descriptor. Safe to call repeatedly.
     func release() {
-        guard fileDescriptor >= 0 else { return }
-        flock(fileDescriptor, LOCK_UN)
-        close(fileDescriptor)
-        fileDescriptor = -1
+        stateLock.withLock {
+            guard fileDescriptor >= 0 else { return }
+            flock(fileDescriptor, LOCK_UN)
+            close(fileDescriptor)
+            fileDescriptor = -1
+        }
     }
 
     /// Whether any known legacy lock file is currently `flock`-held by another

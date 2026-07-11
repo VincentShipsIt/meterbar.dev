@@ -284,4 +284,92 @@ Cache usage metrics in UserDefaults:
 
 ---
 
+### ADR-010: Session Wake watcher lifetime and active-child cancellation (v1)
+
+**Date:** 2026-07-10
+**Status:** Accepted
+**Issue:** #96 (cancellable watcher state machine); refined by #112 (single
+ON/OFF toggle wired to a live continuous watcher)
+
+#### Context
+
+Session Wake needs a long-lived component that waits for a quota reset and then
+resumes blocked Claude Code sessions. #96 requires an explicit, tested decision
+for the watcher's lifetime (app-running-only vs. a managed background helper)
+covering sleep/wake, app quit, crash, and relaunch — plus what happens to a
+child `claude` session that is mid-run when the user turns the watcher off.
+
+#### Decision
+
+**Lifetime: app-running-only. No managed helper (no launchd/XPC daemon) in v1.**
+
+Each watch *pass* is a single cancellable structured `Task` owned by the
+`WakeCoordinator` actor, driving scan → (wait | quota-unknown) → run → re-check.
+Since #112 the watcher is *continuous*: `SessionWakeController` runs a
+`WakeCoordinator` pass, and when a pass settles it re-scans after a fixed
+interval so the watcher keeps watching for the *next* limit hit rather than
+stopping after one resume. The whole thing is tied to the app process lifetime:
+
+- **Quit / crash:** the watch task dies with the app. Nothing resumes while
+  MeterBar is not running. This is intentional — a background daemon that
+  resumes agent sessions unattended is a larger security/permissions surface
+  than v1 accepts (permission bypass, private logging, and the mutual-exclusion
+  protocol are #97 concerns). The legacy launchd watcher stays paused; it is not
+  replaced by a new daemon here.
+- **Relaunch:** the coordinator starts in `.off`. Re-arming is driven by the
+  persisted single ON/OFF toggle (#98/#112 settings store): if the toggle was
+  left on, the controller reconciles and re-arms on launch. #95's replay ledger
+  guarantees a block already handled before the quit is not resumed again after
+  relaunch.
+- **Sleep / wake:** a known reset waits in a single bounded sleep until that
+  instant (an unknown reset polls in interval-sized steps), and **every**
+  launch is gated on a *fresh* quota fetch. A sleep that overshoots after the
+  machine wakes therefore costs only latency, never correctness; the watcher
+  never launches on a stale timer — it re-proves quota on wake.
+
+**Active-child cancellation: cooperative-cancel, preserve, never record.**
+
+When the watcher is turned off (toggle off, wake account removed, or app
+teardown) while a child session is running:
+
+- The structured task is cancelled; the runner (#97) receives cooperative
+  cancellation via its task-cancellation handler, terminates the child within a
+  bounded grace, and returns `WakeRunOutcome.cancelled`.
+- A `.cancelled` outcome is **not** recorded: only `.succeeded` writes the
+  candidate's block fingerprint to the replay ledger, so the interrupted block
+  stays retryable on a later armed run. The in-flight candidate has already been
+  removed from the local queue for the attempt, but because nothing was recorded
+  a subsequent re-scan rediscovers it.
+- `stop()` requests cancellation and returns; the run loop — not `stop()` —
+  owns the final transition, and the coordinator only enters `.off` after the
+  task fully unwinds (observable via `waitUntilFinished()`), so "watcher off"
+  is deterministic rather than best-effort.
+
+#### Consequences
+
+- **Easier:** no signing/entitlement surface for a helper; no daemon lifecycle
+  to manage; cancellation is deterministic and unit-testable with fakes.
+- **Easier:** fail-closed by construction — missing/stale/ambiguous quota and a
+  passed reset all launch nothing.
+- **More difficult:** no overnight resume when the Mac is fully asleep or the
+  app is quit. Documented as a v1 limitation; a managed helper is a possible
+  v2 follow-up.
+- **More difficult:** interrupting a child mid-turn may leave that session's
+  work partially done; it is retried from its last transcript state, not from a
+  checkpoint.
+
+#### Alternatives Considered
+
+- **launchd/XPC managed helper (rejected for v1):** enables resume while the app
+  is closed, but multiplies the signing, permission-bypass, and private-logging
+  surface the epic defers to later issues; the legacy launchd watcher is being
+  retired, not re-created.
+- **Let the active child finish on watcher-off (rejected):** makes "off" mean
+  "off after the current session," which is surprising for a kill switch and
+  leaves a subprocess running unbounded after the user opted out.
+- **Force-kill without preserving the candidate (rejected):** would either drop
+  the work or, if recorded as handled, silently skip it on the next run.
+
+---
+
 <!-- Add new ADRs above this line -->
