@@ -28,9 +28,11 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/menubar.png" alt="Menu Bar" width="300">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/widget-medium.png" alt="Widget" width="300">
+  <img
+    src="https://meterbar.dev/product/overview.png"
+    alt="MeterBar overview window tracking Codex, Claude, and Cursor usage limits"
+    width="800"
+  >
 </p>
 
 ## Features
