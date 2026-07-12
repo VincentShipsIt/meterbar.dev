@@ -1,0 +1,57 @@
+name: Weekly release milestones
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Maintain rolling weekly release milestones
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          today=$(date -u +%F)
+          monday=$(date -u -d "$today -$((10#$(date -u +%u) - 1)) days" +%F)
+          milestones=$(gh api --paginate "repos/$REPOSITORY/milestones?state=all&per_page=100" | jq -s 'add')
+
+          current_number=""
+          for offset in $(seq 0 7); do
+            due=$(date -u -d "$monday +$((offset * 7 + 6)) days" +%F)
+            title="$(date -u -d "$due" +%G-W%V) · Weekly Release"
+            number=$(jq -r --arg title "$title" '.[] | select(.title == $title) | .number' <<<"$milestones" | head -1)
+            description="Weekly delivery timebox. Unfinished active work rolls forward on Monday; deferred work is unscheduled."
+            if [[ -z "$number" ]]; then
+              number=$(gh api --method POST "repos/$REPOSITORY/milestones" \
+                -f title="$title" -f due_on="${due}T23:59:59Z" -f description="$description" --jq .number)
+            else
+              gh api --method PATCH "repos/$REPOSITORY/milestones/$number" \
+                -f due_on="${due}T23:59:59Z" -f description="$description" -f state=open >/dev/null
+            fi
+            if [[ "$offset" == 0 ]]; then current_number=$number; fi
+          done
+
+          jq -r --arg monday "$monday" '.[] | select(.state == "open" and (.title | test("^[0-9]{4}-W[0-9]{2} · Weekly Release$")) and .due_on[0:10] < $monday) | .number' <<<"$milestones" |
+          while read -r expired; do
+            [[ -n "$expired" ]] || continue
+            gh api --paginate "repos/$REPOSITORY/issues?state=open&milestone=$expired&per_page=100" --jq '.[].number' |
+            while read -r issue; do
+              labels=$(gh api "repos/$REPOSITORY/issues/$issue" --jq '[.labels[].name]')
+              if jq -e 'any(. == "deferred")' <<<"$labels" >/dev/null; then
+                gh api --method PATCH "repos/$REPOSITORY/issues/$issue" -F milestone=null >/dev/null
+              else
+                gh api --method PATCH "repos/$REPOSITORY/issues/$issue" -F milestone="$current_number" >/dev/null
+              fi
+            done
+            gh api --method PATCH "repos/$REPOSITORY/milestones/$expired" -f state=closed >/dev/null
+          done
