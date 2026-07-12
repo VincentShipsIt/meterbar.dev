@@ -12,20 +12,12 @@ struct SessionWakeSettingsView: View {
     @ObservedObject private var accounts: ClaudeCodeAccountStore
     @State private var showingFirstRunConfirmation = false
 
-    /// When embedded in the dashboard settings stack (itself inside a ScrollView)
-    /// the grouped `Form` — a nested scroll container — must be dropped for a
-    /// plain vertical layout, or the sections collapse. The standalone Settings
-    /// pane keeps the `Form` styling.
-    private let embeddedInDashboard: Bool
-
     @MainActor
     init(
-        embeddedInDashboard: Bool = false,
         store: SessionWakeSettingsStore? = nil,
         status: SessionWakeStatus? = nil,
         accounts: ClaudeCodeAccountStore? = nil
     ) {
-        self.embeddedInDashboard = embeddedInDashboard
         self.store = store ?? .shared
         self.status = status ?? .shared
         self.accounts = accounts ?? .shared
@@ -51,20 +43,11 @@ struct SessionWakeSettingsView: View {
 
     // MARK: - Layout
 
-    /// Grouped `Form` when standalone; a plain stack when embedded in the
-    /// dashboard's own ScrollView (a nested Form would collapse there).
-    @ViewBuilder private var layout: some View {
-        if embeddedInDashboard {
-            VStack(alignment: .leading, spacing: 12) {
-                sections
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Form {
-                sections
-            }
-            .formStyle(.grouped)
+    private var layout: some View {
+        Form {
+            sections
         }
+        .formStyle(.grouped)
     }
 
     @ViewBuilder private var sections: some View {
