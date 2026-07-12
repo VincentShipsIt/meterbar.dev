@@ -102,6 +102,18 @@ final class WakeRunnerTests: XCTestCase {
         XCTAssertTrue(acknowledged.arguments.contains("--dangerously-skip-permissions"))
     }
 
+    /// GUI launches inherit launchd's bare PATH; without augmentation the
+    /// resumed `claude` cannot find `node` and the wake silently fails.
+    func testBuildAugmentsPATHWithCLIInstallDirectories() {
+        let command = WakeCommandBuilder.build(
+            executable: "/bin/claude", candidate: candidate(cwd: tempDir.path), account: account(),
+            bounds: .default, baseEnvironment: ["PATH": "/usr/bin:/bin"]
+        )
+        let path = command.environment["PATH"] ?? ""
+        XCTAssertTrue(path.hasPrefix("/usr/bin:/bin"), "Inherited PATH entries must keep priority")
+        XCTAssertTrue(path.contains("/opt/homebrew/bin"), "Homebrew bin dir must be reachable for node")
+    }
+
     func testMaxTurnsAndSessionArgs() {
         let command = WakeCommandBuilder.build(
             executable: "/bin/claude", candidate: candidate(sessionID: "abc", cwd: tempDir.path),

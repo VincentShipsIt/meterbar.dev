@@ -7,17 +7,45 @@ import Foundation
 /// out so provider-readiness diagnostics can ask "is `codex` / `claude` on
 /// PATH?" without re-deriving the same fallback list.
 nonisolated enum CLIBinaryLocator {
+    /// The install directories the fallbacks draw from, in priority order.
+    /// Kept in sync with the reconnect script's `export PATH` list.
+    static func fallbackDirectories(home: String) -> [String] {
+        [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.yarn/bin",
+            "\(home)/.bun/bin",
+            "\(home)/.volta/bin",
+        ]
+    }
+
     /// The install-location fallbacks checked after `PATH`, for `command`.
     private static func fallbackCandidates(for command: String, home: String) -> [String] {
-        [
-            "/opt/homebrew/bin/\(command)",
-            "/usr/local/bin/\(command)",
-            "\(home)/.local/bin/\(command)",
-            "\(home)/.npm-global/bin/\(command)",
-            "\(home)/.yarn/bin/\(command)",
-            "\(home)/.bun/bin/\(command)",
-            "\(home)/.volta/bin/\(command)",
-        ]
+        fallbackDirectories(home: home).map { "\($0)/\(command)" }
+    }
+
+    /// `PATH` from `environment` with the fallback install directories appended
+    /// (existing entries keep priority; duplicates are dropped).
+    ///
+    /// GUI apps inherit launchd's bare PATH, so even when MeterBar resolves a
+    /// CLI binary via the fallbacks, the *spawned* CLI can fail to find its own
+    /// runtime — `claude` needs `node`, typically in `/opt/homebrew/bin`.
+    /// Spawn child processes with this PATH instead of the inherited one.
+    static func augmentedPATH(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
+        let existing = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        var seen = Set(existing)
+        var entries = existing
+        for directory in fallbackDirectories(home: home) where seen.insert(directory).inserted {
+            entries.append(directory)
+        }
+        return entries.joined(separator: ":")
     }
 
     /// The resolved absolute path to `command`, or nil if it isn't found.

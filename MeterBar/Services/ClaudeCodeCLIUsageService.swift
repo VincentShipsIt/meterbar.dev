@@ -93,8 +93,16 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
         return output
     }
 
-    private func processEnvironment(account: ClaudeCodeAccount) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+    /// Internal (not private) so tests can verify the spawned environment.
+    func processEnvironment(
+        account: ClaudeCodeAccount,
+        base: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = base
+        // launchd's bare GUI PATH lacks the dirs the CLI's own runtime lives in
+        // (e.g. node under /opt/homebrew/bin); without this the CLI prints a
+        // cost summary instead of the usage screen and parsing fails.
+        environment["PATH"] = CLIBinaryLocator.augmentedPATH(environment: base)
         environment["NO_COLOR"] = "1"
         environment["FORCE_COLOR"] = "0"
         environment["TERM"] = "dumb"
@@ -124,9 +132,11 @@ nonisolated enum ClaudeCodeCLIUsageParser {
             labelPrefixes: ["current week (all models)", "current week"],
             windowMinutes: 7 * 24 * 60,
             now: now)
+        // The CLI's model-specific window label has changed over time
+        // ("Sonnet only" → "Fable", observed claude 2.1.205); match all knowns.
         let sonnetLimit = parseLimit(
             from: lines,
-            labelPrefixes: ["current week (sonnet only)", "sonnet"],
+            labelPrefixes: ["current week (sonnet only)", "current week (fable)", "sonnet", "fable"],
             windowMinutes: 7 * 24 * 60,
             now: now)
 
