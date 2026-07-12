@@ -33,7 +33,8 @@ nonisolated enum StorageKeys {
 
     // MARK: - Session Wake (#98)
 
-    /// Master enablement for the Session Wake feature (Bool, default off).
+    /// Master enablement for Session Wake. Missing stays on for v1.7 compatibility;
+    /// an explicit false is the emergency kill-switch shared with the CLI.
     static let sessionWakeFeatureEnabled = "SessionWakeFeatureEnabled"
     /// Runtime intent for the watcher, distinct from feature enablement (Bool).
     static let sessionWakeWatcherArmed = "SessionWakeWatcherArmed"
