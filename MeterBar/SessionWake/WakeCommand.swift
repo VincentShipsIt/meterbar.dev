@@ -60,6 +60,9 @@ nonisolated enum WakeCommandBuilder {
         }
 
         var environment = baseEnvironment
+        // Same PATH gap as ClaudeCodeCLIUsageService: a GUI-launched MeterBar
+        // inherits launchd's bare PATH, and the resumed `claude` needs `node`.
+        environment["PATH"] = CLIBinaryLocator.augmentedPATH(environment: baseEnvironment)
         environment["NO_COLOR"] = "1"
         environment["FORCE_COLOR"] = "0"
         environment["TERM"] = "dumb"
