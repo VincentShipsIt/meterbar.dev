@@ -75,6 +75,7 @@ meterbar/
 - **OAuthTokenExpiry** — JWT/unix-timestamp expiry checks (60 s grace; unparseable ⇒ not-expired by design).
 - **ServiceSupport** — shared URLSession config, secret-safe HTTP/URLError mapping, real (non-container) home dir via `getpwuid`.
 - **AppLog** — `os.Logger` categories: app, usage, cost, network, storage. This is the only observability; there is no crash reporting or analytics.
+- **SoftwareUpdateController** — owns Sparkle 2's standard updater. The General settings pane binds directly to Sparkle's automatic-check preference (default off until consent) and exposes a manual check action. Release builds embed the GitHub Releases appcast URL and an Actions-provided EdDSA public key.
 
 ## App lifecycle
 
@@ -91,7 +92,7 @@ Dates in the shared JSON use `JSONEncoder`/`JSONDecoder` **default** strategies 
 ## CI / release
 
 - `ci.yml` (push/PR to master, macos-26 + Xcode 26.2): the branch-protection-required `build` job waits for tests/coverage and SwiftLint, fails explicitly unless both pass, then compiles and verifies universal app, widget, and CLI artifacts. Branch protection also requires the test, lint, and secret-scan contexts directly.
-- `release.yml` (canonical `vMAJOR.MINOR.PATCH` tag): builds universal arm64+x86_64 app/widget/CLI artifacts, checks tag/app/CLI version agreement, signs nested code inside-out with an ad-hoc hardened-runtime signature, verifies source entitlements and bundle integrity, zips via `ditto`, publishes GitHub Release, then calls `update-homebrew.yml`. Developer ID signing, authorized provisioning, and notarization remain pending credentials.
+- `release.yml` (canonical `vMAJOR.MINOR.PATCH` tag): preflights Developer ID, notarization, and Sparkle EdDSA credentials; builds universal arm64+x86_64 app/widget/CLI artifacts; checks tag/app/CLI version agreement; signs, notarizes, and staples nested code; generates and validates an EdDSA-signed Sparkle appcast; publishes all assets to GitHub Releases; then calls `update-homebrew.yml`.
 - `secret-scan.yml`: gitleaks (pinned + checksum-verified) over full history.
 
 ## Known architectural risks

@@ -52,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("MeterBar finished launching")
+        SoftwareUpdateController.shared.refreshState()
 
         // Keep Dock visibility in sync with the user's preference.
         observeDockVisibility()

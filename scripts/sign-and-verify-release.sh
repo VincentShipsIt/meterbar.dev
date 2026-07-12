@@ -63,14 +63,20 @@ verify_universal_binary "$widget_binary" "Widget"
 verify_universal_binary "$cli_binary" "CLI"
 
 app_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app_path/Contents/Info.plist")
+app_build_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app_path/Contents/Info.plist")
 cli_version=$("$cli_binary" --version)
 
 echo "Tag version: $expected_version"
 echo "App version: $app_version"
+echo "App build version: $app_build_version"
 echo "CLI version: $cli_version"
 
 if [ "$app_version" != "$expected_version" ]; then
   echo "App version $app_version does not match release version $expected_version." >&2
+  exit 1
+fi
+if [ "$app_build_version" != "$expected_version" ]; then
+  echo "App build version $app_build_version does not match release version $expected_version." >&2
   exit 1
 fi
 if [ "$cli_version" != "$expected_version" ]; then
@@ -110,13 +116,42 @@ sign_code() {
   fi
 }
 
+# Sparkle's helpers have distinct signing requirements. In particular, the
+# Downloader XPC service carries an entitlement that must survive re-signing.
+# Sign these leaves explicitly before sealing Sparkle.framework; `--deep` would
+# incorrectly apply one entitlement set to every nested executable.
+sparkle_framework="$app_path/Contents/Frameworks/Sparkle.framework"
+if [ -d "$sparkle_framework" ]; then
+  sparkle_version="$sparkle_framework/Versions/B"
+  for helper in \
+    "$sparkle_version/XPCServices/Installer.xpc" \
+    "$sparkle_version/Autoupdate" \
+    "$sparkle_version/Updater.app"; do
+    if [ -e "$helper" ]; then
+      echo "Signing Sparkle helper: $helper"
+      sign_code "$helper"
+    fi
+  done
+
+  sparkle_downloader="$sparkle_version/XPCServices/Downloader.xpc"
+  if [ -e "$sparkle_downloader" ]; then
+    echo "Signing Sparkle helper with preserved entitlements: $sparkle_downloader"
+    sign_code "$sparkle_downloader" --preserve-metadata=entitlements
+  fi
+
+  echo "Signing Sparkle framework: $sparkle_framework"
+  sign_code "$sparkle_framework"
+fi
+
 # Sign leaf code first so each containing bundle is sealed only after its
-# contents are final. Framework directories are currently absent, but handling
-# them here prevents a future embedded dependency from silently invalidating the
-# outer signature.
+# contents are final. Sparkle is handled above because its helpers need
+# entitlement-aware signing.
 for frameworks_path in "$widget_path/Contents/Frameworks" "$app_path/Contents/Frameworks"; do
   if [ -d "$frameworks_path" ]; then
     while IFS= read -r -d '' nested_code; do
+      if [ "$nested_code" = "$sparkle_framework" ]; then
+        continue
+      fi
       echo "Signing nested code: $nested_code"
       sign_code "$nested_code"
     done < <(find "$frameworks_path" -depth \( -name '*.framework' -o -name '*.dylib' \) -print0)
@@ -130,6 +165,9 @@ sign_code "$app_path" --entitlements "$app_entitlements"
 codesign --verify --strict --verbose=2 "$cli_binary"
 codesign --verify --strict --verbose=2 "$widget_path"
 codesign --verify --deep --strict --verbose=2 "$app_path"
+if [ -d "$sparkle_framework" ]; then
+  codesign --verify --deep --strict --verbose=2 "$sparkle_framework"
+fi
 
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/meterbar-release-entitlements.XXXXXX")
 trap 'rm -rf "$temporary_directory"' EXIT

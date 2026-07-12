@@ -177,6 +177,7 @@ struct SettingsView: View {
     @StateObject private var dockVisibility = DockVisibilityStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
+    @StateObject private var softwareUpdates = SoftwareUpdateController.shared
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
 
@@ -538,11 +539,38 @@ struct SettingsView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
             }
+
+            SettingsDivider()
+
+            SettingsRowView(
+                title: "Check for updates automatically",
+                detail: "Allow MeterBar to check GitHub Releases for signed updates. Off until you opt in."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { softwareUpdates.automaticallyChecksForUpdates },
+                    set: { softwareUpdates.setAutomaticallyChecksForUpdates($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(softwareUpdates.configurationError != nil)
+            }
+
+            SettingsRowView(
+                title: "Software Update",
+                detail: softwareUpdates.configurationError ?? "Check for a new signed MeterBar release now."
+            ) {
+                Button("Check Now") {
+                    softwareUpdates.checkForUpdates()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!softwareUpdates.canCheckForUpdates)
+            }
         }
         .onAppear {
             // The login-item status can change behind the app's back in System
             // Settings, so re-read it whenever settings is shown.
             launchAtLogin.refreshStatus()
+            softwareUpdates.refreshState()
         }
     }
 
