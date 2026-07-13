@@ -141,6 +141,25 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(snapshots.isEmpty)
     }
 
+    func testMultipleCodexAccountsUseIndependentMetricsAndAccountNames() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [.defaultAccount, work],
+            codexAccountMetrics: [
+                CodexAccount.defaultID: makeMetrics(service: .codexCli, weekly: 25),
+                work.id: makeMetrics(service: .codexCli, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
+        XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
+    }
+
     // MARK: - Limits
 
     func testThirdLimitLabelIsSonnetForClaudeAndCodeReviewForCodex() {

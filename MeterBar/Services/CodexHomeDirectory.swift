@@ -33,6 +33,18 @@ nonisolated enum CodexHomeDirectory {
             .appendingPathComponent("auth.json")
     }
 
+    static func path(for account: CodexAccount) -> String {
+        guard let homeDirectory = account.homeDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !homeDirectory.isEmpty else {
+            return path()
+        }
+        return (homeDirectory as NSString).standardizingPath
+    }
+
+    static func authFilePath(for account: CodexAccount) -> String {
+        (path(for: account) as NSString).appendingPathComponent("auth.json")
+    }
+
     /// The resolved auth-file path for user-facing copy, compacting paths under
     /// the real home directory back to `~/...` while retaining absolute custom
     /// `CODEX_HOME` paths outside it.

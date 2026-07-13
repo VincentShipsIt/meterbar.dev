@@ -173,6 +173,23 @@ final class CodexCliLocalServiceTests: XCTestCase {
         XCTAssertNil(service.getAuthToken())
     }
 
+    func testAccountAuthProviderReadsEachCodexHomeIndependently() {
+        let defaultToken = makeJWT(exp: futureExp, accountId: "default")
+        let workToken = makeJWT(exp: futureExp, accountId: "work")
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let service = CodexCliLocalService(accountAuthFileDataProvider: { account in
+            if account.id == work.id {
+                return self.authFileJSON(accessToken: workToken, accountId: "work")
+            }
+            return self.authFileJSON(accessToken: defaultToken, accountId: "default")
+        })
+
+        XCTAssertEqual(service.getAuthToken(account: .defaultAccount), defaultToken)
+        XCTAssertEqual(service.getAccountId(account: .defaultAccount), "default")
+        XCTAssertEqual(service.getAuthToken(account: work), workToken)
+        XCTAssertEqual(service.getAccountId(account: work), "work")
+    }
+
     // MARK: - Main-thread hygiene
 
     /// The auth-file read is disk I/O and must never run on the main thread when

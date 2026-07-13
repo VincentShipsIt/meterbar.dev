@@ -215,7 +215,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = makeProviderStatusSubmenu(for: service)
             menu.addItem(item)
         }
-
         menu.addItem(.separator())
 
         let refreshItem = NSMenuItem(
@@ -475,7 +474,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var keys = notifiedLimitKeys
         let currentMetrics = UsageDataManager.shared.metrics
 
-        for service in ServiceType.allCases {
+        for service in ServiceType.allCases where service != .claudeCode && service != .codexCli {
             // Disabled providers are removed from UsageDataManager. Evaluate an
             // empty snapshot so their stale band keys are cleared instead of
             // suppressing a future crossing after the provider is re-enabled.
@@ -492,7 +491,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        keys = evaluateAccountNotifications(
+            AccountNotificationInput(
+                service: .claudeCode,
+                accounts: ClaudeCodeAccountStore.shared.accounts.map { ($0.id, $0.name) },
+                accountMetrics: UsageDataManager.shared.claudeCodeAccountMetrics,
+                fallbackMetrics: currentMetrics[.claudeCode]
+            ),
+            decider: decider,
+            keys: keys,
+            now: now
+        )
+        keys = evaluateAccountNotifications(
+            AccountNotificationInput(
+                service: .codexCli,
+                accounts: CodexAccountStore.shared.accounts.map { ($0.id, $0.name) },
+                accountMetrics: UsageDataManager.shared.codexAccountMetrics,
+                fallbackMetrics: currentMetrics[.codexCli]
+            ),
+            decider: decider,
+            keys: keys,
+            now: now
+        )
+
         notifiedLimitKeys = keys
+    }
+
+    private struct AccountNotificationInput {
+        let service: ServiceType
+        let accounts: [(id: UUID, name: String)]
+        let accountMetrics: [UUID: UsageMetrics]
+        let fallbackMetrics: UsageMetrics?
+    }
+
+    private func evaluateAccountNotifications(
+        _ input: AccountNotificationInput,
+        decider: NotificationDecider,
+        keys: Set<String>,
+        now: Date
+    ) -> Set<String> {
+        var updatedKeys = keys
+        let available = input.accounts.compactMap { account -> (UUID, String, UsageMetrics)? in
+            guard let metrics = input.accountMetrics[account.id] else { return nil }
+            return (account.id, account.name, metrics)
+        }
+
+        if available.isEmpty {
+            let metrics = input.fallbackMetrics ?? UsageMetrics(service: input.service, lastUpdated: now)
+            let evaluation = decider.evaluate(
+                metrics: metrics,
+                providerEnabled: providerVisibilityStore.isEnabled(input.service),
+                alreadyNotified: updatedKeys,
+                now: now
+            )
+            updatedKeys = evaluation.notifiedKeys
+            evaluation.notifications.forEach(postNotification)
+            return updatedKeys
+        }
+
+        for (id, name, metrics) in available {
+            let evaluation = decider.evaluate(
+                metrics: metrics,
+                providerEnabled: providerVisibilityStore.isEnabled(input.service),
+                alreadyNotified: updatedKeys,
+                accountKey: id.uuidString,
+                serviceDisplayName: "\(name) (\(input.service.displayName))",
+                now: now
+            )
+            updatedKeys = evaluation.notifiedKeys
+            evaluation.notifications.forEach(postNotification)
+        }
+        return updatedKeys
     }
 
     private func postNotification(_ fired: FiredNotification) {
@@ -562,10 +631,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        UsageDataManager.shared.$codexAccountMetrics
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
         Publishers.Merge(
             ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
             ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
         )
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
+        CodexAccountStore.shared.$customAccounts
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
@@ -685,13 +770,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ))
             }
         }
-        if providerVisibilityStore.isEnabled(.codexCli), let codexLimit = metrics[.codexCli]?.sessionLimit {
-            requests.append(StatusLimitProbeRequest(
-                key: "codex",
-                displayName: ServiceType.codexCli.displayName,
-                limit: codexLimit,
-                probe: { AccountActivityInspector.codexCliActivity() }
-            ))
+        if providerVisibilityStore.isEnabled(.codexCli) {
+            for account in CodexAccountStore.shared.accounts {
+                let accountMetrics = UsageDataManager.shared.codexAccountMetrics[account.id]
+                    ?? (account.isDefault ? metrics[.codexCli] : nil)
+                guard let limit = accountMetrics?.sessionLimit else { continue }
+                let homeDirectory = account.homeDirectory
+                requests.append(StatusLimitProbeRequest(
+                    key: "codex:\(account.id.uuidString)",
+                    displayName: "\(account.name) (\(ServiceType.codexCli.displayName))",
+                    limit: limit,
+                    probe: { AccountActivityInspector.codexCliActivity(homeDirectory: homeDirectory) }
+                ))
+            }
         }
         if providerVisibilityStore.isEnabled(.cursor), let cursorLimit = metrics[.cursor]?.weeklyLimit {
             requests.append(StatusLimitProbeRequest(

@@ -141,6 +141,8 @@ struct SnapshotLimit: Identifiable {
 enum ProviderSnapshotBuilder {
     struct Input {
         var metrics: [ServiceType: UsageMetrics]
+        var codexAccounts: [CodexAccount] = [.defaultAccount]
+        var codexAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
         var enabledServices: Set<ServiceType>
@@ -158,12 +160,25 @@ enum ProviderSnapshotBuilder {
         var result: [ProviderSnapshot] = []
 
         if input.enabledServices.contains(.codexCli) {
-            result.append(snapshot(
-                title: "Codex",
-                service: .codexCli,
-                metrics: input.metrics[.codexCli],
-                emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
-            ))
+            if !input.codexAccountMetrics.isEmpty {
+                for account in input.codexAccounts {
+                    let title = account.isDefault && input.codexAccounts.count == 1 ? "Codex" : account.name
+                    result.append(snapshot(
+                        title: title,
+                        service: .codexCli,
+                        metrics: input.codexAccountMetrics[account.id],
+                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run codex login",
+                        accountID: account.id
+                    ))
+                }
+            } else {
+                result.append(snapshot(
+                    title: "Codex",
+                    service: .codexCli,
+                    metrics: input.metrics[.codexCli],
+                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
+                ))
+            }
         }
 
         if input.enabledServices.contains(.claudeCode) {

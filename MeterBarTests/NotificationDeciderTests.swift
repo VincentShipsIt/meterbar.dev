@@ -399,4 +399,18 @@ final class NotificationDeciderTests: XCTestCase {
             "Claude Code-codeReview-critical"
         ])
     }
+
+    func testAccountIdentityScopesKeysAndLabelsNotification() {
+        let result = decider().evaluate(
+            metrics: metrics(service: .codexCli, session: exhaustedLimit()),
+            providerEnabled: true,
+            alreadyNotified: [],
+            accountKey: "work-account",
+            serviceDisplayName: "Work (OpenAI Codex)",
+            now: now
+        )
+
+        XCTAssertEqual(result.notifications.first?.key, "Codex CLI-work-account-session-critical")
+        XCTAssertEqual(result.notifications.first?.title, "Work (OpenAI Codex) Session Limit Reached")
+    }
 }

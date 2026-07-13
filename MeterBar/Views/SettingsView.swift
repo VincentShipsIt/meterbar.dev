@@ -151,6 +151,13 @@ struct SettingsView: View {
                 isAddingClaudeAccount = false
             }
         }
+        .sheet(isPresented: $isAddingCodexAccount) {
+            AddCodexAccountSheet { name, homeDirectory in
+                codexAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                isAddingCodexAccount = false
+                Task { await dataManager.refreshAll() }
+            }
+        }
     }
 
     // MARK: Private
@@ -158,6 +165,7 @@ struct SettingsView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
+    @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -171,6 +179,7 @@ struct SettingsView: View {
     @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
     @State private var isAddingClaudeAccount = false
+    @State private var isAddingCodexAccount = false
     @State private var claudeReconnectError: String?
     @State private var claudeAdminKeyDraft = ""
     @State private var openaiAdminKeyDraft = ""
@@ -208,6 +217,8 @@ struct SettingsView: View {
         ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
                 metrics: dataManager.metrics,
+                codexAccounts: codexAccountStore.accounts,
+                codexAccountMetrics: dataManager.codexAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 enabledServices: providerVisibility.enabledServices,
@@ -389,7 +400,7 @@ struct SettingsView: View {
     private var codexCliSection: some View {
         SettingsPanelSection(title: "OpenAI Codex", logoKind: .codex, color: MeterBarTheme.codexAccent) {
             SettingsRowView(
-                title: "Connection",
+                title: "Default connection",
                 detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
             ) {
                 HStack(spacing: 8) {
@@ -404,9 +415,7 @@ struct SettingsView: View {
                         Task {
                             let service = codexCliService
                             await Task.detached(priority: .userInitiated) { service.checkAccess() }.value
-                            if codexCliService.hasAccess {
-                                await dataManager.refresh(service: .codexCli)
-                            }
+                            await dataManager.refresh(service: .codexCli)
                         }
                     }
                     .buttonStyle(.bordered)
@@ -421,6 +430,46 @@ struct SettingsView: View {
                 }
             } else if !codexCliService.hasAccess {
                 SettingsNotice(text: "Run codex login, then check again.", color: MeterBarTheme.warning)
+            }
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Codex Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button {
+                        isAddingCodexAccount = true
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(codexAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 { SettingsDivider() }
+                        CodexAccountProfileRow(
+                            account: account,
+                            isConnected: dataManager.codexAccountMetrics[account.id] != nil,
+                            onSave: { name, homeDirectory in
+                                codexAccountStore.updateAccount(
+                                    id: account.id,
+                                    name: name,
+                                    homeDirectory: homeDirectory
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onRemove: {
+                                codexAccountStore.removeAccount(id: account.id)
+                                Task { await dataManager.refreshAll() }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -1710,6 +1759,71 @@ private struct AdminKeySettingsRow: View {
     }
 }
 
+// MARK: - AddCodexAccountSheet
+
+private struct AddCodexAccountSheet: View {
+    let onAdd: (String, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                ProviderLogoView(kind: .codex, size: 18, foregroundColor: MeterBarTheme.codexAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add Codex Account").font(.headline)
+                    Text("Use a separate CODEX_HOME containing its own auth.json.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                TextField("Account name", text: $accountName).settingsInput()
+                HStack(spacing: 8) {
+                    TextField("Codex home directory", text: $homeDirectory).settingsInput()
+                    Button("Choose", action: chooseHomeDirectory).buttonStyle(.bordered)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add Account") {
+                    onAdd(trimmedName, trimmedHomeDirectory)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canAdd)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+    }
+
+    @Environment(\.dismiss)
+    private var dismiss
+    @State private var accountName = ""
+    @State private var homeDirectory = ""
+
+    private var trimmedName: String { accountName.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedHomeDirectory: String {
+        homeDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var canAdd: Bool { !trimmedName.isEmpty && !trimmedHomeDirectory.isEmpty }
+
+    private func chooseHomeDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use"
+        if panel.runModal() == .OK, let url = panel.url {
+            homeDirectory = url.path
+            if trimmedName.isEmpty { accountName = url.lastPathComponent }
+        }
+    }
+}
+
 // MARK: - AddClaudeAccountSheet
 
 private struct AddClaudeAccountSheet: View {
@@ -2021,6 +2135,102 @@ private struct AccountProfileRow: View {
         if panel.runModal() == .OK, let url = panel.url {
             configDirectoryDraft = url.path
         }
+    }
+}
+
+private struct CodexAccountProfileRow: View {
+    init(
+        account: CodexAccount,
+        isConnected: Bool,
+        onSave: @escaping (String, String?) -> Void,
+        onRemove: @escaping () -> Void
+    ) {
+        self.account = account
+        self.isConnected = isConnected
+        self.onSave = onSave
+        self.onRemove = onRemove
+        _nameDraft = State(initialValue: account.name)
+        _homeDirectoryDraft = State(initialValue: account.homeDirectory ?? "")
+    }
+
+    let account: CodexAccount
+    let isConnected: Bool
+    let onSave: (String, String?) -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
+                .foregroundStyle(MeterBarTheme.codexAccent)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Account label", text: $nameDraft)
+                        .settingsInput(width: 240)
+                        .onSubmit(saveChanges)
+                    Text(account.isDefault ? "Default" : "Profile")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.codexAccent)
+                    StatusPill(title: isConnected ? "Connected" : "Not Connected", isConnected: isConnected)
+                        .font(.caption)
+                }
+
+                HStack(spacing: 8) {
+                    Text("CODEX_HOME")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 126, alignment: .leading)
+                    if account.isDefault {
+                        SettingsReadonlyField(text: CodexHomeDirectory.path(for: account))
+                    } else {
+                        TextField("Codex home directory", text: $homeDirectoryDraft)
+                            .settingsInput(width: 280)
+                            .onSubmit(saveChanges)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                Button(action: saveChanges) { Image(systemName: "checkmark") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!hasChanges || !canSave)
+                    .help("Save account changes")
+                if !account.isDefault {
+                    Button(role: .destructive, action: onRemove) { Image(systemName: "trash") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Delete account")
+                }
+            }
+            .frame(minWidth: 80, alignment: .trailing)
+        }
+        .padding(.vertical, 10)
+        .onChange(of: account) { _, updated in
+            nameDraft = updated.name
+            homeDirectoryDraft = updated.homeDirectory ?? ""
+        }
+    }
+
+    @State private var nameDraft: String
+    @State private var homeDirectoryDraft: String
+
+    private var trimmedName: String { nameDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedHomeDirectory: String {
+        homeDirectoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var hasChanges: Bool {
+        trimmedName != account.name || (!account.isDefault && trimmedHomeDirectory != account.homeDirectory)
+    }
+    private var canSave: Bool { !trimmedName.isEmpty && (account.isDefault || !trimmedHomeDirectory.isEmpty) }
+
+    private func saveChanges() {
+        guard hasChanges, canSave else { return }
+        onSave(trimmedName, account.isDefault ? nil : trimmedHomeDirectory)
     }
 }
 
