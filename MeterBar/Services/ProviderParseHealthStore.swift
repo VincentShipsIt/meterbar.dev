@@ -6,25 +6,45 @@ import MeterBarShared
 nonisolated public struct ProviderParseHealthRecord: Codable, Equatable, Sendable {
     static let staleAfter: TimeInterval = 2 * 60 * 60
     static let sustainedFailureCount = 3
+    /// Genuine schema drift fails on every refresh, so two consecutive
+    /// mismatches are the earliest reliable drift signal; a single decode
+    /// failure can be a truncated body from a flaky connection.
+    static let sustainedShapeMismatchCount = 2
 
     public let provider: ServiceType
     public let lastSuccess: Date?
     public let lastAttempt: Date
     public let consecutiveFailures: Int
     public let lastFailureWasShapeMismatch: Bool
+    public let consecutiveShapeMismatches: Int
 
     public init(
         provider: ServiceType,
         lastSuccess: Date?,
         lastAttempt: Date,
         consecutiveFailures: Int,
-        lastFailureWasShapeMismatch: Bool
+        lastFailureWasShapeMismatch: Bool,
+        consecutiveShapeMismatches: Int = 0
     ) {
         self.provider = provider
         self.lastSuccess = lastSuccess
         self.lastAttempt = lastAttempt
         self.consecutiveFailures = consecutiveFailures
         self.lastFailureWasShapeMismatch = lastFailureWasShapeMismatch
+        self.consecutiveShapeMismatches = consecutiveShapeMismatches
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        lastSuccess = try container.decodeIfPresent(Date.self, forKey: .lastSuccess)
+        lastAttempt = try container.decode(Date.self, forKey: .lastAttempt)
+        consecutiveFailures = try container.decode(Int.self, forKey: .consecutiveFailures)
+        lastFailureWasShapeMismatch = try container.decode(Bool.self, forKey: .lastFailureWasShapeMismatch)
+        // Records persisted before this field existed used a one-shot
+        // mismatch flag; carry that meaning forward conservatively.
+        consecutiveShapeMismatches = try container.decodeIfPresent(Int.self, forKey: .consecutiveShapeMismatches)
+            ?? (lastFailureWasShapeMismatch ? Self.sustainedShapeMismatchCount : 0)
     }
 
     static func success(provider: ServiceType = .claudeCode, at date: Date) -> Self {
@@ -33,12 +53,14 @@ nonisolated public struct ProviderParseHealthRecord: Codable, Equatable, Sendabl
             lastSuccess: date,
             lastAttempt: date,
             consecutiveFailures: 0,
-            lastFailureWasShapeMismatch: false
+            lastFailureWasShapeMismatch: false,
+            consecutiveShapeMismatches: 0
         )
     }
 
     func needsAttention(now: Date = Date()) -> Bool {
-        if lastFailureWasShapeMismatch || consecutiveFailures >= Self.sustainedFailureCount {
+        if consecutiveShapeMismatches >= Self.sustainedShapeMismatchCount
+            || consecutiveFailures >= Self.sustainedFailureCount {
             return true
         }
         guard let lastSuccess else { return false }
@@ -71,12 +93,16 @@ final class ProviderParseHealthStore: ObservableObject {
 
     func recordFailure(_ provider: ServiceType, error: Error, at date: Date = Date()) {
         let previous = records[provider]
+        let isShapeMismatch = Self.isShapeMismatch(error)
         records[provider] = ProviderParseHealthRecord(
             provider: provider,
             lastSuccess: previous?.lastSuccess,
             lastAttempt: date,
             consecutiveFailures: (previous?.consecutiveFailures ?? 0) + 1,
-            lastFailureWasShapeMismatch: Self.isShapeMismatch(error)
+            lastFailureWasShapeMismatch: isShapeMismatch,
+            consecutiveShapeMismatches: isShapeMismatch
+                ? (previous?.consecutiveShapeMismatches ?? 0) + 1
+                : 0
         )
         persist()
     }

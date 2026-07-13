@@ -15,17 +15,56 @@ final class ProviderParseHealthTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testParseMismatchNeedsAttentionAfterOneFailureAndPersists() {
+    func testParseMismatchNeedsAttentionOnlyAfterConsecutiveMismatchesAndPersists() {
         let now = Date(timeIntervalSince1970: 10_000)
         let store = ProviderParseHealthStore(userDefaults: defaults)
 
+        // One decode failure can be a truncated body from a flaky connection;
+        // it must not one-shot the provider into "needs attention".
         store.recordFailure(.claudeCode, error: ServiceError.parsingError, at: now)
-
-        let record = store.records[.claudeCode]
+        var record = store.records[.claudeCode]
         XCTAssertEqual(record?.consecutiveFailures, 1)
         XCTAssertTrue(record?.lastFailureWasShapeMismatch ?? false)
-        XCTAssertTrue(record?.needsAttention(now: now) ?? false)
+        XCTAssertFalse(record?.needsAttention(now: now) ?? true)
+
+        // Genuine schema drift fails every refresh; the second consecutive
+        // mismatch is the earliest reliable drift signal.
+        store.recordFailure(.claudeCode, error: ServiceError.parsingError, at: now + 1)
+        record = store.records[.claudeCode]
+        XCTAssertTrue(record?.needsAttention(now: now + 1) ?? false)
         XCTAssertEqual(ProviderParseHealthStore.persistedRecords(from: defaults)[.claudeCode], record)
+    }
+
+    func testTransientDecodeFailureThenSuccessStaysHealthy() {
+        let now = Date(timeIntervalSince1970: 15_000)
+        let store = ProviderParseHealthStore(userDefaults: defaults)
+        let decodeError = DecodingError.dataCorrupted(
+            DecodingError.Context(codingPath: [], debugDescription: "truncated body")
+        )
+
+        store.recordFailure(.claudeCode, error: decodeError, at: now)
+        XCTAssertFalse(store.records[.claudeCode]?.needsAttention(now: now) ?? true)
+
+        store.recordSuccess(.claudeCode, at: now + 1)
+        XCTAssertFalse(store.records[.claudeCode]?.needsAttention(now: now + 1) ?? true)
+
+        // A later isolated mismatch after recovery must start counting from zero.
+        store.recordFailure(.claudeCode, error: decodeError, at: now + 2)
+        XCTAssertFalse(store.records[.claudeCode]?.needsAttention(now: now + 2) ?? true)
+    }
+
+    func testMixedFailureKindsDoNotAccumulateMismatchCount() {
+        let now = Date(timeIntervalSince1970: 17_000)
+        let store = ProviderParseHealthStore(userDefaults: defaults)
+
+        store.recordFailure(.cursor, error: ServiceError.parsingError, at: now)
+        store.recordFailure(.cursor, error: ServiceError.apiError("Request timed out"), at: now + 1)
+        store.recordFailure(.cursor, error: ServiceError.parsingError, at: now + 2)
+
+        // parse, api, parse: never two consecutive mismatches, and only
+        // three total failures reach the ordinary sustained threshold.
+        XCTAssertTrue(store.records[.cursor]?.needsAttention(now: now + 2) ?? false)
+        XCTAssertEqual(store.records[.cursor]?.consecutiveFailures, 3)
     }
 
     func testOrdinaryFailureNeedsThreeAttemptsAndSuccessResetsCounter() {

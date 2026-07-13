@@ -251,10 +251,13 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        if let firstFailure {
-            parseHealthStore.recordFailure(.claudeCode, error: firstFailure)
-        } else if successCount > 0 {
+        // Parse health tracks integration health, not per-account health:
+        // if any account parses, the format contract still holds, so one
+        // failing account must not dim the whole provider.
+        if successCount > 0 {
             parseHealthStore.recordSuccess(.claudeCode)
+        } else if let firstFailure {
+            parseHealthStore.recordFailure(.claudeCode, error: firstFailure)
         }
 
         return refreshedMetrics
