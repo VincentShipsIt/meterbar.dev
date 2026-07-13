@@ -1,8 +1,7 @@
+import Combine
 import Foundation
 import MeterBarShared
 import os
-import Combine
-import SwiftUI
 
 /// The single-account provider surface `UsageDataManager` orchestrates (Codex,
 /// Cursor). Behind a protocol so the manager's merge / graceful-degradation
@@ -26,8 +25,13 @@ class UsageDataManager: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
 
-    @AppStorage(StorageKeys.refreshInterval)
-    private var refreshIntervalRaw: Int = RefreshInterval.fifteenMinutes.rawValue
+    @Published private var refreshIntervalRaw: Int =
+        UserDefaults.standard.object(forKey: StorageKeys.refreshInterval) as? Int
+        ?? RefreshInterval.fifteenMinutes.rawValue {
+        didSet {
+            UserDefaults.standard.set(refreshIntervalRaw, forKey: StorageKeys.refreshInterval)
+        }
+    }
 
     var refreshInterval: RefreshInterval {
         get { RefreshInterval(rawValue: refreshIntervalRaw) ?? .fifteenMinutes }

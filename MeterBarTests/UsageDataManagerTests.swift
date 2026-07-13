@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import MeterBarShared
 import XCTest
@@ -102,6 +103,29 @@ final class UsageDataManagerTests: XCTestCase {
         // The merged snapshot is mirrored to the App Group file for the widget.
         sharedStore.flushPendingWrites()
         XCTAssertEqual(Set(sharedStore.loadMetrics().keys), [.codexCli, .cursor])
+    }
+
+    func testChangingRefreshIntervalPublishesToObservers() {
+        let savedRefreshInterval = UserDefaults.standard.object(forKey: StorageKeys.refreshInterval)
+        defer {
+            if let savedRefreshInterval {
+                UserDefaults.standard.set(savedRefreshInterval, forKey: StorageKeys.refreshInterval)
+            } else {
+                UserDefaults.standard.removeObject(forKey: StorageKeys.refreshInterval)
+            }
+        }
+
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        var publicationCount = 0
+        let cancellable = manager.objectWillChange.sink { publicationCount += 1 }
+        let newInterval: RefreshInterval = manager.refreshInterval == .fiveMinutes ? .manual : .fiveMinutes
+
+        manager.refreshInterval = newInterval
+
+        XCTAssertEqual(publicationCount, 1)
+        withExtendedLifetime(cancellable) {}
     }
 
     func testRefreshAllPreservesCachedMetricsWhenProviderFails() async {

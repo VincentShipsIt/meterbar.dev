@@ -209,6 +209,9 @@ struct StackedDailyUsageColumn: View {
       }
     }
     .frame(width: width, height: maxHeight, alignment: .bottom)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(day.chartAccessibilityLabel)
+    .accessibilityValue(day.chartAccessibilityValue)
     .help(helpText)
   }
 
@@ -261,6 +264,22 @@ struct DailyUsageDay: Identifiable {
 
   var totalTokens: Int {
     segments.reduce(0) { $0 + $1.tokens }
+  }
+
+  var chartAccessibilityLabel: String {
+    DashboardDateFormat.medium(date)
+  }
+
+  var chartAccessibilityValue: String {
+    var values = [
+      "\(UsageFormat.tokens(totalTokens)) tokens",
+      UsageFormat.cost(cost),
+    ]
+    values.append(contentsOf: segments.map { segment in
+      "\(segment.provider.displayName) \(UsageFormat.tokens(segment.tokens)) tokens, "
+        + UsageFormat.cost(segment.cost)
+    })
+    return values.joined(separator: ", ")
   }
 }
 

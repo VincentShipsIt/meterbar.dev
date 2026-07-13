@@ -56,13 +56,6 @@ enum MeterBarTheme {
   static let warning = Color(nsColor: .systemOrange)
   static let danger = Color(nsColor: .systemRed)
 
-  static let glassCardTint = Color.adaptive(
-    light: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.24),
-    dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.07),
-    lightHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.34),
-    darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.13)
-  )
-
   static let glassCardStroke = Color.adaptive(
     light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.05),
     dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.06),
@@ -135,39 +128,13 @@ struct MeterBarDetailBackground: View {
 
 struct MeterBarCompanionSurface: View {
   var radius: CGFloat = 16
-  @Environment(\.accessibilityReduceTransparency)
-  private var reduceTransparency
 
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-
-    shape
-      .fill(reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color.clear)
-      .background {
-        if !reduceTransparency {
-          shape.fill(.ultraThinMaterial)
-        }
-      }
-      .overlay {
-        if !reduceTransparency {
-          shape.fill(MeterBarTheme.companionTint)
-        }
-      }
-      .overlay(alignment: .topLeading) {
-        LinearGradient(
-          colors: [
-            MeterBarTheme.codexAccent.opacity(0.14),
-            MeterBarTheme.appAccent.opacity(0.08),
-            .clear,
-          ],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
-        .clipShape(shape)
-      }
-      .overlay {
-        shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-      }
+    Color.clear
+      .glassEffect(
+        .regular.tint(MeterBarTheme.companionTint),
+        in: .rect(cornerRadius: radius, style: .continuous)
+      )
   }
 }
 
@@ -193,18 +160,7 @@ private struct MeterBarCardSurfaceModifier: ViewModifier {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
     content
-      .background(.ultraThinMaterial, in: shape)
-      .overlay {
-        // Decorative only — filled shapes hit-test, and these sit above the
-        // card content, so they must not swallow clicks meant for buttons
-        // inside the card (e.g. the Costs daily-detail disclosure rows).
-        shape.fill(MeterBarTheme.glassCardTint)
-          .allowsHitTesting(false)
-      }
-      .overlay {
-        shape.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-          .allowsHitTesting(false)
-      }
+      .background(Color(nsColor: .controlBackgroundColor), in: shape)
   }
 }
 

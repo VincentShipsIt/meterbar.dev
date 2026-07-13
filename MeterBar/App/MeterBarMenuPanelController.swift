@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+final class KeyableMenuPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class MeterBarMenuPanelController {
     private let statusButtonProvider: () -> NSStatusBarButton?
@@ -27,7 +31,7 @@ final class MeterBarMenuPanelController {
         guard let button = statusButtonProvider() else { return }
         let panel = ensurePanel()
         position(panel, anchoredTo: button, size: contentSize)
-        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
         startEventMonitoring()
     }
 
@@ -46,7 +50,7 @@ final class MeterBarMenuPanelController {
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
 
-        let panel = NSPanel(
+        let panel = KeyableMenuPanel(
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
