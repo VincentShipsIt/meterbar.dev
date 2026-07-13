@@ -70,6 +70,8 @@ private enum SettingsPane: Hashable, Identifiable {
                 "Codex CLI OAuth"
             case .cursor:
                 "Cursor local state"
+            case .openRouter:
+                "OpenRouter API key"
             }
         }
     }
@@ -158,6 +160,7 @@ struct SettingsView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
+    @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
@@ -171,6 +174,7 @@ struct SettingsView: View {
     @State private var claudeReconnectError: String?
     @State private var claudeAdminKeyDraft = ""
     @State private var openaiAdminKeyDraft = ""
+    @State private var openRouterKeyDraft = ""
     @State private var selectedPane: SettingsPane = .general
     @State private var providerSearchText = ""
 
@@ -209,7 +213,8 @@ struct SettingsView: View {
                 enabledServices: providerVisibility.enabledServices,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
-                cursorHasAccess: cursorService.hasAccess
+                cursorHasAccess: cursorService.hasAccess,
+                openRouterHasAccess: openRouterService.hasAccess
             )
         )
     }
@@ -587,6 +592,11 @@ struct SettingsView: View {
                 detail: "Track Cursor quota from local Cursor state.",
                 service: .cursor
             )
+            providerToggleRow(
+                title: "OpenRouter",
+                detail: "Track credit balance, spend, and per-key limits.",
+                service: .openRouter
+            )
         }
     }
 
@@ -734,6 +744,63 @@ struct SettingsView: View {
                     color: .secondary
                 )
                 SettingsNotice(text: "Log in to Cursor IDE first, then check again.", color: MeterBarTheme.warning)
+            }
+        }
+    }
+
+    private var openRouterSection: some View {
+        SettingsPanelSection(title: "OpenRouter", logoKind: .openRouter, color: MeterBarTheme.openRouterAccent) {
+            SettingsNotice(
+                text: "The key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs.",
+                color: .secondary
+            )
+
+            SettingsRowView(
+                title: "API key",
+                detail: openRouterService.hasAccess
+                    ? "Configured. Refresh validates access and updates credits."
+                    : "Create a key at openrouter.ai/settings/keys."
+            ) {
+                HStack(spacing: 8) {
+                    if openRouterService.hasAccess {
+                        StatusPill(title: "Configured", isConnected: true)
+                        Button("Remove", role: .destructive) {
+                            openRouterService.removeAPIKey()
+                            Task { await dataManager.refresh(service: .openRouter) }
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        SecureField("sk-or-v1-...", text: $openRouterKeyDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 260)
+
+                        Button("Save & Validate") {
+                            guard openRouterService.saveAPIKey(openRouterKeyDraft) else { return }
+                            openRouterKeyDraft = ""
+                            providerVisibility.set(.openRouter, isEnabled: true)
+                            Task { await dataManager.refresh(service: .openRouter) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    Button("Get Key") {
+                        if let url = URL(string: "https://openrouter.ai/settings/keys") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if let error = openRouterService.lastError {
+                let detail = switch error {
+                case .notAuthenticated:
+                    "OpenRouter rejected this key. Remove it and add a valid API key."
+                default:
+                    error.localizedDescription
+                }
+                SettingsNotice(text: detail, color: MeterBarTheme.warning)
             }
         }
     }
@@ -965,6 +1032,8 @@ struct SettingsView: View {
             providerExtraUsageSection(for: service)
         case .cursor:
             cursorSection
+        case .openRouter:
+            openRouterSection
         }
     }
 
@@ -990,6 +1059,8 @@ struct SettingsView: View {
                 )
             }
         case .cursor:
+            EmptyView()
+        case .openRouter:
             EmptyView()
         }
     }
@@ -1097,6 +1168,8 @@ struct SettingsView: View {
                     codexCli.checkAccess()
                 case .cursor:
                     cursor.checkAccess(forceRescan: true)
+                case .openRouter:
+                    break
                 }
             }.value
             await dataManager.refresh(service: service)
@@ -1111,6 +1184,8 @@ struct SettingsView: View {
             "\(codexAuthFileDisplayPath) + ChatGPT usage API"
         case .cursor:
             "Cursor local state + usage API"
+        case .openRouter:
+            "OpenRouter credits + key APIs"
         }
     }
 
@@ -1169,6 +1244,8 @@ struct SettingsView: View {
             return codexCliService.subscriptionType?.capitalized.nilIfEmpty
         case .cursor:
             return cursorService.subscriptionType?.capitalized.nilIfEmpty
+        case .openRouter:
+            return nil
         }
     }
 
@@ -1180,6 +1257,8 @@ struct SettingsView: View {
             codexCliService.hasAccess
         case .cursor:
             cursorService.hasAccess
+        case .openRouter:
+            openRouterService.hasAccess
         }
     }
 
@@ -1191,6 +1270,8 @@ struct SettingsView: View {
             codexCliService.lastError?.localizedDescription
         case .cursor:
             cursorService.lastError?.localizedDescription
+        case .openRouter:
+            openRouterService.lastError?.localizedDescription
         }
     }
 

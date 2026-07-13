@@ -35,17 +35,18 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Ordering and inclusion
 
-    func testDisplayOrderIsCodexClaudeCursor() {
+    func testDisplayOrderIsCodexClaudeCursorOpenRouter() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
                 .claudeCode: makeMetrics(service: .claudeCode, weekly: 20),
-                .cursor: makeMetrics(service: .cursor, weekly: 30)
+                .cursor: makeMetrics(service: .cursor, weekly: 30),
+                .openRouter: makeMetrics(service: .openRouter, weekly: 40)
             ]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor])
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter])
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter"])
     }
 
     func testDisabledProvidersAreExcluded() {
@@ -62,8 +63,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
         ))
 
-        // Popover shows all three (Codex/Claude as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 3)
+        // Popover shows all enabled providers (Codex/Claude/OpenRouter as empty-state cards)…
+        XCTAssertEqual(snapshots.count, 4)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -114,6 +115,16 @@ final class ProviderSnapshotTests: XCTestCase {
 
         XCTAssertEqual(claudeLimits.map(\.title), ["Sonnet"])
         XCTAssertEqual(codexLimits.map(\.title), ["Code Review"])
+    }
+
+    func testOpenRouterUsesCurrencyCreditLabels() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .openRouter, session: 10, weekly: 20),
+            service: .openRouter
+        )
+
+        XCTAssertEqual(limits.map(\.title), ["Key limit", "Account credits"])
+        XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
     }
 
     func testPaceContextComesFromKindNotTitle() {

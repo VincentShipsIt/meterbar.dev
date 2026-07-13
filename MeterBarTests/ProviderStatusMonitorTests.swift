@@ -107,10 +107,35 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertEqual(ServiceType.claudeCode.statusPageDisplayName, "Claude")
         XCTAssertEqual(ServiceType.codexCli.statusPageDisplayName, "OpenAI")
         XCTAssertEqual(ServiceType.cursor.statusPageDisplayName, "Cursor")
+        XCTAssertEqual(ServiceType.openRouter.statusPageDisplayName, "OpenRouter")
 
         XCTAssertEqual(try XCTUnwrap(ServiceType.claudeCode.statusPageURL).absoluteString, "https://status.claude.com/")
         XCTAssertEqual(try XCTUnwrap(ServiceType.codexCli.statusPageURL).absoluteString, "https://status.openai.com/")
         XCTAssertEqual(try XCTUnwrap(ServiceType.cursor.statusPageURL).absoluteString, "https://status.cursor.com/")
+        XCTAssertEqual(
+            try XCTUnwrap(ServiceType.openRouter.statusPageURL).absoluteString,
+            "https://status.openrouter.ai/"
+        )
+    }
+
+    func testOpenRouterStatusPageMapsOperationalHTML() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let client = ProviderStatusClient(session: URLSession(configuration: configuration))
+
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            return (response, Data("<h1>All Systems Operational</h1>".utf8))
+        }
+
+        let report = try await client.fetchReport(for: .openRouter)
+
+        XCTAssertEqual(report.service, .openRouter)
+        XCTAssertEqual(report.summary.indicator, .none)
+        XCTAssertFalse(report.hasIssue)
     }
 
     @MainActor

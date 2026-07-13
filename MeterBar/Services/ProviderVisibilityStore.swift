@@ -36,12 +36,18 @@ final class ProviderVisibilityStore: ObservableObject {
 
         guard nextHiddenServices != hiddenServices else { return }
         hiddenServices = nextHiddenServices
+        if service == .openRouter {
+            userDefaults.set(enabled, forKey: StorageKeys.openRouterProviderEnabled)
+        }
         save()
     }
 
     private func load() {
         let rawValues = userDefaults.stringArray(forKey: storageKey) ?? []
         hiddenServices = Set(rawValues.compactMap(ServiceType.init(rawValue:)))
+        if !userDefaults.bool(forKey: StorageKeys.openRouterProviderEnabled) {
+            hiddenServices.insert(.openRouter)
+        }
     }
 
     private func save() {

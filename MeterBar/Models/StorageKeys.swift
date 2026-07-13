@@ -14,6 +14,8 @@ nonisolated enum StorageKeys {
     static let refreshInterval = "refreshInterval"
     /// Raw values of ServiceTypes the user has hidden.
     static let hiddenProviderServices = "HiddenProviderServices"
+    /// OpenRouter is API-key backed and must be explicitly enabled.
+    static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
     /// Enables the legacy Claude Code OAuth fallback when the CLI is unavailable.

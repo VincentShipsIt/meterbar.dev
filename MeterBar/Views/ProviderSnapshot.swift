@@ -108,6 +108,20 @@ struct SnapshotLimit: Identifiable {
     let kind: Kind
     let title: String
     let usageLimit: UsageLimit
+    let valueStyle: ValueStyle
+
+    enum ValueStyle: Equatable {
+        case quota
+        case currency
+    }
+
+    init(id: String, kind: Kind, title: String, usageLimit: UsageLimit, valueStyle: ValueStyle = .quota) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.usageLimit = usageLimit
+        self.valueStyle = valueStyle
+    }
 
     var usedPercent: Double {
         usageLimit.rawPercentage
@@ -133,6 +147,7 @@ enum ProviderSnapshotBuilder {
         var claudeCodeHasAccess: Bool = false
         var codexCliHasAccess: Bool = false
         var cursorHasAccess: Bool = false
+        var openRouterHasAccess: Bool = false
     }
 
     /// Builds the provider cards in display order (Codex, Claude accounts,
@@ -183,6 +198,15 @@ enum ProviderSnapshotBuilder {
             ))
         }
 
+        if input.enabledServices.contains(.openRouter) {
+            result.append(snapshot(
+                title: "OpenRouter",
+                service: .openRouter,
+                metrics: input.metrics[.openRouter],
+                emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key"
+            ))
+        }
+
         return result
     }
 
@@ -213,10 +237,22 @@ enum ProviderSnapshotBuilder {
 
         var result: [SnapshotLimit] = []
         if let session = metrics.sessionLimit {
-            result.append(SnapshotLimit(id: "session", kind: .session, title: "Session", usageLimit: session))
+            result.append(SnapshotLimit(
+                id: "session",
+                kind: .session,
+                title: service == .openRouter ? "Key limit" : "Session",
+                usageLimit: session,
+                valueStyle: service == .openRouter ? .currency : .quota
+            ))
         }
         if let weekly = metrics.weeklyLimit {
-            result.append(SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly))
+            result.append(SnapshotLimit(
+                id: "weekly",
+                kind: .weekly,
+                title: service == .openRouter ? "Account credits" : "Weekly",
+                usageLimit: weekly,
+                valueStyle: service == .openRouter ? .currency : .quota
+            ))
         }
         if let codeReview = metrics.codeReviewLimit {
             // Claude's third window is the Sonnet-only weekly quota; Codex's is

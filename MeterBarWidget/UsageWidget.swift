@@ -126,21 +126,25 @@ struct ServiceMiniView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(metrics.service.assetName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
+            WidgetProviderIcon(service: metrics.service, size: 14)
 
             if let weeklyLimit = metrics.weeklyLimit {
                 ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
                     .tint(weeklyLimit.statusColor.color)
-                Text(weeklyLimit.percentageText)
+                Text(limitSummary(weeklyLimit))
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
 
             WidgetStatusIndicator(status: metrics.overallStatus)
         }
+    }
+
+    private func limitSummary(_ limit: UsageLimit) -> String {
+        if metrics.service == .openRouter {
+            return String(format: "$%.2f", max(0, limit.total - limit.used))
+        }
+        return limit.percentageText
     }
 }
 
@@ -206,10 +210,7 @@ struct ServiceCompactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
+                WidgetProviderIcon(service: metrics.service, size: 18)
                 Text(metrics.service.displayName)
                     .font(.subheadline)
                     .bold()
@@ -221,11 +222,18 @@ struct ServiceCompactView: View {
                 HStack {
                     ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
                         .tint(weeklyLimit.statusColor.color)
-                    Text(weeklyLimit.percentageText)
+                    Text(limitSummary(weeklyLimit))
                         .font(.caption)
                 }
             }
         }
+    }
+
+    private func limitSummary(_ limit: UsageLimit) -> String {
+        if metrics.service == .openRouter {
+            return String(format: "$%.2f left", max(0, limit.total - limit.used))
+        }
+        return limit.percentageText
     }
 }
 
@@ -235,10 +243,7 @@ struct ServiceDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 20, height: 20)
+                WidgetProviderIcon(service: metrics.service, size: 20)
                 Text(metrics.service.displayName)
                     .font(.headline)
                 Spacer()
@@ -246,11 +251,19 @@ struct ServiceDetailView: View {
             }
 
             if let sessionLimit = metrics.sessionLimit {
-                LimitDetailView(title: "Session", limit: sessionLimit)
+                LimitDetailView(
+                    title: metrics.service == .openRouter ? "Key limit" : "Session",
+                    limit: sessionLimit,
+                    currency: metrics.service == .openRouter
+                )
             }
 
             if let weeklyLimit = metrics.weeklyLimit {
-                LimitDetailView(title: "Weekly", limit: weeklyLimit)
+                LimitDetailView(
+                    title: metrics.service == .openRouter ? "Account credits" : "Weekly",
+                    limit: weeklyLimit,
+                    currency: metrics.service == .openRouter
+                )
             }
 
             if let codeReviewLimit = metrics.codeReviewLimit {
@@ -266,6 +279,7 @@ struct ServiceDetailView: View {
 struct LimitDetailView: View {
     let title: String
     let limit: UsageLimit
+    var currency = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -281,13 +295,14 @@ struct LimitDetailView: View {
             ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
                 .tint(limit.statusColor.color)
 
-            Text(
-                "\(formatNumber(limit.used)) / "
-                    + "\(limit.isEstimated ? "~" : "")\(formatNumber(limit.total))"
-            )
+            Text(currency ? currencyText : "\(formatNumber(limit.used)) / \(limit.isEstimated ? "~" : "")\(formatNumber(limit.total))")
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
+    }
+
+    private var currencyText: String {
+        "$\(String(format: "%.2f", limit.used)) spent / $\(String(format: "%.2f", limit.total))"
     }
 
     private func formatNumber(_ value: Double) -> String {
@@ -295,6 +310,24 @@ struct LimitDetailView: View {
             return String(format: "%.1fk", value / 1000)
         }
         return String(format: "%.0f", value)
+    }
+}
+
+struct WidgetProviderIcon: View {
+    let service: ServiceType
+    let size: CGFloat
+
+    var body: some View {
+        if service == .openRouter {
+            Image(systemName: service.iconName)
+                .font(.system(size: size, weight: .semibold))
+                .frame(width: size, height: size)
+        } else {
+            Image(service.assetName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        }
     }
 }
 

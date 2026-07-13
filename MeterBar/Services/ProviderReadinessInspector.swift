@@ -30,7 +30,8 @@ nonisolated public enum ProviderReadinessInspector {
             now: now,
             claudeReport: { claudeReport(refreshError: $0, now: $1) },
             codexReport: { codexReport(refreshError: $0, now: $1) },
-            cursorReport: { cursorReport(refreshError: $0, now: $1) }
+            cursorReport: { cursorReport(refreshError: $0, now: $1) },
+            openRouterReport: { error, _ in openRouterReport(refreshError: error) }
         )
     }
 
@@ -43,7 +44,10 @@ nonisolated public enum ProviderReadinessInspector {
         now: Date,
         claudeReport: (ServiceError?, Date) -> ProviderReadiness,
         codexReport: (ServiceError?, Date) -> ProviderReadiness,
-        cursorReport: (ServiceError?, Date) -> ProviderReadiness
+        cursorReport: (ServiceError?, Date) -> ProviderReadiness,
+        openRouterReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
+            ProviderReadinessInspector.openRouterReport(refreshError: error)
+        }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.compactMap { provider in
             guard providers.contains(provider) else { return nil }
@@ -54,6 +58,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return codexReport(refreshErrors[provider], now)
             case .cursor:
                 return cursorReport(refreshErrors[provider], now)
+            case .openRouter:
+                return openRouterReport(refreshErrors[provider], now)
             }
         }
     }
@@ -136,6 +142,18 @@ nonisolated public enum ProviderReadinessInspector {
             now: now
         )
         return ProviderReadinessEvaluator.cursor(input)
+    }
+
+    static func openRouterReport(
+        refreshError: ServiceError? = nil,
+        hasAPIKey: () -> Bool = { KeychainManager.shared.hasKey(key: OpenRouterService.keychainKey) }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.openRouter(
+            OpenRouterReadinessInput(
+                hasAPIKey: hasAPIKey(),
+                refreshError: sanitize(refreshError)
+            )
+        )
     }
 
     // MARK: - Helpers

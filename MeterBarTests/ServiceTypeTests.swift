@@ -7,28 +7,32 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.claudeCode.rawValue, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.rawValue, "Codex CLI")
         XCTAssertEqual(ServiceType.cursor.rawValue, "Cursor")
+        XCTAssertEqual(ServiceType.openRouter.rawValue, "OpenRouter")
     }
 
     func testDisplayNames() {
         XCTAssertEqual(ServiceType.claudeCode.displayName, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.displayName, "OpenAI Codex")
         XCTAssertEqual(ServiceType.cursor.displayName, "Cursor")
+        XCTAssertEqual(ServiceType.openRouter.displayName, "OpenRouter")
     }
 
     func testIconNames() {
         XCTAssertEqual(ServiceType.claudeCode.iconName, "terminal")
         XCTAssertEqual(ServiceType.codexCli.iconName, "terminal.fill")
         XCTAssertEqual(ServiceType.cursor.iconName, "cursorarrow.click")
+        XCTAssertEqual(ServiceType.openRouter.iconName, "point.3.connected.trianglepath.dotted")
     }
 
     func testIdProperty() {
         XCTAssertEqual(ServiceType.claudeCode.id, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.id, "Codex CLI")
         XCTAssertEqual(ServiceType.cursor.id, "Cursor")
+        XCTAssertEqual(ServiceType.openRouter.id, "OpenRouter")
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 3)
+        XCTAssertEqual(ServiceType.allCases.count, 4)
     }
 
     func testCodable() throws {

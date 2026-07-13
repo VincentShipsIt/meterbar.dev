@@ -203,9 +203,9 @@ struct NotificationDecider {
         func displayName(for service: ServiceType) -> String {
             switch self {
             case .session:
-                return "Session"
+                return service == .openRouter ? "Key Limit" : "Session"
             case .weekly:
-                return "Weekly"
+                return service == .openRouter ? "Account Credits" : "Weekly"
             case .codeReview:
                 return service == .claudeCode ? "Sonnet" : "Code Review"
             }

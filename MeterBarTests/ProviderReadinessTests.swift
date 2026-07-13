@@ -14,6 +14,20 @@ final class ProviderReadinessTests: XCTestCase {
     // A token value that must never appear in user-facing output.
     private let secret = "SECRET-TOKEN-DO-NOT-LEAK-abc123"
 
+    func testOpenRouterRequiresKeyAndSurfacesSanitizedRefreshFailure() {
+        let missing = ProviderReadinessEvaluator.openRouter(OpenRouterReadinessInput(hasAPIKey: false))
+        XCTAssertEqual(missing.provider, .openRouter)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("Settings"))
+
+        let configured = ProviderReadinessEvaluator.openRouter(
+            OpenRouterReadinessInput(hasAPIKey: true, refreshError: "API error (HTTP 401)")
+        )
+        XCTAssertEqual(configured.check("auth")?.level, .pass)
+        XCTAssertEqual(configured.check("refresh")?.level, .fail)
+        XCTAssertFalse(configured.isHealthy)
+    }
+
     // MARK: - Claude Code
 
     func testClaudeHealthy() {

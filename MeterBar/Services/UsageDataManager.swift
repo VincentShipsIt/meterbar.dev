@@ -15,6 +15,7 @@ protocol SimpleUsageProviding: AnyObject {
 
 extension CodexCliLocalService: SimpleUsageProviding {}
 extension CursorLocalService: SimpleUsageProviding {}
+extension OpenRouterService: SimpleUsageProviding {}
 
 @MainActor
 class UsageDataManager: ObservableObject {
@@ -44,6 +45,7 @@ class UsageDataManager: ObservableObject {
     private let claudeCodeService: ClaudeCodeLocalService
     private let cursorService: SimpleUsageProviding
     private let codexCliService: SimpleUsageProviding
+    private let openRouterService: SimpleUsageProviding
     private let claudeCodeAccountStore: ClaudeCodeAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
 
@@ -61,6 +63,7 @@ class UsageDataManager: ObservableObject {
     init(
         codexCliService: SimpleUsageProviding = CodexCliLocalService.shared,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
+        openRouterService: SimpleUsageProviding = OpenRouterService.shared,
         claudeCodeService: ClaudeCodeLocalService = .shared,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
@@ -70,6 +73,7 @@ class UsageDataManager: ObservableObject {
     ) {
         self.codexCliService = codexCliService
         self.cursorService = cursorService
+        self.openRouterService = openRouterService
         self.claudeCodeService = claudeCodeService
         self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
         self.providerVisibilityStore = providerVisibilityStore ?? .shared
@@ -103,7 +107,7 @@ class UsageDataManager: ObservableObject {
 
         // Fetch the simple (single-account) providers. On failure the final
         // merge loop below preserves any cached metrics (graceful degradation).
-        for service in [ServiceType.codexCli, .cursor]
+        for service in [ServiceType.codexCli, .cursor, .openRouter]
         where providerVisibilityStore.isEnabled(service) && hasProviderAccess(service) {
             do {
                 newMetrics[service] = try await fetchSimpleProviderMetrics(service)
@@ -163,7 +167,7 @@ class UsageDataManager: ObservableObject {
                     // hold a stale error from an unrelated provider/account.
                     throw ServiceError.notAuthenticated
                 }
-            case .codexCli, .cursor:
+            case .codexCli, .cursor, .openRouter:
                 guard hasProviderAccess(service) else {
                     throw ServiceError.notAuthenticated
                 }
@@ -265,6 +269,8 @@ class UsageDataManager: ObservableObject {
             return codexCliService.hasAccess
         case .cursor:
             return cursorService.hasAccess
+        case .openRouter:
+            return openRouterService.hasAccess
         }
     }
 
@@ -276,6 +282,8 @@ class UsageDataManager: ObservableObject {
             return try await codexCliService.fetchUsageMetrics()
         case .cursor:
             return try await cursorService.fetchUsageMetrics()
+        case .openRouter:
+            return try await openRouterService.fetchUsageMetrics()
         case .claudeCode:
             preconditionFailure("Claude Code uses the account-aware fetch path")
         }

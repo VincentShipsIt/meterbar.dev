@@ -206,6 +206,17 @@ public struct CursorReadinessInput: Sendable {
     }
 }
 
+/// Fixture-able facts for the API-key-backed OpenRouter provider.
+public struct OpenRouterReadinessInput: Sendable {
+    public var hasAPIKey: Bool
+    public var refreshError: String?
+
+    public init(hasAPIKey: Bool, refreshError: String? = nil) {
+        self.hasAPIKey = hasAPIKey
+        self.refreshError = refreshError
+    }
+}
+
 // MARK: - Evaluator
 
 public enum ProviderReadinessEvaluator {
@@ -477,6 +488,36 @@ public enum ProviderReadinessEvaluator {
                 recovery: "Quit Cursor (its database locks while running), then rescan."
             )
         }
+    }
+
+    // MARK: OpenRouter
+
+    public static func openRouter(_ input: OpenRouterReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local OpenRouter app or CLI is required."
+        )
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "API key",
+            level: input.hasAPIKey ? .pass : .fail,
+            detail: input.hasAPIKey ? "OpenRouter API key is configured." : "OpenRouter API key is missing.",
+            recovery: input.hasAPIKey ? nil : "Add an API key in MeterBar Settings."
+        )
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: input.hasAPIKey ? .pass : .warn,
+            detail: input.hasAPIKey
+                ? "Credits and per-key limits can be fetched from OpenRouter."
+                : "Usage becomes readable after an API key is configured."
+        )
+        return ProviderReadiness(
+            provider: .openRouter,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
     }
 
     // MARK: Shared

@@ -30,6 +30,10 @@ enum MeterBarTheme {
     light: NSColor(srgbRed: 16 / 255, green: 163 / 255, blue: 127 / 255, alpha: 1),
     dark: NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
   )
+  static let openRouterAccent = Color.adaptive(
+    light: NSColor(srgbRed: 105 / 255, green: 82 / 255, blue: 188 / 255, alpha: 1),
+    dark: NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
+  )
 
   /// The app's own accent. Follows the user's system accent color.
   static let appAccent = Color.accentColor
@@ -71,6 +75,8 @@ enum MeterBarTheme {
       return codexAccent
     case .cursor:
       return cursorAccent
+    case .openRouter:
+      return openRouterAccent
     }
   }
 

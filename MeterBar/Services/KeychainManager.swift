@@ -6,7 +6,7 @@ import Security
 /// fake instead of the real login keychain (which is unavailable / prompts on
 /// CI runners). Signatures mirror the C API 1:1 so the production backend is a
 /// thin pass-through.
-protocol KeychainBackend {
+nonisolated protocol KeychainBackend {
     func update(query: [String: Any], attributes: [String: Any]) -> OSStatus
     func add(query: [String: Any]) -> OSStatus
     func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus
@@ -14,7 +14,7 @@ protocol KeychainBackend {
 }
 
 /// Production backend: forwards straight to the Security framework.
-struct SecItemKeychainBackend: KeychainBackend {
+nonisolated struct SecItemKeychainBackend: KeychainBackend {
     func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
         SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     }
@@ -33,7 +33,7 @@ struct SecItemKeychainBackend: KeychainBackend {
 }
 
 /// Minimal Keychain wrapper for the org API admin keys entered in Settings.
-final class KeychainManager {
+nonisolated final class KeychainManager {
     static let shared = KeychainManager()
 
     private let currentService: String
