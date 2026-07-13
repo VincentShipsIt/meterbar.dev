@@ -33,6 +33,30 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.accounts.first?.name, "shipshitdev")
     }
 
+    func testDefaultConfigDirectoryFallsBackToClaudeUnderRealHome() {
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(environment: [:], realHomeDirectory: "/Users/tester"),
+            "/Users/tester/.claude"
+        )
+    }
+
+    func testDefaultConfigDirectoryHonorsAndExpandsEnvironmentOverride() {
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(
+                environment: ["CLAUDE_CONFIG_DIR": "~/.claude-work"],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "/Users/tester/.claude-work"
+        )
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(
+                environment: ["CLAUDE_CONFIG_DIR": " /Volumes/config/claude "],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "/Volumes/config/claude"
+        )
+    }
+
     func testCustomProfileCanBeEditedAndPersists() {
         let store = ClaudeCodeAccountStore(userDefaults: defaults)
         store.addAccount(name: "genfeed.ai", configDirectory: "/tmp/old-claude-profile")

@@ -1667,20 +1667,26 @@ private struct AdminKeySettingsRow: View {
             }
 
             HStack(spacing: 8) {
-                SecureField(placeholder, text: $draft)
-                    .settingsInput()
-                    .frame(minWidth: 220, maxWidth: 340)
+                if connected {
+                    SettingsReadonlyField(text: "••••••••••••••••")
 
-                Button("Save", action: onSave)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(trimmedDraft.isEmpty)
+                    Button("Remove", role: .destructive, action: onRemove)
+                        .buttonStyle(.bordered)
+                } else {
+                    SecureField(placeholder, text: $draft)
+                        .settingsInput()
+                        .frame(minWidth: 220, maxWidth: 340)
 
-                Button("Remove", action: onRemove)
+                    Button("Save", action: onSave)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(trimmedDraft.isEmpty)
+
+                    Button(action: onHelp) {
+                        Image(systemName: "questionmark.circle")
+                    }
                     .buttonStyle(.bordered)
-                    .disabled(!connected)
-
-                Button("Help", action: onHelp)
-                    .buttonStyle(.bordered)
+                    .help("Where to create this admin API key")
+                }
             }
         }
         .padding(.vertical, 6)
@@ -1802,6 +1808,12 @@ private struct AddClaudeAccountSheet: View {
 
 // MARK: - AccountProfileRow
 
+private enum AccountProfileRowMetrics {
+    static let labelWidth: CGFloat = 126
+    static let fieldWidth: CGFloat = 280
+    static let actionWidth: CGFloat = 28
+}
+
 private struct AccountProfileRow: View {
     // MARK: Lifecycle
 
@@ -1834,8 +1846,10 @@ private struct AccountProfileRow: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
+                    accountFieldLabel("Account name")
+
                     TextField("Account label", text: $nameDraft)
-                        .settingsInput(width: 240)
+                        .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
                     Text(account.isDefault ? "Default" : "Profile")
@@ -1850,18 +1864,22 @@ private struct AccountProfileRow: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(account.isDefault ? "Default config directory" : "Config directory")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 126, alignment: .leading)
+                    accountFieldLabel(account.isDefault ? "Default config directory" : "Config directory")
 
                     if account.isDefault {
                         SettingsReadonlyField(text: displayConfigDirectory)
+
+                        Button {
+                            revealDefaultConfigDirectory()
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Reveal config directory in Finder")
                     } else {
                         HStack(spacing: 8) {
                             TextField("Config directory", text: $configDirectoryDraft)
-                                .settingsInput(width: 280)
+                                .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                                 .onSubmit(saveChanges)
 
                             Button {
@@ -1874,6 +1892,13 @@ private struct AccountProfileRow: View {
                         }
                     }
                 }
+
+                if account.isDefault {
+                    Text("Mirrors the Claude CLI default (~/.claude, or $CLAUDE_CONFIG_DIR)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, AccountProfileRowMetrics.labelWidth + 8)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1883,6 +1908,7 @@ private struct AccountProfileRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(width: AccountProfileRowMetrics.actionWidth)
                 .help("Reconnect Claude profile")
 
                 Button(action: saveChanges) {
@@ -1890,6 +1916,7 @@ private struct AccountProfileRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(width: AccountProfileRowMetrics.actionWidth)
                 .disabled(!hasChanges || !canSave)
                 .help("Save account changes")
 
@@ -1899,10 +1926,15 @@ private struct AccountProfileRow: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(width: AccountProfileRowMetrics.actionWidth)
                     .help("Delete account")
+                } else {
+                    Color.clear
+                        .frame(width: AccountProfileRowMetrics.actionWidth, height: 1)
+                        .accessibilityHidden(true)
                 }
             }
-            .frame(minWidth: 116, alignment: .trailing)
+            .fixedSize()
         }
         .padding(.vertical, 10)
         .onChange(of: account) { _, updatedAccount in
@@ -1927,7 +1959,7 @@ private struct AccountProfileRow: View {
     private var displayConfigDirectory: String {
         account.configDirectory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? account.configDirectory ?? ""
-            : "\(ServiceSupport.realHomeDirectory())/.claude"
+            : ClaudeCodeAccount.defaultConfigDirectory()
     }
 
     private var hasChanges: Bool {
@@ -1944,6 +1976,20 @@ private struct AccountProfileRow: View {
             return
         }
         onSave(trimmedName, account.isDefault ? nil : trimmedConfigDirectory)
+    }
+
+    private func accountFieldLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(width: AccountProfileRowMetrics.labelWidth, alignment: .leading)
+    }
+
+    private func revealDefaultConfigDirectory() {
+        NSWorkspace.shared.activateFileViewerSelecting([
+            URL(fileURLWithPath: ClaudeCodeAccount.defaultConfigDirectory(), isDirectory: true)
+        ])
     }
 
     private func chooseConfigDirectory() {

@@ -51,8 +51,8 @@ struct SessionWakeSettingsView: View {
     }
 
     @ViewBuilder private var sections: some View {
-        switchSection
         accountSection
+        switchSection
         previewSection
         limitsSection
         permissionSection
@@ -65,8 +65,9 @@ struct SessionWakeSettingsView: View {
         Section("Session Wake") {
             Toggle("Session Wake", isOn: onBinding)
                 .disabled(!store.canTurnOn && !store.isOn)
+                .toggleStyle(.switch)
             if store.wakeAccountID == nil {
-                Text("Choose a wake account below to enable Session Wake.")
+                Text("Choose a wake account above to enable Session Wake.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

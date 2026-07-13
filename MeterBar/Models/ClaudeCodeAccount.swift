@@ -24,6 +24,27 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
     var isDefault: Bool {
         id == Self.defaultID
     }
+
+    /// Resolves the default Claude CLI profile directory for user-facing paths
+    /// and Finder actions without mutating the process environment in tests.
+    static func defaultConfigDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
+        guard let rawValue = environment["CLAUDE_CONFIG_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !rawValue.isEmpty else {
+            return (realHomeDirectory as NSString).appendingPathComponent(".claude")
+        }
+
+        if rawValue == "~" {
+            return realHomeDirectory
+        }
+        if rawValue.hasPrefix("~/") {
+            return (realHomeDirectory as NSString).appendingPathComponent(String(rawValue.dropFirst(2)))
+        }
+        return (rawValue as NSString).standardizingPath
+    }
 }
 
 // MARK: - ClaudeCodeAccountStore
