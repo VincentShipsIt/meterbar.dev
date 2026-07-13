@@ -650,7 +650,7 @@ struct UsageDashboardView: View {
             count += 1
         }
         if providerVisibility.isEnabled(.claudeCode) {
-            count += claudeAccountStore.accounts.count
+            count += claudeAccountStore.enabledAccounts.count
         }
         if providerVisibility.isEnabled(.cursor) {
             count += 1

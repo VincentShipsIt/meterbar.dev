@@ -79,7 +79,7 @@ struct SessionWakeSettingsView: View {
         Section("Wake account") {
             Picker("Account", selection: accountBinding) {
                 Text("None selected").tag(UUID?.none)
-                ForEach(accounts.accounts) { account in
+                ForEach(accounts.enabledAccounts) { account in
                     Text(account.name).tag(UUID?.some(account.id))
                 }
             }
@@ -174,7 +174,7 @@ struct SessionWakeSettingsView: View {
     }
 
     private var selectedConfigDirectory: String? {
-        accounts.accounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
+        accounts.enabledAccounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
     }
 
     private func binding<Value>(_ value: Value, _ setter: @escaping (Value) -> Void) -> Binding<Value> {

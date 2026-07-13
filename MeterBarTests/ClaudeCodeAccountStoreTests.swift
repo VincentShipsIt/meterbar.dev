@@ -80,6 +80,46 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.customAccounts.first?.configDirectory, "/tmp/genfeed-claude-profile")
     }
 
+    func testLegacyCustomProfileDefaultsToEnabled() throws {
+        let id = UUID()
+        let data = try XCTUnwrap(
+            """
+            [{"id":"\(id.uuidString)","name":"Legacy","configDirectory":"/tmp/legacy"}]
+            """.data(using: .utf8)
+        )
+        defaults.set(data, forKey: StorageKeys.claudeCodeCustomAccounts)
+
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.customAccounts.first?.id, id)
+        XCTAssertEqual(store.customAccounts.first?.isEnabled, true)
+        XCTAssertEqual(store.enabledAccounts.map(\.id), [ClaudeCodeAccount.defaultID, id])
+    }
+
+    func testDefaultAndCustomProfileEnabledStatePersists() {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Work", configDirectory: "/tmp/work")
+        guard let customID = store.customAccounts.first?.id else {
+            XCTFail("Expected a custom Claude account")
+            return
+        }
+
+        store.setEnabled(false, for: ClaudeCodeAccount.defaultID)
+        store.setEnabled(false, for: customID)
+
+        XCTAssertTrue(store.enabledAccounts.isEmpty)
+        XCTAssertEqual(store.accounts.map(\.isEnabled), [false, false])
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertTrue(reloaded.enabledAccounts.isEmpty)
+        XCTAssertEqual(reloaded.accounts.map(\.isEnabled), [false, false])
+
+        reloaded.setEnabled(true, for: ClaudeCodeAccount.defaultID)
+        reloaded.setEnabled(true, for: customID)
+        let enabledReload = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertEqual(enabledReload.enabledAccounts.map(\.id), [ClaudeCodeAccount.defaultID, customID])
+    }
+
     func testCustomProfileCanBeRemoved() {
         let store = ClaudeCodeAccountStore(userDefaults: defaults)
         store.addAccount(name: "genfeedai", configDirectory: "/tmp/genfeed-claude-profile")

@@ -167,25 +167,22 @@ enum ProviderSnapshotBuilder {
         }
 
         if input.enabledServices.contains(.claudeCode) {
+            let enabledAccounts = input.claudeAccounts.filter(\.isEnabled)
             let accountMetrics = input.claudeAccountMetrics
-            if !accountMetrics.isEmpty {
-                for account in input.claudeAccounts {
-                    let title = account.isDefault && input.claudeAccounts.count == 1 ? "Claude" : account.name
+            if !enabledAccounts.isEmpty {
+                for account in enabledAccounts {
+                    let title = account.isDefault && enabledAccounts.count == 1 ? "Claude" : account.name
+                    let emptyDetail = account.isDefault && input.claudeCodeHasAccess
+                        ? "Waiting for refresh"
+                        : "Run claude login"
                     result.append(snapshot(
                         title: title,
                         service: .claudeCode,
-                        metrics: accountMetrics[account.id],
-                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run claude login",
+                        metrics: accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil),
+                        emptyDetail: emptyDetail,
                         accountID: account.id
                     ))
                 }
-            } else {
-                result.append(snapshot(
-                    title: "Claude",
-                    service: .claudeCode,
-                    metrics: input.metrics[.claudeCode],
-                    emptyDetail: input.claudeCodeHasAccess ? "Waiting for refresh" : "Run claude login"
-                ))
             }
         }
 

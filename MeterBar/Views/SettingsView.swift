@@ -691,6 +691,13 @@ struct SettingsView: View {
                         }
                         AccountProfileRow(
                             account: account,
+                            onEnabledChange: { isEnabled in
+                                claudeAccountStore.setEnabled(isEnabled, for: account.id)
+                                SessionWakeSettingsStore.shared.reconcileAccounts(
+                                    available: claudeAccountStore.enabledAccounts.map(\.id)
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
                             onSave: { name, configDirectory in
                                 updateClaudeAccount(id: account.id, name: name, configDirectory: configDirectory)
                             },
@@ -1819,11 +1826,13 @@ private struct AccountProfileRow: View {
 
     init(
         account: ClaudeCodeAccount,
+        onEnabledChange: @escaping (Bool) -> Void,
         onSave: @escaping (String, String?) -> Void,
         onReconnect: @escaping () -> Void,
         onRemove: @escaping () -> Void
     ) {
         self.account = account
+        self.onEnabledChange = onEnabledChange
         self.onSave = onSave
         self.onReconnect = onReconnect
         self.onRemove = onRemove
@@ -1834,6 +1843,7 @@ private struct AccountProfileRow: View {
     // MARK: Internal
 
     let account: ClaudeCodeAccount
+    let onEnabledChange: (Bool) -> Void
     let onSave: (String, String?) -> Void
     let onReconnect: () -> Void
     let onRemove: () -> Void
@@ -1903,6 +1913,15 @@ private struct AccountProfileRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
+                Toggle("Enabled", isOn: Binding(
+                    get: { account.isEnabled },
+                    set: onEnabledChange
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help(account.isEnabled ? "Disable account" : "Enable account")
+
                 Button(action: onReconnect) {
                     Image(systemName: "arrow.clockwise")
                 }

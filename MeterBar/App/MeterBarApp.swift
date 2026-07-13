@@ -562,7 +562,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        ClaudeCodeAccountStore.shared.$customAccounts
+        Publishers.Merge(
+            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
@@ -671,7 +674,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var requests: [StatusLimitProbeRequest] = []
 
         if providerVisibilityStore.isEnabled(.claudeCode) {
-            for account in ClaudeCodeAccountStore.shared.accounts {
+            for account in ClaudeCodeAccountStore.shared.enabledAccounts {
                 guard let limit = claudeMetrics(for: account, metrics: metrics)?.sessionLimit else { continue }
                 let configDirectory = account.configDirectory
                 requests.append(StatusLimitProbeRequest(

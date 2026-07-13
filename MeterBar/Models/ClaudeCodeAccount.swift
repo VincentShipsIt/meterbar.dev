@@ -20,6 +20,22 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
     let id: UUID
     var name: String
     var configDirectory: String?
+    var isEnabled: Bool
+
+    init(id: UUID, name: String, configDirectory: String?, isEnabled: Bool = true) {
+        self.id = id
+        self.name = name
+        self.configDirectory = configDirectory
+        self.isEnabled = isEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        configDirectory = try container.decodeIfPresent(String.self, forKey: .configDirectory)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
 
     var isDefault: Bool {
         id == Self.defaultID
@@ -54,11 +70,13 @@ final class ClaudeCodeAccountStore: ObservableObject {
 
     @Published private(set) var customAccounts: [ClaudeCodeAccount] = []
     @Published private(set) var defaultAccountName = ClaudeCodeAccount.defaultName
+    @Published private(set) var defaultAccountIsEnabled = true
     @Published private(set) var accountOrder: [UUID] = []
 
     private let userDefaults: UserDefaults
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
+    private let defaultEnabledStorageKey = StorageKeys.claudeCodeDefaultAccountEnabled
     private let accountOrderStorageKey = StorageKeys.claudeCodeAccountOrder
 
     var accounts: [ClaudeCodeAccount] {
@@ -66,9 +84,14 @@ final class ClaudeCodeAccountStore: ObservableObject {
             ClaudeCodeAccount(
                 id: ClaudeCodeAccount.defaultID,
                 name: defaultAccountName,
-                configDirectory: nil
+                configDirectory: nil,
+                isEnabled: defaultAccountIsEnabled
             )
         ] + customAccounts)
+    }
+
+    var enabledAccounts: [ClaudeCodeAccount] {
+        accounts.filter(\.isEnabled)
     }
 
     init(userDefaults: UserDefaults = .standard) {
@@ -131,6 +154,24 @@ final class ClaudeCodeAccountStore: ObservableObject {
         saveCustomAccounts()
     }
 
+    func setEnabled(_ enabled: Bool, for id: UUID) {
+        if id == ClaudeCodeAccount.defaultID {
+            guard enabled != defaultAccountIsEnabled else { return }
+            defaultAccountIsEnabled = enabled
+            saveDefaultAccountEnabled()
+            return
+        }
+
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }),
+              customAccounts[index].isEnabled != enabled else {
+            return
+        }
+        var updatedAccounts = customAccounts
+        updatedAccounts[index].isEnabled = enabled
+        customAccounts = updatedAccounts
+        saveCustomAccounts()
+    }
+
     func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
         var ordered = accounts
         guard !ordered.isEmpty else { return }
@@ -158,6 +199,10 @@ final class ClaudeCodeAccountStore: ObservableObject {
             defaultAccountName = storedDefaultName
         }
 
+        if userDefaults.object(forKey: defaultEnabledStorageKey) != nil {
+            defaultAccountIsEnabled = userDefaults.bool(forKey: defaultEnabledStorageKey)
+        }
+
         accountOrder = userDefaults.stringArray(forKey: accountOrderStorageKey)?
             .compactMap(UUID.init(uuidString:)) ?? []
 
@@ -180,6 +225,14 @@ final class ClaudeCodeAccountStore: ObservableObject {
             userDefaults.removeObject(forKey: defaultNameStorageKey)
         } else {
             userDefaults.set(defaultAccountName, forKey: defaultNameStorageKey)
+        }
+    }
+
+    private func saveDefaultAccountEnabled() {
+        if defaultAccountIsEnabled {
+            userDefaults.removeObject(forKey: defaultEnabledStorageKey)
+        } else {
+            userDefaults.set(false, forKey: defaultEnabledStorageKey)
         }
     }
 
