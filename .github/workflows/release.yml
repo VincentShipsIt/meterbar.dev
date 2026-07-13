@@ -12,6 +12,7 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 60
+    environment: release
     permissions:
       contents: write
     env:
@@ -72,7 +73,7 @@ jobs:
           APPLE_API_PRIVATE_KEY_P8_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_P8_BASE64 }}
           APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: |
           set -euo pipefail
           missing=()
@@ -81,7 +82,7 @@ jobs:
           # runtime, not stored.
           for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD \
                       APPLE_API_PRIVATE_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID \
-                      SPARKLE_ED_PRIVATE_KEY SPARKLE_PUBLIC_ED_KEY; do
+                      SPARKLE_PRIVATE_ED_KEY SPARKLE_PUBLIC_ED_KEY; do
             # Indirect expansion reads the env var named in $name without echoing its value.
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
@@ -325,7 +326,7 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           ZIP_NAME: ${{ steps.package.outputs.zip_name }}
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: |
           set -euo pipefail
           APPCAST_DIR="$RUNNER_TEMP/sparkle-appcast"
@@ -339,7 +340,7 @@ jobs:
 
           mkdir -p "$APPCAST_DIR"
           cp "$GITHUB_WORKSPACE/$ZIP_NAME" "$APPCAST_DIR/$ZIP_NAME"
-          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$GENERATE_APPCAST" \
+          printf '%s' "$SPARKLE_PRIVATE_ED_KEY" | "$GENERATE_APPCAST" \
             --ed-key-file - \
             --download-url-prefix "$DOWNLOAD_PREFIX" \
             "$APPCAST_DIR"

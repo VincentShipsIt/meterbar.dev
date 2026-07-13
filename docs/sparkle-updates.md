@@ -5,9 +5,9 @@ MeterBar direct-download builds use Sparkle 2.9.4. Homebrew remains a supported,
 ## One-time signing setup
 
 1. Resolve the Xcode package and locate Sparkle's tools under the Derived Data `SourcePackages/artifacts/sparkle/Sparkle/bin/` directory.
-2. Run `generate_keys -x /secure/path/meterbar-sparkle-private-key`. Back up that private key outside the repository.
-3. Add the printed base64 public key as the GitHub Actions variable `SPARKLE_PUBLIC_ED_KEY`.
-4. Add the exported private-key contents as the GitHub Actions secret `SPARKLE_ED_PRIVATE_KEY`.
+2. Run `generate_keys --account meterbar` once, then export it with `generate_keys --account meterbar -x /secure/path/meterbar-sparkle-private-key`. Back up that private key outside the repository.
+3. Add the printed base64 public key to the `release` GitHub environment as the Actions variable `SPARKLE_PUBLIC_ED_KEY`.
+4. Add the exported private-key contents to the `release` GitHub environment as the Actions secret `SPARKLE_PRIVATE_ED_KEY`.
 
 The release workflow fails before building if either value is absent. Never commit the private key or pass it as a command-line argument; CI pipes the secret to `generate_appcast --ed-key-file -` over standard input.
 
