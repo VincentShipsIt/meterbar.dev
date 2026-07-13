@@ -22,9 +22,10 @@ nonisolated public enum ProviderReadinessInspector {
     public static func reports(
         providers: Set<ServiceType> = Set(ServiceType.allCases),
         refreshErrors: [ServiceType: ServiceError] = [:],
-        now: Date = Date()
+        now: Date = Date(),
+        parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil
     ) -> [ProviderReadiness] {
-        reports(
+        let baseReports = reports(
             providers: providers,
             refreshErrors: refreshErrors,
             now: now,
@@ -33,6 +34,13 @@ nonisolated public enum ProviderReadinessInspector {
             cursorReport: { cursorReport(refreshError: $0, now: $1) },
             openRouterReport: { error, _ in openRouterReport(refreshError: error) }
         )
+        let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
+        return baseReports.map { report in
+            ProviderReadiness(
+                provider: report.provider,
+                checks: report.checks + [parseHealthCheck(health[report.provider], now: now)]
+            )
+        }
     }
 
     /// Injectable routing seam used to prove that disabled providers perform no
@@ -157,6 +165,61 @@ nonisolated public enum ProviderReadinessInspector {
     }
 
     // MARK: - Helpers
+
+    private static func parseHealthCheck(_ record: ProviderParseHealthRecord?, now: Date) -> ReadinessCheck {
+        let threshold = "Data is considered stale after 2 hours."
+        guard let record else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "No refresh outcome has been recorded yet. \(threshold)"
+            )
+        }
+
+        if record.lastFailureWasShapeMismatch {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .fail,
+                detail: "The last refresh detected an upstream format mismatch. \(threshold)",
+                recovery: "Refresh once more, then copy this Diagnostics report if it persists."
+            )
+        }
+        if record.consecutiveFailures >= ProviderParseHealthRecord.sustainedFailureCount {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .fail,
+                detail: "\(record.consecutiveFailures) consecutive refreshes failed. \(threshold)",
+                recovery: "Check the provider connection and refresh again."
+            )
+        }
+        if record.consecutiveFailures > 0 {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "The latest refresh failed; \(record.consecutiveFailures) failure recorded. \(threshold)"
+            )
+        }
+        if let lastSuccess = record.lastSuccess,
+           now.timeIntervalSince(lastSuccess) > ProviderParseHealthRecord.staleAfter {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "Usage data is older than the 2-hour staleness threshold.",
+                recovery: "Refresh the provider and review any new error."
+            )
+        }
+        return ReadinessCheck(
+            id: ReadinessCheckID.parseHealth,
+            title: "Provider format health",
+            level: .pass,
+            detail: "The most recent provider response parsed successfully. \(threshold)"
+        )
+    }
 
     private static func cursorAppPresent() -> Bool {
         let fileManager = FileManager.default

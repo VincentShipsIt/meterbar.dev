@@ -569,6 +569,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        ProviderParseHealthStore.shared.$records
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
         updateStatusItem(metrics: UsageDataManager.shared.metrics)
     }
 
@@ -621,6 +629,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = ""
             button.imagePosition = .imageOnly
             button.toolTip = "MeterBar"
+            applyParseHealthAppearance(to: button)
             return
         }
 
@@ -630,6 +639,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.title = " \(percent)%"
         button.toolTip = "MeterBar: \(percent)% left on \(selection.displayName)"
         button.setAccessibilityLabel("MeterBar \(percent)% left on \(selection.displayName)")
+        applyParseHealthAppearance(to: button)
+    }
+
+    @MainActor
+    private func applyParseHealthAppearance(to button: NSStatusBarButton) {
+        let now = Date()
+        let hasAttention = providerVisibilityStore.enabledServices.contains { service in
+            ProviderParseHealthStore.shared.records[service]?.needsAttention(now: now) == true
+        }
+        button.alphaValue = hasAttention ? 0.55 : 1
+        if hasAttention {
+            button.toolTip = "\(button.toolTip ?? "MeterBar") · Provider data needs attention"
+        }
     }
 
     /// Every enabled account/provider quota that may own the menu bar title,
