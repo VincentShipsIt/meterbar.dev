@@ -561,6 +561,25 @@ struct SettingsView: View {
             SettingsDivider()
 
             SettingsRowView(
+                title: "Update channel",
+                detail: "Nightly tracks master builds for testing — expect pre-release bugs. "
+                    + "Stable is the default and updates only on tagged releases."
+            ) {
+                Picker("", selection: Binding(
+                    get: { softwareUpdates.channel },
+                    set: { softwareUpdates.setChannel($0) }
+                )) {
+                    ForEach(UpdateChannel.allCases) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 240)
+                .disabled(softwareUpdates.configurationError != nil)
+            }
+
+            SettingsRowView(
                 title: "Check for updates automatically",
                 detail: "Allow MeterBar to check GitHub Releases for signed updates. Off until you opt in."
             ) {
