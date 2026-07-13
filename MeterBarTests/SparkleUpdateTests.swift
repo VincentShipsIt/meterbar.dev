@@ -1,7 +1,30 @@
 import Foundation
+@testable import MeterBar
 import XCTest
 
 final class SparkleUpdateTests: XCTestCase {
+    func testKeyValidatorRejectsUnsubstitutedBuildVariable() {
+        // Debug and PR-gate builds never substitute the build setting, so the
+        // literal variable is exactly what ships in their Info.plist.
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey("$(SPARKLE_PUBLIC_ED_KEY)"))
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey("${SPARKLE_PUBLIC_ED_KEY}"))
+    }
+
+    func testKeyValidatorRejectsEmptyAndMalformedKeys() {
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey(""))
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey("   "))
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey("not base64!!"))
+        // Valid base64 of the wrong length is not an Ed25519 public key.
+        let shortKey = Data(repeating: 7, count: 16).base64EncodedString()
+        XCTAssertFalse(SoftwareUpdateController.isUsableEDPublicKey(shortKey))
+    }
+
+    func testKeyValidatorAcceptsWellFormedEd25519Key() {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        XCTAssertTrue(SoftwareUpdateController.isUsableEDPublicKey(key))
+        XCTAssertTrue(SoftwareUpdateController.isUsableEDPublicKey(" \(key) "))
+    }
+
     func testCheckedInConfigurationRequiresAutomaticCheckConsent() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

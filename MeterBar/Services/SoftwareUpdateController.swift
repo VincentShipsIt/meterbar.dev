@@ -13,13 +13,23 @@ final class SoftwareUpdateController: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
     @Published private(set) var configurationError: String?
 
+    /// True only for a plausible Ed25519 public key. Debug and PR-gate builds
+    /// carry the unsubstituted `$(SPARKLE_PUBLIC_ED_KEY)` build variable in
+    /// their Info.plist, which the empty-string check alone would let through.
+    nonisolated static func isUsableEDPublicKey(_ rawValue: String) -> Bool {
+        let key = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.hasPrefix("$("), !key.hasPrefix("${") else { return false }
+        guard let decoded = Data(base64Encoded: key) else { return false }
+        return decoded.count == 32
+    }
+
 #if canImport(Sparkle)
     private let controller: SPUStandardUpdaterController?
     private var cancellables = Set<AnyCancellable>()
 
     init(bundle: Bundle = .main) {
         guard let publicKey = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
-              !publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              Self.isUsableEDPublicKey(publicKey) else {
             controller = nil
             configurationError = "Software updates are unavailable in this build."
             return
