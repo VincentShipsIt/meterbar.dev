@@ -82,8 +82,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onDismiss: {
                 MeterBarMenuDetailPanel.shared.dismiss()
+                FirstRunOnboardingStore.shared.dismiss()
             }
         )
+
+        if FirstRunOnboardingStore.shared.shouldPresent {
+            // Defer one run-loop turn so the status-item window is ready before
+            // positioning the panel. This is the first-launch welcome moment.
+            DispatchQueue.main.async { [weak self] in
+                self?.menuPanel?.show()
+            }
+        }
 
         Task { @MainActor in
             observeUsageMetrics()

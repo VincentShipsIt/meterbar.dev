@@ -18,6 +18,8 @@ nonisolated enum StorageKeys {
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
+    /// Whether the one-time first-launch popover has been completed or dismissed.
+    static let hasCompletedFirstRun = "HasCompletedFirstRun"
     /// Enables the legacy Claude Code OAuth fallback when the CLI is unavailable.
     static let claudeCodeOAuthFallback = "ClaudeCodeEnableOAuthFallback"
     /// Extra Claude Code account profiles (JSON-encoded [ClaudeCodeAccount]).

@@ -83,6 +83,8 @@ meterbar/
 
 `@main` SwiftUI `App` with `Settings` scene + `NSApplicationDelegateAdaptor`. The delegate creates a manual `NSStatusItem` (not `MenuBarExtra`) with an `NSPopover` hosting `MenuBarView`; right-click opens a native status menu (Dock toggle / dashboard / quit). `LSUIElement = true`; Dock icon toggled at runtime via activation policy. A 5-minute `Task.sleep` loop checks limits and posts local notifications at 90%/100% with stable identifiers and re-arm-on-drop semantics.
 
+On the first launch, `FirstRunOnboardingStore` auto-opens the menu panel and shows a one-time launch-at-login choice. Enablement remains explicit through `SMAppService`; choosing either option or dismissing the panel persists `HasCompletedFirstRun` so onboarding does not reappear.
+
 ## Widget & CLI data contract
 
 The app, widget, and CLI consume the canonical `ServiceType`, `UsageLimit`, and `UsageMetrics` definitions from `Packages/MeterBarShared`. The app-group JSON contract is locked by `CachedMetricsContractTests` and `CachedMetricsReplicaContractTests` so fields and date encoding cannot silently drift across targets.

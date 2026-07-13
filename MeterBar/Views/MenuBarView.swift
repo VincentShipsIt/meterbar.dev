@@ -239,6 +239,9 @@ struct PopoverOverviewPanel: View {
   let openProviderOverview: (ProviderSnapshot) -> Void
 
   @State private var setupReports: [ProviderReadiness] = []
+  @StateObject private var onboarding = FirstRunOnboardingStore.shared
+  @Environment(\.openSettings)
+  private var openSettings
 
   /// The enabled providers currently shown in the popover.
   private var enabledProviders: Set<ServiceType> {
@@ -253,23 +256,33 @@ struct PopoverOverviewPanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
+      if onboarding.shouldPresent {
+        firstRunCallout
+      }
+
       if snapshots.isEmpty {
         DashboardTile(padding: 12) {
-          HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "clock.fill")
-              .font(.system(size: 17, weight: .bold))
-              .foregroundStyle(.secondary)
-              .frame(width: 34, height: 34)
+          VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 10) {
+              Image(systemName: "clock.fill")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 2) {
-              Text("No sources enabled")
-                .font(.headline)
-                .fontWeight(.semibold)
-              Text("Enable a provider in Settings.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("No sources enabled")
+                  .font(.headline)
+                  .fontWeight(.semibold)
+                Text("Enable a provider in Settings.")
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+              }
+              Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+
+            Button("Open Settings") { openSettings() }
+              .buttonStyle(.borderedProminent)
+              .controlSize(.small)
           }
         }
       }
@@ -309,7 +322,39 @@ struct PopoverOverviewPanel: View {
           .fontWeight(.semibold)
         Spacer(minLength: 0)
       }
-      ReadinessChecklist(reports: providersNeedingSetup, compact: true)
+      ReadinessChecklist(
+        reports: providersNeedingSetup,
+        compact: true,
+        recoveryAction: { openSettings() }
+      )
+    }
+  }
+
+  private var firstRunCallout: some View {
+    DashboardTile(padding: 12) {
+      VStack(alignment: .leading, spacing: 9) {
+        HStack(spacing: 8) {
+          Image(systemName: "sparkles")
+            .foregroundStyle(MeterBarTheme.appAccent)
+          Text("Welcome to MeterBar")
+            .font(.headline)
+            .fontWeight(.semibold)
+        }
+
+        Text("Your usage lives in the menu bar. Start MeterBar automatically when you log in?")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+        HStack(spacing: 8) {
+          Button("Enable") { onboarding.chooseLaunchAtLogin(true) }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+          Button("Not Now") { onboarding.chooseLaunchAtLogin(false) }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+      }
     }
   }
 
