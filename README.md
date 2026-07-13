@@ -75,11 +75,17 @@ To update:
 brew upgrade --cask VincentShipsIt/tap/meterbar
 ```
 
+Homebrew installations continue to update through Homebrew. Direct-download builds from v1.7.1 onward can also use **Settings → General → Software Update**. Automatic checks are disabled until you explicitly opt in; **Check Now** always performs a one-time manual check.
+
 ### Manual Download
 
 Download the latest release from [meterbar.dev](https://meterbar.dev).
 
 Releases after v1.6.1 are Developer ID signed and notarized, so direct downloads open without Gatekeeper warnings. For v1.6.1 and earlier (ad-hoc signed only), right-click and select "Open" the first time, or run `xattr -cr /Applications/MeterBar.app`.
+
+Starting with v1.7.1, direct-download releases include Sparkle 2 and consume an EdDSA-signed `appcast.xml` published with each GitHub Release. Older versions without Sparkle cannot discover v1.7.1 automatically and must be upgraded once manually.
+
+Maintainer setup and release verification are documented in [docs/sparkle-updates.md](docs/sparkle-updates.md).
 
 ### Build from Source
 

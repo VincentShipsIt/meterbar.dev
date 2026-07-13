@@ -43,11 +43,27 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Verify Debug and Release identities
+        run: scripts/verify-build-identities.sh
+
       - name: Test release tag validation
         run: scripts/test-release-tag.sh
 
       - name: Build library (SwiftPM)
         run: swift build
+
+      - name: Build Debug app and widget (Xcode)
+        run: |
+          set -euo pipefail
+          xcodebuild -project MeterBar.xcodeproj \
+            -scheme MeterBar \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/MeterBarDebugDerivedData" \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
       - name: Build universal app and widget (Xcode)
         run: |

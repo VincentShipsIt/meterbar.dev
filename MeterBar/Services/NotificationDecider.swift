@@ -91,6 +91,8 @@ struct NotificationDecider {
         metrics: UsageMetrics,
         providerEnabled: Bool,
         alreadyNotified: Set<String>,
+        accountKey: String? = nil,
+        serviceDisplayName: String? = nil,
         now: Date = Date()
     ) -> NotificationEvaluation {
         // Delivery gates suppress banners, not state transitions. Continuing to
@@ -114,7 +116,9 @@ struct NotificationDecider {
         let criticalRank = Self.severityRank(preferences.criticalThreshold.band)
 
         for (limit, quotaKind) in limits {
-            let baseKey = "\(metrics.service.rawValue)-\(quotaKind.rawValue)"
+            let baseKey = [metrics.service.rawValue, accountKey, quotaKind.rawValue]
+                .compactMap { $0 }
+                .joined(separator: "-")
             let warnKey = "\(baseKey)-warn"
             let criticalKey = "\(baseKey)-critical"
 
@@ -147,7 +151,7 @@ struct NotificationDecider {
                     fired.append(FiredNotification(
                         key: criticalKey,
                         level: .critical,
-                        serviceDisplayName: metrics.service.displayName,
+                        serviceDisplayName: serviceDisplayName ?? metrics.service.displayName,
                         quotaDisplayName: quotaDisplayName,
                         blocksProvider: blocksProvider,
                         percentUsed: Int(limit.percentage),
@@ -163,7 +167,7 @@ struct NotificationDecider {
                     fired.append(FiredNotification(
                         key: warnKey,
                         level: .warning,
-                        serviceDisplayName: metrics.service.displayName,
+                        serviceDisplayName: serviceDisplayName ?? metrics.service.displayName,
                         quotaDisplayName: quotaDisplayName,
                         blocksProvider: blocksProvider,
                         percentUsed: Int(limit.percentage),

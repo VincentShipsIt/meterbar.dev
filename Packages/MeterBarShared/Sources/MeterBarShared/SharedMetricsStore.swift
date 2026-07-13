@@ -18,6 +18,7 @@ public enum SharedMetricsStore {
     /// Base name (no extension) of the cached-metrics blob. Also the app's
     /// in-process UserDefaults cache key (see `StorageKeys.cachedUsageMetrics`).
     public static let metricsKey = "cached_usage_metrics"
+    public static let accountMetricsKey = "cached_usage_account_metrics"
 
     /// The shared App Group container, or `nil` when App Groups aren't
     /// provisioned for the running target.
@@ -30,6 +31,10 @@ public enum SharedMetricsStore {
         containerURL?.appendingPathComponent("\(metricsKey).json")
     }
 
+    public static var accountMetricsFileURL: URL? {
+        containerURL?.appendingPathComponent("\(accountMetricsKey).json")
+    }
+
     /// Decode the cached metrics, tolerating a missing file or malformed entries
     /// (an unknown service key drops that entry, not the whole cache — see
     /// `MetricsCodec.decode`). Returns an empty map when nothing is readable.
@@ -39,5 +44,14 @@ public enum SharedMetricsStore {
             return [:]
         }
         return MetricsCodec.decode(data)
+    }
+
+    public static func loadAccountMetrics() -> [AccountUsageSnapshot] {
+        guard let accountMetricsFileURL,
+              let data = try? Data(contentsOf: accountMetricsFileURL),
+              let decoded = try? JSONDecoder().decode([AccountUsageSnapshot].self, from: data) else {
+            return []
+        }
+        return decoded
     }
 }

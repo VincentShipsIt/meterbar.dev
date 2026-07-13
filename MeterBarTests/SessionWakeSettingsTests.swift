@@ -123,6 +123,20 @@ final class SessionWakeSettingsTests: XCTestCase {
         XCTAssertFalse(store.isOn)
     }
 
+    func testDisablingSelectedAccountClearsItAndTurnsOff() {
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        let store = makeStore()
+        store.setWakeAccountID(ClaudeCodeAccount.defaultID)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        accounts.setEnabled(false, for: ClaudeCodeAccount.defaultID)
+        store.reconcileAccounts(available: accounts.enabledAccounts.map(\.id))
+
+        XCTAssertNil(store.wakeAccountID)
+        XCTAssertFalse(store.isOn)
+    }
+
     func testSwitchingAccountWhileArmedDisarms() {
         let accountA = UUID()
         let accountB = UUID()

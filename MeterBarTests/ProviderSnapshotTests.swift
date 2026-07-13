@@ -101,6 +101,65 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(Set(snapshots.map(\.id)).count, snapshots.count)
     }
 
+    func testDisabledClaudeAccountsAreExcludedEvenWithCachedMetrics() {
+        let disabled = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Disabled",
+            configDirectory: "/tmp/disabled",
+            isEnabled: false
+        )
+        let enabled = ClaudeCodeAccount(id: UUID(), name: "Enabled", configDirectory: "/tmp/enabled")
+        let accountMetrics = [
+            disabled.id: makeMetrics(service: .claudeCode, weekly: 80),
+            enabled.id: makeMetrics(service: .claudeCode, weekly: 20)
+        ]
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            claudeAccounts: [disabled, enabled],
+            claudeAccountMetrics: accountMetrics,
+            enabledServices: [.claudeCode]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Enabled"])
+        XCTAssertEqual(snapshots.first?.limits.first?.usageLimit.used, 20)
+    }
+
+    func testClaudeProviderHasNoSnapshotWhenAllAccountsAreDisabled() {
+        let disabledDefault = ClaudeCodeAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: ClaudeCodeAccount.defaultName,
+            configDirectory: nil,
+            isEnabled: false
+        )
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.claudeCode: makeMetrics(service: .claudeCode, weekly: 90)],
+            claudeAccounts: [disabledDefault],
+            enabledServices: [.claudeCode]
+        ))
+
+        XCTAssertTrue(snapshots.isEmpty)
+    }
+
+    func testMultipleCodexAccountsUseIndependentMetricsAndAccountNames() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [.defaultAccount, work],
+            codexAccountMetrics: [
+                CodexAccount.defaultID: makeMetrics(service: .codexCli, weekly: 25),
+                work.id: makeMetrics(service: .codexCli, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
+        XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
+    }
+
     // MARK: - Limits
 
     func testThirdLimitLabelIsSonnetForClaudeAndCodeReviewForCodex() {

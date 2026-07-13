@@ -151,6 +151,13 @@ struct SettingsView: View {
                 isAddingClaudeAccount = false
             }
         }
+        .sheet(isPresented: $isAddingCodexAccount) {
+            AddCodexAccountSheet { name, homeDirectory in
+                codexAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                isAddingCodexAccount = false
+                Task { await dataManager.refreshAll() }
+            }
+        }
     }
 
     // MARK: Private
@@ -158,6 +165,7 @@ struct SettingsView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
+    @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -166,11 +174,13 @@ struct SettingsView: View {
     @StateObject private var dockVisibility = DockVisibilityStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
+    @StateObject private var softwareUpdates = SoftwareUpdateController.shared
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
     @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
     @State private var isAddingClaudeAccount = false
+    @State private var isAddingCodexAccount = false
     @State private var claudeReconnectError: String?
     @State private var claudeAdminKeyDraft = ""
     @State private var openaiAdminKeyDraft = ""
@@ -208,6 +218,8 @@ struct SettingsView: View {
         ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
                 metrics: dataManager.metrics,
+                codexAccounts: codexAccountStore.accounts,
+                codexAccountMetrics: dataManager.codexAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 enabledServices: providerVisibility.enabledServices,
@@ -389,7 +401,7 @@ struct SettingsView: View {
     private var codexCliSection: some View {
         SettingsPanelSection(title: "OpenAI Codex", logoKind: .codex, color: MeterBarTheme.codexAccent) {
             SettingsRowView(
-                title: "Connection",
+                title: "Default connection",
                 detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
             ) {
                 HStack(spacing: 8) {
@@ -404,9 +416,7 @@ struct SettingsView: View {
                         Task {
                             let service = codexCliService
                             await Task.detached(priority: .userInitiated) { service.checkAccess() }.value
-                            if codexCliService.hasAccess {
-                                await dataManager.refresh(service: .codexCli)
-                            }
+                            await dataManager.refresh(service: .codexCli)
                         }
                     }
                     .buttonStyle(.bordered)
@@ -421,6 +431,46 @@ struct SettingsView: View {
                 }
             } else if !codexCliService.hasAccess {
                 SettingsNotice(text: "Run codex login, then check again.", color: MeterBarTheme.warning)
+            }
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Codex Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button {
+                        isAddingCodexAccount = true
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(codexAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 { SettingsDivider() }
+                        CodexAccountProfileRow(
+                            account: account,
+                            isConnected: dataManager.codexAccountMetrics[account.id] != nil,
+                            onSave: { name, homeDirectory in
+                                codexAccountStore.updateAccount(
+                                    id: account.id,
+                                    name: name,
+                                    homeDirectory: homeDirectory
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onRemove: {
+                                codexAccountStore.removeAccount(id: account.id)
+                                Task { await dataManager.refreshAll() }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -507,11 +557,38 @@ struct SettingsView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
             }
+
+            SettingsDivider()
+
+            SettingsRowView(
+                title: "Check for updates automatically",
+                detail: "Allow MeterBar to check GitHub Releases for signed updates. Off until you opt in."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { softwareUpdates.automaticallyChecksForUpdates },
+                    set: { softwareUpdates.setAutomaticallyChecksForUpdates($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(softwareUpdates.configurationError != nil)
+            }
+
+            SettingsRowView(
+                title: "Software Update",
+                detail: softwareUpdates.configurationError ?? "Check for a new signed MeterBar release now."
+            ) {
+                Button("Check Now") {
+                    softwareUpdates.checkForUpdates()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!softwareUpdates.canCheckForUpdates)
+            }
         }
         .onAppear {
             // The login-item status can change behind the app's back in System
             // Settings, so re-read it whenever settings is shown.
             launchAtLogin.refreshStatus()
+            softwareUpdates.refreshState()
         }
     }
 
@@ -691,6 +768,13 @@ struct SettingsView: View {
                         }
                         AccountProfileRow(
                             account: account,
+                            onEnabledChange: { isEnabled in
+                                claudeAccountStore.setEnabled(isEnabled, for: account.id)
+                                SessionWakeSettingsStore.shared.reconcileAccounts(
+                                    available: claudeAccountStore.enabledAccounts.map(\.id)
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
                             onSave: { name, configDirectory in
                                 updateClaudeAccount(id: account.id, name: name, configDirectory: configDirectory)
                             },
@@ -1667,20 +1751,26 @@ private struct AdminKeySettingsRow: View {
             }
 
             HStack(spacing: 8) {
-                SecureField(placeholder, text: $draft)
-                    .settingsInput()
-                    .frame(minWidth: 220, maxWidth: 340)
+                if connected {
+                    SettingsReadonlyField(text: "••••••••••••••••")
 
-                Button("Save", action: onSave)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(trimmedDraft.isEmpty)
+                    Button("Remove", role: .destructive, action: onRemove)
+                        .buttonStyle(.bordered)
+                } else {
+                    SecureField(placeholder, text: $draft)
+                        .settingsInput()
+                        .frame(minWidth: 220, maxWidth: 340)
 
-                Button("Remove", action: onRemove)
+                    Button("Save", action: onSave)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(trimmedDraft.isEmpty)
+
+                    Button(action: onHelp) {
+                        Image(systemName: "questionmark.circle")
+                    }
                     .buttonStyle(.bordered)
-                    .disabled(!connected)
-
-                Button("Help", action: onHelp)
-                    .buttonStyle(.bordered)
+                    .help("Where to create this admin API key")
+                }
             }
         }
         .padding(.vertical, 6)
@@ -1694,6 +1784,71 @@ private struct AdminKeySettingsRow: View {
 
     private var connectedMessage: String {
         "Connected. Estimated usage appears on the API cost card."
+    }
+}
+
+// MARK: - AddCodexAccountSheet
+
+private struct AddCodexAccountSheet: View {
+    let onAdd: (String, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                ProviderLogoView(kind: .codex, size: 18, foregroundColor: MeterBarTheme.codexAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add Codex Account").font(.headline)
+                    Text("Use a separate CODEX_HOME containing its own auth.json.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                TextField("Account name", text: $accountName).settingsInput()
+                HStack(spacing: 8) {
+                    TextField("Codex home directory", text: $homeDirectory).settingsInput()
+                    Button("Choose", action: chooseHomeDirectory).buttonStyle(.bordered)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add Account") {
+                    onAdd(trimmedName, trimmedHomeDirectory)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canAdd)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+    }
+
+    @Environment(\.dismiss)
+    private var dismiss
+    @State private var accountName = ""
+    @State private var homeDirectory = ""
+
+    private var trimmedName: String { accountName.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedHomeDirectory: String {
+        homeDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var canAdd: Bool { !trimmedName.isEmpty && !trimmedHomeDirectory.isEmpty }
+
+    private func chooseHomeDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use"
+        if panel.runModal() == .OK, let url = panel.url {
+            homeDirectory = url.path
+            if trimmedName.isEmpty { accountName = url.lastPathComponent }
+        }
     }
 }
 
@@ -1802,16 +1957,24 @@ private struct AddClaudeAccountSheet: View {
 
 // MARK: - AccountProfileRow
 
+private enum AccountProfileRowMetrics {
+    static let labelWidth: CGFloat = 126
+    static let fieldWidth: CGFloat = 280
+    static let actionWidth: CGFloat = 28
+}
+
 private struct AccountProfileRow: View {
     // MARK: Lifecycle
 
     init(
         account: ClaudeCodeAccount,
+        onEnabledChange: @escaping (Bool) -> Void,
         onSave: @escaping (String, String?) -> Void,
         onReconnect: @escaping () -> Void,
         onRemove: @escaping () -> Void
     ) {
         self.account = account
+        self.onEnabledChange = onEnabledChange
         self.onSave = onSave
         self.onReconnect = onReconnect
         self.onRemove = onRemove
@@ -1822,6 +1985,7 @@ private struct AccountProfileRow: View {
     // MARK: Internal
 
     let account: ClaudeCodeAccount
+    let onEnabledChange: (Bool) -> Void
     let onSave: (String, String?) -> Void
     let onReconnect: () -> Void
     let onRemove: () -> Void
@@ -1834,8 +1998,10 @@ private struct AccountProfileRow: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
+                    accountFieldLabel("Account name")
+
                     TextField("Account label", text: $nameDraft)
-                        .settingsInput(width: 240)
+                        .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
                     Text(account.isDefault ? "Default" : "Profile")
@@ -1850,18 +2016,22 @@ private struct AccountProfileRow: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(account.isDefault ? "Default config directory" : "Config directory")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 126, alignment: .leading)
+                    accountFieldLabel(account.isDefault ? "Default config directory" : "Config directory")
 
                     if account.isDefault {
                         SettingsReadonlyField(text: displayConfigDirectory)
+
+                        Button {
+                            revealDefaultConfigDirectory()
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Reveal config directory in Finder")
                     } else {
                         HStack(spacing: 8) {
                             TextField("Config directory", text: $configDirectoryDraft)
-                                .settingsInput(width: 280)
+                                .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                                 .onSubmit(saveChanges)
 
                             Button {
@@ -1874,15 +2044,32 @@ private struct AccountProfileRow: View {
                         }
                     }
                 }
+
+                if account.isDefault {
+                    Text("Mirrors the Claude CLI default (~/.claude, or $CLAUDE_CONFIG_DIR)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, AccountProfileRowMetrics.labelWidth + 8)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
+                Toggle("Enabled", isOn: Binding(
+                    get: { account.isEnabled },
+                    set: onEnabledChange
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help(account.isEnabled ? "Disable account" : "Enable account")
+
                 Button(action: onReconnect) {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(width: AccountProfileRowMetrics.actionWidth)
                 .help("Reconnect Claude profile")
 
                 Button(action: saveChanges) {
@@ -1890,6 +2077,7 @@ private struct AccountProfileRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(width: AccountProfileRowMetrics.actionWidth)
                 .disabled(!hasChanges || !canSave)
                 .help("Save account changes")
 
@@ -1899,10 +2087,15 @@ private struct AccountProfileRow: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(width: AccountProfileRowMetrics.actionWidth)
                     .help("Delete account")
+                } else {
+                    Color.clear
+                        .frame(width: AccountProfileRowMetrics.actionWidth, height: 1)
+                        .accessibilityHidden(true)
                 }
             }
-            .frame(minWidth: 116, alignment: .trailing)
+            .fixedSize()
         }
         .padding(.vertical, 10)
         .onChange(of: account) { _, updatedAccount in
@@ -1927,7 +2120,7 @@ private struct AccountProfileRow: View {
     private var displayConfigDirectory: String {
         account.configDirectory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? account.configDirectory ?? ""
-            : "\(ServiceSupport.realHomeDirectory())/.claude"
+            : ClaudeCodeAccount.defaultConfigDirectory()
     }
 
     private var hasChanges: Bool {
@@ -1946,6 +2139,20 @@ private struct AccountProfileRow: View {
         onSave(trimmedName, account.isDefault ? nil : trimmedConfigDirectory)
     }
 
+    private func accountFieldLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(width: AccountProfileRowMetrics.labelWidth, alignment: .leading)
+    }
+
+    private func revealDefaultConfigDirectory() {
+        NSWorkspace.shared.activateFileViewerSelecting([
+            URL(fileURLWithPath: ClaudeCodeAccount.defaultConfigDirectory(), isDirectory: true)
+        ])
+    }
+
     private func chooseConfigDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -1956,6 +2163,102 @@ private struct AccountProfileRow: View {
         if panel.runModal() == .OK, let url = panel.url {
             configDirectoryDraft = url.path
         }
+    }
+}
+
+private struct CodexAccountProfileRow: View {
+    init(
+        account: CodexAccount,
+        isConnected: Bool,
+        onSave: @escaping (String, String?) -> Void,
+        onRemove: @escaping () -> Void
+    ) {
+        self.account = account
+        self.isConnected = isConnected
+        self.onSave = onSave
+        self.onRemove = onRemove
+        _nameDraft = State(initialValue: account.name)
+        _homeDirectoryDraft = State(initialValue: account.homeDirectory ?? "")
+    }
+
+    let account: CodexAccount
+    let isConnected: Bool
+    let onSave: (String, String?) -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: account.isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
+                .foregroundStyle(MeterBarTheme.codexAccent)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Account label", text: $nameDraft)
+                        .settingsInput(width: 240)
+                        .onSubmit(saveChanges)
+                    Text(account.isDefault ? "Default" : "Profile")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.codexAccent)
+                    StatusPill(title: isConnected ? "Connected" : "Not Connected", isConnected: isConnected)
+                        .font(.caption)
+                }
+
+                HStack(spacing: 8) {
+                    Text("CODEX_HOME")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 126, alignment: .leading)
+                    if account.isDefault {
+                        SettingsReadonlyField(text: CodexHomeDirectory.path(for: account))
+                    } else {
+                        TextField("Codex home directory", text: $homeDirectoryDraft)
+                            .settingsInput(width: 280)
+                            .onSubmit(saveChanges)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                Button(action: saveChanges) { Image(systemName: "checkmark") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!hasChanges || !canSave)
+                    .help("Save account changes")
+                if !account.isDefault {
+                    Button(role: .destructive, action: onRemove) { Image(systemName: "trash") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Delete account")
+                }
+            }
+            .frame(minWidth: 80, alignment: .trailing)
+        }
+        .padding(.vertical, 10)
+        .onChange(of: account) { _, updated in
+            nameDraft = updated.name
+            homeDirectoryDraft = updated.homeDirectory ?? ""
+        }
+    }
+
+    @State private var nameDraft: String
+    @State private var homeDirectoryDraft: String
+
+    private var trimmedName: String { nameDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedHomeDirectory: String {
+        homeDirectoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var hasChanges: Bool {
+        trimmedName != account.name || (!account.isDefault && trimmedHomeDirectory != account.homeDirectory)
+    }
+    private var canSave: Bool { !trimmedName.isEmpty && (account.isDefault || !trimmedHomeDirectory.isEmpty) }
+
+    private func saveChanges() {
+        guard hasChanges, canSave else { return }
+        onSave(trimmedName, account.isDefault ? nil : trimmedHomeDirectory)
     }
 }
 

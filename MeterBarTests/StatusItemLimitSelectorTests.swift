@@ -115,4 +115,11 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(select([b, a])?.key, "claude:a")
         XCTAssertEqual(select([a, b])?.key, "claude:a")
     }
+
+    func testCodexAccountsCompeteIndependentlyByActivity() {
+        let idle = candidate(key: "codex:personal", percentUsed: 95)
+        let active = candidate(key: "codex:work", percentUsed: 45, activeMinutesAgo: 2)
+
+        XCTAssertEqual(select([idle, active])?.key, "codex:work")
+    }
 }

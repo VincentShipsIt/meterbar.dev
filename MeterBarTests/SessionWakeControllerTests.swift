@@ -118,6 +118,30 @@ final class SessionWakeControllerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
     }
 
+    func testDisablingSelectedAccountStopsWatcherAndClearsSelection() {
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        let store = armedStore()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: accounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+
+        accounts.setEnabled(false, for: ClaudeCodeAccount.defaultID)
+
+        poll { !controller.isWatching }
+        XCTAssertFalse(controller.isWatching)
+        XCTAssertFalse(store.isOn)
+        XCTAssertNil(store.wakeAccountID)
+        poll { recorder.stopCount >= 1 }
+        XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
+    }
+
     func testStaysOffWhenToggleOff() {
         let store = SessionWakeSettingsStore(userDefaults: defaults) // off
         let recorder = WatchRecorder()

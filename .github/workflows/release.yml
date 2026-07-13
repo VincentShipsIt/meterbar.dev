@@ -12,12 +12,14 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 60
+    environment: release
     permissions:
       contents: write
     env:
       APP_PATH: ${{ github.workspace }}/build/Build/Products/Release/MeterBar.app
       # Context values enter shell code only through environment variables.
       REF_NAME: ${{ github.ref_name }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
       # notarytool keychain-profile name (stored in the temp keychain at runtime).
       NOTARY_PROFILE: asc-profile
 
@@ -71,6 +73,7 @@ jobs:
           APPLE_API_PRIVATE_KEY_P8_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_P8_BASE64 }}
           APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: |
           set -euo pipefail
           missing=()
@@ -78,7 +81,8 @@ jobs:
           # required. KEYCHAIN_PASSWORD is intentionally absent — it is generated at
           # runtime, not stored.
           for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD \
-                      APPLE_API_PRIVATE_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID; do
+                      APPLE_API_PRIVATE_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID \
+                      SPARKLE_PRIVATE_ED_KEY SPARKLE_PUBLIC_ED_KEY; do
             # Indirect expansion reads the env var named in $name without echoing its value.
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
@@ -86,7 +90,7 @@ jobs:
           done
           if [ "${#missing[@]}" -ne 0 ]; then
             echo "::error::Missing required signing credential(s): ${missing[*]}" >&2
-            echo "Set secrets DEVELOPER_ID_P12_BASE64 / DEVELOPER_ID_P12_PASSWORD / APPLE_API_PRIVATE_KEY_P8_BASE64 and variables APPLE_API_KEY_ID / APPLE_API_ISSUER_ID under Settings > Secrets and variables > Actions, then re-run." >&2
+            echo "Set the required Developer ID, notarization, and Sparkle EdDSA secrets/variables under Settings > Secrets and variables > Actions, then re-run." >&2
             exit 1
           fi
           echo "All required signing credentials are present."
@@ -110,6 +114,7 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
             build
 
       - name: Build and inject universal CLI
@@ -315,12 +320,44 @@ jobs:
             echo "sha_name=$SHA_NAME"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate and verify Sparkle appcast
+        id: appcast
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          set -euo pipefail
+          APPCAST_DIR="$RUNNER_TEMP/sparkle-appcast"
+          GENERATE_APPCAST="$GITHUB_WORKSPACE/build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
+          DOWNLOAD_PREFIX="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/"
+
+          if [ ! -x "$GENERATE_APPCAST" ]; then
+            echo "::error::Sparkle generate_appcast was not resolved at $GENERATE_APPCAST" >&2
+            exit 1
+          fi
+
+          mkdir -p "$APPCAST_DIR"
+          cp "$GITHUB_WORKSPACE/$ZIP_NAME" "$APPCAST_DIR/$ZIP_NAME"
+          printf '%s' "$SPARKLE_PRIVATE_ED_KEY" | "$GENERATE_APPCAST" \
+            --ed-key-file - \
+            --download-url-prefix "$DOWNLOAD_PREFIX" \
+            "$APPCAST_DIR"
+
+          APPCAST_PATH="$APPCAST_DIR/appcast.xml"
+          scripts/verify-appcast.sh \
+            "$APPCAST_PATH" "$RELEASE_VERSION" "$ZIP_NAME" "$DOWNLOAD_PREFIX"
+          cp "$APPCAST_PATH" "$GITHUB_WORKSPACE/appcast.xml"
+          echo "name=appcast.xml" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             ${{ steps.package.outputs.zip_name }}
             ${{ steps.package.outputs.sha_name }}
+            ${{ steps.appcast.outputs.name }}
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -337,6 +374,7 @@ jobs:
             echo ""
             echo "**Tag:** \`$RELEASE_TAG\`"
             echo "**SHA256:** \`$RELEASE_SHA256\`"
+            echo "**Sparkle feed:** \`appcast.xml\` (EdDSA signed archive)"
             echo ""
             echo "Universal arm64+x86_64, Developer ID signed, notarized, and stapled."
           } >> "$GITHUB_STEP_SUMMARY"

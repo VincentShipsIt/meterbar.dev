@@ -18,14 +18,26 @@ nonisolated enum StorageKeys {
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
+    /// Whether the one-time first-launch popover has been completed or dismissed.
+    static let hasCompletedFirstRun = "HasCompletedFirstRun"
     /// Enables the legacy Claude Code OAuth fallback when the CLI is unavailable.
     static let claudeCodeOAuthFallback = "ClaudeCodeEnableOAuthFallback"
     /// Extra Claude Code account profiles (JSON-encoded [ClaudeCodeAccount]).
     static let claudeCodeCustomAccounts = "ClaudeCodeCustomAccounts"
     /// User-chosen display name for the default Claude Code CLI profile.
     static let claudeCodeDefaultAccountName = "ClaudeCodeDefaultAccountName"
+    /// Whether the synthesized default Claude Code CLI profile participates in tracking.
+    static let claudeCodeDefaultAccountEnabled = "ClaudeCodeDefaultAccountEnabled"
     /// Persisted account display order (array of UUID strings).
     static let claudeCodeAccountOrder = "ClaudeCodeAccountOrder"
+    /// Extra Codex CLI account profiles (JSON-encoded [CodexAccount]).
+    static let codexCustomAccounts = "CodexCustomAccounts"
+    /// User-chosen display name for the default Codex CLI profile.
+    static let codexDefaultAccountName = "CodexDefaultAccountName"
+    /// Persisted Codex account display order (array of UUID strings).
+    static let codexAccountOrder = "CodexAccountOrder"
+    /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
+    static let cachedCodexAccountMetrics = "CachedCodexAccountMetrics"
     /// Global on/off switch for usage notifications.
     static let notificationsEnabled = "NotificationsEnabled"
     /// Raw value of the `NotificationThreshold` at which a warning notifies.

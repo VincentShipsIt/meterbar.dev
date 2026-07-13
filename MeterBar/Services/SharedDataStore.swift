@@ -36,6 +36,13 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
         return SharedMetricsStore.metricsFileURL
     }
 
+    private var accountMetricsFileURL: URL? {
+        if let directoryOverride {
+            return directoryOverride.appendingPathComponent("\(SharedMetricsStore.accountMetricsKey).json")
+        }
+        return SharedMetricsStore.accountMetricsFileURL
+    }
+
     /// Defaults reproduce the production singleton exactly; tests inject a
     /// directory + write spy.
     init(directoryOverride: URL? = nil, didWrite: (() -> Void)? = nil) {
@@ -66,6 +73,25 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
         }
     }
 
+    func saveAccountMetrics(_ snapshots: [AccountUsageSnapshot]) {
+        guard let fileURL = accountMetricsFileURL,
+              let data = try? JSONEncoder().encode(snapshots) else {
+            AppLog.storage.error("Failed to prepare shared account metrics")
+            return
+        }
+
+        ioQueue.async { [weak self] in
+            do {
+                try data.write(to: fileURL, options: [.atomic])
+                self?.didWrite()
+            } catch {
+                AppLog.storage.error(
+                    "Failed to save shared account metrics: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
     /// Reads through the shared reader so the app, widget, and CLI decode the
     /// same file the same way. The test override reads the same file name from
     /// the injected directory.
@@ -76,6 +102,16 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
             return MetricsCodec.decode(data)
         }
         return SharedMetricsStore.loadMetrics()
+    }
+
+    public func loadAccountMetrics() -> [AccountUsageSnapshot] {
+        guard directoryOverride == nil else {
+            guard let fileURL = accountMetricsFileURL,
+                  let data = try? Data(contentsOf: fileURL),
+                  let decoded = try? JSONDecoder().decode([AccountUsageSnapshot].self, from: data) else { return [] }
+            return decoded
+        }
+        return SharedMetricsStore.loadAccountMetrics()
     }
 
     /// Blocks until any in-flight async write has completed. Test-only: lets a

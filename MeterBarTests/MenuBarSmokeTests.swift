@@ -16,7 +16,7 @@ import XCTest
 final class MenuBarSmokeTests: XCTestCase {
 
     /// Controllable single-account provider (Codex / Cursor stand-in).
-    private final class StubUsageProvider: SimpleUsageProviding {
+    private final class StubUsageProvider: SimpleUsageProviding, CodexUsageProviding {
         var hasAccess: Bool
         private let metrics: UsageMetrics
         init(hasAccess: Bool, metrics: UsageMetrics) {
@@ -24,6 +24,8 @@ final class MenuBarSmokeTests: XCTestCase {
             self.metrics = metrics
         }
         func fetchUsageMetrics() async throws -> UsageMetrics { metrics }
+        func canAccess(account: CodexAccount) async -> Bool { hasAccess }
+        func fetchUsageMetrics(account: CodexAccount) async throws -> UsageMetrics { metrics }
     }
 
     private var tempDirectory: URL!

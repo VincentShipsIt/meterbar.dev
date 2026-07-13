@@ -51,8 +51,8 @@ struct SessionWakeSettingsView: View {
     }
 
     @ViewBuilder private var sections: some View {
-        switchSection
         accountSection
+        switchSection
         previewSection
         limitsSection
         permissionSection
@@ -65,8 +65,9 @@ struct SessionWakeSettingsView: View {
         Section("Session Wake") {
             Toggle("Session Wake", isOn: onBinding)
                 .disabled(!store.canTurnOn && !store.isOn)
+                .toggleStyle(.switch)
             if store.wakeAccountID == nil {
-                Text("Choose a wake account below to enable Session Wake.")
+                Text("Choose a wake account above to enable Session Wake.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -78,7 +79,7 @@ struct SessionWakeSettingsView: View {
         Section("Wake account") {
             Picker("Account", selection: accountBinding) {
                 Text("None selected").tag(UUID?.none)
-                ForEach(accounts.accounts) { account in
+                ForEach(accounts.enabledAccounts) { account in
                     Text(account.name).tag(UUID?.some(account.id))
                 }
             }
@@ -173,7 +174,7 @@ struct SessionWakeSettingsView: View {
     }
 
     private var selectedConfigDirectory: String? {
-        accounts.accounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
+        accounts.enabledAccounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
     }
 
     private func binding<Value>(_ value: Value, _ setter: @escaping (Value) -> Void) -> Binding<Value> {

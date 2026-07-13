@@ -80,11 +80,14 @@ final class SessionWakeController: ObservableObject {
         .sink { [weak self] in self?.reconcile() }
         .store(in: &cancellables)
 
-        accounts.$customAccounts
+        Publishers.Merge(
+            accounts.$customAccounts.map { _ in () },
+            accounts.$defaultAccountIsEnabled.map { _ in () }
+        )
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.store.reconcileAccounts(available: self.accounts.accounts.map(\.id))
+                self.store.reconcileAccounts(available: self.accounts.enabledAccounts.map(\.id))
                 self.reconcile()
             }
             .store(in: &cancellables)
@@ -107,7 +110,7 @@ final class SessionWakeController: ObservableObject {
 
     private func selectedAccount() -> ClaudeCodeAccount? {
         guard let id = store.wakeAccountID else { return nil }
-        return accounts.accounts.first { $0.id == id }
+        return accounts.enabledAccounts.first { $0.id == id }
     }
 
     private func startWatching(account: ClaudeCodeAccount) {

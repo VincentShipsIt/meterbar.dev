@@ -141,6 +141,8 @@ struct SnapshotLimit: Identifiable {
 enum ProviderSnapshotBuilder {
     struct Input {
         var metrics: [ServiceType: UsageMetrics]
+        var codexAccounts: [CodexAccount] = [.defaultAccount]
+        var codexAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
         var enabledServices: Set<ServiceType>
@@ -158,34 +160,44 @@ enum ProviderSnapshotBuilder {
         var result: [ProviderSnapshot] = []
 
         if input.enabledServices.contains(.codexCli) {
-            result.append(snapshot(
-                title: "Codex",
-                service: .codexCli,
-                metrics: input.metrics[.codexCli],
-                emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
-            ))
-        }
-
-        if input.enabledServices.contains(.claudeCode) {
-            let accountMetrics = input.claudeAccountMetrics
-            if !accountMetrics.isEmpty {
-                for account in input.claudeAccounts {
-                    let title = account.isDefault && input.claudeAccounts.count == 1 ? "Claude" : account.name
+            if !input.codexAccountMetrics.isEmpty {
+                for account in input.codexAccounts {
+                    let title = account.isDefault && input.codexAccounts.count == 1 ? "Codex" : account.name
                     result.append(snapshot(
                         title: title,
-                        service: .claudeCode,
-                        metrics: accountMetrics[account.id],
-                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run claude login",
+                        service: .codexCli,
+                        metrics: input.codexAccountMetrics[account.id],
+                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run codex login",
                         accountID: account.id
                     ))
                 }
             } else {
                 result.append(snapshot(
-                    title: "Claude",
-                    service: .claudeCode,
-                    metrics: input.metrics[.claudeCode],
-                    emptyDetail: input.claudeCodeHasAccess ? "Waiting for refresh" : "Run claude login"
+                    title: "Codex",
+                    service: .codexCli,
+                    metrics: input.metrics[.codexCli],
+                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
                 ))
+            }
+        }
+
+        if input.enabledServices.contains(.claudeCode) {
+            let enabledAccounts = input.claudeAccounts.filter(\.isEnabled)
+            let accountMetrics = input.claudeAccountMetrics
+            if !enabledAccounts.isEmpty {
+                for account in enabledAccounts {
+                    let title = account.isDefault && enabledAccounts.count == 1 ? "Claude" : account.name
+                    let emptyDetail = account.isDefault && input.claudeCodeHasAccess
+                        ? "Waiting for refresh"
+                        : "Run claude login"
+                    result.append(snapshot(
+                        title: title,
+                        service: .claudeCode,
+                        metrics: accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil),
+                        emptyDetail: emptyDetail,
+                        accountID: account.id
+                    ))
+                }
             }
         }
 
