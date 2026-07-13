@@ -64,7 +64,7 @@ final class MeterBarMenuDetailPanel {
 
   private func ensurePanel() -> NSPanel {
     if let panel { return panel }
-    let panel = NSPanel(
+    let panel = KeyableMenuPanel(
       contentRect: NSRect(x: 0, y: 0, width: 340, height: 360),
       styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
