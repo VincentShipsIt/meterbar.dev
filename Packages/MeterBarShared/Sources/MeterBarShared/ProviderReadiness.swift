@@ -39,6 +39,7 @@ public enum ReadinessCheckID {
     public static let auth = "auth"
     public static let data = "data"
     public static let refresh = "refresh"
+    public static let parseHealth = "parse-health"
 }
 
 /// One evaluated check: a pass/warn/fail plus a redacted, plain-language detail

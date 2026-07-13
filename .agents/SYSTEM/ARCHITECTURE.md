@@ -63,7 +63,7 @@ meterbar/
 
 ## Services (all `.shared` singletons)
 
-- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, drives a `Timer` auto-refresh (default 15 min; `RefreshInterval` supports 1/2/5/15/30 min + manual).
+- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a `Timer` auto-refresh (default 15 min; `RefreshInterval` supports 1/2/5/15/30 min + manual).
 - **ClaudeCodeCLIUsageService** — resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
 - **ClaudeCodeLocalService** — CLI-first wrapper; legacy OAuth fallback + best-effort "extra usage" probe against `api.anthropic.com/api/oauth/usage`.
 - **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off").
@@ -73,6 +73,7 @@ meterbar/
 - **CostTracker** — JSONL/SQLite log scanning, per-day/model/origin breakdowns, cache at `~/Library/Application Support/MeterBar/cost-summary-v1.json`. API-rate estimates come from the versioned `ModelPricing` table in `MeterBarShared`, which is shared with the CLI.
 - **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.meterbar.app`. Reads migrate the older `dev.shipshit.meterbar` (v1.6.x) and `com.agenticindiedev.quotaguard` (v1.0-v1.6) services into the current one, and removals delete all three so a legacy key cannot reappear.
 - **SharedDataStore** — app-group JSON file (`cached_usage_metrics.json`), atomic writes on a serial queue, `WidgetCenter.reloadTimelines` after save.
+- **ProviderParseHealthStore** — app-group `UserDefaults` records of each provider's last successful parse, last attempt, consecutive failures, and format-mismatch state. Diagnostics and `meterbar doctor` share the same records; successful data warns after 2 hours, while format mismatches or 3 consecutive failures need attention and dim the menu bar item.
 - **ProviderVisibilityStore / DockVisibilityStore / ClaudeCodeAccountStore** — UserDefaults-backed preference stores.
 - **OAuthTokenExpiry** — JWT/unix-timestamp expiry checks (60 s grace; unparseable ⇒ not-expired by design).
 - **ServiceSupport** — shared URLSession config, secret-safe HTTP/URLError mapping, real (non-container) home dir via `getpwuid`.

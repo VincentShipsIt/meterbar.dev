@@ -61,7 +61,8 @@ final class UsageDataManagerTests: XCTestCase {
         codex: StubProvider,
         cursor: StubProvider,
         hidden: Set<ServiceType> = [],
-        preload: [ServiceType: UsageMetrics] = [:]
+        preload: [ServiceType: UsageMetrics] = [:],
+        parseHealthStore: ProviderParseHealthStore? = nil
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
         createdSuiteNames.append(contentsOf: [suiteName, "\(suiteName)-vis"])
@@ -84,9 +85,25 @@ final class UsageDataManagerTests: XCTestCase {
             providerVisibilityStore: visibility,
             sharedStore: sharedStore,
             cacheDefaults: cacheDefaults,
+            parseHealthStore: parseHealthStore,
             schedulesAutoRefresh: false
         )
         return (manager, sharedStore)
+    }
+
+    func testRefreshRecordsSuccessAndFailureHealth() async {
+        let healthSuite = "UsageDataManagerHealthTests-\(UUID().uuidString)"
+        createdSuiteNames.append(healthSuite)
+        let health = ProviderParseHealthStore(userDefaults: UserDefaults(suiteName: healthSuite)!)
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .failure(ServiceError.parsingError))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor, parseHealthStore: health)
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(health.records[.codexCli]?.consecutiveFailures, 0)
+        XCTAssertEqual(health.records[.cursor]?.consecutiveFailures, 1)
+        XCTAssertTrue(health.records[.cursor]?.lastFailureWasShapeMismatch ?? false)
     }
 
     func testRefreshAllMergesBothEnabledProviders() async {
