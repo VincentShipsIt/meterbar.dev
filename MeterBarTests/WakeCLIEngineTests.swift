@@ -18,6 +18,18 @@ final class WakeCLIEngineTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
+    func testSharedFeatureFlagDefaultsOnButExplicitOffBlocksCLI() {
+        let suite = "WakeFeatureGateTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return XCTFail("test defaults should be available")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertTrue(SessionWakeCLI.isFeatureEnabled(userDefaults: defaults))
+        defaults.set(false, forKey: SessionWakeCLI.sharedFeatureEnabledKey)
+        XCTAssertFalse(SessionWakeCLI.isFeatureEnabled(userDefaults: defaults))
+    }
+
     private func writeBlockedSession(_ id: String = "s0") throws {
         let projects = tempDir.appendingPathComponent("projects").appendingPathComponent("-proj")
         try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)

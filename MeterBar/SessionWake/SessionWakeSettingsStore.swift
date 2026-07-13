@@ -1,7 +1,9 @@
 import Combine
 import Foundation
+import MeterBarShared
 
-/// Persists Session Wake preferences behind a single ON/OFF switch.
+/// Persists Session Wake preferences behind a user ON/OFF switch and a master
+/// feature kill-switch.
 ///
 /// `isOn` is the one control: when on, the watcher polls the selected account's
 /// session limits and resumes blocked sessions after reset; when off, nothing
@@ -12,6 +14,7 @@ import Foundation
 final class SessionWakeSettingsStore: ObservableObject {
     static let shared = SessionWakeSettingsStore()
 
+    @Published private(set) var featureEnabled: Bool
     @Published private(set) var isOn: Bool
     @Published private(set) var wakeAccountID: UUID?
     @Published private(set) var firstRunAcknowledged: Bool
@@ -26,6 +29,14 @@ final class SessionWakeSettingsStore: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        if userDefaults.object(forKey: StorageKeys.sessionWakeFeatureEnabled) == nil {
+            // Session Wake shipped before this key was wired. Preserve that
+            // behavior for existing installs; an explicit false is the master
+            // emergency-off switch.
+            featureEnabled = true
+        } else {
+            featureEnabled = userDefaults.bool(forKey: StorageKeys.sessionWakeFeatureEnabled)
+        }
         isOn = userDefaults.bool(forKey: StorageKeys.sessionWakeWatcherArmed)
         wakeAccountID = userDefaults.string(forKey: StorageKeys.sessionWakeAccountID).flatMap(UUID.init(uuidString:))
         firstRunAcknowledged = userDefaults.bool(forKey: StorageKeys.sessionWakeFirstEnableAcknowledged)
@@ -43,10 +54,15 @@ final class SessionWakeSettingsStore: ObservableObject {
         let storedTurns = userDefaults.object(forKey: StorageKeys.sessionWakeMaxTurns) as? Int
         maxTurns = storedTurns ?? WakeBounds.default.maxTurns
 
-        // Invariant: never persist "on" without the preconditions still holding.
+        // Invariant: never persist "on" while the master switch is off or
+        // without the remaining preconditions still holding.
         if isOn && !canTurnOn {
             isOn = false
             userDefaults.set(false, forKey: StorageKeys.sessionWakeWatcherArmed)
+        }
+
+        if userDefaults === UserDefaults.standard {
+            syncSharedFeatureFlag()
         }
     }
 
@@ -66,7 +82,7 @@ final class SessionWakeSettingsStore: ObservableObject {
     /// Whether the switch may be turned on right now: an explicit account and,
     /// for bypass mode, its separate acknowledgement.
     var canTurnOn: Bool {
-        wakeAccountID != nil && (permissionMode == .safe || bypassAcknowledged)
+        featureEnabled && wakeAccountID != nil && (permissionMode == .safe || bypassAcknowledged)
     }
 
     /// True when turning on should first show the one-time confirmation.
@@ -75,6 +91,20 @@ final class SessionWakeSettingsStore: ObservableObject {
     }
 
     // MARK: - Mutations
+
+    /// The master kill-switch. Disabling the feature immediately clears live
+    /// watcher intent and is mirrored to the app-group domain used by the CLI.
+    func setFeatureEnabled(_ enabled: Bool) {
+        guard enabled != featureEnabled else { return }
+        featureEnabled = enabled
+        userDefaults.set(enabled, forKey: StorageKeys.sessionWakeFeatureEnabled)
+        if userDefaults === UserDefaults.standard {
+            syncSharedFeatureFlag()
+        }
+        if !enabled {
+            forceOff()
+        }
+    }
 
     /// Turn the watcher on or off. Turning on is refused unless `canTurnOn` and
     /// the first-run confirmation has been acknowledged; turning off always
@@ -157,5 +187,10 @@ final class SessionWakeSettingsStore: ObservableObject {
         guard isOn else { return }
         isOn = false
         userDefaults.set(false, forKey: StorageKeys.sessionWakeWatcherArmed)
+    }
+
+    private func syncSharedFeatureFlag() {
+        UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier)?
+            .set(featureEnabled, forKey: SessionWakeCLI.sharedFeatureEnabledKey)
     }
 }

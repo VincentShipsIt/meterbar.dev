@@ -23,10 +23,35 @@ final class SessionWakeSettingsTests: XCTestCase {
 
     func testDefaultsAreOff() {
         let store = makeStore()
+        XCTAssertTrue(store.featureEnabled)
         XCTAssertFalse(store.isOn)
         XCTAssertNil(store.wakeAccountID)
         XCTAssertFalse(store.canTurnOn)
         XCTAssertTrue(store.needsFirstRunConfirmation)
+    }
+
+    func testMasterFeatureFlagOffForcesWatcherOffAndPreventsArming() {
+        let store = makeStore()
+        store.setWakeAccountID(UUID())
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        store.setFeatureEnabled(false)
+
+        XCTAssertFalse(store.featureEnabled)
+        XCTAssertFalse(store.isOn)
+        XCTAssertFalse(store.canTurnOn)
+        store.setOn(true)
+        XCTAssertFalse(store.isOn)
+    }
+
+    func testExplicitlyDisabledFeatureStaysDisabledAcrossRelaunch() {
+        defaults.set(false, forKey: StorageKeys.sessionWakeFeatureEnabled)
+
+        let store = makeStore()
+
+        XCTAssertFalse(store.featureEnabled)
+        XCTAssertFalse(store.isOn)
     }
 
     func testCannotTurnOnWithoutAccount() {

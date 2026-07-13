@@ -97,11 +97,13 @@ final class SessionWakeStatusTests: XCTestCase {
 
     func testMenuControlVisibility() {
         // On ⇒ shown (kill switch must stay reachable), even mid-run.
-        XCTAssertTrue(SessionWakeMenuControl.shouldShow(isOn: true, canTurnOn: false))
+        XCTAssertTrue(SessionWakeMenuControl.shouldShow(featureEnabled: true, isOn: true, canTurnOn: false))
         // Off but armable (account configured) ⇒ shown for quick access.
-        XCTAssertTrue(SessionWakeMenuControl.shouldShow(isOn: false, canTurnOn: true))
+        XCTAssertTrue(SessionWakeMenuControl.shouldShow(featureEnabled: true, isOn: false, canTurnOn: true))
         // Off and unconfigured ⇒ hidden, no inert row.
-        XCTAssertFalse(SessionWakeMenuControl.shouldShow(isOn: false, canTurnOn: false))
+        XCTAssertFalse(SessionWakeMenuControl.shouldShow(featureEnabled: true, isOn: false, canTurnOn: false))
+        // The master flag hides the control even if stale watcher intent exists.
+        XCTAssertFalse(SessionWakeMenuControl.shouldShow(featureEnabled: false, isOn: true, canTurnOn: true))
     }
 
     func testMenuControlHosts() {
