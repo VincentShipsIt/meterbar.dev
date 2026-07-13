@@ -41,8 +41,8 @@ struct SessionWakeMenuControl: View {
     /// always one click away — or when it is ready to be armed (a wake account is
     /// configured). Hidden when unconfigured, so users who never touch Session
     /// Wake (e.g. Codex-only) don't see an inert row.
-    static func shouldShow(isOn: Bool, canTurnOn: Bool) -> Bool {
-        isOn || canTurnOn
+    static func shouldShow(featureEnabled: Bool, isOn: Bool, canTurnOn: Bool) -> Bool {
+        featureEnabled && (isOn || canTurnOn)
     }
 
     private var label: SessionWakeStatusLabel {

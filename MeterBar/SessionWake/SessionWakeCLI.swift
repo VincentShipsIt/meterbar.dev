@@ -7,6 +7,9 @@ import MeterBarShared
 /// CLI stays a thin wrapper over the same native discovery / quota / runner /
 /// ledger the app uses, and MeterBar's public surface doesn't balloon.
 public enum SessionWakeCLI {
+    /// Shared app-group key used by both the app and bundled CLI.
+    public static let sharedFeatureEnabledKey = "SessionWakeFeatureEnabled"
+
     /// Everything the command needs to render output and set an exit code.
     public struct Result: Sendable {
         /// The versioned JSON response (stdout when `--json`).
@@ -58,6 +61,19 @@ public enum SessionWakeCLI {
 
     /// Run a one-shot wake. `dryRun` performs no subprocess and no mutation.
     public static func run(_ request: Request) async -> Result {
+        guard isFeatureEnabled() else {
+            let message = "Session Wake is disabled by MeterBar's master feature switch."
+            let response = WakeCLIResponse.from(
+                candidates: [],
+                outcome: .validationFailure,
+                provider: request.provider,
+                dryRun: request.dryRun,
+                account: request.configDirectory,
+                message: message
+            )
+            return result(from: response)
+        }
+
         let account = resolveAccount(configDirectory: request.configDirectory)
         let mode: WakePermissionMode = (request.permissionMode.lowercased() == "bypass") ? .bypass : .safe
         let engine = WakeCLIEngine(
@@ -77,17 +93,16 @@ public enum SessionWakeCLI {
             dryRun: request.dryRun,
             limit: request.limit
         )
-        let json = (try? response.jsonData())
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let summary = "Session Wake: \(response.outcome.rawValue) · eligible \(response.eligibleCount)"
-            + " · resumed \(response.summary.resumed) · failed \(response.summary.failed)"
+        return result(from: response)
+    }
 
-        return Result(
-            jsonOutput: json,
-            summaryLine: summary,
-            message: response.message,
-            exitCode: response.outcome.exitCode
-        )
+    /// Missing means enabled for compatibility with v1.7.0 installs. Only an
+    /// explicit false activates the kill-switch.
+    public static func isFeatureEnabled(userDefaults: UserDefaults? = nil) -> Bool {
+        let defaults = userDefaults ?? UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier)
+        guard let defaults else { return true }
+        guard defaults.object(forKey: sharedFeatureEnabledKey) != nil else { return true }
+        return defaults.bool(forKey: sharedFeatureEnabledKey)
     }
 
     /// The wake account config directory the app shares via the app-group
@@ -102,6 +117,20 @@ public enum SessionWakeCLI {
 
     /// The app-group key the app writes the selected wake account's config dir to.
     public static let sharedAccountConfigKey = "SessionWakeAccountConfigDir"
+
+    private static func result(from response: WakeCLIResponse) -> Result {
+        let json = (try? response.jsonData())
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let summary = "Session Wake: \(response.outcome.rawValue) · eligible \(response.eligibleCount)"
+            + " · resumed \(response.summary.resumed) · failed \(response.summary.failed)"
+
+        return Result(
+            jsonOutput: json,
+            summaryLine: summary,
+            message: response.message,
+            exitCode: response.outcome.exitCode
+        )
+    }
 
     private static func resolveAccount(configDirectory: String?) -> ClaudeCodeAccount {
         let explicit = configDirectory?.trimmingCharacters(in: .whitespaces)
