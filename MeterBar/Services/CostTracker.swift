@@ -19,45 +19,6 @@ class CostTracker: ObservableObject {
         isScanning || isRefreshingMissingDays
     }
 
-    // API-rate estimates per million tokens for local log usage.
-    // Prices last verified against provider pricing pages: 2026-07-02. These rot
-    // silently — re-verify when adding models or when estimates look off.
-    // NOTE: MeterBarCLI/Sources/MeterBarCLI.swift carries a simplified copy of the
-    // "claude-sonnet" entry; keep the two in sync until a shared package exists
-    // (.agents/docs/DEFERRED_WORK.md §1).
-    nonisolated private static let pricing: [String: TokenPricing] = [
-        "claude-sonnet": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30),
-        "claude-opus": TokenPricing(input: 15.0, output: 75.0, cacheCreation: 18.75, cacheRead: 1.50),
-        "claude-haiku": TokenPricing(input: 0.25, output: 1.25, cacheCreation: 0.30, cacheRead: 0.03),
-        "claude-fable-5": TokenPricing(
-            input: 10.0, output: 50.0, cacheCreation: 12.5, cacheRead: 1.0, cacheCreationOneHour: 20.0),
-        "claude-opus-4-8": TokenPricing(
-            input: 5.0, output: 25.0, cacheCreation: 6.25, cacheRead: 0.50, cacheCreationOneHour: 10.0),
-        "claude-opus-4-7": TokenPricing(
-            input: 5.0, output: 25.0, cacheCreation: 6.25, cacheRead: 0.50, cacheCreationOneHour: 10.0),
-        "claude-opus-4-6": TokenPricing(
-            input: 5.0, output: 25.0, cacheCreation: 6.25, cacheRead: 0.50, cacheCreationOneHour: 10.0),
-        "claude-sonnet-4-6": TokenPricing(
-            input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30, cacheCreationOneHour: 6.0),
-        "claude-sonnet-4-5": TokenPricing(
-            input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30, cacheCreationOneHour: 6.0),
-        "claude-sonnet-4": TokenPricing(
-            input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30, cacheCreationOneHour: 6.0),
-        "claude-haiku-4-5": TokenPricing(
-            input: 1.0, output: 5.0, cacheCreation: 1.25, cacheRead: 0.10, cacheCreationOneHour: 2.0),
-        "codex": TokenPricing(input: 1.25, output: 10.0, cacheCreation: 0, cacheRead: 0.125),
-        "default": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
-    ]
-
-    /// Non-optional fallback so pricing lookups never need a force-unwrap of
-    /// `pricing["default"]`. Mirrors the `"default"` entry above.
-    nonisolated private static let defaultPricing = TokenPricing(
-        input: 3.0,
-        output: 15.0,
-        cacheCreation: 3.75,
-        cacheRead: 0.30
-    )
-
     // Cached regexes. The scan parses tens of thousands of log lines, so
     // allocating an NSRegularExpression per call was a measurable hot-path
     // cost. Date parsing shares the cached FlexibleISO8601 formatters.
@@ -257,7 +218,7 @@ class CostTracker: ObservableObject {
 
         guard totalInput > 0 || totalOutput > 0 || totalCacheCreation > 0 || totalCacheRead > 0 else { return nil }
 
-        let pricing = Self.pricing["claude-sonnet"] ?? Self.defaultPricing
+        let pricing = ModelPricing.claude(for: nil)
         let fallbackCost = Self.calculateCost(
             input: totalInput,
             output: totalOutput,
@@ -459,64 +420,11 @@ class CostTracker: ObservableObject {
     }
 
     nonisolated static func claudePricing(for model: String?) -> TokenPricing {
-        guard let model else {
-            return Self.pricing["claude-sonnet"] ?? Self.defaultPricing
-        }
-
-        let normalized = Self.normalizeClaudeModel(model)
-        if let exact = Self.pricing[normalized] {
-            return exact
-        }
-
-        if normalized.contains("fable") {
-            return Self.pricing["claude-fable-5"] ?? Self.defaultPricing
-        }
-        if normalized.contains("opus") {
-            let base = Self.pricing["claude-opus"] ?? Self.defaultPricing
-            if normalized.contains("4-8") { return Self.pricing["claude-opus-4-8"] ?? base }
-            if normalized.contains("4-7") { return Self.pricing["claude-opus-4-7"] ?? base }
-            if normalized.contains("4-6") { return Self.pricing["claude-opus-4-6"] ?? base }
-            return base
-        }
-        if normalized.contains("haiku") {
-            return normalized.contains("4-5")
-                ? Self.pricing["claude-haiku-4-5"] ?? (Self.pricing["claude-haiku"] ?? Self.defaultPricing)
-                : Self.pricing["claude-haiku"] ?? Self.defaultPricing
-        }
-        if normalized.contains("sonnet") {
-            let base = Self.pricing["claude-sonnet"] ?? Self.defaultPricing
-            if normalized.contains("4-6") { return Self.pricing["claude-sonnet-4-6"] ?? base }
-            if normalized.contains("4-5") { return Self.pricing["claude-sonnet-4-5"] ?? base }
-            if normalized.contains("4") { return Self.pricing["claude-sonnet-4"] ?? base }
-            return base
-        }
-
-        return Self.defaultPricing
+        ModelPricing.claude(for: model)
     }
 
     nonisolated static func normalizeClaudeModel(_ raw: String) -> String {
-        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("anthropic.") {
-            trimmed = String(trimmed.dropFirst("anthropic.".count))
-        }
-        if let lastDot = trimmed.lastIndex(of: "."),
-           trimmed.contains("claude-") {
-            let tail = String(trimmed[trimmed.index(after: lastDot)...])
-            if tail.hasPrefix("claude-") {
-                trimmed = tail
-            }
-        }
-        if let versionRange = trimmed.range(of: #"-v\d+:\d+$"#, options: .regularExpression) {
-            trimmed.removeSubrange(versionRange)
-        }
-        // Strip a trailing `-YYYYMMDD` release-date suffix so dated model ids
-        // (e.g. `claude-opus-4-8-20260101`) normalize to their base id. This keeps
-        // display names clean and lets pricing match new dated models too, not
-        // only the ones already present in the pricing table.
-        if let dateRange = trimmed.range(of: #"-\d{8}$"#, options: .regularExpression) {
-            return String(trimmed[..<dateRange.lowerBound])
-        }
-        return trimmed
+        ModelPricing.normalizeClaudeModel(raw)
     }
 
     nonisolated private static func scanCodexSessions(since cutoffDate: Date) -> (TokenCost, [DailyTokenUsage])? {
@@ -531,7 +439,7 @@ class CostTracker: ObservableObject {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
-        let pricing = Self.pricing["codex"] ?? Self.defaultPricing
+        let pricing = ModelPricing.codex
         let billableInput = max(0, totals.input - totals.cacheRead)
         let output = totals.output + totals.reasoning
         let cost = Self.calculateCost(
@@ -945,28 +853,6 @@ nonisolated struct CodexScanContext: Sendable {
     var sessionIDs: Set<String> = []
     var earliestDate: Date
     var latestDate: Date
-}
-
-nonisolated struct TokenPricing: Sendable {
-    let input: Double      // per million tokens
-    let output: Double     // per million tokens
-    let cacheCreation: Double
-    let cacheRead: Double
-    let cacheCreationOneHour: Double?
-
-    init(
-        input: Double,
-        output: Double,
-        cacheCreation: Double,
-        cacheRead: Double,
-        cacheCreationOneHour: Double? = nil
-    ) {
-        self.input = input
-        self.output = output
-        self.cacheCreation = cacheCreation
-        self.cacheRead = cacheRead
-        self.cacheCreationOneHour = cacheCreationOneHour
-    }
 }
 
 nonisolated struct TokenAccumulator: Sendable {

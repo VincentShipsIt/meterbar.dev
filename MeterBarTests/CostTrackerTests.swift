@@ -1,5 +1,6 @@
 import XCTest
 @testable import MeterBar
+import MeterBarShared
 
 /// First direct coverage for CostTracker's parsing/pricing internals — the
 /// audit found ~1,000 lines of money math with zero tests, which is exactly

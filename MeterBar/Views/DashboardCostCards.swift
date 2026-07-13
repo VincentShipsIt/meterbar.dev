@@ -77,6 +77,15 @@ struct CostOverviewStatusCard: View {
               .font(.caption)
               .fontWeight(.semibold)
           }
+          HStack {
+            Text("Pricing")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            Spacer()
+            Text(ModelPricing.revisionLabel)
+              .font(.caption)
+              .fontWeight(.semibold)
+          }
         }
       }
     }
