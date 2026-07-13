@@ -88,7 +88,6 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case optimize = "Optimize"
     case diagnostics = "Diagnostics"
     case share = "Share"
-    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -108,14 +107,12 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "stethoscope"
         case .share:
             return "square.and.arrow.up.fill"
-        case .settings:
-            return "gearshape.fill"
         }
     }
 
     /// Sidebar layout: frequency-ordered monitoring pages first, then health
-    /// checks, then utilities. Settings is reached via the toolbar gear, not
-    /// the sidebar (app-level function, not a content destination).
+    /// checks, then utilities. App settings live in the dedicated macOS
+    /// Settings scene rather than masquerading as dashboard content.
     struct SidebarGroup: Identifiable {
         let title: String?
         let sections: [DashboardSection]
@@ -145,8 +142,6 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "Provider setup health"
         case .share:
             return "Social card export"
-        case .settings:
-            return "Accounts, refresh, and local sources"
         }
     }
 }
@@ -231,8 +226,7 @@ struct UsageDashboardView: View {
         } detail: {
             detailContent
                 .toolbar {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        settingsToolbarButton
+                    ToolbarItem(placement: .primaryAction) {
                         refreshToolbarButton
                     }
                 }
@@ -270,16 +264,6 @@ struct UsageDashboardView: View {
         .disabled(isRefreshButtonDisabled)
     }
 
-    private var settingsToolbarButton: some View {
-        Button {
-            navigation.navigate(to: .settings)
-        } label: {
-            Image(systemName: "gearshape")
-                .symbolVariant(activeSection == .settings ? .fill : .none)
-        }
-        .help("Settings")
-    }
-
     private var detailContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -298,8 +282,6 @@ struct UsageDashboardView: View {
                     diagnosticsContent
                 case .share:
                     shareContent
-                case .settings:
-                    settingsContent
                 }
             }
             .padding(.horizontal, 22)
@@ -590,11 +572,6 @@ struct UsageDashboardView: View {
         .frame(height: height)
     }
 
-    private var settingsContent: some View {
-        SettingsView(embeddedInDashboard: true)
-            .frame(maxWidth: .infinity, minHeight: 520, alignment: .leading)
-    }
-
     private var providerSnapshots: [ProviderSnapshot] {
         // Same builder the popover uses; the dashboard only renders providers
         // that have reported metrics.
@@ -791,7 +768,7 @@ struct UsageDashboardView: View {
             return costTracker.isRefreshInProgress
         case .status:
             return providerStatusMonitor.isRefreshing
-        case .overview, .limits, .diagnostics, .settings:
+        case .overview, .limits, .diagnostics:
             return dataManager.isLoading
         }
     }

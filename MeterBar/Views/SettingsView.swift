@@ -120,27 +120,13 @@ private enum SettingsPane: Hashable, Identifiable {
 // MARK: - SettingsView
 
 struct SettingsView: View {
-    // MARK: Lifecycle
-
-    init(embeddedInDashboard: Bool = false) {
-        self.embeddedInDashboard = embeddedInDashboard
-    }
-
     // MARK: Internal
 
-    let embeddedInDashboard: Bool
-
     var body: some View {
-        Group {
-            if embeddedInDashboard {
-                settingsStack
-            } else {
-                settingsWindow
-            }
-        }
+        settingsWindow
         .frame(
-            minWidth: embeddedInDashboard ? nil : SettingsPane.windowMinWidth,
-            minHeight: embeddedInDashboard ? nil : SettingsPane.windowMinHeight
+            minWidth: SettingsPane.windowMinWidth,
+            minHeight: SettingsPane.windowMinHeight
         )
         .alert(
             "Claude Reconnect Failed",
@@ -393,38 +379,6 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.bottom, 2)
-    }
-
-    private var settingsStack: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            trackedProvidersSection
-            if providerVisibility.isEnabled(.claudeCode) {
-                claudeCodeSection
-            }
-            if providerVisibility.isEnabled(.cursor) {
-                cursorSection
-            }
-            if showExtraUsageSection {
-                extraUsageSection
-            }
-            apiUsageSection
-            costTrackingSection
-            refreshSection
-            notificationsSection
-            if sessionWakeStore.featureEnabled {
-                automationSection
-            }
-            generalSection
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    /// Session Wake automation. Mirrors the standalone `.automation` pane (always
-    /// available) so the dashboard settings surface can reach it too.
-    private var automationSection: some View {
-        SettingsPanelSection(title: "Automation", systemImage: "moon.zzz", color: MeterBarTheme.appAccent) {
-            SessionWakeSettingsView(embeddedInDashboard: true)
-        }
     }
 
     private var codexCliSection: some View {

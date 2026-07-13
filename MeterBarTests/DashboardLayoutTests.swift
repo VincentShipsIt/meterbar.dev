@@ -3,21 +3,20 @@ import AppKit
 import SwiftUI
 import XCTest
 
-/// Layout-audit coverage (2026-07-11): sidebar grouping, toolbar settings
-/// entry, header-hosted card controls, and content-hugging cost card.
+/// Layout-audit coverage: sidebar grouping, header-hosted card controls,
+/// and content-hugging cost card.
 @MainActor
 final class DashboardLayoutTests: XCTestCase {
     // MARK: - Sidebar groups
 
-    func testSidebarGroupsCoverEverySectionExceptSettings() {
+    func testSidebarGroupsCoverEveryDashboardSection() {
         let flattened = DashboardSection.sidebarGroups.flatMap(\.sections)
 
         XCTAssertEqual(Set(flattened).count, flattened.count, "sidebar must not repeat a section")
-        XCTAssertFalse(flattened.contains(.settings), "settings moves to the toolbar gear")
         XCTAssertEqual(
             Set(flattened),
-            Set(DashboardSection.allCases).subtracting([.settings]),
-            "every non-settings section must stay reachable from the sidebar"
+            Set(DashboardSection.allCases),
+            "every dashboard section must stay reachable from the sidebar"
         )
     }
 
