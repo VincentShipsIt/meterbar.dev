@@ -424,7 +424,7 @@ struct PopoverOverviewPanel: View {
 
       VStack(spacing: 8) {
         ForEach(snapshots) { snapshot in
-          PopoverProviderStatusCard(
+          ProviderStatusCard(
             snapshot: snapshot,
             onHoverOpen: hoverProviderOverview.map { open in { open(snapshot) } }
           ) {
@@ -507,7 +507,7 @@ struct PopoverOverviewPanel: View {
 
 // Non-private so the Liquid Glass morph wiring can be rendered in both states
 // by `LiquidGlassP1RegressionTests`.
-struct PopoverProviderStatusCard: View {
+struct ProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
   var onHoverOpen: (() -> Void)?

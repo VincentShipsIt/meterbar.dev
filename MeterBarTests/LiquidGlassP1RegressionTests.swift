@@ -215,28 +215,28 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
     func testProviderStatusCardMorphRendersBothStates() {
         let exhausted = makeSnapshot(service: .claudeCode, session: 100, weekly: 20)
         XCTAssertTrue(exhausted.hasExhaustedLimit, "session at limit should drive the compact card")
-        XCTAssertGreaterThan(fittingHeight(PopoverProviderStatusCard(snapshot: exhausted)), 0)
+        XCTAssertGreaterThan(fittingHeight(ProviderStatusCard(snapshot: exhausted)), 0)
 
         let healthy = makeSnapshot(service: .claudeCode, session: 20, weekly: 20)
         XCTAssertFalse(healthy.hasExhaustedLimit, "room left should drive the expanded card")
-        XCTAssertGreaterThan(fittingHeight(PopoverProviderStatusCard(snapshot: healthy)), 0)
+        XCTAssertGreaterThan(fittingHeight(ProviderStatusCard(snapshot: healthy)), 0)
     }
 
-    /// Dashboard twin: `ProviderLimitsBody` (inside `ProviderOverviewStatusCard`)
+    /// Dashboard twin: `ProviderLimitsBody` (inside `ProviderStatusCard`)
     /// blur-replaces between the blocking-reset counter and the limit rows.
     /// Both the weekly-exhausted and normal branches must render.
     func testDashboardProviderCardRendersBothLimitStates() {
         let weeklyExhausted = makeSnapshot(service: .claudeCode, session: 0, weekly: 100)
         XCTAssertTrue(weeklyExhausted.hasExhaustedWeeklyLimit)
         XCTAssertGreaterThan(
-            fittingHeight(ProviderOverviewStatusCard(snapshot: weeklyExhausted, onSelect: nil)),
+            fittingHeight(ProviderStatusCard(snapshot: weeklyExhausted, onSelect: nil)),
             0
         )
 
         let healthy = makeSnapshot(service: .claudeCode, session: 20, weekly: 20)
         XCTAssertFalse(healthy.hasExhaustedWeeklyLimit)
         XCTAssertGreaterThan(
-            fittingHeight(ProviderOverviewStatusCard(snapshot: healthy, onSelect: nil)),
+            fittingHeight(ProviderStatusCard(snapshot: healthy, onSelect: nil)),
             0
         )
     }

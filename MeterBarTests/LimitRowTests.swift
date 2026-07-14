@@ -158,11 +158,11 @@ final class LimitRowTests: XCTestCase {
     }
 }
 
-/// Guards the compact/exhausted popover swap (`PopoverProviderStatusCard`) that
+/// Guards the compact/exhausted popover swap (`ProviderStatusCard`) that
 /// substitutes a countdown row for the limit list — item 4 of the unification:
 /// migrating the limit row must not break that card in either state.
 @MainActor
-final class PopoverProviderStatusCardSmokeTests: XCTestCase {
+final class ProviderStatusCardSmokeTests: XCTestCase {
     private func snapshot(exhausted: Bool) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: exhausted ? 100 : 40,
@@ -186,7 +186,7 @@ final class PopoverProviderStatusCardSmokeTests: XCTestCase {
     }
 
     func testNormalCardRenders() {
-        let card = PopoverProviderStatusCard(snapshot: snapshot(exhausted: false))
+        let card = ProviderStatusCard(snapshot: snapshot(exhausted: false))
         XCTAssertFalse(card.snapshot.hasExhaustedLimit, "fixture should render the normal limit list")
         let host = NSHostingView(rootView: card.frame(width: 360))
         host.layoutSubtreeIfNeeded()
@@ -194,7 +194,7 @@ final class PopoverProviderStatusCardSmokeTests: XCTestCase {
     }
 
     func testExhaustedCardRendersCountdownVariant() {
-        let card = PopoverProviderStatusCard(snapshot: snapshot(exhausted: true))
+        let card = ProviderStatusCard(snapshot: snapshot(exhausted: true))
         XCTAssertTrue(card.snapshot.hasExhaustedLimit, "fixture should drive the compact/exhausted swap")
         let host = NSHostingView(rootView: card.frame(width: 360))
         host.layoutSubtreeIfNeeded()

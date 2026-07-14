@@ -178,7 +178,7 @@ final class DashboardLayoutTests: XCTestCase {
             emptyDetail: ""
         )
         // Tappable card: hover style, chevron, and context menu are all attached.
-        let card = ProviderOverviewStatusCard(snapshot: snapshot) {}
+        let card = ProviderStatusCard(snapshot: snapshot) {}
 
         let hostingView = NSHostingView(rootView: card)
         hostingView.frame = NSRect(x: 0, y: 0, width: 360, height: 260)

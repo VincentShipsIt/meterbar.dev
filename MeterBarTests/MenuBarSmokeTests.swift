@@ -148,7 +148,7 @@ final class MenuBarSmokeTests: XCTestCase {
             metrics: MetricsFixtures.codexCli(),
             emptyDetail: ""
         )
-        let card = PopoverProviderStatusCard(snapshot: snapshot) {}
+        let card = ProviderStatusCard(snapshot: snapshot) {}
 
         let hostingView = NSHostingView(rootView: card)
         hostingView.frame = NSRect(x: 0, y: 0, width: 390, height: 160)

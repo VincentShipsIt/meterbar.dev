@@ -2,12 +2,12 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-// Interaction affordances for the tappable provider cards shared by the popover
-// (`PopoverProviderStatusCard`) and the dashboard overview
-// (`ProviderOverviewStatusCard`). Previously those cards were clickable Buttons
-// with no hover/pressed styling — the only cue was an accessibilityHint sighted
-// users never see. These pieces make "clickable" visible and add a SwiftUI
-// context menu mirroring the hidden status-item NSMenu.
+// Interaction affordances for the tappable provider cards. `ProviderStatusCard`
+// is the single card shared by the popover, the dashboard Overview, and the
+// Limits page. Previously those cards were clickable Buttons with no
+// hover/pressed styling — the only cue was an accessibilityHint sighted users
+// never see. These pieces make "clickable" visible and add a SwiftUI context
+// menu mirroring the hidden status-item NSMenu.
 
 // MARK: - Keyboard shortcuts
 

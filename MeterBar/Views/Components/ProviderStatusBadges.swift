@@ -5,10 +5,9 @@ import MeterBarShared
 /// - "N reset(s) available" — banked rate-limit resets (`resetCreditsAvailable`)
 /// - "Extra usage" + On/Off pill — paid overage state (`extraUsage`)
 ///
-/// Shared by the popover provider card (`PopoverProviderStatusCard`) and the
-/// dashboard provider cards (`ProviderOverviewStatusCard` / `ProviderLimitsCard`)
-/// so the two surfaces can't drift (issue #40). The popover renders `.compact`;
-/// the roomier dashboard cards render `.regular`.
+/// Shared by the single provider card (`ProviderStatusCard`) that renders on the
+/// popover, the dashboard Overview, and the Limits page — one component, so the
+/// surfaces can't drift (issue #40).
 struct ProviderStatusBadges: View {
     enum Style {
         case compact

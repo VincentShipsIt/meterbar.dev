@@ -479,7 +479,7 @@ struct UsageDashboardView: View {
                 ForEach(providerSnapshots) { snapshot in
                     // Same shared provider card as the popover and the Limits
                     // page; tapping it jumps to that provider in Limits.
-                    PopoverProviderStatusCard(
+                    ProviderStatusCard(
                         snapshot: snapshot,
                         onSelect: { navigation.navigate(to: .limits, focusedProviderID: snapshot.id) }
                     )
@@ -501,7 +501,7 @@ struct UsageDashboardView: View {
                 ForEach(orderedProviderSnapshotsForLimits) { snapshot in
                     // The one provider card, shared with the popover, so the two
                     // surfaces are physically the same component and cannot drift.
-                    PopoverProviderStatusCard(snapshot: snapshot)
+                    ProviderStatusCard(snapshot: snapshot)
                 }
             }
         }
