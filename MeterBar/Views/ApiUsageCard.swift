@@ -145,10 +145,27 @@ struct ApiUsageCard: View {
   let isLoading: Bool
   var compact: Bool = false
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   private var accent: Color { MeterBarTheme.accent(for: provider) }
 
+  /// Which of the three mutually-exclusive detail states is shown. Drives the
+  /// card-swap animation; a routine refresh that keeps the same phase (e.g. a
+  /// cost tick while already `.loaded`) does not re-animate the swap.
+  private enum Phase: Equatable { case loading, loaded, empty }
+
+  private var phase: Phase {
+    if isLoading, usage == nil { return .loading }
+    if let usage, usage.hasData { return .loaded }
+    return .empty
+  }
+
   var body: some View {
-    DashboardTile(cornerRadius: 8, padding: compact ? 10 : 12) {
+    DashboardTile(
+      cornerRadius: MeterBarTheme.apiCardRadius,
+      padding: compact ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md
+    ) {
       VStack(alignment: .leading, spacing: compact ? 8 : 10) {
         HStack(spacing: 7) {
           ProviderLogoView(
@@ -165,37 +182,73 @@ struct ApiUsageCard: View {
             .bold()
             .monospacedDigit()
             .foregroundColor(accent)
+            .contentTransition(.numericText())
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(provider.displayName)
+        .accessibilityValue("Estimated \(UsageFormat.cost(usage?.estimatedCostUSD ?? 0))")
 
-        if isLoading, usage == nil {
-          Text("Loading usage…")
-            .font(.caption)
-            .foregroundColor(.secondary)
-        } else if let usage, usage.hasData {
-          Text(tokenSummary(usage))
-            .font(.caption)
-            .foregroundColor(.secondary)
+        detail
+          .animation(
+            MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+            value: phase
+          )
+      }
+    }
+  }
 
-          ForEach(topModels(usage)) { model in
-            HStack(spacing: 8) {
-              Text(model.model)
-                .font(.caption2)
-                .lineLimit(1)
-              Spacer(minLength: 6)
-              Text(UsageFormat.tokens(model.totalTokens))
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .monospacedDigit()
-              Text(UsageFormat.cost(model.estimatedCostUSD))
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .monospacedDigit()
-            }
+  /// The swapping lower half of the card. Each branch carries a stable `.id` and
+  /// the shared `cardPhase` transition so SwiftUI treats a phase change as a
+  /// replacement — the outgoing branch runs the transition out, the incoming
+  /// one runs it in — rather than a default cross-fade.
+  @ViewBuilder private var detail: some View {
+    switch phase {
+    case .loading:
+      Text("Loading usage…")
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .id(Phase.loading)
+        .transition(MeterBarTheme.Motion.cardPhase)
+    case .loaded:
+      loadedDetail
+        .id(Phase.loaded)
+        .transition(MeterBarTheme.Motion.cardPhase)
+    case .empty:
+      Text("No API usage in this window.")
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .id(Phase.empty)
+        .transition(MeterBarTheme.Motion.cardPhase)
+    }
+  }
+
+  @ViewBuilder private var loadedDetail: some View {
+    if let usage, usage.hasData {
+      VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+        Text(tokenSummary(usage))
+          .font(.caption)
+          .foregroundColor(.secondary)
+
+        ForEach(topModels(usage)) { model in
+          HStack(spacing: 8) {
+            Text(model.model)
+              .font(.caption2)
+              .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(UsageFormat.tokens(model.totalTokens))
+              .font(.caption2)
+              .foregroundColor(.secondary)
+              .monospacedDigit()
+            Text(UsageFormat.cost(model.estimatedCostUSD))
+              .font(.caption2)
+              .foregroundColor(.secondary)
+              .monospacedDigit()
           }
-        } else {
-          Text("No API usage in this window.")
-            .font(.caption)
-            .foregroundColor(.secondary)
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel(model.model)
+          .accessibilityValue(
+            "\(UsageFormat.tokens(model.totalTokens)) tokens, \(UsageFormat.cost(model.estimatedCostUSD))"
+          )
         }
       }
     }

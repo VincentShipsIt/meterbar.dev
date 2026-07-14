@@ -171,6 +171,7 @@ struct UsageDashboardView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
     @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
@@ -286,16 +287,18 @@ struct UsageDashboardView: View {
                     shareContent
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 22)
+            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
+            .padding(.top, MeterBarTheme.Spacing.md)
+            .padding(.bottom, MeterBarTheme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
+            // Safe-area handling now lives inside MeterBarDetailBackground: the
+            // material bleeds full-bleed, the accent tint stays below the bar so
+            // the system scroll-edge effect is unobstructed behind toolbar items.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
         .navigationTitle("")
         .navigationSubtitle("")
@@ -400,7 +403,7 @@ struct UsageDashboardView: View {
                     } label: {
                         Label("Refresh Status", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .controlSize(.small)
                     .disabled(providerStatusMonitor.isRefreshing)
                 }
@@ -462,7 +465,7 @@ struct UsageDashboardView: View {
                         } label: {
                             Label("Scan 30 Days", systemImage: "magnifyingglass")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glassProminent)
                         .disabled(costTracker.isRefreshInProgress)
                     }
                     .frame(height: 220, alignment: .center)
@@ -483,7 +486,7 @@ struct UsageDashboardView: View {
                 } label: {
                     Label("Copy PNG", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
 
                 Button {
                     saveSocialCardImage()
@@ -587,7 +590,8 @@ struct UsageDashboardView: View {
             claudeCodeHasAccess: claudeCodeService.hasAccess,
             codexCliHasAccess: codexCliService.hasAccess,
             cursorHasAccess: cursorService.hasAccess,
-            openRouterHasAccess: openRouterService.hasAccess
+            openRouterHasAccess: openRouterService.hasAccess,
+            grokHasAccess: grokService.hasAccess
         ))
         .filter(\.hasMetrics)
     }
@@ -742,6 +746,8 @@ struct UsageDashboardView: View {
         if let error = claudeCodeService.lastError { result[.claudeCode] = error }
         if let error = codexCliService.lastError { result[.codexCli] = error }
         if let error = cursorService.lastError { result[.cursor] = error }
+        if let error = openRouterService.lastError { result[.openRouter] = error }
+        if let error = grokService.lastError { result[.grok] = error }
         return result
     }
 
@@ -882,7 +888,7 @@ struct UsageDashboardView: View {
     }
 
     private func setSocialShareStatus(_ status: String) {
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(MeterBarTheme.Motion.standard) {
             socialShareStatus = status
         }
     }

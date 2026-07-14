@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import MeterBarShared
+import SwiftUI
 import XCTest
 @testable import MeterBar
 
@@ -14,7 +16,6 @@ import XCTest
 /// drive. See `.agents/docs/TESTING.md` for the manual UI/widget QA checklist.
 @MainActor
 final class MenuBarSmokeTests: XCTestCase {
-
     /// Controllable single-account provider (Codex / Cursor stand-in).
     private final class StubUsageProvider: SimpleUsageProviding, CodexUsageProviding {
         var hasAccess: Bool
@@ -69,8 +70,9 @@ final class MenuBarSmokeTests: XCTestCase {
         //    isolated stores (Claude Code hidden — no CLI creds in CI).
         let codex = StubUsageProvider(hasAccess: true, metrics: MetricsFixtures.codexCli())
         let cursor = StubUsageProvider(hasAccess: true, metrics: MetricsFixtures.cursor())
-        let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        let visibilityDefaults = try XCTUnwrap(UserDefaults(suiteName: "\(suiteName!)-vis"))
+        let baseSuite = try XCTUnwrap(suiteName)
+        let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: baseSuite))
+        let visibilityDefaults = try XCTUnwrap(UserDefaults(suiteName: "\(baseSuite)-vis"))
         let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
         visibility.set(.claudeCode, isEnabled: false)
         let sharedStore = SharedDataStore(directoryOverride: tempDirectory) {}
@@ -114,12 +116,13 @@ final class MenuBarSmokeTests: XCTestCase {
     func testRelaunchRestoresCachedMetricsFromSharedDefaults() async throws {
         // Simulate a previous run having cached metrics, then a fresh "launch":
         // the manager must render them immediately (no blank UI before first fetch).
-        let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let baseSuite = try XCTUnwrap(suiteName)
+        let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: baseSuite))
         let seeded = MetricsFixtures.allProviders()
         cacheDefaults.set(MetricsCodec.encode(seeded), forKey: StorageKeys.cachedUsageMetrics)
 
         let visibility = ProviderVisibilityStore(
-            userDefaults: try XCTUnwrap(UserDefaults(suiteName: "\(suiteName!)-vis"))
+            userDefaults: try XCTUnwrap(UserDefaults(suiteName: "\(baseSuite)-vis"))
         )
         let manager = UsageDataManager(
             codexCliService: StubUsageProvider(hasAccess: false, metrics: MetricsFixtures.codexCli()),
@@ -131,5 +134,76 @@ final class MenuBarSmokeTests: XCTestCase {
         )
 
         XCTAssertEqual(Set(manager.metrics.keys), Set(seeded.keys))
+    }
+
+    // MARK: - Popover provider card affordances
+
+    /// The tappable popover card hosts with its hover button style, disclosure
+    /// chevron, and context menu attached — a broken affordance (e.g. a bad
+    /// command wiring or a layout regression from the chevron) fails to build here.
+    func testPopoverProviderCardHostsWithContextMenu() throws {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: MetricsFixtures.codexCli(),
+            emptyDetail: ""
+        )
+        let card = PopoverProviderStatusCard(snapshot: snapshot) {}
+
+        let hostingView = NSHostingView(rootView: card)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 390, height: 160)
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
+    }
+
+    /// Firing the popover card's context-menu commands runs each side effect for
+    /// the card's own service — the "Refresh this provider" / "Hide provider"
+    /// items must act on the provider the menu was opened from.
+    func testPopoverProviderCardCommandsFireForItsService() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: nil,
+            emptyDetail: ""
+        )
+
+        var refreshed: [ServiceType] = []
+        var hidden: [ServiceType] = []
+        let commands = ProviderCardCommands.make(
+            snapshot: snapshot,
+            refresh: { refreshed.append($0) },
+            openStatusPage: { _ in },
+            hide: { hidden.append($0) },
+            openInDashboard: {}
+        )
+
+        commands.first { $0.id == .refresh }?.action()
+        commands.first { $0.id == .hide }?.action()
+
+        XCTAssertEqual(refreshed, [.codexCli])
+        XCTAssertEqual(hidden, [.codexCli])
+    }
+
+    /// With no providers enabled the popover overview renders its empty state,
+    /// whose sole CTA — "Open Settings" — adopted the `.glass` button style.
+    /// SwiftPM CI can't hit-test AppKit controls, so this guards that the
+    /// glass-styled CTA still compiles and lays out with a non-zero size inside
+    /// the real panel. A removed button or an invalid `.glass` style regresses
+    /// here; the `openSettings` action itself is a standard SwiftUI environment
+    /// action and needs no separate coverage.
+    func testEmptyStateOpenSettingsGlassCTARenders() {
+        let panel = PopoverOverviewPanel(
+            snapshots: [],
+            openDashboard: {},
+            openStatusDetail: {},
+            openProviderOverview: { _ in }
+        )
+        let hostingView = NSHostingView(rootView: panel)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 390, height: 320)
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(hostingView.fittingSize.width, 0)
+        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 }

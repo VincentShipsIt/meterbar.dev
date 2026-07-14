@@ -143,10 +143,7 @@ struct ServiceMiniView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(row.metrics.service.assetName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
+            WidgetProviderIcon(service: row.metrics.service, size: 14)
 
             Text(row.name)
                 .font(.caption2)
@@ -230,10 +227,7 @@ struct ServiceCompactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(row.metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
+                WidgetProviderIcon(service: row.metrics.service, size: 18)
                 Text(row.name)
                     .font(.subheadline)
                     .bold()
@@ -260,88 +254,12 @@ struct ServiceCompactView: View {
     }
 }
 
-struct ServiceDetailView: View {
-    let metrics: UsageMetrics
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                WidgetProviderIcon(service: metrics.service, size: 20)
-                Text(metrics.service.displayName)
-                    .font(.headline)
-                Spacer()
-                WidgetStatusIndicator(status: metrics.overallStatus)
-            }
-
-            if let sessionLimit = metrics.sessionLimit {
-                LimitDetailView(
-                    title: metrics.service == .openRouter ? "Key limit" : "Session",
-                    limit: sessionLimit,
-                    currency: metrics.service == .openRouter
-                )
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitDetailView(
-                    title: metrics.service == .openRouter ? "Account credits" : "Weekly",
-                    limit: weeklyLimit,
-                    currency: metrics.service == .openRouter
-                )
-            }
-
-            if let codeReviewLimit = metrics.codeReviewLimit {
-                LimitDetailView(title: "Code Review", limit: codeReviewLimit)
-            }
-        }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
-    }
-}
-
-struct LimitDetailView: View {
-    let title: String
-    let limit: UsageLimit
-    var currency = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.caption)
-                Spacer()
-                Text(limit.percentageText)
-                    .font(.caption)
-                    .bold()
-            }
-
-            ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
-                .tint(limit.statusColor.color)
-
-            Text(currency ? currencyText : "\(formatNumber(limit.used)) / \(limit.isEstimated ? "~" : "")\(formatNumber(limit.total))")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var currencyText: String {
-        "$\(String(format: "%.2f", limit.used)) spent / $\(String(format: "%.2f", limit.total))"
-    }
-
-    private func formatNumber(_ value: Double) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fk", value / 1000)
-        }
-        return String(format: "%.0f", value)
-    }
-}
-
 struct WidgetProviderIcon: View {
     let service: ServiceType
     let size: CGFloat
 
     var body: some View {
-        if service == .openRouter {
+        if service == .openRouter || service == .grok {
             Image(systemName: service.iconName)
                 .font(.system(size: size, weight: .semibold))
                 .frame(width: size, height: size)
@@ -353,7 +271,6 @@ struct WidgetProviderIcon: View {
         }
     }
 }
-
 struct WidgetStatusIndicator: View {
     let status: UsageStatus
 

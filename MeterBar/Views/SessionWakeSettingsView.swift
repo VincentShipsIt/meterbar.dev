@@ -36,7 +36,7 @@ struct SessionWakeSettingsView: View {
             Text("""
             While on, MeterBar watches this account's usage limits and, after a \
             limit resets, automatically resumes your blocked Claude Code sessions \
-            one at a time. It only runs while MeterBar is open.
+            one at a time. The background watcher keeps running after MeterBar quits.
             """)
         }
     }
@@ -65,7 +65,7 @@ struct SessionWakeSettingsView: View {
                     ? "Choose a wake account above to enable Session Wake."
                     : "Automatically resume blocked Claude Code sessions after a limit resets."
             ) {
-                Toggle("", isOn: onBinding)
+                Toggle("Session Wake", isOn: onBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .disabled(!store.canTurnOn && !store.isOn)
@@ -75,13 +75,28 @@ struct SessionWakeSettingsView: View {
                 Text(status.label(isOn: store.isOn).title)
                     .foregroundStyle(.secondary)
             }
+
+            SettingsRowView(
+                title: "Execution",
+                detail: status.backgroundExecution.detail
+            ) {
+                if status.backgroundExecution == .requiresApproval {
+                    Button("Open Login Items") {
+                        SMAppServiceSessionWakeAgent.openSystemSettings()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text(status.backgroundExecution.title)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
     private var accountSection: some View {
         SettingsPanelSection(title: "Wake account", systemImage: "person.crop.circle", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Account") {
-                Picker("", selection: accountBinding) {
+                Picker("Wake account", selection: accountBinding) {
                     Text("None selected").tag(UUID?.none)
                     ForEach(accounts.enabledAccounts) { account in
                         Text(account.name).tag(UUID?.some(account.id))
@@ -137,20 +152,22 @@ struct SessionWakeSettingsView: View {
         SettingsPanelSection(title: "Limits", systemImage: "slider.horizontal.3", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Max sessions per run", detail: "\(store.maxSessionsPerRun)") {
                 Stepper(
-                    "",
+                    "Max sessions per run",
                     value: binding(store.maxSessionsPerRun, store.setMaxSessionsPerRun),
                     in: WakeBounds.sessionsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxSessionsPerRun)")
             }
 
             SettingsRowView(title: "Max turns per session", detail: "\(store.maxTurns)") {
                 Stepper(
-                    "",
+                    "Max turns per session",
                     value: binding(store.maxTurns, store.setMaxTurns),
                     in: WakeBounds.maxTurnsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxTurns)")
             }
 
             SettingsRowView(title: "Resume prompt") {
@@ -164,7 +181,7 @@ struct SessionWakeSettingsView: View {
     private var permissionSection: some View {
         SettingsPanelSection(title: "Permissions", systemImage: "lock.shield", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Permission mode") {
-                Picker("", selection: binding(store.permissionMode, store.setPermissionMode)) {
+                Picker("Permission mode", selection: binding(store.permissionMode, store.setPermissionMode)) {
                     Text("Safe").tag(WakePermissionMode.safe)
                     Text("Bypass").tag(WakePermissionMode.bypass)
                 }
@@ -178,7 +195,7 @@ struct SessionWakeSettingsView: View {
                     title: "Acknowledge risk",
                     detail: "Bypassing permission prompts lets resumed sessions run without confirmation."
                 ) {
-                    Toggle("", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
+                    Toggle("Acknowledge risk", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
@@ -192,7 +209,7 @@ struct SessionWakeSettingsView: View {
                 title: "Notify when a run completes",
                 detail: "Post a notification after Session Wake finishes resuming sessions."
             ) {
-                Toggle("", isOn: $store.notifyOnCompletion)
+                Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
                     .labelsHidden()
                     .toggleStyle(.switch)
             }

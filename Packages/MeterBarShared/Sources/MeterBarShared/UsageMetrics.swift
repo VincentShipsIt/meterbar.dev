@@ -2,7 +2,7 @@ import Foundation
 
 /// Whether paid "extra usage" / overage credits are enabled for a service.
 ///
-/// Both Claude Code ("extra usage") and Codex ("credits") let an account spend
+/// Claude Code and Grok ("extra usage") plus Codex ("credits") let an account spend
 /// beyond its subscription quota once exhausted. Surfacing this lets users confirm
 /// at a glance whether they can be billed for overage, or whether usage is hard-capped.
 public struct ExtraUsageStatus: Codable, Equatable, Sendable {

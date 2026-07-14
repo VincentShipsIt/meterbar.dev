@@ -1,5 +1,12 @@
 import Foundation
 
+/// Whether the runner takes the shared Session Wake lock itself or runs under
+/// a process-lifetime lock already held by the continuous app/agent watcher.
+nonisolated enum WakeExecutionLockMode: Equatable, Sendable {
+    case acquirePerRun
+    case externallyOwned
+}
+
 /// The one native process runner shared by MeterBar and its CLI.
 ///
 /// Responsibilities: revalidate the target immediately before exec, take the
@@ -16,6 +23,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
     let account: ClaudeCodeAccount
     private let baseEnvironment: [String: String]
     private let lockFactory: @Sendable () -> WakeLock
+    private let lockMode: WakeExecutionLockMode
     private let logger: WakeRunLogger
     private let now: @Sendable () -> Date
 
@@ -27,6 +35,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         prompt: String = WakeCommandBuilder.defaultPrompt,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         lockFactory: @escaping @Sendable () -> WakeLock = { WakeLock() },
+        lockMode: WakeExecutionLockMode = .acquirePerRun,
         logger: WakeRunLogger = WakeRunLogger(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -37,6 +46,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         self.prompt = prompt
         self.baseEnvironment = baseEnvironment
         self.lockFactory = lockFactory
+        self.lockMode = lockMode
         self.logger = logger
         self.now = now
     }
@@ -55,28 +65,30 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             return .failed(reason: "claude binary not found")
         }
 
-        // Take the shared lock only now, when we are actually ready to launch.
-        // The runner is the sole owner of the lock across app and CLI paths, so
-        // the caller must not hold it (the CLI engine only probe-releases).
-        let lock = lockFactory()
-        switch lock.acquire() {
-        case .acquired:
-            break
-        case let .contended(holder):
-            let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
-            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
-        case let .legacyHeld(guidance):
-            let outcome = WakeRunOutcome.failed(reason: guidance)
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
-        case let .unavailable(reason):
-            let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
+        let lock = lockMode == .acquirePerRun ? lockFactory() : nil
+        if let lock {
+            // One-shot CLI runs take the shared lock only when ready to launch.
+            // Continuous app/agent watchers pass `.externallyOwned` because they
+            // hold the same lock for their whole lifetime.
+            switch lock.acquire() {
+            case .acquired:
+                break
+            case let .contended(holder):
+                let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
+                let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            case let .legacyHeld(guidance):
+                let outcome = WakeRunOutcome.failed(reason: guidance)
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            case let .unavailable(reason):
+                let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            }
         }
-        defer { lock.release() }
+        defer { lock?.release() }
 
         let command = WakeCommandBuilder.build(
             executable: resolved,

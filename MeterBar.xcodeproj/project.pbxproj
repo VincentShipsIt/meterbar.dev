@@ -51,6 +51,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Resources/dev.meterbar.app.session-wake.plist,
 			);
 			target = 52CFA4FF2F0323EF0036036C /* MeterBar */;
 		};
@@ -166,6 +167,7 @@
 				52CFA4FC2F0323EF0036036C /* Sources */,
 				52CFA4FD2F0323EF0036036C /* Frameworks */,
 				52CFA4FE2F0323EF0036036C /* Resources */,
+				52B0A0012F1400010036036C /* Embed Session Wake Launch Agent */,
 				5259E4542F032E78001001CF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -243,6 +245,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		52B0A0012F1400010036036C /* Embed Session Wake Launch Agent */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 0;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/MeterBar/Resources/dev.meterbar.app.session-wake.plist",
+			);
+			name = "Embed Session Wake Launch Agent";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.meterbar.app.session-wake.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nsource_plist=\"${SRCROOT}/MeterBar/Resources/dev.meterbar.app.session-wake.plist\"\ndestination_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\n/bin/mkdir -p \"${destination_dir}\"\n/bin/cp \"${source_plist}\" \"${destination_dir}/dev.meterbar.app.session-wake.plist\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		5259E4392F032E77001001CF /* Sources */ = {
