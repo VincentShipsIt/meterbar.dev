@@ -82,8 +82,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusItem?.button
             },
             onDismiss: {
+                // Closing the popover only tears down the transient detail
+                // panel. First-run onboarding is NOT dismissed here: an
+                // incidental close (click-away / Escape) must leave the welcome
+                // callout to reappear until the user acts on Enable / Not Now.
                 MeterBarMenuDetailPanel.shared.dismiss()
-                FirstRunOnboardingStore.shared.dismiss()
             }
         )
 
