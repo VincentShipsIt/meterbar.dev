@@ -238,7 +238,7 @@ struct UsageDashboardView: View {
     @State private var isRunningDiagnostics = false
     @State private var socialCardGeneratedAt = Date()
     @State private var socialShareStatus: String?
-    @State private var isSidebarVisible = true
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
@@ -262,7 +262,7 @@ struct UsageDashboardView: View {
     }
 
     var body: some View {
-        dashboardShell
+        dashboardSplitView
         .background {
             MeterBarMenuWindowAccessor { window in
                 guard let window else { return }
@@ -283,36 +283,14 @@ struct UsageDashboardView: View {
         }
     }
 
-    private var dashboardShell: some View {
-        HStack(spacing: 0) {
-            if isSidebarVisible {
-                sidebarList
-                    .frame(width: 220)
-                    .background(.regularMaterial)
-                    .clipShape(.rect(cornerRadius: MeterBarTheme.sidebarRadius, style: .continuous))
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
+    private var dashboardSplitView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarList
+        } detail: {
             detailContent
+                .toolbar { dashboardToolbar }
         }
-        .background { MeterBarDetailBackground() }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.standard) {
-                        isSidebarVisible.toggle()
-                    }
-                } label: {
-                    Label(
-                        isSidebarVisible ? "Hide Sidebar" : "Show Sidebar",
-                        systemImage: "sidebar.left"
-                    )
-                }
-                .help(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
-            }
-
-            dashboardToolbar
-        }
+        .navigationSplitViewStyle(.balanced)
     }
 
     /// The primary-action toolbar. In monitoring mode: Refresh + a gear that
@@ -373,7 +351,7 @@ struct UsageDashboardView: View {
         }
         .listStyle(.sidebar)
         .tint(MeterBarTheme.sidebarMenuTint)
-        .scrollContentBackground(.hidden)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
     /// Settings pages shown *in place of* the monitoring sidebar while in
@@ -391,7 +369,7 @@ struct UsageDashboardView: View {
         }
         .listStyle(.sidebar)
         .tint(MeterBarTheme.sidebarMenuTint)
-        .scrollContentBackground(.hidden)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
     /// Settings sections available right now — Automation only when Session Wake

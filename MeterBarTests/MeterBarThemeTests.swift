@@ -41,10 +41,6 @@ final class MeterBarThemeTests: XCTestCase {
         XCTAssertEqual(MeterBarTheme.companionShellRadius, MeterBarTheme.Radius.shell)
     }
 
-    func testSidebarUsesCompactRadiusToken() {
-        XCTAssertEqual(MeterBarTheme.sidebarRadius, MeterBarTheme.Radius.medium)
-    }
-
     /// The concentric rule derives nested-card radii from their container minus a
     /// spacing step, so a card reads as parallel to the surface it sits in.
     func testConcentricRadiusRule() {

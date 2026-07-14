@@ -44,10 +44,6 @@ enum MeterBarTheme {
   /// Matches MacSweep's companion popover and detail-panel shell radius.
   static let companionShellRadius: CGFloat = Radius.shell
 
-  /// The native Tahoe sidebar shape is intentionally overridden: its floating
-  /// pill radius is too large beside MeterBar's compact 8pt controls.
-  static let sidebarRadius: CGFloat = Radius.medium
-
   // MARK: - Spacing scale
 
   /// 4pt spacing grid for padding. Raw padding values snap to the nearest step;

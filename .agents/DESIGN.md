@@ -80,7 +80,7 @@ Native SF fonts via SwiftUI system font APIs. Keep text compact (see frontmatter
 
 ## Layout & Spacing
 
-- Companion window: compact 8pt sidebar shell with a native `.sidebar` `List`; content in a `ScrollView` with ~22px padding; cards use the shared translucent surface.
+- Companion window: native `NavigationSplitView` with a `.sidebar` `List`; content in a `ScrollView` with ~22px padding; cards use the shared translucent surface. Do not replace the native sidebar shell to tune its radius.
 - Settings: native `Form` with `.formStyle(.grouped)` and `Section`s.
 - Popover: a single dense overview (native `List`/`Section` or `GroupBox`), not a tab strip. Refresh/dashboard actions only.
 - Repeated rows: 8–12px vertical spacing.
