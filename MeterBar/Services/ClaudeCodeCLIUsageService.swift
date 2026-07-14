@@ -141,6 +141,15 @@ nonisolated enum ClaudeCodeCLIUsageParser {
             now: now)
 
         guard sessionLimit != nil || weeklyLimit != nil || sonnetLimit != nil else {
+            // A headless (non-TTY) spawn of `claude /usage` renders a session
+            // cost summary instead of the usage screen, so no windows parse.
+            // Surface that specifically — the OAuth endpoint is the fix.
+            if looksLikeCostSummary(sanitized) {
+                throw ClaudeCodeCLIUsageError.parsingFailed(
+                    "Claude CLI returned a session cost summary instead of the usage screen; "
+                        + "`claude /usage` no longer renders headlessly. "
+                        + "Connect Claude Code via its OAuth login in Settings.")
+            }
             throw ClaudeCodeCLIUsageError.parsingFailed("No Claude usage windows found.")
         }
 
@@ -221,6 +230,13 @@ nonisolated enum ClaudeCodeCLIUsageParser {
         }
 
         return nil
+    }
+
+    /// The session cost summary a headless `claude /usage` prints leads with a
+    /// "Total cost:" line — a reliable, version-stable marker distinct from the
+    /// usage screen's window labels.
+    private static func looksLikeCostSummary(_ text: String) -> Bool {
+        text.range(of: "total cost", options: .caseInsensitive) != nil
     }
 
     private static func stripANSICodes(from text: String) -> String {

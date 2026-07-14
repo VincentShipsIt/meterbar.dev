@@ -26,9 +26,14 @@ struct SessionWakeMenuControl: View {
             Text(label.title)
                 .font(.caption)
                 .foregroundStyle(label.isAttention ? .orange : .secondary)
-            Toggle("", isOn: watcherBinding)
+                .accessibilityHidden(true)
+            // Real label kept but hidden visually so VoiceOver announces
+            // "Session Wake, <on/off>" instead of an unnamed switch; the status
+            // text above is folded in as the accessibility value.
+            Toggle("Session Wake", isOn: watcherBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .accessibilityValue(label.title)
                 // The one-time first-run confirmation happens in Settings, so
                 // the menu toggle is a quick kill-switch once enabled there.
                 .disabled(!store.isOn && (!store.canTurnOn || store.needsFirstRunConfirmation))

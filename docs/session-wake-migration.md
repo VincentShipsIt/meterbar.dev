@@ -92,6 +92,7 @@ Only after steps 1–3 pass:
   the selected account directory directly; there is no session-sync step.
 - **Codex is not covered by v1.** Its subagent filtering and CLI-compatibility
   preflight are deferred to a separate follow-up issue.
-- **v1 watcher lifetime is app-running-only.** There is no managed launchd
-  helper; the watcher lives with the MeterBar process and re-arms on next launch
-  per your Automation settings.
+- **v1.8+ watcher lifetime is managed.** Enabling Session Wake registers the
+  signed `meterbar wake-agent` launch agent bundled inside MeterBar.app. It
+  survives GUI quit and subsequent logins; turning the Session Wake switch off
+  writes the kill-switch first and then unregisters the agent.

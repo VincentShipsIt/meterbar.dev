@@ -22,14 +22,43 @@ enum ResetCountdownSchedule {
 struct ResetCountdownLabel: View {
     let title: String?
     let limit: UsageLimit
-    var font: Font = .caption
-    var foregroundColor: Color = .secondary
-    var iconSize: CGFloat = 10
+    let font: Font
+    let foregroundColor: Color
+    let iconSize: CGFloat
+    let usesPopoverPreference: Bool
+
+    @ObservedObject private var preferences: MenuBarDisplayPreferencesStore
+
+    init(
+        title: String?,
+        limit: UsageLimit,
+        font: Font = .caption,
+        foregroundColor: Color = .secondary,
+        iconSize: CGFloat = 10,
+        usesPopoverPreference: Bool = false,
+        preferences: MenuBarDisplayPreferencesStore? = nil
+    ) {
+        self.title = title
+        self.limit = limit
+        self.font = font
+        self.foregroundColor = foregroundColor
+        self.iconSize = iconSize
+        self.usesPopoverPreference = usesPopoverPreference
+        _preferences = ObservedObject(wrappedValue: preferences ?? .shared)
+    }
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             Group {
-                if let text = Self.counterText(title: title, limit: limit, now: timeline.date) {
+                if let text = Self.counterText(
+                    title: title,
+                    limit: limit,
+                    format: usesPopoverPreference ? preferences.resetTimeFormat : .countdown,
+                    now: timeline.date
+                ) {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: iconSize, weight: .semibold))
@@ -37,20 +66,44 @@ struct ResetCountdownLabel: View {
                             .font(font)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                            .numericRefreshTransition(value: text, reduceMotion: reduceMotion)
                     }
                     .foregroundColor(foregroundColor)
-                    .help(text)
                 }
             }
         }
     }
 
-    static func counterText(title: String?, limit: UsageLimit, now: Date) -> String? {
-        guard let countdown = limit.resetCountdownText(now: now) else { return nil }
+    static func counterText(
+        title: String?,
+        limit: UsageLimit,
+        format: ResetTimeFormat = .countdown,
+        now: Date,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard let resetTime = limit.resetTime,
+              let countdown = limit.resetCountdownText(now: now) else { return nil }
         if countdown == "now" {
             return title.map { "\($0) reset due" } ?? "Reset due"
         }
-        return title.map { "\($0) reset in \(countdown)" } ?? "Resets in \(countdown)"
+
+        switch format {
+        case .countdown:
+            return title.map { "\($0) reset in \(countdown)" } ?? "Resets in \(countdown)"
+        case .clock:
+            let clock = formattedClockTime(resetTime, locale: locale, timeZone: timeZone)
+            return title.map { "\($0) resets at \(clock)" } ?? "Resets at \(clock)"
+        }
+    }
+
+    static func formattedClockTime(_ date: Date, locale: Locale, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 
@@ -59,6 +112,9 @@ struct NextResetCountdownLabel: View {
     var font: Font = .caption
     var foregroundColor: Color = .secondary
     var iconSize: CGFloat = 10
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     /// How long after a window's reset time we keep showing "reset due" before
     /// treating the data as stale and hiding the label (until a refresh repopulates
@@ -81,9 +137,9 @@ struct NextResetCountdownLabel: View {
                             .font(font)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                            .numericRefreshTransition(value: text, reduceMotion: reduceMotion)
                     }
                     .foregroundColor(foregroundColor)
-                    .help(text)
                 }
             }
         }
@@ -121,12 +177,16 @@ struct NextResetCountdownLabel: View {
 struct BlockingLimitResetCounter: View {
     let windows: [ResetCountdownWindow]
     let accentColor: Color
+    var format: ResetTimeFormat = .countdown
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             let blockingWindow = Self.selectBlockingWindow(windows, now: timeline.date)
             let title = Self.titleText(for: blockingWindow, in: windows)
-            let counter = Self.counterText(for: blockingWindow, now: timeline.date)
+            let counter = Self.counterText(for: blockingWindow, now: timeline.date, format: format)
             let detail = Self.detailText(for: blockingWindow, in: windows)
 
             HStack(alignment: .center, spacing: 9) {
@@ -148,6 +208,7 @@ struct BlockingLimitResetCounter: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
+                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
                     Text(detail)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -158,7 +219,6 @@ struct BlockingLimitResetCounter: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            .help("\(title) \(counter)")
         }
     }
 
@@ -204,13 +264,29 @@ struct BlockingLimitResetCounter: View {
         return exhaustedCount > 1 ? "Limits exhausted" : "Limit exhausted"
     }
 
-    static func counterText(for window: ResetCountdownWindow?, now: Date) -> String {
+    static func counterText(
+        for window: ResetCountdownWindow?,
+        now: Date,
+        format: ResetTimeFormat = .countdown,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String {
         guard let window,
               let countdown = window.limit.resetCountdownText(now: now) else {
             return "Reset time unavailable"
         }
 
-        return countdown == "now" ? "due now" : "in \(countdown)"
+        if countdown == "now" {
+            return "due now"
+        }
+
+        switch format {
+        case .countdown:
+            return "in \(countdown)"
+        case .clock:
+            guard let resetTime = window.limit.resetTime else { return "Reset time unavailable" }
+            return "at \(ResetCountdownLabel.formattedClockTime(resetTime, locale: locale, timeZone: timeZone))"
+        }
     }
 
     static func detailText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {
@@ -232,6 +308,9 @@ struct CompactBlockingLimitResetRow: View {
     let windows: [ResetCountdownWindow]
     let accentColor: Color
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(windows, now: timeline.date)
@@ -252,6 +331,7 @@ struct CompactBlockingLimitResetRow: View {
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
                     Text(detail)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -262,7 +342,6 @@ struct CompactBlockingLimitResetRow: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .help("\(title) \(counter)")
         }
     }
 }

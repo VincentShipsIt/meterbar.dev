@@ -4,7 +4,7 @@ import Foundation
 /// locations MeterBar runs from (Homebrew, npm-global, yarn, bun, volta, etc.).
 ///
 /// This was previously private to `ClaudeCodeCLIUsageService`; it is factored
-/// out so provider-readiness diagnostics can ask "is `codex` / `claude` on
+/// out so provider-readiness diagnostics can ask "is `codex` / `claude` / `grok` on
 /// PATH?" without re-deriving the same fallback list.
 nonisolated enum CLIBinaryLocator {
     /// The install directories the fallbacks draw from, in priority order.

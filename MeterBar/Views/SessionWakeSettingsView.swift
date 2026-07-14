@@ -10,17 +10,20 @@ struct SessionWakeSettingsView: View {
     @ObservedObject private var store: SessionWakeSettingsStore
     @ObservedObject private var status: SessionWakeStatus
     @ObservedObject private var accounts: ClaudeCodeAccountStore
+    @ObservedObject private var codexAccounts: CodexAccountStore
     @State private var showingFirstRunConfirmation = false
 
     @MainActor
     init(
         store: SessionWakeSettingsStore? = nil,
         status: SessionWakeStatus? = nil,
-        accounts: ClaudeCodeAccountStore? = nil
+        accounts: ClaudeCodeAccountStore? = nil,
+        codexAccounts: CodexAccountStore? = nil
     ) {
         self.store = store ?? .shared
         self.status = status ?? .shared
         self.accounts = accounts ?? .shared
+        self.codexAccounts = codexAccounts ?? .shared
     }
 
     var body: some View {
@@ -35,8 +38,9 @@ struct SessionWakeSettingsView: View {
         } message: {
             Text("""
             While on, MeterBar watches this account's usage limits and, after a \
-            limit resets, automatically resumes your blocked Claude Code sessions \
-            one at a time. It only runs while MeterBar is open.
+            limit resets, automatically resumes your blocked \
+            \(store.wakeProvider.displayName) sessions one at a time. The \
+            background watcher keeps running after MeterBar quits.
             """)
         }
     }
@@ -61,11 +65,11 @@ struct SessionWakeSettingsView: View {
         SettingsPanelSection(title: "Session Wake", systemImage: "moon.zzz", color: MeterBarTheme.appAccent) {
             SettingsRowView(
                 title: "Session Wake",
-                detail: store.wakeAccountID == nil
+                detail: store.activeAccountID == nil
                     ? "Choose a wake account above to enable Session Wake."
-                    : "Automatically resume blocked Claude Code sessions after a limit resets."
+                    : "Automatically resume blocked \(store.wakeProvider.displayName) sessions after a limit resets."
             ) {
-                Toggle("", isOn: onBinding)
+                Toggle("Session Wake", isOn: onBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .disabled(!store.canTurnOn && !store.isOn)
@@ -75,15 +79,41 @@ struct SessionWakeSettingsView: View {
                 Text(status.label(isOn: store.isOn).title)
                     .foregroundStyle(.secondary)
             }
+
+            SettingsRowView(
+                title: "Execution",
+                detail: status.backgroundExecution.detail
+            ) {
+                if status.backgroundExecution == .requiresApproval {
+                    Button("Open Login Items") {
+                        SMAppServiceSessionWakeAgent.openSystemSettings()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text(status.backgroundExecution.title)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
     private var accountSection: some View {
         SettingsPanelSection(title: "Wake account", systemImage: "person.crop.circle", color: MeterBarTheme.appAccent) {
+            SettingsRowView(title: "Provider") {
+                Picker("", selection: providerBinding) {
+                    ForEach(WakeProvider.allCases, id: \.self) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+            }
+
             SettingsRowView(title: "Account") {
-                Picker("", selection: accountBinding) {
+                Picker("Wake account", selection: accountBinding) {
                     Text("None selected").tag(UUID?.none)
-                    ForEach(accounts.enabledAccounts) { account in
+                    ForEach(providerAccounts) { account in
                         Text(account.name).tag(UUID?.some(account.id))
                     }
                 }
@@ -92,8 +122,21 @@ struct SessionWakeSettingsView: View {
             }
 
             if store.isOn {
-                SettingsNotice(text: "Changing the wake account turns Session Wake off.", color: .secondary)
+                SettingsNotice(
+                    text: "Changing the provider or wake account turns Session Wake off.",
+                    color: .secondary
+                )
             }
+        }
+    }
+
+    /// Name + id pairs for the currently selected provider's enabled accounts.
+    private var providerAccounts: [AccountChoice] {
+        switch store.wakeProvider {
+        case .claude:
+            return accounts.enabledAccounts.map { AccountChoice(id: $0.id, name: $0.name) }
+        case .codex:
+            return codexAccounts.enabledAccounts.map { AccountChoice(id: $0.id, name: $0.name) }
         }
     }
 
@@ -137,20 +180,22 @@ struct SessionWakeSettingsView: View {
         SettingsPanelSection(title: "Limits", systemImage: "slider.horizontal.3", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Max sessions per run", detail: "\(store.maxSessionsPerRun)") {
                 Stepper(
-                    "",
+                    "Max sessions per run",
                     value: binding(store.maxSessionsPerRun, store.setMaxSessionsPerRun),
                     in: WakeBounds.sessionsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxSessionsPerRun)")
             }
 
             SettingsRowView(title: "Max turns per session", detail: "\(store.maxTurns)") {
                 Stepper(
-                    "",
+                    "Max turns per session",
                     value: binding(store.maxTurns, store.setMaxTurns),
                     in: WakeBounds.maxTurnsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxTurns)")
             }
 
             SettingsRowView(title: "Resume prompt") {
@@ -164,7 +209,7 @@ struct SessionWakeSettingsView: View {
     private var permissionSection: some View {
         SettingsPanelSection(title: "Permissions", systemImage: "lock.shield", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Permission mode") {
-                Picker("", selection: binding(store.permissionMode, store.setPermissionMode)) {
+                Picker("Permission mode", selection: binding(store.permissionMode, store.setPermissionMode)) {
                     Text("Safe").tag(WakePermissionMode.safe)
                     Text("Bypass").tag(WakePermissionMode.bypass)
                 }
@@ -178,7 +223,7 @@ struct SessionWakeSettingsView: View {
                     title: "Acknowledge risk",
                     detail: "Bypassing permission prompts lets resumed sessions run without confirmation."
                 ) {
-                    Toggle("", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
+                    Toggle("Acknowledge risk", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
@@ -192,7 +237,7 @@ struct SessionWakeSettingsView: View {
                 title: "Notify when a run completes",
                 detail: "Post a notification after Session Wake finishes resuming sessions."
             ) {
-                Toggle("", isOn: $store.notifyOnCompletion)
+                Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
                     .labelsHidden()
                     .toggleStyle(.switch)
             }
@@ -220,15 +265,39 @@ struct SessionWakeSettingsView: View {
         )
     }
 
-    private var accountBinding: Binding<UUID?> {
-        Binding(get: { store.wakeAccountID }, set: { store.setWakeAccountID($0) })
+    private var providerBinding: Binding<WakeProvider> {
+        Binding(get: { store.wakeProvider }, set: { store.setWakeProvider($0) })
     }
 
+    /// Routes the account picker to the active provider's selection so each
+    /// provider keeps its own explicitly chosen account.
+    private var accountBinding: Binding<UUID?> {
+        Binding(
+            get: { store.activeAccountID },
+            set: { newValue in
+                switch store.wakeProvider {
+                case .claude: store.setWakeAccountID(newValue)
+                case .codex: store.setWakeCodexAccountID(newValue)
+                }
+            }
+        )
+    }
+
+    /// The Claude config directory to preview against. Preview uses Claude
+    /// session discovery, so it is only meaningful for the Claude provider.
     private var selectedConfigDirectory: String? {
-        accounts.enabledAccounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
+        guard store.wakeProvider == .claude else { return nil }
+        return accounts.enabledAccounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
     }
 
     private func binding<Value>(_ value: Value, _ setter: @escaping (Value) -> Void) -> Binding<Value> {
         Binding(get: { value }, set: { setter($0) })
     }
+}
+
+/// A provider-agnostic account row for the wake account picker, so the picker
+/// can list either `ClaudeCodeAccount`s or `CodexAccount`s uniformly.
+private struct AccountChoice: Identifiable {
+    let id: UUID
+    let name: String
 }

@@ -15,6 +15,7 @@ protocol SimpleUsageProviding: AnyObject {
 
 extension CursorLocalService: SimpleUsageProviding {}
 extension OpenRouterService: SimpleUsageProviding {}
+extension GrokCLIUsageService: SimpleUsageProviding {}
 
 protocol CodexUsageProviding: AnyObject {
     func canAccess(account: CodexAccount) async -> Bool
@@ -53,6 +54,7 @@ class UsageDataManager: ObservableObject {
     private let cursorService: SimpleUsageProviding
     private let codexCliService: CodexUsageProviding
     private let openRouterService: SimpleUsageProviding
+    private let grokService: SimpleUsageProviding
     private let claudeCodeAccountStore: ClaudeCodeAccountStore
     private let codexAccountStore: CodexAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
@@ -73,6 +75,7 @@ class UsageDataManager: ObservableObject {
         codexCliService: CodexUsageProviding? = nil,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
         openRouterService: SimpleUsageProviding = OpenRouterService.shared,
+        grokService: SimpleUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeLocalService = .shared,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         codexAccountStore: CodexAccountStore? = nil,
@@ -85,6 +88,7 @@ class UsageDataManager: ObservableObject {
         self.codexCliService = codexCliService ?? CodexCliLocalService.shared
         self.cursorService = cursorService
         self.openRouterService = openRouterService
+        self.grokService = grokService
         self.claudeCodeService = claudeCodeService
         self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
         self.codexAccountStore = codexAccountStore ?? .shared
@@ -134,7 +138,7 @@ class UsageDataManager: ObservableObject {
 
         // Fetch the simple (single-account) providers. On failure the final
         // merge loop below preserves any cached metrics (graceful degradation).
-        for service in [ServiceType.cursor, .openRouter]
+        for service in [ServiceType.cursor, .openRouter, .grok]
         where providerVisibilityStore.isEnabled(service) && hasProviderAccess(service) {
             do {
                 newMetrics[service] = try await fetchSimpleProviderMetrics(service)
@@ -210,6 +214,20 @@ class UsageDataManager: ObservableObject {
         isLoading = false
     }
 
+    /// Installs the post-redemption Codex usage response into the same caches
+    /// used by the popover, dashboard, widget, and CLI. The service has already
+    /// performed the network refresh; this method only publishes that result.
+    func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
+        codexAccountMetrics[accountID] = refreshedMetrics
+        if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
+            metrics[.codexCli] = representative
+        }
+        lastError = nil
+        saveCachedData()
+        saveCachedCodexAccountMetrics()
+        saveSharedData(metrics)
+    }
+
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
         case .claudeCode:
@@ -221,7 +239,7 @@ class UsageDataManager: ObservableObject {
             let accountMetrics = await fetchCodexAccountMetrics()
             codexAccountMetrics = accountMetrics
             if let representative = representativeCodexMetrics(from: accountMetrics) { return representative }
-        case .cursor, .openRouter:
+        case .cursor, .openRouter, .grok:
             guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
             do {
                 return try await fetchSimpleProviderMetrics(service)
@@ -377,6 +395,8 @@ class UsageDataManager: ObservableObject {
             return cursorService.hasAccess
         case .openRouter:
             return openRouterService.hasAccess
+        case .grok:
+            return grokService.hasAccess
         }
     }
 
@@ -390,6 +410,8 @@ class UsageDataManager: ObservableObject {
                 result = try await cursorService.fetchUsageMetrics()
             case .openRouter:
                 result = try await openRouterService.fetchUsageMetrics()
+            case .grok:
+                result = try await grokService.fetchUsageMetrics()
             case .claudeCode, .codexCli:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }

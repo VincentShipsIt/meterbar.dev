@@ -10,10 +10,17 @@ import Foundation
 nonisolated struct BlockFingerprint: Codable, Equatable, Hashable, Sendable {
     let value: String
 
-    init(sessionID: String, blockedAt: Date, reason: WakeBlockReason) {
+    init(sessionID: String, blockedAt: Date, reason: WakeBlockReason, provider: WakeProvider = .claude) {
         // Second precision: the same event re-read must hash identically.
         let epochSecond = Int(blockedAt.timeIntervalSince1970.rounded())
-        let seed = "\(sessionID)|\(epochSecond)|\(reason.rawValue)"
+        // Claude's seed is kept byte-identical so existing ledger entries keep
+        // matching across the upgrade that added a provider dimension; only
+        // non-Claude providers namespace the seed, which also prevents a Claude
+        // and a Codex session that share an id/instant/reason from colliding on
+        // one ledger entry.
+        let seed = (provider == .claude)
+            ? "\(sessionID)|\(epochSecond)|\(reason.rawValue)"
+            : "\(provider.rawValue)|\(sessionID)|\(epochSecond)|\(reason.rawValue)"
         let digest = SHA256.hash(data: Data(seed.utf8))
         self.value = digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -38,6 +45,10 @@ nonisolated enum WakeSkipReason: String, Codable, Equatable, Sendable {
 /// reason rather than silently dropping the candidate so the UI/CLI can explain
 /// why a visible blocked session was not resumed.
 nonisolated struct WakeSessionCandidate: Equatable, Sendable, Identifiable {
+    /// Which assistant this session belongs to. Defaulted to `.claude` so every
+    /// existing construction site (and test) keeps compiling unchanged; Codex
+    /// discovery passes `.codex` explicitly.
+    let provider: WakeProvider
     let sessionID: String
     let transcriptPath: String
     /// Canonicalized (symlinks resolved) working directory, if resolvable.
@@ -49,6 +60,30 @@ nonisolated struct WakeSessionCandidate: Equatable, Sendable, Identifiable {
     let resetHint: TranscriptResetParser.Result?
     let fingerprint: BlockFingerprint
     let skipReason: WakeSkipReason?
+
+    init(
+        sessionID: String,
+        transcriptPath: String,
+        workingDirectory: String?,
+        gitBranch: String?,
+        reason: WakeBlockReason,
+        blockedAt: Date,
+        resetHint: TranscriptResetParser.Result?,
+        fingerprint: BlockFingerprint,
+        skipReason: WakeSkipReason?,
+        provider: WakeProvider = .claude
+    ) {
+        self.provider = provider
+        self.sessionID = sessionID
+        self.transcriptPath = transcriptPath
+        self.workingDirectory = workingDirectory
+        self.gitBranch = gitBranch
+        self.reason = reason
+        self.blockedAt = blockedAt
+        self.resetHint = resetHint
+        self.fingerprint = fingerprint
+        self.skipReason = skipReason
+    }
 
     var id: String { fingerprint.value }
 

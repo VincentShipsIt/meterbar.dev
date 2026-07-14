@@ -23,7 +23,7 @@
 
 > **Note**: MeterBar is currently in active development. The app is not yet available on the Mac App Store but will be published soon. For now, you can build from source or download pre-built binaries from the Releases page.
 
-A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Cursor usage at a glance.
+A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor, OpenRouter, and Grok usage at a glance.
 
 ## Screenshots
 
@@ -39,8 +39,8 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Widget Support**: macOS widget for at-a-glance monitoring
-- **Multi-Service Support**: Track Claude Code, Codex CLI, and Cursor
-- **Zero Configuration**: Automatically reads credentials from CLI tools (no API keys needed)
+- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, and Grok
+- **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
 - **Real-time Updates**: Background refresh every 15 minutes
 - **Pace-aware Bars**: Usage bars show quota left with an expected-pace marker and burn-rate projection
 - **Color-coded Status**: Green (healthy), Orange (tight), Red (critical/exhausted)
@@ -49,9 +49,11 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 
 | Service | Auth Method | Metrics Tracked |
 |---------|-------------|-----------------|
-| **Claude Code** | Claude CLI `/usage` output | 5h session, 7-day all models, 7-day Sonnet |
+| **Claude Code** | Keychain OAuth token (`/api/oauth/usage`); CLI `/usage` fallback | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
 | **Cursor** | Local SQLite database | Monthly usage |
+| **OpenRouter** | User-provided API key stored in Keychain | Account credits, spend, per-key limits |
+| **Grok** | Cached `grok login` session, accessed by the official CLI | Weekly quota, reset time, extra credits |
 
 ## Installation
 
@@ -104,8 +106,8 @@ open MeterBar.xcodeproj
 
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
 2. Log in: `claude login`
-3. The app runs `claude /usage` and parses the CLI usage output
-4. Add extra Claude accounts in Settings by pointing each one at a separate `CLAUDE_CONFIG_DIR`
+3. The app reads usage from Claude Code's authenticated `/api/oauth/usage` endpoint using its Keychain login (first launch shows a one-time Keychain access prompt); if no token is available it falls back to parsing `claude /usage` output
+4. Add extra Claude accounts in Settings by pointing each one at a separate `CLAUDE_CONFIG_DIR` (custom accounts use the CLI, since only the default account has a Keychain token)
 
 ### Codex CLI
 
@@ -118,6 +120,13 @@ open MeterBar.xcodeproj
 
 1. Install and log into Cursor IDE
 2. The app automatically reads from Cursor's local database
+
+### Grok
+
+1. Install [Grok Build](https://x.ai/cli)
+2. Log in: `grok login`
+3. Enable Grok under **Settings → General → Tracked Providers**
+4. MeterBar asks the official CLI for billing data over ACP; it does not read or store the cached token
 
 ## Usage
 
@@ -151,7 +160,7 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider (claude, codex, cursor)
+# Filter by provider (claude, codex, cursor, openrouter, grok)
 meterbar usage --provider claude
 
 # Show token costs from the app's last local scan
@@ -163,6 +172,7 @@ meterbar cost --json
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Costs tab), so the CLI and the app always show the same numbers.
+The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
 The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
 ```
@@ -174,29 +184,31 @@ The CLI is automatically installed when using Homebrew. For manual installs, it'
 MeterBar reads usage data from local CLI output, local credential stores, and provider APIs:
 
 ```
-claude /usage            # Claude Code usage
-macOS Keychain           # Legacy Claude Code OAuth fallback only
+macOS Keychain           # Claude Code OAuth token (Claude Code-credentials)
+claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
 ~/Library/Application Support/Cursor/  # Cursor local DB
+~/.grok/auth.json        # Grok CLI login presence only; token contents stay inside the CLI
 ```
 
 It then uses the respective local source or API to fetch current usage data:
-- Claude Code (legacy OAuth fallback only): `https://api.anthropic.com/api/oauth/usage`
+- Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
+- Grok: official `grok agent --no-leader stdio` ACP billing response
 
-Claude Code usage uses `claude /usage` first so MeterBar does not need to read Claude Code's OAuth token during normal operation. A legacy OAuth fallback can be enabled in Settings under Claude Code.
-- Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR`.
+Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
+- Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no Keychain token of their own).
 - Cursor: Local SQLite queries
 
-**No provider API keys are required for CLI-backed services** - the app uses local CLI/session data where possible and does not read Claude Code's OAuth token during normal operation.
+**No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch); Grok authentication remains inside the official CLI process.
 
 ## Privacy & Security
 
 - All credentials remain in their original locations (managed by CLI tools)
 - No data sent to external servers (only calls to the providers' own usage endpoints)
 - The main app is **not** sandboxed — it must read other tools' credential/log files
-  (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` binary. The
+  (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.
 - No analytics, telemetry, or crash reporting
 - Open source for full transparency
@@ -217,6 +229,7 @@ Make sure you're logged into the CLI tool:
 ```bash
 claude login   # For Claude Code
 codex login    # For Codex CLI
+grok login     # For Grok Build
 ```
 
 If the app still shows "Not Connected" or "Not configured", re-run the login command. MeterBar treats expired local OAuth tokens as disconnected so it does not keep making failing usage requests.
@@ -227,7 +240,7 @@ Run `codex logout && codex login` and select your team workspace when prompted.
 
 ### App can't read credentials
 
-The app reads CLI credential files from `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default) and Cursor's local database. If you built from source with App Sandbox enabled, those reads will fail — the shipped configuration keeps the main app un-sandboxed for this reason.
+The app reads CLI credential files from `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default), checks for the Grok CLI login, and reads Cursor's local database. If you built from source with App Sandbox enabled, those accesses will fail — the shipped configuration keeps the main app un-sandboxed for this reason.
 
 ## Contributing
 

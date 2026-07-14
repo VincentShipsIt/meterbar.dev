@@ -4,15 +4,12 @@ import SwiftUI
 /// Fixed export geometry for the social share card. The card is rendered to a
 /// 1200×675 PNG (standard link-preview / tweet aspect); every interior metric is
 /// laid out against `exportSize` and multiplied by a runtime `scale` so the same
-/// view fills both the small in-app preview and the full-size export bitmap.
+/// view fills both the in-app preview and the full-size export bitmap.
 enum SocialShareCardLayout {
     static let exportSize = CGSize(width: 1_200, height: 675)
     static let aspectRatio: CGFloat = exportSize.width / exportSize.height
 }
 
-/// The in-dashboard preview wrapper: keeps the export aspect ratio, clips to a
-/// rounded rect, and adds a hairline border + drop shadow so the card reads as a
-/// physical shareable object rather than inline content.
 struct SocialShareCardPreview: View {
     let content: SocialShareCardContent
 
@@ -27,14 +24,13 @@ struct SocialShareCardPreview: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
             }
-            .shadow(color: .black.opacity(0.14), radius: 16, x: 0, y: 8)
+            .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 9)
     }
 }
 
-/// The branded share card itself. Rendered both on screen (preview) and to PNG
-/// via `ImageRenderer`. Every dimension is expressed as a base value times the
-/// geometry-derived `scale`, so the layout is resolution-independent between the
-/// preview and the 1200×675 export.
+/// A deliberately unserious 30-day usage receipt. All numbers and text stay in
+/// SwiftUI so exported PNGs remain crisp and truthful; the decorative background
+/// is also code-native so it never competes with the user's stats.
 struct SocialShareCard: View {
     let content: SocialShareCardContent
 
@@ -51,256 +47,266 @@ struct SocialShareCard: View {
                 VStack(alignment: .leading, spacing: 0) {
                     header(scale: scale)
 
-                    Spacer(minLength: 18 * scale)
+                    Spacer(minLength: 22 * scale)
 
-                    HStack(alignment: .bottom, spacing: 34 * scale) {
-                        heroCopy(scale: scale)
-                        Spacer(minLength: 16 * scale)
-                        SocialShareTokenChart(
-                            values: content.dailyTokenTotals,
-                            accent: MeterBarTheme.codexAccent,
-                            scale: scale
-                        )
-                        .frame(width: 390 * scale, height: 214 * scale)
+                    HStack(alignment: .top, spacing: 36 * scale) {
+                        hero(scale: scale)
+                            .frame(width: 650 * scale, alignment: .leading)
+
+                        SocialShareStatsPanel(content: content, scale: scale)
+                            .frame(width: 406 * scale)
                     }
 
-                    Spacer(minLength: 24 * scale)
+                    Spacer(minLength: 22 * scale)
 
                     footer(scale: scale)
                 }
                 .padding(.horizontal, 54 * scale)
-                .padding(.vertical, 46 * scale)
+                .padding(.vertical, 42 * scale)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .background(Color(red: 0.025, green: 0.027, blue: 0.033))
+        .background(Color(red: 0.035, green: 0.025, blue: 0.075))
     }
 
     private func header(scale: CGFloat) -> some View {
-        HStack(alignment: .top) {
-            HStack(spacing: 14 * scale) {
+        HStack {
+            HStack(spacing: 12 * scale) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 15 * scale, style: .continuous)
-                        .fill(Color.white.opacity(0.10))
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 27 * scale, weight: .bold))
-                        .foregroundStyle(MeterBarTheme.appAccent)
+                    Circle()
+                        .fill(Color.white)
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 23 * scale, weight: .black))
+                        .foregroundStyle(Color(red: 0.16, green: 0.07, blue: 0.31))
                 }
-                .frame(width: 58 * scale, height: 58 * scale)
+                .frame(width: 48 * scale, height: 48 * scale)
 
-                VStack(alignment: .leading, spacing: 3 * scale) {
-                    Text(SocialShareCardContent.appName)
-                        .font(.system(size: 29 * scale, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("local AI usage from the macOS menu bar")
-                        .font(.system(size: 17 * scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                }
+                Text(SocialShareCardContent.appName)
+                    .font(.system(size: 27 * scale, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
             }
 
             Spacer()
 
-            Text("TOKEN MAXING RECEIPTS")
-                .font(.system(size: 15 * scale, weight: .black, design: .monospaced))
-                .tracking(1.8 * scale)
-                .foregroundStyle(.white.opacity(0.68))
+            Text("LOCAL RECEIPT  /  LAST 30 DAYS")
+                .font(.system(size: 14 * scale, weight: .black, design: .monospaced))
+                .tracking(1.2 * scale)
+                .foregroundStyle(.white.opacity(0.72))
                 .padding(.horizontal, 15 * scale)
                 .padding(.vertical, 9 * scale)
-                .background(Color.white.opacity(0.08), in: Capsule())
+                .background(Color.black.opacity(0.24), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(Color.white.opacity(0.14), lineWidth: max(0.5, scale))
+                }
         }
     }
 
-    private func heroCopy(scale: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 16 * scale) {
-            VStack(alignment: .leading, spacing: 6 * scale) {
-                Text(content.tokenHeroValue)
-                    .font(.system(size: 63 * scale, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                Text(content.tokenHeroCaption.uppercased())
-                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
-                    .tracking(1.2 * scale)
-                    .foregroundStyle(MeterBarTheme.codexAccent)
-            }
+    private func hero(scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(content.tokenHeroValue)
+                .font(.system(size: 78 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.52)
 
-            HStack(spacing: 10 * scale) {
-                SocialShareMetricPill(title: "Providers", value: content.sourceLabel, scale: scale)
-                SocialShareMetricPill(title: "Estimate", value: content.costLabel, scale: scale)
-            }
+            Text(content.tokenHeroCaption.uppercased())
+                .font(.system(size: 16 * scale, weight: .black, design: .monospaced))
+                .tracking(1.15 * scale)
+                .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.25))
+                .padding(.top, 3 * scale)
 
-            VStack(alignment: .leading, spacing: 7 * scale) {
-                Text(content.providerLine)
-                    .font(.system(size: 20 * scale, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(content.quotaLine)
-                    .font(.system(size: 18 * scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.68))
+            SocialShareTierSticker(tier: content.usageTier, scale: scale)
+                .padding(.top, 30 * scale)
+
+            Text("“\(content.usageTier.joke)”")
+                .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+                .padding(.top, 25 * scale)
+                .frame(maxWidth: 620 * scale, alignment: .leading)
+        }
+    }
+
+    private func footer(scale: CGFloat) -> some View {
+        HStack(spacing: 12 * scale) {
+            Text(SocialShareCardContent.websiteDisplay)
+                .font(.system(size: 16 * scale, weight: .black, design: .monospaced))
+                .foregroundStyle(.white)
+
+            Text("•")
+                .foregroundStyle(.white.opacity(0.36))
+
+            Text("NO FAKE PERCENTILES. JUST RECEIPTS.")
+                .font(.system(size: 12 * scale, weight: .bold, design: .monospaced))
+                .tracking(0.8 * scale)
+                .foregroundStyle(.white.opacity(0.58))
+
+            Spacer()
+
+            Image(systemName: "lock.fill")
+                .font(.system(size: 12 * scale, weight: .bold))
+                .foregroundStyle(.white.opacity(0.55))
+            Text("SESSION DATA STAYS LOCAL")
+                .font(.system(size: 12 * scale, weight: .bold, design: .monospaced))
+                .tracking(0.7 * scale)
+                .foregroundStyle(.white.opacity(0.58))
+        }
+    }
+}
+
+private struct SocialShareTierSticker: View {
+    let tier: SocialShareUsageTier
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 13 * scale) {
+            Image(systemName: tier.symbolName)
+                .font(.system(size: 24 * scale, weight: .black))
+
+            VStack(alignment: .leading, spacing: 1 * scale) {
+                Text("30-DAY CLASS")
+                    .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
+                    .tracking(0.8 * scale)
+                    .opacity(0.62)
+                Text(tier.title)
+                    .font(.system(size: 21 * scale, weight: .black, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
         }
-        .frame(maxWidth: 620 * scale, alignment: .leading)
-    }
-
-    private func footer(scale: CGFloat) -> some View {
-        VStack(spacing: 10 * scale) {
-            SocialShareMetadataRow(
-                iconName: "globe",
-                title: "Website",
-                value: SocialShareCardContent.websiteDisplay,
-                scale: scale
-            )
-            SocialShareMetadataRow(
-                iconName: "terminal.fill",
-                title: "Install",
-                value: SocialShareCardContent.installCommand,
-                scale: scale
-            )
+        .foregroundStyle(Color(red: 0.13, green: 0.05, blue: 0.20))
+        .padding(.horizontal, 18 * scale)
+        .padding(.vertical, 11 * scale)
+        .background(
+            Color(red: 1.0, green: 0.78, blue: 0.25),
+            in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                .stroke(Color.black.opacity(0.24), lineWidth: max(1, 2 * scale))
         }
+        .shadow(color: .black.opacity(0.22), radius: 0, x: 5 * scale, y: 6 * scale)
+        .rotationEffect(.degrees(-1.3))
     }
 }
 
-private struct SocialShareCardBackground: View {
+private struct SocialShareStatsPanel: View {
+    let content: SocialShareCardContent
     let scale: CGFloat
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.022, green: 0.024, blue: 0.030),
-                    Color(red: 0.040, green: 0.046, blue: 0.052),
-                    Color(red: 0.025, green: 0.030, blue: 0.036)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        VStack(alignment: .leading, spacing: 15 * scale) {
+            SocialShareTokenChart(values: content.dailyTokenTotals, scale: scale)
+                .frame(height: 188 * scale)
 
-            SocialShareGridPattern(scale: scale)
-                .stroke(Color.white.opacity(0.055), lineWidth: max(0.5, scale))
+            HStack(spacing: 10 * scale) {
+                SocialShareStatCell(
+                    label: "Sessions",
+                    value: content.sessionLabel,
+                    symbolName: "bubble.left.and.bubble.right.fill",
+                    scale: scale
+                )
+                SocialShareStatCell(
+                    label: "Avg / session",
+                    value: content.averageTokensPerSession,
+                    symbolName: "divide",
+                    scale: scale
+                )
+            }
 
-            VStack {
-                Spacer()
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                MeterBarTheme.codexAccent.opacity(0.0),
-                                MeterBarTheme.codexAccent.opacity(0.20),
-                                MeterBarTheme.cursorAccent.opacity(0.14)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(height: 5 * scale)
+            HStack(spacing: 10 * scale) {
+                SocialShareStatCell(
+                    label: "Active days",
+                    value: content.activeDaysLabel,
+                    symbolName: "calendar",
+                    scale: scale
+                )
+                SocialShareStatCell(
+                    label: "Top source",
+                    value: content.topProviderLabel,
+                    symbolName: "arrow.up.right",
+                    scale: scale
+                )
             }
         }
+        .padding(17 * scale)
+        .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 24 * scale, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: max(0.5, scale))
+        }
     }
 }
 
-private struct SocialShareGridPattern: Shape {
-    let scale: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let spacing = max(22, 44 * scale)
-
-        var x = rect.minX
-        while x <= rect.maxX {
-            path.move(to: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: x, y: rect.maxY))
-            x += spacing
-        }
-
-        var y = rect.minY
-        while y <= rect.maxY {
-            path.move(to: CGPoint(x: rect.minX, y: y))
-            path.addLine(to: CGPoint(x: rect.maxX, y: y))
-            y += spacing
-        }
-
-        return path
-    }
-}
-
-private struct SocialShareMetricPill: View {
-    let title: String
+private struct SocialShareStatCell: View {
+    let label: String
     let value: String
+    let symbolName: String
     let scale: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3 * scale) {
-            Text(title.uppercased())
-                .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
-                .tracking(0.7 * scale)
-                .foregroundStyle(.white.opacity(0.44))
+        VStack(alignment: .leading, spacing: 5 * scale) {
+            HStack(spacing: 6 * scale) {
+                Image(systemName: symbolName)
+                Text(label.uppercased())
+            }
+            .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.50))
+
             Text(value)
-                .font(.system(size: 16 * scale, weight: .bold))
+                .font(.system(size: 17 * scale, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .minimumScaleFactor(0.68)
+                .minimumScaleFactor(0.62)
         }
-        .padding(.horizontal, 13 * scale)
+        .padding(.horizontal, 12 * scale)
         .padding(.vertical, 10 * scale)
-        .frame(minWidth: 135 * scale, alignment: .leading)
-        .background(Color.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 11 * scale, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 11 * scale, style: .continuous)
-                .stroke(Color.white.opacity(0.11), lineWidth: max(0.5, scale))
-        }
+        .frame(maxWidth: .infinity, minHeight: 61 * scale, alignment: .leading)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
     }
 }
 
-/// A branded, static bar chart of 30-day local token totals for the export image.
-///
-/// Deliberately kept separate from the interactive `DailyUsageChart`: this one
-/// renders a fixed-size marketing bitmap (dark gradient palette, `scale`-driven
-/// geometry, sample bars when no scan has run yet, no legend/axis/tooltips),
-/// whereas `DailyUsageChart` is a live, system-themed, `DailyTokenUsage`-bound
-/// view with `.help()` tooltips that are meaningless in a flattened PNG. The two
-/// consume different inputs (`[Int]` daily totals vs. `[DailyTokenUsage]` rows)
-/// and share no rendering requirements, so composing them would mean bolting an
-/// alternate palette and placeholder mode onto the interactive chart.
 private struct SocialShareTokenChart: View {
     let values: [Int]
-    let accent: Color
     let scale: CGFloat
 
     private var chartValues: [Int] {
-        if values.contains(where: { $0 > 0 }) {
-            return values
-        }
-        return [4, 7, 5, 10, 8, 14, 9, 17, 13, 20, 12, 18, 24, 16, 28]
+        let visibleValues = Array(values.suffix(30))
+        return visibleValues.isEmpty ? Array(repeating: 0, count: 30) : visibleValues
     }
 
     private var maxValue: Int {
         max(chartValues.max() ?? 1, 1)
     }
 
+    private var hasUsage: Bool {
+        chartValues.contains(where: { $0 > 0 })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12 * scale) {
             HStack {
-                VStack(alignment: .leading, spacing: 3 * scale) {
-                    Text("30d local tokens")
-                        .font(.system(size: 17 * scale, weight: .bold))
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    Text("DAILY BURN")
+                        .font(.system(size: 13 * scale, weight: .black, design: .monospaced))
+                        .tracking(0.8 * scale)
                         .foregroundStyle(.white)
-                    Text(values.contains(where: { $0 > 0 }) ? "tracked history" : "waiting for scan")
-                        .font(.system(size: 12 * scale, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.54))
+                    Text(hasUsage ? "30-day session tokens" : "feed me more sessions")
+                        .font(.system(size: 11 * scale, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.50))
                 }
                 Spacer()
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 18 * scale, weight: .bold))
-                    .foregroundStyle(accent)
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 18 * scale, weight: .black))
+                    .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.28))
             }
 
             GeometryReader { proxy in
-                let spacing = max(3 * scale, 2)
+                let spacing = max(2 * scale, 1)
                 let barWidth = max(
-                    4 * scale,
+                    2 * scale,
                     (proxy.size.width - CGFloat(max(0, chartValues.count - 1)) * spacing)
                         / CGFloat(max(1, chartValues.count))
                 )
@@ -309,64 +315,97 @@ private struct SocialShareTokenChart: View {
                     ForEach(chartValues.indices, id: \.self) { index in
                         let value = chartValues[index]
                         let percent = CGFloat(value) / CGFloat(maxValue)
-                        let opacity = values.contains(where: { $0 > 0 }) ? 0.92 : 0.38
 
-                        RoundedRectangle(cornerRadius: 4 * scale, style: .continuous)
+                        RoundedRectangle(cornerRadius: 3 * scale, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        accent.opacity(opacity),
-                                        MeterBarTheme.cursorAccent.opacity(max(0.18, opacity - 0.18))
+                                        Color(red: 1.0, green: 0.72, blue: 0.25),
+                                        Color(red: 1.0, green: 0.34, blue: 0.48),
                                     ],
                                     startPoint: .bottom,
                                     endPoint: .top
                                 )
                             )
-                            .frame(width: barWidth, height: max(6 * scale, proxy.size.height * percent))
+                            .opacity(hasUsage ? 0.96 : 0.20)
+                            .frame(width: barWidth, height: max(5 * scale, proxy.size.height * percent))
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
             }
         }
-        .padding(16 * scale)
-        .background(Color.white.opacity(0.072), in: RoundedRectangle(cornerRadius: 18 * scale, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: max(0.5, scale))
+    }
+}
+
+private struct SocialShareCardBackground: View {
+    let scale: CGFloat
+
+    private let sparklePositions: [CGPoint] = [
+        CGPoint(x: 0.09, y: 0.17),
+        CGPoint(x: 0.19, y: 0.84),
+        CGPoint(x: 0.46, y: 0.10),
+        CGPoint(x: 0.73, y: 0.12),
+        CGPoint(x: 0.93, y: 0.34),
+        CGPoint(x: 0.86, y: 0.88),
+        CGPoint(x: 0.55, y: 0.91),
+    ]
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.13, green: 0.05, blue: 0.25),
+                        Color(red: 0.06, green: 0.03, blue: 0.14),
+                        Color(red: 0.03, green: 0.08, blue: 0.16),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                Circle()
+                    .fill(Color(red: 0.48, green: 0.17, blue: 0.78).opacity(0.34))
+                    .frame(width: 620 * scale, height: 620 * scale)
+                    .blur(radius: 70 * scale)
+                    .offset(x: 430 * scale, y: -310 * scale)
+
+                Circle()
+                    .fill(Color(red: 1.0, green: 0.34, blue: 0.26).opacity(0.19))
+                    .frame(width: 500 * scale, height: 500 * scale)
+                    .blur(radius: 80 * scale)
+                    .offset(x: -470 * scale, y: 300 * scale)
+
+                SocialShareDiagonalPattern(scale: scale)
+                    .stroke(Color.white.opacity(0.045), lineWidth: max(0.5, scale))
+
+                ForEach(Array(sparklePositions.enumerated()), id: \.offset) { index, position in
+                    Image(systemName: index.isMultiple(of: 2) ? "sparkle" : "circle.circle")
+                        .font(.system(size: CGFloat(15 + (index % 3) * 5) * scale, weight: .bold))
+                        .foregroundStyle(.white.opacity(index.isMultiple(of: 2) ? 0.18 : 0.10))
+                        .position(
+                            x: proxy.size.width * position.x,
+                            y: proxy.size.height * position.y
+                        )
+                }
+            }
         }
     }
 }
 
-private struct SocialShareMetadataRow: View {
-    let iconName: String
-    let title: String
-    let value: String
+private struct SocialShareDiagonalPattern: Shape {
     let scale: CGFloat
 
-    var body: some View {
-        HStack(spacing: 12 * scale) {
-            Image(systemName: iconName)
-                .font(.system(size: 15 * scale, weight: .bold))
-                .foregroundStyle(MeterBarTheme.codexAccent)
-                .frame(width: 24 * scale)
-            Text(title.uppercased())
-                .font(.system(size: 12 * scale, weight: .black, design: .monospaced))
-                .tracking(0.8 * scale)
-                .foregroundStyle(.white.opacity(0.48))
-                .frame(width: 64 * scale, alignment: .leading)
-            Text(value)
-                .font(.system(size: 18 * scale, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.52)
-            Spacer(minLength: 0)
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let spacing = max(34, 58 * scale)
+        var x = rect.minX - rect.height
+
+        while x <= rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.maxY))
+            path.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+            x += spacing
         }
-        .padding(.horizontal, 15 * scale)
-        .padding(.vertical, 11 * scale)
-        .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: max(0.5, scale))
-        }
+
+        return path
     }
 }

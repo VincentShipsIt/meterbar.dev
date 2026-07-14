@@ -189,12 +189,114 @@ final class SessionWakeSettingsTests: XCTestCase {
     func testNotificationRequiresGlobalProviderAndWakePreference() {
         func decide(_ global: Bool, _ provider: Bool, _ wake: Bool) -> Bool {
             SessionWakeNotificationDecider.shouldNotifyOnCompletion(
-                .init(globalNotificationsEnabled: global, claudeProviderEnabled: provider, notifyOnCompletion: wake)
+                .init(
+                    globalNotificationsEnabled: global,
+                    providerEnabled: provider,
+                    providerDisplayName: "Claude Code",
+                    notifyOnCompletion: wake
+                )
             )
         }
         XCTAssertTrue(decide(true, true, true))
         XCTAssertFalse(decide(false, true, true))
         XCTAssertFalse(decide(true, false, true))
         XCTAssertFalse(decide(true, true, false))
+    }
+
+    // MARK: - Provider dimension
+
+    func testDefaultProviderIsClaude() {
+        let store = makeStore()
+        XCTAssertEqual(store.wakeProvider, .claude)
+        XCTAssertNil(store.wakeCodexAccountID)
+        XCTAssertNil(store.activeAccountID)
+    }
+
+    func testActiveAccountIDFollowsProvider() {
+        let claudeID = UUID()
+        let codexID = UUID()
+        let store = makeStore()
+        store.setWakeAccountID(claudeID)
+        store.setWakeCodexAccountID(codexID)
+
+        XCTAssertEqual(store.activeAccountID, claudeID)
+        store.setWakeProvider(.codex)
+        XCTAssertEqual(store.activeAccountID, codexID)
+    }
+
+    func testCanTurnOnConsidersSelectedProviderAccount() {
+        let store = makeStore()
+        // Claude account selected, but the active provider is Codex ⇒ cannot arm.
+        store.setWakeAccountID(UUID())
+        store.setWakeProvider(.codex)
+        XCTAssertFalse(store.canTurnOn)
+
+        // Selecting a Codex account enables it.
+        store.setWakeCodexAccountID(UUID())
+        XCTAssertTrue(store.canTurnOn)
+    }
+
+    func testSwitchingProviderWhileArmedDisarms() {
+        let store = makeStore()
+        store.setWakeAccountID(UUID())
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        store.setWakeProvider(.codex)
+        XCTAssertEqual(store.wakeProvider, .codex)
+        XCTAssertFalse(store.isOn)
+
+        let reloaded = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.wakeProvider, .codex)
+        XCTAssertFalse(reloaded.isOn)
+    }
+
+    func testSwitchingCodexAccountWhileArmedDisarms() {
+        let accountA = UUID()
+        let accountB = UUID()
+        let store = makeStore()
+        store.setWakeProvider(.codex)
+        store.setWakeCodexAccountID(accountA)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        store.setWakeCodexAccountID(accountB)
+        XCTAssertEqual(store.wakeCodexAccountID, accountB)
+        XCTAssertFalse(store.isOn)
+    }
+
+    func testReconcileCodexAccountsClearsMissingSelection() {
+        let store = makeStore()
+        store.setWakeProvider(.codex)
+        store.setWakeCodexAccountID(UUID())
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        store.reconcileCodexAccounts(available: [UUID(), UUID()]) // selected id gone
+        XCTAssertNil(store.wakeCodexAccountID)
+        XCTAssertFalse(store.isOn)
+    }
+
+    func testProviderAndCodexAccountPersistAcrossRelaunch() {
+        let codexID = UUID()
+        let store = makeStore()
+        store.setWakeProvider(.codex)
+        store.setWakeCodexAccountID(codexID)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        let reloaded = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.wakeProvider, .codex)
+        XCTAssertEqual(reloaded.wakeCodexAccountID, codexID)
+        XCTAssertTrue(reloaded.isOn)
+    }
+
+    func testStaleOnWithoutCodexAccountIsCorrectedAtLoad() {
+        // Persisted "on" for Codex with no Codex account selected must not arm.
+        defaults.set(WakeProvider.codex.rawValue, forKey: StorageKeys.sessionWakeProvider)
+        defaults.set(true, forKey: StorageKeys.sessionWakeWatcherArmed)
+        defaults.set(true, forKey: StorageKeys.sessionWakeFirstEnableAcknowledged)
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(store.isOn)
     }
 }

@@ -74,26 +74,59 @@ public enum SessionWakeCLI {
             return result(from: response)
         }
 
-        let account = resolveAccount(configDirectory: request.configDirectory)
+        guard let provider = WakeProvider.parse(request.provider) else {
+            let response = WakeCLIResponse.from(
+                candidates: [],
+                outcome: .validationFailure,
+                provider: request.provider.lowercased(),
+                dryRun: request.dryRun,
+                account: request.configDirectory,
+                message: "Unsupported provider '\(request.provider)'. Use 'claude' or 'codex'."
+            )
+            return result(from: response)
+        }
+
         let mode: WakePermissionMode = (request.permissionMode.lowercased() == "bypass") ? .bypass : .safe
-        let engine = WakeCLIEngine(
-            makeRunner: { runnerAccount in
+        let engine = WakeCLIEngine(shouldCancel: request.shouldCancel)
+        let runtime = makeRuntime(
+            provider: provider,
+            configDirectory: request.configDirectory,
+            mode: mode,
+            bypassAcknowledged: request.bypassAcknowledged
+        )
+
+        let response = await engine.run(runtime: runtime, dryRun: request.dryRun, limit: request.limit)
+        return result(from: response)
+    }
+
+    /// Build the provider-specific runtime the engine drives. For Codex the
+    /// `configDirectory` request field is reinterpreted as CODEX_HOME.
+    private static func makeRuntime(
+        provider: WakeProvider,
+        configDirectory: String?,
+        mode: WakePermissionMode,
+        bypassAcknowledged: Bool
+    ) -> WakeProviderRuntime {
+        switch provider {
+        case .claude:
+            let account = resolveAccount(configDirectory: configDirectory)
+            return ClaudeWakeRuntime(account: account) { runnerAccount in
                 WakeProcessRunner(
                     account: runnerAccount,
                     permissionMode: mode,
-                    bypassAcknowledged: request.bypassAcknowledged
+                    bypassAcknowledged: bypassAcknowledged
                 )
-            },
-            shouldCancel: request.shouldCancel
-        )
-
-        let response = await engine.run(
-            provider: request.provider,
-            account: account,
-            dryRun: request.dryRun,
-            limit: request.limit
-        )
-        return result(from: response)
+            }
+        case .codex:
+            let account = resolveCodexAccount(homeDirectory: configDirectory)
+            return CodexWakeRuntime(account: account) { runnerAccount in
+                CodexWakeProcessRunner(
+                    account: runnerAccount,
+                    permissionMode: mode,
+                    bypassAcknowledged: bypassAcknowledged
+                )
+            }
+        }
     }
 
     /// Missing means enabled for compatibility with v1.7.0 installs. Only an
@@ -139,6 +172,33 @@ public enum SessionWakeCLI {
         }
         if let shared = sharedAccountConfigDirectory() {
             return ClaudeCodeAccount(id: UUID(), name: "shared", configDirectory: shared)
+        }
+        return .defaultAccount
+    }
+
+    /// The app-group key the app writes the selected Codex wake account's
+    /// CODEX_HOME to. Read-only from the CLI.
+    public static let sharedCodexHomeKey = "SessionWakeCodexHomeDir"
+
+    /// The Codex CODEX_HOME the app shares via the app-group domain.
+    public static func sharedCodexHomeDirectory() -> String? {
+        guard let shared = UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier) else {
+            return nil
+        }
+        let value = shared.string(forKey: sharedCodexHomeKey)?.trimmingCharacters(in: .whitespaces)
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    /// Resolve the Codex wake account. An explicit `--config-dir` is treated as
+    /// CODEX_HOME; otherwise the app-group value the app shares, then the
+    /// default profile (`CODEX_HOME` env / `~/.codex`).
+    private static func resolveCodexAccount(homeDirectory: String?) -> CodexAccount {
+        let explicit = homeDirectory?.trimmingCharacters(in: .whitespaces)
+        if let explicit, !explicit.isEmpty {
+            return CodexAccount(id: UUID(), name: "cli", homeDirectory: explicit)
+        }
+        if let shared = sharedCodexHomeDirectory() {
+            return CodexAccount(id: UUID(), name: "shared", homeDirectory: shared)
         }
         return .defaultAccount
     }

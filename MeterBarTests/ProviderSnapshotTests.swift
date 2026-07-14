@@ -35,18 +35,19 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Ordering and inclusion
 
-    func testDisplayOrderIsCodexClaudeCursorOpenRouter() {
+    func testDisplayOrderIsCodexClaudeCursorOpenRouterGrok() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
                 .claudeCode: makeMetrics(service: .claudeCode, weekly: 20),
                 .cursor: makeMetrics(service: .cursor, weekly: 30),
-                .openRouter: makeMetrics(service: .openRouter, weekly: 40)
+                .openRouter: makeMetrics(service: .openRouter, weekly: 40),
+                .grok: makeMetrics(service: .grok, weekly: 50)
             ]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter])
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter, .grok])
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter", "Grok"])
     }
 
     func testDisabledProvidersAreExcluded() {
@@ -63,8 +64,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
         ))
 
-        // Popover shows all enabled providers (Codex/Claude/OpenRouter as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 4)
+        // Popover shows all enabled providers (Codex/Claude/OpenRouter/Grok as empty-state cards)…
+        XCTAssertEqual(snapshots.count, 5)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -156,8 +157,37 @@ final class ProviderSnapshotTests: XCTestCase {
         ))
 
         XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map(\.accountID), [CodexAccount.defaultID, work.id])
         XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
         XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
+    }
+
+    func testStatusItemPinOptionsUseStableProviderAccountWindowKeys() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [work],
+            codexAccountMetrics: [
+                work.id: makeMetrics(service: .codexCli, session: 25, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(
+            snapshots.statusItemPinOptions,
+            [
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "session"),
+                    title: "Work · Session"
+                ),
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "weekly"),
+                    title: "Work · Weekly"
+                )
+            ]
+        )
     }
 
     // MARK: - Limits

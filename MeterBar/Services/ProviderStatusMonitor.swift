@@ -146,6 +146,8 @@ extension ServiceType {
             return "Cursor"
         case .openRouter:
             return "OpenRouter"
+        case .grok:
+            return "Grok"
         }
     }
 
@@ -159,6 +161,8 @@ extension ServiceType {
             return "https://status.cursor.com/"
         case .openRouter:
             return "https://status.openrouter.ai/"
+        case .grok:
+            return "https://status.x.ai/"
         }
     }
 

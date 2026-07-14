@@ -28,6 +28,22 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(configured.isHealthy)
     }
 
+    func testGrokRequiresCLIAndCachedLogin() {
+        let missing = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)
+        )
+        XCTAssertEqual(missing.provider, .grok)
+        XCTAssertEqual(missing.check("installed")?.level, .fail)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("grok login"))
+
+        let ready = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: true)
+        )
+        XCTAssertEqual(ready.overall, .pass)
+        XCTAssertEqual(ready.check("data")?.level, .pass)
+    }
+
     // MARK: - Claude Code
 
     func testClaudeHealthy() {
@@ -222,7 +238,7 @@ final class ProviderReadinessTests: XCTestCase {
     func testCodexApiKeyModeDoesNotAuthorizeSubscriptionQuota() {
         // The quota endpoint uses the ChatGPT/Codex OAuth access token. An API
         // key may authorize platform APIs, but it cannot make this check healthy.
-        let json = #"{"OPENAI_API_KEY":"sk-\#(secret)","tokens":null}"#.data(using: .utf8)
+        let json = Data(#"{"OPENAI_API_KEY":"sk-\#(secret)","tokens":null}"#.utf8)
         let input = CodexReadinessInput(
             isCLIInstalled: true,
             authFileExists: true,
@@ -354,7 +370,12 @@ final class ProviderReadinessTests: XCTestCase {
                 ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .pass, detail: "OK"),
                 ReadinessCheck(id: ReadinessCheckID.data, title: "Usage readable", level: .pass, detail: "OK"),
                 ReadinessCheck(id: ReadinessCheckID.refresh, title: "Last refresh", level: .pass, detail: "OK"),
-                ReadinessCheck(id: ReadinessCheckID.parseHealth, title: "Provider format health", level: .warn, detail: "Format drift"),
+                ReadinessCheck(
+                    id: ReadinessCheckID.parseHealth,
+                    title: "Provider format health",
+                    level: .warn,
+                    detail: "Format drift"
+                ),
             ]
         )
 
@@ -397,8 +418,18 @@ final class ProviderReadinessTests: XCTestCase {
 
     private func assertNoSecretLeak(_ report: ProviderReadiness, file: StaticString = #filePath, line: UInt = #line) {
         for check in report.checks {
-            XCTAssertFalse(check.detail.contains(secret), "secret leaked into detail: \(check.detail)", file: file, line: line)
-            XCTAssertFalse((check.recovery ?? "").contains(secret), "secret leaked into recovery", file: file, line: line)
+            XCTAssertFalse(
+                check.detail.contains(secret),
+                "secret leaked into detail: \(check.detail)",
+                file: file,
+                line: line
+            )
+            XCTAssertFalse(
+                (check.recovery ?? "").contains(secret),
+                "secret leaked into recovery",
+                file: file,
+                line: line
+            )
         }
     }
 

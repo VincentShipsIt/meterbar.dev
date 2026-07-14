@@ -71,4 +71,28 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
     func testThrowsWhenNoUsageWindowsArePresent() {
         XCTAssertThrowsError(try ClaudeCodeCLIUsageParser.parseMetrics(from: "No usage data"))
     }
+
+    /// Headless (non-TTY) spawns of `claude /usage` no longer render the usage
+    /// screen — the CLI prints a session cost summary instead. The parser must
+    /// recognise that shape and throw a legible, actionable error rather than a
+    /// vague "No Claude usage windows found."
+    func testDetectsCostSummaryInsteadOfUsageScreen() {
+        let output = """
+        Total cost:            $0.0000
+        Total duration (API):  0s
+        Total duration (wall): 1.2s
+        Total code changes:    0 lines added, 0 lines removed
+        Usage by model:
+            claude-opus:  0 input, 0 output
+        """
+
+        XCTAssertThrowsError(try ClaudeCodeCLIUsageParser.parseMetrics(from: output)) { error in
+            guard case let ClaudeCodeCLIUsageError.parsingFailed(message) = error else {
+                return XCTFail("Expected parsingFailed, got \(error)")
+            }
+            XCTAssertTrue(
+                message.lowercased().contains("cost summary"),
+                "Message should call out the cost-summary shape, got: \(message)")
+        }
+    }
 }

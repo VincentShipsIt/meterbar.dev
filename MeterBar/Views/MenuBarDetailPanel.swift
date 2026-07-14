@@ -22,6 +22,14 @@ final class MeterBarMenuDetailPanel {
 
   private var panel: NSPanel?
 
+  /// Bumped on every `present()`/`dismiss()`. A deferred fade-out completion
+  /// only orders the panel out if the token still matches, so re-presenting the
+  /// card (e.g. hovering to another row) cancels the pending hide.
+  private var presentationToken = 0
+
+  /// Whether present/dismiss animate. Honors Reduce Motion; overridable in tests.
+  var motionEnabled = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
   /// Presents the detail card next to `anchor`. `preferredTopY` (screen
   /// coordinates) top-aligns the card with the row that opened it; without it
   /// the card aligns with the anchor's top edge.
@@ -49,12 +57,59 @@ final class MeterBarMenuDetailPanel {
         .frame(width: frame.width, height: frame.height)
     )
     panel.applyCompanionClipping()
-    panel.setFrame(frame, display: true)
-    panel.orderFront(nil)
+
+    let wasVisible = panel.isVisible
+    // Cancel any pending fade-out so re-presenting doesn't get ordered out.
+    presentationToken &+= 1
+
+    guard motionEnabled else {
+      panel.alphaValue = 1
+      panel.setFrame(frame, display: true)
+      panel.orderFront(nil)
+      return
+    }
+
+    if wasVisible {
+      // Already on screen (moving between rows): glide the frame and make sure
+      // the alpha is restored in case a fade-out was mid-flight.
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = MeterBarTheme.Motion.panelResize
+        panel.animator().setFrame(frame, display: true)
+        panel.animator().alphaValue = 1
+      }
+    } else {
+      panel.alphaValue = 0
+      panel.setFrame(frame, display: true)
+      panel.orderFront(nil)
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = MeterBarTheme.Motion.panelFadeIn
+        panel.animator().alphaValue = 1
+      }
+    }
   }
 
   func dismiss() {
-    panel?.orderOut(nil)
+    guard let panel, panel.isVisible else { return }
+    presentationToken &+= 1
+    let token = presentationToken
+
+    guard motionEnabled else {
+      panel.orderOut(nil)
+      panel.alphaValue = 1
+      return
+    }
+
+    NSAnimationContext.runAnimationGroup({ context in
+      context.duration = MeterBarTheme.Motion.panelFadeOut
+      panel.animator().alphaValue = 0
+    }, completionHandler: { [weak self] in
+      MainActor.assumeIsolated {
+        // Skip if a newer present/dismiss superseded this fade-out.
+        guard let self, self.presentationToken == token else { return }
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+      }
+    })
   }
 
   func owns(window: NSWindow?) -> Bool {
@@ -114,6 +169,12 @@ enum MeterBarMenuDetailPanelLayout {
 struct MenuBarProviderDetailContent: View {
   let snapshot: ProviderSnapshot
 
+  @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+
+  init(snapshot: ProviderSnapshot) {
+    self.snapshot = snapshot
+  }
+
   private var detailLimits: [SnapshotLimit] {
     snapshot.detailLimits
   }
@@ -125,7 +186,7 @@ struct MenuBarProviderDetailContent: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       header
-        .padding(.bottom, 10)
+        .padding(.bottom, MeterBarTheme.Spacing.md)
 
       Divider()
 
@@ -139,9 +200,9 @@ struct MenuBarProviderDetailContent: View {
         .scrollContentBackground(.hidden)
       }
     }
-    .padding(14)
+    .padding(MeterBarTheme.Spacing.lg)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(MeterBarCompanionSurface(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
+    .background(MeterBarTheme.Surface.chrome(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
     .clipShape(
       RoundedRectangle(
         cornerRadius: MeterBarMenuDetailPanelLayout.cornerRadius,
@@ -157,15 +218,16 @@ struct MenuBarProviderDetailContent: View {
           .font(.caption)
           .foregroundColor(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.vertical, 12)
+          .padding(.vertical, MeterBarTheme.Spacing.md)
       } else {
         if snapshot.hasExhaustedLimit {
           BlockingLimitResetCounter(
             windows: snapshot.resetWindows,
-            accentColor: snapshot.accentColor
+            accentColor: snapshot.accentColor,
+            format: menuBarDisplayPreferences.resetTimeFormat
           )
-          .padding(10)
-          .meterBarCardSurface(cornerRadius: 10)
+          .padding(MeterBarTheme.Spacing.md)
+          .meterBarCardSurface(cornerRadius: MeterBarTheme.detailCardRadius)
         }
 
         VStack(alignment: .leading, spacing: 10) {
@@ -175,7 +237,7 @@ struct MenuBarProviderDetailContent: View {
             .foregroundColor(.secondary)
 
           ForEach(detailLimits) { limit in
-            MenuBarProviderLimitDetailRow(limit: limit, accentColor: snapshot.accentColor)
+            LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .detail)
           }
         }
       }
@@ -183,10 +245,10 @@ struct MenuBarProviderDetailContent: View {
       let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
       if badges.hasContent {
         badges
-          .padding(.top, 2)
+          .padding(.top, MeterBarTheme.Spacing.xxs)
       }
     }
-    .padding(.top, 12)
+    .padding(.top, MeterBarTheme.Spacing.md)
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
@@ -210,78 +272,6 @@ struct MenuBarProviderDetailContent: View {
   }
 }
 
-private struct MenuBarProviderLimitDetailRow: View {
-  let limit: SnapshotLimit
-  let accentColor: Color
-
-  private var isOut: Bool {
-    limit.percentLeft <= 0
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 8) {
-        Text(limit.title)
-          .font(.caption)
-          .fontWeight(.semibold)
-        if limit.usageLimit.isEstimated {
-          Text("Estimated")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundColor(.secondary)
-        }
-        Spacer(minLength: 4)
-        Text(isOut && !limit.usageLimit.isEstimated ? "Out" : limit.usageLimit.percentLeftText)
-          .font(.caption)
-          .fontWeight(.semibold)
-          .foregroundColor(isOut ? MeterBarTheme.danger : .primary)
-      }
-
-      UsageBar(
-        usedPercentage: limit.usedPercent,
-        accentColor: accentColor,
-        pace: limit.usageLimit.isEstimated ? nil : limit.usageLimit.pace(),
-        paceContext: limit.paceContext
-      )
-
-      HStack(spacing: 6) {
-        Text(limit.usageLimit.usedPercentageText)
-          .font(.caption2)
-          .foregroundColor(.secondary)
-
-        if !limit.usageLimit.isEstimated, let pace = limit.usageLimit.pace() {
-          Text(pace.leftLabel)
-            .font(.caption2)
-            .foregroundColor(paceLabelColor(pace))
-        }
-
-        Spacer(minLength: 6)
-
-        if limit.usageLimit.resetTime != nil {
-          ResetCountdownLabel(
-            title: nil,
-            limit: limit.usageLimit,
-            font: .caption2,
-            foregroundColor: .secondary,
-            iconSize: 9
-          )
-        }
-      }
-    }
-    .padding(10)
-    .meterBarCardSurface(cornerRadius: 10)
-  }
-
-  private func paceLabelColor(_ pace: UsagePace) -> Color {
-    if pace.isExhausted {
-      return MeterBarTheme.danger
-    }
-    switch pace.stage {
-    case .reserve:
-      return MeterBarTheme.success
-    case .deficit:
-      return MeterBarTheme.warning
-    case .onPace:
-      return .secondary
-    }
-  }
-}
+// The detail-panel limit row is now `LimitRow(density: .detail)` — see
+// MeterBar/Views/Components/LimitRow.swift. It keeps the per-row card surface
+// that this bespoke `MenuBarProviderLimitDetailRow` used to draw inline.

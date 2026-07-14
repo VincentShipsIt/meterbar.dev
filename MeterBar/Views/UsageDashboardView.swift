@@ -171,6 +171,7 @@ struct UsageDashboardView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
     @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
@@ -286,16 +287,18 @@ struct UsageDashboardView: View {
                     shareContent
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 22)
+            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
+            .padding(.top, MeterBarTheme.Spacing.md)
+            .padding(.bottom, MeterBarTheme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
+            // Safe-area handling now lives inside MeterBarDetailBackground: the
+            // material bleeds full-bleed, the accent tint stays below the bar so
+            // the system scroll-edge effect is unobstructed behind toolbar items.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
         .navigationTitle("")
         .navigationSubtitle("")
@@ -400,7 +403,7 @@ struct UsageDashboardView: View {
                     } label: {
                         Label("Refresh Status", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .controlSize(.small)
                     .disabled(providerStatusMonitor.isRefreshing)
                 }
@@ -462,7 +465,7 @@ struct UsageDashboardView: View {
                         } label: {
                             Label("Scan 30 Days", systemImage: "magnifyingglass")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glassProminent)
                         .disabled(costTracker.isRefreshInProgress)
                     }
                     .frame(height: 220, alignment: .center)
@@ -475,7 +478,7 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 14) {
             SocialShareCardPreview(content: socialShareCardContent)
                 .frame(maxWidth: 860)
-                .accessibilityLabel("MeterBar social share card preview")
+                .accessibilityLabel("MeterBar 30-day token receipt preview")
 
             HStack(spacing: 10) {
                 Button {
@@ -483,7 +486,7 @@ struct UsageDashboardView: View {
                 } label: {
                     Label("Copy PNG", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
 
                 Button {
                     saveSocialCardImage()
@@ -493,9 +496,9 @@ struct UsageDashboardView: View {
                 .buttonStyle(.bordered)
 
                 Button {
-                    copyTweetText()
+                    copyShareCaption()
                 } label: {
-                    Label("Copy Text", systemImage: "text.quote")
+                    Label("Copy Caption", systemImage: "text.quote")
                 }
                 .buttonStyle(.bordered)
 
@@ -522,8 +525,8 @@ struct UsageDashboardView: View {
                 }
             }
 
-            DashboardCard(title: "Tweet Text") {
-                Text(socialShareCardContent.tweetText)
+            DashboardCard(title: "Share Caption") {
+                Text(socialShareCardContent.shareCaption)
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -533,16 +536,11 @@ struct UsageDashboardView: View {
     }
 
     private func makeSocialShareCardContent(generatedAt: Date) -> SocialShareCardContent {
-        // Reuse the canonical tightest-quota window the overview already derives
-        // (`providerSnapshots.tightestLimit`) instead of re-deriving it locally.
-        let tightest = tightestLimit
-        return SocialShareCardContent(
+        SocialShareCardContent(
             tokenTotal: visibleCostSummary?.totalTokens,
-            estimatedCostUSD: visibleCostSummary?.totalCostUSD,
-            sourceCount: socialSourceCount,
+            sessionCount: socialSessionCount,
             providerNames: socialProviderNames,
-            tightestLimitTitle: tightest?.title,
-            tightestPercentLeft: tightest?.percentLeft,
+            topProviderName: socialTopProviderName,
             dailyTokenTotals: socialDailyTokenTotals(generatedAt: generatedAt),
             generatedAt: generatedAt
         )
@@ -587,7 +585,8 @@ struct UsageDashboardView: View {
             claudeCodeHasAccess: claudeCodeService.hasAccess,
             codexCliHasAccess: codexCliService.hasAccess,
             cursorHasAccess: cursorService.hasAccess,
-            openRouterHasAccess: openRouterService.hasAccess
+            openRouterHasAccess: openRouterService.hasAccess,
+            grokHasAccess: grokService.hasAccess
         ))
         .filter(\.hasMetrics)
     }
@@ -616,8 +615,15 @@ struct UsageDashboardView: View {
         makeSocialShareCardContent(generatedAt: socialCardGeneratedAt)
     }
 
-    private var socialSourceCount: Int {
-        max(providerSnapshots.count, visibleCostSummary?.costs.count ?? 0)
+    private var socialSessionCount: Int? {
+        guard let costs = visibleCostSummary?.costs else { return nil }
+        return costs.reduce(0) { $0 + $1.sessionCount }
+    }
+
+    private var socialTopProviderName: String? {
+        visibleCostSummary?.costs.max { lhs, rhs in
+            lhs.totalTokens < rhs.totalTokens
+        }?.provider.displayName
     }
 
     private var socialProviderNames: [String] {
@@ -742,6 +748,8 @@ struct UsageDashboardView: View {
         if let error = claudeCodeService.lastError { result[.claudeCode] = error }
         if let error = codexCliService.lastError { result[.codexCli] = error }
         if let error = cursorService.lastError { result[.cursor] = error }
+        if let error = openRouterService.lastError { result[.openRouter] = error }
+        if let error = grokService.lastError { result[.grok] = error }
         return result
     }
 
@@ -847,15 +855,15 @@ struct UsageDashboardView: View {
         }
     }
 
-    private func copyTweetText() {
+    private func copyShareCaption() {
         let generatedAt = Date()
         let content = makeSocialShareCardContent(generatedAt: generatedAt)
         socialCardGeneratedAt = generatedAt
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(content.tweetText, forType: .string)
-        setSocialShareStatus("Text copied")
+        pasteboard.setString(content.shareCaption, forType: .string)
+        setSocialShareStatus("Caption copied")
     }
 
     private func renderSocialCardImage(content: SocialShareCardContent) -> NSImage? {
@@ -882,7 +890,7 @@ struct UsageDashboardView: View {
     }
 
     private func setSocialShareStatus(_ status: String) {
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(MeterBarTheme.Motion.standard) {
             socialShareStatus = status
         }
     }

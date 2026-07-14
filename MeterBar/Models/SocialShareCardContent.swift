@@ -7,20 +7,16 @@ struct SocialShareCardContent: Equatable {
 
     init(
         tokenTotal: Int?,
-        estimatedCostUSD: Double?,
-        sourceCount: Int,
+        sessionCount: Int?,
         providerNames: [String],
-        tightestLimitTitle: String?,
-        tightestPercentLeft: Int?,
+        topProviderName: String?,
         dailyTokenTotals: [Int],
         generatedAt: Date = Date()
     ) {
         self.tokenTotal = tokenTotal
-        self.estimatedCostUSD = estimatedCostUSD
-        self.sourceCount = max(0, sourceCount)
+        self.sessionCount = sessionCount.map { max(0, $0) }
         self.providerNames = Self.uniqueProviderNames(providerNames)
-        self.tightestLimitTitle = tightestLimitTitle
-        self.tightestPercentLeft = tightestPercentLeft
+        self.topProviderName = topProviderName?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.dailyTokenTotals = Array(dailyTokenTotals.suffix(30))
         self.generatedAt = generatedAt
     }
@@ -30,14 +26,11 @@ struct SocialShareCardContent: Equatable {
     static let appName = "MeterBar"
     static let websiteURL = "https://meterbar.dev"
     static let websiteDisplay = "meterbar.dev"
-    static let installCommand = "brew tap VincentShipsIt/tap && brew install --cask VincentShipsIt/tap/meterbar"
 
     let tokenTotal: Int?
-    let estimatedCostUSD: Double?
-    let sourceCount: Int
+    let sessionCount: Int?
     let providerNames: [String]
-    let tightestLimitTitle: String?
-    let tightestPercentLeft: Int?
+    let topProviderName: String?
     let dailyTokenTotals: [Int]
     let generatedAt: Date
 
@@ -45,59 +38,67 @@ struct SocialShareCardContent: Equatable {
         tokenTotal != nil
     }
 
+    /// Whether the 30-day chart has any real usage to draw. When this is false
+    /// the share card must render an honest empty state — never fabricated bars.
+    /// This is the single source of truth the chart view keys its empty state on.
+    var hasDailyChartData: Bool {
+        dailyTokenTotals.contains { $0 > 0 }
+    }
+
     var tokenHeroValue: String {
         guard let tokenTotal else {
-            return "Scan needed"
+            return "SCAN ME"
         }
         return UsageFormat.groupedTokens(tokenTotal)
     }
 
-    var compactTokenHeroValue: String {
-        guard let tokenTotal else {
-            return "0"
-        }
-        return UsageFormat.tokens(tokenTotal)
-    }
-
     var tokenHeroCaption: String {
-        hasTokenData ? "tokens tracked in 30 days" : "30-day token history pending"
+        hasTokenData ? "tokens burned across local sessions" : "your 30-day receipts are hiding"
     }
 
-    var costLabel: String {
-        guard let estimatedCostUSD else {
-            return "API-rate estimate pending"
+    var usageTier: SocialShareUsageTier {
+        SocialShareUsageTier.classify(tokenTotal: tokenTotal)
+    }
+
+    var sessionLabel: String {
+        guard let sessionCount else {
+            return "Scan pending"
         }
-        return "\(UsageFormat.cost(estimatedCostUSD)) API-rate estimate"
+        return sessionCount == 1 ? "1 session" : "\(sessionCount) sessions"
     }
 
-    var sourceLabel: String {
-        let count = max(sourceCount, providerNames.count)
-        return count == 1 ? "1 source" : "\(count) sources"
-    }
-
-    var providerLine: String {
-        let providers = providerNames.prefix(3)
-        guard !providers.isEmpty else {
-            return "Claude Code / Codex / Cursor"
+    var averageTokensPerSession: String {
+        guard let tokenTotal, let sessionCount, sessionCount > 0 else {
+            return "—"
         }
-        return providers.joined(separator: " / ")
+        return UsageFormat.tokens(tokenTotal / sessionCount)
     }
 
-    var quotaLine: String {
-        guard let tightestLimitTitle, let tightestPercentLeft else {
-            return "Quota window waiting for refresh"
-        }
-        if tightestPercentLeft <= 0 {
-            return "\(tightestLimitTitle) is maxed until reset"
-        }
-        return "\(tightestLimitTitle) has \(tightestPercentLeft)% quota left"
+    var activeDaysLabel: String {
+        let activeDays = dailyTokenTotals.filter { $0 > 0 }.count
+        return "\(activeDays)/30"
     }
 
-    var tweetText: String {
-        [
-            "\(Self.appName) token maxing receipts: \(compactTokenHeroValue) tokens tracked locally.",
-            "Website: \(Self.websiteURL)",
-            "Install: \(Self.installCommand)",
+    var topProviderLabel: String {
+        if let topProviderName, !topProviderName.isEmpty {
+            return topProviderName
+        }
+        return providerNames.first ?? "Scan pending"
+    }
+
+    var shareCaption: String {
+        guard hasTokenData else {
+            return [
+                "My 30-day token receipts are still hiding.",
+                usageTier.joke,
+                Self.websiteURL,
+            ].joined(separator: "\n")
+        }
+
+        return [
+            "I burned \(tokenHeroValue) tokens across \(sessionLabel) in the last 30 days.",
+            "\(usageTier.title): \(usageTier.joke)",
+            Self.websiteURL,
         ].joined(separator: "\n")
     }
 
@@ -142,6 +143,57 @@ struct SocialShareCardContent: Equatable {
         }
 
         return result
+    }
+}
+
+// MARK: - SocialShareUsageTier
+
+struct SocialShareUsageTier: Equatable {
+    let title: String
+    let joke: String
+    let symbolName: String
+
+    static func classify(tokenTotal: Int?) -> Self {
+        guard let tokenTotal else {
+            return Self(
+                title: "NO RECEIPTS YET",
+                joke: "Run the scan. Your tokens deserve a paper trail.",
+                symbolName: "questionmark.folder.fill"
+            )
+        }
+
+        switch tokenTotal {
+        case ..<100_000:
+            return Self(
+                title: "NOT BURNING ENOUGH",
+                joke: "Open another session. The tokens barely felt that.",
+                symbolName: "flame"
+            )
+        case ..<1_000_000:
+            return Self(
+                title: "WARMING UP",
+                joke: "A promising burn. Your context window remains suspiciously calm.",
+                symbolName: "flame.fill"
+            )
+        case ..<10_000_000:
+            return Self(
+                title: "POWER USER",
+                joke: "Respectable. Several context windows gave their all.",
+                symbolName: "bolt.fill"
+            )
+        case ..<50_000_000:
+            return Self(
+                title: "TOP USER ENERGY",
+                joke: "The context window just filed for overtime.",
+                symbolName: "trophy.fill"
+            )
+        default:
+            return Self(
+                title: "TOKEN MAXXER",
+                joke: "Your token budget has entered witness protection.",
+                symbolName: "crown.fill"
+            )
+        }
     }
 }
 

@@ -16,11 +16,23 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
+    /// Grok Build is CLI-backed but opt-in while its ACP billing method is in beta.
+    static let grokProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
+    /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
+    static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
+    /// `StatusItemLabelMetric` raw value (percent left, percent used, or icon only).
+    static let statusItemLabelMetric = "StatusItemLabelMetric"
+    /// `StatusItemLabelSize` raw value (compact or regular).
+    static let statusItemLabelSize = "StatusItemLabelSize"
+    /// `ResetTimeFormat` raw value for reset labels in popover cards.
+    static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
-    /// Enables the legacy Claude Code OAuth fallback when the CLI is unavailable.
+    /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the
+    /// primary reader for the default account. On by default; off forces the CLI
+    /// output fallback. Legacy key name kept to preserve existing user settings.
     static let claudeCodeOAuthFallback = "ClaudeCodeEnableOAuthFallback"
     /// Extra Claude Code account profiles (JSON-encoded [ClaudeCodeAccount]).
     static let claudeCodeCustomAccounts = "ClaudeCodeCustomAccounts"
@@ -34,6 +46,8 @@ nonisolated enum StorageKeys {
     static let codexCustomAccounts = "CodexCustomAccounts"
     /// User-chosen display name for the default Codex CLI profile.
     static let codexDefaultAccountName = "CodexDefaultAccountName"
+    /// Whether the synthesized default Codex CLI profile participates in tracking.
+    static let codexDefaultAccountEnabled = "CodexDefaultAccountEnabled"
     /// Persisted Codex account display order (array of UUID strings).
     static let codexAccountOrder = "CodexAccountOrder"
     /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
@@ -52,8 +66,12 @@ nonisolated enum StorageKeys {
     static let sessionWakeFeatureEnabled = "SessionWakeFeatureEnabled"
     /// Runtime intent for the watcher, distinct from feature enablement (Bool).
     static let sessionWakeWatcherArmed = "SessionWakeWatcherArmed"
-    /// Explicitly selected wake account id (UUID string). Never inferred.
+    /// The active wake provider raw value (`WakeProvider`, default `.claude`).
+    static let sessionWakeProvider = "SessionWakeProvider"
+    /// Explicitly selected Claude wake account id (UUID string). Never inferred.
     static let sessionWakeAccountID = "SessionWakeAccountID"
+    /// Explicitly selected Codex wake account id (UUID string). Never inferred.
+    static let sessionWakeCodexAccountID = "SessionWakeCodexAccountID"
     /// Whether the user completed the first-enable safety acknowledgement (Bool).
     static let sessionWakeFirstEnableAcknowledged = "SessionWakeFirstEnableAcknowledged"
     /// Whether the user separately acknowledged permission-bypass mode (Bool).
