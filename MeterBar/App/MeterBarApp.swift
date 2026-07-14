@@ -746,7 +746,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasAttention = providerVisibilityStore.enabledServices.contains { service in
             ProviderParseHealthStore.shared.records[service]?.needsAttention(now: now) == true
         }
-        button.alphaValue = hasAttention ? 0.55 : 1
+        let targetAlpha: CGFloat = hasAttention ? 0.55 : 1
+        // This runs on every status refresh; only animate when the value actually
+        // changes so a steady state doesn't restart the fade each tick.
+        if button.alphaValue != targetAlpha {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                button.alphaValue = targetAlpha
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = MeterBarTheme.Motion.statusItemAlpha
+                    button.animator().alphaValue = targetAlpha
+                }
+            }
+        }
         if hasAttention {
             button.toolTip = "\(button.toolTip ?? "MeterBar") · Provider data needs attention"
         }

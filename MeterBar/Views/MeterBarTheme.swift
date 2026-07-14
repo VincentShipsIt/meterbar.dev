@@ -12,6 +12,22 @@ enum MeterBarTheme {
   /// Matches MacSweep's companion popover and detail-panel shell radius.
   static let companionShellRadius: CGFloat = 16
 
+  // MARK: - Motion
+
+  /// Animation durations for menu-chrome show/hide/resize. Kept short so the
+  /// menu bar still feels instant while the frame/alpha changes read as a
+  /// glide rather than a snap. Honor Reduce Motion at the call site.
+  enum Motion {
+    /// Popover/detail frame resize (expand/collapse, provider appearing).
+    static let panelResize: TimeInterval = 0.2
+    /// Fade in when a panel is ordered front.
+    static let panelFadeIn: TimeInterval = 0.15
+    /// Fade out before a panel is ordered out.
+    static let panelFadeOut: TimeInterval = 0.12
+    /// Status-item alpha change for the parse-health attention state.
+    static let statusItemAlpha: TimeInterval = 0.2
+  }
+
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
   static let codexAccent = Color.adaptive(
