@@ -93,7 +93,7 @@ enum ExtraUsageDisplayPolicy {
         guard service == .claudeCode, status.state == .unknown else {
             return status
         }
-        return UserDefaults.standard.bool(forKey: StorageKeys.claudeCodeOAuthFallback) ? status : nil
+        return ClaudeCodeLocalService.isOAuthUsageEnabled() ? status : nil
     }
 }
 

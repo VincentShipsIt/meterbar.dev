@@ -66,11 +66,11 @@ struct SettingsView: View {
     @State private var openRouterKeyDraft = ""
     @State private var selectedProviderTab: ServiceType = .claudeCode
 
-    /// Same key ClaudeCodeLocalService reads. Previously this flag was only
-    /// settable via `defaults write`; exposing it here makes the legacy OAuth
-    /// fallback discoverable instead of a hidden switch.
+    /// Same key ClaudeCodeLocalService reads. OAuth (`/api/oauth/usage`) is the
+    /// primary Claude Code usage source and is on by default; turning this off
+    /// forces the CLI-output fallback (which no longer renders headlessly).
     @AppStorage(StorageKeys.claudeCodeOAuthFallback)
-    private var oauthFallbackEnabled = false
+    private var oauthFallbackEnabled = true
 
     private var providerSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(
@@ -556,14 +556,15 @@ struct SettingsView: View {
                     color: .secondary
                 )
                 SettingsNotice(
-                    text: "MeterBar reads Claude CLI usage output before any legacy OAuth fallback.",
+                    text: "MeterBar reads usage from Claude Code's OAuth login; the CLI output is a fallback.",
                     color: MeterBarTheme.warning
                 )
             }
 
             SettingsRowView(
-                title: "Legacy OAuth fallback",
-                detail: "When the Claude CLI is unavailable, read usage via Claude Code's OAuth token."
+                title: "Claude Code OAuth usage",
+                detail: "Read usage from Claude Code's Keychain login (the primary source). "
+                    + "Off = use only the CLI's `claude /usage` output, which no longer renders headlessly."
             ) {
                 Toggle("", isOn: Binding(
                     get: { oauthFallbackEnabled },

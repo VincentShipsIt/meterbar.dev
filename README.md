@@ -49,7 +49,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 
 | Service | Auth Method | Metrics Tracked |
 |---------|-------------|-----------------|
-| **Claude Code** | Claude CLI `/usage` output | 5h session, 7-day all models, 7-day Sonnet |
+| **Claude Code** | Keychain OAuth token (`/api/oauth/usage`); CLI `/usage` fallback | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
 | **Cursor** | Local SQLite database | Monthly usage |
 
@@ -104,8 +104,8 @@ open MeterBar.xcodeproj
 
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
 2. Log in: `claude login`
-3. The app runs `claude /usage` and parses the CLI usage output
-4. Add extra Claude accounts in Settings by pointing each one at a separate `CLAUDE_CONFIG_DIR`
+3. The app reads usage from Claude Code's authenticated `/api/oauth/usage` endpoint using its Keychain login (first launch shows a one-time Keychain access prompt); if no token is available it falls back to parsing `claude /usage` output
+4. Add extra Claude accounts in Settings by pointing each one at a separate `CLAUDE_CONFIG_DIR` (custom accounts use the CLI, since only the default account has a Keychain token)
 
 ### Codex CLI
 
@@ -174,22 +174,22 @@ The CLI is automatically installed when using Homebrew. For manual installs, it'
 MeterBar reads usage data from local CLI output, local credential stores, and provider APIs:
 
 ```
-claude /usage            # Claude Code usage
-macOS Keychain           # Legacy Claude Code OAuth fallback only
+macOS Keychain           # Claude Code OAuth token (Claude Code-credentials)
+claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
 ~/Library/Application Support/Cursor/  # Cursor local DB
 ```
 
 It then uses the respective local source or API to fetch current usage data:
-- Claude Code (legacy OAuth fallback only): `https://api.anthropic.com/api/oauth/usage`
+- Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
 
-Claude Code usage uses `claude /usage` first so MeterBar does not need to read Claude Code's OAuth token during normal operation. A legacy OAuth fallback can be enabled in Settings under Claude Code.
-- Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR`.
+Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
+- Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no Keychain token of their own).
 - Cursor: Local SQLite queries
 
-**No provider API keys are required for CLI-backed services** - the app uses local CLI/session data where possible and does not read Claude Code's OAuth token during normal operation.
+**No provider API keys are required for CLI-backed services** - the app uses the local Claude Code login and CLI/session data. The default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch).
 
 ## Privacy & Security
 

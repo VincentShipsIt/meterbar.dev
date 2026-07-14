@@ -13,7 +13,7 @@ Providers tracked:
 
 | Provider | `ServiceType` case | Data source |
 |---|---|---|
-| Claude Code | `.claudeCode` | Shells out to `claude /usage`, regex-parses terminal output. Legacy OAuth fallback (keychain item `Claude Code-credentials`) behind the `ClaudeCodeEnableOAuthFallback` UserDefaults flag |
+| Claude Code | `.claudeCode` | Default account: calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint with the `Claude Code-credentials` Keychain OAuth token (primary; on by default via the `ClaudeCodeEnableOAuthFallback` flag). Falls back to shelling out to `claude /usage` and regex-parsing terminal output when no token is available. Custom (`CLAUDE_CONFIG_DIR`) accounts use the CLI, since `claude /usage` no longer renders in a headless spawn |
 | OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage` |
 | Cursor | `.cursor` | Reads session JWT from Cursor's `state.vscdb` SQLite, calls `https://cursor.com/api/usage-summary` |
 | OpenRouter | `.openRouter` | User-provided API key in Keychain; calls documented `/api/v1/credits` and `/api/v1/key` endpoints |
@@ -66,8 +66,8 @@ meterbar/
 ## Services (all `.shared` singletons)
 
 - **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a `Timer` auto-refresh (default 15 min; `RefreshInterval` supports 1/2/5/15/30 min + manual).
-- **ClaudeCodeCLIUsageService** — resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
-- **ClaudeCodeLocalService** — CLI-first wrapper; legacy OAuth fallback + best-effort "extra usage" probe against `api.anthropic.com/api/oauth/usage`.
+- **ClaudeCodeCLIUsageService** — fallback source. Resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. `/usage` no longer renders in a headless spawn (it prints a session cost summary), so the parser detects that shape and throws a legible error. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
+- **ClaudeCodeLocalService** — OAuth-primary wrapper. For the default account it reads `api.anthropic.com/api/oauth/usage` with the Keychain token (`metrics(from:)` maps windows + extra-usage), falling back to the CLI parser only when no token is available; custom accounts use the CLI. `prefersOAuth`/`isOAuthUsageEnabled` are the pure source-selection helpers.
 - **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off").
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **OpenRouterService** — opt-in API-key provider; maps account credits/spend and optional per-key caps into shared metrics.

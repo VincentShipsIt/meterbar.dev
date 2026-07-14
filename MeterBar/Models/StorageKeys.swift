@@ -20,7 +20,9 @@ nonisolated enum StorageKeys {
     static let showInDock = "ShowMeterBarInDock"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
-    /// Enables the legacy Claude Code OAuth fallback when the CLI is unavailable.
+    /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the
+    /// primary reader for the default account. On by default; off forces the CLI
+    /// output fallback. Legacy key name kept to preserve existing user settings.
     static let claudeCodeOAuthFallback = "ClaudeCodeEnableOAuthFallback"
     /// Extra Claude Code account profiles (JSON-encoded [ClaudeCodeAccount]).
     static let claudeCodeCustomAccounts = "ClaudeCodeCustomAccounts"

@@ -13,7 +13,6 @@ class ClaudeCodeLocalService: ObservableObject {
 
     private let keychainService = "Claude Code-credentials"
     private let cliUsageService = ClaudeCodeCLIUsageService.shared
-    private let oauthFallbackUserDefaultsKey = StorageKeys.claudeCodeOAuthFallback
 
     private let urlSession = ServiceSupport.session
 
@@ -99,7 +98,7 @@ class ClaudeCodeLocalService: ObservableObject {
             clearsSubscription = false
         } else if isOAuthFallbackEnabled, getOAuthToken() != nil {
             newHasAccess = true
-            newAuthState = .connected(.legacyOAuth)
+            newAuthState = .connected(.oauth)
             clearsSubscription = false
         } else {
             newHasAccess = false
@@ -121,50 +120,35 @@ class ClaudeCodeLocalService: ObservableObject {
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics(account: ClaudeCodeAccount = .defaultAccount) async throws -> UsageMetrics {
-        do {
-            let metrics = try await cliUsageService.fetchUsageMetrics(account: account)
-            await MainActor.run {
-                self.lastError = nil
-                self.hasAccess = true
-                if account.isDefault || self.authState == .unavailable {
-                    self.authState = .connected(.cli)
-                }
-            }
-            // The CLI output does not expose the "extra usage" toggle. Only read
-            // Claude's OAuth keychain item when the user explicitly enables the
-            // legacy OAuth fallback; ad-hoc local installs otherwise trigger a
-            // keychain approval prompt on every rebuilt binary.
-            let extraUsage = await fetchExtraUsageStatus(account: account)
-            return metrics.withExtraUsage(extraUsage)
-        } catch {
-            if !account.isDefault || !isOAuthFallbackEnabled {
-                let serviceError = serviceError(from: error)
-                await MainActor.run {
-                    self.lastError = serviceError
-                    if account.isDefault {
-                        self.hasAccess = false
-                        self.authState = authState(from: error)
-                    }
-                }
-                throw serviceError
+        // Primary source: the authenticated `/api/oauth/usage` endpoint — the
+        // same data Claude Code's own `/usage` screen reads. `claude /usage` no
+        // longer renders in a headless (non-TTY) spawn (it prints a session cost
+        // summary instead), so the CLI parser is now a fallback. Only the
+        // default account has a Keychain OAuth token; custom accounts
+        // (`CLAUDE_CONFIG_DIR`) have none and go straight to the CLI.
+        if Self.prefersOAuth(account: account, oauthEnabled: isOAuthFallbackEnabled) {
+            // `nil` ⇒ no usable Keychain token; fall back to the CLI. A thrown
+            // error means a token was in hand but the request/decode failed —
+            // surface it rather than retry the headless-broken CLI.
+            if let metrics = try await fetchUsageViaOAuth() {
+                return metrics
             }
         }
 
+        return try await fetchUsageViaCLI(account: account)
+    }
+
+    /// Fetches usage from the OAuth `/api/oauth/usage` endpoint for the default
+    /// account. Returns `nil` when there is no usable Keychain token (missing or
+    /// expired) so the caller can fall back to the CLI.
+    private func fetchUsageViaOAuth() async throws -> UsageMetrics? {
         // Keychain read — off the main actor (it can raise a blocking approval
         // dialog, and the app target runs async bodies on the main actor).
-        let fallbackToken = await Task.detached(priority: .userInitiated) { [self] in
+        let token = await Task.detached(priority: .userInitiated) { [self] in
             getOAuthToken()
         }.value
 
-        guard let token = fallbackToken else {
-            let error = ServiceError.notAuthenticated
-            await MainActor.run {
-                self.lastError = error
-                self.hasAccess = false
-                self.authState = .needsLogin
-            }
-            throw error
-        }
+        guard let token else { return nil }
 
         guard let url = URL(string: usageEndpoint) else {
             throw ServiceError.invalidURL
@@ -189,43 +173,10 @@ class ClaudeCodeLocalService: ObservableObject {
             await MainActor.run {
                 self.lastError = nil
                 self.hasAccess = true
-                self.authState = .connected(.legacyOAuth)
+                self.authState = .connected(.oauth)
             }
 
-            // Session limit = 5-hour window
-            let sessionLimit = UsageLimit(
-                used: usageResponse.fiveHour.utilization,
-                total: 100.0,
-                resetTime: usageResponse.fiveHour.resetsAt,
-                windowSeconds: 5 * 60 * 60
-            )
-
-            // Weekly limit = 7-day window (all models)
-            let weeklyLimit = UsageLimit(
-                used: usageResponse.sevenDay.utilization,
-                total: 100.0,
-                resetTime: usageResponse.sevenDay.resetsAt,
-                windowSeconds: 7 * 24 * 60 * 60
-            )
-
-            // Sonnet-only weekly limit (if available)
-            var sonnetLimit: UsageLimit?
-            if let sonnet = usageResponse.sevenDaySonnet {
-                sonnetLimit = UsageLimit(
-                    used: sonnet.utilization,
-                    total: 100.0,
-                    resetTime: sonnet.resetsAt,
-                    windowSeconds: 7 * 24 * 60 * 60
-                )
-            }
-
-            return UsageMetrics(
-                service: .claudeCode,
-                sessionLimit: sessionLimit,
-                weeklyLimit: weeklyLimit,
-                codeReviewLimit: sonnetLimit,
-                extraUsage: usageResponse.extraUsageStatus
-            )
+            return Self.metrics(from: usageResponse)
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
             await MainActor.run {
@@ -239,6 +190,88 @@ class ClaudeCodeLocalService: ObservableObject {
             }
             throw serviceError
         }
+    }
+
+    /// Fallback source: shells out to `claude /usage` and parses the terminal
+    /// output. Used for custom accounts and when no OAuth token is available.
+    private func fetchUsageViaCLI(account: ClaudeCodeAccount) async throws -> UsageMetrics {
+        do {
+            let metrics = try await cliUsageService.fetchUsageMetrics(account: account)
+            await MainActor.run {
+                self.lastError = nil
+                self.hasAccess = true
+                if account.isDefault || self.authState == .unavailable {
+                    self.authState = .connected(.cli)
+                }
+            }
+            // The CLI output does not expose the "extra usage" toggle. Only read
+            // Claude's OAuth keychain item when OAuth is enabled; ad-hoc local
+            // installs otherwise trigger a keychain approval prompt on every
+            // rebuilt binary.
+            let extraUsage = await fetchExtraUsageStatus(account: account)
+            return metrics.withExtraUsage(extraUsage)
+        } catch {
+            let serviceError = serviceError(from: error)
+            await MainActor.run {
+                self.lastError = serviceError
+                if account.isDefault {
+                    self.hasAccess = false
+                    self.authState = authState(from: error)
+                }
+            }
+            throw serviceError
+        }
+    }
+
+    /// OAuth (`/api/oauth/usage`) is the primary Claude Code usage source and is
+    /// enabled by default. Users opt out — e.g. unsigned dev builds that
+    /// re-prompt for Keychain access on every rebuild — by setting the flag
+    /// false. Single source of truth for the three call sites that read it.
+    nonisolated static func isOAuthUsageEnabled(defaults: UserDefaults = .standard) -> Bool {
+        (defaults.object(forKey: StorageKeys.claudeCodeOAuthFallback) as? Bool) ?? true
+    }
+
+    /// OAuth is preferred only for the default account (whose token lives in the
+    /// Keychain) and only when enabled.
+    nonisolated static func prefersOAuth(account: ClaudeCodeAccount, oauthEnabled: Bool) -> Bool {
+        account.isDefault && oauthEnabled
+    }
+
+    /// Maps an `/api/oauth/usage` response onto the shared `UsageMetrics`.
+    /// Session = 5-hour window, weekly = 7-day (all models), code-review =
+    /// per-model weekly window (Sonnet/Fable) when the server emits one.
+    nonisolated static func metrics(from response: ClaudeCodeUsageResponse) -> UsageMetrics {
+        let sessionLimit = UsageLimit(
+            used: response.fiveHour.utilization,
+            total: 100.0,
+            resetTime: response.fiveHour.resetsAt,
+            windowSeconds: 5 * 60 * 60
+        )
+
+        let weeklyLimit = UsageLimit(
+            used: response.sevenDay.utilization,
+            total: 100.0,
+            resetTime: response.sevenDay.resetsAt,
+            windowSeconds: 7 * 24 * 60 * 60
+        )
+
+        var codeReviewLimit: UsageLimit?
+        if let sonnet = response.sevenDaySonnet {
+            codeReviewLimit = UsageLimit(
+                used: sonnet.utilization,
+                total: 100.0,
+                resetTime: sonnet.resetsAt,
+                windowSeconds: 7 * 24 * 60 * 60
+            )
+        }
+
+        return UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: sessionLimit,
+            weeklyLimit: weeklyLimit,
+            codeReviewLimit: codeReviewLimit,
+            extraUsage: response.extraUsageStatus
+        )
     }
 
     /// Best-effort fetch of the Claude "extra usage" on/off state from the OAuth usage endpoint.
@@ -285,7 +318,7 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     nonisolated private var isOAuthFallbackEnabled: Bool {
-        UserDefaults.standard.bool(forKey: oauthFallbackUserDefaultsKey)
+        Self.isOAuthUsageEnabled()
     }
 
     private func serviceError(from error: Error) -> ServiceError {
@@ -329,7 +362,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
 enum ClaudeCodeUsageSource: String {
     case cli = "Claude CLI"
-    case legacyOAuth = "Legacy OAuth"
+    case oauth = "OAuth"
 }
 
 enum ClaudeCodeAuthState: Equatable {
@@ -359,11 +392,11 @@ enum ClaudeCodeAuthState: Equatable {
         case .unavailable:
             return "Install Claude Code and run 'claude login'."
         case .cliAvailable:
-            return "Using Claude CLI usage output; refresh to update."
+            return "Ready. MeterBar reads usage from your Claude Code login; refresh to update."
         case .connected(.cli):
             return "Using Claude CLI usage output."
-        case .connected(.legacyOAuth):
-            return "Using legacy OAuth fallback."
+        case .connected(.oauth):
+            return "Using Claude Code's OAuth usage endpoint."
         case .needsLogin:
             return "Run 'claude login' again."
         case let .error(message):
