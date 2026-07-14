@@ -206,19 +206,17 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         XCTAssertNotEqual(MeterBarTheme.Motion.standard, MeterBarTheme.Motion.disclosure)
     }
 
-    // MARK: - Glass morph containers render in both states
+    // MARK: - Unified provider card renders in both states
 
-    /// The flagship popover card swaps its exhausted (compact) and expanded
-    /// bodies through a single `glassEffectID` inside a `GlassEffectContainer`.
-    /// Both branches must build and lay out — a broken morph identity or an
-    /// unrenderable glass surface would blank the provider card.
-    func testProviderStatusCardMorphRendersBothStates() {
+    /// Available and exhausted providers share one outer card shell; only the
+    /// inner usage content changes between limit rows and the reset counter.
+    func testProviderStatusCardSingleShellRendersBothStates() {
         let exhausted = makeSnapshot(service: .claudeCode, session: 100, weekly: 20)
-        XCTAssertTrue(exhausted.hasExhaustedLimit, "session at limit should drive the compact card")
+        XCTAssertTrue(exhausted.hasExhaustedLimit, "session at limit should drive reset-only content")
         XCTAssertGreaterThan(fittingHeight(ProviderStatusCard(snapshot: exhausted)), 0)
 
         let healthy = makeSnapshot(service: .claudeCode, session: 20, weekly: 20)
-        XCTAssertFalse(healthy.hasExhaustedLimit, "room left should drive the expanded card")
+        XCTAssertFalse(healthy.hasExhaustedLimit, "room left should render limit rows")
         XCTAssertGreaterThan(fittingHeight(ProviderStatusCard(snapshot: healthy)), 0)
     }
 

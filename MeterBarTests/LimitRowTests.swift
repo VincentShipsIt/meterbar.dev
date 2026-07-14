@@ -158,9 +158,8 @@ final class LimitRowTests: XCTestCase {
     }
 }
 
-/// Guards the compact/exhausted popover swap (`ProviderStatusCard`) that
-/// substitutes a countdown row for the limit list — item 4 of the unification:
-/// migrating the limit row must not break that card in either state.
+/// Guards the single `ProviderStatusCard` shell that substitutes reset-only
+/// content for the limit list without swapping to a second card design.
 @MainActor
 final class ProviderStatusCardSmokeTests: XCTestCase {
     private func snapshot(exhausted: Bool) -> ProviderSnapshot {
@@ -193,9 +192,9 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
-    func testExhaustedCardRendersCountdownVariant() {
+    func testExhaustedCardRendersResetOnlyContent() {
         let card = ProviderStatusCard(snapshot: snapshot(exhausted: true))
-        XCTAssertTrue(card.snapshot.hasExhaustedLimit, "fixture should drive the compact/exhausted swap")
+        XCTAssertTrue(card.snapshot.hasExhaustedLimit, "fixture should drive the reset-only content")
         let host = NSHostingView(rootView: card.frame(width: 360))
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(host.fittingSize.height, 0)

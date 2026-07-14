@@ -504,8 +504,8 @@ struct PopoverOverviewPanel: View {
   }
 }
 
-// Non-private so the Liquid Glass morph wiring can be rendered in both states
-// by `LiquidGlassP1RegressionTests`.
+// Non-private so the shared card shell can be rendered in both usage states by
+// `LiquidGlassP1RegressionTests`.
 struct ProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
@@ -521,14 +521,6 @@ struct ProviderStatusCard: View {
   @State private var showingResetCreditConfirmation = false
   @State private var resetCreditAlertTitle = "Couldn't use reset credit"
   @State private var resetCreditAlertMessage: String?
-
-  /// Shared identity for the exhausted↔expanded glass morph. Scoped per card
-  /// instance via `cardMorph`, so sibling provider cards never cross-morph.
-  @Namespace private var cardMorph
-  @Environment(\.accessibilityReduceMotion)
-  private var reduceMotion
-
-  private static let cardGlassID = "provider-status-card"
 
   init(
     snapshot: ProviderSnapshot,
@@ -556,41 +548,35 @@ struct ProviderStatusCard: View {
   }
 
   var body: some View {
-    Group {
-      if showsResetCreditAction {
-        compactExhaustedCardWithAction
-      } else {
-        selectableCard
+    selectableCard
+      .providerCardContextMenu(ProviderCardCommands.standard(snapshot: snapshot))
+      .task(id: snapshot.updatedAt) {
+        await refreshCodexAuthenticationState()
       }
-    }
-    .providerCardContextMenu(ProviderCardCommands.standard(snapshot: snapshot))
-    .task(id: snapshot.updatedAt) {
-      await refreshCodexAuthenticationState()
-    }
-    .confirmationDialog(
-      "Use a Codex reset credit?",
-      isPresented: $showingResetCreditConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("Use Reset Credit") { consumeResetCredit() }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text(
-        "This spends one of your finite Codex reset credits and resets the active blocked usage window. " +
-          "The action cannot be undone."
-      )
-    }
-    .alert(
-      resetCreditAlertTitle,
-      isPresented: Binding(
-        get: { resetCreditAlertMessage != nil },
-        set: { if !$0 { resetCreditAlertMessage = nil } }
-      )
-    ) {
-      Button("OK") { resetCreditAlertMessage = nil }
-    } message: {
-      Text(resetCreditAlertMessage ?? "")
-    }
+      .confirmationDialog(
+        "Use a Codex reset credit?",
+        isPresented: $showingResetCreditConfirmation,
+        titleVisibility: .visible
+      ) {
+        Button("Use Reset Credit") { consumeResetCredit() }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(
+          "This spends one of your finite Codex reset credits and resets the active blocked usage window. " +
+            "The action cannot be undone."
+        )
+      }
+      .alert(
+        resetCreditAlertTitle,
+        isPresented: Binding(
+          get: { resetCreditAlertMessage != nil },
+          set: { if !$0 { resetCreditAlertMessage = nil } }
+        )
+      ) {
+        Button("OK") { resetCreditAlertMessage = nil }
+      } message: {
+        Text(resetCreditAlertMessage ?? "")
+      }
   }
 
   @ViewBuilder private var selectableCard: some View {
@@ -614,120 +600,8 @@ struct ProviderStatusCard: View {
     }
   }
 
-  // The exhausted (58pt) and expanded (124pt) states share one glass identity
-  // inside a container so the height change morphs instead of hard-swapping.
-  // Container spacing matches the 8pt provider-card list rhythm so the glass
-  // samples correctly (Liquid Glass docs). Reduce Motion drops the animation.
   private var cardContent: some View {
-    GlassEffectContainer(spacing: 8) {
-      Group {
-        if snapshot.hasExhaustedLimit {
-          compactExhaustedCard
-            .glassEffectID(Self.cardGlassID, in: cardMorph)
-        } else {
-          expandedCard
-            .glassEffectID(Self.cardGlassID, in: cardMorph)
-        }
-      }
-    }
-    .animation(
-      reduceMotion ? nil : MeterBarTheme.Motion.standard,
-      value: snapshot.hasExhaustedLimit
-    )
-    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
-  }
-
-  private var compactExhaustedCard: some View {
     DashboardTile(padding: 11, surface: .glass) {
-      compactExhaustedContent
-    }
-  }
-
-  private var compactExhaustedCardWithAction: some View {
-    DashboardTile(padding: 11, surface: .glass) {
-      VStack(alignment: .leading, spacing: 8) {
-        compactExhaustedContent
-
-        Divider()
-
-        Button {
-          showingResetCreditConfirmation = true
-        } label: {
-          HStack(spacing: 6) {
-            if isConsumingResetCredit {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Image(systemName: "arrow.clockwise.circle.fill")
-            }
-            Text(isConsumingResetCredit ? "Using reset credit…" : "Use reset credit")
-          }
-          .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .disabled(isConsumingResetCredit)
-      }
-    }
-  }
-
-  private var compactExhaustedContent: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
-        let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
-          snapshot.resetWindows,
-          now: timeline.date
-        )
-        let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
-        let counter = BlockingLimitResetCounter.counterText(
-          for: blockingWindow,
-          now: timeline.date,
-          format: menuBarDisplayPreferences.resetTimeFormat
-        )
-
-        HStack(alignment: .center, spacing: 9) {
-          ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-
-          VStack(alignment: .leading, spacing: 1) {
-            Text(snapshot.title)
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .lineLimit(1)
-            Text(updatedText)
-              .font(.caption2)
-              .foregroundColor(.secondary)
-              .lineLimit(1)
-          }
-
-          Spacer(minLength: 8)
-
-          HStack(spacing: 5) {
-            Image(systemName: "hourglass")
-              .font(.system(size: 10, weight: .semibold))
-            Text("\(title) \(counter)")
-              .font(.caption)
-              .fontWeight(.semibold)
-              .monospacedDigit()
-              .lineLimit(1)
-              .minimumScaleFactor(0.72)
-          }
-          .foregroundColor(snapshot.accentColor)
-          .help("\(title) \(counter)")
-        }
-      }
-
-      let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
-      if badges.hasContent {
-        badges
-      }
-    }
-  }
-
-  private var expandedCard: some View {
-    DashboardTile(
-      padding: 11,
-      surface: .glass
-    ) {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 7) {
           ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
@@ -755,6 +629,12 @@ struct ProviderStatusCard: View {
             .font(.caption)
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        } else if snapshot.hasExhaustedLimit {
+          BlockingLimitResetCounter(
+            windows: snapshot.resetWindows,
+            accentColor: snapshot.accentColor,
+            format: menuBarDisplayPreferences.resetTimeFormat
+          )
         } else {
           VStack(alignment: .leading, spacing: 9) {
             ForEach(snapshot.limits) { limit in
@@ -767,8 +647,35 @@ struct ProviderStatusCard: View {
         if badges.hasContent {
           badges
         }
+
+        if showsResetCreditAction {
+          Divider()
+
+          resetCreditButton
+        }
       }
     }
+    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
+  }
+
+  private var resetCreditButton: some View {
+    Button {
+      showingResetCreditConfirmation = true
+    } label: {
+      HStack(spacing: 6) {
+        if isConsumingResetCredit {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(systemName: "arrow.clockwise.circle.fill")
+        }
+        Text(isConsumingResetCredit ? "Using reset credit…" : "Use reset credit")
+      }
+      .frame(maxWidth: .infinity)
+    }
+    .buttonStyle(.borderedProminent)
+    .controlSize(.small)
+    .disabled(isConsumingResetCredit)
   }
 
   private var updatedText: String {
