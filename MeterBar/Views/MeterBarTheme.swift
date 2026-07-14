@@ -113,11 +113,20 @@ struct MeterBarDetailBackground: View {
   var body: some View {
     ZStack {
       if reduceTransparency {
+        // Opaque fallback fills the whole window, bar region included.
         Color(nsColor: .windowBackgroundColor)
+          .ignoresSafeArea()
       } else {
+        // The material is the window backing and may bleed under the toolbar.
         Color.clear
           .background(.regularMaterial)
+          .ignoresSafeArea()
 
+        // Keep the accent tint inside the safe area so the macOS 26 automatic
+        // scroll-edge effect owns the toolbar region. Apple's guidance is to
+        // avoid custom darkening/tinting behind bar items; letting this gradient
+        // bleed under the bar (its densest corner is .topLeading) would compete
+        // with the system blur/fade that keeps toolbar controls legible.
         LinearGradient(
           colors: [
             MeterBarTheme.codexAccent.opacity(0.04),
