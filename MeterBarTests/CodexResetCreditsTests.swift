@@ -146,7 +146,7 @@ final class CodexResetCreditsTests: XCTestCase {
                 return (response, Data(#"{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"}],"available_count":1}"#.utf8))
             case ("POST", "/backend-api/wham/rate-limit-reset-credits/consume"):
                 XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "account-1")
-                let body = try XCTUnwrap(request.httpBody)
+                let body = try requestBodyData(from: request)
                 let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
                 XCTAssertEqual(json["credit_id"], "credit-1")
                 XCTAssertFalse(try XCTUnwrap(json["redeem_request_id"]).isEmpty)
@@ -224,6 +224,30 @@ final class CodexResetCreditsTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func requestBodyData(from request: URLRequest) throws -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                throw try XCTUnwrap(stream.streamError)
+            }
+            if count == 0 {
+                break
+            }
+            body.append(buffer, count: count)
+        }
+        return body
     }
 
     private func authFileData() -> Data {
