@@ -8,9 +8,8 @@ import Foundation
 /// re-exhausts the window stops the queue and preserves the remaining work
 /// instead of hammering a blocked account.
 ///
-/// v1 lifetime is **app-running-only**: the watcher lives with the process.
-/// There is no managed launchd helper in v1; sleep/wake and quit simply end the
-/// watcher, and it is re-armed on next launch by the settings layer (#98).
+/// The same actor runs in the GUI fallback and in the managed launch agent. Its
+/// structured cancellation semantics are identical in both processes.
 actor WakeCoordinator {
     private let discovery: SessionDiscovery
     private let authority: WakeQuotaAuthority
@@ -47,8 +46,9 @@ actor WakeCoordinator {
         self.onState = onState
     }
 
-    /// Arm the watcher for a provider runtime (Claude or Codex). No-op if already
-    /// running. This is the provider-agnostic entry point the controller drives.
+    /// Provider-agnostic entry point used by the managed agent and Codex-aware
+    /// callers. The legacy Claude entry point above remains for existing tests
+    /// and app wiring.
     func start(runtime: WakeProviderRuntime) {
         guard runTask == nil else { return }
         runTask = Task { [weak self] in
@@ -106,14 +106,11 @@ actor WakeCoordinator {
         transition(.scanning)
         let discovered = await runtime.discover(ledger: ledger)
         var queue = Array(discovered.filter(\.isExecutable).prefix(bounds.maxSessionsPerRun))
+        let runtimeRunner = runtime.makeRunner()
 
         var summary = WakeRunSummary()
         summary.skipped = discovered.count - queue.count
         unknownPolls = 0
-
-        // One runner per loop, shared across every launch in this pass (matches
-        // the one-shot engine and the pre-runtime coordinator's single runner).
-        let runner = runtime.makeRunner()
 
         loop: while !queue.isEmpty && !Task.isCancelled {
             // Fresh quota before EVERY launch.
@@ -121,7 +118,7 @@ actor WakeCoordinator {
             let step = await handle(
                 quota: quota,
                 runtime: runtime,
-                runner: runner,
+                runner: runtimeRunner,
                 queue: &queue,
                 summary: &summary
             )

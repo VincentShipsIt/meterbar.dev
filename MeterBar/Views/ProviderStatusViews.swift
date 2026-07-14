@@ -37,21 +37,10 @@ struct ProviderStatusBadge: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: indicator.symbolName)
-                .font(.system(size: 10, weight: .semibold))
-            Text(label)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-        }
-        .foregroundStyle(indicator.tint)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(indicator.tint.opacity(0.14), in: Capsule())
-        .overlay {
-            Capsule().stroke(indicator.tint.opacity(0.18), lineWidth: 1)
-        }
+        // Migrated to the shared `MeterBarChip` — this recipe was already the
+        // closest to the standard (fill 0.14 + stroke 0.18), so only the padding
+        // scale is normalized.
+        MeterBarChip(label, systemImage: indicator.symbolName, tint: indicator.tint, style: .flat)
     }
 }
 
@@ -63,6 +52,8 @@ struct ProviderStatusTable: View {
     let openStatusPage: (ServiceType) -> Void
 
     @State private var expandedServices: Set<ServiceType> = []
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         DashboardTile(padding: 8) {
@@ -70,7 +61,7 @@ struct ProviderStatusTable: View {
                 ForEach(Array(ServiceType.allCases.enumerated()), id: \.element) { index, service in
                     if index > 0 {
                         Divider()
-                            .padding(.horizontal, 6)
+                            .padding(.horizontal, MeterBarTheme.Spacing.sm)
                     }
 
                     ProviderStatusDisclosureRow(
@@ -87,7 +78,11 @@ struct ProviderStatusTable: View {
     }
 
     private func toggleExpansion(for service: ServiceType) {
-        withAnimation(.snappy(duration: 0.18)) {
+        // These rows sit on a shared flat tile (divider-separated), with no
+        // per-row glass surface, so a `glassEffectID` morph would read wrong —
+        // they keep the in-place move/opacity transition, now on a shared token
+        // and gated by Reduce Motion.
+        withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
             if expandedServices.contains(service) {
                 expandedServices.remove(service)
             } else {
@@ -104,6 +99,9 @@ private struct ProviderStatusDisclosureRow: View {
     let isExpanded: Bool
     let toggle: () -> Void
     let openStatusPage: () -> Void
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     private var indicator: ProviderStatusIndicator {
         report?.summary.indicator ?? (error == nil ? .unknown : .critical)
@@ -123,6 +121,8 @@ private struct ProviderStatusDisclosureRow: View {
                             .fontWeight(.bold)
                             .foregroundColor(.secondary)
                             .frame(width: 12)
+                            .contentTransition(.symbolEffect(.replace))
+                            .animation(MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion), value: isExpanded)
 
                         ProviderLogoView(
                             kind: .forService(service),
@@ -155,14 +155,14 @@ private struct ProviderStatusDisclosureRow: View {
                 .buttonStyle(.borderless)
                 .help("Open \(service.statusPageDisplayName) status page")
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
+            .padding(.horizontal, MeterBarTheme.Spacing.sm)
+            .padding(.vertical, MeterBarTheme.Spacing.sm)
 
             if isExpanded {
                 expandedDetails
-                    .padding(.leading, 28)
-                    .padding(.trailing, 6)
-                    .padding(.bottom, 10)
+                    .padding(.leading, MeterBarTheme.Spacing.xxl)
+                    .padding(.trailing, MeterBarTheme.Spacing.sm)
+                    .padding(.bottom, MeterBarTheme.Spacing.md)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -205,7 +205,7 @@ private struct ProviderStatusDisclosureRow: View {
             Image(systemName: ProviderStatusIndicator.critical.symbolName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(MeterBarTheme.danger)
-                .padding(.top, 1)
+                .padding(.top, MeterBarTheme.Spacing.xxs)
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -236,11 +236,17 @@ private struct ProviderStatusComponentRow: View {
     var indented = false
     var compact = false
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(component.indicator.tint)
                 .frame(width: compact ? 6 : 8, height: compact ? 6 : 8)
+                // Status dots are `Circle` fills, not SF Symbols, so animate the
+                // tint change on refresh rather than a symbol replace.
+                .animation(MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion), value: component.indicator)
 
             Text(component.name)
                 .font(compact ? .caption : .subheadline)
@@ -259,6 +265,9 @@ private struct ProviderStatusComponentRow: View {
 
 struct PopoverProviderStatusSummaryCard: View {
     @StateObject private var statusMonitor = ProviderStatusMonitor.shared
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     let openStatusDetail: () -> Void
 
@@ -314,20 +323,30 @@ struct PopoverProviderStatusSummaryCard: View {
 
                     HStack(spacing: 5) {
                         ForEach(ServiceType.allCases) { service in
+                            let indicator = statusMonitor.reports[service]?.summary.indicator ?? .unknown
                             Circle()
-                                .fill((statusMonitor.reports[service]?.summary.indicator ?? .unknown).tint)
+                                .fill(indicator.tint)
                                 .frame(width: 7, height: 7)
                                 .help(service.statusPageDisplayName)
+                                .animation(
+                                    MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion),
+                                    value: indicator
+                                )
                         }
                     }
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Provider Status")
+        .accessibilityValue(summaryText)
+        .accessibilityHint("Show provider status details")
         .task {
             await statusMonitor.refreshAllIfNeeded()
         }
@@ -370,7 +389,7 @@ struct MenuBarStatusDetailContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.bottom, 10)
+                .padding(.bottom, MeterBarTheme.Spacing.md)
 
             Divider()
 
@@ -384,9 +403,9 @@ struct MenuBarStatusDetailContent: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .padding(14)
+        .padding(MeterBarTheme.Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(MeterBarCompanionSurface(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
+        .background(MeterBarTheme.Surface.chrome(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
         .clipShape(
             RoundedRectangle(
                 cornerRadius: MeterBarMenuDetailPanelLayout.cornerRadius,
@@ -430,7 +449,7 @@ struct MenuBarStatusDetailContent: View {
                 )
             }
         }
-        .padding(.top, 12)
+        .padding(.top, MeterBarTheme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
@@ -518,7 +537,7 @@ private struct MenuBarStatusDetailProviderSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .meterBarCardSurface(cornerRadius: 10)
+        .padding(MeterBarTheme.Spacing.md)
+        .meterBarCardSurface(cornerRadius: MeterBarTheme.Radius.card)
     }
 }

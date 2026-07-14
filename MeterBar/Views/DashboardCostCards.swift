@@ -10,10 +10,32 @@ struct CostOverviewStatusCard: View {
   let isRefreshingMissingDays: Bool
   let formattedTokens: String
 
+  // Headline sizes scale with Dynamic Type (from their default 34/28pt) instead
+  // of being frozen in pixels, so the cost figure grows for larger accessibility
+  // text sizes. `minimumScaleFactor` + `lineLimit(1)` keep the tile from breaking.
+  @ScaledMetric(relativeTo: .largeTitle)
+  private var headlineSize: CGFloat = 34
+  @ScaledMetric(relativeTo: .title)
+  private var scanningHeadlineSize: CGFloat = 28
+
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   private var subtitle: String {
     if isScanning { return "Scanning local logs" }
     if isRefreshingMissingDays { return "Updating…" }
     return "Last 30 days"
+  }
+
+  /// The hero value's three mutually-exclusive states. Animate the swap on the
+  /// *phase*, not `formattedTotalCost` — a refreshed dollar figure re-renders
+  /// the same `.loaded` phase and updates in place via `.numericText()`.
+  private enum Phase: Equatable { case loaded, scanning, needsScan }
+
+  private var phase: Phase {
+    if summary?.formattedTotalCost != nil { return .loaded }
+    if isScanning { return .scanning }
+    return .needsScan
   }
 
   var body: some View {
@@ -34,29 +56,11 @@ struct CostOverviewStatusCard: View {
           Spacer()
         }
 
-        if let formattedTotalCost = summary?.formattedTotalCost {
-          Text(formattedTotalCost)
-            .font(.system(size: 34, weight: .bold))
-            .foregroundColor(.primary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-        } else if isScanning {
-          HStack(spacing: 10) {
-            ProgressView()
-              .controlSize(.small)
-            Text("Scanning...")
-              .font(.system(size: 28, weight: .bold))
-              .foregroundColor(.primary)
-              .lineLimit(1)
-              .minimumScaleFactor(0.75)
-          }
-        } else {
-          Text("Scan needed")
-            .font(.system(size: 34, weight: .bold))
-            .foregroundColor(.primary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-        }
+        heroValue
+          .animation(
+            MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+            value: phase
+          )
 
         VStack(spacing: 7) {
           HStack {
@@ -67,6 +71,7 @@ struct CostOverviewStatusCard: View {
             Text(formattedTokens)
               .font(.caption)
               .fontWeight(.semibold)
+              .numericRefreshTransition(value: formattedTokens, reduceMotion: reduceMotion)
           }
           HStack {
             Text("Providers")
@@ -76,6 +81,7 @@ struct CostOverviewStatusCard: View {
             Text("\(summary?.costs.count ?? 0)")
               .font(.caption)
               .fontWeight(.semibold)
+              .numericRefreshTransition(value: summary?.costs.count ?? 0, reduceMotion: reduceMotion)
           }
           HStack {
             Text("Pricing")
@@ -90,8 +96,49 @@ struct CostOverviewStatusCard: View {
       }
     }
   }
+
+  /// The swapping hero figure. Each branch is `.id`-tagged and carries the
+  /// shared `cardPhase` transition so a phase change is a clean replacement.
+  @ViewBuilder private var heroValue: some View {
+    switch phase {
+    case .loaded:
+      Text(summary?.formattedTotalCost ?? "")
+        .font(.system(size: headlineSize, weight: .bold))
+        .foregroundColor(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .contentTransition(.numericText())
+        .id(Phase.loaded)
+        .transition(MeterBarTheme.Motion.cardPhase)
+    case .scanning:
+      HStack(spacing: 10) {
+        ProgressView()
+          .controlSize(.small)
+        Text("Scanning...")
+          .font(.system(size: scanningHeadlineSize, weight: .bold))
+          .foregroundColor(.primary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.75)
+      }
+      .id(Phase.scanning)
+      .transition(MeterBarTheme.Motion.cardPhase)
+    case .needsScan:
+      Text("Scan needed")
+        .font(.system(size: headlineSize, weight: .bold))
+        .foregroundColor(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .id(Phase.needsScan)
+        .transition(MeterBarTheme.Motion.cardPhase)
+    }
+  }
 }
 
+/// Full-area loading treatment for the **first** scan, when there is no cost
+/// data to show yet. It replaces the entire chart with an animated shimmer so
+/// the empty slot reads as "working on it" rather than "nothing here." Contrast
+/// with `CostScanProgressBadge`, which is a small overlay used when a scan
+/// refreshes data that is *already* on screen.
 struct CostScanLoadingChart: View {
   let compact: Bool
 
@@ -133,7 +180,7 @@ struct CostScanLoadingChart: View {
                 let wave = reduceMotion ? 0.5 : (sin((time * 3.2) + Double(index) * 0.55) + 1) / 2
                 let height = chartHeight * CGFloat(0.14 + (seed * 0.44) + (wave * 0.28))
 
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                   .fill(
                     LinearGradient(
                       colors: [
@@ -162,7 +209,7 @@ struct CostScanLoadingChart: View {
                 .offset(x: sweepX)
             }
           }
-          .clipShape(RoundedRectangle(cornerRadius: 7))
+          .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium))
 
           if !compact {
             Text("Parsing Claude and Codex sessions")
@@ -176,6 +223,10 @@ struct CostScanLoadingChart: View {
   }
 }
 
+/// Small overlay badge shown when a scan runs **on top of** data that is
+/// already displayed — the chart stays visible (dimmed) and this badge signals
+/// the in-progress refresh in a corner. Contrast with `CostScanLoadingChart`,
+/// which takes over the whole area when there is nothing to show yet.
 struct CostScanProgressBadge: View {
   let compact: Bool
 
@@ -206,6 +257,9 @@ struct ProviderCostBreakdown: View {
   let cost: TokenCost
   var quotaSnapshot: ProviderSnapshot?
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   private var logoKind: ProviderLogoKind {
     .forService(cost.provider)
   }
@@ -228,6 +282,7 @@ struct ProviderCostBreakdown: View {
           Text(cost.formattedCost)
             .font(.title3)
             .bold()
+            .numericRefreshTransition(value: cost.formattedCost, reduceMotion: reduceMotion)
         }
 
         if let quotaSnapshot, quotaSnapshot.hasExhaustedLimit {
@@ -286,16 +341,19 @@ struct CostBreakdownSection: View {
             .font(.caption)
             .fontWeight(.semibold)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, MeterBarTheme.Spacing.xxs)
       }
     }
-    .padding(.top, 4)
+    .padding(.top, MeterBarTheme.Spacing.xs)
   }
 }
 
 struct CostMetric: View {
   let label: String
   let value: String
+
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
@@ -306,8 +364,12 @@ struct CostMetric: View {
         .font(.headline)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+        .numericRefreshTransition(value: value, reduceMotion: reduceMotion)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(label)
+    .accessibilityValue(value)
   }
 }
 
@@ -315,17 +377,25 @@ struct UsageDetailMetric: View {
   let label: String
   let value: String
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   var body: some View {
     VStack(alignment: .leading, spacing: 1) {
       Text(label)
-        .font(.system(size: 9, weight: .medium))
+        .font(.caption2)
+        .fontWeight(.medium)
         .foregroundColor(.secondary)
       Text(value)
         .font(.caption)
         .fontWeight(.semibold)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+        .numericRefreshTransition(value: value, reduceMotion: reduceMotion)
     }
     .frame(width: 58, alignment: .leading)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(label)
+    .accessibilityValue(value)
   }
 }

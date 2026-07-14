@@ -108,6 +108,7 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertEqual(ServiceType.codexCli.statusPageDisplayName, "OpenAI")
         XCTAssertEqual(ServiceType.cursor.statusPageDisplayName, "Cursor")
         XCTAssertEqual(ServiceType.openRouter.statusPageDisplayName, "OpenRouter")
+        XCTAssertEqual(ServiceType.grok.statusPageDisplayName, "Grok")
 
         XCTAssertEqual(try XCTUnwrap(ServiceType.claudeCode.statusPageURL).absoluteString, "https://status.claude.com/")
         XCTAssertEqual(try XCTUnwrap(ServiceType.codexCli.statusPageURL).absoluteString, "https://status.openai.com/")
@@ -116,6 +117,7 @@ final class ProviderStatusMonitorTests: XCTestCase {
             try XCTUnwrap(ServiceType.openRouter.statusPageURL).absoluteString,
             "https://status.openrouter.ai/"
         )
+        XCTAssertEqual(try XCTUnwrap(ServiceType.grok.statusPageURL).absoluteString, "https://status.x.ai/")
     }
 
     func testOpenRouterStatusPageMapsOperationalHTML() async throws {

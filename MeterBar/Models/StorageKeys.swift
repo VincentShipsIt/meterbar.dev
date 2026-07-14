@@ -16,8 +16,18 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
+    /// Grok Build is CLI-backed but opt-in while its ACP billing method is in beta.
+    static let grokProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
+    /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
+    static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
+    /// `StatusItemLabelMetric` raw value (percent left, percent used, or icon only).
+    static let statusItemLabelMetric = "StatusItemLabelMetric"
+    /// `StatusItemLabelSize` raw value (compact or regular).
+    static let statusItemLabelSize = "StatusItemLabelSize"
+    /// `ResetTimeFormat` raw value for reset labels in popover cards.
+    static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
     /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the

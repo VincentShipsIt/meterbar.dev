@@ -48,9 +48,11 @@ struct SettingsView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
+    @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared
@@ -84,7 +86,8 @@ struct SettingsView: View {
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess
+                openRouterHasAccess: openRouterService.hasAccess,
+                grokHasAccess: grokService.hasAccess
             )
         )
     }
@@ -92,6 +95,11 @@ struct SettingsView: View {
     private var showExtraUsageSection: Bool {
         (providerVisibility.isEnabled(.claudeCode) && claudeExtraUsageStatus != nil)
             || providerVisibility.isEnabled(.codexCli)
+            || providerVisibility.isEnabled(.grok)
+    }
+
+    private var statusItemPinOptions: [StatusItemPinOption] {
+        providerSnapshots.statusItemPinOptions
     }
 
     private var claudeExtraUsageStatus: ExtraUsageStatus? {
@@ -122,6 +130,7 @@ struct SettingsView: View {
             settingsTab {
                 trackedProvidersSection
                 refreshSection
+                menuBarDisplaySection
                 notificationsSection
                 generalSection
             }
@@ -135,7 +144,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.bottom, 4)
+                .padding(.bottom, MeterBarTheme.Spacing.xs)
 
                 providerSettingsPane(for: selectedProviderTab)
             }
@@ -168,8 +177,11 @@ struct SettingsView: View {
         }
         .frame(width: Self.windowWidth, height: Self.windowHeight)
         .background {
+            // MeterBarDetailBackground now handles safe area internally (material
+            // full-bleed, tint inset). The macOS TabView renders its tab strip as
+            // a separate control rather than a scroll-under bar, so nothing here
+            // scrolls beneath a bar — but this keeps the two windows consistent.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
     }
 
@@ -186,8 +198,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 content()
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, MeterBarTheme.Spacing.xl)
+            .padding(.vertical, MeterBarTheme.Spacing.xl)
             .frame(width: Self.windowWidth, alignment: .topLeading)
         }
         .scrollContentBackground(.hidden)
@@ -266,7 +278,12 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                 }
             } else if !codexCliService.hasAccess {
-                SettingsNotice(text: "Run codex login, then check again.", color: MeterBarTheme.warning)
+                EmptyStateCard(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Not connected",
+                    message: "Run codex login, then Check Again.",
+                    tone: .warning
+                )
             }
 
             SettingsDivider()
@@ -397,6 +414,25 @@ struct SettingsView: View {
             SettingsDivider()
 
             SettingsRowView(
+                title: "Update channel",
+                detail: "Nightly tracks master builds for testing — expect pre-release bugs. "
+                    + "Stable is the default and updates only on tagged releases."
+            ) {
+                Picker("", selection: Binding(
+                    get: { softwareUpdates.channel },
+                    set: { softwareUpdates.setChannel($0) }
+                )) {
+                    ForEach(UpdateChannel.allCases) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 240)
+                .disabled(softwareUpdates.configurationError != nil)
+            }
+
+            SettingsRowView(
                 title: "Check for updates automatically",
                 detail: "Allow MeterBar to check GitHub Releases for signed updates. Off until you opt in."
             ) {
@@ -428,10 +464,92 @@ struct SettingsView: View {
         }
     }
 
+    private var menuBarDisplaySection: some View {
+        SettingsPanelSection(
+            title: "Menu Bar & Popover",
+            systemImage: "menubar.rectangle",
+            color: MeterBarTheme.appAccent
+        ) {
+            SettingsRowView(
+                title: "Menu bar shows",
+                detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota window visible."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.pinnedCandidateKey },
+                    set: { menuBarDisplayPreferences.setPinnedCandidateKey($0) }
+                )) {
+                    Text("Auto").tag(String?.none)
+                    ForEach(statusItemPinOptions) { option in
+                        Text(option.title).tag(String?.some(option.id))
+                    }
+                    if let pinned = menuBarDisplayPreferences.pinnedCandidateKey,
+                       !statusItemPinOptions.contains(where: { $0.id == pinned }) {
+                        Text("Pinned metric unavailable").tag(String?.some(pinned))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 240)
+            }
+
+            SettingsRowView(
+                title: "Label metric",
+                detail: "Icon Only keeps the status item minimal while preserving details in its tooltip."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.labelMetric },
+                    set: { menuBarDisplayPreferences.setLabelMetric($0) }
+                )) {
+                    ForEach(StatusItemLabelMetric.allCases) { metric in
+                        Text(metric.displayName).tag(metric)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 180)
+            }
+
+            SettingsRowView(
+                title: "Label width",
+                detail: "Regular adds “left” or “used”; Compact keeps today’s number-only label."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.labelSize },
+                    set: { menuBarDisplayPreferences.setLabelSize($0) }
+                )) {
+                    ForEach(StatusItemLabelSize.allCases) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Reset times",
+                detail: "Choose countdowns or local clock times on popover quota cards."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.resetTimeFormat },
+                    set: { menuBarDisplayPreferences.setResetTimeFormat($0) }
+                )) {
+                    ForEach(ResetTimeFormat.allCases) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+            }
+        }
+    }
+
     private var extraUsageSection: some View {
         SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
             SettingsNotice(
-                text: "Extra usage (Claude) and credits (Codex) let a provider bill overage beyond your "
+                text: "Extra usage and credits let a provider bill overage beyond your "
                     + "plan once your quota is exhausted. \"Off\" means usage is capped at your subscription.",
                 color: .secondary
             )
@@ -451,6 +569,14 @@ struct SettingsView: View {
                     title: "OpenAI Codex",
                     status: dataManager.metrics[.codexCli]?.extraUsage,
                     manageURL: "https://chatgpt.com"
+                )
+            }
+
+            if providerVisibility.isEnabled(.grok) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
                 )
             }
         }
@@ -510,6 +636,11 @@ struct SettingsView: View {
                 detail: "Track credit balance, spend, and per-key limits.",
                 service: .openRouter
             )
+            providerToggleRow(
+                title: "Grok",
+                detail: "Track Grok Build weekly quota from its cached CLI login.",
+                service: .grok
+            )
         }
     }
 
@@ -551,13 +682,11 @@ struct SettingsView: View {
                     }
                 }
             } else {
-                SettingsNotice(
-                    text: claudeCodeService.authState.guidanceText,
-                    color: .secondary
-                )
-                SettingsNotice(
-                    text: "MeterBar reads usage from Claude Code's OAuth login; the CLI output is a fallback.",
-                    color: MeterBarTheme.warning
+                EmptyStateCard(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Not connected",
+                    message: claudeCodeService.authState.guidanceText,
+                    tone: .warning
                 )
             }
 
@@ -660,11 +789,12 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                 }
             } else if !cursorService.hasAccess {
-                SettingsNotice(
-                    text: "Reads Cursor IDE credentials from Cursor's local state database.",
-                    color: .secondary
+                EmptyStateCard(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Not connected",
+                    message: "Log in to Cursor IDE, then Check Again.",
+                    tone: .warning
                 )
-                SettingsNotice(text: "Log in to Cursor IDE first, then check again.", color: MeterBarTheme.warning)
             }
         }
     }
@@ -721,7 +851,68 @@ struct SettingsView: View {
                 default:
                     error.localizedDescription
                 }
-                SettingsNotice(text: detail, color: MeterBarTheme.warning)
+                EmptyStateCard(
+                    systemImage: "exclamationmark.triangle.fill",
+                    title: "Not connected",
+                    message: detail,
+                    tone: .warning
+                )
+            }
+        }
+    }
+
+    private var grokSection: some View {
+        SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+            SettingsNotice(
+                text: "MeterBar asks the official Grok CLI for billing data over ACP. "
+                    + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
+                color: .secondary
+            )
+
+            SettingsRowView(title: "Connection") {
+                HStack(spacing: 8) {
+                    StatusPill(
+                        title: grokService.hasAccess ? "Connected" : "Not Connected",
+                        isConnected: grokService.hasAccess
+                    )
+
+                    Button(grokService.hasAccess ? "Refresh" : "Check Again") {
+                        Task {
+                            let service = grokService
+                            await Task.detached(priority: .userInitiated) {
+                                service.checkAccess()
+                            }.value
+                            if grokService.hasAccess {
+                                await dataManager.refresh(service: .grok)
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Install / Sign In") {
+                        if let url = URL(string: "https://x.ai/cli") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if let subscriptionType = grokService.subscriptionType, grokService.hasAccess {
+                SettingsRowView(title: "Plan") {
+                    Text(subscriptionType)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+            } else if !grokService.hasAccess {
+                SettingsNotice(
+                    text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
+                    color: MeterBarTheme.warning
+                )
+            }
+
+            if let error = grokService.lastError {
+                SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
             }
         }
     }
@@ -766,15 +957,27 @@ struct SettingsView: View {
                     SettingsNotice(text: "Last scanned \(formatDate(lastScan)) ago.", color: .secondary)
                 }
             } else if costTracker.costSummary != nil {
-                SettingsNotice(text: "No cost data for enabled providers.", color: .secondary)
+                // Scanned, but nothing landed for the providers that are enabled.
+                EmptyStateCard(
+                    systemImage: "tray",
+                    title: "No cost data",
+                    message: "Enabled providers logged no local tokens in the last 30 days."
+                )
             } else {
-                SettingsNotice(text: "No cost data loaded yet.", color: .secondary)
+                // Never scanned this session — the button below kicks off the first scan.
+                EmptyStateCard(
+                    systemImage: "magnifyingglass",
+                    title: "No scan yet",
+                    message: "Scan 30 days to estimate local token cost."
+                )
             }
 
             if !canScanCosts {
-                SettingsNotice(
-                    text: "Enable Claude Code or OpenAI Codex to scan local token logs.",
-                    color: MeterBarTheme.warning
+                EmptyStateCard(
+                    systemImage: "exclamationmark.triangle.fill",
+                    title: "Nothing to scan",
+                    message: "Enable Claude Code or OpenAI Codex to scan local token logs.",
+                    tone: .warning
                 )
             }
 
@@ -796,7 +999,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(costTracker.isRefreshInProgress || !canScanCosts)
             }
         }
@@ -826,7 +1029,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
         }
     }
@@ -906,11 +1109,19 @@ struct SettingsView: View {
         ) {
             let snapshots = providerSnapshots(for: service).filter(\.hasMetrics)
             if snapshots.isEmpty {
-                SettingsNotice(
-                    text: providerVisibility
-                        .isEnabled(service) ? "No usage data yet. Refresh after signing in." : "Provider is disabled.",
-                    color: .secondary
-                )
+                if providerVisibility.isEnabled(service) {
+                    EmptyStateCard(
+                        systemImage: "chart.bar",
+                        title: "No usage yet",
+                        message: "Refresh after signing in to see \(service.displayName) usage."
+                    )
+                } else {
+                    EmptyStateCard(
+                        systemImage: "eye.slash",
+                        title: "Provider disabled",
+                        message: "Enable \(service.displayName) to track its usage."
+                    )
+                }
             } else {
                 ForEach(snapshots) { snapshot in
                     VStack(alignment: .leading, spacing: 10) {
@@ -924,10 +1135,14 @@ struct SettingsView: View {
                         }
 
                         if snapshot.detailLimits.isEmpty {
-                            SettingsNotice(text: "No quota windows reported.", color: .secondary)
+                            EmptyStateCard(
+                                systemImage: "clock.badge.questionmark",
+                                title: "No quota windows",
+                                message: "This provider didn't report any limit windows."
+                            )
                         } else {
                             ForEach(snapshot.detailLimits) { limit in
-                                DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+                                LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
                             }
                         }
 
@@ -955,6 +1170,9 @@ struct SettingsView: View {
             cursorSection
         case .openRouter:
             openRouterSection
+        case .grok:
+            grokSection
+            providerExtraUsageSection(for: service)
         }
     }
 
@@ -983,6 +1201,14 @@ struct SettingsView: View {
             EmptyView()
         case .openRouter:
             EmptyView()
+        case .grok:
+            SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
+                )
+            }
         }
     }
 
@@ -1068,6 +1294,7 @@ struct SettingsView: View {
             let claudeCode = claudeCodeService
             let codexCli = codexCliService
             let cursor = cursorService
+            let grok = grokService
             await Task.detached(priority: .userInitiated) {
                 switch service {
                 case .claudeCode:
@@ -1078,6 +1305,8 @@ struct SettingsView: View {
                     cursor.checkAccess(forceRescan: true)
                 case .openRouter:
                     break
+                case .grok:
+                    grok.checkAccess()
                 }
             }.value
             await dataManager.refresh(service: service)
@@ -1094,6 +1323,8 @@ struct SettingsView: View {
             "Cursor local state + usage API"
         case .openRouter:
             "OpenRouter credits + key APIs"
+        case .grok:
+            "Grok Build ACP billing"
         }
     }
 
@@ -1147,6 +1378,8 @@ struct SettingsView: View {
             return cursorService.subscriptionType?.capitalized.nilIfEmpty
         case .openRouter:
             return nil
+        case .grok:
+            return grokService.subscriptionType?.nilIfEmpty
         }
     }
 
@@ -1160,6 +1393,8 @@ struct SettingsView: View {
             cursorService.hasAccess
         case .openRouter:
             openRouterService.hasAccess
+        case .grok:
+            grokService.hasAccess
         }
     }
 
@@ -1173,6 +1408,8 @@ struct SettingsView: View {
             cursorService.lastError?.localizedDescription
         case .openRouter:
             openRouterService.lastError?.localizedDescription
+        case .grok:
+            grokService.lastError?.localizedDescription
         }
     }
 
@@ -1351,6 +1588,10 @@ struct SettingsRowView<Content: View>: View {
                 }
             }
             .frame(width: SettingsRowViewMetrics.labelWidth, alignment: .leading)
+            // Read the title and its explanatory detail as one VoiceOver element
+            // rather than two adjacent fragments. The trailing control stays a
+            // separate focusable element so its own label/actuation are intact.
+            .accessibilityElement(children: .combine)
 
             content
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1449,7 +1690,7 @@ private struct AdminKeySettingsRow: View {
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
     }
 
     // MARK: Private
@@ -1500,7 +1741,7 @@ private struct AddCodexAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1591,7 +1832,7 @@ private struct AddClaudeAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1680,15 +1921,15 @@ private struct AccountProfileRow: View {
                         .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
-                    Text(account.isDefault ? "Default" : "Profile")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
-                        .settingsInputSurface(
-                            horizontalPadding: 8,
-                            verticalPadding: 4,
-                            shape: .capsule
-                        )
+                    // Migrated to the shared `MeterBarChip`. This was the 5th,
+                    // odd-one-out recipe (`.thinMaterial` + glassCardStroke); the
+                    // `.glass` chip gives it the standard Liquid-Glass capsule
+                    // while keeping the Default/Profile role tint.
+                    MeterBarChip(
+                        account.isDefault ? "Default" : "Profile",
+                        tint: account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent,
+                        style: .glass
+                    )
                 }
 
                 HStack(spacing: 8) {
@@ -1773,7 +2014,7 @@ private struct AccountProfileRow: View {
             }
             .fixedSize()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
             configDirectoryDraft = updatedAccount.configDirectory ?? ""
@@ -1913,7 +2154,7 @@ private struct CodexAccountProfileRow: View {
             }
             .frame(minWidth: 80, alignment: .trailing)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updated in
             nameDraft = updated.name
             homeDirectoryDraft = updated.homeDirectory ?? ""
@@ -1967,44 +2208,26 @@ private struct SettingsInputModifier: ViewModifier {
     }
 }
 
-// MARK: - SettingsInputSurfaceShape
-
-private enum SettingsInputSurfaceShape {
-    case roundedRectangle
-    case capsule
-}
-
 // MARK: - SettingsInputSurfaceModifier
 
 private struct SettingsInputSurfaceModifier: ViewModifier {
     let width: CGFloat?
     let horizontalPadding: CGFloat
     let verticalPadding: CGFloat
-    let shape: SettingsInputSurfaceShape
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .roundedRectangle:
-            let roundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        // The capsule variant moved to `MeterBarChip(style: .glass)`; this
+        // surface now only backs rounded-rectangle settings input fields.
+        let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
 
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: roundedRectangle)
-                .overlay {
-                    roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        case .capsule:
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        }
+        content
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .frame(width: width)
+            .background(.thinMaterial, in: roundedRectangle)
+            .overlay {
+                roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
     }
 }
 
@@ -2016,15 +2239,13 @@ private extension View {
     func settingsInputSurface(
         width: CGFloat? = nil,
         horizontalPadding: CGFloat = 10,
-        verticalPadding: CGFloat = 6,
-        shape: SettingsInputSurfaceShape = .roundedRectangle
+        verticalPadding: CGFloat = 6
     ) -> some View {
         modifier(
             SettingsInputSurfaceModifier(
                 width: width,
                 horizontalPadding: horizontalPadding,
-                verticalPadding: verticalPadding,
-                shape: shape
+                verticalPadding: verticalPadding
             )
         )
     }

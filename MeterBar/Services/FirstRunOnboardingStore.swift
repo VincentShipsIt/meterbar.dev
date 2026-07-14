@@ -48,16 +48,14 @@ final class FirstRunOnboardingStore: ObservableObject {
 
     var shouldPresent: Bool { !hasCompletedFirstRun }
 
+    /// The only way to complete onboarding: the user explicitly acts on the
+    /// welcome callout's Enable / Not Now buttons. An incidental popover close
+    /// (click-away / Escape) deliberately does nothing, so the callout keeps
+    /// reappearing until a real choice is made.
     func chooseLaunchAtLogin(_ enabled: Bool) {
         if enabled {
             launchAtLogin.setEnabled(true)
         }
-        complete()
-    }
-
-    /// Clicking away is also a dismissal choice; onboarding must never nag on
-    /// a later launch after the user has seen and dismissed it.
-    func dismiss() {
         complete()
     }
 

@@ -218,6 +218,28 @@ public struct OpenRouterReadinessInput: Sendable {
     }
 }
 
+/// Fixture-able facts for the Grok Build CLI-backed provider. The inspector
+/// checks only file existence/readability; credential contents stay private to
+/// the official CLI process.
+public struct GrokReadinessInput: Sendable {
+    public var isCLIInstalled: Bool
+    public var authFileExists: Bool
+    public var authFileReadable: Bool
+    public var refreshError: String?
+
+    public init(
+        isCLIInstalled: Bool,
+        authFileExists: Bool,
+        authFileReadable: Bool,
+        refreshError: String? = nil
+    ) {
+        self.isCLIInstalled = isCLIInstalled
+        self.authFileExists = authFileExists
+        self.authFileReadable = authFileReadable
+        self.refreshError = refreshError
+    }
+}
+
 // MARK: - Evaluator
 
 public enum ProviderReadinessEvaluator {
@@ -517,6 +539,43 @@ public enum ProviderReadinessEvaluator {
         )
         return ProviderReadiness(
             provider: .openRouter,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: Grok
+
+    public static func grok(_ input: GrokReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "CLI installed",
+            level: input.isCLIInstalled ? .pass : .fail,
+            detail: input.isCLIInstalled ? "Grok Build CLI found on PATH." : "Grok Build CLI not found on PATH.",
+            recovery: input.isCLIInstalled ? nil : "Install Grok Build, then run `grok login`."
+        )
+        let authLevel: ReadinessLevel = input.authFileReadable ? .pass : .fail
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "Signed in",
+            level: authLevel,
+            detail: input.authFileReadable
+                ? "A readable Grok Build cached login is available."
+                : input.authFileExists
+                    ? "Grok Build cached login exists but could not be read."
+                    : "Not signed in — no Grok Build cached login found.",
+            recovery: input.authFileReadable ? nil : "Run `grok login`."
+        )
+        let dataReady = input.isCLIInstalled && input.authFileReadable
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: dataReady ? .pass : .warn,
+            detail: dataReady
+                ? "Weekly usage is readable through the Grok Build ACP billing method."
+                : "Usage becomes readable once Grok Build is installed and signed in."
+        )
+        return ProviderReadiness(
+            provider: .grok,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
     }

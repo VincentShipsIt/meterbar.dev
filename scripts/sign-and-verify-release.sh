@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 APP_PATH EXPECTED_VERSION" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+  echo "Usage: $0 APP_PATH EXPECTED_SHORT_VERSION [EXPECTED_BUILD_VERSION]" >&2
+  echo "EXPECTED_BUILD_VERSION defaults to EXPECTED_SHORT_VERSION (stable, where" >&2
+  echo "CFBundleShortVersionString == CFBundleVersion). Pass both to verify a" >&2
+  echo "nightly build whose display and ordering versions differ." >&2
   echo "Signs ad-hoc by default; set SIGNING_IDENTITY (and optionally" >&2
   echo "SIGNING_KEYCHAIN) to sign with a Developer ID identity instead." >&2
   exit 64
@@ -20,17 +23,37 @@ fi
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd "$script_dir/.." && pwd)
 app_path="$1"
-expected_version="$2"
+# Short version is the human/display string (CFBundleShortVersionString, and what
+# the embedded CLI reports). Build version is Sparkle's ordering key
+# (CFBundleVersion). For stable they are identical; for nightly they differ.
+expected_short="$2"
+expected_build="${3:-$2}"
 widget_path="$app_path/Contents/PlugIns/MeterBarWidgetExtension.appex"
 app_binary="$app_path/Contents/MacOS/MeterBar"
 widget_binary="$widget_path/Contents/MacOS/MeterBarWidgetExtension"
 cli_binary="$app_path/Contents/Helpers/meterbar"
+session_wake_agent_plist="$app_path/Contents/Library/LaunchAgents/dev.meterbar.app.session-wake.plist"
 app_entitlements="$repository_root/MeterBar/MeterBar.entitlements"
 widget_entitlements="$repository_root/MeterBarWidget/MeterBarWidget.entitlements"
 
-if [[ ! "$expected_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-  echo "Expected version must match canonical MAJOR.MINOR.PATCH syntax." >&2
-  exit 64
+# Keep every version value free of shell metacharacters (they flow into echo and
+# string comparisons downstream). Stable stays strictly canonical; nightly allows
+# the decoupled forms: a dotted-integer build (e.g. 1.7.1.42) and a display short
+# version drawn from a limited charset (e.g. 1.7.1-nightly.42+a1b2c3d).
+if [ "$expected_build" = "$expected_short" ]; then
+  if [[ ! "$expected_short" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "Expected version must match canonical MAJOR.MINOR.PATCH syntax." >&2
+    exit 64
+  fi
+else
+  if [[ ! "$expected_build" =~ ^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+$ ]]; then
+    echo "Nightly build version must be dotted integers (e.g. 1.7.1.42)." >&2
+    exit 64
+  fi
+  if [[ ! "$expected_short" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+    echo "Nightly short version has unexpected characters: $expected_short" >&2
+    exit 64
+  fi
 fi
 
 for directory in "$app_path" "$widget_path"; do
@@ -40,12 +63,31 @@ for directory in "$app_path" "$widget_path"; do
   fi
 done
 
-for file in "$app_binary" "$widget_binary" "$cli_binary" "$app_entitlements" "$widget_entitlements"; do
+for file in \
+  "$app_binary" \
+  "$widget_binary" \
+  "$cli_binary" \
+  "$session_wake_agent_plist" \
+  "$app_entitlements" \
+  "$widget_entitlements"; do
   if [ ! -f "$file" ]; then
     echo "Required release input not found: $file" >&2
     exit 1
   fi
 done
+
+plutil -lint "$session_wake_agent_plist"
+agent_program=$(/usr/libexec/PlistBuddy -c "Print :BundleProgram" "$session_wake_agent_plist")
+agent_command=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:1" "$session_wake_agent_plist")
+agent_run_at_load=$(/usr/libexec/PlistBuddy -c "Print :RunAtLoad" "$session_wake_agent_plist")
+agent_restart_on_failure=$(/usr/libexec/PlistBuddy -c "Print :KeepAlive:SuccessfulExit" "$session_wake_agent_plist")
+if [ "$agent_program" != "Contents/Helpers/meterbar" ] \
+  || [ "$agent_command" != "wake-agent" ] \
+  || [ "$agent_run_at_load" != "true" ] \
+  || [ "$agent_restart_on_failure" != "false" ]; then
+  echo "Session Wake launch-agent plist has an invalid command or lifecycle policy." >&2
+  exit 1
+fi
 
 verify_universal_binary() {
   local binary="$1"
@@ -66,21 +108,23 @@ app_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$a
 app_build_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app_path/Contents/Info.plist")
 cli_version=$("$cli_binary" --version)
 
-echo "Tag version: $expected_version"
+echo "Expected short version: $expected_short"
+echo "Expected build version: $expected_build"
 echo "App version: $app_version"
 echo "App build version: $app_build_version"
 echo "CLI version: $cli_version"
 
-if [ "$app_version" != "$expected_version" ]; then
-  echo "App version $app_version does not match release version $expected_version." >&2
+if [ "$app_version" != "$expected_short" ]; then
+  echo "App version $app_version does not match expected short version $expected_short." >&2
   exit 1
 fi
-if [ "$app_build_version" != "$expected_version" ]; then
-  echo "App build version $app_build_version does not match release version $expected_version." >&2
+if [ "$app_build_version" != "$expected_build" ]; then
+  echo "App build version $app_build_version does not match expected build version $expected_build." >&2
   exit 1
 fi
-if [ "$cli_version" != "$expected_version" ]; then
-  echo "CLI version $cli_version does not match release version $expected_version." >&2
+# The embedded CLI reports CFBundleShortVersionString, so it must equal the short version.
+if [ "$cli_version" != "$expected_short" ]; then
+  echo "CLI version $cli_version does not match expected short version $expected_short." >&2
   exit 1
 fi
 

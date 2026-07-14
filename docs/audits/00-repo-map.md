@@ -59,7 +59,7 @@ Three build systems coexist in one repo (see risk R6):
 - **No code signing identity, no notarization** anywhere in the pipeline; README instructs users to `xattr -cr` the quarantine flag (`README.md:80-83`). Version currently `MARKETING_VERSION = 1.6` (pbxproj:282 etc.), while `MeterBar/Info.plist:22` pins `CFBundleShortVersionString` to `1.0` — the plist value appears overridden by build settings, but the checked-in `1.0` is misleading.
 - README badge claims "macOS 13.0+" and "Swift 5.9" (`README.md:12-13`) — both false against the project files (macOS 26, Swift 5 mode / tools 6.2).
 
-**Scheduling/cron analog:** in-process `Timer` (refresh) + `Task.sleep` loop (notifications) + WidgetKit timeline `.after(nextUpdate)` (`MeterBarWidget/UsageWidget.swift:225-233`). No launchd agents, no background daemons.
+**Scheduling/cron analog:** in-process `Timer` (refresh) + `Task.sleep` loop (notifications) + WidgetKit timeline `.after(nextUpdate)` (`MeterBarWidget/UsageWidget.swift:225-233`). Session Wake additionally registers the bundled `meterbar wake-agent` as a per-user `SMAppService` launch agent while armed.
 
 **Observability:** `os.Logger` only, via `AppLog` with 5 categories (`MeterBar/Services/AppLog.swift`). No crash reporting, no analytics, no telemetry (grep for Sentry/Crashlytics/analytics: zero hits in Swift sources). For a distributed app, the only failure signal is user reports.
 
