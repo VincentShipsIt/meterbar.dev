@@ -6,11 +6,21 @@ import SwiftUI
 
 let overviewTileMinHeight: CGFloat = 220
 
+/// Backing surface for a `DashboardTile`. The default `.card` keeps the flat
+/// control-background fill unchanged; `.glass` swaps in a Liquid Glass surface
+/// so the tile can participate in a `glassEffectID` morph inside a
+/// `GlassEffectContainer` (the exhausted↔expanded provider-card swap).
+enum DashboardTileSurface {
+  case card
+  case glass
+}
+
 struct DashboardTile<Content: View>: View {
   let cornerRadius: CGFloat
   let padding: CGFloat
   let minHeight: CGFloat?
   let alignment: Alignment
+  let surface: DashboardTileSurface
   @ViewBuilder let content: Content
 
   init(
@@ -18,12 +28,14 @@ struct DashboardTile<Content: View>: View {
     padding: CGFloat = 14,
     minHeight: CGFloat? = nil,
     alignment: Alignment = .topLeading,
+    surface: DashboardTileSurface = .card,
     @ViewBuilder content: () -> Content
   ) {
     self.cornerRadius = cornerRadius
     self.padding = padding
     self.minHeight = minHeight
     self.alignment = alignment
+    self.surface = surface
     self.content = content()
   }
 
@@ -31,7 +43,26 @@ struct DashboardTile<Content: View>: View {
     content
       .padding(padding)
       .frame(maxWidth: .infinity, minHeight: minHeight, alignment: alignment)
-      .meterBarCardSurface(cornerRadius: cornerRadius)
+      .modifier(DashboardTileSurfaceModifier(surface: surface, cornerRadius: cornerRadius))
+  }
+}
+
+/// Applies the tile's backing surface. Split out so `DashboardTile` stays a
+/// single view while the flat-fill vs. Liquid Glass choice branches cleanly.
+private struct DashboardTileSurfaceModifier: ViewModifier {
+  let surface: DashboardTileSurface
+  let cornerRadius: CGFloat
+
+  func body(content: Content) -> some View {
+    switch surface {
+    case .card:
+      content.meterBarCardSurface(cornerRadius: cornerRadius)
+    case .glass:
+      content.glassEffect(
+        .regular,
+        in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      )
+    }
   }
 }
 

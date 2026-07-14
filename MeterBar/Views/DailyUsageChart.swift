@@ -294,6 +294,8 @@ struct DailyUsageBreakdownList: View {
   let dailyUsage: [DailyTokenUsage]
 
   @State private var expandedDayIDs: Set<Date> = []
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
 
   private var days: [DailyProviderUsageDay] {
     let grouped = Dictionary(grouping: dailyUsage) { Calendar.current.startOfDay(for: $0.date) }
@@ -334,7 +336,10 @@ struct DailyUsageBreakdownList: View {
   }
 
   private func toggleExpansion(for dayID: Date) {
-    withAnimation(.snappy(duration: 0.18)) {
+    // In-place table expansion on a flat tile — no per-row glass surface to
+    // morph, so it keeps the move/opacity transition on the shared token,
+    // gated by Reduce Motion.
+    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
       if expandedDayIDs.contains(dayID) {
         expandedDayIDs.remove(dayID)
       } else {

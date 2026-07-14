@@ -372,9 +372,24 @@ struct PopoverOverviewPanel: View {
   }
 }
 
-private struct PopoverProviderStatusCard: View {
+// Non-private so the Liquid Glass morph wiring can be rendered in both states
+// by `LiquidGlassP1RegressionTests`.
+struct PopoverProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
+
+  /// Shared identity for the exhausted↔expanded glass morph. Scoped per card
+  /// instance via `cardMorph`, so sibling provider cards never cross-morph.
+  @Namespace private var cardMorph
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
+  private static let cardGlassID = "provider-status-card"
+
+  init(snapshot: ProviderSnapshot, onSelect: (() -> Void)? = nil) {
+    self.snapshot = snapshot
+    self.onSelect = onSelect
+  }
 
   private var statusColor: Color {
     snapshot.band?.color ?? .secondary
@@ -398,19 +413,31 @@ private struct PopoverProviderStatusCard: View {
     }
   }
 
+  // The exhausted (58pt) and expanded (124pt) states share one glass identity
+  // inside a container so the height change morphs instead of hard-swapping.
+  // Container spacing matches the 8pt provider-card list rhythm so the glass
+  // samples correctly (Liquid Glass docs). Reduce Motion drops the animation.
   private var cardContent: some View {
-    Group {
-      if snapshot.hasExhaustedLimit {
-        compactExhaustedCard
-      } else {
-        expandedCard
+    GlassEffectContainer(spacing: 8) {
+      Group {
+        if snapshot.hasExhaustedLimit {
+          compactExhaustedCard
+            .glassEffectID(Self.cardGlassID, in: cardMorph)
+        } else {
+          expandedCard
+            .glassEffectID(Self.cardGlassID, in: cardMorph)
+        }
       }
     }
+    .animation(
+      reduceMotion ? nil : MeterBarTheme.Motion.standard,
+      value: snapshot.hasExhaustedLimit
+    )
     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 
   private var compactExhaustedCard: some View {
-    DashboardTile(padding: 11, minHeight: 58, alignment: .center) {
+    DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
       VStack(alignment: .leading, spacing: 8) {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
           let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
@@ -462,7 +489,8 @@ private struct PopoverProviderStatusCard: View {
   private var expandedCard: some View {
     DashboardTile(
       padding: 11,
-      minHeight: 124
+      minHeight: 124,
+      surface: .glass
     ) {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 7) {

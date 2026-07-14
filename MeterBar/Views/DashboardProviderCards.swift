@@ -138,7 +138,22 @@ private struct ProviderLimitsBody: View {
   var emptyMinHeight: CGFloat?
   var rowSpacing: CGFloat = 12
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   var body: some View {
+    // Dashboard twin of the popover's exhausted↔normal swap. This body sits
+    // inside a flat DashboardTile with no per-branch glass surface, so it uses
+    // a blur-replace transition + the shared smooth timing rather than a full
+    // `glassEffectID` morph (which would need its own glass container to read).
+    content
+      .animation(
+        reduceMotion ? nil : MeterBarTheme.Motion.standard,
+        value: snapshot.hasExhaustedWeeklyLimit
+      )
+  }
+
+  @ViewBuilder private var content: some View {
     if snapshot.limits.isEmpty {
       Text("No quota windows reported")
         .font(emptyFont)
@@ -149,12 +164,14 @@ private struct ProviderLimitsBody: View {
         windows: snapshot.resetWindows,
         accentColor: snapshot.accentColor
       )
+      .transition(.blurReplace)
     } else {
       VStack(alignment: .leading, spacing: rowSpacing) {
         ForEach(snapshot.limits) { limit in
           DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
         }
       }
+      .transition(.blurReplace)
     }
   }
 }

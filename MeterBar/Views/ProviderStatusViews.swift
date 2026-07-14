@@ -63,6 +63,8 @@ struct ProviderStatusTable: View {
     let openStatusPage: (ServiceType) -> Void
 
     @State private var expandedServices: Set<ServiceType> = []
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         DashboardTile(padding: 8) {
@@ -87,7 +89,11 @@ struct ProviderStatusTable: View {
     }
 
     private func toggleExpansion(for service: ServiceType) {
-        withAnimation(.snappy(duration: 0.18)) {
+        // These rows sit on a shared flat tile (divider-separated), with no
+        // per-row glass surface, so a `glassEffectID` morph would read wrong —
+        // they keep the in-place move/opacity transition, now on a shared token
+        // and gated by Reduce Motion.
+        withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
             if expandedServices.contains(service) {
                 expandedServices.remove(service)
             } else {
