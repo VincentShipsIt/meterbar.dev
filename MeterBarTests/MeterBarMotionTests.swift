@@ -2,27 +2,48 @@ import SwiftUI
 import XCTest
 @testable import MeterBar
 
-/// Covers the micro-motion tokens that drive refresh-driven animation across the
-/// UI (numeric-text rolls, bar sweeps, icon/state swaps). The view modifiers
-/// themselves aren't inspectable without ViewInspector (not a dependency here),
-/// so the testable seam is `MeterBarTheme.Motion`: every animated surface routes
-/// through it, and the Reduce-Motion contract lives entirely in these accessors.
+/// Invariants for the shared motion vocabulary (`MeterBarTheme.Motion`) — the
+/// testable seam for refresh/micro-motion, since the view modifiers themselves
+/// aren't inspectable without ViewInspector. The Reduce-Motion contract lives
+/// entirely in these accessors, so every animated surface routes through them.
 final class MeterBarMotionTests: XCTestCase {
-    // MARK: - Reduce Motion collapses to an instant (nil) animation
+    // MARK: Tokens exist and keep their calibrated feel
 
-    func testStandardIsNilUnderReduceMotion() {
-        XCTAssertNil(MeterBarTheme.Motion.standard(reduceMotion: true))
+    func testMotionTokensMatchCalibratedCurves() {
+        XCTAssertEqual(MeterBarTheme.Motion.quick, .snappy(duration: 0.18))
+        XCTAssertEqual(MeterBarTheme.Motion.disclosure, .snappy(duration: 0.18))
+        XCTAssertEqual(MeterBarTheme.Motion.standard, .smooth(duration: 0.3))
+        XCTAssertEqual(MeterBarTheme.Motion.panel, .smooth(duration: 0.22))
+        XCTAssertEqual(MeterBarTheme.Motion.standardCurve, .smooth(duration: 0.35))
+        XCTAssertEqual(MeterBarTheme.Motion.snappyCurve, .smooth(duration: 0.22))
     }
 
-    func testSnappyIsNilUnderReduceMotion() {
+    func testStandardCurveAndSnappyCurveAreDistinct() {
+        XCTAssertNotEqual(
+            MeterBarTheme.Motion.standardCurve,
+            MeterBarTheme.Motion.snappyCurve
+        )
+    }
+
+    // MARK: Reduce Motion collapses to an instant (nil) animation
+
+    func testResolveSuppressesAnimationWhenReduceMotionOn() {
+        XCTAssertNil(MeterBarTheme.Motion.resolve(.quick, reduceMotion: true))
+        XCTAssertNil(MeterBarTheme.Motion.resolve(.standard, reduceMotion: true))
+        XCTAssertNil(MeterBarTheme.Motion.resolve(.panel, reduceMotion: true))
+        XCTAssertNil(MeterBarTheme.Motion.resolve(.standardCurve, reduceMotion: true))
         XCTAssertNil(MeterBarTheme.Motion.snappy(reduceMotion: true))
     }
 
-    // MARK: - Motion on: the token resolves to its curve
+    // MARK: Motion on: the accessor resolves to its curve
 
-    func testStandardResolvesToCurveWhenMotionAllowed() {
+    func testResolvePassesThroughWhenReduceMotionOff() {
         XCTAssertEqual(
-            MeterBarTheme.Motion.standard(reduceMotion: false),
+            MeterBarTheme.Motion.resolve(.quick, reduceMotion: false),
+            MeterBarTheme.Motion.quick
+        )
+        XCTAssertEqual(
+            MeterBarTheme.Motion.resolve(.standardCurve, reduceMotion: false),
             MeterBarTheme.Motion.standardCurve
         )
     }
@@ -34,12 +55,11 @@ final class MeterBarMotionTests: XCTestCase {
         )
     }
 
-    // MARK: - The two curves are distinct so numeric rolls and icon swaps differ
-
-    func testStandardAndSnappyAreDistinctCurves() {
-        XCTAssertNotEqual(
-            MeterBarTheme.Motion.standardCurve,
-            MeterBarTheme.Motion.snappyCurve
-        )
+    func testResolveIsUsableAsWithAnimationArgument() {
+        var animatedValue = 0
+        withAnimation(MeterBarTheme.Motion.resolve(.quick, reduceMotion: true)) {
+            animatedValue = 1
+        }
+        XCTAssertEqual(animatedValue, 1)
     }
 }

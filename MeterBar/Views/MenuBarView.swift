@@ -36,7 +36,7 @@ struct MenuBarView: View {
   var body: some View {
     mainColumn
     .frame(width: popoverWidth, height: popoverHeight)
-    .background(MeterBarCompanionSurface(radius: MeterBarTheme.companionShellRadius))
+    .background(MeterBarTheme.Surface.chrome(radius: MeterBarTheme.companionShellRadius))
     .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.companionShellRadius, style: .continuous))
     .background(
       MeterBarMenuWindowAccessor { window in
@@ -97,7 +97,7 @@ struct MenuBarView: View {
             SessionWakeMenuControl()
           }
         }
-        .padding(10)
+        .padding(MeterBarTheme.Spacing.md)
         .background(
           GeometryReader { proxy in
             Color.clear.preference(
@@ -163,8 +163,8 @@ struct MenuBarView: View {
       }
     }
     .font(.body)
-    .padding(.horizontal, 14)
-    .padding(.vertical, 8)
+    .padding(.horizontal, MeterBarTheme.Spacing.lg)
+    .padding(.vertical, MeterBarTheme.Spacing.sm)
   }
 
   private func openDashboard() {
@@ -372,9 +372,24 @@ struct PopoverOverviewPanel: View {
   }
 }
 
-private struct PopoverProviderStatusCard: View {
+// Non-private so the Liquid Glass morph wiring can be rendered in both states
+// by `LiquidGlassP1RegressionTests`.
+struct PopoverProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
+
+  /// Shared identity for the exhausted↔expanded glass morph. Scoped per card
+  /// instance via `cardMorph`, so sibling provider cards never cross-morph.
+  @Namespace private var cardMorph
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
+  private static let cardGlassID = "provider-status-card"
+
+  init(snapshot: ProviderSnapshot, onSelect: (() -> Void)? = nil) {
+    self.snapshot = snapshot
+    self.onSelect = onSelect
+  }
 
   private var statusColor: Color {
     snapshot.band?.color ?? .secondary
@@ -398,19 +413,31 @@ private struct PopoverProviderStatusCard: View {
     }
   }
 
+  // The exhausted (58pt) and expanded (124pt) states share one glass identity
+  // inside a container so the height change morphs instead of hard-swapping.
+  // Container spacing matches the 8pt provider-card list rhythm so the glass
+  // samples correctly (Liquid Glass docs). Reduce Motion drops the animation.
   private var cardContent: some View {
-    Group {
-      if snapshot.hasExhaustedLimit {
-        compactExhaustedCard
-      } else {
-        expandedCard
+    GlassEffectContainer(spacing: 8) {
+      Group {
+        if snapshot.hasExhaustedLimit {
+          compactExhaustedCard
+            .glassEffectID(Self.cardGlassID, in: cardMorph)
+        } else {
+          expandedCard
+            .glassEffectID(Self.cardGlassID, in: cardMorph)
+        }
       }
     }
-    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .animation(
+      reduceMotion ? nil : MeterBarTheme.Motion.standard,
+      value: snapshot.hasExhaustedLimit
+    )
+    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
   }
 
   private var compactExhaustedCard: some View {
-    DashboardTile(padding: 11, minHeight: 58, alignment: .center) {
+    DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
       VStack(alignment: .leading, spacing: 8) {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
           let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
@@ -462,7 +489,8 @@ private struct PopoverProviderStatusCard: View {
   private var expandedCard: some View {
     DashboardTile(
       padding: 11,
-      minHeight: 124
+      minHeight: 124,
+      surface: .glass
     ) {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 7) {
@@ -492,7 +520,7 @@ private struct PopoverProviderStatusCard: View {
         } else {
           VStack(alignment: .leading, spacing: 9) {
             ForEach(snapshot.limits) { limit in
-              PopoverLimitRow(limit: limit, accentColor: snapshot.accentColor)
+              LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .compact)
             }
           }
         }
@@ -508,54 +536,6 @@ private struct PopoverProviderStatusCard: View {
   private var updatedText: String {
     guard let updatedAt = snapshot.updatedAt else { return "No data" }
     return "Updated \(UsageFormat.relative(updatedAt))"
-  }
-}
-
-private struct PopoverLimitRow: View {
-  let limit: SnapshotLimit
-  let accentColor: Color
-
-  private var isOut: Bool {
-    limit.percentLeft <= 0
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 4) {
-        Text(limit.title)
-          .font(.caption2)
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-        if limit.usageLimit.isEstimated {
-          Text("Estimated")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundColor(.secondary)
-        }
-        Spacer(minLength: 4)
-        Text(isOut && !limit.usageLimit.isEstimated ? "Out" : limit.usageLimit.percentLeftText)
-          .font(.caption)
-          .fontWeight(.semibold)
-          .foregroundColor(isOut ? MeterBarTheme.danger : .primary)
-          .lineLimit(1)
-      }
-
-      UsageBar(
-        usedPercentage: limit.usedPercent,
-        accentColor: accentColor,
-        pace: limit.usageLimit.isEstimated ? nil : limit.usageLimit.pace(),
-        paceContext: limit.paceContext
-      )
-
-      if limit.usageLimit.resetTime != nil {
-        ResetCountdownLabel(
-          title: limit.title,
-          limit: limit.usageLimit,
-          font: .caption2,
-          foregroundColor: .secondary,
-          iconSize: 9
-        )
-      }
-    }
   }
 }
 

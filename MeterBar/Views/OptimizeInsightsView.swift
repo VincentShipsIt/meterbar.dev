@@ -271,13 +271,9 @@ private struct RankedBreakdownRow: View {
           .truncationMode(.middle)
 
         if showsTier, entry.tier != .unknown {
-          Text(entry.tier.label)
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(tierColor.opacity(0.18), in: Capsule())
-            .foregroundStyle(tierColor)
+          // Migrated to the shared `MeterBarChip`; fill normalizes 0.18 -> 0.14
+          // and it picks up the standard hairline stroke. Tier color unchanged.
+          MeterBarChip(entry.tier.label, tint: tierColor, style: .flat)
         }
 
         Spacer(minLength: 8)

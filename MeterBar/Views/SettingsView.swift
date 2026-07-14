@@ -135,7 +135,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.bottom, 4)
+                .padding(.bottom, MeterBarTheme.Spacing.xs)
 
                 providerSettingsPane(for: selectedProviderTab)
             }
@@ -168,8 +168,11 @@ struct SettingsView: View {
         }
         .frame(width: Self.windowWidth, height: Self.windowHeight)
         .background {
+            // MeterBarDetailBackground now handles safe area internally (material
+            // full-bleed, tint inset). The macOS TabView renders its tab strip as
+            // a separate control rather than a scroll-under bar, so nothing here
+            // scrolls beneath a bar — but this keeps the two windows consistent.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
     }
 
@@ -186,8 +189,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 content()
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, MeterBarTheme.Spacing.xl)
+            .padding(.vertical, MeterBarTheme.Spacing.xl)
             .frame(width: Self.windowWidth, alignment: .topLeading)
         }
         .scrollContentBackground(.hidden)
@@ -927,7 +930,7 @@ struct SettingsView: View {
                             SettingsNotice(text: "No quota windows reported.", color: .secondary)
                         } else {
                             ForEach(snapshot.detailLimits) { limit in
-                                DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+                                LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
                             }
                         }
 
@@ -1449,7 +1452,7 @@ private struct AdminKeySettingsRow: View {
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
     }
 
     // MARK: Private
@@ -1500,7 +1503,7 @@ private struct AddCodexAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1591,7 +1594,7 @@ private struct AddClaudeAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1680,15 +1683,15 @@ private struct AccountProfileRow: View {
                         .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
-                    Text(account.isDefault ? "Default" : "Profile")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
-                        .settingsInputSurface(
-                            horizontalPadding: 8,
-                            verticalPadding: 4,
-                            shape: .capsule
-                        )
+                    // Migrated to the shared `MeterBarChip`. This was the 5th,
+                    // odd-one-out recipe (`.thinMaterial` + glassCardStroke); the
+                    // `.glass` chip gives it the standard Liquid-Glass capsule
+                    // while keeping the Default/Profile role tint.
+                    MeterBarChip(
+                        account.isDefault ? "Default" : "Profile",
+                        tint: account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent,
+                        style: .glass
+                    )
                 }
 
                 HStack(spacing: 8) {
@@ -1773,7 +1776,7 @@ private struct AccountProfileRow: View {
             }
             .fixedSize()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
             configDirectoryDraft = updatedAccount.configDirectory ?? ""
@@ -1913,7 +1916,7 @@ private struct CodexAccountProfileRow: View {
             }
             .frame(minWidth: 80, alignment: .trailing)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updated in
             nameDraft = updated.name
             homeDirectoryDraft = updated.homeDirectory ?? ""
@@ -1967,44 +1970,26 @@ private struct SettingsInputModifier: ViewModifier {
     }
 }
 
-// MARK: - SettingsInputSurfaceShape
-
-private enum SettingsInputSurfaceShape {
-    case roundedRectangle
-    case capsule
-}
-
 // MARK: - SettingsInputSurfaceModifier
 
 private struct SettingsInputSurfaceModifier: ViewModifier {
     let width: CGFloat?
     let horizontalPadding: CGFloat
     let verticalPadding: CGFloat
-    let shape: SettingsInputSurfaceShape
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .roundedRectangle:
-            let roundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        // The capsule variant moved to `MeterBarChip(style: .glass)`; this
+        // surface now only backs rounded-rectangle settings input fields.
+        let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
 
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: roundedRectangle)
-                .overlay {
-                    roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        case .capsule:
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        }
+        content
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .frame(width: width)
+            .background(.thinMaterial, in: roundedRectangle)
+            .overlay {
+                roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
     }
 }
 
@@ -2016,15 +2001,13 @@ private extension View {
     func settingsInputSurface(
         width: CGFloat? = nil,
         horizontalPadding: CGFloat = 10,
-        verticalPadding: CGFloat = 6,
-        shape: SettingsInputSurfaceShape = .roundedRectangle
+        verticalPadding: CGFloat = 6
     ) -> some View {
         modifier(
             SettingsInputSurfaceModifier(
                 width: width,
                 horizontalPadding: horizontalPadding,
-                verticalPadding: verticalPadding,
-                shape: shape
+                verticalPadding: verticalPadding
             )
         )
     }

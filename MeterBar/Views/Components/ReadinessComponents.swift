@@ -46,7 +46,7 @@ struct ReadinessCheckRow: View {
       Image(systemName: check.level.iconName)
         .font(.system(size: compact ? 11 : 13, weight: .semibold))
         .foregroundStyle(check.level.tint)
-        .padding(.top, 1)
+        .padding(.top, MeterBarTheme.Spacing.xxs)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(check.title)
@@ -117,13 +117,9 @@ struct ReadinessBadge: View {
   let level: ReadinessLevel
 
   var body: some View {
-    Text(level.badgeLabel)
-      .font(.caption2)
-      .fontWeight(.semibold)
-      .foregroundStyle(level.tint)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(level.tint.opacity(0.14), in: Capsule())
+    // Migrated to the shared `MeterBarChip`; gains the standard hairline stroke
+    // the readiness badge previously lacked, so it matches the other badges.
+    MeterBarChip(level.badgeLabel, tint: level.tint, style: .flat)
   }
 }
 
@@ -177,6 +173,6 @@ private extension View {
       .fontWeight(.medium)
       .foregroundStyle(tint)
       .fixedSize(horizontal: false, vertical: true)
-      .padding(.top, 1)
+      .padding(.top, MeterBarTheme.Spacing.xxs)
   }
 }

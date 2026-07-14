@@ -148,7 +148,10 @@ struct ApiUsageCard: View {
   private var accent: Color { MeterBarTheme.accent(for: provider) }
 
   var body: some View {
-    DashboardTile(cornerRadius: 8, padding: compact ? 10 : 12) {
+    DashboardTile(
+      cornerRadius: MeterBarTheme.apiCardRadius,
+      padding: compact ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md
+    ) {
       VStack(alignment: .leading, spacing: compact ? 8 : 10) {
         HStack(spacing: 7) {
           ProviderLogoView(
