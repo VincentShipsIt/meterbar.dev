@@ -1,0 +1,57 @@
+name: Bug report
+description: Report reproducible broken behavior
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before filing. Do not include secrets, credentials, personal data, or security-vulnerability details.
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: What happens now, and who or what is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What observable behavior should happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest repeatable sequence.
+      placeholder: |
+        1. Start ...
+        2. Run or open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Version or commit, operating system, runtime, browser or client, and relevant configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add relevant logs, screenshots, or recordings after removing sensitive data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests for this problem.
+          required: true
+        - label: I removed secrets, credentials, personal data, and customer data.
+          required: true
+        - label: This report does not publicly disclose a security vulnerability.
+          required: true

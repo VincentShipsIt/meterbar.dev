@@ -1,0 +1,65 @@
+name: Feature / PRD
+description: Propose a new capability with an actionable product brief
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and observable outcome before proposing implementation details.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or broken, who is affected, and why does it matter?
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: State one measurable outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List what is in scope and what is explicitly out of scope.
+      placeholder: |
+        In:
+        - ...
+
+        Out:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use testable outcomes. Prefer WHEN, WHILE, WHERE, or IF ... THE SYSTEM SHALL ...
+      placeholder: |
+        - [ ] WHEN ... THE SYSTEM SHALL ...
+        - [ ] IF ... THEN THE SYSTEM SHALL ...
+    validations:
+      required: true
+  - type: textarea
+    id: technical
+    attributes:
+      label: Technical notes
+      description: Add constraints, risks, dependencies, public contracts, or architectural decisions without prescribing a brittle file-by-file implementation.
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: Add related issues, designs, research, or supporting context.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests for this request.
+          required: true
+        - label: I described the problem, desired outcome, and scope boundaries.
+          required: true
