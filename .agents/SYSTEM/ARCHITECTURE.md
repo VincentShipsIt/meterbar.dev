@@ -81,6 +81,7 @@ meterbar/
 - **ServiceSupport** — shared URLSession config, secret-safe HTTP/URLError mapping, real (non-container) home dir via `getpwuid`.
 - **AppLog** — `os.Logger` categories: app, usage, cost, network, storage. This is the only observability; there is no crash reporting or analytics.
 - **SoftwareUpdateController** — owns Sparkle 2's standard updater. The General settings pane binds directly to Sparkle's automatic-check preference (default off until consent) and exposes a manual check action. Release builds embed the GitHub Releases appcast URL and an Actions-provided EdDSA public key.
+- **SessionWakeController + managed agent** — signed release bundles register `Contents/Helpers/meterbar wake-agent` through `SMAppService.agent`. The launch agent owns the shared wake lock for its lifetime, reads versioned configuration/status through the app group, and keeps the native coordinator alive after the GUI quits. Debug builds without the injected CLI retain the in-process fallback.
 
 ## App lifecycle
 

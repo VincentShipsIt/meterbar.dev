@@ -372,4 +372,57 @@ teardown) while a child session is running:
 
 ---
 
+### ADR-011: Managed Session Wake launch agent (v1.8)
+
+**Date:** 2026-07-14
+**Status:** Accepted
+**Issue:** #133
+
+#### Context
+
+ADR-010 deliberately kept Session Wake inside the GUI for v1, so quitting
+MeterBar also stopped overnight reset handling. The safety-critical discovery,
+fresh-quota gate, replay ledger, bounded runner, and advisory lock are now
+shared native code and the release is Developer ID signed/notarized. The next
+step is persistence without reviving the retired Python/shell watcher.
+
+#### Decision
+
+Register a per-user `SMAppService` launch agent whose plist lives at
+`Contents/Library/LaunchAgents/dev.meterbar.app.session-wake.plist`. The agent
+runs the already-bundled, already-signed `Contents/Helpers/meterbar wake-agent`
+entry point; there is no second engine or helper target.
+
+- The app writes a versioned configuration snapshot and metadata-only live
+  status/heartbeat through the existing app-group domain. Turning Session Wake
+  off writes `isArmed = false` before unregistering, so cancellation does not
+  depend solely on ServiceManagement succeeding.
+- The agent owns the existing `wake.lock` for its full lifetime. Development
+  builds without the embedded CLI retain the in-app watcher, which takes the
+  same lifetime lock. One-shot CLI work probes the same lock, making app,
+  launch agent, and CLI mutually exclusive.
+- The agent recreates the provider runtime from fresh shared configuration for
+  every scan. Every launch still goes through the existing fresh quota gate,
+  cwd revalidation, bounded runner, and replay ledger. Sleep overshoot only
+  delays a fresh quota check; it never authorizes a launch.
+- `SIGTERM`, the shared armed flag, or feature kill-switch cancels the
+  coordinator and active child cooperatively before releasing the lifetime
+  lock. `launchd` restarts unexpected non-zero exits and bootstraps the agent on
+  subsequent logins; a deliberate disarm exits successfully and unregisters.
+- Completion banners are emitted by the agent using metadata-only summary copy,
+  so notification delivery does not depend on the GUI process being alive.
+
+#### Consequences
+
+- **Easier:** overnight wake survives GUI quit, crash recovery, sleep/wake, and
+  logout/login without installing files outside the signed app bundle.
+- **Easier:** the same lock and native engine enforce one automation owner and
+  preserve every existing fail-closed invariant.
+- **More difficult:** first registration can require approval in System
+  Settings › General › Login Items; Settings surfaces that state explicitly.
+- **More difficult:** debug builds use the in-process fallback because CI injects
+  the universal CLI after the Xcode app build.
+
+---
+
 <!-- Add new ADRs above this line -->

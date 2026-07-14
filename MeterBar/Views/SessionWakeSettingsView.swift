@@ -36,7 +36,7 @@ struct SessionWakeSettingsView: View {
             Text("""
             While on, MeterBar watches this account's usage limits and, after a \
             limit resets, automatically resumes your blocked Claude Code sessions \
-            one at a time. It only runs while MeterBar is open.
+            one at a time. The background watcher keeps running after MeterBar quits.
             """)
         }
     }
@@ -74,6 +74,21 @@ struct SessionWakeSettingsView: View {
             SettingsRowView(title: "Status") {
                 Text(status.label(isOn: store.isOn).title)
                     .foregroundStyle(.secondary)
+            }
+
+            SettingsRowView(
+                title: "Execution",
+                detail: status.backgroundExecution.detail
+            ) {
+                if status.backgroundExecution == .requiresApproval {
+                    Button("Open Login Items") {
+                        SMAppServiceSessionWakeAgent.openSystemSettings()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text(status.backgroundExecution.title)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

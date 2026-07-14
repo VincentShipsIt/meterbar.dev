@@ -18,6 +18,7 @@ nonisolated struct CodexWakeProcessRunner: WakeExecuting {
     let account: CodexAccount
     private let baseEnvironment: [String: String]
     private let lockFactory: @Sendable () -> WakeLock
+    private let lockMode: WakeExecutionLockMode
     private let logger: WakeRunLogger
     private let now: @Sendable () -> Date
 
@@ -29,6 +30,7 @@ nonisolated struct CodexWakeProcessRunner: WakeExecuting {
         prompt: String = WakeCommandBuilder.defaultPrompt,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         lockFactory: @escaping @Sendable () -> WakeLock = { WakeLock() },
+        lockMode: WakeExecutionLockMode = .acquirePerRun,
         logger: WakeRunLogger = WakeRunLogger(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -39,6 +41,7 @@ nonisolated struct CodexWakeProcessRunner: WakeExecuting {
         self.prompt = prompt
         self.baseEnvironment = baseEnvironment
         self.lockFactory = lockFactory
+        self.lockMode = lockMode
         self.logger = logger
         self.now = now
     }
@@ -55,25 +58,27 @@ nonisolated struct CodexWakeProcessRunner: WakeExecuting {
             return .failed(reason: "codex binary not found")
         }
 
-        let lock = lockFactory()
-        switch lock.acquire() {
-        case .acquired:
-            break
-        case let .contended(holder):
-            let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
-            let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
-        case let .legacyHeld(guidance):
-            let outcome = WakeRunOutcome.failed(reason: guidance)
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
-        case let .unavailable(reason):
-            let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
-            record(candidate: candidate, outcome: outcome, result: nil, start: now())
-            return outcome
+        let lock = lockMode == .acquirePerRun ? lockFactory() : nil
+        if let lock {
+            switch lock.acquire() {
+            case .acquired:
+                break
+            case let .contended(holder):
+                let suffix = holder.map { " (\($0.shortDescription))" } ?? ""
+                let outcome = WakeRunOutcome.failed(reason: "another Session Wake holder is active\(suffix)")
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            case let .legacyHeld(guidance):
+                let outcome = WakeRunOutcome.failed(reason: guidance)
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            case let .unavailable(reason):
+                let outcome = WakeRunOutcome.failed(reason: "wake lock unavailable: \(reason)")
+                record(candidate: candidate, outcome: outcome, result: nil, start: now())
+                return outcome
+            }
         }
-        defer { lock.release() }
+        defer { lock?.release() }
 
         let command = CodexWakeCommandBuilder.build(
             executable: resolved,

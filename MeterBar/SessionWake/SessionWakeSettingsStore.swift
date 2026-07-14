@@ -26,9 +26,15 @@ final class SessionWakeSettingsStore: ObservableObject {
     @Published private(set) var maxTurns: Int
 
     private let userDefaults: UserDefaults
+    private let agentStateStore: SessionWakeAgentStateStore?
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        agentStateStore: SessionWakeAgentStateStore? = nil
+    ) {
         self.userDefaults = userDefaults
+        self.agentStateStore = agentStateStore
+            ?? (userDefaults === UserDefaults.standard ? SessionWakeAgentStateStore() : nil)
         if userDefaults.object(forKey: StorageKeys.sessionWakeFeatureEnabled) == nil {
             // Session Wake shipped before this key was wired. Preserve that
             // behavior for existing installs; an explicit false is the master
@@ -63,6 +69,7 @@ final class SessionWakeSettingsStore: ObservableObject {
 
         if userDefaults === UserDefaults.standard {
             syncSharedFeatureFlag()
+            syncAgentControlFlags()
         }
     }
 
@@ -104,6 +111,7 @@ final class SessionWakeSettingsStore: ObservableObject {
         if !enabled {
             forceOff()
         }
+        syncAgentControlFlags()
     }
 
     /// Turn the watcher on or off. Turning on is refused unless `canTurnOn` and
@@ -116,6 +124,7 @@ final class SessionWakeSettingsStore: ObservableObject {
         guard on != isOn else { return }
         isOn = on
         userDefaults.set(on, forKey: StorageKeys.sessionWakeWatcherArmed)
+        syncAgentControlFlags()
     }
 
     /// Complete the one-time confirmation and turn on in a single step (what the
@@ -187,10 +196,23 @@ final class SessionWakeSettingsStore: ObservableObject {
         guard isOn else { return }
         isOn = false
         userDefaults.set(false, forKey: StorageKeys.sessionWakeWatcherArmed)
+        syncAgentControlFlags()
     }
 
     private func syncSharedFeatureFlag() {
         UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier)?
             .set(featureEnabled, forKey: SessionWakeCLI.sharedFeatureEnabledKey)
+    }
+
+    /// Synchronous kill-switch propagation. The controller writes the complete
+    /// configuration, but turning Session Wake off must reach an already-running
+    /// agent before the next Combine/run-loop reconciliation (including an
+    /// immediate app quit).
+    private func syncAgentControlFlags() {
+        guard let agentStateStore,
+              let configuration = agentStateStore.loadConfiguration() else { return }
+        agentStateStore.saveConfiguration(
+            configuration.withControlFlags(featureEnabled: featureEnabled, isArmed: isOn)
+        )
     }
 }

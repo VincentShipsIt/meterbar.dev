@@ -25,6 +25,7 @@ widget_path="$app_path/Contents/PlugIns/MeterBarWidgetExtension.appex"
 app_binary="$app_path/Contents/MacOS/MeterBar"
 widget_binary="$widget_path/Contents/MacOS/MeterBarWidgetExtension"
 cli_binary="$app_path/Contents/Helpers/meterbar"
+session_wake_agent_plist="$app_path/Contents/Library/LaunchAgents/dev.meterbar.app.session-wake.plist"
 app_entitlements="$repository_root/MeterBar/MeterBar.entitlements"
 widget_entitlements="$repository_root/MeterBarWidget/MeterBarWidget.entitlements"
 
@@ -40,12 +41,31 @@ for directory in "$app_path" "$widget_path"; do
   fi
 done
 
-for file in "$app_binary" "$widget_binary" "$cli_binary" "$app_entitlements" "$widget_entitlements"; do
+for file in \
+  "$app_binary" \
+  "$widget_binary" \
+  "$cli_binary" \
+  "$session_wake_agent_plist" \
+  "$app_entitlements" \
+  "$widget_entitlements"; do
   if [ ! -f "$file" ]; then
     echo "Required release input not found: $file" >&2
     exit 1
   fi
 done
+
+plutil -lint "$session_wake_agent_plist"
+agent_program=$(/usr/libexec/PlistBuddy -c "Print :BundleProgram" "$session_wake_agent_plist")
+agent_command=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:1" "$session_wake_agent_plist")
+agent_run_at_load=$(/usr/libexec/PlistBuddy -c "Print :RunAtLoad" "$session_wake_agent_plist")
+agent_restart_on_failure=$(/usr/libexec/PlistBuddy -c "Print :KeepAlive:SuccessfulExit" "$session_wake_agent_plist")
+if [ "$agent_program" != "Contents/Helpers/meterbar" ] \
+  || [ "$agent_command" != "wake-agent" ] \
+  || [ "$agent_run_at_load" != "true" ] \
+  || [ "$agent_restart_on_failure" != "false" ]; then
+  echo "Session Wake launch-agent plist has an invalid command or lifecycle policy." >&2
+  exit 1
+fi
 
 verify_universal_binary() {
   local binary="$1"

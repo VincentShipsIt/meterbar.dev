@@ -100,9 +100,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
-            // Surface a banner when a wake run finishes (gated by the global,
-            // provider, and Session Wake notification switches).
-            observeSessionWakeCompletion()
+            // The managed agent owns completion banners while it is available,
+            // including when the GUI is quit. Development builds without the
+            // embedded helper retain the in-app notification observer.
+            if !SessionWakeController.shared.usesBackgroundAgent {
+                observeSessionWakeCompletion()
+            }
         }
 
         // Setup notifications (also handles initial data refresh)

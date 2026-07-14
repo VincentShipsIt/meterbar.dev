@@ -1,6 +1,31 @@
 import Combine
 import Foundation
 
+enum SessionWakeBackgroundExecution: Equatable, Sendable {
+    case inactive
+    case starting
+    case active
+    case requiresApproval
+    case inApp
+    case failed(String)
+
+    var title: String {
+        switch self {
+        case .inactive: return "Inactive"
+        case .starting: return "Starting in background"
+        case .active: return "Background · survives app quit"
+        case .requiresApproval: return "Approval required in Login Items"
+        case .inApp: return "In app · development fallback"
+        case .failed: return "Needs attention"
+        }
+    }
+
+    var detail: String? {
+        guard case let .failed(message) = self else { return nil }
+        return message
+    }
+}
+
 /// Pure mapping from watcher state to the user-facing status surface.
 ///
 /// Real states are surfaced distinctly (Running / Stopping / Quota Unknown /
@@ -62,6 +87,7 @@ final class SessionWakeStatus: ObservableObject {
     @Published private(set) var previewCandidates: [WakeSessionCandidate] = []
     @Published private(set) var isPreviewing = false
     @Published private(set) var lastSummary: WakeRunSummary?
+    @Published private(set) var backgroundExecution: SessionWakeBackgroundExecution = .inactive
 
     private let discovery: SessionDiscovery
     private let ledgerFactory: @Sendable () -> ReplayLedger
@@ -98,6 +124,10 @@ final class SessionWakeStatus: ObservableObject {
         if case let .completed(summary) = state {
             lastSummary = summary
         }
+    }
+
+    func updateBackgroundExecution(_ execution: SessionWakeBackgroundExecution) {
+        backgroundExecution = execution
     }
 
     func label(isOn: Bool) -> SessionWakeStatusLabel {

@@ -8,9 +8,8 @@ import Foundation
 /// re-exhausts the window stops the queue and preserves the remaining work
 /// instead of hammering a blocked account.
 ///
-/// v1 lifetime is **app-running-only**: the watcher lives with the process.
-/// There is no managed launchd helper in v1; sleep/wake and quit simply end the
-/// watcher, and it is re-armed on next launch by the settings layer (#98).
+/// The same actor runs in the GUI fallback and in the managed launch agent. Its
+/// structured cancellation semantics are identical in both processes.
 actor WakeCoordinator {
     private let discovery: SessionDiscovery
     private let authority: WakeQuotaAuthority
@@ -50,8 +49,23 @@ actor WakeCoordinator {
     /// Arm the watcher for `account`. No-op if already running.
     func start(account: ClaudeCodeAccount) {
         guard runTask == nil else { return }
+        let legacyRunner = runner
+        let runtime = ClaudeWakeRuntime(
+            account: account,
+            discovery: discovery,
+            authority: authority,
+            makeRunner: { _ in legacyRunner }
+        )
+        start(runtime: runtime)
+    }
+
+    /// Provider-agnostic entry point used by the managed agent and Codex-aware
+    /// callers. The legacy Claude entry point above remains for existing tests
+    /// and app wiring.
+    func start(runtime: WakeProviderRuntime) {
+        guard runTask == nil else { return }
         runTask = Task { [weak self] in
-            await self?.runLoop(account: account)
+            await self?.runLoop(runtime: runtime)
         }
     }
 
@@ -85,10 +99,11 @@ actor WakeCoordinator {
 
     private var unknownPolls = 0
 
-    private func runLoop(account: ClaudeCodeAccount) async {
+    private func runLoop(runtime: WakeProviderRuntime) async {
         transition(.scanning)
-        let discovered = await discovery.discover(configDirectory: account.configDirectory, ledger: ledger)
+        let discovered = await runtime.discover(ledger: ledger)
         var queue = Array(discovered.filter(\.isExecutable).prefix(bounds.maxSessionsPerRun))
+        let runtimeRunner = runtime.makeRunner()
 
         var summary = WakeRunSummary()
         summary.skipped = discovered.count - queue.count
@@ -96,8 +111,14 @@ actor WakeCoordinator {
 
         loop: while !queue.isEmpty && !Task.isCancelled {
             // Fresh quota before EVERY launch.
-            let quota = await authority.freshQuota(account: account)
-            let step = await handle(quota: quota, account: account, queue: &queue, summary: &summary)
+            let quota = await runtime.freshQuota()
+            let step = await handle(
+                quota: quota,
+                runtime: runtime,
+                runner: runtimeRunner,
+                queue: &queue,
+                summary: &summary
+            )
             switch step {
             case .keepGoing:
                 continue
@@ -122,14 +143,15 @@ actor WakeCoordinator {
 
     private func handle(
         quota: WakeQuota,
-        account: ClaudeCodeAccount,
+        runtime: WakeProviderRuntime,
+        runner: WakeExecuting,
         queue: inout [WakeSessionCandidate],
         summary: inout WakeRunSummary
     ) async -> LoopStep {
         switch quota {
         case .available:
             unknownPolls = 0
-            return await launchNext(account: account, queue: &queue, summary: &summary)
+            return await launchNext(runtime: runtime, runner: runner, queue: &queue, summary: &summary)
         case let .blocked(until, _):
             summary.remaining = queue.count
             transition(.waiting(until: until))
@@ -145,7 +167,8 @@ actor WakeCoordinator {
     }
 
     private func launchNext(
-        account: ClaudeCodeAccount,
+        runtime: WakeProviderRuntime,
+        runner: WakeExecuting,
         queue: inout [WakeSessionCandidate],
         summary: inout WakeRunSummary
     ) async -> LoopStep {
@@ -158,7 +181,7 @@ actor WakeCoordinator {
 
         // Re-fetch AFTER the attempt; a re-maxed window stops the queue and
         // preserves the remaining work.
-        let post = await authority.freshQuota(account: account)
+        let post = await runtime.freshQuota()
         if case let .blocked(until, _) = post {
             summary.remaining = queue.count
             transition(.waiting(until: until))

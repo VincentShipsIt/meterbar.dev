@@ -10,7 +10,7 @@ struct MeterBarCLI: AsyncParsableCommand {
         commandName: "meterbar",
         abstract: "Track AI coding assistant usage from the command line",
         version: MeterBarCLIVersion.current,
-        subcommands: [Usage.self, Cost.self, Doctor.self, Wake.self],
+        subcommands: [Usage.self, Cost.self, Doctor.self, Wake.self, WakeAgent.self],
         defaultSubcommand: Usage.self
     )
 }
