@@ -200,4 +200,13 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
+
+    func testOnlyAvailableCardAllowsDetailNavigation() {
+        let action = {}
+        let available = ProviderStatusCard(snapshot: snapshot(exhausted: false), onSelect: action)
+        let exhausted = ProviderStatusCard(snapshot: snapshot(exhausted: true), onSelect: action)
+
+        XCTAssertTrue(available.allowsDetailNavigation)
+        XCTAssertFalse(exhausted.allowsDetailNavigation)
+    }
 }

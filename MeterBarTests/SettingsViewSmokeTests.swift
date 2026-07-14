@@ -54,4 +54,24 @@ final class SettingsViewSmokeTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
         XCTAssertGreaterThanOrEqual(hostingView.fittingSize.width, 720)
     }
+
+    func testAboutSettingsExposeProjectLinks() {
+        XCTAssertEqual(AboutSettingsView.links.map(\.id), ["website", "github", "x"])
+        XCTAssertEqual(
+            AboutSettingsView.links.map(\.detail),
+            ["meterbar.dev", "VincentShipsIt/meterbar.dev", "@shipshitdev"]
+        )
+        XCTAssertEqual(
+            AboutSettingsView.links.map { $0.url.absoluteString },
+            [
+                "https://meterbar.dev",
+                "https://github.com/VincentShipsIt/meterbar.dev",
+                "https://x.com/shipshitdev",
+            ]
+        )
+
+        let hostingView = NSHostingView(rootView: AboutSettingsView().frame(width: 720))
+        hostingView.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
+    }
 }

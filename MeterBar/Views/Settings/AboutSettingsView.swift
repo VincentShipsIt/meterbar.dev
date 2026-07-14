@@ -1,10 +1,38 @@
 import MeterBarShared
 import SwiftUI
 
-/// The "About" settings tab: version, software-update check, and website link.
+/// The "About" settings tab: version, software-update check, and project links.
 /// Extracted from the SettingsView monolith.
 struct AboutSettingsView: View {
+    struct LinkDestination: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let url: URL
+    }
+
     // MARK: Internal
+
+    static let links = [
+        LinkDestination(
+            id: "website",
+            title: "Website",
+            detail: "meterbar.dev",
+            url: destination("https://meterbar.dev")
+        ),
+        LinkDestination(
+            id: "github",
+            title: "GitHub Repository",
+            detail: "VincentShipsIt/meterbar.dev",
+            url: destination("https://github.com/VincentShipsIt/meterbar.dev")
+        ),
+        LinkDestination(
+            id: "x",
+            title: "X",
+            detail: "@shipshitdev",
+            url: destination("https://x.com/shipshitdev")
+        ),
+    ]
 
     var body: some View {
         SettingsPanelSection(title: "About MeterBar", systemImage: "info.circle", color: MeterBarTheme.appAccent) {
@@ -30,12 +58,13 @@ struct AboutSettingsView: View {
                 .disabled(!softwareUpdates.canCheckForUpdates)
             }
 
-            SettingsRowView(
-                title: "Website",
-                detail: "meterbar.dev"
-            ) {
-                Link("Open", destination: URL(string: "https://meterbar.dev")!)
+            SettingsDivider()
+
+            ForEach(Self.links) { link in
+                SettingsRowView(title: link.title, detail: link.detail) {
+                    Link("Open", destination: link.url)
                     .buttonStyle(.bordered)
+                }
             }
         }
         .onAppear { softwareUpdates.refreshState() }
@@ -44,6 +73,13 @@ struct AboutSettingsView: View {
     // MARK: Private
 
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared
+
+    private static func destination(_ value: String) -> URL {
+        guard let url = URL(string: value) else {
+            preconditionFailure("Invalid static About URL: \(value)")
+        }
+        return url
+    }
 
     private static var appVersionString: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"

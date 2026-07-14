@@ -45,6 +45,7 @@ final class UsageDashboardWindowController {
             // material and the detail's MeterBarDetailBackground bleed up under
             // the bar, so the chrome reads as one continuous surface.
             window.backgroundColor = .clear
+            window.isOpaque = false
             window.isRestorable = false
             window.contentMinSize = NSSize(width: 900, height: 600)
             window.contentViewController = hostingController

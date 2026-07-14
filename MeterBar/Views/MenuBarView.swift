@@ -426,10 +426,9 @@ struct PopoverOverviewPanel: View {
         ForEach(snapshots) { snapshot in
           ProviderStatusCard(
             snapshot: snapshot,
-            onHoverOpen: hoverProviderOverview.map { open in { open(snapshot) } }
-          ) {
-            openProviderOverview(snapshot)
-          }
+            onHoverOpen: hoverProviderOverview.map { open in { open(snapshot) } },
+            onSelect: { openProviderOverview(snapshot) }
+          )
           .reportPopoverCardFrame(id: snapshot.id)
           .transition(MeterBarTheme.Motion.popoverTile)
         }
@@ -549,6 +548,13 @@ struct ProviderStatusCard: View {
     snapshot.band?.shortLabel ?? "Offline"
   }
 
+  /// Exhausted cards are terminal summaries: their reset countdown is the only
+  /// actionable quota information, so no surface may open a redundant detail
+  /// view or show a disclosure affordance for them.
+  var allowsDetailNavigation: Bool {
+    onSelect != nil && !snapshot.hasExhaustedLimit
+  }
+
   var body: some View {
     Group {
       if showsResetCreditAction {
@@ -588,7 +594,7 @@ struct ProviderStatusCard: View {
   }
 
   @ViewBuilder private var selectableCard: some View {
-    if let onSelect {
+    if let onSelect, allowsDetailNavigation {
       Button(action: onSelect) {
         cardContent
       }
@@ -603,7 +609,7 @@ struct ProviderStatusCard: View {
   /// Chevron shown only when the card opens a detail panel, so "clickable" is
   /// visible instead of relying on an accessibilityHint alone.
   @ViewBuilder private var disclosureChevron: some View {
-    if onSelect != nil {
+    if allowsDetailNavigation {
       CardDisclosureChevron()
     }
   }
@@ -640,16 +646,7 @@ struct ProviderStatusCard: View {
   private var compactExhaustedCardWithAction: some View {
     DashboardTile(padding: 11, surface: .glass) {
       VStack(alignment: .leading, spacing: 8) {
-        if let onSelect {
-          Button(action: onSelect) {
-            compactExhaustedContent
-              .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .accessibilityHint("Open \(snapshot.title) provider details")
-        } else {
-          compactExhaustedContent
-        }
+        compactExhaustedContent
 
         Divider()
 
