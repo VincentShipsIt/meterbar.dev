@@ -335,7 +335,10 @@ private struct SettingsInputSurfaceModifier: ViewModifier {
         content
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, verticalPadding)
-            .frame(width: width)
+            // Leading, not centered: a read-only path (or any value shorter than
+            // the field) must hug the left edge like a real text input, not float
+            // in the middle of the field.
+            .frame(width: width, alignment: .leading)
             .background(.thinMaterial, in: roundedRectangle)
             .overlay {
                 roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)

@@ -113,8 +113,10 @@ struct GeneralSettingsView: View {
                     }
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.glass)
+                .help("Refresh now")
             }
         }
     }

@@ -16,6 +16,10 @@ struct ProviderSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // Compact segmented "pill", left-aligned — the same control style as
+            // the provider/mode pickers elsewhere (Session Wake), instead of a
+            // full-width bar that read as tabs. `fixedSize` stops the segmented
+            // control from stretching edge-to-edge.
             Picker("Provider", selection: $selectedProviderTab) {
                 ForEach(ServiceType.allCases) { service in
                     Text(service.displayName).tag(service)
@@ -23,6 +27,7 @@ struct ProviderSettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .fixedSize()
             .padding(.bottom, MeterBarTheme.Spacing.xs)
 
             providerSettingsPane(for: selectedProviderTab)
@@ -299,7 +304,7 @@ struct ProviderSettingsView: View {
                 HStack(spacing: 8) {
                     StatusPill(title: claudeCodeService.authState.statusText, isConnected: claudeCodeService.hasAccess)
 
-                    Button(claudeCodeService.hasAccess ? "Refresh" : "Check Again") {
+                    Button {
                         // checkAccess can hit the keychain (blocking approval
                         // dialog) — run it off the main actor.
                         Task {
@@ -309,8 +314,12 @@ struct ProviderSettingsView: View {
                                 await dataManager.refreshAll()
                             }
                         }
+                    } label: {
+                        Label(claudeCodeService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
+                    .help(claudeCodeService.hasAccess ? "Refresh" : "Check again")
                 }
             }
 
@@ -417,7 +426,7 @@ struct ProviderSettingsView: View {
                         isConnected: codexCliService.hasAccess
                     )
 
-                    Button(codexCliService.hasAccess ? "Refresh" : "Check Again") {
+                    Button {
                         // checkAccess does disk I/O — run it off the main actor
                         // (a plain Task would inherit MainActor and block the UI).
                         Task {
@@ -425,8 +434,12 @@ struct ProviderSettingsView: View {
                             await Task.detached(priority: .userInitiated) { service.checkAccess() }.value
                             await dataManager.refresh(service: .codexCli)
                         }
+                    } label: {
+                        Label(codexCliService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
+                    .help(codexCliService.hasAccess ? "Refresh" : "Check again")
                 }
             }
 
@@ -496,7 +509,7 @@ struct ProviderSettingsView: View {
                         isConnected: cursorService.hasAccess
                     )
 
-                    Button(cursorService.hasAccess ? "Refresh" : "Check Again") {
+                    Button {
                         // forceRescan walks the whole Cursor directory tree —
                         // the worst main-thread stall in the app; run detached.
                         Task {
@@ -508,8 +521,12 @@ struct ProviderSettingsView: View {
                                 await dataManager.refreshAll()
                             }
                         }
+                    } label: {
+                        Label(cursorService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
+                    .help(cursorService.hasAccess ? "Refresh" : "Check again")
                 }
             }
 
@@ -607,7 +624,7 @@ struct ProviderSettingsView: View {
                         isConnected: grokService.hasAccess
                     )
 
-                    Button(grokService.hasAccess ? "Refresh" : "Check Again") {
+                    Button {
                         Task {
                             let service = grokService
                             await Task.detached(priority: .userInitiated) {
@@ -617,8 +634,12 @@ struct ProviderSettingsView: View {
                                 await dataManager.refresh(service: .grok)
                             }
                         }
+                    } label: {
+                        Label(grokService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
+                    .help(grokService.hasAccess ? "Refresh" : "Check again")
 
                     Button("Install / Sign In") {
                         if let url = URL(string: "https://x.ai/cli") {

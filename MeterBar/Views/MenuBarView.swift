@@ -632,13 +632,13 @@ struct PopoverProviderStatusCard: View {
   }
 
   private var compactExhaustedCard: some View {
-    DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
+    DashboardTile(padding: 11, surface: .glass) {
       compactExhaustedContent
     }
   }
 
   private var compactExhaustedCardWithAction: some View {
-    DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
+    DashboardTile(padding: 11, surface: .glass) {
       VStack(alignment: .leading, spacing: 8) {
         if let onSelect {
           Button(action: onSelect) {
@@ -729,7 +729,6 @@ struct PopoverProviderStatusCard: View {
   private var expandedCard: some View {
     DashboardTile(
       padding: 11,
-      minHeight: 124,
       surface: .glass
     ) {
       VStack(alignment: .leading, spacing: 10) {
@@ -758,7 +757,7 @@ struct PopoverProviderStatusCard: View {
           Text(snapshot.emptyDetail)
             .font(.caption)
             .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
           VStack(alignment: .leading, spacing: 9) {
             ForEach(snapshot.limits) { limit in
