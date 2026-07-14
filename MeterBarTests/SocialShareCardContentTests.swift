@@ -1,68 +1,71 @@
-import AppKit
-@testable import MeterBar
-import SwiftUI
 import XCTest
+@testable import MeterBar
 
 final class SocialShareCardContentTests: XCTestCase {
-    func testPublicInstallMetadataMatchesReadme() {
+    func testPublicWebsiteMetadataMatchesReadme() {
         XCTAssertEqual(SocialShareCardContent.websiteURL, "https://meterbar.dev")
         XCTAssertEqual(SocialShareCardContent.websiteDisplay, "meterbar.dev")
-        XCTAssertEqual(
-            SocialShareCardContent.installCommand,
-            "brew tap VincentShipsIt/tap && brew install --cask VincentShipsIt/tap/meterbar"
-        )
     }
 
-    func testTweetTextIncludesWebsiteAndInstallCommand() {
+    func testShareCaptionSharesUsageWithoutInstallPitch() {
         let content = SocialShareCardContent(
             tokenTotal: 1_234_567,
-            estimatedCostUSD: 12.34,
-            sourceCount: 2,
+            sessionCount: 42,
             providerNames: ["OpenAI Codex", "Claude Code"],
-            tightestLimitTitle: "Weekly",
-            tightestPercentLeft: 7,
+            topProviderName: "Claude Code",
             dailyTokenTotals: [1, 2, 3],
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
-        XCTAssertTrue(content.tweetText.contains("1.2M tokens"))
-        XCTAssertTrue(content.tweetText.contains(SocialShareCardContent.websiteURL))
-        XCTAssertTrue(content.tweetText.contains(SocialShareCardContent.installCommand))
+        XCTAssertTrue(content.shareCaption.contains("1,234,567 tokens"))
+        XCTAssertTrue(content.shareCaption.contains("42 sessions"))
+        XCTAssertTrue(content.shareCaption.contains("POWER USER"))
+        XCTAssertTrue(content.shareCaption.contains(SocialShareCardContent.websiteURL))
+        XCTAssertFalse(content.shareCaption.contains("brew install"))
     }
 
     func testShareCardLabelsHandleMissingUsage() {
         let content = SocialShareCardContent(
             tokenTotal: nil,
-            estimatedCostUSD: nil,
-            sourceCount: 0,
+            sessionCount: nil,
             providerNames: [],
-            tightestLimitTitle: nil,
-            tightestPercentLeft: nil,
+            topProviderName: nil,
             dailyTokenTotals: [],
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
-        XCTAssertEqual(content.tokenHeroValue, "Scan needed")
-        XCTAssertEqual(content.tokenHeroCaption, "30-day token history pending")
-        XCTAssertEqual(content.costLabel, "API-rate estimate pending")
-        XCTAssertEqual(content.sourceLabel, "0 sources")
-        XCTAssertEqual(content.providerLine, "Claude Code / Codex / Cursor")
-        XCTAssertEqual(content.quotaLine, "Quota window waiting for refresh")
+        XCTAssertEqual(content.tokenHeroValue, "SCAN ME")
+        XCTAssertEqual(content.tokenHeroCaption, "your 30-day receipts are hiding")
+        XCTAssertEqual(content.sessionLabel, "Scan pending")
+        XCTAssertEqual(content.averageTokensPerSession, "—")
+        XCTAssertEqual(content.activeDaysLabel, "0/30")
+        XCTAssertEqual(content.topProviderLabel, "Scan pending")
+        XCTAssertEqual(content.usageTier.title, "NO RECEIPTS YET")
     }
 
-    func testQuotaLineCallsOutMaxedLimit() {
+    func testSessionStatsUseTrackedTotals() {
         let content = SocialShareCardContent(
-            tokenTotal: 42,
-            estimatedCostUSD: 0.01,
-            sourceCount: 1,
-            providerNames: ["Claude Code"],
-            tightestLimitTitle: "Session",
-            tightestPercentLeft: 0,
-            dailyTokenTotals: [],
+            tokenTotal: 2_400_000,
+            sessionCount: 24,
+            providerNames: ["Codex", "Claude", "Codex", " "],
+            topProviderName: " Claude ",
+            dailyTokenTotals: [0, 100, 200, 0, 300],
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
-        XCTAssertEqual(content.quotaLine, "Session is maxed until reset")
+        XCTAssertEqual(content.providerNames, ["Codex", "Claude"])
+        XCTAssertEqual(content.sessionLabel, "24 sessions")
+        XCTAssertEqual(content.averageTokensPerSession, "100.0K")
+        XCTAssertEqual(content.activeDaysLabel, "3/30")
+        XCTAssertEqual(content.topProviderLabel, "Claude")
+    }
+
+    func testUsageTiersCoverLowTopAndMaxxingUsers() {
+        XCTAssertEqual(SocialShareUsageTier.classify(tokenTotal: 99_999).title, "NOT BURNING ENOUGH")
+        XCTAssertEqual(SocialShareUsageTier.classify(tokenTotal: 999_999).title, "WARMING UP")
+        XCTAssertEqual(SocialShareUsageTier.classify(tokenTotal: 9_999_999).title, "POWER USER")
+        XCTAssertEqual(SocialShareUsageTier.classify(tokenTotal: 49_999_999).title, "TOP USER ENERGY")
+        XCTAssertEqual(SocialShareUsageTier.classify(tokenTotal: 50_000_000).title, "TOKEN MAXXER")
     }
 
     func testDailyTokenTotalsBuildsStableWindow() {
@@ -102,68 +105,17 @@ final class SocialShareCardContentTests: XCTestCase {
         )
     }
 
-    func testHasDailyChartDataReflectsRealTotalsNotFabricatedBars() {
-        // The share chart used to substitute a hardcoded [4,7,5,...] array when
-        // no scan had run. It no longer does — the honest signal is
-        // `hasDailyChartData`, which is false unless a real total is present.
-        let noHistory = makeContent(dailyTokenTotals: [])
-        XCTAssertFalse(noHistory.hasDailyChartData)
-
-        let allZero = makeContent(dailyTokenTotals: [0, 0, 0, 0])
-        XCTAssertFalse(allZero.hasDailyChartData)
-
-        let withUsage = makeContent(dailyTokenTotals: [0, 0, 3, 0])
-        XCTAssertTrue(withUsage.hasDailyChartData)
-    }
-
-    @MainActor
-    func testShareCardRendersHonestEmptyStateWhenNoScan() {
-        let content = makeContent(tokenTotal: nil, dailyTokenTotals: [])
-        XCTAssertFalse(content.hasDailyChartData)
-
-        // The card must still render its fixed export geometry with no real data,
-        // falling back to the "scan needed" placeholder rather than fake bars.
-        let host = NSHostingView(
-            rootView: SocialShareCard(content: content)
-                .frame(width: 1_200, height: 675)
-        )
-        host.layoutSubtreeIfNeeded()
-        XCTAssertGreaterThan(host.fittingSize.width, 0)
-        XCTAssertGreaterThan(host.fittingSize.height, 0)
-    }
-
-    func testDefaultFilenameUsesGeneratedTimestamp() {
+    func testDefaultFilenameUsesGeneratedTimestampAndKeepsThirtyDays() {
         let content = SocialShareCardContent(
             tokenTotal: 1,
-            estimatedCostUSD: nil,
-            sourceCount: 1,
-            providerNames: ["Codex", "Codex", " "],
-            tightestLimitTitle: nil,
-            tightestPercentLeft: nil,
+            sessionCount: 1,
+            providerNames: ["Codex"],
+            topProviderName: "Codex",
             dailyTokenTotals: Array(0 ..< 40),
             generatedAt: Date(timeIntervalSince1970: 3600)
         )
 
-        XCTAssertEqual(content.providerNames, ["Codex"])
         XCTAssertEqual(content.dailyTokenTotals.count, 30)
         XCTAssertEqual(content.defaultFilename, "meterbar-token-card-19700101-010000.png")
-    }
-
-    // MARK: Private
-
-    private func makeContent(
-        tokenTotal: Int? = 1_000,
-        dailyTokenTotals: [Int]
-    ) -> SocialShareCardContent {
-        SocialShareCardContent(
-            tokenTotal: tokenTotal,
-            estimatedCostUSD: nil,
-            sourceCount: 1,
-            providerNames: ["Claude Code"],
-            tightestLimitTitle: nil,
-            tightestPercentLeft: nil,
-            dailyTokenTotals: dailyTokenTotals,
-            generatedAt: Date(timeIntervalSince1970: 0)
-        )
     }
 }
