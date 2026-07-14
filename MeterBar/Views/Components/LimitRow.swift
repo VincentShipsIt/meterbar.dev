@@ -80,8 +80,7 @@ struct LimitRow: View {
             .foregroundColor(.secondary)
     }
 
-    @ViewBuilder
-    private var footer: some View {
+    @ViewBuilder private var footer: some View {
         switch density.footerStyle {
         case .resetOnly:
             if content.showsReset {

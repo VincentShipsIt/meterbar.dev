@@ -186,7 +186,10 @@ struct ApiUsageCard: View {
         }
 
         detail
-          .animation(MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion), value: phase)
+          .animation(
+            MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+            value: phase
+          )
       }
     }
   }

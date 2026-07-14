@@ -336,7 +336,10 @@ struct PopoverOverviewPanel: View {
         }
       }
     }
-    .animation(MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion), value: structuralKey)
+    .animation(
+      MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+      value: structuralKey
+    )
     .task {
       await loadSetupReports()
     }

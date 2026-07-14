@@ -347,7 +347,10 @@ extension View {
   /// transition. Collapses to an instant update under Reduce Motion.
   func numericRefreshTransition(value: some Equatable, reduceMotion: Bool) -> some View {
     contentTransition(.numericText())
-      .animation(MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standardCurve, reduceMotion: reduceMotion), value: value)
+      .animation(
+        MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standardCurve, reduceMotion: reduceMotion),
+        value: value
+      )
   }
 }
 

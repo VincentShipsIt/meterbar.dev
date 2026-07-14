@@ -49,7 +49,10 @@ struct CostOverviewStatusCard: View {
         }
 
         heroValue
-          .animation(MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion), value: phase)
+          .animation(
+            MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+            value: phase
+          )
 
         VStack(spacing: 7) {
           HStack {

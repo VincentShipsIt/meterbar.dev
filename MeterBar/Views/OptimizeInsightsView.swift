@@ -41,7 +41,10 @@ struct OptimizeInsightsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       phaseContent
-        .animation(MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion), value: phase)
+        .animation(
+          MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
+          value: phase
+        )
     }
   }
 

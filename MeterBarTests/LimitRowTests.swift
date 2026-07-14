@@ -102,7 +102,8 @@ final class LimitRowTests: XCTestCase {
             let host = NSHostingView(rootView: row.frame(width: 320))
             host.layoutSubtreeIfNeeded()
             XCTAssertGreaterThan(
-                host.fittingSize.height, 0,
+                host.fittingSize.height,
+                0,
                 "LimitRow(\(density)) should produce a non-zero layout"
             )
         }
@@ -142,7 +143,8 @@ final class PopoverProviderStatusCardSmokeTests: XCTestCase {
             ],
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
-            resetCreditsAvailable: nil
+            resetCreditsAvailable: nil,
+            accountID: nil
         )
     }
 
