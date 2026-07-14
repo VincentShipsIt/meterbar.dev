@@ -520,7 +520,7 @@ struct PopoverProviderStatusCard: View {
         } else {
           VStack(alignment: .leading, spacing: 9) {
             ForEach(snapshot.limits) { limit in
-              PopoverLimitRow(limit: limit, accentColor: snapshot.accentColor)
+              LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .compact)
             }
           }
         }
@@ -536,54 +536,6 @@ struct PopoverProviderStatusCard: View {
   private var updatedText: String {
     guard let updatedAt = snapshot.updatedAt else { return "No data" }
     return "Updated \(UsageFormat.relative(updatedAt))"
-  }
-}
-
-private struct PopoverLimitRow: View {
-  let limit: SnapshotLimit
-  let accentColor: Color
-
-  private var isOut: Bool {
-    limit.percentLeft <= 0
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 4) {
-        Text(limit.title)
-          .font(.caption2)
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-        if limit.usageLimit.isEstimated {
-          Text("Estimated")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundColor(.secondary)
-        }
-        Spacer(minLength: 4)
-        Text(isOut && !limit.usageLimit.isEstimated ? "Out" : limit.usageLimit.percentLeftText)
-          .font(.caption)
-          .fontWeight(.semibold)
-          .foregroundColor(isOut ? MeterBarTheme.danger : .primary)
-          .lineLimit(1)
-      }
-
-      UsageBar(
-        usedPercentage: limit.usedPercent,
-        accentColor: accentColor,
-        pace: limit.usageLimit.isEstimated ? nil : limit.usageLimit.pace(),
-        paceContext: limit.paceContext
-      )
-
-      if limit.usageLimit.resetTime != nil {
-        ResetCountdownLabel(
-          title: limit.title,
-          limit: limit.usageLimit,
-          font: .caption2,
-          foregroundColor: .secondary,
-          iconSize: 9
-        )
-      }
-    }
   }
 }
 
