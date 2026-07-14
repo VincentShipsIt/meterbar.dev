@@ -1467,6 +1467,10 @@ struct SettingsRowView<Content: View>: View {
                 }
             }
             .frame(width: SettingsRowViewMetrics.labelWidth, alignment: .leading)
+            // Read the title and its explanatory detail as one VoiceOver element
+            // rather than two adjacent fragments. The trailing control stays a
+            // separate focusable element so its own label/actuation are intact.
+            .accessibilityElement(children: .combine)
 
             content
                 .frame(maxWidth: .infinity, alignment: .trailing)

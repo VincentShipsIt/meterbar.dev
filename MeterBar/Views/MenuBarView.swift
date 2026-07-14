@@ -148,18 +148,23 @@ struct MenuBarView: View {
           Button(action: openDashboard) {
             Image(systemName: MenuBarOverlayIcons.dashboard)
               .font(.system(size: 12, weight: .semibold))
+              .accessibilityHidden(true)
           }
           .meterBarGlassIconButton()
           .help("Open Usage Dashboard")
+          .accessibilityLabel("Open Dashboard")
 
           Button {
             Task { await dataManager.refreshAll() }
           } label: {
             RefreshingIcon(isRefreshing: dataManager.isLoading)
               .font(.system(size: 12, weight: .semibold))
+              .accessibilityHidden(true)
           }
           .meterBarGlassIconButton()
           .help(dataManager.isLoading ? "Refreshing usage" : "Refresh usage")
+          .accessibilityLabel("Refresh")
+          .accessibilityValue(dataManager.isLoading ? "Refreshing" : "")
           .disabled(dataManager.isLoading)
         }
       }
@@ -313,6 +318,7 @@ struct PopoverOverviewPanel: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.secondary)
                 .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
 
               VStack(alignment: .leading, spacing: 2) {
                 Text("No sources enabled")
@@ -717,6 +723,9 @@ struct PopoverProviderStatusCard: View {
       }
       isConsumingResetCredit = false
     }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(limit.accessibilityLabel)
+    .accessibilityValue(limit.accessibilityValue)
   }
 }
 

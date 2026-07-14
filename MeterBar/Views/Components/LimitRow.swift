@@ -45,6 +45,11 @@ struct LimitRow: View {
             )
             footer
         }
+        // One combined VoiceOver element per limit row across all three
+        // surfaces, via the shared SnapshotLimit accessibility helpers.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(limit.accessibilityLabel)
+        .accessibilityValue(limit.accessibilityValue)
     }
 
     private var header: some View {

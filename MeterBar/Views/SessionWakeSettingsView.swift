@@ -65,7 +65,7 @@ struct SessionWakeSettingsView: View {
                     ? "Choose a wake account above to enable Session Wake."
                     : "Automatically resume blocked Claude Code sessions after a limit resets."
             ) {
-                Toggle("", isOn: onBinding)
+                Toggle("Session Wake", isOn: onBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .disabled(!store.canTurnOn && !store.isOn)
@@ -96,7 +96,7 @@ struct SessionWakeSettingsView: View {
     private var accountSection: some View {
         SettingsPanelSection(title: "Wake account", systemImage: "person.crop.circle", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Account") {
-                Picker("", selection: accountBinding) {
+                Picker("Wake account", selection: accountBinding) {
                     Text("None selected").tag(UUID?.none)
                     ForEach(accounts.enabledAccounts) { account in
                         Text(account.name).tag(UUID?.some(account.id))
@@ -152,20 +152,22 @@ struct SessionWakeSettingsView: View {
         SettingsPanelSection(title: "Limits", systemImage: "slider.horizontal.3", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Max sessions per run", detail: "\(store.maxSessionsPerRun)") {
                 Stepper(
-                    "",
+                    "Max sessions per run",
                     value: binding(store.maxSessionsPerRun, store.setMaxSessionsPerRun),
                     in: WakeBounds.sessionsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxSessionsPerRun)")
             }
 
             SettingsRowView(title: "Max turns per session", detail: "\(store.maxTurns)") {
                 Stepper(
-                    "",
+                    "Max turns per session",
                     value: binding(store.maxTurns, store.setMaxTurns),
                     in: WakeBounds.maxTurnsRange
                 )
                 .labelsHidden()
+                .accessibilityValue("\(store.maxTurns)")
             }
 
             SettingsRowView(title: "Resume prompt") {
@@ -179,7 +181,7 @@ struct SessionWakeSettingsView: View {
     private var permissionSection: some View {
         SettingsPanelSection(title: "Permissions", systemImage: "lock.shield", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Permission mode") {
-                Picker("", selection: binding(store.permissionMode, store.setPermissionMode)) {
+                Picker("Permission mode", selection: binding(store.permissionMode, store.setPermissionMode)) {
                     Text("Safe").tag(WakePermissionMode.safe)
                     Text("Bypass").tag(WakePermissionMode.bypass)
                 }
@@ -193,7 +195,7 @@ struct SessionWakeSettingsView: View {
                     title: "Acknowledge risk",
                     detail: "Bypassing permission prompts lets resumed sessions run without confirmation."
                 ) {
-                    Toggle("", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
+                    Toggle("Acknowledge risk", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
@@ -207,7 +209,7 @@ struct SessionWakeSettingsView: View {
                 title: "Notify when a run completes",
                 detail: "Post a notification after Session Wake finishes resuming sessions."
             ) {
-                Toggle("", isOn: $store.notifyOnCompletion)
+                Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
                     .labelsHidden()
                     .toggleStyle(.switch)
             }

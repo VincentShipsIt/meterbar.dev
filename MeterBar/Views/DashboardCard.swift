@@ -225,5 +225,8 @@ struct DashboardMetricTile: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(title)
+    .accessibilityValue("\(value), \(caption)")
   }
 }

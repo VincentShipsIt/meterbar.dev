@@ -338,10 +338,15 @@ struct PopoverProviderStatusSummaryCard: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Provider Status")
+        .accessibilityValue(summaryText)
+        .accessibilityHint("Show provider status details")
         .task {
             await statusMonitor.refreshAllIfNeeded()
         }
