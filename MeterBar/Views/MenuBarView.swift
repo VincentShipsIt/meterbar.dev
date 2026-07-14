@@ -36,7 +36,7 @@ struct MenuBarView: View {
   var body: some View {
     mainColumn
     .frame(width: popoverWidth, height: popoverHeight)
-    .background(MeterBarCompanionSurface(radius: MeterBarTheme.companionShellRadius))
+    .background(MeterBarTheme.Surface.chrome(radius: MeterBarTheme.companionShellRadius))
     .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.companionShellRadius, style: .continuous))
     .background(
       MeterBarMenuWindowAccessor { window in

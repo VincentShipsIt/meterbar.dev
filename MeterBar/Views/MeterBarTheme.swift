@@ -12,6 +12,55 @@ enum MeterBarTheme {
   /// Matches MacSweep's companion popover and detail-panel shell radius.
   static let companionShellRadius: CGFloat = 16
 
+  // MARK: - Surface vocabulary (the two-layer material system)
+
+  /// MeterBar's surface tokens, codifying Apple's intended two-layer model.
+  ///
+  /// **Layer 1 — CHROME (glass).** Window and panel shells, headers, floating
+  /// controls, and badges that *overlay* content. Rendered with Liquid Glass
+  /// (`.glassEffect`) via ``MeterBarCompanionSurface`` and, for detail panes,
+  /// ``MeterBarDetailBackground``. Glass belongs to structure that floats above
+  /// content — it is deliberately **never** used as a content-card fill (more
+  /// glass is not the goal; consistency is). Under Reduce Transparency both
+  /// collapse to ``chromeOpaqueFallback`` — good citizenship, preserved.
+  ///
+  /// **Layer 2 — CONTENT (flat, opaque).** The calm semantic fills that content
+  /// sits on. ``content`` is the *single* fill for every dashboard, settings,
+  /// and popover card. ``inset`` is a row nested one step inside a content
+  /// card. Both are already opaque, so Reduce Transparency leaves them intact.
+  ///
+  /// The existing "glass shell containing flat-fill cards" structure is the
+  /// correct Apple pattern; these tokens make it deliberate rather than
+  /// accidental. Radius / spacing / opacity tokens are a separate concern and
+  /// intentionally live elsewhere — this enum is fills only.
+  enum Surface {
+    /// **Layer 1 — chrome.** The Liquid Glass surface (tinted with
+    /// ``MeterBarTheme/companionTint``). Use for window / panel shells,
+    /// headers, and floating overlays — never for a content card. Preferred
+    /// over constructing ``MeterBarCompanionSurface`` directly so the
+    /// vocabulary stays the single entry point.
+    static func chrome(
+      radius: CGFloat = MeterBarTheme.companionShellRadius
+    ) -> MeterBarCompanionSurface {
+      MeterBarCompanionSurface(radius: radius)
+    }
+
+    /// **Layer 1 — chrome fallback.** The opaque fill glass collapses to under
+    /// Reduce Transparency. Named so the fallback is deliberate and testable;
+    /// consumed by ``MeterBarDetailBackground``.
+    static let chromeOpaqueFallback = Color(nsColor: .windowBackgroundColor)
+
+    /// **Layer 2 — content.** The single content-card fill. Every card sits on
+    /// this one calm, opaque, appearance-adaptive semantic color. Applied via
+    /// ``SwiftUI/View/meterBarCardSurface(cornerRadius:)`` — the one source of
+    /// truth for card fills.
+    static let content = Color(nsColor: .controlBackgroundColor)
+
+    /// **Layer 2 — inset.** A row nested inside a ``content`` card, one step
+    /// recessed. Use for grouped rows *within* a card, not for the card itself.
+    static let inset = Color(nsColor: .windowBackgroundColor)
+  }
+
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
   static let codexAccent = Color.adaptive(
@@ -113,7 +162,7 @@ struct MeterBarDetailBackground: View {
   var body: some View {
     ZStack {
       if reduceTransparency {
-        Color(nsColor: .windowBackgroundColor)
+        MeterBarTheme.Surface.chromeOpaqueFallback
       } else {
         Color.clear
           .background(.regularMaterial)
@@ -165,8 +214,11 @@ private struct MeterBarCardSurfaceModifier: ViewModifier {
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
+    // Every flat content card funnels through here, so pointing this one
+    // modifier at `Surface.content` collapses all card fills onto a single
+    // source of truth (behavior-preserving — same semantic color).
     content
-      .background(Color(nsColor: .controlBackgroundColor), in: shape)
+      .background(MeterBarTheme.Surface.content, in: shape)
   }
 }
 

@@ -141,7 +141,7 @@ struct MenuBarProviderDetailContent: View {
     }
     .padding(14)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(MeterBarCompanionSurface(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
+    .background(MeterBarTheme.Surface.chrome(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
     .clipShape(
       RoundedRectangle(
         cornerRadius: MeterBarMenuDetailPanelLayout.cornerRadius,
