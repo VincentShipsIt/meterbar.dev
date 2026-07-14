@@ -17,6 +17,9 @@ final class SessionWakeControllerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(
+            at: FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName ?? "")-watcher.lock")
+        )
     }
 
     private func pump(_ seconds: TimeInterval = 0.1) {
@@ -39,6 +42,12 @@ final class SessionWakeControllerTests: XCTestCase {
         return store
     }
 
+    private func lifetimeLockFactory() -> @Sendable () -> WakeLock {
+        let lockURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName ?? UUID().uuidString)-watcher.lock")
+        return { WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app) }
+    }
+
     func testWatcherReArmsOnLaunchWhenToggleWasLeftOn() {
         let store = armedStore()
         XCTAssertTrue(store.isOn)
@@ -49,7 +58,8 @@ final class SessionWakeControllerTests: XCTestCase {
             status: SessionWakeStatus(),
             accounts: ClaudeCodeAccountStore(userDefaults: defaults),
             rescanInterval: 3_600,
-            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
         )
 
         controller.activate() // initial reconcile re-arms
@@ -66,7 +76,8 @@ final class SessionWakeControllerTests: XCTestCase {
             status: SessionWakeStatus(),
             accounts: ClaudeCodeAccountStore(userDefaults: defaults),
             rescanInterval: 3_600,
-            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
         )
         controller.activate()
         XCTAssertTrue(controller.isWatching)
@@ -100,7 +111,8 @@ final class SessionWakeControllerTests: XCTestCase {
             status: SessionWakeStatus(),
             accounts: accounts,
             rescanInterval: 3_600,
-            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
         )
         controller.activate()
         XCTAssertTrue(controller.isWatching)
@@ -127,7 +139,8 @@ final class SessionWakeControllerTests: XCTestCase {
             status: SessionWakeStatus(),
             accounts: accounts,
             rescanInterval: 3_600,
-            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
         )
         controller.activate()
         poll { recorder.startCount >= 1 }
@@ -150,11 +163,48 @@ final class SessionWakeControllerTests: XCTestCase {
             status: SessionWakeStatus(),
             accounts: ClaudeCodeAccountStore(userDefaults: defaults),
             rescanInterval: 3_600,
-            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
         )
         controller.activate()
         XCTAssertFalse(controller.isWatching)
         XCTAssertEqual(recorder.startCount, 0)
+    }
+
+    func testReleaseBundleHandsWatchingToManagedAgentAndDisarmUnregisters() {
+        let store = armedStore()
+        let recorder = WatchRecorder()
+        let fakeAgent = FakeSessionWakeAgent()
+        let agentSuite = "SessionWakeControllerAgent-\(UUID().uuidString)"
+        let agentDefaults = UserDefaults(suiteName: agentSuite)
+        guard let agentDefaults else { return XCTFail("agent defaults should be available") }
+        defer { agentDefaults.removePersistentDomain(forName: agentSuite) }
+        let agentState = SessionWakeAgentStateStore(userDefaults: agentDefaults)
+        agentState.saveStatus(.init(state: .idle))
+        let sessionStatus = SessionWakeStatus()
+        let controller = SessionWakeController(
+            store: store,
+            status: sessionStatus,
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            agent: fakeAgent,
+            agentStateStore: agentState,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+
+        controller.activate()
+
+        XCTAssertEqual(fakeAgent.registerCount, 1)
+        XCTAssertEqual(recorder.startCount, 0, "managed bundles must not start a second in-app watcher")
+        XCTAssertEqual(sessionStatus.backgroundExecution, .active)
+        XCTAssertTrue(agentState.loadConfiguration()?.canRun == true)
+
+        store.setOn(false)
+        pump()
+
+        XCTAssertEqual(fakeAgent.unregisterCount, 1)
+        XCTAssertFalse(agentState.loadConfiguration()?.isArmed ?? true)
     }
 }
 
@@ -191,5 +241,24 @@ nonisolated private struct FakeWatcher: WakeWatching {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+    }
+}
+
+private final class FakeSessionWakeAgent: SessionWakeAgentControlling {
+    var isAvailable = true
+    private(set) var status: SessionWakeAgentRegistrationStatus = .notRegistered
+    private(set) var registerCount = 0
+    private(set) var unregisterCount = 0
+
+    func currentStatus() -> SessionWakeAgentRegistrationStatus { status }
+
+    func register() throws {
+        registerCount += 1
+        status = .enabled
+    }
+
+    func unregister() throws {
+        unregisterCount += 1
+        status = .notRegistered
     }
 }

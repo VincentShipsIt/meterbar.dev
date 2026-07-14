@@ -1,5 +1,7 @@
-import XCTest
+import AppKit
 @testable import MeterBar
+import SwiftUI
+import XCTest
 
 final class SocialShareCardContentTests: XCTestCase {
     func testPublicInstallMetadataMatchesReadme() {
@@ -100,6 +102,36 @@ final class SocialShareCardContentTests: XCTestCase {
         )
     }
 
+    func testHasDailyChartDataReflectsRealTotalsNotFabricatedBars() {
+        // The share chart used to substitute a hardcoded [4,7,5,...] array when
+        // no scan had run. It no longer does — the honest signal is
+        // `hasDailyChartData`, which is false unless a real total is present.
+        let noHistory = makeContent(dailyTokenTotals: [])
+        XCTAssertFalse(noHistory.hasDailyChartData)
+
+        let allZero = makeContent(dailyTokenTotals: [0, 0, 0, 0])
+        XCTAssertFalse(allZero.hasDailyChartData)
+
+        let withUsage = makeContent(dailyTokenTotals: [0, 0, 3, 0])
+        XCTAssertTrue(withUsage.hasDailyChartData)
+    }
+
+    @MainActor
+    func testShareCardRendersHonestEmptyStateWhenNoScan() {
+        let content = makeContent(tokenTotal: nil, dailyTokenTotals: [])
+        XCTAssertFalse(content.hasDailyChartData)
+
+        // The card must still render its fixed export geometry with no real data,
+        // falling back to the "scan needed" placeholder rather than fake bars.
+        let host = NSHostingView(
+            rootView: SocialShareCard(content: content)
+                .frame(width: 1_200, height: 675)
+        )
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.width, 0)
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
+    }
+
     func testDefaultFilenameUsesGeneratedTimestamp() {
         let content = SocialShareCardContent(
             tokenTotal: 1,
@@ -115,5 +147,23 @@ final class SocialShareCardContentTests: XCTestCase {
         XCTAssertEqual(content.providerNames, ["Codex"])
         XCTAssertEqual(content.dailyTokenTotals.count, 30)
         XCTAssertEqual(content.defaultFilename, "meterbar-token-card-19700101-010000.png")
+    }
+
+    // MARK: Private
+
+    private func makeContent(
+        tokenTotal: Int? = 1_000,
+        dailyTokenTotals: [Int]
+    ) -> SocialShareCardContent {
+        SocialShareCardContent(
+            tokenTotal: tokenTotal,
+            estimatedCostUSD: nil,
+            sourceCount: 1,
+            providerNames: ["Claude Code"],
+            tightestLimitTitle: nil,
+            tightestPercentLeft: nil,
+            dailyTokenTotals: dailyTokenTotals,
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
     }
 }

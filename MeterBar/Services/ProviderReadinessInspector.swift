@@ -32,7 +32,8 @@ nonisolated public enum ProviderReadinessInspector {
             claudeReport: { claudeReport(refreshError: $0, now: $1) },
             codexReport: { codexReport(refreshError: $0, now: $1) },
             cursorReport: { cursorReport(refreshError: $0, now: $1) },
-            openRouterReport: { error, _ in openRouterReport(refreshError: error) }
+            openRouterReport: { error, _ in openRouterReport(refreshError: error) },
+            grokReport: { error, _ in grokReport(refreshError: error) }
         )
         let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
         return baseReports.map { report in
@@ -55,6 +56,9 @@ nonisolated public enum ProviderReadinessInspector {
         cursorReport: (ServiceError?, Date) -> ProviderReadiness,
         openRouterReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
             ProviderReadinessInspector.openRouterReport(refreshError: error)
+        },
+        grokReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
+            ProviderReadinessInspector.grokReport(refreshError: error)
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.compactMap { provider in
@@ -68,6 +72,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return cursorReport(refreshErrors[provider], now)
             case .openRouter:
                 return openRouterReport(refreshErrors[provider], now)
+            case .grok:
+                return grokReport(refreshErrors[provider], now)
             }
         }
     }
@@ -159,6 +165,20 @@ nonisolated public enum ProviderReadinessInspector {
         ProviderReadinessEvaluator.openRouter(
             OpenRouterReadinessInput(
                 hasAPIKey: hasAPIKey(),
+                refreshError: sanitize(refreshError)
+            )
+        )
+    }
+
+    static func grokReport(refreshError: ServiceError? = nil) -> ProviderReadiness {
+        let fileManager = FileManager.default
+        let authPath = GrokCLIUsageService.authFilePath()
+        let authExists = fileManager.fileExists(atPath: authPath)
+        return ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(
+                isCLIInstalled: CLIBinaryLocator.isAvailable(command: "grok", overrideEnvVar: "GROK_CLI_PATH"),
+                authFileExists: authExists,
+                authFileReadable: authExists && fileManager.isReadableFile(atPath: authPath),
                 refreshError: sanitize(refreshError)
             )
         )

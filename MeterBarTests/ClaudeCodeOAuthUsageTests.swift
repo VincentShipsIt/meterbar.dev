@@ -60,6 +60,23 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(account: custom, oauthEnabled: false))
     }
 
+    // MARK: - Pure OAuth fetch (side-effect-free)
+
+    func testOAuthFetchThrowsInvalidURLForEmptyEndpoint() async {
+        // The pure fetch validates the endpoint before touching the network, so
+        // this exercises it without a request. It also proves the fetch is a
+        // plain `static` callable from a nonisolated (background) context — the
+        // property the session-wake path depends on.
+        do {
+            _ = try await ClaudeCodeLocalService.fetchOAuthMetrics(token: "token", endpoint: "")
+            XCTFail("An empty endpoint must throw before any network call")
+        } catch ServiceError.invalidURL {
+            // expected
+        } catch {
+            XCTFail("Expected ServiceError.invalidURL, got \(error)")
+        }
+    }
+
     // MARK: - Enabled-by-default flag
 
     func testOAuthUsageEnabledDefaultsTrueWhenUnset() throws {

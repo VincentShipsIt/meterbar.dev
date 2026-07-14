@@ -3,7 +3,7 @@ import XCTest
 @testable import MeterBar
 
 final class ProviderVisibilityStoreTests: XCTestCase {
-    func testOpenRouterRequiresExplicitOptInAndPersistsEnablement() {
+    func testOptInProvidersRequireExplicitEnablementAndPersistIt() {
         let suiteName = "ProviderVisibilityStoreTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             return XCTFail("Could not create isolated defaults")
@@ -12,11 +12,14 @@ final class ProviderVisibilityStoreTests: XCTestCase {
 
         let initial = ProviderVisibilityStore(userDefaults: defaults)
         XCTAssertFalse(initial.isEnabled(.openRouter))
+        XCTAssertFalse(initial.isEnabled(.grok))
         XCTAssertTrue(initial.isEnabled(.claudeCode))
 
         initial.set(.openRouter, isEnabled: true)
+        initial.set(.grok, isEnabled: true)
         let reloaded = ProviderVisibilityStore(userDefaults: defaults)
 
         XCTAssertTrue(reloaded.isEnabled(.openRouter))
+        XCTAssertTrue(reloaded.isEnabled(.grok))
     }
 }

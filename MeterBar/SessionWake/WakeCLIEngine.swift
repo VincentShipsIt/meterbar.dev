@@ -85,11 +85,11 @@ struct WakeCLIEngine {
 
         // Pre-flight probe only: detect a legacy watcher / another live holder
         // for a distinct, actionable message before the quota fetch — then
-        // release at once. The per-run runner takes the shared lock when a
-        // launch is actually ready (matching the app watcher, where the runner,
-        // not the coordinator, owns the lock). Holding this engine lock across
-        // resume() would self-contend: flock via a second descriptor in the
-        // same process is denied on macOS, so every real resume would fail.
+        // release at once. A managed app/agent watcher holds this lock for its
+        // whole lifetime, so this probe excludes one-shot CLI work. If no
+        // watcher owns it, the per-run runner takes the lock when launch-ready.
+        // Holding this engine instance across resume() would self-contend via
+        // the runner's second descriptor, so the probe is released first.
         switch lock.acquire() {
         case .acquired:
             lock.release()

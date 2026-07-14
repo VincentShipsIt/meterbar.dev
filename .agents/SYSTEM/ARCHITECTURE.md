@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-09 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-14 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -14,9 +14,10 @@ Providers tracked:
 | Provider | `ServiceType` case | Data source |
 |---|---|---|
 | Claude Code | `.claudeCode` | Default account: calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint with the `Claude Code-credentials` Keychain OAuth token (primary; on by default via the `ClaudeCodeEnableOAuthFallback` flag). Falls back to shelling out to `claude /usage` and regex-parsing terminal output when no token is available. Custom (`CLAUDE_CONFIG_DIR`) accounts use the CLI, since `claude /usage` no longer renders in a headless spawn |
-| OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage` |
+| OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage`; exhausted accounts can consume a banked reset credit through the authenticated reset-credit endpoints after explicit confirmation |
 | Cursor | `.cursor` | Reads session JWT from Cursor's `state.vscdb` SQLite, calls `https://cursor.com/api/usage-summary` |
 | OpenRouter | `.openRouter` | User-provided API key in Keychain; calls documented `/api/v1/credits` and `/api/v1/key` endpoints |
+| Grok | `.grok` | Opt-in. Runs the official Grok Build CLI's ACP stdio agent with its cached login and maps `_x.ai/billing` into the shared weekly quota/credit model; MeterBar checks login-file presence but never reads token contents |
 | Claude (admin) | `.claude` | Anthropic Admin API key (user-provided, stored in our keychain), `/v1/organizations/usage_report/messages` |
 | OpenAI (admin) | `.openai` | OpenAI Admin API key (user-provided, stored in our keychain), `/v1/organization/usage/completions` |
 
@@ -68,9 +69,10 @@ meterbar/
 - **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a `Timer` auto-refresh (default 15 min; `RefreshInterval` supports 1/2/5/15/30 min + manual).
 - **ClaudeCodeCLIUsageService** — fallback source. Resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. `/usage` no longer renders in a headless spawn (it prints a session cost summary), so the parser detects that shape and throws a legible error. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
 - **ClaudeCodeLocalService** — OAuth-primary wrapper. For the default account it reads `api.anthropic.com/api/oauth/usage` with the Keychain token (`metrics(from:)` maps windows + extra-usage), falling back to the CLI parser only when no token is available; custom accounts use the CLI. `prefersOAuth`/`isOAuthUsageEnabled` are the pure source-selection helpers.
-- **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off").
+- **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off"). It also lists and consumes banked rate-limit resets with an idempotency key, then immediately refreshes usage. The exhausted popover card and `meterbar reset-credit --yes` are the two explicit-confirmation entry points.
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **OpenRouterService** — opt-in API-key provider; maps account credits/spend and optional per-key caps into shared metrics.
+- **GrokCLIUsageService** — opt-in CLI provider; resolves `grok`, authenticates the official ACP process with `cached_token`, and maps weekly usage, reset time, prepaid balance, and on-demand credit limits. The process runs with auto-update disabled and discards stderr to avoid account metadata in logs.
 - **ClaudeService / OpenAIService** — admin-key usage reports (paginated, 50-page cap) via `ServiceSupport.fetchDecoded`.
 - **CostTracker** — JSONL/SQLite log scanning, per-day/model/origin breakdowns, cache at `~/Library/Application Support/MeterBar/cost-summary-v1.json`. API-rate estimates come from the versioned `ModelPricing` table in `MeterBarShared`, which is shared with the CLI.
 - **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.meterbar.app`. Reads migrate the older `dev.shipshit.meterbar` (v1.6.x) and `com.agenticindiedev.quotaguard` (v1.0-v1.6) services into the current one, and removals delete all three so a legacy key cannot reappear.
@@ -81,6 +83,7 @@ meterbar/
 - **ServiceSupport** — shared URLSession config, secret-safe HTTP/URLError mapping, real (non-container) home dir via `getpwuid`.
 - **AppLog** — `os.Logger` categories: app, usage, cost, network, storage. This is the only observability; there is no crash reporting or analytics.
 - **SoftwareUpdateController** — owns Sparkle 2's standard updater. The General settings pane binds directly to Sparkle's automatic-check preference (default off until consent) and exposes a manual check action. Release builds embed the GitHub Releases appcast URL and an Actions-provided EdDSA public key.
+- **SessionWakeController + managed agent** — signed release bundles register `Contents/Helpers/meterbar wake-agent` through `SMAppService.agent`. The launch agent owns the shared wake lock for its lifetime, reads versioned configuration/status through the app group, and keeps the native coordinator alive after the GUI quits. Debug builds without the injected CLI retain the in-process fallback.
 
 ## App lifecycle
 
@@ -93,6 +96,10 @@ On the first launch, `FirstRunOnboardingStore` auto-opens the menu panel and sho
 The app, widget, and CLI consume the canonical `ServiceType`, `UsageLimit`, and `UsageMetrics` definitions from `Packages/MeterBarShared`. The app-group JSON contract is locked by `CachedMetricsContractTests` and `CachedMetricsReplicaContractTests` so fields and date encoding cannot silently drift across targets.
 
 Dates in the shared JSON use `JSONEncoder`/`JSONDecoder` **default** strategies (seconds since 2001-01-01 reference date). Changing either side's date strategy breaks widget + CLI decode.
+
+The CLI's public `usage --json` and `cost --json` integration surface is separate from that internal
+cache format. It emits explicit version 1 DTOs with ISO-8601 dates; the compatibility contract lives
+in `docs/cli-json-schema.md`.
 
 ---
 

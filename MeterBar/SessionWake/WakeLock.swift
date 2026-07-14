@@ -7,6 +7,7 @@ nonisolated struct WakeLockHolder: Codable, Equatable, Sendable {
     /// Who is holding the shared lock.
     enum Kind: String, Codable, Equatable, Sendable {
         case app
+        case agent
         case cli
     }
 
@@ -28,10 +29,10 @@ nonisolated struct WakeLockHolder: Codable, Equatable, Sendable {
 /// legacy watcher during migration.
 ///
 /// Uses `flock(LOCK_EX|LOCK_NB)` on a fixed lock file so any two holders — the
-/// app and the CLI, or either and a still-loaded legacy job — mutually exclude.
-/// The lock is acquired only when a run is actually ready, never held across a
-/// long quota wait. The holder writes a JSON descriptor into the lock file so a
-/// contender can say who is running.
+/// app, managed agent, CLI, or a still-loaded legacy job — mutually exclude.
+/// Continuous watchers hold it for their process/task lifetime; one-shot CLI
+/// runs probe it before quota work and their runner owns it across execution.
+/// The holder writes a JSON descriptor so a contender can say who is running.
 nonisolated final class WakeLock: @unchecked Sendable {
     /// The outcome of trying to acquire the shared lock.
     enum Acquisition: Equatable {

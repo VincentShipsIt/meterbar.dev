@@ -2,6 +2,7 @@ import AppKit
 import MeterBarShared
 import Combine
 import os
+import QuartzCore
 import SwiftUI
 import UserNotifications
 
@@ -82,8 +83,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusItem?.button
             },
             onDismiss: {
+                // Closing the popover only tears down the transient detail
+                // panel. First-run onboarding is NOT dismissed here: an
+                // incidental close (click-away / Escape) must leave the welcome
+                // callout to reappear until the user acts on Enable / Not Now.
                 MeterBarMenuDetailPanel.shared.dismiss()
-                FirstRunOnboardingStore.shared.dismiss()
             }
         )
 
@@ -100,9 +104,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
-            // Surface a banner when a wake run finishes (gated by the global,
-            // provider, and Session Wake notification switches).
-            observeSessionWakeCompletion()
+            // The managed agent owns completion banners while it is available,
+            // including when the GUI is quit. Development builds without the
+            // embedded helper retain the in-app notification observer.
+            if !SessionWakeController.shared.usesBackgroundAgent {
+                observeSessionWakeCompletion()
+            }
         }
 
         // Setup notifications (also handles initial data refresh)
@@ -724,7 +731,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             previousKey: shownStatusItemKey
         ) else {
             shownStatusItemKey = nil
-            button.title = ""
+            setStatusButtonTitle(button, to: "")
             button.imagePosition = .imageOnly
             button.toolTip = "MeterBar"
             applyParseHealthAppearance(to: button)
@@ -734,10 +741,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         shownStatusItemKey = selection.key
         let percent = percentLeft(for: selection.limit)
         button.imagePosition = .imageLeft
-        button.title = " \(percent)%"
+        setStatusButtonTitle(button, to: " \(percent)%")
         button.toolTip = "MeterBar: \(percent)% left on \(selection.displayName)"
         button.setAccessibilityLabel("MeterBar \(percent)% left on \(selection.displayName)")
         applyParseHealthAppearance(to: button)
+    }
+
+    /// Sets the status-button title, crossfading the change so the menu-bar
+    /// `NN%` doesn't snap on refresh. SwiftUI's `.contentTransition(.numericText())`
+    /// can't reach this AppKit `NSStatusBarButton`, so we fade its layer instead.
+    /// No-op fade when the title is unchanged or Reduce Motion is on.
+    @MainActor
+    private func setStatusButtonTitle(_ button: NSStatusBarButton, to newTitle: String) {
+        if button.title != newTitle,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            button.wantsLayer = true
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.22
+            button.layer?.add(fade, forKey: "titleFade")
+        }
+        button.title = newTitle
     }
 
     @MainActor
@@ -746,7 +770,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasAttention = providerVisibilityStore.enabledServices.contains { service in
             ProviderParseHealthStore.shared.records[service]?.needsAttention(now: now) == true
         }
-        button.alphaValue = hasAttention ? 0.55 : 1
+        let targetAlpha: CGFloat = hasAttention ? 0.55 : 1
+        // This runs on every status refresh; only animate when the value actually
+        // changes so a steady state doesn't restart the fade each tick.
+        if button.alphaValue != targetAlpha {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                button.alphaValue = targetAlpha
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = MeterBarTheme.Motion.statusItemAlpha
+                    button.animator().alphaValue = targetAlpha
+                }
+            }
+        }
         if hasAttention {
             button.toolTip = "\(button.toolTip ?? "MeterBar") · Provider data needs attention"
         }

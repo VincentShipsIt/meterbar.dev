@@ -8,6 +8,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case codexCli = "Codex CLI"
     case cursor = "Cursor"
     case openRouter = "OpenRouter"
+    case grok = "Grok"
 
     public var id: String { rawValue }
 
@@ -17,6 +18,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .codexCli: return "OpenAI Codex"
         case .cursor: return "Cursor"
         case .openRouter: return "OpenRouter"
+        case .grok: return "Grok"
         }
     }
 
@@ -27,6 +29,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .codexCli: return "terminal.fill"
         case .cursor: return "cursorarrow.click"
         case .openRouter: return "point.3.connected.trianglepath.dotted"
+        case .grok: return "bolt.fill"
         }
     }
 
@@ -38,6 +41,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .codexCli: return "CodexIcon"
         case .cursor: return "CursorIcon"
         case .openRouter: return "OpenRouterIcon"
+        case .grok: return "GrokIcon"
         }
     }
 
@@ -48,6 +52,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .codexCli: return 1
         case .cursor: return 2
         case .openRouter: return 3
+        case .grok: return 4
         }
     }
 }

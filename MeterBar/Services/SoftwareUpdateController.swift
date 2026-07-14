@@ -4,6 +4,24 @@ import Foundation
 import Sparkle
 #endif
 
+/// Release channel the updater points Sparkle at. Stable uses the feed baked
+/// into Info.plist (`SUFeedURL`); Nightly swaps to the rolling master feed at
+/// runtime via the updater delegate, so one installed app can test master
+/// builds without a full release.
+enum UpdateChannel: String, CaseIterable, Identifiable {
+    case stable
+    case nightly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .stable: "Stable"
+        case .nightly: "Nightly"
+        }
+    }
+}
+
 /// Owns Sparkle's standard updater and exposes only user-controlled update actions.
 /// Automatic network checks remain off until the user explicitly enables them.
 final class SoftwareUpdateController: ObservableObject {
@@ -12,6 +30,39 @@ final class SoftwareUpdateController: ObservableObject {
     @Published private(set) var automaticallyChecksForUpdates = false
     @Published private(set) var canCheckForUpdates = false
     @Published private(set) var configurationError: String?
+    /// Currently selected release channel. Persisted across launches.
+    @Published private(set) var channel: UpdateChannel = .stable
+
+    /// UserDefaults key holding the persisted `UpdateChannel.rawValue`.
+    static let channelStorageKey = "MeterBarUpdateChannel"
+
+    /// Rolling nightly feed. Uses the fixed `nightly` pre-release tag (not
+    /// `/latest/`, which resolves only to non-prerelease releases) so the URL is
+    /// permanent. Signed with the same EdDSA key as stable.
+    static let nightlyFeedURLString =
+        "https://github.com/VincentShipsIt/meterbar.dev/releases/download/nightly/appcast-nightly.xml"
+
+    /// Feed override for a channel. `nil` means "use the Info.plist `SUFeedURL`"
+    /// (the stable feed), which is exactly what Sparkle expects from
+    /// `feedURLString(for:)` when no override applies.
+    static func resolvedFeedURLString(for channel: UpdateChannel) -> String? {
+        switch channel {
+        case .stable: nil
+        case .nightly: nightlyFeedURLString
+        }
+    }
+
+    static func loadChannel(from defaults: UserDefaults) -> UpdateChannel {
+        guard let raw = defaults.string(forKey: channelStorageKey),
+              let channel = UpdateChannel(rawValue: raw) else {
+            return .stable
+        }
+        return channel
+    }
+
+    static func persistChannel(_ channel: UpdateChannel, to defaults: UserDefaults) {
+        defaults.set(channel.rawValue, forKey: channelStorageKey)
+    }
 
     /// True only for a plausible Ed25519 public key. Debug and PR-gate builds
     /// carry the unsubstituted `$(SPARKLE_PUBLIC_ED_KEY)` build variable in
@@ -23,11 +74,23 @@ final class SoftwareUpdateController: ObservableObject {
         return decoded.count == 32
     }
 
+    private let userDefaults: UserDefaults
+
 #if canImport(Sparkle)
     private let controller: SPUStandardUpdaterController?
+    private let channelDelegate: ChannelUpdaterDelegate
     private var cancellables = Set<AnyCancellable>()
 
-    init(bundle: Bundle = .main) {
+    init(bundle: Bundle = .main, defaults: UserDefaults = .standard) {
+        userDefaults = defaults
+        let channel = Self.loadChannel(from: defaults)
+        self.channel = channel
+        // Sparkle references the updater delegate weakly, so the controller must
+        // retain it. Created before the guard so every stored property is set on
+        // the unusable-key early return too.
+        let delegate = ChannelUpdaterDelegate(channel: channel)
+        channelDelegate = delegate
+
         guard let publicKey = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
               Self.isUsableEDPublicKey(publicKey) else {
             controller = nil
@@ -37,7 +100,7 @@ final class SoftwareUpdateController: ObservableObject {
 
         let controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: delegate,
             userDriverDelegate: nil
         )
         self.controller = controller
@@ -60,6 +123,20 @@ final class SoftwareUpdateController: ObservableObject {
         refreshState()
     }
 
+    /// Switch release channel: persist it, repoint the updater's feed, then look
+    /// for a build on the new channel immediately (Sparkle re-queries the
+    /// delegate on each check, so the swapped feed takes effect right away).
+    func setChannel(_ channel: UpdateChannel) {
+        guard channel != self.channel else { return }
+        self.channel = channel
+        Self.persistChannel(channel, to: userDefaults)
+        channelDelegate.channel = channel
+        refreshState()
+        if canCheckForUpdates {
+            checkForUpdates()
+        }
+    }
+
     func checkForUpdates() {
         controller?.checkForUpdates(nil)
         refreshState()
@@ -74,14 +151,36 @@ final class SoftwareUpdateController: ObservableObject {
         automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
         canCheckForUpdates = updater.canCheckForUpdates
     }
+
+    /// Retains Sparkle's updater delegate and overrides the feed per channel.
+    /// `channel` is mutated by `setChannel` so a live channel switch is picked up
+    /// on the next update check without recreating the updater.
+    private final class ChannelUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+        var channel: UpdateChannel
+
+        init(channel: UpdateChannel) {
+            self.channel = channel
+        }
+
+        func feedURLString(for updater: SPUUpdater) -> String? {
+            SoftwareUpdateController.resolvedFeedURLString(for: channel)
+        }
+    }
 #else
-    init(bundle: Bundle = .main) {
+    init(bundle: Bundle = .main, defaults: UserDefaults = .standard) {
         _ = bundle
+        userDefaults = defaults
+        channel = Self.loadChannel(from: defaults)
         configurationError = "Software updates are available in the app build."
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
         _ = enabled
+    }
+
+    func setChannel(_ channel: UpdateChannel) {
+        self.channel = channel
+        Self.persistChannel(channel, to: userDefaults)
     }
 
     func checkForUpdates() {

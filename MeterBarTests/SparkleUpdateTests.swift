@@ -100,4 +100,72 @@ final class SparkleUpdateTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
     }
+
+    // MARK: - Update channel
+
+    private func makeIsolatedDefaults() throws -> (UserDefaults, String) {
+        let suiteName = "meterbar-channel-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        return (defaults, suiteName)
+    }
+
+    func testChannelDefaultsToStableWhenUnsetOrInvalid() throws {
+        let (defaults, suiteName) = try makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(SoftwareUpdateController.loadChannel(from: defaults), .stable)
+
+        defaults.set("not-a-channel", forKey: SoftwareUpdateController.channelStorageKey)
+        XCTAssertEqual(SoftwareUpdateController.loadChannel(from: defaults), .stable)
+    }
+
+    func testChannelPersistenceRoundTrips() throws {
+        let (defaults, suiteName) = try makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        SoftwareUpdateController.persistChannel(.nightly, to: defaults)
+        XCTAssertEqual(
+            defaults.string(forKey: SoftwareUpdateController.channelStorageKey),
+            UpdateChannel.nightly.rawValue
+        )
+        XCTAssertEqual(SoftwareUpdateController.loadChannel(from: defaults), .nightly)
+
+        SoftwareUpdateController.persistChannel(.stable, to: defaults)
+        XCTAssertEqual(SoftwareUpdateController.loadChannel(from: defaults), .stable)
+    }
+
+    func testStableChannelFallsBackToInfoPlistFeed() {
+        // nil tells Sparkle to use the Info.plist SUFeedURL (the stable feed).
+        XCTAssertNil(SoftwareUpdateController.resolvedFeedURLString(for: .stable))
+    }
+
+    func testNightlyChannelResolvesToRollingNightlyFeed() throws {
+        let feed = try XCTUnwrap(SoftwareUpdateController.resolvedFeedURLString(for: .nightly))
+        XCTAssertEqual(feed, SoftwareUpdateController.nightlyFeedURLString)
+        XCTAssertTrue(feed.hasPrefix("https://"))
+        // Fixed `nightly` tag path — never `/latest/`, which excludes prereleases.
+        XCTAssertTrue(feed.contains("/releases/download/nightly/"))
+        XCTAssertTrue(feed.hasSuffix("/appcast-nightly.xml"))
+        XCTAssertNotNil(URL(string: feed))
+    }
+
+    // MARK: - Nightly version ordering
+
+    // Nightly CFBundleVersion is `<latest-stable>.<commits>` (e.g. 1.7.1.5) so
+    // Sparkle's numeric comparator ranks a newer nightly above an older one,
+    // above the last stable, and BELOW the next stable — letting a switch back
+    // to Stable auto-update cleanly once the next tagged release ships.
+    func testNightlyBuildOutranksBaseStable() {
+        XCTAssertEqual("1.7.1.5".compare("1.7.1", options: .numeric), .orderedDescending)
+    }
+
+    func testLaterNightlyOutranksEarlierNightly() {
+        XCTAssertEqual("1.7.1.6".compare("1.7.1.5", options: .numeric), .orderedDescending)
+    }
+
+    func testNextStableOutranksNightly() {
+        XCTAssertEqual("1.7.2".compare("1.7.1.5", options: .numeric), .orderedDescending)
+        // Even a high nightly build number cannot beat the next stable minor.
+        XCTAssertEqual("1.7.2".compare("1.7.1.9999", options: .numeric), .orderedDescending)
+    }
 }

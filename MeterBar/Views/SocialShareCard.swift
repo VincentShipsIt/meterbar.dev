@@ -58,6 +58,7 @@ struct SocialShareCard: View {
                         Spacer(minLength: 16 * scale)
                         SocialShareTokenChart(
                             values: content.dailyTokenTotals,
+                            hasData: content.hasDailyChartData,
                             accent: MeterBarTheme.codexAccent,
                             scale: scale
                         )
@@ -258,26 +259,25 @@ private struct SocialShareMetricPill: View {
 ///
 /// Deliberately kept separate from the interactive `DailyUsageChart`: this one
 /// renders a fixed-size marketing bitmap (dark gradient palette, `scale`-driven
-/// geometry, sample bars when no scan has run yet, no legend/axis/tooltips),
-/// whereas `DailyUsageChart` is a live, system-themed, `DailyTokenUsage`-bound
-/// view with `.help()` tooltips that are meaningless in a flattened PNG. The two
-/// consume different inputs (`[Int]` daily totals vs. `[DailyTokenUsage]` rows)
-/// and share no rendering requirements, so composing them would mean bolting an
-/// alternate palette and placeholder mode onto the interactive chart.
+/// geometry, no legend/axis/tooltips), whereas `DailyUsageChart` is a live,
+/// system-themed, `DailyTokenUsage`-bound view with `.help()` tooltips that are
+/// meaningless in a flattened PNG. The two consume different inputs (`[Int]`
+/// daily totals vs. `[DailyTokenUsage]` rows) and share no rendering
+/// requirements, so composing them would mean bolting an alternate palette and
+/// placeholder mode onto the interactive chart.
+///
+/// When there is no real usage (`hasData == false`) the chart renders an honest
+/// "scan needed" placeholder — a flat dashed baseline, no bars. It never
+/// fabricates plausible-looking numbers, so a screenshot can't misrepresent a
+/// user who hasn't run a scan.
 private struct SocialShareTokenChart: View {
     let values: [Int]
+    let hasData: Bool
     let accent: Color
     let scale: CGFloat
 
-    private var chartValues: [Int] {
-        if values.contains(where: { $0 > 0 }) {
-            return values
-        }
-        return [4, 7, 5, 10, 8, 14, 9, 17, 13, 20, 12, 18, 24, 16, 28]
-    }
-
     private var maxValue: Int {
-        max(chartValues.max() ?? 1, 1)
+        max(values.max() ?? 1, 1)
     }
 
     var body: some View {
@@ -287,7 +287,7 @@ private struct SocialShareTokenChart: View {
                     Text("30d local tokens")
                         .font(.system(size: 17 * scale, weight: .bold))
                         .foregroundStyle(.white)
-                    Text(values.contains(where: { $0 > 0 }) ? "tracked history" : "waiting for scan")
+                    Text(hasData ? "tracked history" : "scan needed")
                         .font(.system(size: 12 * scale, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.54))
                 }
@@ -297,35 +297,10 @@ private struct SocialShareTokenChart: View {
                     .foregroundStyle(accent)
             }
 
-            GeometryReader { proxy in
-                let spacing = max(3 * scale, 2)
-                let barWidth = max(
-                    4 * scale,
-                    (proxy.size.width - CGFloat(max(0, chartValues.count - 1)) * spacing)
-                        / CGFloat(max(1, chartValues.count))
-                )
-
-                HStack(alignment: .bottom, spacing: spacing) {
-                    ForEach(chartValues.indices, id: \.self) { index in
-                        let value = chartValues[index]
-                        let percent = CGFloat(value) / CGFloat(maxValue)
-                        let opacity = values.contains(where: { $0 > 0 }) ? 0.92 : 0.38
-
-                        RoundedRectangle(cornerRadius: 4 * scale, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        accent.opacity(opacity),
-                                        MeterBarTheme.cursorAccent.opacity(max(0.18, opacity - 0.18))
-                                    ],
-                                    startPoint: .bottom,
-                                    endPoint: .top
-                                )
-                            )
-                            .frame(width: barWidth, height: max(6 * scale, proxy.size.height * percent))
-                    }
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
+            if hasData {
+                bars
+            } else {
+                emptyPlaceholder
             }
         }
         .padding(16 * scale)
@@ -333,6 +308,68 @@ private struct SocialShareTokenChart: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: max(0.5, scale))
+        }
+    }
+
+    private var bars: some View {
+        GeometryReader { proxy in
+            let spacing = max(3 * scale, 2)
+            let barWidth = max(
+                4 * scale,
+                (proxy.size.width - CGFloat(max(0, values.count - 1)) * spacing)
+                    / CGFloat(max(1, values.count))
+            )
+
+            HStack(alignment: .bottom, spacing: spacing) {
+                ForEach(values.indices, id: \.self) { index in
+                    let percent = CGFloat(values[index]) / CGFloat(maxValue)
+
+                    RoundedRectangle(cornerRadius: 4 * scale, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    accent.opacity(0.92),
+                                    MeterBarTheme.cursorAccent.opacity(0.74)
+                                ],
+                                startPoint: .bottom,
+                                endPoint: .top
+                            )
+                        )
+                        .frame(width: barWidth, height: max(6 * scale, proxy.size.height * percent))
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
+        }
+    }
+
+    /// Honest "no data yet" state: a dashed baseline with a short caption, drawn
+    /// in place of bars so the card reads as empty rather than populated.
+    private var emptyPlaceholder: some View {
+        GeometryReader { proxy in
+            ZStack {
+                RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                    .fill(Color.white.opacity(0.03))
+
+                VStack(spacing: 8 * scale) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 26 * scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.32))
+                    Text("Run a cost scan to fill this in")
+                        .font(.system(size: 13 * scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.46))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Path { path in
+                    let y = proxy.size.height - max(2, scale)
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                }
+                .stroke(
+                    Color.white.opacity(0.22),
+                    style: StrokeStyle(lineWidth: max(1, scale), dash: [6 * scale, 5 * scale])
+                )
+            }
         }
     }
 }

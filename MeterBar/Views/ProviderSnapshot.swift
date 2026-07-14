@@ -17,6 +17,7 @@ struct ProviderSnapshot: Identifiable {
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
+    let accountID: UUID?
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -85,6 +86,28 @@ struct ProviderSnapshot: Identifiable {
         guard hasExhaustedWeeklyLimit else { return limits }
         return limits.filter { $0.kind != .session }
     }
+
+    // MARK: - Accessibility
+
+    /// VoiceOver label for a provider card: provider name, severity band, and
+    /// freshness — the same three facts the card renders in its header. Kept as
+    /// a pure computed property (like `DailyUsageDay.chartAccessibilityLabel`)
+    /// so the popover and dashboard cards can't drift and the composition is
+    /// unit-testable without the network or a rendered view.
+    var accessibilityLabel: String {
+        "\(title), \(band?.shortLabel ?? "No data"), \(updatedText)"
+    }
+
+    /// VoiceOver value for a provider card: each quota window's reading spoken
+    /// in order, so a `children: .combine` card announces as one coherent
+    /// summary instead of a fragmented subview tree. Falls back to the card's
+    /// empty-state copy when no windows are reported.
+    var accessibilityValue: String {
+        guard !limits.isEmpty else { return emptyDetail }
+        return limits
+            .map { "\($0.accessibilityLabel), \($0.accessibilityValue)" }
+            .joined(separator: ", ")
+    }
 }
 
 enum ExtraUsageDisplayPolicy {
@@ -136,6 +159,30 @@ struct SnapshotLimit: Identifiable {
     var paceContext: PaceLabelContext {
         kind == .weekly ? .weekly : .session
     }
+
+    // MARK: - Accessibility
+
+    private var isOut: Bool { percentLeft <= 0 }
+
+    /// VoiceOver label naming this quota window, appending "estimated" when the
+    /// total was derived rather than provider-reported (the visual "Estimated"
+    /// tag). Shared by all three limit-row renderers so they read identically.
+    var accessibilityLabel: String {
+        usageLimit.isEstimated ? "\(title), estimated" : title
+    }
+
+    /// VoiceOver value for a quota window: how much is left and how much is
+    /// used/spent, mirroring the trailing value + used-value copy the rows
+    /// render. Currency-style limits (OpenRouter key/credit balances) speak
+    /// dollars; quota-style limits speak percentages.
+    var accessibilityValue: String {
+        if valueStyle == .currency {
+            let left = UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
+            return "\(left) left, \(UsageFormat.cost(usageLimit.used)) spent"
+        }
+        let trailing = (isOut && !usageLimit.isEstimated) ? "Out" : usageLimit.percentLeftText
+        return "\(trailing), \(usageLimit.usedPercentageText)"
+    }
 }
 
 enum ProviderSnapshotBuilder {
@@ -150,10 +197,11 @@ enum ProviderSnapshotBuilder {
         var codexCliHasAccess: Bool = false
         var cursorHasAccess: Bool = false
         var openRouterHasAccess: Bool = false
+        var grokHasAccess: Bool = false
     }
 
     /// Builds the provider cards in display order (Codex, Claude accounts,
-    /// Cursor). Providers without metrics are included with an empty-state
+    /// Cursor, OpenRouter, Grok). Providers without metrics are included with an empty-state
     /// detail so the popover can render a "waiting / log in" card; the
     /// dashboard filters those out via `hasMetrics`.
     static func snapshots(_ input: Input) -> [ProviderSnapshot] {
@@ -176,7 +224,8 @@ enum ProviderSnapshotBuilder {
                     title: "Codex",
                     service: .codexCli,
                     metrics: input.metrics[.codexCli],
-                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
+                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login",
+                    accountID: CodexAccount.defaultID
                 ))
             }
         }
@@ -219,6 +268,15 @@ enum ProviderSnapshotBuilder {
             ))
         }
 
+        if input.enabledServices.contains(.grok) {
+            result.append(snapshot(
+                title: "Grok",
+                service: .grok,
+                metrics: input.metrics[.grok],
+                emptyDetail: input.grokHasAccess ? "Waiting for refresh" : "Run grok login"
+            ))
+        }
+
         return result
     }
 
@@ -240,7 +298,8 @@ enum ProviderSnapshotBuilder {
             limits: limits(for: metrics, service: service),
             emptyDetail: emptyDetail,
             extraUsage: metrics?.extraUsage,
-            resetCreditsAvailable: metrics?.resetCreditsAvailable
+            resetCreditsAvailable: metrics?.resetCreditsAvailable,
+            accountID: accountID
         )
     }
 

@@ -45,6 +45,13 @@ struct SocialShareCardContent: Equatable {
         tokenTotal != nil
     }
 
+    /// Whether the 30-day chart has any real usage to draw. When this is false
+    /// the share card must render an honest empty state — never fabricated bars.
+    /// This is the single source of truth the chart view keys its empty state on.
+    var hasDailyChartData: Bool {
+        dailyTokenTotals.contains { $0 > 0 }
+    }
+
     var tokenHeroValue: String {
         guard let tokenTotal else {
             return "Scan needed"
