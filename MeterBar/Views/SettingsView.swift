@@ -890,7 +890,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(costTracker.isRefreshInProgress || !canScanCosts)
             }
         }
@@ -920,7 +920,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
         }
     }

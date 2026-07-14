@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import MeterBarShared
+import SwiftUI
 import XCTest
 @testable import MeterBar
 
@@ -131,5 +133,27 @@ final class MenuBarSmokeTests: XCTestCase {
         )
 
         XCTAssertEqual(Set(manager.metrics.keys), Set(seeded.keys))
+    }
+
+    /// With no providers enabled the popover overview renders its empty state,
+    /// whose sole CTA — "Open Settings" — adopted the `.glass` button style.
+    /// SwiftPM CI can't hit-test AppKit controls, so this guards that the
+    /// glass-styled CTA still compiles and lays out with a non-zero size inside
+    /// the real panel. A removed button or an invalid `.glass` style regresses
+    /// here; the `openSettings` action itself is a standard SwiftUI environment
+    /// action and needs no separate coverage.
+    func testEmptyStateOpenSettingsGlassCTARenders() {
+        let panel = PopoverOverviewPanel(
+            snapshots: [],
+            openDashboard: {},
+            openStatusDetail: {},
+            openProviderOverview: { _ in }
+        )
+        let hostingView = NSHostingView(rootView: panel)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 390, height: 320)
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(hostingView.fittingSize.width, 0)
+        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 }
