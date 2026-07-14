@@ -1,0 +1,67 @@
+name: Nightly
+
+# Build a signed, notarized nightly from master so testers can flip MeterBar's
+# in-app Update channel to Nightly and update in place — no tag, no full release.
+# Publishes to a rolling `nightly` pre-release with fixed asset names, so the
+# feed (appcast-nightly.xml) and download (MeterBar-nightly.zip) URLs are stable.
+on:
+  schedule:
+    # Daily at 09:07 UTC. Off the :00 mark to avoid the top-of-hour scheduler surge.
+    - cron: '7 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never let two nightlies race on the rolling tag; the newest wins.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  # Derive a version pair that orders correctly in Sparkle:
+  #   build  = <latest-stable>.<commits-since-tag>   e.g. 1.7.1.42   (CFBundleVersion, ordering key)
+  #   short  = <latest-stable>-nightly.<N>+<sha>     e.g. 1.7.1-nightly.42+a1b2c3d (display)
+  # `1.7.1 < 1.7.1.42 < 1.7.2`, so a newer nightly always wins, and the next
+  # tagged stable overtakes any nightly — a switch back to Stable auto-updates.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      short: ${{ steps.version.outputs.short }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          # Full history + tags so `git describe` / `rev-list --count` work.
+          fetch-depth: 0
+
+      - name: Derive nightly version
+        id: version
+        run: |
+          set -euo pipefail
+          BASE_TAG=$(git describe --tags --abbrev=0 --match 'v*')
+          BASE=${BASE_TAG#v}
+          COUNT=$(git rev-list --count "${BASE_TAG}..HEAD")
+          SHA=$(git rev-parse --short HEAD)
+          {
+            echo "short=${BASE}-nightly.${COUNT}+${SHA}"
+            echo "build=${BASE}.${COUNT}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    permissions:
+      contents: write
+    uses: ./.github/workflows/_build-signed.yml
+    with:
+      short_version: ${{ needs.version.outputs.short }}
+      build_version: ${{ needs.version.outputs.build }}
+      release_tag: nightly
+      download_prefix: https://github.com/${{ github.repository }}/releases/download/nightly/
+      appcast_name: appcast-nightly.xml
+      zip_name: MeterBar-nightly.zip
+      prerelease: true
+      rolling: true
+    secrets: inherit
