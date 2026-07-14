@@ -593,9 +593,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func postSessionWakeCompletion(summary: WakeRunSummary) {
+        let provider = SessionWakeSettingsStore.shared.wakeProvider
+        let providerService: ServiceType = provider == .codex ? .codexCli : .claudeCode
         let context = SessionWakeNotificationContext(
             globalNotificationsEnabled: notificationPreferences.isEnabled,
-            claudeProviderEnabled: providerVisibilityStore.isEnabled(.claudeCode),
+            providerEnabled: providerVisibilityStore.isEnabled(providerService),
+            providerDisplayName: provider.displayName,
             notifyOnCompletion: SessionWakeSettingsStore.shared.notifyOnCompletion
         )
         guard let fired = SessionWakeNotificationDecider.completionNotification(

@@ -46,6 +46,8 @@ nonisolated enum StorageKeys {
     static let codexCustomAccounts = "CodexCustomAccounts"
     /// User-chosen display name for the default Codex CLI profile.
     static let codexDefaultAccountName = "CodexDefaultAccountName"
+    /// Whether the synthesized default Codex CLI profile participates in tracking.
+    static let codexDefaultAccountEnabled = "CodexDefaultAccountEnabled"
     /// Persisted Codex account display order (array of UUID strings).
     static let codexAccountOrder = "CodexAccountOrder"
     /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
@@ -64,8 +66,12 @@ nonisolated enum StorageKeys {
     static let sessionWakeFeatureEnabled = "SessionWakeFeatureEnabled"
     /// Runtime intent for the watcher, distinct from feature enablement (Bool).
     static let sessionWakeWatcherArmed = "SessionWakeWatcherArmed"
-    /// Explicitly selected wake account id (UUID string). Never inferred.
+    /// The active wake provider raw value (`WakeProvider`, default `.claude`).
+    static let sessionWakeProvider = "SessionWakeProvider"
+    /// Explicitly selected Claude wake account id (UUID string). Never inferred.
     static let sessionWakeAccountID = "SessionWakeAccountID"
+    /// Explicitly selected Codex wake account id (UUID string). Never inferred.
+    static let sessionWakeCodexAccountID = "SessionWakeCodexAccountID"
     /// Whether the user completed the first-enable safety acknowledgement (Bool).
     static let sessionWakeFirstEnableAcknowledged = "SessionWakeFirstEnableAcknowledged"
     /// Whether the user separately acknowledged permission-bypass mode (Bool).
