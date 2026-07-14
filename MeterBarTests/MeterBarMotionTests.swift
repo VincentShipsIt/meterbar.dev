@@ -12,42 +12,42 @@ final class MeterBarMotionTests: XCTestCase {
     // MARK: Tokens exist and keep their calibrated feel
 
     func testMotionTokensMatchCalibratedCurves() {
-        XCTAssertEqual(M.quick, .snappy(duration: 0.18))
-        XCTAssertEqual(M.disclosure, .snappy(duration: 0.18))
-        XCTAssertEqual(M.standard, .smooth(duration: 0.3))
-        XCTAssertEqual(M.panel, .smooth(duration: 0.22))
-        XCTAssertEqual(M.standardCurve, .smooth(duration: 0.35))
-        XCTAssertEqual(M.snappyCurve, .smooth(duration: 0.22))
+        XCTAssertEqual(MB.quick, .snappy(duration: 0.18))
+        XCTAssertEqual(MB.disclosure, .snappy(duration: 0.18))
+        XCTAssertEqual(MB.standard, .smooth(duration: 0.3))
+        XCTAssertEqual(MB.panel, .smooth(duration: 0.22))
+        XCTAssertEqual(MB.standardCurve, .smooth(duration: 0.35))
+        XCTAssertEqual(MB.snappyCurve, .smooth(duration: 0.22))
     }
 
     func testStandardCurveAndSnappyCurveAreDistinct() {
-        XCTAssertNotEqual(M.standardCurve, M.snappyCurve)
+        XCTAssertNotEqual(MB.standardCurve, MB.snappyCurve)
     }
 
     // MARK: Reduce Motion collapses to an instant (nil) animation
 
     func testResolveSuppressesAnimationWhenReduceMotionOn() {
-        XCTAssertNil(M.resolve(M.quick, reduceMotion: true))
-        XCTAssertNil(M.resolve(M.standard, reduceMotion: true))
-        XCTAssertNil(M.resolve(M.panel, reduceMotion: true))
-        XCTAssertNil(M.resolve(M.standardCurve, reduceMotion: true))
-        XCTAssertNil(M.snappy(reduceMotion: true))
+        XCTAssertNil(MB.resolve(MB.quick, reduceMotion: true))
+        XCTAssertNil(MB.resolve(MB.standard, reduceMotion: true))
+        XCTAssertNil(MB.resolve(MB.panel, reduceMotion: true))
+        XCTAssertNil(MB.resolve(MB.standardCurve, reduceMotion: true))
+        XCTAssertNil(MB.snappy(reduceMotion: true))
     }
 
     // MARK: Motion on: the accessor resolves to its curve
 
     func testResolvePassesThroughWhenReduceMotionOff() {
-        XCTAssertEqual(M.resolve(M.quick, reduceMotion: false), M.quick)
-        XCTAssertEqual(M.resolve(M.standardCurve, reduceMotion: false), M.standardCurve)
+        XCTAssertEqual(MB.resolve(MB.quick, reduceMotion: false), MB.quick)
+        XCTAssertEqual(MB.resolve(MB.standardCurve, reduceMotion: false), MB.standardCurve)
     }
 
     func testSnappyResolvesToCurveWhenMotionAllowed() {
-        XCTAssertEqual(M.snappy(reduceMotion: false), M.snappyCurve)
+        XCTAssertEqual(MB.snappy(reduceMotion: false), MB.snappyCurve)
     }
 
     func testResolveIsUsableAsWithAnimationArgument() {
         var animatedValue = 0
-        withAnimation(M.resolve(M.quick, reduceMotion: true)) {
+        withAnimation(MB.resolve(MB.quick, reduceMotion: true)) {
             animatedValue = 1
         }
         XCTAssertEqual(animatedValue, 1)
