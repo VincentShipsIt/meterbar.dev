@@ -254,4 +254,18 @@ final class UsageDataManagerTests: XCTestCase {
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.name), [CodexAccount.defaultName, "Work"])
     }
+
+    func testApplyResetCreditRefreshPublishesAccountAndSharedMetrics() {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(codex: codex, cursor: cursor)
+        let refreshed = MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 0)
+
+        manager.applyCodexResetCreditRefresh(refreshed, accountID: CodexAccount.defaultID)
+
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 0)
+        sharedStore.flushPendingWrites()
+        XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.resetCreditsAvailable, 0)
+    }
 }
