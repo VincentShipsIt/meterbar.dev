@@ -125,7 +125,7 @@ struct MenuBarProviderDetailContent: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       header
-        .padding(.bottom, 10)
+        .padding(.bottom, MeterBarTheme.Spacing.md)
 
       Divider()
 
@@ -139,7 +139,7 @@ struct MenuBarProviderDetailContent: View {
         .scrollContentBackground(.hidden)
       }
     }
-    .padding(14)
+    .padding(MeterBarTheme.Spacing.lg)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(MeterBarCompanionSurface(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
     .clipShape(
@@ -157,15 +157,15 @@ struct MenuBarProviderDetailContent: View {
           .font(.caption)
           .foregroundColor(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.vertical, 12)
+          .padding(.vertical, MeterBarTheme.Spacing.md)
       } else {
         if snapshot.hasExhaustedLimit {
           BlockingLimitResetCounter(
             windows: snapshot.resetWindows,
             accentColor: snapshot.accentColor
           )
-          .padding(10)
-          .meterBarCardSurface(cornerRadius: 10)
+          .padding(MeterBarTheme.Spacing.md)
+          .meterBarCardSurface(cornerRadius: MeterBarTheme.detailCardRadius)
         }
 
         VStack(alignment: .leading, spacing: 10) {
@@ -183,10 +183,10 @@ struct MenuBarProviderDetailContent: View {
       let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
       if badges.hasContent {
         badges
-          .padding(.top, 2)
+          .padding(.top, MeterBarTheme.Spacing.xxs)
       }
     }
-    .padding(.top, 12)
+    .padding(.top, MeterBarTheme.Spacing.md)
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
@@ -267,8 +267,8 @@ private struct MenuBarProviderLimitDetailRow: View {
         }
       }
     }
-    .padding(10)
-    .meterBarCardSurface(cornerRadius: 10)
+    .padding(MeterBarTheme.Spacing.md)
+    .meterBarCardSurface(cornerRadius: MeterBarTheme.detailCardRadius)
   }
 
   private func paceLabelColor(_ pace: UsagePace) -> Color {

@@ -135,7 +135,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.bottom, 4)
+                .padding(.bottom, MeterBarTheme.Spacing.xs)
 
                 providerSettingsPane(for: selectedProviderTab)
             }
@@ -186,8 +186,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 content()
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, MeterBarTheme.Spacing.xl)
+            .padding(.vertical, MeterBarTheme.Spacing.xl)
             .frame(width: Self.windowWidth, alignment: .topLeading)
         }
         .scrollContentBackground(.hidden)
@@ -1449,7 +1449,7 @@ private struct AdminKeySettingsRow: View {
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
     }
 
     // MARK: Private
@@ -1500,7 +1500,7 @@ private struct AddCodexAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1591,7 +1591,7 @@ private struct AddClaudeAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1773,7 +1773,7 @@ private struct AccountProfileRow: View {
             }
             .fixedSize()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
             configDirectoryDraft = updatedAccount.configDirectory ?? ""
@@ -1913,7 +1913,7 @@ private struct CodexAccountProfileRow: View {
             }
             .frame(minWidth: 80, alignment: .trailing)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updated in
             nameDraft = updated.name
             homeDirectoryDraft = updated.homeDirectory ?? ""
@@ -1985,7 +1985,7 @@ private struct SettingsInputSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         switch shape {
         case .roundedRectangle:
-            let roundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
+            let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
 
             content
                 .padding(.horizontal, horizontalPadding)

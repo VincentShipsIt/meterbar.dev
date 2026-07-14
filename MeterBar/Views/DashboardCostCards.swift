@@ -133,7 +133,7 @@ struct CostScanLoadingChart: View {
                 let wave = reduceMotion ? 0.5 : (sin((time * 3.2) + Double(index) * 0.55) + 1) / 2
                 let height = chartHeight * CGFloat(0.14 + (seed * 0.44) + (wave * 0.28))
 
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                   .fill(
                     LinearGradient(
                       colors: [
@@ -162,7 +162,7 @@ struct CostScanLoadingChart: View {
                 .offset(x: sweepX)
             }
           }
-          .clipShape(RoundedRectangle(cornerRadius: 7))
+          .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium))
 
           if !compact {
             Text("Parsing Claude and Codex sessions")
@@ -286,10 +286,10 @@ struct CostBreakdownSection: View {
             .font(.caption)
             .fontWeight(.semibold)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, MeterBarTheme.Spacing.xxs)
       }
     }
-    .padding(.top, 4)
+    .padding(.top, MeterBarTheme.Spacing.xs)
   }
 }
 

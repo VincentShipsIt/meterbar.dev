@@ -118,7 +118,7 @@ struct DailyUsageChart: View {
     HStack(spacing: 12) {
       ForEach(visibleProviders, id: \.self) { provider in
         HStack(spacing: 5) {
-          RoundedRectangle(cornerRadius: 2)
+          RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
             .fill(color(for: provider))
             .frame(width: 8, height: 8)
           Text(provider.displayName)
@@ -201,7 +201,7 @@ struct StackedDailyUsageColumn: View {
           }
         }
         .frame(width: width, height: height, alignment: .bottom)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small))
       } else {
         Capsule()
           .fill(.quaternary)
@@ -393,8 +393,8 @@ struct DailyUsageTableHeader: View {
     .fontWeight(.semibold)
     .foregroundColor(.secondary)
     .textCase(.uppercase)
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
+    .padding(.horizontal, MeterBarTheme.Spacing.md)
+    .padding(.vertical, MeterBarTheme.Spacing.sm)
   }
 }
 
@@ -493,8 +493,8 @@ struct DailyUsageDetailRow: View {
             isPrimary: true
           )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, MeterBarTheme.Spacing.md)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -508,7 +508,7 @@ struct DailyUsageDetailRow: View {
             DailyProviderUsageSummaryRow(provider: provider)
           }
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, MeterBarTheme.Spacing.sm)
         .transition(.opacity.combined(with: .move(edge: .top)))
       }
     }
@@ -566,8 +566,8 @@ struct DailyProviderUsageSummaryRow: View {
         width: DailyUsageTableLayout.costColumnWidth
       )
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 5)
+    .padding(.horizontal, MeterBarTheme.Spacing.md)
+    .padding(.vertical, MeterBarTheme.Spacing.xs)
   }
 
   private var providerShortName: String {

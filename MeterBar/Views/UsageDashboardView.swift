@@ -286,9 +286,9 @@ struct UsageDashboardView: View {
                     shareContent
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 22)
+            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
+            .padding(.top, MeterBarTheme.Spacing.md)
+            .padding(.bottom, MeterBarTheme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)

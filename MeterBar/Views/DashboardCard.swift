@@ -14,8 +14,8 @@ struct DashboardTile<Content: View>: View {
   @ViewBuilder let content: Content
 
   init(
-    cornerRadius: CGFloat = 12,
-    padding: CGFloat = 14,
+    cornerRadius: CGFloat = MeterBarTheme.Radius.card,
+    padding: CGFloat = MeterBarTheme.Spacing.lg,
     minHeight: CGFloat? = nil,
     alignment: Alignment = .topLeading,
     @ViewBuilder content: () -> Content

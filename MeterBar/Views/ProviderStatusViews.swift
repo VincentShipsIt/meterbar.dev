@@ -46,11 +46,11 @@ struct ProviderStatusBadge: View {
                 .lineLimit(1)
         }
         .foregroundStyle(indicator.tint)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(indicator.tint.opacity(0.14), in: Capsule())
+        .padding(.horizontal, MeterBarTheme.Spacing.sm)
+        .padding(.vertical, MeterBarTheme.Spacing.xs)
+        .background(indicator.tint.opacity(MeterBarTheme.Fill.subtle), in: Capsule())
         .overlay {
-            Capsule().stroke(indicator.tint.opacity(0.18), lineWidth: 1)
+            Capsule().stroke(indicator.tint.opacity(MeterBarTheme.Fill.hairline), lineWidth: 1)
         }
     }
 }
@@ -70,7 +70,7 @@ struct ProviderStatusTable: View {
                 ForEach(Array(ServiceType.allCases.enumerated()), id: \.element) { index, service in
                     if index > 0 {
                         Divider()
-                            .padding(.horizontal, 6)
+                            .padding(.horizontal, MeterBarTheme.Spacing.sm)
                     }
 
                     ProviderStatusDisclosureRow(
@@ -155,14 +155,14 @@ private struct ProviderStatusDisclosureRow: View {
                 .buttonStyle(.borderless)
                 .help("Open \(service.statusPageDisplayName) status page")
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
+            .padding(.horizontal, MeterBarTheme.Spacing.sm)
+            .padding(.vertical, MeterBarTheme.Spacing.sm)
 
             if isExpanded {
                 expandedDetails
-                    .padding(.leading, 28)
-                    .padding(.trailing, 6)
-                    .padding(.bottom, 10)
+                    .padding(.leading, MeterBarTheme.Spacing.xxl)
+                    .padding(.trailing, MeterBarTheme.Spacing.sm)
+                    .padding(.bottom, MeterBarTheme.Spacing.md)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -205,7 +205,7 @@ private struct ProviderStatusDisclosureRow: View {
             Image(systemName: ProviderStatusIndicator.critical.symbolName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(MeterBarTheme.danger)
-                .padding(.top, 1)
+                .padding(.top, MeterBarTheme.Spacing.xxs)
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -370,7 +370,7 @@ struct MenuBarStatusDetailContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.bottom, 10)
+                .padding(.bottom, MeterBarTheme.Spacing.md)
 
             Divider()
 
@@ -384,7 +384,7 @@ struct MenuBarStatusDetailContent: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .padding(14)
+        .padding(MeterBarTheme.Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(MeterBarCompanionSurface(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
         .clipShape(
@@ -430,7 +430,7 @@ struct MenuBarStatusDetailContent: View {
                 )
             }
         }
-        .padding(.top, 12)
+        .padding(.top, MeterBarTheme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
@@ -518,7 +518,7 @@ private struct MenuBarStatusDetailProviderSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .meterBarCardSurface(cornerRadius: 10)
+        .padding(MeterBarTheme.Spacing.md)
+        .meterBarCardSurface(cornerRadius: MeterBarTheme.Radius.card)
     }
 }

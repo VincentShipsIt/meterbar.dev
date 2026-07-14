@@ -9,8 +9,66 @@ import SwiftUI
 /// Transparency. The only custom colors are the per-provider brand accents and
 /// quota status — and those are kept appearance-adaptive too.
 enum MeterBarTheme {
+  // MARK: - Radius scale
+
+  /// Corner-radius scale. Raw radii across the views snap to the nearest step
+  /// so cards, chips, and bars read as one system instead of a dozen ad-hoc
+  /// values. `shell` matches MacSweep's companion popover / detail-panel shell.
+  enum Radius {
+    /// Chart bars, legend swatches, inline quota-bar caps/markers. Geometry
+    /// often clamps this below 4 on thin (≤2–7pt) shapes, which is intended.
+    static let small: CGFloat = 4
+    /// Buttons, compact tiles, the API-usage card.
+    static let medium: CGFloat = 8
+    /// Standard dashboard card.
+    static let card: CGFloat = 12
+    /// Companion popover + detail-panel shell.
+    static let shell: CGFloat = 16
+
+    /// Concentric-radius rule: a rounded child inset by `inset` from a rounded
+    /// parent keeps visually parallel corners when its radius is the parent's
+    /// radius minus that inset. Used to derive nested-card radii below.
+    static func concentric(outer: CGFloat, inset: CGFloat) -> CGFloat {
+      max(0, outer - inset)
+    }
+  }
+
+  /// A card nested inside the companion shell (16) reads as concentric one
+  /// spacing step in → 12 (== `Radius.card`).
+  static let detailCardRadius = Radius.concentric(outer: Radius.shell, inset: Spacing.xs)
+
+  /// A card nested inside a standard dashboard card (12) reads as concentric one
+  /// spacing step in → 8 (== `Radius.medium`). Used by the API-usage card.
+  static let apiCardRadius = Radius.concentric(outer: Radius.card, inset: Spacing.xs)
+
   /// Matches MacSweep's companion popover and detail-panel shell radius.
-  static let companionShellRadius: CGFloat = 16
+  static let companionShellRadius: CGFloat = Radius.shell
+
+  // MARK: - Spacing scale
+
+  /// 4pt spacing grid for padding. Raw padding values snap to the nearest step;
+  /// exact ties round up. Replaces the ~15 ad-hoc padding literals in the views.
+  enum Spacing {
+    static let xxs: CGFloat = 2
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 12
+    static let lg: CGFloat = 16
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+  }
+
+  // MARK: - Fill / stroke opacity
+
+  /// Opacity tokens for the recurring tinted fills and hairline strokes on
+  /// chips, badges, and quota bars. One-off decorative gradients (cost-card
+  /// shimmer, detail-background wash) intentionally keep their own literals.
+  enum Fill {
+    /// Tinted chip / badge / bar background.
+    static let subtle: Double = 0.14
+    /// Hairline stroke around a tinted chip / badge.
+    static let hairline: Double = 0.18
+  }
 
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
@@ -133,7 +191,7 @@ struct MeterBarDetailBackground: View {
 }
 
 struct MeterBarCompanionSurface: View {
-  var radius: CGFloat = 16
+  var radius: CGFloat = MeterBarTheme.Radius.shell
 
   var body: some View {
     Color.clear
@@ -154,7 +212,7 @@ extension NSPanel {
 }
 
 extension View {
-  func meterBarCardSurface(cornerRadius: CGFloat = 12) -> some View {
+  func meterBarCardSurface(cornerRadius: CGFloat = MeterBarTheme.Radius.card) -> some View {
     modifier(MeterBarCardSurfaceModifier(cornerRadius: cornerRadius))
   }
 }

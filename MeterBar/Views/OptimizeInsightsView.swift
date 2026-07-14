@@ -274,9 +274,9 @@ private struct RankedBreakdownRow: View {
           Text(entry.tier.label)
             .font(.caption2)
             .fontWeight(.semibold)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(tierColor.opacity(0.18), in: Capsule())
+            .padding(.horizontal, MeterBarTheme.Spacing.sm)
+            .padding(.vertical, MeterBarTheme.Spacing.xxs)
+            .background(tierColor.opacity(MeterBarTheme.Fill.subtle), in: Capsule())
             .foregroundStyle(tierColor)
         }
 

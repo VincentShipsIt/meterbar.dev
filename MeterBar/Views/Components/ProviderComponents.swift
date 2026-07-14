@@ -161,13 +161,13 @@ struct ExtraUsageStatusPill: View {
                 .font(.caption2)
                 .fontWeight(.semibold)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.14))
+        .padding(.horizontal, MeterBarTheme.Spacing.sm)
+        .padding(.vertical, MeterBarTheme.Spacing.xs)
+        .background(color.opacity(MeterBarTheme.Fill.subtle))
         .clipShape(Capsule())
         .overlay {
             Capsule()
-                .stroke(color.opacity(0.20), lineWidth: 1)
+                .stroke(color.opacity(MeterBarTheme.Fill.hairline), lineWidth: 1)
         }
         .help(tooltip)
     }
@@ -228,10 +228,10 @@ struct UsageBar: View {
 
                 if isExhausted {
                     Capsule()
-                        .fill(MeterBarTheme.danger.opacity(0.16))
+                        .fill(MeterBarTheme.danger.opacity(MeterBarTheme.Fill.subtle))
                         .frame(width: proxy.size.width, height: 7)
                         .offset(y: 4)
-                    RoundedRectangle(cornerRadius: 1)
+                    RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                         .fill(MeterBarTheme.danger)
                         .frame(width: 2, height: 13)
                         .offset(x: max(0, proxy.size.width - 2), y: 1)
@@ -255,7 +255,7 @@ struct UsageBar: View {
                     .clipShape(Capsule())
                     .offset(y: 4)
 
-                    RoundedRectangle(cornerRadius: 1)
+                    RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                         .fill(markerColor(for: pace))
                         .frame(width: 2, height: 13)
                         .offset(x: min(max(0, expectedX - 1), max(0, proxy.size.width - 2)), y: 1)
@@ -263,7 +263,7 @@ struct UsageBar: View {
                     Rectangle()
                         .fill(accentColor)
                         .frame(width: proxy.size.width * clampedRemainingPercentage / 100, height: 7)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small))
                         .offset(y: 4)
                 }
             }

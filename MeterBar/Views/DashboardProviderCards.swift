@@ -97,7 +97,7 @@ struct ProviderOverviewStatusCard: View {
         }
       }
     }
-    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
   }
 }
 
