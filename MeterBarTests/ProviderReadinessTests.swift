@@ -28,6 +28,22 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(configured.isHealthy)
     }
 
+    func testGrokRequiresCLIAndCachedLogin() {
+        let missing = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)
+        )
+        XCTAssertEqual(missing.provider, .grok)
+        XCTAssertEqual(missing.check("installed")?.level, .fail)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("grok login"))
+
+        let ready = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: true)
+        )
+        XCTAssertEqual(ready.overall, .pass)
+        XCTAssertEqual(ready.check("data")?.level, .pass)
+    }
+
     // MARK: - Claude Code
 
     func testClaudeHealthy() {

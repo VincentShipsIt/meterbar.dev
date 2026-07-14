@@ -20,6 +20,7 @@ struct MenuBarView: View {
   @StateObject private var codexAccountStore = CodexAccountStore.shared
   @StateObject private var cursorService = CursorLocalService.shared
   @StateObject private var openRouterService = OpenRouterService.shared
+  @StateObject private var grokService = GrokCLIUsageService.shared
   @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
   @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
@@ -81,7 +82,8 @@ struct MenuBarView: View {
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess
+                openRouterHasAccess: openRouterService.hasAccess,
+                grokHasAccess: grokService.hasAccess
               )),
             openDashboard: openDashboard,
             openStatusDetail: openStatusDetail,

@@ -48,6 +48,7 @@ struct SettingsView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
@@ -84,7 +85,8 @@ struct SettingsView: View {
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess
+                openRouterHasAccess: openRouterService.hasAccess,
+                grokHasAccess: grokService.hasAccess
             )
         )
     }
@@ -92,6 +94,7 @@ struct SettingsView: View {
     private var showExtraUsageSection: Bool {
         (providerVisibility.isEnabled(.claudeCode) && claudeExtraUsageStatus != nil)
             || providerVisibility.isEnabled(.codexCli)
+            || providerVisibility.isEnabled(.grok)
     }
 
     private var claudeExtraUsageStatus: ExtraUsageStatus? {
@@ -434,7 +437,7 @@ struct SettingsView: View {
     private var extraUsageSection: some View {
         SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
             SettingsNotice(
-                text: "Extra usage (Claude) and credits (Codex) let a provider bill overage beyond your "
+                text: "Extra usage and credits let a provider bill overage beyond your "
                     + "plan once your quota is exhausted. \"Off\" means usage is capped at your subscription.",
                 color: .secondary
             )
@@ -454,6 +457,14 @@ struct SettingsView: View {
                     title: "OpenAI Codex",
                     status: dataManager.metrics[.codexCli]?.extraUsage,
                     manageURL: "https://chatgpt.com"
+                )
+            }
+
+            if providerVisibility.isEnabled(.grok) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
                 )
             }
         }
@@ -512,6 +523,11 @@ struct SettingsView: View {
                 title: "OpenRouter",
                 detail: "Track credit balance, spend, and per-key limits.",
                 service: .openRouter
+            )
+            providerToggleRow(
+                title: "Grok",
+                detail: "Track Grok Build weekly quota from its cached CLI login.",
+                service: .grok
             )
         }
     }
@@ -725,6 +741,62 @@ struct SettingsView: View {
                     error.localizedDescription
                 }
                 SettingsNotice(text: detail, color: MeterBarTheme.warning)
+            }
+        }
+    }
+
+    private var grokSection: some View {
+        SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+            SettingsNotice(
+                text: "MeterBar asks the official Grok CLI for billing data over ACP. "
+                    + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
+                color: .secondary
+            )
+
+            SettingsRowView(title: "Connection") {
+                HStack(spacing: 8) {
+                    StatusPill(
+                        title: grokService.hasAccess ? "Connected" : "Not Connected",
+                        isConnected: grokService.hasAccess
+                    )
+
+                    Button(grokService.hasAccess ? "Refresh" : "Check Again") {
+                        Task {
+                            let service = grokService
+                            await Task.detached(priority: .userInitiated) {
+                                service.checkAccess()
+                            }.value
+                            if grokService.hasAccess {
+                                await dataManager.refresh(service: .grok)
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Install / Sign In") {
+                        if let url = URL(string: "https://x.ai/cli") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if let subscriptionType = grokService.subscriptionType, grokService.hasAccess {
+                SettingsRowView(title: "Plan") {
+                    Text(subscriptionType)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+            } else if !grokService.hasAccess {
+                SettingsNotice(
+                    text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
+                    color: MeterBarTheme.warning
+                )
+            }
+
+            if let error = grokService.lastError {
+                SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
             }
         }
     }
@@ -958,6 +1030,9 @@ struct SettingsView: View {
             cursorSection
         case .openRouter:
             openRouterSection
+        case .grok:
+            grokSection
+            providerExtraUsageSection(for: service)
         }
     }
 
@@ -986,6 +1061,14 @@ struct SettingsView: View {
             EmptyView()
         case .openRouter:
             EmptyView()
+        case .grok:
+            SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
+                )
+            }
         }
     }
 
@@ -1071,6 +1154,7 @@ struct SettingsView: View {
             let claudeCode = claudeCodeService
             let codexCli = codexCliService
             let cursor = cursorService
+            let grok = grokService
             await Task.detached(priority: .userInitiated) {
                 switch service {
                 case .claudeCode:
@@ -1081,6 +1165,8 @@ struct SettingsView: View {
                     cursor.checkAccess(forceRescan: true)
                 case .openRouter:
                     break
+                case .grok:
+                    grok.checkAccess()
                 }
             }.value
             await dataManager.refresh(service: service)
@@ -1097,6 +1183,8 @@ struct SettingsView: View {
             "Cursor local state + usage API"
         case .openRouter:
             "OpenRouter credits + key APIs"
+        case .grok:
+            "Grok Build ACP billing"
         }
     }
 
@@ -1150,6 +1238,8 @@ struct SettingsView: View {
             return cursorService.subscriptionType?.capitalized.nilIfEmpty
         case .openRouter:
             return nil
+        case .grok:
+            return grokService.subscriptionType?.nilIfEmpty
         }
     }
 
@@ -1163,6 +1253,8 @@ struct SettingsView: View {
             cursorService.hasAccess
         case .openRouter:
             openRouterService.hasAccess
+        case .grok:
+            grokService.hasAccess
         }
     }
 
@@ -1176,6 +1268,8 @@ struct SettingsView: View {
             cursorService.lastError?.localizedDescription
         case .openRouter:
             openRouterService.lastError?.localizedDescription
+        case .grok:
+            grokService.lastError?.localizedDescription
         }
     }
 

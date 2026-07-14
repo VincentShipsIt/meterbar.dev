@@ -87,6 +87,20 @@ enum MetricsFixtures {
         )
     }
 
+    static func grok(weeklyUsedPercent: Double = 64) -> UsageMetrics {
+        UsageMetrics(
+            service: .grok,
+            weeklyLimit: UsageLimit(
+                used: weeklyUsedPercent,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(7 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
+            lastUpdated: referenceDate
+        )
+    }
+
     /// One populated metric per provider, keyed by `ServiceType`.
     static func allProviders() -> [ServiceType: UsageMetrics] {
         [

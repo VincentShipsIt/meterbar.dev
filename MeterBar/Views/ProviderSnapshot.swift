@@ -151,10 +151,11 @@ enum ProviderSnapshotBuilder {
         var codexCliHasAccess: Bool = false
         var cursorHasAccess: Bool = false
         var openRouterHasAccess: Bool = false
+        var grokHasAccess: Bool = false
     }
 
     /// Builds the provider cards in display order (Codex, Claude accounts,
-    /// Cursor). Providers without metrics are included with an empty-state
+    /// Cursor, OpenRouter, Grok). Providers without metrics are included with an empty-state
     /// detail so the popover can render a "waiting / log in" card; the
     /// dashboard filters those out via `hasMetrics`.
     static func snapshots(_ input: Input) -> [ProviderSnapshot] {
@@ -218,6 +219,15 @@ enum ProviderSnapshotBuilder {
                 service: .openRouter,
                 metrics: input.metrics[.openRouter],
                 emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key"
+            ))
+        }
+
+        if input.enabledServices.contains(.grok) {
+            result.append(snapshot(
+                title: "Grok",
+                service: .grok,
+                metrics: input.metrics[.grok],
+                emptyDetail: input.grokHasAccess ? "Waiting for refresh" : "Run grok login"
             ))
         }
 

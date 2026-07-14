@@ -35,18 +35,19 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Ordering and inclusion
 
-    func testDisplayOrderIsCodexClaudeCursorOpenRouter() {
+    func testDisplayOrderIsCodexClaudeCursorOpenRouterGrok() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
                 .claudeCode: makeMetrics(service: .claudeCode, weekly: 20),
                 .cursor: makeMetrics(service: .cursor, weekly: 30),
-                .openRouter: makeMetrics(service: .openRouter, weekly: 40)
+                .openRouter: makeMetrics(service: .openRouter, weekly: 40),
+                .grok: makeMetrics(service: .grok, weekly: 50)
             ]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter])
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter, .grok])
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter", "Grok"])
     }
 
     func testDisabledProvidersAreExcluded() {
@@ -63,8 +64,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
         ))
 
-        // Popover shows all enabled providers (Codex/Claude/OpenRouter as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 4)
+        // Popover shows all enabled providers (Codex/Claude/OpenRouter/Grok as empty-state cards)…
+        XCTAssertEqual(snapshots.count, 5)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])

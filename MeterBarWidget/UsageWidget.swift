@@ -143,10 +143,7 @@ struct ServiceMiniView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(row.metrics.service.assetName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
+            WidgetProviderIcon(service: row.metrics.service, size: 14)
 
             Text(row.name)
                 .font(.caption2)
@@ -230,10 +227,7 @@ struct ServiceCompactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(row.metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
+                WidgetProviderIcon(service: row.metrics.service, size: 18)
                 Text(row.name)
                     .font(.subheadline)
                     .bold()
@@ -260,6 +254,23 @@ struct ServiceCompactView: View {
     }
 }
 
+struct WidgetProviderIcon: View {
+    let service: ServiceType
+    let size: CGFloat
+
+    var body: some View {
+        if service == .openRouter || service == .grok {
+            Image(systemName: service.iconName)
+                .font(.system(size: size, weight: .semibold))
+                .frame(width: size, height: size)
+        } else {
+            Image(service.assetName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        }
+    }
+}
 struct WidgetStatusIndicator: View {
     let status: UsageStatus
 

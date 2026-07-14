@@ -17,6 +17,7 @@ Providers tracked:
 | OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage`; exhausted accounts can consume a banked reset credit through the authenticated reset-credit endpoints after explicit confirmation |
 | Cursor | `.cursor` | Reads session JWT from Cursor's `state.vscdb` SQLite, calls `https://cursor.com/api/usage-summary` |
 | OpenRouter | `.openRouter` | User-provided API key in Keychain; calls documented `/api/v1/credits` and `/api/v1/key` endpoints |
+| Grok | `.grok` | Opt-in. Runs the official Grok Build CLI's ACP stdio agent with its cached login and maps `_x.ai/billing` into the shared weekly quota/credit model; MeterBar checks login-file presence but never reads token contents |
 | Claude (admin) | `.claude` | Anthropic Admin API key (user-provided, stored in our keychain), `/v1/organizations/usage_report/messages` |
 | OpenAI (admin) | `.openai` | OpenAI Admin API key (user-provided, stored in our keychain), `/v1/organization/usage/completions` |
 
@@ -71,6 +72,7 @@ meterbar/
 - **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off"). It also lists and consumes banked rate-limit resets with an idempotency key, then immediately refreshes usage. The exhausted popover card and `meterbar reset-credit --yes` are the two explicit-confirmation entry points.
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **OpenRouterService** — opt-in API-key provider; maps account credits/spend and optional per-key caps into shared metrics.
+- **GrokCLIUsageService** — opt-in CLI provider; resolves `grok`, authenticates the official ACP process with `cached_token`, and maps weekly usage, reset time, prepaid balance, and on-demand credit limits. The process runs with auto-update disabled and discards stderr to avoid account metadata in logs.
 - **ClaudeService / OpenAIService** — admin-key usage reports (paginated, 50-page cap) via `ServiceSupport.fetchDecoded`.
 - **CostTracker** — JSONL/SQLite log scanning, per-day/model/origin breakdowns, cache at `~/Library/Application Support/MeterBar/cost-summary-v1.json`. API-rate estimates come from the versioned `ModelPricing` table in `MeterBarShared`, which is shared with the CLI.
 - **AuthenticationManager + KeychainManager** — the two admin keys, stored in keychain service `dev.meterbar.app`. Reads migrate the older `dev.shipshit.meterbar` (v1.6.x) and `com.agenticindiedev.quotaguard` (v1.0-v1.6) services into the current one, and removals delete all three so a legacy key cannot reappear.
