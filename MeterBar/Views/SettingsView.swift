@@ -927,7 +927,7 @@ struct SettingsView: View {
                             SettingsNotice(text: "No quota windows reported.", color: .secondary)
                         } else {
                             ForEach(snapshot.detailLimits) { limit in
-                                DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+                                LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
                             }
                         }
 
