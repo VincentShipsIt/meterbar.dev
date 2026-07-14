@@ -294,8 +294,10 @@ struct UsageDashboardView: View {
         .scrollContentBackground(.hidden)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
+            // Safe-area handling now lives inside MeterBarDetailBackground: the
+            // material bleeds full-bleed, the accent tint stays below the bar so
+            // the system scroll-edge effect is unobstructed behind toolbar items.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
         .navigationTitle("")
         .navigationSubtitle("")

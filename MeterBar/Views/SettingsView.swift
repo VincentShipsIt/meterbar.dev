@@ -168,8 +168,11 @@ struct SettingsView: View {
         }
         .frame(width: Self.windowWidth, height: Self.windowHeight)
         .background {
+            // MeterBarDetailBackground now handles safe area internally (material
+            // full-bleed, tint inset). The macOS TabView renders its tab strip as
+            // a separate control rather than a scroll-under bar, so nothing here
+            // scrolls beneath a bar — but this keeps the two windows consistent.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
     }
 

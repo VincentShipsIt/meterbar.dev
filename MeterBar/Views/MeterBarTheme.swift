@@ -123,6 +123,24 @@ enum MeterBarTheme {
   }
 }
 
+extension MeterBarTheme {
+  /// Animation tokens for state transitions. Centralizing them keeps the
+  /// Liquid Glass morphs (exhausted↔expanded card height swaps) and the
+  /// in-place disclosure expansions on one shared timing instead of scattering
+  /// `.smooth` / `.snappy` literals across the views.
+  enum Motion {
+    /// Smooth spring driving `glassEffectID` morphs inside a
+    /// `GlassEffectContainer` — the flagship exhausted/expanded provider-card
+    /// swap and its dashboard twin. Follows the SwiftUI Liquid Glass docs'
+    /// `.smooth` guidance for glass state changes.
+    static let standard: Animation = .smooth(duration: 0.32)
+
+    /// Snappier timing for the in-place status/day disclosure rows, preserving
+    /// the prior `.snappy(0.18)` feel now that it flows through a token.
+    static let disclosure: Animation = .snappy(duration: 0.18)
+  }
+}
+
 extension QuotaBand {
   /// Appearance-adaptive color for the band (single place where severity
   /// maps to color, shared by every surface).
@@ -142,11 +160,20 @@ struct MeterBarDetailBackground: View {
   var body: some View {
     ZStack {
       if reduceTransparency {
+        // Opaque fallback fills the whole window, bar region included.
         Color(nsColor: .windowBackgroundColor)
+          .ignoresSafeArea()
       } else {
+        // The material is the window backing and may bleed under the toolbar.
         Color.clear
           .background(.regularMaterial)
+          .ignoresSafeArea()
 
+        // Keep the accent tint inside the safe area so the macOS 26 automatic
+        // scroll-edge effect owns the toolbar region. Apple's guidance is to
+        // avoid custom darkening/tinting behind bar items; letting this gradient
+        // bleed under the bar (its densest corner is .topLeading) would compete
+        // with the system blur/fade that keeps toolbar controls legible.
         LinearGradient(
           colors: [
             MeterBarTheme.codexAccent.opacity(0.04),
