@@ -52,6 +52,7 @@ struct SettingsView: View {
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
+    @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared
@@ -97,6 +98,10 @@ struct SettingsView: View {
             || providerVisibility.isEnabled(.grok)
     }
 
+    private var statusItemPinOptions: [StatusItemPinOption] {
+        providerSnapshots.statusItemPinOptions
+    }
+
     private var claudeExtraUsageStatus: ExtraUsageStatus? {
         ExtraUsageDisplayPolicy.visibleStatus(
             for: .claudeCode,
@@ -125,6 +130,7 @@ struct SettingsView: View {
             settingsTab {
                 trackedProvidersSection
                 refreshSection
+                menuBarDisplaySection
                 notificationsSection
                 generalSection
             }
@@ -455,6 +461,88 @@ struct SettingsView: View {
             // Settings, so re-read it whenever settings is shown.
             launchAtLogin.refreshStatus()
             softwareUpdates.refreshState()
+        }
+    }
+
+    private var menuBarDisplaySection: some View {
+        SettingsPanelSection(
+            title: "Menu Bar & Popover",
+            systemImage: "menubar.rectangle",
+            color: MeterBarTheme.appAccent
+        ) {
+            SettingsRowView(
+                title: "Menu bar shows",
+                detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota window visible."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.pinnedCandidateKey },
+                    set: { menuBarDisplayPreferences.setPinnedCandidateKey($0) }
+                )) {
+                    Text("Auto").tag(String?.none)
+                    ForEach(statusItemPinOptions) { option in
+                        Text(option.title).tag(String?.some(option.id))
+                    }
+                    if let pinned = menuBarDisplayPreferences.pinnedCandidateKey,
+                       !statusItemPinOptions.contains(where: { $0.id == pinned }) {
+                        Text("Pinned metric unavailable").tag(String?.some(pinned))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 240)
+            }
+
+            SettingsRowView(
+                title: "Label metric",
+                detail: "Icon Only keeps the status item minimal while preserving details in its tooltip."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.labelMetric },
+                    set: { menuBarDisplayPreferences.setLabelMetric($0) }
+                )) {
+                    ForEach(StatusItemLabelMetric.allCases) { metric in
+                        Text(metric.displayName).tag(metric)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 180)
+            }
+
+            SettingsRowView(
+                title: "Label width",
+                detail: "Regular adds “left” or “used”; Compact keeps today’s number-only label."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.labelSize },
+                    set: { menuBarDisplayPreferences.setLabelSize($0) }
+                )) {
+                    ForEach(StatusItemLabelSize.allCases) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Reset times",
+                detail: "Choose countdowns or local clock times on popover quota cards."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.resetTimeFormat },
+                    set: { menuBarDisplayPreferences.setResetTimeFormat($0) }
+                )) {
+                    ForEach(ResetTimeFormat.allCases) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+            }
         }
     }
 

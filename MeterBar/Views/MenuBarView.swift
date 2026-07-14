@@ -434,6 +434,7 @@ struct PopoverProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
 
+  @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
   @StateObject private var codexService = CodexCliLocalService.shared
   @StateObject private var codexAccounts = CodexAccountStore.shared
   @StateObject private var dataManager = UsageDataManager.shared
@@ -597,7 +598,11 @@ struct PopoverProviderStatusCard: View {
           now: timeline.date
         )
         let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
-        let counter = BlockingLimitResetCounter.counterText(for: blockingWindow, now: timeline.date)
+        let counter = BlockingLimitResetCounter.counterText(
+          for: blockingWindow,
+          now: timeline.date,
+          format: menuBarDisplayPreferences.resetTimeFormat
+        )
 
         HStack(alignment: .center, spacing: 9) {
           ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)

@@ -94,7 +94,8 @@ struct LimitRow: View {
                     limit: limit.usageLimit,
                     font: density.resetFont,
                     foregroundColor: .secondary,
-                    iconSize: density.resetIconSize
+                    iconSize: density.resetIconSize,
+                    usesPopoverPreference: density == .compact
                 )
             }
         case .full:
