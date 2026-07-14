@@ -407,6 +407,16 @@ struct PopoverProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
 
+  @StateObject private var codexService = CodexCliLocalService.shared
+  @StateObject private var codexAccounts = CodexAccountStore.shared
+  @StateObject private var dataManager = UsageDataManager.shared
+  @State private var isCodexAuthenticated = false
+  @State private var isConsumingResetCredit = false
+  @State private var didConsumeResetCredit = false
+  @State private var showingResetCreditConfirmation = false
+  @State private var resetCreditAlertTitle = "Couldn't use reset credit"
+  @State private var resetCreditAlertMessage: String?
+
   /// Shared identity for the exhausted↔expanded glass morph. Scoped per card
   /// instance via `cardMorph`, so sibling provider cards never cross-morph.
   @Namespace private var cardMorph
@@ -430,15 +440,50 @@ struct PopoverProviderStatusCard: View {
 
   var body: some View {
     Group {
-      if let onSelect {
-        Button(action: onSelect) {
-          cardContent
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint("Open \(snapshot.title) provider details")
+      if showsResetCreditAction {
+        compactExhaustedCardWithAction
       } else {
+        selectableCard
+      }
+    }
+    .task(id: snapshot.updatedAt) {
+      await refreshCodexAuthenticationState()
+    }
+    .confirmationDialog(
+      "Use a Codex reset credit?",
+      isPresented: $showingResetCreditConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Use Reset Credit") { consumeResetCredit() }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "This spends one of your finite Codex reset credits and resets the active blocked usage window. " +
+          "The action cannot be undone."
+      )
+    }
+    .alert(
+      resetCreditAlertTitle,
+      isPresented: Binding(
+        get: { resetCreditAlertMessage != nil },
+        set: { if !$0 { resetCreditAlertMessage = nil } }
+      )
+    ) {
+      Button("OK") { resetCreditAlertMessage = nil }
+    } message: {
+      Text(resetCreditAlertMessage ?? "")
+    }
+  }
+
+  @ViewBuilder private var selectableCard: some View {
+    if let onSelect {
+      Button(action: onSelect) {
         cardContent
       }
+      .buttonStyle(.plain)
+      .accessibilityHint("Open \(snapshot.title) provider details")
+    } else {
+      cardContent
     }
   }
 
@@ -467,50 +512,91 @@ struct PopoverProviderStatusCard: View {
 
   private var compactExhaustedCard: some View {
     DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
+      compactExhaustedContent
+    }
+  }
+
+  private var compactExhaustedCardWithAction: some View {
+    DashboardTile(padding: 11, minHeight: 58, alignment: .center, surface: .glass) {
       VStack(alignment: .leading, spacing: 8) {
-        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
-          let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
-            snapshot.resetWindows,
-            now: timeline.date
-          )
-          let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
-          let counter = BlockingLimitResetCounter.counterText(for: blockingWindow, now: timeline.date)
-
-          HStack(alignment: .center, spacing: 9) {
-            ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-
-            VStack(alignment: .leading, spacing: 1) {
-              Text(snapshot.title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-              Text(updatedText)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 5) {
-              Image(systemName: "hourglass")
-                .font(.system(size: 10, weight: .semibold))
-              Text("\(title) \(counter)")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-            }
-            .foregroundColor(snapshot.accentColor)
-            .help("\(title) \(counter)")
+        if let onSelect {
+          Button(action: onSelect) {
+            compactExhaustedContent
+              .contentShape(Rectangle())
           }
+          .buttonStyle(.plain)
+          .accessibilityHint("Open \(snapshot.title) provider details")
+        } else {
+          compactExhaustedContent
         }
 
-        let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
-        if badges.hasContent {
-          badges
+        Divider()
+
+        Button {
+          showingResetCreditConfirmation = true
+        } label: {
+          HStack(spacing: 6) {
+            if isConsumingResetCredit {
+              ProgressView()
+                .controlSize(.small)
+            } else {
+              Image(systemName: "arrow.clockwise.circle.fill")
+            }
+            Text(isConsumingResetCredit ? "Using reset credit…" : "Use reset credit")
+          }
+          .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(isConsumingResetCredit)
+      }
+    }
+  }
+
+  private var compactExhaustedContent: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+        let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
+          snapshot.resetWindows,
+          now: timeline.date
+        )
+        let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
+        let counter = BlockingLimitResetCounter.counterText(for: blockingWindow, now: timeline.date)
+
+        HStack(alignment: .center, spacing: 9) {
+          ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+
+          VStack(alignment: .leading, spacing: 1) {
+            Text(snapshot.title)
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .lineLimit(1)
+            Text(updatedText)
+              .font(.caption2)
+              .foregroundColor(.secondary)
+              .lineLimit(1)
+          }
+
+          Spacer(minLength: 8)
+
+          HStack(spacing: 5) {
+            Image(systemName: "hourglass")
+              .font(.system(size: 10, weight: .semibold))
+            Text("\(title) \(counter)")
+              .font(.caption)
+              .fontWeight(.semibold)
+              .monospacedDigit()
+              .lineLimit(1)
+              .minimumScaleFactor(0.72)
+          }
+          .foregroundColor(snapshot.accentColor)
+          .help("\(title) \(counter)")
+        }
+      }
+
+      let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
+      if badges.hasContent {
+        badges
       }
     }
   }
@@ -565,6 +651,52 @@ struct PopoverProviderStatusCard: View {
   private var updatedText: String {
     guard let updatedAt = snapshot.updatedAt else { return "No data" }
     return "Updated \(UsageFormat.relative(updatedAt))"
+  }
+
+  private var showsResetCreditAction: Bool {
+    guard snapshot.service == .codexCli, !didConsumeResetCredit else { return false }
+    return CodexResetCreditEligibility.isEligible(
+      isBlocked: snapshot.hasExhaustedLimit,
+      availableCredits: snapshot.resetCreditsAvailable,
+      isAuthenticated: isCodexAuthenticated
+    )
+  }
+
+  private var codexAccount: CodexAccount? {
+    guard snapshot.service == .codexCli, let accountID = snapshot.accountID else { return nil }
+    return codexAccounts.accounts.first { $0.id == accountID }
+  }
+
+  private func refreshCodexAuthenticationState() async {
+    guard let codexAccount else {
+      isCodexAuthenticated = false
+      return
+    }
+    isCodexAuthenticated = await codexService.canAccess(account: codexAccount)
+  }
+
+  private func consumeResetCredit() {
+    guard let codexAccount, !isConsumingResetCredit else { return }
+    isConsumingResetCredit = true
+
+    Task {
+      do {
+        let result = try await codexService.consumeResetCredit(account: codexAccount)
+        didConsumeResetCredit = true
+        if let refreshedMetrics = result.refreshedMetrics {
+          dataManager.applyCodexResetCreditRefresh(refreshedMetrics, accountID: codexAccount.id)
+        }
+        if let refreshError = result.usageRefreshErrorDescription {
+          resetCreditAlertTitle = "Reset credit used"
+          resetCreditAlertMessage =
+            "The credit was used, but usage could not refresh (\(refreshError)). Do not retry; refresh later."
+        }
+      } catch {
+        resetCreditAlertTitle = "Couldn't use reset credit"
+        resetCreditAlertMessage = error.localizedDescription
+      }
+      isConsumingResetCredit = false
+    }
   }
 }
 

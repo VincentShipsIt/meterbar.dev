@@ -210,6 +210,20 @@ class UsageDataManager: ObservableObject {
         isLoading = false
     }
 
+    /// Installs the post-redemption Codex usage response into the same caches
+    /// used by the popover, dashboard, widget, and CLI. The service has already
+    /// performed the network refresh; this method only publishes that result.
+    func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
+        codexAccountMetrics[accountID] = refreshedMetrics
+        if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
+            metrics[.codexCli] = representative
+        }
+        lastError = nil
+        saveCachedData()
+        saveCachedCodexAccountMetrics()
+        saveSharedData(metrics)
+    }
+
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
         case .claudeCode:
