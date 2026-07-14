@@ -23,22 +23,24 @@ struct MeterBarChip: View {
         case glass
     }
 
-    /// One padding scale + one stroke/fill treatment for every chip.
+    /// One padding scale + one stroke/fill treatment for every chip, now sourced
+    /// from `MeterBarTheme`'s shared design tokens so chips, cards, and bars draw
+    /// from the same spacing/opacity vocabulary instead of local literals.
     ///
-    /// These are the *single* standardized values the five legacy recipes used
-    /// to disagree on. They intentionally live here rather than in
-    /// `MeterBarTheme` because no radius/opacity design token has landed yet.
-    ///
-    /// Follow-up (not yet actionable): once the radius/opacity design-token
-    /// chip lands in `MeterBarTheme`, fold these constants into it so chips and
-    /// cards share the same tokens instead of hard-coding them here.
+    /// `verticalPadding` is the one value without an exact token: the old 3pt sat
+    /// midway between `Spacing.xxs` (2) and `Spacing.xs` (4), so it snaps up to
+    /// `xs` following the Spacing scale's "exact ties round up" rule — the same
+    /// convention PR #191's view sweep applied. That +1pt shift is the single
+    /// sanctioned appearance change here; every other value is preserved exactly.
+    /// `iconPointSize` and `strokeWidth` have no design token and stay literals,
+    /// and the surface keeps a true `.capsule` (a pill, not a fixed-radius step).
     enum Metrics {
-        static let horizontalPadding: CGFloat = 8
-        static let verticalPadding: CGFloat = 3
-        static let iconTextSpacing: CGFloat = 4
+        static let horizontalPadding: CGFloat = MeterBarTheme.Spacing.sm
+        static let verticalPadding: CGFloat = MeterBarTheme.Spacing.xs
+        static let iconTextSpacing: CGFloat = MeterBarTheme.Spacing.xs
         static let iconPointSize: CGFloat = 10
-        static let fillOpacity: Double = 0.14
-        static let strokeOpacity: Double = 0.18
+        static let fillOpacity: Double = MeterBarTheme.Fill.subtle
+        static let strokeOpacity: Double = MeterBarTheme.Fill.hairline
         static let strokeWidth: CGFloat = 1
     }
 
