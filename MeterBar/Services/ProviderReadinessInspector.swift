@@ -84,7 +84,7 @@ nonisolated public enum ProviderReadinessInspector {
         now: Date = Date(),
         cachedMetrics: UsageMetrics? = SharedDataStore.shared.loadMetrics()[.claudeCode],
         isOAuthFallbackEnabled: () -> Bool = {
-            UserDefaults.standard.bool(forKey: StorageKeys.claudeCodeOAuthFallback)
+            ClaudeCodeLocalService.isOAuthUsageEnabled()
         },
         credentialsData: () -> Data? = { ClaudeCodeLocalService.shared.credentialsData() }
     ) -> ProviderReadiness {
