@@ -117,13 +117,9 @@ struct ReadinessBadge: View {
   let level: ReadinessLevel
 
   var body: some View {
-    Text(level.badgeLabel)
-      .font(.caption2)
-      .fontWeight(.semibold)
-      .foregroundStyle(level.tint)
-      .padding(.horizontal, MeterBarTheme.Spacing.sm)
-      .padding(.vertical, MeterBarTheme.Spacing.xs)
-      .background(level.tint.opacity(MeterBarTheme.Fill.subtle), in: Capsule())
+    // Migrated to the shared `MeterBarChip`; gains the standard hairline stroke
+    // the readiness badge previously lacked, so it matches the other badges.
+    MeterBarChip(level.badgeLabel, tint: level.tint, style: .flat)
   }
 }
 

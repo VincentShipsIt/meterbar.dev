@@ -37,21 +37,10 @@ struct ProviderStatusBadge: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: indicator.symbolName)
-                .font(.system(size: 10, weight: .semibold))
-            Text(label)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-        }
-        .foregroundStyle(indicator.tint)
-        .padding(.horizontal, MeterBarTheme.Spacing.sm)
-        .padding(.vertical, MeterBarTheme.Spacing.xs)
-        .background(indicator.tint.opacity(MeterBarTheme.Fill.subtle), in: Capsule())
-        .overlay {
-            Capsule().stroke(indicator.tint.opacity(MeterBarTheme.Fill.hairline), lineWidth: 1)
-        }
+        // Migrated to the shared `MeterBarChip` — this recipe was already the
+        // closest to the standard (fill 0.14 + stroke 0.18), so only the padding
+        // scale is normalized.
+        MeterBarChip(label, systemImage: indicator.symbolName, tint: indicator.tint, style: .flat)
     }
 }
 

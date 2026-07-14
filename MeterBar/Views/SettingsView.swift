@@ -1683,15 +1683,15 @@ private struct AccountProfileRow: View {
                         .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
-                    Text(account.isDefault ? "Default" : "Profile")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
-                        .settingsInputSurface(
-                            horizontalPadding: 8,
-                            verticalPadding: 4,
-                            shape: .capsule
-                        )
+                    // Migrated to the shared `MeterBarChip`. This was the 5th,
+                    // odd-one-out recipe (`.thinMaterial` + glassCardStroke); the
+                    // `.glass` chip gives it the standard Liquid-Glass capsule
+                    // while keeping the Default/Profile role tint.
+                    MeterBarChip(
+                        account.isDefault ? "Default" : "Profile",
+                        tint: account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent,
+                        style: .glass
+                    )
                 }
 
                 HStack(spacing: 8) {
@@ -1970,44 +1970,26 @@ private struct SettingsInputModifier: ViewModifier {
     }
 }
 
-// MARK: - SettingsInputSurfaceShape
-
-private enum SettingsInputSurfaceShape {
-    case roundedRectangle
-    case capsule
-}
-
 // MARK: - SettingsInputSurfaceModifier
 
 private struct SettingsInputSurfaceModifier: ViewModifier {
     let width: CGFloat?
     let horizontalPadding: CGFloat
     let verticalPadding: CGFloat
-    let shape: SettingsInputSurfaceShape
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .roundedRectangle:
-            let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
+        // The capsule variant moved to `MeterBarChip(style: .glass)`; this
+        // surface now only backs rounded-rectangle settings input fields.
+        let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
 
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: roundedRectangle)
-                .overlay {
-                    roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        case .capsule:
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        }
+        content
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .frame(width: width)
+            .background(.thinMaterial, in: roundedRectangle)
+            .overlay {
+                roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
     }
 }
 
@@ -2019,15 +2001,13 @@ private extension View {
     func settingsInputSurface(
         width: CGFloat? = nil,
         horizontalPadding: CGFloat = 10,
-        verticalPadding: CGFloat = 6,
-        shape: SettingsInputSurfaceShape = .roundedRectangle
+        verticalPadding: CGFloat = 6
     ) -> some View {
         modifier(
             SettingsInputSurfaceModifier(
                 width: width,
                 horizontalPadding: horizontalPadding,
-                verticalPadding: verticalPadding,
-                shape: shape
+                verticalPadding: verticalPadding
             )
         )
     }
