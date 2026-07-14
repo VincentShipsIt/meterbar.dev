@@ -124,7 +124,9 @@ enum ProviderLogoImageCache {
 struct ExtraUsageStatusPill: View {
     let status: ExtraUsageStatus
 
-    private var label: String {
+    // `label`/`color` are the chip's text + tint; kept internal (not private)
+    // so the migration test can assert the On/Off/Unknown mapping is preserved.
+    var label: String {
         switch status.state {
         case .on: return "On"
         case .off: return "Off"
@@ -132,7 +134,7 @@ struct ExtraUsageStatusPill: View {
         }
     }
 
-    private var color: Color {
+    var color: Color {
         switch status.state {
         case .on: return MeterBarTheme.warning
         case .off: return MeterBarTheme.success
@@ -153,23 +155,11 @@ struct ExtraUsageStatusPill: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(label)
-                .font(.caption2)
-                .fontWeight(.semibold)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.14))
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(color.opacity(0.20), lineWidth: 1)
-        }
-        .help(tooltip)
+        // Migrated to the shared `MeterBarChip`. The status color now tints the
+        // whole chip (leading dot + label) rather than only the dot, matching
+        // the other status badges; the On/Off/Unknown semantics are unchanged.
+        MeterBarChip(label, systemImage: "circle.fill", tint: color, style: .flat)
+            .help(tooltip)
     }
 }
 
@@ -178,6 +168,15 @@ struct UsageBar: View {
     let accentColor: Color
     let pace: UsagePace?
     let paceContext: PaceLabelContext
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
+    /// Curve the fill/marker sweep to their new positions on refresh instead of
+    /// teleporting. `nil` under Reduce Motion (via `Motion.resolve`).
+    private var fillAnimation: Animation? {
+        MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standardCurve, reduceMotion: reduceMotion)
+    }
 
     private var clampedUsedPercentage: Double {
         min(max(usedPercentage, 0), 100)
@@ -228,10 +227,10 @@ struct UsageBar: View {
 
                 if isExhausted {
                     Capsule()
-                        .fill(MeterBarTheme.danger.opacity(0.16))
+                        .fill(MeterBarTheme.danger.opacity(MeterBarTheme.Fill.subtle))
                         .frame(width: proxy.size.width, height: 7)
                         .offset(y: 4)
-                    RoundedRectangle(cornerRadius: 1)
+                    RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                         .fill(MeterBarTheme.danger)
                         .frame(width: 2, height: 13)
                         .offset(x: max(0, proxy.size.width - 2), y: 1)
@@ -255,7 +254,7 @@ struct UsageBar: View {
                     .clipShape(Capsule())
                     .offset(y: 4)
 
-                    RoundedRectangle(cornerRadius: 1)
+                    RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
                         .fill(markerColor(for: pace))
                         .frame(width: 2, height: 13)
                         .offset(x: min(max(0, expectedX - 1), max(0, proxy.size.width - 2)), y: 1)
@@ -263,10 +262,16 @@ struct UsageBar: View {
                     Rectangle()
                         .fill(accentColor)
                         .frame(width: proxy.size.width * clampedRemainingPercentage / 100, height: 7)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small))
                         .offset(y: 4)
                 }
             }
+            // Sweep the fill/marker widths to their new values on refresh. Keyed
+            // on every input that moves a bar so all three branches (exhausted /
+            // off-pace / default) animate, not just the default fill.
+            .animation(fillAnimation, value: clampedRemainingPercentage)
+            .animation(fillAnimation, value: pace?.expectedUsedPercent)
+            .animation(fillAnimation, value: isExhausted)
         }
         .frame(height: 15)
         .help(tooltipText ?? "")

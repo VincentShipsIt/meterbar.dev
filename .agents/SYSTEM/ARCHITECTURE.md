@@ -94,6 +94,10 @@ The app, widget, and CLI consume the canonical `ServiceType`, `UsageLimit`, and 
 
 Dates in the shared JSON use `JSONEncoder`/`JSONDecoder` **default** strategies (seconds since 2001-01-01 reference date). Changing either side's date strategy breaks widget + CLI decode.
 
+The CLI's public `usage --json` and `cost --json` integration surface is separate from that internal
+cache format. It emits explicit version 1 DTOs with ISO-8601 dates; the compatibility contract lives
+in `docs/cli-json-schema.md`.
+
 ---
 
 ## CI / release

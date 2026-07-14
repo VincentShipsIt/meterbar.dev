@@ -51,21 +51,35 @@ final class FirstRunOnboardingTests: XCTestCase {
         XCTAssertFalse(store.shouldPresent)
     }
 
-    func testFreshInstallPresentsAndDismissPersistsOnce() {
+    func testFreshInstallPresents() {
+        let store = FirstRunOnboardingStore(
+            userDefaults: defaults,
+            launchAtLogin: LaunchAtLoginStore(controller: FakeLaunchController())
+        )
+
+        XCTAssertTrue(store.shouldPresent)
+    }
+
+    /// The core of this bug: an incidental popover close (click-away / Escape)
+    /// must NOT complete onboarding. The callout keeps reappearing on the next
+    /// launch until the user acts on Enable / Not Now.
+    func testIncidentalDismissDoesNotCompleteOnboarding() {
         let store = FirstRunOnboardingStore(
             userDefaults: defaults,
             launchAtLogin: LaunchAtLoginStore(controller: FakeLaunchController())
         )
         XCTAssertTrue(store.shouldPresent)
 
-        store.dismiss()
-
-        XCTAssertFalse(store.shouldPresent)
+        // Simulate the popover closing without the user touching the callout:
+        // nothing is invoked on the onboarding store. Persistence must be
+        // untouched, so a freshly reloaded store still presents the callout.
         let reloaded = FirstRunOnboardingStore(
             userDefaults: defaults,
             launchAtLogin: LaunchAtLoginStore(controller: FakeLaunchController())
         )
-        XCTAssertFalse(reloaded.shouldPresent)
+
+        XCTAssertTrue(reloaded.shouldPresent)
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.hasCompletedFirstRun))
     }
 
     func testEnableLaunchAtLoginRegistersAndCompletesOnboarding() {
@@ -78,6 +92,14 @@ final class FirstRunOnboardingTests: XCTestCase {
         XCTAssertEqual(controller.registerCallCount, 1)
         XCTAssertTrue(launchAtLogin.isEnabled)
         XCTAssertFalse(store.shouldPresent)
+
+        // The choice persists: a later launch does not re-present onboarding.
+        XCTAssertTrue(defaults.bool(forKey: StorageKeys.hasCompletedFirstRun))
+        let reloaded = FirstRunOnboardingStore(
+            userDefaults: defaults,
+            launchAtLogin: LaunchAtLoginStore(controller: FakeLaunchController())
+        )
+        XCTAssertFalse(reloaded.shouldPresent)
     }
 
     func testNotNowCompletesWithoutRegistering() {
@@ -91,5 +113,13 @@ final class FirstRunOnboardingTests: XCTestCase {
 
         XCTAssertEqual(controller.registerCallCount, 0)
         XCTAssertFalse(store.shouldPresent)
+
+        // "Not Now" is still an explicit choice and persists across launches.
+        XCTAssertTrue(defaults.bool(forKey: StorageKeys.hasCompletedFirstRun))
+        let reloaded = FirstRunOnboardingStore(
+            userDefaults: defaults,
+            launchAtLogin: LaunchAtLoginStore(controller: FakeLaunchController())
+        )
+        XCTAssertFalse(reloaded.shouldPresent)
     }
 }

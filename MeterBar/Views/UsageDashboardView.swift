@@ -286,16 +286,18 @@ struct UsageDashboardView: View {
                     shareContent
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 22)
+            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
+            .padding(.top, MeterBarTheme.Spacing.md)
+            .padding(.bottom, MeterBarTheme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
+            // Safe-area handling now lives inside MeterBarDetailBackground: the
+            // material bleeds full-bleed, the accent tint stays below the bar so
+            // the system scroll-edge effect is unobstructed behind toolbar items.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
         .navigationTitle("")
         .navigationSubtitle("")
@@ -882,7 +884,7 @@ struct UsageDashboardView: View {
     }
 
     private func setSocialShareStatus(_ status: String) {
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(MeterBarTheme.Motion.standard) {
             socialShareStatus = status
         }
     }

@@ -97,7 +97,7 @@ struct ProviderOverviewStatusCard: View {
         }
       }
     }
-    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
   }
 }
 
@@ -138,7 +138,22 @@ private struct ProviderLimitsBody: View {
   var emptyMinHeight: CGFloat?
   var rowSpacing: CGFloat = 12
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   var body: some View {
+    // Dashboard twin of the popover's exhausted↔normal swap. This body sits
+    // inside a flat DashboardTile with no per-branch glass surface, so it uses
+    // a blur-replace transition + the shared smooth timing rather than a full
+    // `glassEffectID` morph (which would need its own glass container to read).
+    content
+      .animation(
+        reduceMotion ? nil : MeterBarTheme.Motion.standard,
+        value: snapshot.hasExhaustedWeeklyLimit
+      )
+  }
+
+  @ViewBuilder private var content: some View {
     if snapshot.limits.isEmpty {
       Text("No quota windows reported")
         .font(emptyFont)
@@ -149,12 +164,14 @@ private struct ProviderLimitsBody: View {
         windows: snapshot.resetWindows,
         accentColor: snapshot.accentColor
       )
+      .transition(.blurReplace)
     } else {
       VStack(alignment: .leading, spacing: rowSpacing) {
         ForEach(snapshot.limits) { limit in
-          DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+          LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
         }
       }
+      .transition(.blurReplace)
     }
   }
 }
@@ -175,88 +192,6 @@ struct ProviderTitle: View {
   }
 }
 
-struct DashboardLimitRow: View {
-  let limit: SnapshotLimit
-  let accentColor: Color
-
-  private var isOut: Bool {
-    limit.percentLeft <= 0
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack {
-        Text(limit.title)
-          .font(.subheadline)
-          .bold()
-        if limit.usageLimit.isEstimated {
-          Text("Estimated")
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-        }
-        Spacer()
-        Text(trailingValue)
-          .font(.subheadline)
-          .bold()
-          .foregroundColor(isOut ? MeterBarTheme.danger : .primary)
-      }
-
-      UsageBar(
-        usedPercentage: limit.usedPercent,
-        accentColor: accentColor,
-        pace: limit.usageLimit.isEstimated ? nil : limit.usageLimit.pace(),
-        paceContext: limit.paceContext
-      )
-
-      HStack {
-        Text(usedValue)
-          .font(.caption)
-          .foregroundColor(.secondary)
-        if !limit.usageLimit.isEstimated, let pace = limit.usageLimit.pace() {
-          Text(pace.leftLabel)
-            .font(.caption)
-            .foregroundColor(paceLabelColor(pace))
-        }
-        Spacer()
-        if limit.usageLimit.resetTime != nil {
-          ResetCountdownLabel(
-            title: nil,
-            limit: limit.usageLimit,
-            font: .caption,
-            foregroundColor: .secondary,
-            iconSize: 10
-          )
-        }
-      }
-    }
-  }
-
-  private var trailingValue: String {
-    if limit.valueStyle == .currency {
-      return "\(UsageFormat.cost(max(0, limit.usageLimit.total - limit.usageLimit.used))) left"
-    }
-    return (isOut && !limit.usageLimit.isEstimated) ? "Out" : limit.usageLimit.percentLeftText
-  }
-
-  private var usedValue: String {
-    if limit.valueStyle == .currency {
-      return "\(UsageFormat.cost(limit.usageLimit.used)) spent"
-    }
-    return limit.usageLimit.usedPercentageText
-  }
-
-  private func paceLabelColor(_ pace: UsagePace) -> Color {
-    if pace.isExhausted {
-      return MeterBarTheme.danger
-    }
-    switch pace.stage {
-    case .reserve:
-      return MeterBarTheme.success
-    case .deficit:
-      return MeterBarTheme.warning
-    case .onPace:
-      return .secondary
-    }
-  }
-}
+// The dashboard/settings limit row is now `LimitRow(density: .regular)` — see
+// MeterBar/Views/Components/LimitRow.swift. The bespoke `DashboardLimitRow`
+// (and its popover/detail twins) was folded into that single component.
