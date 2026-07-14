@@ -92,6 +92,11 @@ struct CostOverviewStatusCard: View {
   }
 }
 
+/// Full-area loading treatment for the **first** scan, when there is no cost
+/// data to show yet. It replaces the entire chart with an animated shimmer so
+/// the empty slot reads as "working on it" rather than "nothing here." Contrast
+/// with `CostScanProgressBadge`, which is a small overlay used when a scan
+/// refreshes data that is *already* on screen.
 struct CostScanLoadingChart: View {
   let compact: Bool
 
@@ -176,6 +181,10 @@ struct CostScanLoadingChart: View {
   }
 }
 
+/// Small overlay badge shown when a scan runs **on top of** data that is
+/// already displayed — the chart stays visible (dimmed) and this badge signals
+/// the in-progress refresh in a corner. Contrast with `CostScanLoadingChart`,
+/// which takes over the whole area when there is nothing to show yet.
 struct CostScanProgressBadge: View {
   let compact: Bool
 
