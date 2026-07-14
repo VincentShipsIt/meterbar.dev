@@ -478,7 +478,7 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 14) {
             SocialShareCardPreview(content: socialShareCardContent)
                 .frame(maxWidth: 860)
-                .accessibilityLabel("MeterBar social share card preview")
+                .accessibilityLabel("MeterBar 30-day token receipt preview")
 
             HStack(spacing: 10) {
                 Button {
@@ -496,9 +496,9 @@ struct UsageDashboardView: View {
                 .buttonStyle(.bordered)
 
                 Button {
-                    copyTweetText()
+                    copyShareCaption()
                 } label: {
-                    Label("Copy Text", systemImage: "text.quote")
+                    Label("Copy Caption", systemImage: "text.quote")
                 }
                 .buttonStyle(.bordered)
 
@@ -525,8 +525,8 @@ struct UsageDashboardView: View {
                 }
             }
 
-            DashboardCard(title: "Tweet Text") {
-                Text(socialShareCardContent.tweetText)
+            DashboardCard(title: "Share Caption") {
+                Text(socialShareCardContent.shareCaption)
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -536,16 +536,11 @@ struct UsageDashboardView: View {
     }
 
     private func makeSocialShareCardContent(generatedAt: Date) -> SocialShareCardContent {
-        // Reuse the canonical tightest-quota window the overview already derives
-        // (`providerSnapshots.tightestLimit`) instead of re-deriving it locally.
-        let tightest = tightestLimit
-        return SocialShareCardContent(
+        SocialShareCardContent(
             tokenTotal: visibleCostSummary?.totalTokens,
-            estimatedCostUSD: visibleCostSummary?.totalCostUSD,
-            sourceCount: socialSourceCount,
+            sessionCount: socialSessionCount,
             providerNames: socialProviderNames,
-            tightestLimitTitle: tightest?.title,
-            tightestPercentLeft: tightest?.percentLeft,
+            topProviderName: socialTopProviderName,
             dailyTokenTotals: socialDailyTokenTotals(generatedAt: generatedAt),
             generatedAt: generatedAt
         )
@@ -620,8 +615,15 @@ struct UsageDashboardView: View {
         makeSocialShareCardContent(generatedAt: socialCardGeneratedAt)
     }
 
-    private var socialSourceCount: Int {
-        max(providerSnapshots.count, visibleCostSummary?.costs.count ?? 0)
+    private var socialSessionCount: Int? {
+        guard let costs = visibleCostSummary?.costs else { return nil }
+        return costs.reduce(0) { $0 + $1.sessionCount }
+    }
+
+    private var socialTopProviderName: String? {
+        visibleCostSummary?.costs.max { lhs, rhs in
+            lhs.totalTokens < rhs.totalTokens
+        }?.provider.displayName
     }
 
     private var socialProviderNames: [String] {
@@ -853,15 +855,15 @@ struct UsageDashboardView: View {
         }
     }
 
-    private func copyTweetText() {
+    private func copyShareCaption() {
         let generatedAt = Date()
         let content = makeSocialShareCardContent(generatedAt: generatedAt)
         socialCardGeneratedAt = generatedAt
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(content.tweetText, forType: .string)
-        setSocialShareStatus("Text copied")
+        pasteboard.setString(content.shareCaption, forType: .string)
+        setSocialShareStatus("Caption copied")
     }
 
     private func renderSocialCardImage(content: SocialShareCardContent) -> NSImage? {

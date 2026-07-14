@@ -33,12 +33,19 @@ final class MeterBarChipTests: XCTestCase {
     }
 
     /// The whole point of the component: one padding scale, one fill, one
-    /// stroke. If someone re-diverges these, this test fails loudly.
-    func testStandardizedMetricsAreSingleScale() {
-        XCTAssertEqual(MeterBarChip.Metrics.horizontalPadding, 8)
-        XCTAssertEqual(MeterBarChip.Metrics.verticalPadding, 3)
-        XCTAssertEqual(MeterBarChip.Metrics.fillOpacity, 0.14, accuracy: 0.0001)
-        XCTAssertEqual(MeterBarChip.Metrics.strokeOpacity, 0.18, accuracy: 0.0001)
+    /// stroke — now derived from `MeterBarTheme`'s shared tokens rather than
+    /// local literals. Asserting against the tokens (not magic numbers, which
+    /// `MeterBarThemeTests` already guards) catches two kinds of drift: someone
+    /// re-hardcoding a Metric, and the derivation silently detaching from the
+    /// theme scale.
+    func testStandardizedMetricsDeriveFromThemeTokens() {
+        XCTAssertEqual(MeterBarChip.Metrics.horizontalPadding, MeterBarTheme.Spacing.sm)
+        // verticalPadding has no exact token (old 3pt); it snaps up to xs (4) per
+        // the Spacing scale's round-up tie-break — the one sanctioned +1pt shift.
+        XCTAssertEqual(MeterBarChip.Metrics.verticalPadding, MeterBarTheme.Spacing.xs)
+        XCTAssertEqual(MeterBarChip.Metrics.iconTextSpacing, MeterBarTheme.Spacing.xs)
+        XCTAssertEqual(MeterBarChip.Metrics.fillOpacity, MeterBarTheme.Fill.subtle, accuracy: 0.0001)
+        XCTAssertEqual(MeterBarChip.Metrics.strokeOpacity, MeterBarTheme.Fill.hairline, accuracy: 0.0001)
         XCTAssertEqual(MeterBarChip.Metrics.strokeWidth, 1)
     }
 

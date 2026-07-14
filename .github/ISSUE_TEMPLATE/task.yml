@@ -1,0 +1,56 @@
+name: Agent-ready task
+description: Define a focused chore, refactor, documentation change, or implementation slice
+body:
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Execution mode
+      description: Choose AFK only when an agent can complete the task without another decision.
+      options:
+        - AFK
+        - HITL
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior or context
+      description: Describe the relevant state today.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behavior
+      description: Describe what must be true when the task is complete.
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Key contracts
+      description: Name interfaces, commands, APIs, configuration keys, data shapes, or compatibility constraints that must be preserved or changed.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List mechanically verifiable outcomes.
+      placeholder: |
+        - [ ] WHEN ... THE SYSTEM SHALL ...
+        - [ ] IF ... THEN THE SYSTEM SHALL ...
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: List focused commands, checks, or review steps that prove completion.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: List adjacent work that must not be included.
+    validations:
+      required: true

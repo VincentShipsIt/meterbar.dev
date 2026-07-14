@@ -162,6 +162,34 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
     }
 
+    func testStatusItemPinOptionsUseStableProviderAccountWindowKeys() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [work],
+            codexAccountMetrics: [
+                work.id: makeMetrics(service: .codexCli, session: 25, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(
+            snapshots.statusItemPinOptions,
+            [
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "session"),
+                    title: "Work · Session"
+                ),
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "weekly"),
+                    title: "Work · Weekly"
+                )
+            ]
+        )
+    }
+
     // MARK: - Limits
 
     func testThirdLimitLabelIsSonnetForClaudeAndCodeReviewForCodex() {

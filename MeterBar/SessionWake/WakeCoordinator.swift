@@ -46,19 +46,6 @@ actor WakeCoordinator {
         self.onState = onState
     }
 
-    /// Arm the watcher for `account`. No-op if already running.
-    func start(account: ClaudeCodeAccount) {
-        guard runTask == nil else { return }
-        let legacyRunner = runner
-        let runtime = ClaudeWakeRuntime(
-            account: account,
-            discovery: discovery,
-            authority: authority,
-            makeRunner: { _ in legacyRunner }
-        )
-        start(runtime: runtime)
-    }
-
     /// Provider-agnostic entry point used by the managed agent and Codex-aware
     /// callers. The legacy Claude entry point above remains for existing tests
     /// and app wiring.
@@ -67,6 +54,22 @@ actor WakeCoordinator {
         runTask = Task { [weak self] in
             await self?.runLoop(runtime: runtime)
         }
+    }
+
+    /// Legacy Claude-only convenience. Wraps the stored discovery/authority/runner
+    /// into a `ClaudeWakeRuntime` and delegates to `start(runtime:)`, so callers
+    /// and tests that already speak `ClaudeCodeAccount` keep working unchanged.
+    /// The stored single runner is reused for every launch (the runtime hands the
+    /// same instance back from `makeRunner()`), preserving the original behavior.
+    func start(account: ClaudeCodeAccount) {
+        let runner = self.runner
+        let runtime = ClaudeWakeRuntime(
+            account: account,
+            discovery: discovery,
+            authority: authority,
+            makeRunner: { _ in runner }
+        )
+        start(runtime: runtime)
     }
 
     /// Cancel any in-flight watch deterministically. Cancels pending sleep/poll

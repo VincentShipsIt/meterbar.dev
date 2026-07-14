@@ -1,41 +1,27 @@
-## Description
+## Summary
 
-Brief description of what this PR does.
+<!-- What changed and what user, developer, or repository outcome does it produce? -->
 
 ## Related issue
 
-<!-- Use `Closes #123` only when this PR fully resolves the issue. Use `Refs #123` otherwise. A closing keyword takes effect when the PR merges into the repository's default branch. -->
+<!-- Use `Closes #123` when this PR fully resolves tracked work. Use `Refs #123` for context only. If no tracking issue exists, write `No-Issue` and explain why. Repositories may require a closing keyword for feat/fix PRs. -->
 
-## Type of Change
+## Scope
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+<!-- Call out important boundaries, public contracts, migrations, generated files, or intentionally excluded work. -->
 
-## Testing
+## Verification
 
-Describe the tests you ran and how to verify your changes.
+<!-- List focused commands or manual checks and their results. State which broader checks are intentionally left to CI. -->
 
-- [ ] Tested on macOS [version]
-- [ ] Tested with [service] authentication
-- [ ] Verified widget updates correctly
-- [ ] Verified menu bar functionality
+## Screenshots
+
+<!-- Required for visible UI changes; otherwise write "Not applicable". -->
 
 ## Checklist
 
-- [ ] My code follows the project's style guidelines
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-
-## Screenshots (if applicable)
-
-Add screenshots to help explain your changes.
-
-## Additional Notes
-
-Any additional information that reviewers should know.
+- [ ] I reviewed the final diff for unrelated changes.
+- [ ] I ran the relevant focused checks or documented why they were left to CI.
+- [ ] I updated relevant documentation or explained why no documentation change is needed.
+- [ ] I documented migrations, release steps, or external configuration changes, or marked them not applicable.
+- [ ] I did not include secrets, credentials, personal data, customer data, or generated build output.

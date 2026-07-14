@@ -337,6 +337,23 @@ enum ProviderSnapshotBuilder {
 }
 
 extension Array where Element == ProviderSnapshot {
+    var statusItemPinOptions: [StatusItemPinOption] {
+        flatMap { snapshot in
+            snapshot.limits.map { limit in
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(
+                        service: snapshot.service,
+                        accountID: snapshot.accountID,
+                        windowID: limit.id
+                    ),
+                    title: "\(snapshot.title) · \(limit.title)"
+                )
+            }
+        }
+    }
+}
+
+extension Array where Element == ProviderSnapshot {
     /// The single tightest quota window across every provider — what the
     /// overview hero and menu-bar summaries report.
     var tightestLimit: SnapshotLimit? {

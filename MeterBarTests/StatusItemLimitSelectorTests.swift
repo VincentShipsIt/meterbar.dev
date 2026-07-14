@@ -9,21 +9,33 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         key: String,
         percentUsed: Double,
         activeMinutesAgo: Double? = nil,
-        displayName: String? = nil
+        displayName: String? = nil,
+        pinKey: String? = nil,
+        windowName: String = "Session",
+        isAutoSelectable: Bool = true
     ) -> StatusLimitCandidate {
         StatusLimitCandidate(
             key: key,
+            pinKey: pinKey ?? key,
             displayName: displayName ?? key,
+            windowName: windowName,
             limit: UsageLimit(used: percentUsed, total: 100, resetTime: nil),
-            lastActivity: activeMinutesAgo.map { now.addingTimeInterval(-$0 * 60) }
+            lastActivity: activeMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
+            isAutoSelectable: isAutoSelectable
         )
     }
 
     private func select(
         _ candidates: [StatusLimitCandidate],
-        previousKey: String? = nil
+        previousKey: String? = nil,
+        pinnedKey: String? = nil
     ) -> StatusLimitCandidate? {
-        StatusItemLimitSelector.select(candidates: candidates, previousKey: previousKey, now: now)
+        StatusItemLimitSelector.select(
+            candidates: candidates,
+            previousKey: previousKey,
+            pinnedKey: pinnedKey,
+            now: now
+        )
     }
 
     // MARK: - Basics
@@ -121,5 +133,60 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         let active = candidate(key: "codex:work", percentUsed: 45, activeMinutesAgo: 2)
 
         XCTAssertEqual(select([idle, active])?.key, "codex:work")
+    }
+
+    // MARK: - Pinned selection
+
+    func testPinnedWindowWinsOverAutoHeuristic() {
+        let automatic = candidate(key: "codex:work:session", percentUsed: 90, activeMinutesAgo: 1)
+        let pinned = candidate(
+            key: "claude:personal:weekly",
+            percentUsed: 20,
+            windowName: "Weekly",
+            isAutoSelectable: false
+        )
+
+        XCTAssertEqual(
+            select([automatic, pinned], pinnedKey: pinned.key)?.key,
+            pinned.key
+        )
+    }
+
+    func testPinnedAutoWindowMatchesPersistentPinKeyWithoutChangingLegacyAutoKey() {
+        let claude = candidate(key: "claude:work", percentUsed: 90, activeMinutesAgo: 1)
+        let codex = candidate(
+            key: "codex:work",
+            percentUsed: 20,
+            activeMinutesAgo: 1,
+            pinKey: "codexCli:account-id:session"
+        )
+
+        let selection = select([claude, codex], pinnedKey: "codexCli:account-id:session")
+
+        XCTAssertEqual(selection?.key, "codex:work")
+        XCTAssertEqual(selection?.pinKey, "codexCli:account-id:session")
+    }
+
+    func testUnavailablePinFallsBackToByteCompatibleAutoSelection() {
+        let claude = candidate(key: "claude:work:session", percentUsed: 40, activeMinutesAgo: 2)
+        let codex = candidate(key: "codex:work:session", percentUsed: 70, activeMinutesAgo: 1)
+
+        XCTAssertEqual(
+            select([claude, codex], pinnedKey: "cursor:default:weekly")?.key,
+            "codex:work:session"
+        )
+    }
+
+    func testPinOnlyWindowsDoNotChangeAutoSelection() {
+        let session = candidate(key: "codex:work:session", percentUsed: 40, activeMinutesAgo: 1)
+        let weekly = candidate(
+            key: "codex:work:weekly",
+            percentUsed: 95,
+            activeMinutesAgo: 1,
+            windowName: "Weekly",
+            isAutoSelectable: false
+        )
+
+        XCTAssertEqual(select([session, weekly])?.key, session.key)
     }
 }

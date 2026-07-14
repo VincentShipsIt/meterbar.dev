@@ -162,6 +162,7 @@ final class SessionWakeControllerTests: XCTestCase {
             store: store,
             status: SessionWakeStatus(),
             accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
             rescanInterval: 3_600,
             makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
             makeLifetimeLock: lifetimeLockFactory()
@@ -169,6 +170,73 @@ final class SessionWakeControllerTests: XCTestCase {
         controller.activate()
         XCTAssertFalse(controller.isWatching)
         XCTAssertEqual(recorder.startCount, 0)
+    }
+
+    func testDefaultProviderStartsClaudeRuntime() {
+        // The default provider is Claude; the watcher is armed with a Claude
+        // runtime (the existing behavior, now asserted explicitly).
+        let store = armedStore()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+        XCTAssertEqual(recorder.startedProviders.first, .claude)
+    }
+
+    func testCodexProviderStartsCodexRuntime() {
+        // Selecting the Codex provider + a Codex account arms the watcher with a
+        // Codex runtime — the app-watcher Codex path this change adds.
+        let codexAccounts = CodexAccountStore(userDefaults: defaults)
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        store.setWakeProvider(.codex)
+        store.setWakeCodexAccountID(CodexAccount.defaultID)
+        store.acknowledgeFirstRunAndTurnOn()
+        XCTAssertTrue(store.isOn)
+
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: codexAccounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+        )
+        controller.activate()
+        XCTAssertTrue(controller.isWatching)
+        poll { recorder.startCount >= 1 }
+        XCTAssertEqual(recorder.startedProviders.first, .codex)
+    }
+
+    func testSwitchingProviderWhileArmedStopsTheWatcher() {
+        let store = armedStore() // Claude, armed
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) }
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+        XCTAssertGreaterThanOrEqual(recorder.startCount, 1)
+
+        // Switching the provider disarms (store.forceOff) ⇒ watcher tears down.
+        store.setWakeProvider(.codex)
+        poll { !controller.isWatching }
+        XCTAssertFalse(controller.isWatching)
+        XCTAssertFalse(store.isOn)
+        poll { recorder.stopCount >= 1 }
+        XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
     }
 
     func testReleaseBundleHandsWatchingToManagedAgentAndDisarmUnregisters() {
@@ -198,7 +266,7 @@ final class SessionWakeControllerTests: XCTestCase {
         XCTAssertEqual(fakeAgent.registerCount, 1)
         XCTAssertEqual(recorder.startCount, 0, "managed bundles must not start a second in-app watcher")
         XCTAssertEqual(sessionStatus.backgroundExecution, .active)
-        XCTAssertTrue(agentState.loadConfiguration()?.canRun == true)
+        XCTAssertEqual(agentState.loadConfiguration()?.canRun, true)
 
         store.setOn(false)
         pump()
@@ -214,9 +282,13 @@ nonisolated private final class WatchRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var starts = 0
     private var stops = 0
+    private var providers: [WakeProvider] = []
     var startCount: Int { lock.lock(); defer { lock.unlock() }; return starts }
     var stopCount: Int { lock.lock(); defer { lock.unlock() }; return stops }
-    func recordStart() { lock.lock(); starts += 1; lock.unlock() }
+    var startedProviders: [WakeProvider] { lock.lock(); defer { lock.unlock() }; return providers }
+    func recordStart(provider: WakeProvider) {
+        lock.lock(); starts += 1; providers.append(provider); lock.unlock()
+    }
     func recordStop() { lock.lock(); stops += 1; lock.unlock() }
 }
 
@@ -224,8 +296,8 @@ nonisolated private struct FakeWatcher: WakeWatching {
     let recorder: WatchRecorder
     let onState: @Sendable (WakeWatcherState) -> Void
 
-    func start(account: ClaudeCodeAccount) async {
-        recorder.recordStart()
+    func start(runtime: WakeProviderRuntime) async {
+        recorder.recordStart(provider: runtime.provider)
         onState(.scanning)
     }
 

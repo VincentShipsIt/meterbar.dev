@@ -90,6 +90,34 @@ final class WakeCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(calls, 3)
     }
 
+    func testStartWithRuntimeDrivesTheWholeQueue() async throws {
+        // The provider-agnostic entry point: arm with an explicit runtime rather
+        // than the Claude `start(account:)` facade. Same lifecycle, driven off
+        // `WakeProviderRuntime` (discover / freshQuota / makeRunner).
+        try writeBlockedSessions(2)
+        let runner = RecordingRunner()
+        let provider = SequencedProvider(repeating: .open)
+        let coordinator = makeCoordinator(provider: provider, runner: runner, sleep: immediateSleep)
+        let runtime = ClaudeWakeRuntime(
+            account: account(),
+            discovery: SessionDiscovery(),
+            authority: WakeQuotaAuthority(provider: provider, maxAge: 3600, now: { Date() }),
+            makeRunner: { _ in runner }
+        )
+
+        await coordinator.start(runtime: runtime)
+        await coordinator.waitUntilFinished()
+
+        let ran = await runner.ran
+        XCTAssertEqual(Set(ran), ["s0", "s1"])
+        if case let .completed(summary) = await coordinator.state {
+            XCTAssertEqual(summary.resumed, 2)
+            XCTAssertEqual(summary.remaining, 0)
+        } else {
+            XCTFail("Expected completed state")
+        }
+    }
+
     func testUnknownQuotaLaunchesNothing() async throws {
         try writeBlockedSessions(1)
         let runner = RecordingRunner()

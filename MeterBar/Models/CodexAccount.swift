@@ -14,6 +14,24 @@ nonisolated struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     var name: String
     var homeDirectory: String?
+    var isEnabled: Bool
+
+    init(id: UUID, name: String, homeDirectory: String?, isEnabled: Bool = true) {
+        self.id = id
+        self.name = name
+        self.homeDirectory = homeDirectory
+        self.isEnabled = isEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        homeDirectory = try container.decodeIfPresent(String.self, forKey: .homeDirectory)
+        // Backward-compat: profiles persisted before the enable/disable flag
+        // existed decode as enabled.
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
 
     var isDefault: Bool { id == Self.defaultID }
 }
@@ -23,14 +41,24 @@ final class CodexAccountStore: ObservableObject {
 
     @Published private(set) var customAccounts: [CodexAccount] = []
     @Published private(set) var defaultAccountName = CodexAccount.defaultName
+    @Published private(set) var defaultAccountIsEnabled = true
     @Published private(set) var accountOrder: [UUID] = []
 
     private let userDefaults: UserDefaults
 
     var accounts: [CodexAccount] {
         orderedAccounts(from: [
-            CodexAccount(id: CodexAccount.defaultID, name: defaultAccountName, homeDirectory: nil)
+            CodexAccount(
+                id: CodexAccount.defaultID,
+                name: defaultAccountName,
+                homeDirectory: nil,
+                isEnabled: defaultAccountIsEnabled
+            )
         ] + customAccounts)
+    }
+
+    var enabledAccounts: [CodexAccount] {
+        accounts.filter(\.isEnabled)
     }
 
     init(userDefaults: UserDefaults = .standard) {
@@ -89,6 +117,24 @@ final class CodexAccountStore: ObservableObject {
         saveCustomAccounts()
     }
 
+    func setEnabled(_ enabled: Bool, for id: UUID) {
+        if id == CodexAccount.defaultID {
+            guard enabled != defaultAccountIsEnabled else { return }
+            defaultAccountIsEnabled = enabled
+            saveDefaultAccountEnabled()
+            return
+        }
+
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }),
+              customAccounts[index].isEnabled != enabled else {
+            return
+        }
+        var updatedAccounts = customAccounts
+        updatedAccounts[index].isEnabled = enabled
+        customAccounts = updatedAccounts
+        saveCustomAccounts()
+    }
+
     func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
         var ordered = accounts
         let movingIndexes = source.sorted()
@@ -107,6 +153,9 @@ final class CodexAccountStore: ObservableObject {
         if let name = userDefaults.string(forKey: StorageKeys.codexDefaultAccountName)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             defaultAccountName = name
+        }
+        if userDefaults.object(forKey: StorageKeys.codexDefaultAccountEnabled) != nil {
+            defaultAccountIsEnabled = userDefaults.bool(forKey: StorageKeys.codexDefaultAccountEnabled)
         }
         accountOrder = userDefaults.stringArray(forKey: StorageKeys.codexAccountOrder)?
             .compactMap(UUID.init(uuidString:)) ?? []
@@ -127,6 +176,14 @@ final class CodexAccountStore: ObservableObject {
             userDefaults.removeObject(forKey: StorageKeys.codexDefaultAccountName)
         } else {
             userDefaults.set(defaultAccountName, forKey: StorageKeys.codexDefaultAccountName)
+        }
+    }
+
+    private func saveDefaultAccountEnabled() {
+        if defaultAccountIsEnabled {
+            userDefaults.removeObject(forKey: StorageKeys.codexDefaultAccountEnabled)
+        } else {
+            userDefaults.set(false, forKey: StorageKeys.codexDefaultAccountEnabled)
         }
     }
 

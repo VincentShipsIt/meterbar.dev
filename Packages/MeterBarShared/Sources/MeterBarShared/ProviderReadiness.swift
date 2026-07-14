@@ -80,6 +80,15 @@ public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
 
     public var isHealthy: Bool { overall == .pass }
 
+    /// True only when a genuine SETUP check (installed, auth, or data) is at
+    /// `.fail`. Excludes `refresh` and `parseHealth` — a working provider whose
+    /// only issue is a format-health warning must not keep the "Finish setup"
+    /// checklist pinned open.
+    public var needsSetup: Bool {
+        let setupIDs = [ReadinessCheckID.installed, ReadinessCheckID.auth, ReadinessCheckID.data]
+        return checks.contains { setupIDs.contains($0.id) && $0.level == .fail }
+    }
+
     public func check(_ id: String) -> ReadinessCheck? {
         checks.first { $0.id == id }
     }

@@ -75,6 +75,54 @@ final class ResetCountdownTests: XCTestCase {
         XCTAssertNil(ResetCountdownLabel.counterText(title: "Weekly", limit: limit(resetIn: nil), now: epoch))
     }
 
+    func testCounterTextClockFormatUsesInjectedLocaleAndTimeZone() {
+        let locale = Locale(identifier: "en_GB")
+        let timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+
+        XCTAssertEqual(
+            ResetCountdownLabel.counterText(
+                title: "Weekly",
+                limit: limit(resetIn: 3_660),
+                format: .clock,
+                now: epoch,
+                locale: locale,
+                timeZone: timeZone
+            ),
+            "Weekly resets at 01:01"
+        )
+        XCTAssertEqual(
+            ResetCountdownLabel.counterText(
+                title: nil,
+                limit: limit(resetIn: 3_660),
+                format: .clock,
+                now: epoch,
+                locale: locale,
+                timeZone: timeZone
+            ),
+            "Resets at 01:01"
+        )
+    }
+
+    func testClockFormatKeepsResetDueAndMissingTimeBehavior() {
+        XCTAssertEqual(
+            ResetCountdownLabel.counterText(
+                title: "Session",
+                limit: limit(resetIn: -1),
+                format: .clock,
+                now: epoch
+            ),
+            "Session reset due"
+        )
+        XCTAssertNil(
+            ResetCountdownLabel.counterText(
+                title: nil,
+                limit: limit(resetIn: nil),
+                format: .clock,
+                now: epoch
+            )
+        )
+    }
+
     // MARK: - NextResetCountdownLabel.selectNextWindow
 
     func testSelectNextWindowPicksSoonestFuture() {
@@ -157,6 +205,16 @@ final class ResetCountdownTests: XCTestCase {
         XCTAssertEqual(
             BlockingLimitResetCounter.counterText(for: weekly, now: epoch),
             "in 1d 1h"
+        )
+        XCTAssertEqual(
+            BlockingLimitResetCounter.counterText(
+                for: weekly,
+                now: epoch,
+                format: .clock,
+                locale: Locale(identifier: "en_GB"),
+                timeZone: TimeZone(secondsFromGMT: 0) ?? .current
+            ),
+            "at 01:00"
         )
     }
 }

@@ -5,8 +5,10 @@ import Foundation
 struct SessionWakeNotificationContext: Equatable, Sendable {
     /// The global notifications master switch (NotificationPreferencesStore).
     let globalNotificationsEnabled: Bool
-    /// Whether the Claude provider is visible/enabled (ProviderVisibilityStore).
-    let claudeProviderEnabled: Bool
+    /// Whether the active wake provider is visible/enabled (ProviderVisibilityStore).
+    let providerEnabled: Bool
+    /// The active wake provider's user-facing name, used in the completion copy.
+    let providerDisplayName: String
     /// The Session Wake "notify on completion" preference.
     let notifyOnCompletion: Bool
 }
@@ -24,7 +26,7 @@ struct FiredWakeNotification: Equatable, Sendable {
 }
 
 /// Decides whether Session Wake may post a notification. A wake notification is
-/// suppressed unless the global switch, the Claude provider, and the Session
+/// suppressed unless the global switch, the active provider, and the Session
 /// Wake preference all allow it — Session Wake never overrides the user's global
 /// or provider-level choices.
 enum SessionWakeNotificationDecider {
@@ -34,7 +36,7 @@ enum SessionWakeNotificationDecider {
 
     static func shouldNotifyOnCompletion(_ context: SessionWakeNotificationContext) -> Bool {
         context.globalNotificationsEnabled
-            && context.claudeProviderEnabled
+            && context.providerEnabled
             && context.notifyOnCompletion
     }
 
@@ -60,7 +62,7 @@ enum SessionWakeNotificationDecider {
         guard summary.attempted > 0 || summary.remaining > 0 else { return nil }
 
         let sessionNoun = summary.attempted == 1 ? "session" : "sessions"
-        var body = "Resumed \(summary.resumed) of \(summary.attempted) Claude \(sessionNoun)."
+        var body = "Resumed \(summary.resumed) of \(summary.attempted) \(context.providerDisplayName) \(sessionNoun)."
         if summary.failed > 0 {
             let failureNoun = summary.failed == 1 ? "failure" : "failures"
             body += " \(summary.failed) \(failureNoun)."
