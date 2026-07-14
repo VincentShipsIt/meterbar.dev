@@ -32,10 +32,26 @@ struct UsageWidget: Widget {
 struct UsageWidgetEntry: TimelineEntry {
     let date: Date
     let metrics: [ServiceType: UsageMetrics]
+    let accountMetrics: [AccountUsageSnapshot]
 
-    var sortedServices: [ServiceType] {
-        metrics.keys.sorted { $0.sortOrder < $1.sortOrder }
+    var rows: [WidgetUsageRow] {
+        let accountServices = Set(accountMetrics.map { $0.metrics.service })
+        let accountRows = accountMetrics.map {
+            WidgetUsageRow(id: $0.id.uuidString, name: $0.name, metrics: $0.metrics)
+        }
+        let providerRows = metrics
+            .filter { !accountServices.contains($0.key) }
+            .map { WidgetUsageRow(id: $0.key.rawValue, name: $0.key.displayName, metrics: $0.value) }
+        return (accountRows + providerRows).sorted {
+            ($0.metrics.service.sortOrder, $0.name) < ($1.metrics.service.sortOrder, $1.name)
+        }
     }
+}
+
+struct WidgetUsageRow: Identifiable {
+    let id: String
+    let name: String
+    let metrics: UsageMetrics
 }
 
 struct UsageWidgetProvider: TimelineProvider {
@@ -55,14 +71,16 @@ struct UsageWidgetProvider: TimelineProvider {
                     service: .claudeCode,
                     weeklyLimit: UsageLimit(used: 90, total: 100, resetTime: nil)
                 )
-            ]
+            ],
+            accountMetrics: []
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UsageWidgetEntry) -> Void) {
         let entry = UsageWidgetEntry(
             date: Date(),
-            metrics: SharedMetricsStore.loadMetrics()
+            metrics: SharedMetricsStore.loadMetrics(),
+            accountMetrics: SharedMetricsStore.loadAccountMetrics()
         )
         completion(entry)
     }
@@ -71,7 +89,8 @@ struct UsageWidgetProvider: TimelineProvider {
         let cachedMetrics = SharedMetricsStore.loadMetrics()
         let entry = UsageWidgetEntry(
             date: Date(),
-            metrics: cachedMetrics
+            metrics: cachedMetrics,
+            accountMetrics: SharedMetricsStore.loadAccountMetrics()
         )
 
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date()
@@ -103,15 +122,13 @@ struct SmallWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if entry.metrics.isEmpty {
+            if entry.rows.isEmpty {
                 Text("No data")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                ForEach(entry.sortedServices.prefix(3), id: \.self) { service in
-                    if let metrics = entry.metrics[service] {
-                        ServiceMiniView(metrics: metrics)
-                    }
+                ForEach(Array(entry.rows.prefix(3))) { row in
+                    ServiceMiniView(row: row)
                 }
             }
         }
@@ -122,25 +139,33 @@ struct SmallWidgetView: View {
 }
 
 struct ServiceMiniView: View {
-    let metrics: UsageMetrics
+    let row: WidgetUsageRow
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(metrics.service.assetName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
+            WidgetProviderIcon(service: row.metrics.service, size: 14)
 
-            if let weeklyLimit = metrics.weeklyLimit {
+            Text(row.name)
+                .font(.caption2)
+                .lineLimit(1)
+
+            if let weeklyLimit = row.metrics.weeklyLimit {
                 ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
                     .tint(weeklyLimit.statusColor.color)
-                Text("\(Int(weeklyLimit.percentage))%")
+                Text(limitSummary(weeklyLimit))
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
 
-            WidgetStatusIndicator(status: metrics.overallStatus)
+            WidgetStatusIndicator(status: row.metrics.overallStatus)
         }
+    }
+
+    private func limitSummary(_ limit: UsageLimit) -> String {
+        if row.metrics.service == .openRouter {
+            return String(format: "$%.2f", max(0, limit.total - limit.used))
+        }
+        return limit.percentageText
     }
 }
 
@@ -149,15 +174,13 @@ struct MediumWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if entry.metrics.isEmpty {
+            if entry.rows.isEmpty {
                 Text("No services connected")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                ForEach(entry.sortedServices, id: \.self) { service in
-                    if let metrics = entry.metrics[service] {
-                        ServiceCompactView(metrics: metrics)
-                    }
+                ForEach(entry.rows) { row in
+                    ServiceCompactView(row: row)
                 }
             }
         }
@@ -172,7 +195,7 @@ struct LargeWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if entry.metrics.isEmpty {
+            if entry.rows.isEmpty {
                 VStack {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.largeTitle)
@@ -183,13 +206,11 @@ struct LargeWidgetView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let services = Array(entry.sortedServices.prefix(7))
-                ForEach(Array(services.enumerated()), id: \.element) { index, service in
-                    if let metrics = entry.metrics[service] {
-                        ServiceCompactView(metrics: metrics)
-                        if index < services.count - 1 {
-                            Spacer()
-                        }
+                let rows = Array(entry.rows.prefix(7))
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    ServiceCompactView(row: row)
+                    if index < rows.count - 1 {
+                        Spacer()
                     }
                 }
             }
@@ -201,100 +222,55 @@ struct LargeWidgetView: View {
 }
 
 struct ServiceCompactView: View {
-    let metrics: UsageMetrics
+    let row: WidgetUsageRow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
-                Text(metrics.service.displayName)
+                WidgetProviderIcon(service: row.metrics.service, size: 18)
+                Text(row.name)
                     .font(.subheadline)
                     .bold()
                 Spacer()
-                WidgetStatusIndicator(status: metrics.overallStatus)
+                WidgetStatusIndicator(status: row.metrics.overallStatus)
             }
 
-            if let weeklyLimit = metrics.weeklyLimit {
+            if let weeklyLimit = row.metrics.weeklyLimit {
                 HStack {
                     ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
                         .tint(weeklyLimit.statusColor.color)
-                    Text("\(Int(weeklyLimit.percentage))%")
+                    Text(limitSummary(weeklyLimit))
                         .font(.caption)
                 }
             }
         }
     }
+
+    private func limitSummary(_ limit: UsageLimit) -> String {
+        if row.metrics.service == .openRouter {
+            return String(format: "$%.2f left", max(0, limit.total - limit.used))
+        }
+        return limit.percentageText
+    }
 }
 
-struct ServiceDetailView: View {
-    let metrics: UsageMetrics
+struct WidgetProviderIcon: View {
+    let service: ServiceType
+    let size: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(metrics.service.assetName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 20, height: 20)
-                Text(metrics.service.displayName)
-                    .font(.headline)
-                Spacer()
-                WidgetStatusIndicator(status: metrics.overallStatus)
-            }
-
-            if let sessionLimit = metrics.sessionLimit {
-                LimitDetailView(title: "Session", limit: sessionLimit)
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitDetailView(title: "Weekly", limit: weeklyLimit)
-            }
-
-            if let codeReviewLimit = metrics.codeReviewLimit {
-                LimitDetailView(title: "Code Review", limit: codeReviewLimit)
-            }
+        if service == .openRouter || service == .grok {
+            Image(systemName: service.iconName)
+                .font(.system(size: size, weight: .semibold))
+                .frame(width: size, height: size)
+        } else {
+            Image(service.assetName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
         }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
     }
 }
-
-struct LimitDetailView: View {
-    let title: String
-    let limit: UsageLimit
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.caption)
-                Spacer()
-                Text("\(Int(limit.percentage))%")
-                    .font(.caption)
-                    .bold()
-            }
-
-            ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
-                .tint(limit.statusColor.color)
-
-            Text("\(formatNumber(limit.used)) / \(formatNumber(limit.total))")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private func formatNumber(_ value: Double) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fk", value / 1000)
-        }
-        return String(format: "%.0f", value)
-    }
-}
-
 struct WidgetStatusIndicator: View {
     let status: UsageStatus
 

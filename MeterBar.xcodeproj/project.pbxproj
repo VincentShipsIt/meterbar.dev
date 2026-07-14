@@ -12,6 +12,7 @@
 		5259E44F2F032E78001001CF /* MeterBarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5259E43D2F032E77001001CF /* MeterBarWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		52ABC1022F0400010036036C /* MeterBarShared in Frameworks */ = {isa = PBXBuildFile; productRef = 52ABC1012F0400010036036C /* MeterBarShared */; };
 		52ABC1042F0400010036036C /* MeterBarShared in Frameworks */ = {isa = PBXBuildFile; productRef = 52ABC1032F0400010036036C /* MeterBarShared */; };
+		52ABC1072F0400010036036C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 52ABC1062F0400010036036C /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +47,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		52ABC1082F0400010036036C /* Exceptions for "MeterBar" folder in "MeterBar" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				Resources/dev.meterbar.app.session-wake.plist,
+			);
+			target = 52CFA4FF2F0323EF0036036C /* MeterBar */;
+		};
 		5259E4502F032E78001001CF /* Exceptions for "MeterBarWidget" folder in "MeterBarWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -66,6 +75,9 @@
 		};
 		52CFA5022F0323EF0036036C /* MeterBar */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				52ABC1082F0400010036036C /* Exceptions for "MeterBar" folder in "MeterBar" target */,
+			);
 			path = MeterBar;
 			sourceTree = "<group>";
 		};
@@ -86,6 +98,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				52ABC1072F0400010036036C /* Sparkle in Frameworks */,
 				52ABC1022F0400010036036C /* MeterBarShared in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -154,6 +167,7 @@
 				52CFA4FC2F0323EF0036036C /* Sources */,
 				52CFA4FD2F0323EF0036036C /* Frameworks */,
 				52CFA4FE2F0323EF0036036C /* Resources */,
+				52B0A0012F1400010036036C /* Embed Session Wake Launch Agent */,
 				5259E4542F032E78001001CF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -167,6 +181,7 @@
 			name = MeterBar;
 			packageProductDependencies = (
 				52ABC1012F0400010036036C /* MeterBarShared */,
+				52ABC1062F0400010036036C /* Sparkle */,
 			);
 			productName = MeterBar;
 			productReference = 52CFA5002F0323EF0036036C /* MeterBar.app */;
@@ -201,6 +216,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				52ABC1002F0400010036036C /* XCLocalSwiftPackageReference "Packages/MeterBarShared" */,
+				52ABC1052F0400010036036C /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 52CFA5012F0323EF0036036C /* Products */;
@@ -229,6 +245,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		52B0A0012F1400010036036C /* Embed Session Wake Launch Agent */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 0;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/MeterBar/Resources/dev.meterbar.app.session-wake.plist",
+			);
+			name = "Embed Session Wake Launch Agent";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.meterbar.app.session-wake.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nsource_plist=\"${SRCROOT}/MeterBar/Resources/dev.meterbar.app.session-wake.plist\"\ndestination_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\n/bin/mkdir -p \"${destination_dir}\"\n/bin/cp \"${source_plist}\" \"${destination_dir}/dev.meterbar.app.session-wake.plist\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		5259E4392F032E77001001CF /* Sources */ = {
@@ -263,7 +299,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = MeterBarWidget/MeterBarWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEVELOPMENT_TEAM = C76R5DRH64;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -280,7 +316,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MeterBarWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = MeterBarWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = "MeterBarWidget Dev";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -289,7 +325,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.7.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.meterbar.app.Widget;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.meterbar.app.debug.Widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
@@ -308,7 +344,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = MeterBarWidget/MeterBarWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEVELOPMENT_TEAM = C76R5DRH64;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -475,7 +511,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEVELOPMENT_TEAM = C76R5DRH64;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -491,16 +527,16 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MeterBar/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.7.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.meterbar.app;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.meterbar.app.debug;
+				PRODUCT_NAME = "MeterBar Dev";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -521,7 +557,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEVELOPMENT_TEAM = C76R5DRH64;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -537,8 +573,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MeterBar/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -597,6 +633,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		52ABC1052F0400010036036C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		52ABC1012F0400010036036C /* MeterBarShared */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -605,6 +652,11 @@
 		52ABC1032F0400010036036C /* MeterBarShared */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MeterBarShared;
+		};
+		52ABC1062F0400010036036C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 52ABC1052F0400010036036C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

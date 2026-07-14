@@ -18,7 +18,8 @@ final class CachedMetricsContractTests: XCTestCase {
                 used: 42.5,
                 total: 100,
                 resetTime: Date(timeIntervalSinceReferenceDate: 700_000_000),
-                windowSeconds: 5 * 3_600
+                windowSeconds: 5 * 3_600,
+                isEstimated: true
             ),
             weeklyLimit: UsageLimit(used: 12, total: 100, resetTime: nil),
             extraUsage: ExtraUsageStatus(state: .on, detail: "$0.00 used"),
@@ -61,10 +62,11 @@ final class CachedMetricsContractTests: XCTestCase {
         }
 
         let session = try XCTUnwrap(object["sessionLimit"] as? [String: Any])
-        for key in ["used", "total", "resetTime", "windowSeconds"] {
+        for key in ["used", "total", "resetTime", "windowSeconds", "isEstimated"] {
             XCTAssertNotNil(session[key], "missing sessionLimit key '\(key)'")
         }
         XCTAssertEqual(session["used"] as? Double, 42.5)
+        XCTAssertEqual(session["isEstimated"] as? Bool, true)
 
         let extra = try XCTUnwrap(object["extraUsage"] as? [String: Any])
         XCTAssertEqual(extra["state"] as? String, "on")
@@ -98,6 +100,7 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertEqual(metrics.service, .codexCli)
         XCTAssertEqual(metrics.weeklyLimit?.used, 30)
         XCTAssertNil(metrics.weeklyLimit?.windowSeconds)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertNil(metrics.extraUsage)
         XCTAssertNil(metrics.resetCreditsAvailable)
     }

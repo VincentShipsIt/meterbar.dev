@@ -35,17 +35,19 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Ordering and inclusion
 
-    func testDisplayOrderIsCodexClaudeCursor() {
+    func testDisplayOrderIsCodexClaudeCursorOpenRouterGrok() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
                 .claudeCode: makeMetrics(service: .claudeCode, weekly: 20),
-                .cursor: makeMetrics(service: .cursor, weekly: 30)
+                .cursor: makeMetrics(service: .cursor, weekly: 30),
+                .openRouter: makeMetrics(service: .openRouter, weekly: 40),
+                .grok: makeMetrics(service: .grok, weekly: 50)
             ]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor])
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter, .grok])
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter", "Grok"])
     }
 
     func testDisabledProvidersAreExcluded() {
@@ -62,8 +64,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
         ))
 
-        // Popover shows all three (Codex/Claude as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 3)
+        // Popover shows all enabled providers (Codex/Claude/OpenRouter/Grok as empty-state cards)…
+        XCTAssertEqual(snapshots.count, 5)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -100,6 +102,94 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(Set(snapshots.map(\.id)).count, snapshots.count)
     }
 
+    func testDisabledClaudeAccountsAreExcludedEvenWithCachedMetrics() {
+        let disabled = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Disabled",
+            configDirectory: "/tmp/disabled",
+            isEnabled: false
+        )
+        let enabled = ClaudeCodeAccount(id: UUID(), name: "Enabled", configDirectory: "/tmp/enabled")
+        let accountMetrics = [
+            disabled.id: makeMetrics(service: .claudeCode, weekly: 80),
+            enabled.id: makeMetrics(service: .claudeCode, weekly: 20)
+        ]
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            claudeAccounts: [disabled, enabled],
+            claudeAccountMetrics: accountMetrics,
+            enabledServices: [.claudeCode]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Enabled"])
+        XCTAssertEqual(snapshots.first?.limits.first?.usageLimit.used, 20)
+    }
+
+    func testClaudeProviderHasNoSnapshotWhenAllAccountsAreDisabled() {
+        let disabledDefault = ClaudeCodeAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: ClaudeCodeAccount.defaultName,
+            configDirectory: nil,
+            isEnabled: false
+        )
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.claudeCode: makeMetrics(service: .claudeCode, weekly: 90)],
+            claudeAccounts: [disabledDefault],
+            enabledServices: [.claudeCode]
+        ))
+
+        XCTAssertTrue(snapshots.isEmpty)
+    }
+
+    func testMultipleCodexAccountsUseIndependentMetricsAndAccountNames() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [.defaultAccount, work],
+            codexAccountMetrics: [
+                CodexAccount.defaultID: makeMetrics(service: .codexCli, weekly: 25),
+                work.id: makeMetrics(service: .codexCli, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map(\.accountID), [CodexAccount.defaultID, work.id])
+        XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
+        XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
+    }
+
+    func testStatusItemPinOptionsUseStableProviderAccountWindowKeys() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            codexAccounts: [work],
+            codexAccountMetrics: [
+                work.id: makeMetrics(service: .codexCli, session: 25, weekly: 75)
+            ],
+            claudeAccounts: [.defaultAccount],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(
+            snapshots.statusItemPinOptions,
+            [
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "session"),
+                    title: "Work · Session"
+                ),
+                StatusItemPinOption(
+                    id: StatusItemPinKey.make(service: .codexCli, accountID: work.id, windowID: "weekly"),
+                    title: "Work · Weekly"
+                )
+            ]
+        )
+    }
+
     // MARK: - Limits
 
     func testThirdLimitLabelIsSonnetForClaudeAndCodeReviewForCodex() {
@@ -114,6 +204,16 @@ final class ProviderSnapshotTests: XCTestCase {
 
         XCTAssertEqual(claudeLimits.map(\.title), ["Sonnet"])
         XCTAssertEqual(codexLimits.map(\.title), ["Code Review"])
+    }
+
+    func testOpenRouterUsesCurrencyCreditLabels() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .openRouter, session: 10, weekly: 20),
+            service: .openRouter
+        )
+
+        XCTAssertEqual(limits.map(\.title), ["Key limit", "Account credits"])
+        XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
     }
 
     func testPaceContextComesFromKindNotTitle() {
@@ -260,6 +360,29 @@ final class ProviderSnapshotTests: XCTestCase {
             ProviderStatusBadges(snapshot: snapshot).hasContent,
             "Overage On/Off remains relevant when the subscription quota is exhausted."
         )
+    }
+
+    func testEstimatedExhaustionDoesNotClaimProviderIsBlocked() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(
+                used: 500,
+                total: 500,
+                resetTime: nil,
+                isEstimated: true
+            )
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: metrics,
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.band, .exhausted)
+        XCTAssertFalse(snapshot.hasExhaustedLimit)
+        XCTAssertFalse(snapshot.hasExhaustedWeeklyLimit)
+        XCTAssertTrue(snapshot.blockingLimits.isEmpty)
     }
 
     func testBlockingResetWindowsExcludeSimultaneouslyExhaustedSecondaryQuota() {

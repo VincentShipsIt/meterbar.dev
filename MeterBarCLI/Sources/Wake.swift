@@ -16,10 +16,11 @@ import MeterBar
 /// - SIGINT releases the shared lock and leaves no child process.
 /// - Configuration comes from explicit flags or the shared app-group domain,
 ///   never the CLI process's own `UserDefaults.standard`.
-/// - Codex is not exposed.
+/// - Both `claude` and `codex` providers are supported; each resumes only its
+///   own blocked sessions, gated by that account's fresh usage quota.
 struct Wake: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Resume Claude Code sessions blocked on usage limits"
+        abstract: "Resume Claude Code or Codex sessions blocked on usage limits"
     )
 
     @Flag(name: .long, help: "Preview resumable sessions without launching anything.")
@@ -28,10 +29,10 @@ struct Wake: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Emit only the versioned JSON response on stdout.")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Provider (only 'claude' is supported).")
+    @Option(name: .shortAndLong, help: "Provider: 'claude' (default) or 'codex'.")
     var provider: String = "claude"
 
-    @Option(name: .long, help: "Explicit CLAUDE_CONFIG_DIR for the wake account.")
+    @Option(name: .long, help: "Explicit config dir for the wake account (CLAUDE_CONFIG_DIR for claude, CODEX_HOME for codex).")
     var configDir: String?
 
     @Option(name: .shortAndLong, help: "Maximum sessions to resume this run.")

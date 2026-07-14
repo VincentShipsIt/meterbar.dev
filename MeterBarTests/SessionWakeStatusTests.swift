@@ -52,8 +52,8 @@ final class SessionWakeStatusTests: XCTestCase {
             "message": ["role": "assistant", "content": [["type": "text", "text": "session limit resets 3:00am (UTC)"]]]
         ]
         let data = try JSONSerialization.data(withJSONObject: object)
-        try String(decoding: data, as: UTF8.self)
-            .write(to: projects.appendingPathComponent("s0.jsonl"), atomically: true, encoding: .utf8)
+        let transcript = try XCTUnwrap(String(data: data, encoding: .utf8))
+        try transcript.write(to: projects.appendingPathComponent("s0.jsonl"), atomically: true, encoding: .utf8)
 
         let ledgerURL = tempDir.appendingPathComponent("l.json")
         let status = SessionWakeStatus(ledgerFactory: { ReplayLedger(fileURL: ledgerURL) })
@@ -64,27 +64,12 @@ final class SessionWakeStatusTests: XCTestCase {
 
     // MARK: - SwiftUI hosting
 
-    func testSettingsPaneHosts() {
-        let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
-        let store = SessionWakeSettingsStore(userDefaults: defaults)
-        store.setWakeAccountID(UUID())
-        store.acknowledgeFirstRunAndTurnOn()
-        let view = SessionWakeSettingsView(store: store, status: SessionWakeStatus(), accounts: ClaudeCodeAccountStore(userDefaults: defaults))
-        let host = NSHostingView(rootView: view)
-        host.frame = NSRect(x: 0, y: 0, width: 520, height: 700)
-        host.layoutSubtreeIfNeeded()
-        XCTAssertGreaterThan(host.fittingSize.height, 100)
-    }
-
-    func testSettingsPaneHostsEmbeddedInDashboard() {
-        // The dashboard embeds the settings inside its own ScrollView, so the
-        // embedded variant must render without the grouped Form's nested scroll.
-        let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
+    func testSettingsPaneHosts() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "hosting-\(UUID().uuidString)"))
         let store = SessionWakeSettingsStore(userDefaults: defaults)
         store.setWakeAccountID(UUID())
         store.acknowledgeFirstRunAndTurnOn()
         let view = SessionWakeSettingsView(
-            embeddedInDashboard: true,
             store: store,
             status: SessionWakeStatus(),
             accounts: ClaudeCodeAccountStore(userDefaults: defaults)
@@ -106,8 +91,8 @@ final class SessionWakeStatusTests: XCTestCase {
         XCTAssertFalse(SessionWakeMenuControl.shouldShow(featureEnabled: false, isOn: true, canTurnOn: true))
     }
 
-    func testMenuControlHosts() {
-        let defaults = UserDefaults(suiteName: "hosting-\(UUID().uuidString)")!
+    func testMenuControlHosts() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "hosting-\(UUID().uuidString)"))
         let view = SessionWakeMenuControl(
             store: SessionWakeSettingsStore(userDefaults: defaults),
             status: SessionWakeStatus()

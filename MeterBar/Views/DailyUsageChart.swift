@@ -118,7 +118,7 @@ struct DailyUsageChart: View {
     HStack(spacing: 12) {
       ForEach(visibleProviders, id: \.self) { provider in
         HStack(spacing: 5) {
-          RoundedRectangle(cornerRadius: 2)
+          RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
             .fill(color(for: provider))
             .frame(width: 8, height: 8)
           Text(provider.displayName)
@@ -201,7 +201,7 @@ struct StackedDailyUsageColumn: View {
           }
         }
         .frame(width: width, height: height, alignment: .bottom)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small))
       } else {
         Capsule()
           .fill(.quaternary)
@@ -209,6 +209,9 @@ struct StackedDailyUsageColumn: View {
       }
     }
     .frame(width: width, height: maxHeight, alignment: .bottom)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(day.chartAccessibilityLabel)
+    .accessibilityValue(day.chartAccessibilityValue)
     .help(helpText)
   }
 
@@ -262,6 +265,22 @@ struct DailyUsageDay: Identifiable {
   var totalTokens: Int {
     segments.reduce(0) { $0 + $1.tokens }
   }
+
+  var chartAccessibilityLabel: String {
+    DashboardDateFormat.medium(date)
+  }
+
+  var chartAccessibilityValue: String {
+    var values = [
+      "\(UsageFormat.tokens(totalTokens)) tokens",
+      UsageFormat.cost(cost),
+    ]
+    values.append(contentsOf: segments.map { segment in
+      "\(segment.provider.displayName) \(UsageFormat.tokens(segment.tokens)) tokens, "
+        + UsageFormat.cost(segment.cost)
+    })
+    return values.joined(separator: ", ")
+  }
 }
 
 struct DailyUsageProviderSegment: Identifiable {
@@ -275,6 +294,8 @@ struct DailyUsageBreakdownList: View {
   let dailyUsage: [DailyTokenUsage]
 
   @State private var expandedDayIDs: Set<Date> = []
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
 
   private var days: [DailyProviderUsageDay] {
     let grouped = Dictionary(grouping: dailyUsage) { Calendar.current.startOfDay(for: $0.date) }
@@ -315,7 +336,10 @@ struct DailyUsageBreakdownList: View {
   }
 
   private func toggleExpansion(for dayID: Date) {
-    withAnimation(.snappy(duration: 0.18)) {
+    // In-place table expansion on a flat tile — no per-row glass surface to
+    // morph, so it keeps the move/opacity transition on the shared token,
+    // gated by Reduce Motion.
+    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
       if expandedDayIDs.contains(dayID) {
         expandedDayIDs.remove(dayID)
       } else {
@@ -374,8 +398,8 @@ struct DailyUsageTableHeader: View {
     .fontWeight(.semibold)
     .foregroundColor(.secondary)
     .textCase(.uppercase)
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
+    .padding(.horizontal, MeterBarTheme.Spacing.md)
+    .padding(.vertical, MeterBarTheme.Spacing.sm)
   }
 }
 
@@ -436,6 +460,9 @@ struct DailyUsageDetailRow: View {
   let isExpanded: Bool
   let toggle: () -> Void
 
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       Button(action: toggle) {
@@ -446,6 +473,8 @@ struct DailyUsageDetailRow: View {
               .fontWeight(.bold)
               .foregroundColor(.secondary)
               .frame(width: 12)
+              .contentTransition(.symbolEffect(.replace))
+              .animation(MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion), value: isExpanded)
 
             Text(dateLabel(day.date))
               .font(.subheadline)
@@ -474,8 +503,8 @@ struct DailyUsageDetailRow: View {
             isPrimary: true
           )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, MeterBarTheme.Spacing.md)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -489,7 +518,7 @@ struct DailyUsageDetailRow: View {
             DailyProviderUsageSummaryRow(provider: provider)
           }
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, MeterBarTheme.Spacing.sm)
         .transition(.opacity.combined(with: .move(edge: .top)))
       }
     }
@@ -547,8 +576,8 @@ struct DailyProviderUsageSummaryRow: View {
         width: DailyUsageTableLayout.costColumnWidth
       )
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 5)
+    .padding(.horizontal, MeterBarTheme.Spacing.md)
+    .padding(.vertical, MeterBarTheme.Spacing.xs)
   }
 
   private var providerShortName: String {
@@ -559,6 +588,10 @@ struct DailyProviderUsageSummaryRow: View {
       return "Codex"
     case .cursor:
       return "Cursor"
+    case .openRouter:
+      return "OpenRouter"
+    case .grok:
+      return "Grok"
     }
   }
 }

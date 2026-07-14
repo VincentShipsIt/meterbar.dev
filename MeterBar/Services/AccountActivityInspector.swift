@@ -61,6 +61,15 @@ nonisolated enum AccountActivityInspector {
         ))
     }
 
+    static func codexCliActivity(homeDirectory: String?) -> Date? {
+        let account = CodexAccount(
+            id: CodexAccount.defaultID,
+            name: CodexAccount.defaultName,
+            homeDirectory: homeDirectory
+        )
+        return lastActivity(inDirectory: CodexHomeDirectory.path(for: account))
+    }
+
     /// Cursor continuously checkpoints its state database while running; the
     /// WAL sibling is the hottest file. Mirrors the candidate paths used by
     /// `CursorLocalService.getCursorDatabasePath`.

@@ -2,15 +2,34 @@ import Foundation
 import MeterBarShared
 
 /// One account/provider quota competing for the menu bar percentage slot.
-struct StatusLimitCandidate: Equatable {
-    /// Stable identity across refreshes (e.g. "claude:<uuid>", "codex", "cursor")
-    /// so the sticky selection can recognize the previously shown account.
+struct StatusLimitCandidate: Equatable, Sendable {
+    /// Legacy Auto identity (e.g. "claude:<uuid>", "codex:<uuid>", "cursor")
+    /// retained byte-for-byte so sticky selection and equal-quota tie-breaks do
+    /// not change when the user leaves the new preference set to Auto.
     let key: String
+    /// Stable provider/account/window identity persisted for explicit pins.
+    let pinKey: String
     /// Human-readable label for the status item tooltip.
     let displayName: String
+    /// Provider-specific quota-window label (Session, Weekly, Sonnet, etc.).
+    let windowName: String
     let limit: UsageLimit
     /// Most recent on-disk activity for the account, nil when undetectable.
     let lastActivity: Date?
+    /// Only the same session/weekly windows used before #142 participate in
+    /// Auto. Other windows exist solely so the user can pin them explicitly.
+    let isAutoSelectable: Bool
+}
+
+nonisolated enum StatusItemPinKey {
+    static func make(service: ServiceType, accountID: UUID?, windowID: String) -> String {
+        "\(service.rawValue):\(accountID?.uuidString ?? "default"):\(windowID)"
+    }
+}
+
+struct StatusItemPinOption: Identifiable, Equatable {
+    let id: String
+    let title: String
 }
 
 /// Picks which quota the menu bar title shows.
@@ -31,20 +50,26 @@ enum StatusItemLimitSelector {
     static func select(
         candidates: [StatusLimitCandidate],
         previousKey: String?,
+        pinnedKey: String? = nil,
         now: Date = Date(),
         activityWindow: TimeInterval = Self.activityWindow,
         hysteresisPoints: Int = Self.hysteresisPoints
     ) -> StatusLimitCandidate? {
-        guard !candidates.isEmpty else { return nil }
+        if let pinnedKey, let pinned = candidates.first(where: { $0.pinKey == pinnedKey }) {
+            return pinned
+        }
 
-        let active = candidates.filter { candidate in
+        let autoCandidates = candidates.filter(\.isAutoSelectable)
+        guard !autoCandidates.isEmpty else { return nil }
+
+        let active = autoCandidates.filter { candidate in
             guard let lastActivity = candidate.lastActivity else { return false }
             return now.timeIntervalSince(lastActivity) <= activityWindow
         }
 
         // No detectable activity anywhere: fall back to the old behavior and
         // let every enabled account compete.
-        let pool = active.isEmpty ? candidates : active
+        let pool = active.isEmpty ? autoCandidates : active
 
         guard let tightest = pool.min(by: { lhs, rhs in
             let lhsLeft = QuotaMath.percentLeft(for: lhs.limit)

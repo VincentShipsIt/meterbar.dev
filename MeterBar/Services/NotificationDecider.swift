@@ -91,6 +91,8 @@ struct NotificationDecider {
         metrics: UsageMetrics,
         providerEnabled: Bool,
         alreadyNotified: Set<String>,
+        accountKey: String? = nil,
+        serviceDisplayName: String? = nil,
         now: Date = Date()
     ) -> NotificationEvaluation {
         // Delivery gates suppress banners, not state transitions. Continuing to
@@ -114,11 +116,22 @@ struct NotificationDecider {
         let criticalRank = Self.severityRank(preferences.criticalThreshold.band)
 
         for (limit, quotaKind) in limits {
-            let baseKey = "\(metrics.service.rawValue)-\(quotaKind.rawValue)"
+            let baseKey = [metrics.service.rawValue, accountKey, quotaKind.rawValue]
+                .compactMap { $0 }
+                .joined(separator: "-")
             let warnKey = "\(baseKey)-warn"
             let criticalKey = "\(baseKey)-critical"
 
             guard let limit else {
+                keys.remove(warnKey)
+                keys.remove(criticalKey)
+                continue
+            }
+
+            // Heuristic totals can indicate UI severity, but they are not a
+            // reliable basis for a threshold alert. Clear crossing state so a
+            // later provider-reported value can notify normally.
+            guard !limit.isEstimated else {
                 keys.remove(warnKey)
                 keys.remove(criticalKey)
                 continue
@@ -138,7 +151,7 @@ struct NotificationDecider {
                     fired.append(FiredNotification(
                         key: criticalKey,
                         level: .critical,
-                        serviceDisplayName: metrics.service.displayName,
+                        serviceDisplayName: serviceDisplayName ?? metrics.service.displayName,
                         quotaDisplayName: quotaDisplayName,
                         blocksProvider: blocksProvider,
                         percentUsed: Int(limit.percentage),
@@ -154,7 +167,7 @@ struct NotificationDecider {
                     fired.append(FiredNotification(
                         key: warnKey,
                         level: .warning,
-                        serviceDisplayName: metrics.service.displayName,
+                        serviceDisplayName: serviceDisplayName ?? metrics.service.displayName,
                         quotaDisplayName: quotaDisplayName,
                         blocksProvider: blocksProvider,
                         percentUsed: Int(limit.percentage),
@@ -194,9 +207,9 @@ struct NotificationDecider {
         func displayName(for service: ServiceType) -> String {
             switch self {
             case .session:
-                return "Session"
+                return service == .openRouter ? "Key Limit" : "Session"
             case .weekly:
-                return "Weekly"
+                return service == .openRouter ? "Account Credits" : "Weekly"
             case .codeReview:
                 return service == .claudeCode ? "Sonnet" : "Code Review"
             }

@@ -39,13 +39,14 @@ extension ReadinessLevel {
 struct ReadinessCheckRow: View {
   let check: ReadinessCheck
   var compact: Bool = false
+  var recoveryAction: (() -> Void)?
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
       Image(systemName: check.level.iconName)
         .font(.system(size: compact ? 11 : 13, weight: .semibold))
         .foregroundStyle(check.level.tint)
-        .padding(.top, 1)
+        .padding(.top, MeterBarTheme.Spacing.xxs)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(check.title)
@@ -57,12 +58,20 @@ struct ReadinessCheckRow: View {
           .fixedSize(horizontal: false, vertical: true)
 
         if let recovery = check.recovery {
-          Text(recovery)
-            .font(compact ? .caption2 : .caption)
-            .fontWeight(.medium)
-            .foregroundStyle(check.level.tint)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 1)
+          if let recoveryAction {
+            Button(action: recoveryAction) {
+              HStack(spacing: 4) {
+                Text(recovery)
+                Image(systemName: "arrow.up.forward.app")
+              }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Open MeterBar Settings")
+            .recoveryStyle(compact: compact, tint: check.level.tint)
+          } else {
+            Text(recovery)
+              .recoveryStyle(compact: compact, tint: check.level.tint)
+          }
         }
       }
       Spacer(minLength: 0)
@@ -75,6 +84,7 @@ struct ReadinessCheckRow: View {
 struct ReadinessProviderCard: View {
   let report: ProviderReadiness
   var compact: Bool = false
+  var recoveryAction: (() -> Void)?
 
   var body: some View {
     DashboardTile(padding: compact ? 11 : 14) {
@@ -94,7 +104,7 @@ struct ReadinessProviderCard: View {
 
         VStack(alignment: .leading, spacing: compact ? 7 : 9) {
           ForEach(report.checks) { check in
-            ReadinessCheckRow(check: check, compact: compact)
+            ReadinessCheckRow(check: check, compact: compact, recoveryAction: recoveryAction)
           }
         }
       }
@@ -107,13 +117,9 @@ struct ReadinessBadge: View {
   let level: ReadinessLevel
 
   var body: some View {
-    Text(level.badgeLabel)
-      .font(.caption2)
-      .fontWeight(.semibold)
-      .foregroundStyle(level.tint)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(level.tint.opacity(0.14), in: Capsule())
+    // Migrated to the shared `MeterBarChip`; gains the standard hairline stroke
+    // the readiness badge previously lacked, so it matches the other badges.
+    MeterBarChip(level.badgeLabel, tint: level.tint, style: .flat)
   }
 }
 
@@ -150,12 +156,23 @@ enum DiagnosticsReportText {
 struct ReadinessChecklist: View {
   let reports: [ProviderReadiness]
   var compact: Bool = false
+  var recoveryAction: (() -> Void)?
 
   var body: some View {
     VStack(alignment: .leading, spacing: compact ? 8 : 12) {
       ForEach(reports) { report in
-        ReadinessProviderCard(report: report, compact: compact)
+        ReadinessProviderCard(report: report, compact: compact, recoveryAction: recoveryAction)
       }
     }
+  }
+}
+
+private extension View {
+  func recoveryStyle(compact: Bool, tint: Color) -> some View {
+    font(compact ? .caption2 : .caption)
+      .fontWeight(.medium)
+      .foregroundStyle(tint)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.top, MeterBarTheme.Spacing.xxs)
   }
 }

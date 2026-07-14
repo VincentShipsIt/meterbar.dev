@@ -8,10 +8,14 @@ import XCTest
 /// owns the actual `UNUserNotificationCenter` interaction. These tests pin the
 /// three gates plus the pluralization / failure-count copy.
 final class SessionWakeNotificationDeciderTests: XCTestCase {
-    private func allowingContext(notifyOnCompletion: Bool = true) -> SessionWakeNotificationContext {
+    private func allowingContext(
+        notifyOnCompletion: Bool = true,
+        providerDisplayName: String = "Claude Code"
+    ) -> SessionWakeNotificationContext {
         SessionWakeNotificationContext(
             globalNotificationsEnabled: true,
-            claudeProviderEnabled: true,
+            providerEnabled: true,
+            providerDisplayName: providerDisplayName,
             notifyOnCompletion: notifyOnCompletion
         )
     }
@@ -19,9 +23,18 @@ final class SessionWakeNotificationDeciderTests: XCTestCase {
     func testCompletionSuppressedWhenAnyGateClosed() {
         let summary = WakeRunSummary(resumed: 1)
         let closed = [
-            SessionWakeNotificationContext(globalNotificationsEnabled: false, claudeProviderEnabled: true, notifyOnCompletion: true),
-            SessionWakeNotificationContext(globalNotificationsEnabled: true, claudeProviderEnabled: false, notifyOnCompletion: true),
-            SessionWakeNotificationContext(globalNotificationsEnabled: true, claudeProviderEnabled: true, notifyOnCompletion: false)
+            SessionWakeNotificationContext(
+                globalNotificationsEnabled: false, providerEnabled: true,
+                providerDisplayName: "Claude Code", notifyOnCompletion: true
+            ),
+            SessionWakeNotificationContext(
+                globalNotificationsEnabled: true, providerEnabled: false,
+                providerDisplayName: "Claude Code", notifyOnCompletion: true
+            ),
+            SessionWakeNotificationContext(
+                globalNotificationsEnabled: true, providerEnabled: true,
+                providerDisplayName: "Claude Code", notifyOnCompletion: false
+            )
         ]
         for context in closed {
             XCTAssertNil(SessionWakeNotificationDecider.completionNotification(summary: summary, context: context))
@@ -45,7 +58,7 @@ final class SessionWakeNotificationDeciderTests: XCTestCase {
             summary: WakeRunSummary(remaining: 2),
             context: allowingContext()
         )
-        XCTAssertEqual(fired?.body, "Resumed 0 of 0 Claude sessions. 2 still queued.")
+        XCTAssertEqual(fired?.body, "Resumed 0 of 0 Claude Code sessions. 2 still queued.")
     }
 
     func testCompletionSingularCopy() {
@@ -53,27 +66,37 @@ final class SessionWakeNotificationDeciderTests: XCTestCase {
         let fired = SessionWakeNotificationDecider.completionNotification(summary: summary, context: allowingContext())
         XCTAssertEqual(fired?.key, "session-wake-completion")
         XCTAssertEqual(fired?.title, "Session Wake — Run Complete")
-        XCTAssertEqual(fired?.body, "Resumed 1 of 1 Claude session.")
+        XCTAssertEqual(fired?.body, "Resumed 1 of 1 Claude Code session.")
     }
 
     func testCompletionPluralWithSingleFailure() {
         // resumed 2 + failed 1 ⇒ attempted 3.
         let summary = WakeRunSummary(resumed: 2, failed: 1)
         let fired = SessionWakeNotificationDecider.completionNotification(summary: summary, context: allowingContext())
-        XCTAssertEqual(fired?.body, "Resumed 2 of 3 Claude sessions. 1 failure.")
+        XCTAssertEqual(fired?.body, "Resumed 2 of 3 Claude Code sessions. 1 failure.")
     }
 
     func testCompletionPluralFailures() {
         let summary = WakeRunSummary(resumed: 0, failed: 2)
         let fired = SessionWakeNotificationDecider.completionNotification(summary: summary, context: allowingContext())
-        XCTAssertEqual(fired?.body, "Resumed 0 of 2 Claude sessions. 2 failures.")
+        XCTAssertEqual(fired?.body, "Resumed 0 of 2 Claude Code sessions. 2 failures.")
     }
 
     func testCompletionMentionsRemainingWhenRequeued() {
         // Quota re-exhausted mid-run: some resumed, some still queued.
         let summary = WakeRunSummary(resumed: 1, failed: 0, skipped: 0, remaining: 2)
         let fired = SessionWakeNotificationDecider.completionNotification(summary: summary, context: allowingContext())
-        XCTAssertEqual(fired?.body, "Resumed 1 of 1 Claude session. 2 still queued.")
+        XCTAssertEqual(fired?.body, "Resumed 1 of 1 Claude Code session. 2 still queued.")
+    }
+
+    func testCompletionCopyUsesProviderDisplayName() {
+        // Codex runs surface the Codex provider name, not a hardcoded "Claude".
+        let summary = WakeRunSummary(resumed: 2, failed: 1)
+        let fired = SessionWakeNotificationDecider.completionNotification(
+            summary: summary,
+            context: allowingContext(providerDisplayName: "Codex")
+        )
+        XCTAssertEqual(fired?.body, "Resumed 2 of 3 Codex sessions. 1 failure.")
     }
 
     func testCompletionKeyIsStableAcrossDifferentCounts() {

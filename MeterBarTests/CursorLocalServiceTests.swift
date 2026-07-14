@@ -44,9 +44,11 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.service, .cursor)
         XCTAssertEqual(metrics.weeklyLimit?.used, 137)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
         XCTAssertEqual(metrics.sessionLimit?.used, 4)
         XCTAssertEqual(metrics.sessionLimit?.total, 20)
+        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
     }
 
     func testMapSummarySubstitutesDefaultPlanTotalWhenMissing() throws {
@@ -57,6 +59,7 @@ final class CursorLocalServiceTests: XCTestCase {
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.used, 50)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
     }
 
     func testMapSummaryOmitsSessionLimitWhenOnDemandDisabled() throws {
@@ -85,6 +88,7 @@ final class CursorLocalServiceTests: XCTestCase {
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
         XCTAssertEqual(metrics.sessionLimit?.used, 8)
         XCTAssertEqual(metrics.sessionLimit?.total ?? 0, 12, accuracy: 0.0001)
+        XCTAssertEqual(metrics.sessionLimit?.isEstimated, true)
     }
 
     func testMapSummaryOmitsSessionLimitWhenOnDemandAllZero() throws {

@@ -144,6 +144,10 @@ extension ServiceType {
             return "OpenAI"
         case .cursor:
             return "Cursor"
+        case .openRouter:
+            return "OpenRouter"
+        case .grok:
+            return "Grok"
         }
     }
 
@@ -155,6 +159,10 @@ extension ServiceType {
             return "https://status.openai.com/"
         case .cursor:
             return "https://status.cursor.com/"
+        case .openRouter:
+            return "https://status.openrouter.ai/"
+        case .grok:
+            return "https://status.x.ai/"
         }
     }
 
@@ -277,6 +285,9 @@ struct ProviderStatusClient {
     let session: URLSession
 
     func fetchReport(for service: ServiceType) async throws -> ProviderStatusReport {
+        if service == .openRouter {
+            return try await fetchOpenRouterReport()
+        }
         guard let baseURL = service.statusPageURL else {
             throw ServiceError.invalidURL
         }
@@ -289,6 +300,30 @@ struct ProviderStatusClient {
             pageURL: baseURL,
             summary: parsedStatus.summary,
             components: components,
+            fetchedAt: Date()
+        )
+    }
+
+    private func fetchOpenRouterReport() async throws -> ProviderStatusReport {
+        guard let url = ServiceType.openRouter.statusPageURL else {
+            throw ServiceError.invalidURL
+        }
+        let (data, response) = try await session.data(from: url)
+        try ServiceSupport.validate(response, data: data)
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw ServiceError.parsingError
+        }
+        let operational = html.localizedCaseInsensitiveContains("All Systems Operational")
+        return ProviderStatusReport(
+            service: .openRouter,
+            pageName: "OpenRouter",
+            pageURL: url,
+            summary: ProviderStatusSummary(
+                indicator: operational ? .none : .unknown,
+                description: operational ? "All Systems Operational" : "Check the OpenRouter status page",
+                updatedAt: nil
+            ),
+            components: [],
             fetchedAt: Date()
         )
     }

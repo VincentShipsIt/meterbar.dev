@@ -2,6 +2,7 @@ import AppKit
 import MeterBarShared
 import Combine
 import os
+import QuartzCore
 import SwiftUI
 import UserNotifications
 
@@ -28,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notificationPreferences = NotificationPreferencesStore.shared
+    private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     private var cancellables = Set<AnyCancellable>()
     private var monitorTask: Task<Void, Never>?
 
@@ -52,6 +54,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("MeterBar finished launching")
+        SoftwareUpdateController.shared.refreshState()
 
         // Keep Dock visibility in sync with the user's preference.
         observeDockVisibility()
@@ -81,18 +84,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusItem?.button
             },
             onDismiss: {
+                // Closing the popover only tears down the transient detail
+                // panel. First-run onboarding is NOT dismissed here: an
+                // incidental close (click-away / Escape) must leave the welcome
+                // callout to reappear until the user acts on Enable / Not Now.
                 MeterBarMenuDetailPanel.shared.dismiss()
             }
         )
+
+        if FirstRunOnboardingStore.shared.shouldPresent {
+            // Defer one run-loop turn so the status-item window is ready before
+            // positioning the panel. This is the first-launch welcome moment.
+            DispatchQueue.main.async { [weak self] in
+                self?.menuPanel?.show()
+            }
+        }
 
         Task { @MainActor in
             observeUsageMetrics()
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
-            // Surface a banner when a wake run finishes (gated by the global,
-            // provider, and Session Wake notification switches).
-            observeSessionWakeCompletion()
+            // The managed agent owns completion banners while it is available,
+            // including when the GUI is quit. Development builds without the
+            // embedded helper retain the in-app notification observer.
+            if !SessionWakeController.shared.usesBackgroundAgent {
+                observeSessionWakeCompletion()
+            }
         }
 
         // Setup notifications (also handles initial data refresh)
@@ -206,7 +224,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = makeProviderStatusSubmenu(for: service)
             menu.addItem(item)
         }
-
         menu.addItem(.separator())
 
         let refreshItem = NSMenuItem(
@@ -466,7 +483,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var keys = notifiedLimitKeys
         let currentMetrics = UsageDataManager.shared.metrics
 
-        for service in ServiceType.allCases {
+        for service in ServiceType.allCases where service != .claudeCode && service != .codexCli {
             // Disabled providers are removed from UsageDataManager. Evaluate an
             // empty snapshot so their stale band keys are cleared instead of
             // suppressing a future crossing after the provider is re-enabled.
@@ -483,7 +500,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        keys = evaluateAccountNotifications(
+            AccountNotificationInput(
+                service: .claudeCode,
+                accounts: ClaudeCodeAccountStore.shared.accounts.map { ($0.id, $0.name) },
+                accountMetrics: UsageDataManager.shared.claudeCodeAccountMetrics,
+                fallbackMetrics: currentMetrics[.claudeCode]
+            ),
+            decider: decider,
+            keys: keys,
+            now: now
+        )
+        keys = evaluateAccountNotifications(
+            AccountNotificationInput(
+                service: .codexCli,
+                accounts: CodexAccountStore.shared.accounts.map { ($0.id, $0.name) },
+                accountMetrics: UsageDataManager.shared.codexAccountMetrics,
+                fallbackMetrics: currentMetrics[.codexCli]
+            ),
+            decider: decider,
+            keys: keys,
+            now: now
+        )
+
         notifiedLimitKeys = keys
+    }
+
+    private struct AccountNotificationInput {
+        let service: ServiceType
+        let accounts: [(id: UUID, name: String)]
+        let accountMetrics: [UUID: UsageMetrics]
+        let fallbackMetrics: UsageMetrics?
+    }
+
+    private func evaluateAccountNotifications(
+        _ input: AccountNotificationInput,
+        decider: NotificationDecider,
+        keys: Set<String>,
+        now: Date
+    ) -> Set<String> {
+        var updatedKeys = keys
+        let available = input.accounts.compactMap { account -> (UUID, String, UsageMetrics)? in
+            guard let metrics = input.accountMetrics[account.id] else { return nil }
+            return (account.id, account.name, metrics)
+        }
+
+        if available.isEmpty {
+            let metrics = input.fallbackMetrics ?? UsageMetrics(service: input.service, lastUpdated: now)
+            let evaluation = decider.evaluate(
+                metrics: metrics,
+                providerEnabled: providerVisibilityStore.isEnabled(input.service),
+                alreadyNotified: updatedKeys,
+                now: now
+            )
+            updatedKeys = evaluation.notifiedKeys
+            evaluation.notifications.forEach(postNotification)
+            return updatedKeys
+        }
+
+        for (id, name, metrics) in available {
+            let evaluation = decider.evaluate(
+                metrics: metrics,
+                providerEnabled: providerVisibilityStore.isEnabled(input.service),
+                alreadyNotified: updatedKeys,
+                accountKey: id.uuidString,
+                serviceDisplayName: "\(name) (\(input.service.displayName))",
+                now: now
+            )
+            updatedKeys = evaluation.notifiedKeys
+            evaluation.notifications.forEach(postNotification)
+        }
+        return updatedKeys
     }
 
     private func postNotification(_ fired: FiredNotification) {
@@ -506,9 +593,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func postSessionWakeCompletion(summary: WakeRunSummary) {
+        let provider = SessionWakeSettingsStore.shared.wakeProvider
+        let providerService: ServiceType = provider == .codex ? .codexCli : .claudeCode
         let context = SessionWakeNotificationContext(
             globalNotificationsEnabled: notificationPreferences.isEnabled,
-            claudeProviderEnabled: providerVisibilityStore.isEnabled(.claudeCode),
+            providerEnabled: providerVisibilityStore.isEnabled(providerService),
+            providerDisplayName: provider.displayName,
             notifyOnCompletion: SessionWakeSettingsStore.shared.notifyOnCompletion
         )
         guard let fired = SessionWakeNotificationDecider.completionNotification(
@@ -553,7 +643,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        ClaudeCodeAccountStore.shared.$customAccounts
+        UsageDataManager.shared.$codexAccountMetrics
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
+        Publishers.Merge(
+            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
+        CodexAccountStore.shared.$customAccounts
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
@@ -569,17 +678,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        ProviderParseHealthStore.shared.$records
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
+        Publishers.Merge3(
+            menuBarDisplayPreferences.$pinnedCandidateKey.map { _ in () },
+            menuBarDisplayPreferences.$labelMetric.map { _ in () },
+            menuBarDisplayPreferences.$labelSize.map { _ in () }
+        )
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
+                }
+            }
+            .store(in: &cancellables)
+
         updateStatusItem(metrics: UsageDataManager.shared.metrics)
     }
 
     /// One menu-bar-title candidate whose on-disk activity probe has not run
     /// yet. The probe is a `@Sendable` closure so the filesystem scan can run
     /// off the main actor (it previously ran inline here and stalled the UI).
-    private struct StatusLimitProbeRequest: Sendable {
+    private struct StatusLimitCandidateSeed: Sendable {
         let key: String
+        let pinKey: String
         let displayName: String
+        let windowName: String
         let limit: UsageLimit
+        let isAutoSelectable: Bool
+    }
+
+    private struct StatusLimitProbeRequest: Sendable {
+        let seeds: [StatusLimitCandidateSeed]
         let probe: @Sendable () -> Date?
+    }
+
+    private struct StatusLimitSource {
+        let service: ServiceType
+        let accountID: UUID?
+        let autoSelectionKey: String?
+        let displayName: String
+        let metrics: UsageMetrics
+        let autoWindowID: String?
     }
 
     @MainActor
@@ -595,13 +740,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { [weak self] in
             let candidates = await Task.detached(priority: .userInitiated) {
-                requests.map { request in
-                    StatusLimitCandidate(
-                        key: request.key,
-                        displayName: request.displayName,
-                        limit: request.limit,
-                        lastActivity: request.probe()
-                    )
+                requests.flatMap { request in
+                    let lastActivity = request.probe()
+                    return request.seeds.map { seed in
+                        StatusLimitCandidate(
+                            key: seed.key,
+                            pinKey: seed.pinKey,
+                            displayName: seed.displayName,
+                            windowName: seed.windowName,
+                            limit: seed.limit,
+                            lastActivity: lastActivity,
+                            isAutoSelectable: seed.isAutoSelectable
+                        )
+                    }
                 }
             }.value
             guard let self, generation == self.statusItemUpdateGeneration else { return }
@@ -615,21 +766,84 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let selection = StatusItemLimitSelector.select(
             candidates: candidates,
-            previousKey: shownStatusItemKey
+            previousKey: shownStatusItemKey,
+            pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
         ) else {
             shownStatusItemKey = nil
-            button.title = ""
+            setStatusButtonTitle(button, to: "")
             button.imagePosition = .imageOnly
             button.toolTip = "MeterBar"
+            button.setAccessibilityLabel("MeterBar")
+            applyParseHealthAppearance(to: button)
             return
         }
 
         shownStatusItemKey = selection.key
-        let percent = percentLeft(for: selection.limit)
-        button.imagePosition = .imageLeft
-        button.title = " \(percent)%"
-        button.toolTip = "MeterBar: \(percent)% left on \(selection.displayName)"
-        button.setAccessibilityLabel("MeterBar \(percent)% left on \(selection.displayName)")
+        let isPinned = menuBarDisplayPreferences.pinnedCandidateKey == selection.pinKey
+        let selectionName = isPinned
+            ? "\(selection.displayName) · \(selection.windowName)"
+            : selection.displayName
+        let title = StatusItemLabelFormatter.title(
+            for: selection.limit,
+            metric: menuBarDisplayPreferences.labelMetric,
+            size: menuBarDisplayPreferences.labelSize
+        )
+        let spokenValue = StatusItemLabelFormatter.spokenValue(
+            for: selection.limit,
+            metric: menuBarDisplayPreferences.labelMetric
+        )
+
+        button.imagePosition = title == nil ? .imageOnly : .imageLeft
+        setStatusButtonTitle(button, to: title.map { " \($0)" } ?? "")
+        if let spokenValue {
+            button.toolTip = "MeterBar: \(spokenValue) on \(selectionName)"
+            button.setAccessibilityLabel("MeterBar \(spokenValue) on \(selectionName)")
+        } else {
+            button.toolTip = "MeterBar: \(selectionName)"
+            button.setAccessibilityLabel("MeterBar \(selectionName)")
+        }
+        applyParseHealthAppearance(to: button)
+    }
+
+    /// Sets the status-button title, crossfading the change so the menu-bar
+    /// `NN%` doesn't snap on refresh. SwiftUI's `.contentTransition(.numericText())`
+    /// can't reach this AppKit `NSStatusBarButton`, so we fade its layer instead.
+    /// No-op fade when the title is unchanged or Reduce Motion is on.
+    @MainActor
+    private func setStatusButtonTitle(_ button: NSStatusBarButton, to newTitle: String) {
+        if button.title != newTitle,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            button.wantsLayer = true
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.22
+            button.layer?.add(fade, forKey: "titleFade")
+        }
+        button.title = newTitle
+    }
+
+    @MainActor
+    private func applyParseHealthAppearance(to button: NSStatusBarButton) {
+        let now = Date()
+        let hasAttention = providerVisibilityStore.enabledServices.contains { service in
+            ProviderParseHealthStore.shared.records[service]?.needsAttention(now: now) == true
+        }
+        let targetAlpha: CGFloat = hasAttention ? 0.55 : 1
+        // This runs on every status refresh; only animate when the value actually
+        // changes so a steady state doesn't restart the fade each tick.
+        if button.alphaValue != targetAlpha {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                button.alphaValue = targetAlpha
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = MeterBarTheme.Motion.statusItemAlpha
+                    button.animator().alphaValue = targetAlpha
+                }
+            }
+        }
+        if hasAttention {
+            button.toolTip = "\(button.toolTip ?? "MeterBar") · Provider data needs attention"
+        }
     }
 
     /// Every enabled account/provider quota that may own the menu bar title,
@@ -640,47 +854,100 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var requests: [StatusLimitProbeRequest] = []
 
         if providerVisibilityStore.isEnabled(.claudeCode) {
-            for account in ClaudeCodeAccountStore.shared.accounts {
-                guard let limit = claudeMetrics(for: account, metrics: metrics)?.sessionLimit else { continue }
+            for account in ClaudeCodeAccountStore.shared.enabledAccounts {
+                guard let accountMetrics = claudeMetrics(for: account, metrics: metrics) else { continue }
                 let configDirectory = account.configDirectory
-                requests.append(StatusLimitProbeRequest(
-                    key: "claude:\(account.id.uuidString)",
+                let source = StatusLimitSource(
+                    service: .claudeCode,
+                    accountID: account.id,
+                    autoSelectionKey: "claude:\(account.id.uuidString)",
                     displayName: "\(account.name) (\(ServiceType.claudeCode.displayName))",
-                    limit: limit,
+                    metrics: accountMetrics,
+                    autoWindowID: "session"
+                )
+                requests.append(statusLimitProbeRequest(
+                    source: source,
                     probe: { AccountActivityInspector.claudeCodeActivity(configDirectory: configDirectory) }
                 ))
             }
         }
-        if providerVisibilityStore.isEnabled(.codexCli), let codexLimit = metrics[.codexCli]?.sessionLimit {
-            requests.append(StatusLimitProbeRequest(
-                key: "codex",
-                displayName: ServiceType.codexCli.displayName,
-                limit: codexLimit,
-                probe: { AccountActivityInspector.codexCliActivity() }
+        if providerVisibilityStore.isEnabled(.codexCli) {
+            for account in CodexAccountStore.shared.accounts {
+                let accountMetrics = UsageDataManager.shared.codexAccountMetrics[account.id]
+                    ?? (account.isDefault ? metrics[.codexCli] : nil)
+                guard let accountMetrics else { continue }
+                let homeDirectory = account.homeDirectory
+                let source = StatusLimitSource(
+                    service: .codexCli,
+                    accountID: account.id,
+                    autoSelectionKey: "codex:\(account.id.uuidString)",
+                    displayName: "\(account.name) (\(ServiceType.codexCli.displayName))",
+                    metrics: accountMetrics,
+                    autoWindowID: "session"
+                )
+                requests.append(statusLimitProbeRequest(
+                    source: source,
+                    probe: { AccountActivityInspector.codexCliActivity(homeDirectory: homeDirectory) }
+                ))
+            }
+        }
+        if providerVisibilityStore.isEnabled(.cursor), let cursorMetrics = metrics[.cursor] {
+            let source = StatusLimitSource(
+                service: .cursor,
+                accountID: nil,
+                autoSelectionKey: "cursor",
+                displayName: ServiceType.cursor.displayName,
+                metrics: cursorMetrics,
+                autoWindowID: "weekly"
+            )
+            requests.append(statusLimitProbeRequest(
+                source: source,
+                probe: { AccountActivityInspector.cursorActivity() }
             ))
         }
-        if providerVisibilityStore.isEnabled(.cursor), let cursorLimit = metrics[.cursor]?.weeklyLimit {
-            requests.append(StatusLimitProbeRequest(
-                key: "cursor",
-                displayName: ServiceType.cursor.displayName,
-                limit: cursorLimit,
-                probe: { AccountActivityInspector.cursorActivity() }
+        if providerVisibilityStore.isEnabled(.openRouter), let openRouterMetrics = metrics[.openRouter] {
+            let source = StatusLimitSource(
+                service: .openRouter,
+                accountID: nil,
+                autoSelectionKey: nil,
+                displayName: ServiceType.openRouter.displayName,
+                metrics: openRouterMetrics,
+                autoWindowID: nil
+            )
+            requests.append(statusLimitProbeRequest(
+                source: source,
+                probe: { nil }
             ))
         }
 
         return requests
     }
 
+    private func statusLimitProbeRequest(
+        source: StatusLimitSource,
+        probe: @escaping @Sendable () -> Date?
+    ) -> StatusLimitProbeRequest {
+        let seeds = ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service).map { limit in
+            let pinKey = StatusItemPinKey.make(
+                service: source.service,
+                accountID: source.accountID,
+                windowID: limit.id
+            )
+            return StatusLimitCandidateSeed(
+                key: limit.id == source.autoWindowID ? source.autoSelectionKey ?? pinKey : pinKey,
+                pinKey: pinKey,
+                displayName: source.displayName,
+                windowName: limit.title,
+                limit: limit.usageLimit,
+                isAutoSelectable: limit.id == source.autoWindowID
+            )
+        }
+        return StatusLimitProbeRequest(seeds: seeds, probe: probe)
+    }
+
     @MainActor
     private func claudeMetrics(for account: ClaudeCodeAccount, metrics: [ServiceType: UsageMetrics]) -> UsageMetrics? {
         UsageDataManager.shared.claudeCodeAccountMetrics[account.id] ?? (account.isDefault ? metrics[.claudeCode] : nil)
-    }
-
-    private func percentLeft(for limit: UsageLimit) -> Int {
-        // Shared math so the menu-bar title always agrees with the popover and
-        // dashboard (the previous copy rounded instead of ceiling and could
-        // disagree by 1%).
-        QuotaMath.percentLeft(for: limit)
     }
 
     private func createMenuBarIcon() -> NSImage {

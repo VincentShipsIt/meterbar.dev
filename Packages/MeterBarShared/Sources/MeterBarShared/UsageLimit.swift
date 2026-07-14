@@ -5,12 +5,39 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     public let total: Double
     public let resetTime: Date?
     public let windowSeconds: TimeInterval?
+    /// True when MeterBar substituted or derived the quota total instead of
+    /// receiving it from the provider.
+    public let isEstimated: Bool
 
-    public init(used: Double, total: Double, resetTime: Date?, windowSeconds: TimeInterval? = nil) {
+    public init(
+        used: Double,
+        total: Double,
+        resetTime: Date?,
+        windowSeconds: TimeInterval? = nil,
+        isEstimated: Bool = false
+    ) {
         self.used = used
         self.total = total
         self.resetTime = resetTime
         self.windowSeconds = windowSeconds
+        self.isEstimated = isEstimated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case used
+        case total
+        case resetTime
+        case windowSeconds
+        case isEstimated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        used = try container.decode(Double.self, forKey: .used)
+        total = try container.decode(Double.self, forKey: .total)
+        resetTime = try container.decodeIfPresent(Date.self, forKey: .resetTime)
+        windowSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .windowSeconds)
+        isEstimated = try container.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
     }
 
     public var rawPercentage: Double {
@@ -20,6 +47,25 @@ public struct UsageLimit: Codable, Equatable, Sendable {
 
     public var percentage: Double {
         return min(100, rawPercentage)
+    }
+
+    /// User-facing percentage labels shared by the app, widget, and CLI. A
+    /// leading approximation mark prevents heuristic totals from looking like
+    /// provider-reported measurements.
+    public var percentageText: String {
+        "\(estimatePrefix)\(Int(percentage.rounded()))%"
+    }
+
+    public var percentLeftText: String {
+        "\(estimatePrefix)\(QuotaMath.percentLeft(for: self))% left"
+    }
+
+    public var usedPercentageText: String {
+        "\(percentageText) used"
+    }
+
+    private var estimatePrefix: String {
+        isEstimated ? "~" : ""
     }
 
     /// `used` clamped into `0...total`, for progress bars that reject

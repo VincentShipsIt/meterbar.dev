@@ -10,25 +10,20 @@ struct SessionWakeSettingsView: View {
     @ObservedObject private var store: SessionWakeSettingsStore
     @ObservedObject private var status: SessionWakeStatus
     @ObservedObject private var accounts: ClaudeCodeAccountStore
+    @ObservedObject private var codexAccounts: CodexAccountStore
     @State private var showingFirstRunConfirmation = false
-
-    /// When embedded in the dashboard settings stack (itself inside a ScrollView)
-    /// the grouped `Form` — a nested scroll container — must be dropped for a
-    /// plain vertical layout, or the sections collapse. The standalone Settings
-    /// pane keeps the `Form` styling.
-    private let embeddedInDashboard: Bool
 
     @MainActor
     init(
-        embeddedInDashboard: Bool = false,
         store: SessionWakeSettingsStore? = nil,
         status: SessionWakeStatus? = nil,
-        accounts: ClaudeCodeAccountStore? = nil
+        accounts: ClaudeCodeAccountStore? = nil,
+        codexAccounts: CodexAccountStore? = nil
     ) {
-        self.embeddedInDashboard = embeddedInDashboard
         self.store = store ?? .shared
         self.status = status ?? .shared
         self.accounts = accounts ?? .shared
+        self.codexAccounts = codexAccounts ?? .shared
     }
 
     var body: some View {
@@ -43,33 +38,21 @@ struct SessionWakeSettingsView: View {
         } message: {
             Text("""
             While on, MeterBar watches this account's usage limits and, after a \
-            limit resets, automatically resumes your blocked Claude Code sessions \
-            one at a time. It only runs while MeterBar is open.
+            limit resets, automatically resumes your blocked \
+            \(store.wakeProvider.displayName) sessions one at a time. The \
+            background watcher keeps running after MeterBar quits.
             """)
         }
     }
 
     // MARK: - Layout
 
-    /// Grouped `Form` when standalone; a plain stack when embedded in the
-    /// dashboard's own ScrollView (a nested Form would collapse there).
+    /// Matches the card style used by every other Settings tab
+    /// (`SettingsPanelSection` + `SettingsRowView`) instead of a grouped `Form`,
+    /// so the Automation tab is visually consistent with the rest.
     @ViewBuilder private var layout: some View {
-        if embeddedInDashboard {
-            VStack(alignment: .leading, spacing: 12) {
-                sections
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Form {
-                sections
-            }
-            .formStyle(.grouped)
-        }
-    }
-
-    @ViewBuilder private var sections: some View {
-        switchSection
         accountSection
+        switchSection
         previewSection
         limitsSection
         permissionSection
@@ -79,88 +62,185 @@ struct SessionWakeSettingsView: View {
     // MARK: - Sections
 
     private var switchSection: some View {
-        Section("Session Wake") {
-            Toggle("Session Wake", isOn: onBinding)
-                .disabled(!store.canTurnOn && !store.isOn)
-            if store.wakeAccountID == nil {
-                Text("Choose a wake account below to enable Session Wake.")
-                    .font(.footnote)
+        SettingsPanelSection(title: "Session Wake", systemImage: "moon.zzz", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Session Wake",
+                detail: store.activeAccountID == nil
+                    ? "Choose a wake account above to enable Session Wake."
+                    : "Automatically resume blocked \(store.wakeProvider.displayName) sessions after a limit resets."
+            ) {
+                Toggle("Session Wake", isOn: onBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!store.canTurnOn && !store.isOn)
+            }
+
+            SettingsRowView(title: "Status") {
+                Text(status.label(isOn: store.isOn).title)
                     .foregroundStyle(.secondary)
             }
-            LabeledContent("Status", value: status.label(isOn: store.isOn).title)
+
+            SettingsRowView(
+                title: "Execution",
+                detail: status.backgroundExecution.detail
+            ) {
+                if status.backgroundExecution == .requiresApproval {
+                    Button("Open Login Items") {
+                        SMAppServiceSessionWakeAgent.openSystemSettings()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text(status.backgroundExecution.title)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
     private var accountSection: some View {
-        Section("Wake account") {
-            Picker("Account", selection: accountBinding) {
-                Text("None selected").tag(UUID?.none)
-                ForEach(accounts.accounts) { account in
-                    Text(account.name).tag(UUID?.some(account.id))
+        SettingsPanelSection(title: "Wake account", systemImage: "person.crop.circle", color: MeterBarTheme.appAccent) {
+            SettingsRowView(title: "Provider") {
+                Picker("", selection: providerBinding) {
+                    ForEach(WakeProvider.allCases, id: \.self) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
             }
+
+            SettingsRowView(title: "Account") {
+                Picker("Wake account", selection: accountBinding) {
+                    Text("None selected").tag(UUID?.none)
+                    ForEach(providerAccounts) { account in
+                        Text(account.name).tag(UUID?.some(account.id))
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+            }
+
             if store.isOn {
-                Text("Changing the wake account turns Session Wake off.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                SettingsNotice(
+                    text: "Changing the provider or wake account turns Session Wake off.",
+                    color: .secondary
+                )
             }
         }
     }
 
+    /// Name + id pairs for the currently selected provider's enabled accounts.
+    private var providerAccounts: [AccountChoice] {
+        switch store.wakeProvider {
+        case .claude:
+            return accounts.enabledAccounts.map { AccountChoice(id: $0.id, name: $0.name) }
+        case .codex:
+            return codexAccounts.enabledAccounts.map { AccountChoice(id: $0.id, name: $0.name) }
+        }
+    }
+
     private var previewSection: some View {
-        Section("Preview") {
-            Button("Preview resumable sessions") {
-                Task { await status.preview(configDirectory: selectedConfigDirectory) }
+        SettingsPanelSection(title: "Preview", systemImage: "eye", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Resumable sessions",
+                detail: "Check how many blocked sessions would resume on the next wake."
+            ) {
+                Button("Preview") {
+                    Task { await status.preview(configDirectory: selectedConfigDirectory) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(status.isPreviewing)
             }
-            .disabled(status.isPreviewing)
-            LabeledContent("Eligible", value: "\(status.eligibleCount)")
+
+            SettingsRowView(title: "Eligible") {
+                Text("\(status.eligibleCount)")
+                    .foregroundStyle(.secondary)
+            }
+
             ForEach(Array(status.skipSummary.keys), id: \.self) { reason in
-                LabeledContent(reason.rawValue, value: "\(status.skipSummary[reason] ?? 0)")
-                    .font(.footnote)
+                SettingsRowView(title: reason.rawValue) {
+                    Text("\(status.skipSummary[reason] ?? 0)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
+
             if let summary = status.lastSummary {
-                let detail = "\(summary.resumed) resumed · \(summary.failed) failed · \(summary.skipped) skipped"
-                LabeledContent("Last run", value: detail)
-                    .font(.footnote)
+                SettingsRowView(title: "Last run") {
+                    Text("\(summary.resumed) resumed · \(summary.failed) failed · \(summary.skipped) skipped")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
 
     private var limitsSection: some View {
-        Section("Limits") {
-            Stepper(
-                "Max sessions per run: \(store.maxSessionsPerRun)",
-                value: binding(store.maxSessionsPerRun, store.setMaxSessionsPerRun),
-                in: WakeBounds.sessionsRange
-            )
-            Stepper(
-                "Max turns per session: \(store.maxTurns)",
-                value: binding(store.maxTurns, store.setMaxTurns),
-                in: WakeBounds.maxTurnsRange
-            )
-            TextField("Resume prompt", text: $store.prompt)
+        SettingsPanelSection(title: "Limits", systemImage: "slider.horizontal.3", color: MeterBarTheme.appAccent) {
+            SettingsRowView(title: "Max sessions per run", detail: "\(store.maxSessionsPerRun)") {
+                Stepper(
+                    "Max sessions per run",
+                    value: binding(store.maxSessionsPerRun, store.setMaxSessionsPerRun),
+                    in: WakeBounds.sessionsRange
+                )
+                .labelsHidden()
+                .accessibilityValue("\(store.maxSessionsPerRun)")
+            }
+
+            SettingsRowView(title: "Max turns per session", detail: "\(store.maxTurns)") {
+                Stepper(
+                    "Max turns per session",
+                    value: binding(store.maxTurns, store.setMaxTurns),
+                    in: WakeBounds.maxTurnsRange
+                )
+                .labelsHidden()
+                .accessibilityValue("\(store.maxTurns)")
+            }
+
+            SettingsRowView(title: "Resume prompt") {
+                TextField("continue", text: $store.prompt)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
+            }
         }
     }
 
     private var permissionSection: some View {
-        Section("Permissions") {
-            Picker("Permission mode", selection: binding(store.permissionMode, store.setPermissionMode)) {
-                Text("Safe").tag(WakePermissionMode.safe)
-                Text("Bypass").tag(WakePermissionMode.bypass)
+        SettingsPanelSection(title: "Permissions", systemImage: "lock.shield", color: MeterBarTheme.appAccent) {
+            SettingsRowView(title: "Permission mode") {
+                Picker("Permission mode", selection: binding(store.permissionMode, store.setPermissionMode)) {
+                    Text("Safe").tag(WakePermissionMode.safe)
+                    Text("Bypass").tag(WakePermissionMode.bypass)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 180)
             }
+
             if store.permissionMode == .bypass {
-                Toggle(
-                    "I acknowledge bypassing permission prompts is risky",
-                    isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged)
-                )
-                .font(.callout)
+                SettingsRowView(
+                    title: "Acknowledge risk",
+                    detail: "Bypassing permission prompts lets resumed sessions run without confirmation."
+                ) {
+                    Toggle("Acknowledge risk", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
             }
         }
     }
 
     private var notificationSection: some View {
-        Section("Notifications") {
-            Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
+        SettingsPanelSection(title: "Notifications", systemImage: "bell", color: MeterBarTheme.appAccent) {
+            SettingsRowView(
+                title: "Notify when a run completes",
+                detail: "Post a notification after Session Wake finishes resuming sessions."
+            ) {
+                Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
         }
     }
 
@@ -185,15 +265,39 @@ struct SessionWakeSettingsView: View {
         )
     }
 
-    private var accountBinding: Binding<UUID?> {
-        Binding(get: { store.wakeAccountID }, set: { store.setWakeAccountID($0) })
+    private var providerBinding: Binding<WakeProvider> {
+        Binding(get: { store.wakeProvider }, set: { store.setWakeProvider($0) })
     }
 
+    /// Routes the account picker to the active provider's selection so each
+    /// provider keeps its own explicitly chosen account.
+    private var accountBinding: Binding<UUID?> {
+        Binding(
+            get: { store.activeAccountID },
+            set: { newValue in
+                switch store.wakeProvider {
+                case .claude: store.setWakeAccountID(newValue)
+                case .codex: store.setWakeCodexAccountID(newValue)
+                }
+            }
+        )
+    }
+
+    /// The Claude config directory to preview against. Preview uses Claude
+    /// session discovery, so it is only meaningful for the Claude provider.
     private var selectedConfigDirectory: String? {
-        accounts.accounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
+        guard store.wakeProvider == .claude else { return nil }
+        return accounts.enabledAccounts.first(where: { $0.id == store.wakeAccountID })?.configDirectory
     }
 
     private func binding<Value>(_ value: Value, _ setter: @escaping (Value) -> Void) -> Binding<Value> {
         Binding(get: { value }, set: { setter($0) })
     }
+}
+
+/// A provider-agnostic account row for the wake account picker, so the picker
+/// can list either `ClaudeCodeAccount`s or `CodexAccount`s uniformly.
+private struct AccountChoice: Identifiable {
+    let id: UUID
+    let name: String
 }

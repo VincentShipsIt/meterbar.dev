@@ -33,6 +33,30 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.accounts.first?.name, "shipshitdev")
     }
 
+    func testDefaultConfigDirectoryFallsBackToClaudeUnderRealHome() {
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(environment: [:], realHomeDirectory: "/Users/tester"),
+            "/Users/tester/.claude"
+        )
+    }
+
+    func testDefaultConfigDirectoryHonorsAndExpandsEnvironmentOverride() {
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(
+                environment: ["CLAUDE_CONFIG_DIR": "~/.claude-work"],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "/Users/tester/.claude-work"
+        )
+        XCTAssertEqual(
+            ClaudeCodeAccount.defaultConfigDirectory(
+                environment: ["CLAUDE_CONFIG_DIR": " /Volumes/config/claude "],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "/Volumes/config/claude"
+        )
+    }
+
     func testCustomProfileCanBeEditedAndPersists() {
         let store = ClaudeCodeAccountStore(userDefaults: defaults)
         store.addAccount(name: "genfeed.ai", configDirectory: "/tmp/old-claude-profile")
@@ -54,6 +78,46 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
         XCTAssertEqual(reloaded.customAccounts.first?.name, "genfeedai")
         XCTAssertEqual(reloaded.customAccounts.first?.configDirectory, "/tmp/genfeed-claude-profile")
+    }
+
+    func testLegacyCustomProfileDefaultsToEnabled() throws {
+        let id = UUID()
+        let data = try XCTUnwrap(
+            """
+            [{"id":"\(id.uuidString)","name":"Legacy","configDirectory":"/tmp/legacy"}]
+            """.data(using: .utf8)
+        )
+        defaults.set(data, forKey: StorageKeys.claudeCodeCustomAccounts)
+
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.customAccounts.first?.id, id)
+        XCTAssertEqual(store.customAccounts.first?.isEnabled, true)
+        XCTAssertEqual(store.enabledAccounts.map(\.id), [ClaudeCodeAccount.defaultID, id])
+    }
+
+    func testDefaultAndCustomProfileEnabledStatePersists() {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Work", configDirectory: "/tmp/work")
+        guard let customID = store.customAccounts.first?.id else {
+            XCTFail("Expected a custom Claude account")
+            return
+        }
+
+        store.setEnabled(false, for: ClaudeCodeAccount.defaultID)
+        store.setEnabled(false, for: customID)
+
+        XCTAssertTrue(store.enabledAccounts.isEmpty)
+        XCTAssertEqual(store.accounts.map(\.isEnabled), [false, false])
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertTrue(reloaded.enabledAccounts.isEmpty)
+        XCTAssertEqual(reloaded.accounts.map(\.isEnabled), [false, false])
+
+        reloaded.setEnabled(true, for: ClaudeCodeAccount.defaultID)
+        reloaded.setEnabled(true, for: customID)
+        let enabledReload = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertEqual(enabledReload.enabledAccounts.map(\.id), [ClaudeCodeAccount.defaultID, customID])
     }
 
     func testCustomProfileCanBeRemoved() {

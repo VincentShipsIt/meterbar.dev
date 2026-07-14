@@ -113,6 +113,28 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertNil(ProviderReadinessInspector.sanitize(nil))
     }
 
+    func testParseHealthAddsImmediateFormatMismatchCheckWithStalenessThreshold() {
+        let now = Date(timeIntervalSince1970: 40_000)
+        let record = ProviderParseHealthRecord(
+            provider: .codexCli,
+            lastSuccess: now.addingTimeInterval(-60),
+            lastAttempt: now,
+            consecutiveFailures: 1,
+            lastFailureWasShapeMismatch: true
+        )
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.codexCli],
+            now: now,
+            parseHealth: [.codexCli: record]
+        )
+        let check = reports.first?.check(ReadinessCheckID.parseHealth)
+
+        XCTAssertEqual(check?.level, .fail)
+        XCTAssertTrue(check?.detail.contains("format") ?? false)
+        XCTAssertTrue(check?.detail.contains("2 hours") ?? false)
+    }
+
     func testHttpStatusExtraction() {
         XCTAssertEqual(ProviderReadinessInspector.httpStatus(in: "HTTP 404: not found"), 404)
         XCTAssertNil(ProviderReadinessInspector.httpStatus(in: "no status here"))

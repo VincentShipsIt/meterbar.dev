@@ -10,7 +10,7 @@ struct MeterBarCLI: AsyncParsableCommand {
         commandName: "meterbar",
         abstract: "Track AI coding assistant usage from the command line",
         version: MeterBarCLIVersion.current,
-        subcommands: [Usage.self, Cost.self, Doctor.self, Wake.self],
+        subcommands: [Usage.self, Cost.self, Doctor.self, Wake.self, WakeAgent.self, ResetCredit.self],
         defaultSubcommand: Usage.self
     )
 }
@@ -56,15 +56,23 @@ private enum MeterBarCLIVersion {
     }
 }
 
+private func emitJSON<T: CLIJSONDocument>(_ document: T) throws {
+    do {
+        print(try document.jsonString())
+    } catch {
+        throw ValidationError("Failed to encode CLI JSON: \(error.localizedDescription)")
+    }
+}
+
 struct Usage: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Show current usage metrics"
     )
 
-    @Flag(name: .shortAndLong, help: "Output as JSON")
+    @Flag(name: .shortAndLong, help: "Output the versioned JSON schema")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor)")
+    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok)")
     var provider: String?
 
     func run() throws {
@@ -73,7 +81,10 @@ struct Usage: ParsableCommand {
 
         if metrics.isEmpty {
             if json {
-                print("{\"error\": \"No cached metrics found. Open MeterBar app to fetch data.\"}")
+                try emitJSON(CLIJSONErrorResponse(
+                    code: "usage_cache_missing",
+                    message: "No cached metrics found. Open MeterBar app to fetch data."
+                ))
             } else {
                 print("No cached metrics found.")
                 print("Open MeterBar app to fetch usage data first.")
@@ -92,21 +103,9 @@ struct Usage: ParsableCommand {
         }
 
         if json {
-            printJSON(filtered)
+            try emitJSON(UsageCLIJSONResponse(metrics: filtered))
         } else {
             printText(filtered)
-        }
-    }
-
-    private func printJSON(_ metrics: [ServiceType: UsageMetrics]) {
-        let keyed = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
-            result[pair.key.rawValue] = pair.value
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(keyed),
-           let str = String(data: data, encoding: .utf8) {
-            print(str)
         }
     }
 
@@ -120,10 +119,18 @@ struct Usage: ParsableCommand {
             print("▸ \(service.displayName)")
 
             if let session = metric.sessionLimit {
-                printLimit("  Session", session)
+                printLimit(
+                    service == .openRouter ? "  Key limit" : "  Session",
+                    session,
+                    currency: service == .openRouter
+                )
             }
             if let weekly = metric.weeklyLimit {
-                printLimit("  Weekly", weekly)
+                printLimit(
+                    service == .openRouter ? "  Account credits" : "  Weekly",
+                    weekly,
+                    currency: service == .openRouter
+                )
             }
             if let codeReview = metric.codeReviewLimit {
                 printLimit(service == .claudeCode ? "  Sonnet" : "  Code Review", codeReview)
@@ -132,13 +139,18 @@ struct Usage: ParsableCommand {
         }
     }
 
-    private func printLimit(_ label: String, _ limit: UsageLimit) {
+    private func printLimit(_ label: String, _ limit: UsageLimit, currency: Bool = false) {
         let percent = limit.percentage
         let bar = progressBar(percent: percent, width: 20)
         let status = statusEmoji(for: limit)
 
-        print("\(label): \(bar) \(String(format: "%.0f%%", percent)) \(status)")
-        print("    \(Int(limit.used))/\(Int(limit.total)) used")
+        print("\(label): \(bar) \(currency ? String(format: "%.0f%%", percent) : limit.percentageText) \(status)")
+        if currency {
+            print("    \(UsageFormat.cost(limit.used)) spent / \(UsageFormat.cost(limit.total)) credits")
+        } else {
+            let estimateDetail = limit.isEstimated ? " (estimated limit)" : ""
+            print("    \(Int(limit.used))/\(Int(limit.total)) used\(estimateDetail)")
+        }
         if let reset = limit.resetTime {
             print("    Resets: \(UsageFormat.relative(reset))")
         }
@@ -166,7 +178,7 @@ struct Cost: ParsableCommand {
         abstract: "Show token costs from the MeterBar app's last local scan"
     )
 
-    @Flag(name: .shortAndLong, help: "Output as JSON")
+    @Flag(name: .shortAndLong, help: "Output the versioned JSON schema")
     var json: Bool = false
 
     @Option(
@@ -188,7 +200,10 @@ struct Cost: ParsableCommand {
         // and the app's Costs tab showed different numbers for the same logs.
         guard let cache = CostSummaryStore.load() else {
             if json {
-                print("{\"error\": \"No cost data cached. Open MeterBar and run a scan (Costs tab).\"}")
+                try emitJSON(CLIJSONErrorResponse(
+                    code: "cost_cache_missing",
+                    message: "No cost data cached. Open MeterBar and run a scan (Costs tab)."
+                ))
             } else {
                 print("No cost data cached.")
                 print("Open MeterBar and run a scan (Costs tab), then try again.")
@@ -199,35 +214,19 @@ struct Cost: ParsableCommand {
         // `--days N` reports a windowed view derived purely from the cached daily
         // rows — no rescan. Falls through to the full cached summary otherwise.
         if let days {
-            let window = cache.summary.dailyCostWindow(lastDays: days)
             if json {
-                printJSON(window)
+                try emitJSON(CostCLIJSONResponse(cache: cache, days: days))
             } else {
+                let window = cache.summary.dailyCostWindow(lastDays: days)
                 printWindow(window, cache: cache)
             }
             return
         }
 
         if json {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            if let data = try? encoder.encode(cache),
-               let str = String(data: data, encoding: .utf8) {
-                print(str)
-            }
+            try emitJSON(CostCLIJSONResponse(cache: cache))
         } else {
             printCosts(cache)
-        }
-    }
-
-    private func printJSON<T: Encodable>(_ value: T) {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(value),
-           let str = String(data: data, encoding: .utf8) {
-            print(str)
         }
     }
 
@@ -309,7 +308,7 @@ struct Doctor: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output as JSON")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor)")
+    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok)")
     var provider: String?
 
     func run() throws {

@@ -71,4 +71,23 @@ final class SharedDataStoreTests: XCTestCase {
         XCTAssertEqual(Set(loaded.keys), [.cursor])
         XCTAssertEqual(loaded[.cursor]?.weeklyLimit?.used, 400)
     }
+
+    func testAccountMetricsRoundTripPreservesLabelsAndIndependentUsage() {
+        let store = SharedDataStore(directoryOverride: tempDirectory) {}
+        let snapshots = [
+            AccountUsageSnapshot(id: CodexAccount.defaultID, name: "Personal", metrics: MetricsFixtures.codexCli()),
+            AccountUsageSnapshot(
+                id: UUID(),
+                name: "Work",
+                metrics: MetricsFixtures.codexCli(sessionUsedPercent: 90, weeklyUsedPercent: 70)
+            )
+        ]
+
+        store.saveAccountMetrics(snapshots)
+        store.flushPendingWrites()
+
+        let loaded = store.loadAccountMetrics()
+        XCTAssertEqual(loaded.map(\.name), ["Personal", "Work"])
+        XCTAssertEqual(loaded.map { $0.metrics.sessionLimit?.used }, [30, 90])
+    }
 }

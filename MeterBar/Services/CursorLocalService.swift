@@ -273,14 +273,17 @@ class CursorLocalService: ObservableObject {
         }
 
         // Extract usage from individual plan
-        let planUsed = Double(summaryData.individualUsage?.plan?.used ?? 0)
-        let planTotal = Double(summaryData.individualUsage?.plan?.total ?? Int(defaultPlanTotal))
+        let plan = summaryData.individualUsage?.plan
+        let planUsed = Double(plan?.used ?? 0)
+        let planTotalIsEstimated = plan?.total == nil
+        let planTotal = Double(plan?.total ?? Int(defaultPlanTotal))
 
         // Create usage metrics using plan data
         let weeklyLimit = UsageLimit(
             used: planUsed,
             total: planTotal,
-            resetTime: resetTime
+            resetTime: resetTime,
+            isEstimated: planTotalIsEstimated
         )
 
         // On-demand usage as secondary metric if enabled
@@ -292,7 +295,8 @@ class CursorLocalService: ObservableObject {
                 sessionLimit = UsageLimit(
                     used: onDemandUsed,
                     total: onDemandLimit > 0 ? onDemandLimit : onDemandUsed * onDemandHeadroomMultiplier,
-                    resetTime: resetTime
+                    resetTime: resetTime,
+                    isEstimated: onDemandLimit <= 0
                 )
             }
         }

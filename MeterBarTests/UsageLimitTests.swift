@@ -3,6 +3,28 @@ import MeterBarShared
 @testable import MeterBar
 
 final class UsageLimitTests: XCTestCase {
+    func testEstimatedPresentationLabelsAreExplicit() {
+        let reported = UsageLimit(used: 25, total: 100, resetTime: nil)
+        let estimated = UsageLimit(used: 25, total: 100, resetTime: nil, isEstimated: true)
+
+        XCTAssertFalse(reported.isEstimated)
+        XCTAssertEqual(reported.percentageText, "25%")
+        XCTAssertEqual(reported.percentLeftText, "75% left")
+        XCTAssertEqual(reported.usedPercentageText, "25% used")
+
+        XCTAssertTrue(estimated.isEstimated)
+        XCTAssertEqual(estimated.percentageText, "~25%")
+        XCTAssertEqual(estimated.percentLeftText, "~75% left")
+        XCTAssertEqual(estimated.usedPercentageText, "~25% used")
+    }
+
+    func testLegacyJSONWithoutEstimatedFlagDecodesAsReported() throws {
+        let data = Data(#"{"used":25,"total":100,"resetTime":null,"windowSeconds":null}"#.utf8)
+        let limit = try JSONDecoder().decode(UsageLimit.self, from: data)
+
+        XCTAssertFalse(limit.isEstimated)
+    }
+
     func testPercentageValues() {
         let limit = UsageLimit(used: 25, total: 100, resetTime: nil)
 

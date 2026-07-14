@@ -15,7 +15,7 @@ final class KeychainManagerTests: XCTestCase {
     /// and account. Mirrors the real semantics the manager relies on: update on
     /// a missing item returns `errSecItemNotFound`, copy on a missing item
     /// returns `errSecItemNotFound`, and delete is idempotent at the manager.
-    private final class InMemoryKeychainBackend: KeychainBackend {
+    nonisolated private final class InMemoryKeychainBackend: KeychainBackend {
         private struct ItemKey: Hashable {
             let service: String
             let account: String

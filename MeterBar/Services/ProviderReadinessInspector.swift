@@ -22,16 +22,26 @@ nonisolated public enum ProviderReadinessInspector {
     public static func reports(
         providers: Set<ServiceType> = Set(ServiceType.allCases),
         refreshErrors: [ServiceType: ServiceError] = [:],
-        now: Date = Date()
+        now: Date = Date(),
+        parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil
     ) -> [ProviderReadiness] {
-        reports(
+        let baseReports = reports(
             providers: providers,
             refreshErrors: refreshErrors,
             now: now,
             claudeReport: { claudeReport(refreshError: $0, now: $1) },
             codexReport: { codexReport(refreshError: $0, now: $1) },
-            cursorReport: { cursorReport(refreshError: $0, now: $1) }
+            cursorReport: { cursorReport(refreshError: $0, now: $1) },
+            openRouterReport: { error, _ in openRouterReport(refreshError: error) },
+            grokReport: { error, _ in grokReport(refreshError: error) }
         )
+        let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
+        return baseReports.map { report in
+            ProviderReadiness(
+                provider: report.provider,
+                checks: report.checks + [parseHealthCheck(health[report.provider], now: now)]
+            )
+        }
     }
 
     /// Injectable routing seam used to prove that disabled providers perform no
@@ -43,7 +53,13 @@ nonisolated public enum ProviderReadinessInspector {
         now: Date,
         claudeReport: (ServiceError?, Date) -> ProviderReadiness,
         codexReport: (ServiceError?, Date) -> ProviderReadiness,
-        cursorReport: (ServiceError?, Date) -> ProviderReadiness
+        cursorReport: (ServiceError?, Date) -> ProviderReadiness,
+        openRouterReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
+            ProviderReadinessInspector.openRouterReport(refreshError: error)
+        },
+        grokReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
+            ProviderReadinessInspector.grokReport(refreshError: error)
+        }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.compactMap { provider in
             guard providers.contains(provider) else { return nil }
@@ -54,6 +70,10 @@ nonisolated public enum ProviderReadinessInspector {
                 return codexReport(refreshErrors[provider], now)
             case .cursor:
                 return cursorReport(refreshErrors[provider], now)
+            case .openRouter:
+                return openRouterReport(refreshErrors[provider], now)
+            case .grok:
+                return grokReport(refreshErrors[provider], now)
             }
         }
     }
@@ -70,7 +90,7 @@ nonisolated public enum ProviderReadinessInspector {
         now: Date = Date(),
         cachedMetrics: UsageMetrics? = SharedDataStore.shared.loadMetrics()[.claudeCode],
         isOAuthFallbackEnabled: () -> Bool = {
-            UserDefaults.standard.bool(forKey: StorageKeys.claudeCodeOAuthFallback)
+            ClaudeCodeLocalService.isOAuthUsageEnabled()
         },
         credentialsData: () -> Data? = { ClaudeCodeLocalService.shared.credentialsData() }
     ) -> ProviderReadiness {
@@ -138,7 +158,88 @@ nonisolated public enum ProviderReadinessInspector {
         return ProviderReadinessEvaluator.cursor(input)
     }
 
+    static func openRouterReport(
+        refreshError: ServiceError? = nil,
+        hasAPIKey: () -> Bool = { KeychainManager.shared.hasKey(key: OpenRouterService.keychainKey) }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.openRouter(
+            OpenRouterReadinessInput(
+                hasAPIKey: hasAPIKey(),
+                refreshError: sanitize(refreshError)
+            )
+        )
+    }
+
+    static func grokReport(refreshError: ServiceError? = nil) -> ProviderReadiness {
+        let fileManager = FileManager.default
+        let authPath = GrokCLIUsageService.authFilePath()
+        let authExists = fileManager.fileExists(atPath: authPath)
+        return ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(
+                isCLIInstalled: CLIBinaryLocator.isAvailable(command: "grok", overrideEnvVar: "GROK_CLI_PATH"),
+                authFileExists: authExists,
+                authFileReadable: authExists && fileManager.isReadableFile(atPath: authPath),
+                refreshError: sanitize(refreshError)
+            )
+        )
+    }
+
     // MARK: - Helpers
+
+    private static func parseHealthCheck(_ record: ProviderParseHealthRecord?, now: Date) -> ReadinessCheck {
+        let threshold = "Data is considered stale after 2 hours."
+        guard let record else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "No refresh outcome has been recorded yet. \(threshold)"
+            )
+        }
+
+        if record.lastFailureWasShapeMismatch {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .fail,
+                detail: "The last refresh detected an upstream format mismatch. \(threshold)",
+                recovery: "Refresh once more, then copy this Diagnostics report if it persists."
+            )
+        }
+        if record.consecutiveFailures >= ProviderParseHealthRecord.sustainedFailureCount {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .fail,
+                detail: "\(record.consecutiveFailures) consecutive refreshes failed. \(threshold)",
+                recovery: "Check the provider connection and refresh again."
+            )
+        }
+        if record.consecutiveFailures > 0 {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "The latest refresh failed; \(record.consecutiveFailures) failure recorded. \(threshold)"
+            )
+        }
+        if let lastSuccess = record.lastSuccess,
+           now.timeIntervalSince(lastSuccess) > ProviderParseHealthRecord.staleAfter {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: "Provider format health",
+                level: .warn,
+                detail: "Usage data is older than the 2-hour staleness threshold.",
+                recovery: "Refresh the provider and review any new error."
+            )
+        }
+        return ReadinessCheck(
+            id: ReadinessCheckID.parseHealth,
+            title: "Provider format health",
+            level: .pass,
+            detail: "The most recent provider response parsed successfully. \(threshold)"
+        )
+    }
 
     private static func cursorAppPresent() -> Bool {
         let fileManager = FileManager.default

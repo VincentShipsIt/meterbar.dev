@@ -2,9 +2,14 @@ import Foundation
 
 /// The engine behind `meterbar wake`: a thin one-shot orchestration over the
 /// same discovery, quota, runner, and ledger the app uses. It never invokes a
-/// Claude process or mutates anything on `dryRun`, emits a distinguishable
-/// outcome for every terminal state, and refuses non-Claude providers (Codex is
-/// not exposed in v1).
+/// provider process or mutates anything on `dryRun`, and emits a
+/// distinguishable outcome for every terminal state.
+///
+/// The orchestration is provider-agnostic: it drives a `WakeProviderRuntime`
+/// (Claude or Codex) via `run(runtime:dryRun:limit:)`. The legacy
+/// `run(provider:account:dryRun:limit:)` is retained as a Claude-only facade
+/// that builds a `ClaudeWakeRuntime` and delegates to the same body — so the
+/// caller that already speaks `ClaudeCodeAccount` keeps working unchanged.
 struct WakeCLIEngine {
     private let discovery: SessionDiscovery
     private let authority: WakeQuotaAuthority
@@ -17,7 +22,7 @@ struct WakeCLIEngine {
     init(
         discovery: SessionDiscovery = SessionDiscovery(),
         authority: WakeQuotaAuthority = WakeQuotaAuthority(),
-        makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting,
+        makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting = { WakeProcessRunner(account: $0) },
         ledgerFactory: @escaping @Sendable () -> ReplayLedger = { ReplayLedger() },
         lock: WakeLock = WakeLock(holderKind: .cli),
         bounds: WakeBounds = .default,
@@ -32,22 +37,39 @@ struct WakeCLIEngine {
         self.shouldCancel = shouldCancel
     }
 
+    /// Legacy Claude-only entry point. Preserved so existing callers and tests
+    /// that pass a `ClaudeCodeAccount` and a provider string keep their exact
+    /// behavior; a non-Claude provider string here is still a validation
+    /// failure (Codex is reached through `run(runtime:)`, not this method).
     func run(provider: String, account: ClaudeCodeAccount, dryRun: Bool, limit: Int?) async -> WakeCLIResponse {
         let normalizedProvider = provider.lowercased()
         guard normalizedProvider == "claude" else {
-            // Codex is intentionally not exposed in v1.
             return .from(
                 candidates: [],
                 outcome: .validationFailure,
                 provider: normalizedProvider,
                 dryRun: dryRun,
                 account: account.configDirectory,
-                message: "Only the 'claude' provider is supported in this version."
+                message: "Only the 'claude' provider is supported on this entry point."
             )
         }
+        let runtime = ClaudeWakeRuntime(
+            account: account,
+            discovery: discovery,
+            authority: authority,
+            makeRunner: makeRunner
+        )
+        return await run(runtime: runtime, dryRun: dryRun, limit: limit)
+    }
+
+    /// Provider-agnostic one-shot wake. `dryRun` performs no subprocess and no
+    /// mutation.
+    func run(runtime: WakeProviderRuntime, dryRun: Bool, limit: Int?) async -> WakeCLIResponse {
+        let providerToken = runtime.provider.rawValue
+        let accountLabel = runtime.accountLabel
 
         let ledger = ledgerFactory()
-        let candidates = await discovery.discover(configDirectory: account.configDirectory, ledger: ledger)
+        let candidates = await runtime.discover(ledger: ledger)
 
         // Dry-run / preview: strictly read-only. No lock, no quota fetch, no
         // subprocess, no mutation.
@@ -55,19 +77,19 @@ struct WakeCLIEngine {
             return .from(
                 candidates: candidates,
                 outcome: .success,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: true,
-                account: account.configDirectory
+                account: accountLabel
             )
         }
 
         // Pre-flight probe only: detect a legacy watcher / another live holder
         // for a distinct, actionable message before the quota fetch — then
-        // release at once. The per-run runner takes the shared lock when a
-        // launch is actually ready (matching the app watcher, where the runner,
-        // not the coordinator, owns the lock). Holding this engine lock across
-        // resume() would self-contend: flock via a second descriptor in the
-        // same process is denied on macOS, so every real resume would fail.
+        // release at once. A managed app/agent watcher holds this lock for its
+        // whole lifetime, so this probe excludes one-shot CLI work. If no
+        // watcher owns it, the per-run runner takes the lock when launch-ready.
+        // Holding this engine instance across resume() would self-contend via
+        // the runner's second descriptor, so the probe is released first.
         switch lock.acquire() {
         case .acquired:
             lock.release()
@@ -76,42 +98,42 @@ struct WakeCLIEngine {
             return .from(
                 candidates: candidates,
                 outcome: .validationFailure,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: false,
-                account: account.configDirectory,
+                account: accountLabel,
                 message: "Another Session Wake holder\(who) is already running."
             )
         case let .legacyHeld(guidance):
             return .from(
                 candidates: candidates,
                 outcome: .validationFailure,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: false,
-                account: account.configDirectory,
+                account: accountLabel,
                 message: guidance
             )
         case let .unavailable(reason):
             return .from(
                 candidates: candidates,
                 outcome: .validationFailure,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: false,
-                account: account.configDirectory,
+                account: accountLabel,
                 message: "Session Wake lock unavailable: \(reason)"
             )
         }
         defer { lock.release() }
 
         // Fresh quota before any launch.
-        let quota = await authority.freshQuota(account: account)
+        let quota = await runtime.freshQuota()
         switch quota {
         case let .unknown(reason):
             return .from(
                 candidates: candidates,
                 outcome: .quotaUnknown,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: false,
-                account: account.configDirectory,
+                account: accountLabel,
                 message: reason
             )
         case let .blocked(until, reason):
@@ -119,30 +141,31 @@ struct WakeCLIEngine {
             return .from(
                 candidates: candidates,
                 outcome: .blockedWithoutWait,
-                provider: normalizedProvider,
+                provider: providerToken,
                 dryRun: false,
-                account: account.configDirectory,
+                account: accountLabel,
                 message: detail
             )
         case .available:
             return await resume(
                 candidates: candidates,
-                account: account,
+                runner: runtime.makeRunner(),
                 ledger: ledger,
                 limit: limit,
-                provider: normalizedProvider
+                provider: providerToken,
+                accountLabel: accountLabel
             )
         }
     }
 
     private func resume(
         candidates: [WakeSessionCandidate],
-        account: ClaudeCodeAccount,
+        runner: WakeExecuting,
         ledger: ReplayLedger,
         limit: Int?,
-        provider: String
+        provider: String,
+        accountLabel: String?
     ) async -> WakeCLIResponse {
-        let runner = makeRunner(account)
         let cap = min(limit ?? bounds.maxSessionsPerRun, bounds.maxSessionsPerRun)
         let queue = Array(candidates.filter(\.isExecutable).prefix(cap))
 
@@ -184,7 +207,7 @@ struct WakeCLIEngine {
             outcome: outcome,
             provider: provider,
             dryRun: false,
-            account: account.configDirectory,
+            account: accountLabel,
             summary: summary
         )
     }

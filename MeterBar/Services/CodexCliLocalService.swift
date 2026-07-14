@@ -16,17 +16,20 @@ import os
 class CodexCliLocalService: ObservableObject {
     static let shared = CodexCliLocalService()
 
-    // API endpoint for Codex CLI usage
+    // ChatGPT Codex endpoints used by the installed Codex CLI/app-server.
     private let usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
+    private let resetCreditsEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+    private let consumeResetCreditEndpoint =
+        "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
 
     // Shared URLSession with the standard usage-request timeouts
-    private let urlSession = ServiceSupport.session
+    private let urlSession: URLSession
 
     /// Raw bytes of `CODEX_HOME/auth.json`, behind a closure so tests can supply a
     /// fixture without a real credential file on disk (the auth file never
     /// exists on CI). Defaults to reading the real path. `@Sendable` because the
     /// read is disk I/O and must be callable off the main actor.
-    nonisolated private let authFileDataProvider: @Sendable () -> Data?
+    nonisolated private let authFileDataProvider: @Sendable (CodexAccount) -> Data?
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var lastError: ServiceError?
@@ -34,15 +37,28 @@ class CodexCliLocalService: ObservableObject {
 
     /// Defaults reproduce the production singleton; tests inject a fixture
     /// auth-file provider.
-    init(authFileDataProvider: (@Sendable () -> Data?)? = nil) {
-        self.authFileDataProvider = authFileDataProvider ?? { CodexCliLocalService.defaultAuthFileDataProvider() }
+    init(
+        authFileDataProvider: (@Sendable () -> Data?)? = nil,
+        accountAuthFileDataProvider: (@Sendable (CodexAccount) -> Data?)? = nil,
+        urlSession: URLSession = ServiceSupport.session
+    ) {
+        self.urlSession = urlSession
+        if let accountAuthFileDataProvider {
+            self.authFileDataProvider = accountAuthFileDataProvider
+        } else if let authFileDataProvider {
+            self.authFileDataProvider = { _ in authFileDataProvider() }
+        } else {
+            self.authFileDataProvider = { account in
+                Self.defaultAuthFileDataProvider(account: account)
+            }
+        }
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess() }
     }
 
     /// Reads `CODEX_HOME/auth.json` using the same resolver as readiness,
     /// activity, and cost scans.
-    nonisolated private static func defaultAuthFileDataProvider() -> Data? {
-        let path = CodexHomeDirectory.authFilePath()
+    nonisolated private static func defaultAuthFileDataProvider(account: CodexAccount) -> Data? {
+        let path = CodexHomeDirectory.authFilePath(for: account)
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         return FileManager.default.contents(atPath: path)
     }
@@ -52,8 +68,8 @@ class CodexCliLocalService: ObservableObject {
     /// Read OAuth access token from `CODEX_HOME/auth.json`.
     /// This file is created and maintained by the Codex CLI when user logs in.
     /// `nonisolated`: disk I/O — never call this synchronously from the main actor.
-    nonisolated func getAuthToken() -> String? {
-        guard let token = readAuthFile()?.tokens?.accessToken else {
+    nonisolated func getAuthToken(account: CodexAccount = .defaultAccount) -> String? {
+        guard let token = readAuthFile(account: account)?.tokens?.accessToken else {
             return nil
         }
 
@@ -66,13 +82,23 @@ class CodexCliLocalService: ObservableObject {
 
     /// Read account ID from `CODEX_HOME/auth.json`.
     /// Required for the ChatGPT-Account-Id header to get team/workspace data
-    nonisolated func getAccountId() -> String? {
-        readAuthFile()?.tokens?.accountId
+    nonisolated func getAccountId(account: CodexAccount = .defaultAccount) -> String? {
+        readAuthFile(account: account)?.tokens?.accountId
     }
 
-    nonisolated private func readAuthFile() -> CodexAuthFile? {
-        guard let data = authFileDataProvider() else { return nil }
+    nonisolated private func readAuthFile(account: CodexAccount) -> CodexAuthFile? {
+        guard let data = authFileDataProvider(account) else { return nil }
         return try? JSONDecoder().decode(CodexAuthFile.self, from: data)
+    }
+
+    nonisolated func hasAccess(account: CodexAccount) -> Bool {
+        getAuthToken(account: account) != nil
+    }
+
+    func canAccess(account: CodexAccount) async -> Bool {
+        await Task.detached(priority: .userInitiated) { [self] in
+            hasAccess(account: account)
+        }.value
     }
 
     /// Check and update access status
@@ -87,18 +113,18 @@ class CodexCliLocalService: ObservableObject {
 
     // MARK: - Usage Fetching
 
-    func fetchUsageMetrics() async throws -> UsageMetrics {
+    func fetchUsageMetrics(account: CodexAccount = .defaultAccount) async throws -> UsageMetrics {
         // Auth-file read is disk I/O; the app target runs async bodies on the
         // main actor (default MainActor isolation), so hop off explicitly.
         let auth = await Task.detached(priority: .userInitiated) { [self] in
-            (token: getAuthToken(), accountId: getAccountId())
+            (token: getAuthToken(account: account), accountId: getAccountId(account: account))
         }.value
 
         guard let token = auth.token else {
             let error = ServiceError.notAuthenticated
             await MainActor.run {
                 self.lastError = error
-                self.hasAccess = false
+                if account.isDefault { self.hasAccess = false }
             }
             throw error
         }
@@ -138,8 +164,10 @@ class CodexCliLocalService: ObservableObject {
 
             await MainActor.run {
                 self.lastError = nil
-                self.hasAccess = true
-                self.subscriptionType = usageResponse.planType
+                if account.isDefault {
+                    self.hasAccess = true
+                    self.subscriptionType = usageResponse.planType
+                }
             }
 
             // Pure response→UsageMetrics mapping (window math, code-review limit,
@@ -151,12 +179,130 @@ class CodexCliLocalService: ObservableObject {
             AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
             await MainActor.run {
                 self.lastError = serviceError
-                if case .notAuthenticated = serviceError {
+                if account.isDefault, case .notAuthenticated = serviceError {
                     self.hasAccess = false
                 }
             }
             throw serviceError
         }
+    }
+
+    // MARK: - Reset-credit action
+
+    /// Consumes one banked Codex rate-limit reset for `account`, then immediately
+    /// re-fetches usage. The POST is sent once with a fresh idempotency key; the
+    /// provider owns replay protection for that key.
+    func consumeResetCredit(account: CodexAccount = .defaultAccount) async throws -> CodexResetCreditConsumption {
+        let auth = await Task.detached(priority: .userInitiated) { [self] in
+            (token: getAuthToken(account: account), accountId: getAccountId(account: account))
+        }.value
+
+        guard let token = auth.token else {
+            throw ServiceError.notAuthenticated
+        }
+
+        let credits = try await fetchResetCredits(token: token, accountID: auth.accountId)
+        guard let credit = credits.credits.first(where: { $0.isAvailableCodexReset }) else {
+            throw CodexResetCreditError.noAvailableCredit
+        }
+
+        let payload = ConsumeResetCreditRequest(
+            creditID: credit.id,
+            redeemRequestID: UUID().uuidString.lowercased()
+        )
+        let payloadData: Data
+        do {
+            payloadData = try JSONEncoder().encode(payload)
+        } catch {
+            throw CodexResetCreditError.unexpectedResponse
+        }
+
+        var request = try makeCodexRequest(
+            endpoint: consumeResetCreditEndpoint,
+            method: "POST",
+            token: token,
+            accountID: auth.accountId
+        )
+        request.httpBody = payloadData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let response: ConsumeResetCreditResponse
+        do {
+            let (data, urlResponse) = try await urlSession.data(for: request)
+            try ServiceSupport.validate(urlResponse, data: data)
+            response = try JSONDecoder().decode(ConsumeResetCreditResponse.self, from: data)
+        } catch {
+            throw ServiceSupport.serviceError(from: error)
+        }
+
+        switch response.code {
+        case .reset:
+            break
+        case .nothingToReset:
+            throw CodexResetCreditError.nothingToReset
+        case .noCredit:
+            throw CodexResetCreditError.noAvailableCredit
+        case .alreadyRedeemed:
+            throw CodexResetCreditError.alreadyRedeemed
+        }
+
+        do {
+            let refreshedMetrics = try await fetchUsageMetrics(account: account)
+            return CodexResetCreditConsumption(
+                windowsReset: response.windowsReset,
+                refreshedMetrics: refreshedMetrics,
+                usageRefreshErrorDescription: nil
+            )
+        } catch {
+            // The credit was already consumed. Return success with a clear warning
+            // so callers never invite a second, accidental redemption.
+            return CodexResetCreditConsumption(
+                windowsReset: response.windowsReset,
+                refreshedMetrics: nil,
+                usageRefreshErrorDescription: ServiceSupport.safeErrorMessage(for: error)
+            )
+        }
+    }
+
+    private func fetchResetCredits(token: String, accountID: String?) async throws -> ResetCreditsResponse {
+        let request = try makeCodexRequest(
+            endpoint: resetCreditsEndpoint,
+            method: "GET",
+            token: token,
+            accountID: accountID
+        )
+
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            try ServiceSupport.validate(response, data: data)
+            return try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
+        } catch {
+            throw ServiceSupport.serviceError(from: error)
+        }
+    }
+
+    private func makeCodexRequest(
+        endpoint: String,
+        method: String,
+        token: String,
+        accountID: String?
+    ) throws -> URLRequest {
+        guard let url = URL(string: endpoint) else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let accountID {
+            request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+        request.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(ServiceSupport.browserUserAgent, forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 30.0
+        return request
     }
 
     // MARK: - Response Mapping
@@ -167,6 +313,106 @@ class CodexCliLocalService: ObservableObject {
     /// test suites exercise the same code path.
     static func mapUsageResponse(_ usageResponse: CodexCliUsageResponse) -> UsageMetrics {
         usageResponse.toUsageMetrics()
+    }
+}
+
+// MARK: - Reset-credit models and public CLI facade
+
+nonisolated enum CodexResetCreditEligibility {
+    static func isEligible(isBlocked: Bool, availableCredits: Int?, isAuthenticated: Bool) -> Bool {
+        isBlocked && (availableCredits ?? 0) > 0 && isAuthenticated
+    }
+}
+
+public struct CodexResetCreditConsumption {
+    public let windowsReset: Int
+    public let refreshedMetrics: UsageMetrics?
+    public let usageRefreshErrorDescription: String?
+}
+
+public enum CodexResetCreditError: LocalizedError, Sendable {
+    case noAvailableCredit
+    case nothingToReset
+    case alreadyRedeemed
+    case unexpectedResponse
+
+    public var errorDescription: String? {
+        switch self {
+        case .noAvailableCredit:
+            return "No Codex reset credit is available. Refresh usage and try again."
+        case .nothingToReset:
+            return "Codex no longer has a blocked usage window, so no reset credit was used."
+        case .alreadyRedeemed:
+            return "That Codex reset credit was already used. Refresh usage before trying again."
+        case .unexpectedResponse:
+            return "Codex returned an unexpected reset-credit response."
+        }
+    }
+}
+
+/// Public seam used by the bundled `meterbar reset-credit` command without
+/// exposing the app's internal account-store model to the CLI target.
+public enum CodexResetCreditAPI {
+    public static func consume(codexHome: String? = nil) async throws -> CodexResetCreditConsumption {
+        let trimmedHome = codexHome?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let account: CodexAccount
+        if let trimmedHome, !trimmedHome.isEmpty {
+            account = CodexAccount(
+                id: UUID(),
+                name: "CLI reset-credit account",
+                homeDirectory: (trimmedHome as NSString).standardizingPath
+            )
+        } else {
+            account = .defaultAccount
+        }
+        return try await CodexCliLocalService.shared.consumeResetCredit(account: account)
+    }
+}
+
+nonisolated private struct ResetCreditsResponse: Decodable {
+    let credits: [ResetCredit]
+}
+
+nonisolated private struct ResetCredit: Decodable {
+    let id: String
+    let resetType: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case resetType = "reset_type"
+        case status
+    }
+
+    var isAvailableCodexReset: Bool {
+        status == "available" && resetType == "codex_rate_limits"
+    }
+}
+
+nonisolated private struct ConsumeResetCreditRequest: Encodable {
+    let creditID: String
+    let redeemRequestID: String
+
+    enum CodingKeys: String, CodingKey {
+        case creditID = "credit_id"
+        case redeemRequestID = "redeem_request_id"
+    }
+}
+
+nonisolated private struct ConsumeResetCreditResponse: Decodable {
+    enum Code: String, Decodable {
+        case reset
+        case nothingToReset = "nothing_to_reset"
+        case noCredit = "no_credit"
+        case alreadyRedeemed = "already_redeemed"
+    }
+
+    let code: Code
+    let windowsReset: Int
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case windowsReset = "windows_reset"
     }
 }
 

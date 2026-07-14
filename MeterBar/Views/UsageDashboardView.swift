@@ -88,7 +88,6 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case optimize = "Optimize"
     case diagnostics = "Diagnostics"
     case share = "Share"
-    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -108,14 +107,12 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "stethoscope"
         case .share:
             return "square.and.arrow.up.fill"
-        case .settings:
-            return "gearshape.fill"
         }
     }
 
     /// Sidebar layout: frequency-ordered monitoring pages first, then health
-    /// checks, then utilities. Settings is reached via the toolbar gear, not
-    /// the sidebar (app-level function, not a content destination).
+    /// checks, then utilities. App settings live in the dedicated macOS
+    /// Settings scene rather than masquerading as dashboard content.
     struct SidebarGroup: Identifiable {
         let title: String?
         let sections: [DashboardSection]
@@ -145,8 +142,6 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "Provider setup health"
         case .share:
             return "Social card export"
-        case .settings:
-            return "Accounts, refresh, and local sources"
         }
     }
 }
@@ -170,10 +165,13 @@ struct UsageDashboardView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+    @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
+    @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
     @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
@@ -231,8 +229,7 @@ struct UsageDashboardView: View {
         } detail: {
             detailContent
                 .toolbar {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        settingsToolbarButton
+                    ToolbarItem(placement: .primaryAction) {
                         refreshToolbarButton
                     }
                 }
@@ -270,16 +267,6 @@ struct UsageDashboardView: View {
         .disabled(isRefreshButtonDisabled)
     }
 
-    private var settingsToolbarButton: some View {
-        Button {
-            navigation.navigate(to: .settings)
-        } label: {
-            Image(systemName: "gearshape")
-                .symbolVariant(activeSection == .settings ? .fill : .none)
-        }
-        .help("Settings")
-    }
-
     private var detailContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -298,20 +285,20 @@ struct UsageDashboardView: View {
                     diagnosticsContent
                 case .share:
                     shareContent
-                case .settings:
-                    settingsContent
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 22)
+            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
+            .padding(.top, MeterBarTheme.Spacing.md)
+            .padding(.bottom, MeterBarTheme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
+            // Safe-area handling now lives inside MeterBarDetailBackground: the
+            // material bleeds full-bleed, the accent tint stays below the bar so
+            // the system scroll-edge effect is unobstructed behind toolbar items.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
         .navigationTitle("")
         .navigationSubtitle("")
@@ -416,7 +403,7 @@ struct UsageDashboardView: View {
                     } label: {
                         Label("Refresh Status", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .controlSize(.small)
                     .disabled(providerStatusMonitor.isRefreshing)
                 }
@@ -478,7 +465,7 @@ struct UsageDashboardView: View {
                         } label: {
                             Label("Scan 30 Days", systemImage: "magnifyingglass")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glassProminent)
                         .disabled(costTracker.isRefreshInProgress)
                     }
                     .frame(height: 220, alignment: .center)
@@ -499,7 +486,7 @@ struct UsageDashboardView: View {
                 } label: {
                     Label("Copy PNG", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
 
                 Button {
                     saveSocialCardImage()
@@ -585,22 +572,21 @@ struct UsageDashboardView: View {
         .frame(height: height)
     }
 
-    private var settingsContent: some View {
-        SettingsView(embeddedInDashboard: true)
-            .frame(maxWidth: .infinity, minHeight: 520, alignment: .leading)
-    }
-
     private var providerSnapshots: [ProviderSnapshot] {
         // Same builder the popover uses; the dashboard only renders providers
         // that have reported metrics.
         ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
             metrics: dataManager.metrics,
+            codexAccounts: codexAccountStore.accounts,
+            codexAccountMetrics: dataManager.codexAccountMetrics,
             claudeAccounts: claudeAccountStore.accounts,
             claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
             enabledServices: providerVisibility.enabledServices,
             claudeCodeHasAccess: claudeCodeService.hasAccess,
             codexCliHasAccess: codexCliService.hasAccess,
-            cursorHasAccess: cursorService.hasAccess
+            cursorHasAccess: cursorService.hasAccess,
+            openRouterHasAccess: openRouterService.hasAccess,
+            grokHasAccess: grokService.hasAccess
         ))
         .filter(\.hasMetrics)
     }
@@ -673,7 +659,7 @@ struct UsageDashboardView: View {
             count += 1
         }
         if providerVisibility.isEnabled(.claudeCode) {
-            count += claudeAccountStore.accounts.count
+            count += claudeAccountStore.enabledAccounts.count
         }
         if providerVisibility.isEnabled(.cursor) {
             count += 1
@@ -762,6 +748,8 @@ struct UsageDashboardView: View {
         if let error = claudeCodeService.lastError { result[.claudeCode] = error }
         if let error = codexCliService.lastError { result[.codexCli] = error }
         if let error = cursorService.lastError { result[.cursor] = error }
+        if let error = openRouterService.lastError { result[.openRouter] = error }
+        if let error = grokService.lastError { result[.grok] = error }
         return result
     }
 
@@ -793,7 +781,7 @@ struct UsageDashboardView: View {
             return costTracker.isRefreshInProgress
         case .status:
             return providerStatusMonitor.isRefreshing
-        case .overview, .limits, .diagnostics, .settings:
+        case .overview, .limits, .diagnostics:
             return dataManager.isLoading
         }
     }
@@ -902,7 +890,7 @@ struct UsageDashboardView: View {
     }
 
     private func setSocialShareStatus(_ status: String) {
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(MeterBarTheme.Motion.standard) {
             socialShareStatus = status
         }
     }
@@ -989,7 +977,10 @@ private struct OverviewSummaryStrip: View {
     private func tightestValue(now: Date) -> String {
         guard let tightestLimit else { return "No data" }
         guard tightestLimit.usageLimit.isAtLimit else {
-            return "\(tightestLimit.percentLeft)% left"
+            return tightestLimit.usageLimit.percentLeftText
+        }
+        if tightestLimit.usageLimit.isEstimated {
+            return tightestLimit.usageLimit.percentLeftText
         }
         guard let countdown = tightestLimit.usageLimit.resetCountdownText(now: now) else {
             return "Reset unknown"
