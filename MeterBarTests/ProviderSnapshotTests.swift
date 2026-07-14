@@ -157,6 +157,7 @@ final class ProviderSnapshotTests: XCTestCase {
         ))
 
         XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map(\.accountID), [CodexAccount.defaultID, work.id])
         XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
         XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
     }

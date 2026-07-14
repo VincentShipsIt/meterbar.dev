@@ -26,6 +26,9 @@ struct ResetCountdownLabel: View {
     var foregroundColor: Color = .secondary
     var iconSize: CGFloat = 10
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             Group {
@@ -37,6 +40,7 @@ struct ResetCountdownLabel: View {
                             .font(font)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                            .numericRefreshTransition(value: text, reduceMotion: reduceMotion)
                     }
                     .foregroundColor(foregroundColor)
                     .help(text)
@@ -60,6 +64,9 @@ struct NextResetCountdownLabel: View {
     var foregroundColor: Color = .secondary
     var iconSize: CGFloat = 10
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     /// How long after a window's reset time we keep showing "reset due" before
     /// treating the data as stale and hiding the label (until a refresh repopulates
     /// a future reset time). Prevents a perpetual "reset due" when a provider goes offline.
@@ -81,6 +88,7 @@ struct NextResetCountdownLabel: View {
                             .font(font)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                            .numericRefreshTransition(value: text, reduceMotion: reduceMotion)
                     }
                     .foregroundColor(foregroundColor)
                     .help(text)
@@ -122,6 +130,9 @@ struct BlockingLimitResetCounter: View {
     let windows: [ResetCountdownWindow]
     let accentColor: Color
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             let blockingWindow = Self.selectBlockingWindow(windows, now: timeline.date)
@@ -148,6 +159,7 @@ struct BlockingLimitResetCounter: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
+                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
                     Text(detail)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -232,6 +244,9 @@ struct CompactBlockingLimitResetRow: View {
     let windows: [ResetCountdownWindow]
     let accentColor: Color
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(windows, now: timeline.date)
@@ -252,6 +267,7 @@ struct CompactBlockingLimitResetRow: View {
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
                     Text(detail)
                         .font(.caption2)
                         .foregroundColor(.secondary)

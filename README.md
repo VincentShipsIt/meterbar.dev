@@ -172,6 +172,7 @@ meterbar cost --json
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Costs tab), so the CLI and the app always show the same numbers.
+The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
 The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
 ```

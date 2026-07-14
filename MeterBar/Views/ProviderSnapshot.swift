@@ -17,6 +17,7 @@ struct ProviderSnapshot: Identifiable {
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
+    let accountID: UUID?
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -177,7 +178,8 @@ enum ProviderSnapshotBuilder {
                     title: "Codex",
                     service: .codexCli,
                     metrics: input.metrics[.codexCli],
-                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
+                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login",
+                    accountID: CodexAccount.defaultID
                 ))
             }
         }
@@ -250,7 +252,8 @@ enum ProviderSnapshotBuilder {
             limits: limits(for: metrics, service: service),
             emptyDetail: emptyDetail,
             extraUsage: metrics?.extraUsage,
-            resetCreditsAvailable: metrics?.resetCreditsAvailable
+            resetCreditsAvailable: metrics?.resetCreditsAvailable,
+            accountID: accountID
         )
     }
 
