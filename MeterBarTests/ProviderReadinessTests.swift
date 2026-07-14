@@ -238,7 +238,7 @@ final class ProviderReadinessTests: XCTestCase {
     func testCodexApiKeyModeDoesNotAuthorizeSubscriptionQuota() {
         // The quota endpoint uses the ChatGPT/Codex OAuth access token. An API
         // key may authorize platform APIs, but it cannot make this check healthy.
-        let json = #"{"OPENAI_API_KEY":"sk-\#(secret)","tokens":null}"#.data(using: .utf8)
+        let json = Data(#"{"OPENAI_API_KEY":"sk-\#(secret)","tokens":null}"#.utf8)
         let input = CodexReadinessInput(
             isCLIInstalled: true,
             authFileExists: true,
@@ -357,12 +357,79 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertEqual(summary.displayText, "1 ready · 1 warning · 1 needs attention")
     }
 
+    // MARK: - needsSetup (drives the "Finish setup" checklist)
+
+    func testNeedsSetupFalseWhenOnlyParseHealthWarns() {
+        // A working provider (installed + signed in + usage readable) whose only
+        // blemish is a format-health warning must NOT keep the setup checklist
+        // pinned open, even though it is not `isHealthy`.
+        let report = ProviderReadiness(
+            provider: .claudeCode,
+            checks: [
+                ReadinessCheck(id: ReadinessCheckID.installed, title: "CLI installed", level: .pass, detail: "OK"),
+                ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .pass, detail: "OK"),
+                ReadinessCheck(id: ReadinessCheckID.data, title: "Usage readable", level: .pass, detail: "OK"),
+                ReadinessCheck(id: ReadinessCheckID.refresh, title: "Last refresh", level: .pass, detail: "OK"),
+                ReadinessCheck(
+                    id: ReadinessCheckID.parseHealth,
+                    title: "Provider format health",
+                    level: .warn,
+                    detail: "Format drift"
+                ),
+            ]
+        )
+
+        XCTAssertFalse(report.isHealthy)
+        XCTAssertFalse(report.needsSetup)
+    }
+
+    func testNeedsSetupFalseWhenOnlyRefreshFails() {
+        // A transient refresh failure is not a setup problem.
+        let report = ProviderReadinessEvaluator.cursor(
+            CursorReadinessInput(
+                isInstalled: true,
+                database: .tokenPresent,
+                refreshError: "API error (HTTP 500)",
+                now: now
+            )
+        )
+
+        XCTAssertEqual(report.overall, .fail)
+        XCTAssertFalse(report.needsSetup)
+    }
+
+    func testNeedsSetupTrueWhenSetupCheckFails() {
+        // A genuine setup failure (not signed in) keeps the checklist open.
+        let report = ProviderReadinessEvaluator.codexCli(
+            CodexReadinessInput(
+                isCLIInstalled: true,
+                authFileExists: false,
+                authFileReadable: false,
+                authJSON: nil,
+                now: now
+            )
+        )
+
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        XCTAssertTrue(report.needsSetup)
+    }
+
     // MARK: - Fixtures
 
     private func assertNoSecretLeak(_ report: ProviderReadiness, file: StaticString = #filePath, line: UInt = #line) {
         for check in report.checks {
-            XCTAssertFalse(check.detail.contains(secret), "secret leaked into detail: \(check.detail)", file: file, line: line)
-            XCTAssertFalse((check.recovery ?? "").contains(secret), "secret leaked into recovery", file: file, line: line)
+            XCTAssertFalse(
+                check.detail.contains(secret),
+                "secret leaked into detail: \(check.detail)",
+                file: file,
+                line: line
+            )
+            XCTAssertFalse(
+                (check.recovery ?? "").contains(secret),
+                "secret leaked into recovery",
+                file: file,
+                line: line
+            )
         }
     }
 
