@@ -17,8 +17,21 @@ struct MeterBarApp: App {
     }
 
     var body: some Scene {
+        // A menu-bar app still needs one Scene; `SettingsView` is kept as its
+        // content for the smoke test, but the standard Settings command below is
+        // replaced so ⌘, / "Settings…" open the dashboard's in-window settings
+        // mode instead of this separate window. No small settings window ever
+        // shows.
         Settings {
             SettingsView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    UsageDashboardWindowController.shared.showSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }

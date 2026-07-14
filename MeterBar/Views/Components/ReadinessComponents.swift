@@ -86,6 +86,14 @@ struct ReadinessProviderCard: View {
   var compact: Bool = false
   var recoveryAction: (() -> Void)?
 
+  /// In the compact "Finish setup" checklist, only the steps that still need
+  /// attention are worth showing — a wall of green checkmarks is noise when the
+  /// point is "what's left to do." The full Diagnostics view (non-compact) keeps
+  /// every check so the report stays complete and copyable.
+  private var visibleChecks: [ReadinessCheck] {
+    compact ? report.checks.filter { $0.level != .pass } : report.checks
+  }
+
   var body: some View {
     DashboardTile(padding: compact ? 11 : 14) {
       VStack(alignment: .leading, spacing: compact ? 8 : 10) {
@@ -103,7 +111,7 @@ struct ReadinessProviderCard: View {
         }
 
         VStack(alignment: .leading, spacing: compact ? 7 : 9) {
-          ForEach(report.checks) { check in
+          ForEach(visibleChecks) { check in
             ReadinessCheckRow(check: check, compact: compact, recoveryAction: recoveryAction)
           }
         }

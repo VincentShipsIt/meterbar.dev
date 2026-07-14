@@ -172,10 +172,21 @@ enum MeterBarTheme {
   static let danger = Color(nsColor: .systemRed)
 
   static let glassCardStroke = Color.adaptive(
-    light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.05),
-    dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.06),
-    lightHighContrast: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.14),
-    darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.16)
+    light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.08),
+    dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10),
+    lightHighContrast: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.16),
+    darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.20)
+  )
+
+  /// Soft ambient shadow that lifts a Layer-2 content card off the surface
+  /// behind it. On a same-tone window the opaque fill alone reads as a flat
+  /// gray slab; this — with ``glassCardStroke`` — is what gives the card an edge
+  /// and a sense of elevation. Kept subtle so a dense column of cards never
+  /// turns muddy; a touch deeper in dark mode, where a black shadow needs more
+  /// alpha to register against a dark backing.
+  static let cardShadow = Color.adaptive(
+    light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.10),
+    dark: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.30)
   )
 
   static func accent(for service: ServiceType) -> Color {
@@ -360,11 +371,19 @@ private struct MeterBarCardSurfaceModifier: ViewModifier {
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-    // Every flat content card funnels through here, so pointing this one
-    // modifier at `Surface.content` collapses all card fills onto a single
-    // source of truth (behavior-preserving — same semantic color).
+    // Every flat content card funnels through here — the single source of truth
+    // for card fills. The opaque `Surface.content` fill stays (Layer 2, never
+    // glass), but it's given real depth: a hairline stroke traces the edge and a
+    // soft ambient shadow lifts the card off the surface behind it. Without
+    // these an opaque fill on a same-tone window reads as a dead gray slab;
+    // adding glass here instead would be glass-on-glass, which Apple's macOS 26
+    // guidance warns against for dense content. Depth cues, not more glass.
     content
       .background(MeterBarTheme.Surface.content, in: shape)
+      .overlay {
+        shape.strokeBorder(MeterBarTheme.glassCardStroke, lineWidth: 1)
+      }
+      .shadow(color: MeterBarTheme.cardShadow, radius: 5, x: 0, y: 1)
   }
 }
 

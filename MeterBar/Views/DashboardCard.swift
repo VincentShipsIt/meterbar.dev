@@ -4,8 +4,6 @@ import SwiftUI
 
 // Shared dashboard chrome extracted from UsageDashboardView.swift (R8 split). Pure move.
 
-let overviewTileMinHeight: CGFloat = 220
-
 /// Backing surface for a `DashboardTile`. The default `.card` keeps the flat
 /// control-background fill unchanged; `.glass` swaps in a Liquid Glass surface
 /// so the tile can participate in a `glassEffectID` morph inside a

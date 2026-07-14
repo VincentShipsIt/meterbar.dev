@@ -77,7 +77,12 @@ struct ProviderOverviewStatusCard: View {
   }
 
   private var cardContent: some View {
-    DashboardTile(minHeight: overviewTileMinHeight) {
+    // Content-driven height — no min-height clamp. The old fixed floor padded
+    // short cards to a tall uniform block and, inside the lazy overview grid,
+    // made cards visibly resize as they scrolled into view (content height on
+    // first pass, then a jump to the floor). Letting each card hug its content
+    // removes both.
+    DashboardTile {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           ProviderLogoView(kind: snapshot.logoKind, size: 20, foregroundColor: snapshot.accentColor)

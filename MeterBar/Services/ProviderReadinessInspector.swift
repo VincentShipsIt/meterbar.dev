@@ -187,57 +187,78 @@ nonisolated public enum ProviderReadinessInspector {
     // MARK: - Helpers
 
     private static func parseHealthCheck(_ record: ProviderParseHealthRecord?, now: Date) -> ReadinessCheck {
+        // Plain-English label. "Provider format health" was internal jargon; a
+        // user reads this row to answer "is my usage current?", so the title
+        // says exactly that and the detail carries the specifics.
+        let title = "Usage data"
         let threshold = "Data is considered stale after 2 hours."
+
         guard let record else {
             return ReadinessCheck(
                 id: ReadinessCheckID.parseHealth,
-                title: "Provider format health",
+                title: title,
                 level: .warn,
                 detail: "No refresh outcome has been recorded yet. \(threshold)"
             )
         }
 
+        // A genuine format drift is a real, immediate failure worth surfacing —
+        // MeterBar reverse-engineers these feeds, so a shape change breaks reads.
         if record.lastFailureWasShapeMismatch {
             return ReadinessCheck(
                 id: ReadinessCheckID.parseHealth,
-                title: "Provider format health",
+                title: title,
                 level: .fail,
-                detail: "The last refresh detected an upstream format mismatch. \(threshold)",
+                detail: "MeterBar couldn't read the latest usage — the provider's "
+                    + "response format changed. \(threshold)",
                 recovery: "Refresh once more, then copy this Diagnostics report if it persists."
             )
         }
+        // Failures piling up mean the data on screen is genuinely going stale.
         if record.consecutiveFailures >= ProviderParseHealthRecord.sustainedFailureCount {
             return ReadinessCheck(
                 id: ReadinessCheckID.parseHealth,
-                title: "Provider format health",
+                title: title,
                 level: .fail,
-                detail: "\(record.consecutiveFailures) consecutive refreshes failed. \(threshold)",
+                detail: "\(record.consecutiveFailures) refreshes in a row failed. \(threshold)",
                 recovery: "Check the provider connection and refresh again."
             )
         }
+
+        // Freshness decides the rest — not a single miss. MeterBar retries on
+        // every refresh, so one stray failure while recent data is still on
+        // screen is invisible to the user and not worth a warning. (Warning on
+        // it is exactly what made this row light up "all the time".)
+        let hasRecentSuccess: Bool = {
+            guard let lastSuccess = record.lastSuccess else { return false }
+            return now.timeIntervalSince(lastSuccess) <= ProviderParseHealthRecord.staleAfter
+        }()
+
+        if hasRecentSuccess {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .pass,
+                detail: "Showing usage from a recent successful refresh. \(threshold)"
+            )
+        }
+
+        // No recent success to fall back on: now the failure (or the age) matters.
         if record.consecutiveFailures > 0 {
             return ReadinessCheck(
                 id: ReadinessCheckID.parseHealth,
-                title: "Provider format health",
+                title: title,
                 level: .warn,
-                detail: "The latest refresh failed; \(record.consecutiveFailures) failure recorded. \(threshold)"
-            )
-        }
-        if let lastSuccess = record.lastSuccess,
-           now.timeIntervalSince(lastSuccess) > ProviderParseHealthRecord.staleAfter {
-            return ReadinessCheck(
-                id: ReadinessCheckID.parseHealth,
-                title: "Provider format health",
-                level: .warn,
-                detail: "Usage data is older than the 2-hour staleness threshold.",
+                detail: "The last refresh failed and there's no recent usage to fall back on. \(threshold)",
                 recovery: "Refresh the provider and review any new error."
             )
         }
         return ReadinessCheck(
             id: ReadinessCheckID.parseHealth,
-            title: "Provider format health",
-            level: .pass,
-            detail: "The most recent provider response parsed successfully. \(threshold)"
+            title: title,
+            level: .warn,
+            detail: "Usage data is older than the 2-hour freshness window.",
+            recovery: "Refresh the provider and review any new error."
         )
     }
 

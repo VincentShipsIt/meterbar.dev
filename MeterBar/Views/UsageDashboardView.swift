@@ -39,7 +39,12 @@ final class UsageDashboardWindowController {
                 defer: false
             )
             applyWindowChrome(window, section: DashboardNavigationStore.shared.selectedSection)
-            window.backgroundColor = .windowBackgroundColor
+            // Clear, not a solid fill: with a transparent titlebar over
+            // fullSizeContentView, a solid windowBackgroundColor paints the
+            // titlebar strip as a flat dead slab. Clearing it lets the sidebar's
+            // material and the detail's MeterBarDetailBackground bleed up under
+            // the bar, so the chrome reads as one continuous surface.
+            window.backgroundColor = .clear
             window.isRestorable = false
             window.contentMinSize = NSSize(width: 900, height: 600)
             window.contentViewController = hostingController
@@ -69,6 +74,14 @@ final class UsageDashboardWindowController {
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Open (or front) the dashboard window in its in-window settings mode. This
+    /// is what ⌘,, the app menu's "Settings…", and the popover's settings entry
+    /// points now call — there is no separate Settings window.
+    func showSettings(_ section: SettingsSection = .general) {
+        DashboardNavigationStore.shared.openSettings(section)
+        show()
     }
 
     private func windowDidClose() {
@@ -146,6 +159,32 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// The app-settings pages, surfaced as an in-window mode of the dashboard rather
+/// than a separate macOS Settings window. Mirrors the tabs the old `SettingsView`
+/// shell carried, reusing the same section views. `.automation` is feature-gated
+/// and only appears when Session Wake is enabled.
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
+    case general = "General"
+    case providers = "Providers"
+    case apiUsage = "API Usage"
+    case cost = "Cost"
+    case automation = "Automation"
+    case about = "About"
+
+    var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .general: return "gearshape"
+        case .providers: return "square.grid.2x2"
+        case .apiUsage: return "key"
+        case .cost: return "chart.bar"
+        case .automation: return "moon.zzz"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 @MainActor
 final class DashboardNavigationStore: ObservableObject {
     static let shared = DashboardNavigationStore()
@@ -153,11 +192,28 @@ final class DashboardNavigationStore: ObservableObject {
     @Published var selectedSection: DashboardSection = .overview
     @Published var focusedProviderID: ProviderSnapshot.ID?
 
+    /// When true the dashboard swaps its sidebar + content for the settings
+    /// pages (the gear next to Refresh, or ⌘,/Settings…). No separate window.
+    @Published var isShowingSettings = false
+    @Published var selectedSettingsSection: SettingsSection = .general
+
     private init() {}
 
     func navigate(to section: DashboardSection, focusedProviderID: ProviderSnapshot.ID? = nil) {
         selectedSection = section
         self.focusedProviderID = focusedProviderID
+        isShowingSettings = false
+    }
+
+    /// Enter the in-window settings mode on `section` (defaults to General).
+    func openSettings(_ section: SettingsSection = .general) {
+        selectedSettingsSection = section
+        isShowingSettings = true
+    }
+
+    /// Return from settings to the monitoring dashboard.
+    func closeSettings() {
+        isShowingSettings = false
     }
 }
 
@@ -175,12 +231,15 @@ struct UsageDashboardView: View {
     @StateObject private var apiUsageStore = ApiUsageStore.shared
     @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
+    @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
     @State private var readinessReports: [ProviderReadiness] = []
     @State private var isRunningDiagnostics = false
     @State private var socialCardGeneratedAt = Date()
     @State private var socialShareStatus: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     private var activeSection: DashboardSection { navigation.selectedSection }
 
@@ -228,16 +287,53 @@ struct UsageDashboardView: View {
             sidebarList
         } detail: {
             detailContent
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        refreshToolbarButton
-                    }
-                }
+                .toolbar { dashboardToolbar }
         }
         .navigationSplitViewStyle(.balanced)
     }
 
-    private var sidebarList: some View {
+    /// The primary-action toolbar. In monitoring mode: Refresh + a gear that
+    /// enters settings. In settings mode: a single "Done" that returns to the
+    /// dashboard (Refresh has nothing to act on there). Settings is a mode of
+    /// this one window — never a separate window.
+    @ToolbarContentBuilder private var dashboardToolbar: some ToolbarContent {
+        if navigation.isShowingSettings {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.standard) {
+                        navigation.closeSettings()
+                    }
+                } label: {
+                    Label("Done", systemImage: "chevron.backward")
+                }
+                .help("Back to dashboard")
+            }
+        } else {
+            ToolbarItem(placement: .primaryAction) {
+                refreshToolbarButton
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.standard) {
+                        navigation.openSettings()
+                    }
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Settings")
+            }
+        }
+    }
+
+    @ViewBuilder private var sidebarList: some View {
+        if navigation.isShowingSettings {
+            settingsSidebarList
+        } else {
+            monitoringSidebarList
+        }
+    }
+
+    private var monitoringSidebarList: some View {
         List(selection: selectedSection) {
             ForEach(DashboardSection.sidebarGroups) { group in
                 Section {
@@ -257,6 +353,42 @@ struct UsageDashboardView: View {
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
+    /// Settings pages shown *in place of* the monitoring sidebar while in
+    /// settings mode — the same sidebar column, different rows.
+    private var settingsSidebarList: some View {
+        List(selection: settingsSelection) {
+            Section {
+                ForEach(availableSettingsSections) { section in
+                    Label(section.rawValue, systemImage: section.iconName)
+                        .tag(section)
+                }
+            } header: {
+                Text("Settings")
+            }
+        }
+        .listStyle(.sidebar)
+        .tint(MeterBarTheme.sidebarMenuTint)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+    }
+
+    /// Settings sections available right now — Automation only when Session Wake
+    /// is enabled, matching the old settings shell's feature gate.
+    private var availableSettingsSections: [SettingsSection] {
+        SettingsSection.allCases.filter { section in
+            section != .automation || sessionWakeStore.featureEnabled
+        }
+    }
+
+    private var settingsSelection: Binding<SettingsSection?> {
+        Binding(
+            get: { navigation.selectedSettingsSection },
+            set: { section in
+                guard let section else { return }
+                navigation.selectedSettingsSection = section
+            }
+        )
+    }
+
     private var refreshToolbarButton: some View {
         Button {
             Task { await refreshDashboard() }
@@ -270,21 +402,10 @@ struct UsageDashboardView: View {
     private var detailContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                switch activeSection {
-                case .overview:
-                    overviewContent
-                case .limits:
-                    limitsContent
-                case .status:
-                    statusPagesContent
-                case .costs:
-                    costsContent
-                case .optimize:
-                    OptimizeInsightsView()
-                case .diagnostics:
-                    diagnosticsContent
-                case .share:
-                    shareContent
+                if navigation.isShowingSettings {
+                    settingsSectionContent
+                } else {
+                    monitoringSectionContent
                 }
             }
             .padding(.horizontal, MeterBarTheme.Spacing.xxl)
@@ -303,6 +424,45 @@ struct UsageDashboardView: View {
         .navigationTitle("")
         .navigationSubtitle("")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder private var monitoringSectionContent: some View {
+        switch activeSection {
+        case .overview:
+            overviewContent
+        case .limits:
+            limitsContent
+        case .status:
+            statusPagesContent
+        case .costs:
+            costsContent
+        case .optimize:
+            OptimizeInsightsView()
+        case .diagnostics:
+            diagnosticsContent
+        case .share:
+            shareContent
+        }
+    }
+
+    /// The selected settings page, rendered inline as dashboard content. Reuses
+    /// the exact section views the old macOS Settings window hosted; the shell's
+    /// ScrollView + padding wrap them, so nothing double-scrolls.
+    @ViewBuilder private var settingsSectionContent: some View {
+        switch navigation.selectedSettingsSection {
+        case .general:
+            GeneralSettingsView()
+        case .providers:
+            ProviderSettingsView()
+        case .apiUsage:
+            ApiUsageSettingsView()
+        case .cost:
+            CostSettingsView()
+        case .automation:
+            SessionWakeSettingsView()
+        case .about:
+            AboutSettingsView()
+        }
     }
 
     private var overviewContent: some View {

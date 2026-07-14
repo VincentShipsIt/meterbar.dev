@@ -78,10 +78,13 @@ final class DashboardLayoutTests: XCTestCase {
         hostingView.frame = NSRect(x: 0, y: 0, width: 700, height: 400)
         hostingView.layoutSubtreeIfNeeded()
 
+        // 220 was the old overview-grid min-height floor (since removed in favor
+        // of content-driven cards); the costs-page card must hug its content and
+        // stay well under that former floor.
         XCTAssertLessThan(
             hostingView.fittingSize.height,
-            overviewTileMinHeight,
-            "costs-page card should hug its content instead of padding to the overview grid height"
+            220,
+            "costs-page card should hug its content, not pad out to the old grid floor"
         )
     }
 

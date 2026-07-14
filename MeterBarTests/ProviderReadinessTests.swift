@@ -372,7 +372,7 @@ final class ProviderReadinessTests: XCTestCase {
                 ReadinessCheck(id: ReadinessCheckID.refresh, title: "Last refresh", level: .pass, detail: "OK"),
                 ReadinessCheck(
                     id: ReadinessCheckID.parseHealth,
-                    title: "Provider format health",
+                    title: "Usage data",
                     level: .warn,
                     detail: "Format drift"
                 ),

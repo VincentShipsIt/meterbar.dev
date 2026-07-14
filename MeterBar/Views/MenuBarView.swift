@@ -251,8 +251,6 @@ struct PopoverOverviewPanel: View {
 
   @State private var setupReports: [ProviderReadiness] = []
   @StateObject private var onboarding = FirstRunOnboardingStore.shared
-  @Environment(\.openSettings)
-  private var openSettings
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
@@ -277,9 +275,12 @@ struct PopoverOverviewPanel: View {
   }
 
   /// Enabled providers that still need setup — drives the first-run checklist.
-  /// The section collapses (renders nothing) once these are all healthy.
+  /// Keyed on `needsSetup` (a genuine install/auth/data failure), NOT `!isHealthy`:
+  /// a working provider whose only blemish is a transient refresh or format-health
+  /// *warning* must not keep "Finish setup" pinned open forever. The section
+  /// collapses (renders nothing) once no enabled provider has a real setup gap.
   private var providersNeedingSetup: [ProviderReadiness] {
-    setupReports.filter { enabledProviders.contains($0.provider) && !$0.isHealthy }
+    setupReports.filter { enabledProviders.contains($0.provider) && $0.needsSetup }
   }
 
   /// Captures *which* tiles the panel shows, not their values. The panel
@@ -332,7 +333,7 @@ struct PopoverOverviewPanel: View {
               Spacer(minLength: 0)
             }
 
-            Button("Open Settings") { openSettings() }
+            Button("Open Settings") { UsageDashboardWindowController.shared.showSettings(.providers) }
               .buttonStyle(.glass)
               .controlSize(.small)
           }
@@ -384,7 +385,7 @@ struct PopoverOverviewPanel: View {
       ReadinessChecklist(
         reports: providersNeedingSetup,
         compact: true,
-        recoveryAction: { openSettings() }
+        recoveryAction: { UsageDashboardWindowController.shared.showSettings(.providers) }
       )
     }
   }
