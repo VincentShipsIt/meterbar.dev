@@ -36,8 +36,13 @@ final class ProviderVisibilityStore: ObservableObject {
 
         guard nextHiddenServices != hiddenServices else { return }
         hiddenServices = nextHiddenServices
-        if service == .openRouter {
+        switch service {
+        case .openRouter:
             userDefaults.set(enabled, forKey: StorageKeys.openRouterProviderEnabled)
+        case .grok:
+            userDefaults.set(enabled, forKey: StorageKeys.grokProviderEnabled)
+        case .claudeCode, .codexCli, .cursor:
+            break
         }
         save()
     }
@@ -47,6 +52,9 @@ final class ProviderVisibilityStore: ObservableObject {
         hiddenServices = Set(rawValues.compactMap(ServiceType.init(rawValue:)))
         if !userDefaults.bool(forKey: StorageKeys.openRouterProviderEnabled) {
             hiddenServices.insert(.openRouter)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.grokProviderEnabled) {
+            hiddenServices.insert(.grok)
         }
     }
 

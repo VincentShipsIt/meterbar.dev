@@ -48,6 +48,7 @@ struct SettingsView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
@@ -84,7 +85,8 @@ struct SettingsView: View {
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess
+                openRouterHasAccess: openRouterService.hasAccess,
+                grokHasAccess: grokService.hasAccess
             )
         )
     }
@@ -92,6 +94,7 @@ struct SettingsView: View {
     private var showExtraUsageSection: Bool {
         (providerVisibility.isEnabled(.claudeCode) && claudeExtraUsageStatus != nil)
             || providerVisibility.isEnabled(.codexCli)
+            || providerVisibility.isEnabled(.grok)
     }
 
     private var claudeExtraUsageStatus: ExtraUsageStatus? {
@@ -135,7 +138,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.bottom, 4)
+                .padding(.bottom, MeterBarTheme.Spacing.xs)
 
                 providerSettingsPane(for: selectedProviderTab)
             }
@@ -168,8 +171,11 @@ struct SettingsView: View {
         }
         .frame(width: Self.windowWidth, height: Self.windowHeight)
         .background {
+            // MeterBarDetailBackground now handles safe area internally (material
+            // full-bleed, tint inset). The macOS TabView renders its tab strip as
+            // a separate control rather than a scroll-under bar, so nothing here
+            // scrolls beneath a bar — but this keeps the two windows consistent.
             MeterBarDetailBackground()
-                .ignoresSafeArea()
         }
     }
 
@@ -186,8 +192,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 content()
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, MeterBarTheme.Spacing.xl)
+            .padding(.vertical, MeterBarTheme.Spacing.xl)
             .frame(width: Self.windowWidth, alignment: .topLeading)
         }
         .scrollContentBackground(.hidden)
@@ -431,7 +437,7 @@ struct SettingsView: View {
     private var extraUsageSection: some View {
         SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
             SettingsNotice(
-                text: "Extra usage (Claude) and credits (Codex) let a provider bill overage beyond your "
+                text: "Extra usage and credits let a provider bill overage beyond your "
                     + "plan once your quota is exhausted. \"Off\" means usage is capped at your subscription.",
                 color: .secondary
             )
@@ -451,6 +457,14 @@ struct SettingsView: View {
                     title: "OpenAI Codex",
                     status: dataManager.metrics[.codexCli]?.extraUsage,
                     manageURL: "https://chatgpt.com"
+                )
+            }
+
+            if providerVisibility.isEnabled(.grok) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
                 )
             }
         }
@@ -509,6 +523,11 @@ struct SettingsView: View {
                 title: "OpenRouter",
                 detail: "Track credit balance, spend, and per-key limits.",
                 service: .openRouter
+            )
+            providerToggleRow(
+                title: "Grok",
+                detail: "Track Grok Build weekly quota from its cached CLI login.",
+                service: .grok
             )
         }
     }
@@ -726,6 +745,62 @@ struct SettingsView: View {
         }
     }
 
+    private var grokSection: some View {
+        SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+            SettingsNotice(
+                text: "MeterBar asks the official Grok CLI for billing data over ACP. "
+                    + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
+                color: .secondary
+            )
+
+            SettingsRowView(title: "Connection") {
+                HStack(spacing: 8) {
+                    StatusPill(
+                        title: grokService.hasAccess ? "Connected" : "Not Connected",
+                        isConnected: grokService.hasAccess
+                    )
+
+                    Button(grokService.hasAccess ? "Refresh" : "Check Again") {
+                        Task {
+                            let service = grokService
+                            await Task.detached(priority: .userInitiated) {
+                                service.checkAccess()
+                            }.value
+                            if grokService.hasAccess {
+                                await dataManager.refresh(service: .grok)
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Install / Sign In") {
+                        if let url = URL(string: "https://x.ai/cli") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if let subscriptionType = grokService.subscriptionType, grokService.hasAccess {
+                SettingsRowView(title: "Plan") {
+                    Text(subscriptionType)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+            } else if !grokService.hasAccess {
+                SettingsNotice(
+                    text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
+                    color: MeterBarTheme.warning
+                )
+            }
+
+            if let error = grokService.lastError {
+                SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
+            }
+        }
+    }
+
     private var costTrackingSection: some View {
         SettingsPanelSection(title: "Cost Tracking", systemImage: "chart.bar.xaxis", color: MeterBarTheme.success) {
             if costTracker.isScanning {
@@ -927,7 +1002,7 @@ struct SettingsView: View {
                             SettingsNotice(text: "No quota windows reported.", color: .secondary)
                         } else {
                             ForEach(snapshot.detailLimits) { limit in
-                                DashboardLimitRow(limit: limit, accentColor: snapshot.accentColor)
+                                LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
                             }
                         }
 
@@ -955,6 +1030,9 @@ struct SettingsView: View {
             cursorSection
         case .openRouter:
             openRouterSection
+        case .grok:
+            grokSection
+            providerExtraUsageSection(for: service)
         }
     }
 
@@ -983,6 +1061,14 @@ struct SettingsView: View {
             EmptyView()
         case .openRouter:
             EmptyView()
+        case .grok:
+            SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
+                extraUsageRow(
+                    title: "Grok",
+                    status: dataManager.metrics[.grok]?.extraUsage,
+                    manageURL: "https://grok.com/?_s=usage"
+                )
+            }
         }
     }
 
@@ -1068,6 +1154,7 @@ struct SettingsView: View {
             let claudeCode = claudeCodeService
             let codexCli = codexCliService
             let cursor = cursorService
+            let grok = grokService
             await Task.detached(priority: .userInitiated) {
                 switch service {
                 case .claudeCode:
@@ -1078,6 +1165,8 @@ struct SettingsView: View {
                     cursor.checkAccess(forceRescan: true)
                 case .openRouter:
                     break
+                case .grok:
+                    grok.checkAccess()
                 }
             }.value
             await dataManager.refresh(service: service)
@@ -1094,6 +1183,8 @@ struct SettingsView: View {
             "Cursor local state + usage API"
         case .openRouter:
             "OpenRouter credits + key APIs"
+        case .grok:
+            "Grok Build ACP billing"
         }
     }
 
@@ -1147,6 +1238,8 @@ struct SettingsView: View {
             return cursorService.subscriptionType?.capitalized.nilIfEmpty
         case .openRouter:
             return nil
+        case .grok:
+            return grokService.subscriptionType?.nilIfEmpty
         }
     }
 
@@ -1160,6 +1253,8 @@ struct SettingsView: View {
             cursorService.hasAccess
         case .openRouter:
             openRouterService.hasAccess
+        case .grok:
+            grokService.hasAccess
         }
     }
 
@@ -1173,6 +1268,8 @@ struct SettingsView: View {
             cursorService.lastError?.localizedDescription
         case .openRouter:
             openRouterService.lastError?.localizedDescription
+        case .grok:
+            grokService.lastError?.localizedDescription
         }
     }
 
@@ -1449,7 +1546,7 @@ private struct AdminKeySettingsRow: View {
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
     }
 
     // MARK: Private
@@ -1500,7 +1597,7 @@ private struct AddCodexAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1591,7 +1688,7 @@ private struct AddClaudeAccountSheet: View {
                 .disabled(!canAdd)
             }
         }
-        .padding(22)
+        .padding(MeterBarTheme.Spacing.xxl)
         .frame(width: 520)
     }
 
@@ -1680,15 +1777,15 @@ private struct AccountProfileRow: View {
                         .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
                         .onSubmit(saveChanges)
 
-                    Text(account.isDefault ? "Default" : "Profile")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent)
-                        .settingsInputSurface(
-                            horizontalPadding: 8,
-                            verticalPadding: 4,
-                            shape: .capsule
-                        )
+                    // Migrated to the shared `MeterBarChip`. This was the 5th,
+                    // odd-one-out recipe (`.thinMaterial` + glassCardStroke); the
+                    // `.glass` chip gives it the standard Liquid-Glass capsule
+                    // while keeping the Default/Profile role tint.
+                    MeterBarChip(
+                        account.isDefault ? "Default" : "Profile",
+                        tint: account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent,
+                        style: .glass
+                    )
                 }
 
                 HStack(spacing: 8) {
@@ -1773,7 +1870,7 @@ private struct AccountProfileRow: View {
             }
             .fixedSize()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
             configDirectoryDraft = updatedAccount.configDirectory ?? ""
@@ -1913,7 +2010,7 @@ private struct CodexAccountProfileRow: View {
             }
             .frame(minWidth: 80, alignment: .trailing)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updated in
             nameDraft = updated.name
             homeDirectoryDraft = updated.homeDirectory ?? ""
@@ -1967,44 +2064,26 @@ private struct SettingsInputModifier: ViewModifier {
     }
 }
 
-// MARK: - SettingsInputSurfaceShape
-
-private enum SettingsInputSurfaceShape {
-    case roundedRectangle
-    case capsule
-}
-
 // MARK: - SettingsInputSurfaceModifier
 
 private struct SettingsInputSurfaceModifier: ViewModifier {
     let width: CGFloat?
     let horizontalPadding: CGFloat
     let verticalPadding: CGFloat
-    let shape: SettingsInputSurfaceShape
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .roundedRectangle:
-            let roundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        // The capsule variant moved to `MeterBarChip(style: .glass)`; this
+        // surface now only backs rounded-rectangle settings input fields.
+        let roundedRectangle = RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
 
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: roundedRectangle)
-                .overlay {
-                    roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        case .capsule:
-            content
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(width: width)
-                .background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
-                }
-        }
+        content
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .frame(width: width)
+            .background(.thinMaterial, in: roundedRectangle)
+            .overlay {
+                roundedRectangle.stroke(MeterBarTheme.glassCardStroke, lineWidth: 0.5)
+            }
     }
 }
 
@@ -2016,15 +2095,13 @@ private extension View {
     func settingsInputSurface(
         width: CGFloat? = nil,
         horizontalPadding: CGFloat = 10,
-        verticalPadding: CGFloat = 6,
-        shape: SettingsInputSurfaceShape = .roundedRectangle
+        verticalPadding: CGFloat = 6
     ) -> some View {
         modifier(
             SettingsInputSurfaceModifier(
                 width: width,
                 horizontalPadding: horizontalPadding,
-                verticalPadding: verticalPadding,
-                shape: shape
+                verticalPadding: verticalPadding
             )
         )
     }

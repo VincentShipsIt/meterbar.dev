@@ -95,12 +95,12 @@ final class WidgetRenderingTests: XCTestCase {
     }
 
     func testEachProviderRendersIndividually() {
-        // Claude Code, OpenAI Codex, and Cursor each render a populated row on
-        // their own (the acceptance criterion names all three providers).
+        // Every CLI-backed provider renders a populated row on its own.
         let cases: [(ServiceType, UsageMetrics)] = [
             (.claudeCode, MetricsFixtures.claudeCode()),
             (.codexCli, MetricsFixtures.codexCli()),
-            (.cursor, MetricsFixtures.cursor())
+            (.cursor, MetricsFixtures.cursor()),
+            (.grok, MetricsFixtures.grok())
         ]
         for (service, metrics) in cases {
             for family in WidgetFamily.allCases {

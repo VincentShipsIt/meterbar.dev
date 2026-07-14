@@ -17,6 +17,7 @@ struct ProviderSnapshot: Identifiable {
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
+    let accountID: UUID?
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -150,10 +151,11 @@ enum ProviderSnapshotBuilder {
         var codexCliHasAccess: Bool = false
         var cursorHasAccess: Bool = false
         var openRouterHasAccess: Bool = false
+        var grokHasAccess: Bool = false
     }
 
     /// Builds the provider cards in display order (Codex, Claude accounts,
-    /// Cursor). Providers without metrics are included with an empty-state
+    /// Cursor, OpenRouter, Grok). Providers without metrics are included with an empty-state
     /// detail so the popover can render a "waiting / log in" card; the
     /// dashboard filters those out via `hasMetrics`.
     static func snapshots(_ input: Input) -> [ProviderSnapshot] {
@@ -176,7 +178,8 @@ enum ProviderSnapshotBuilder {
                     title: "Codex",
                     service: .codexCli,
                     metrics: input.metrics[.codexCli],
-                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login"
+                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login",
+                    accountID: CodexAccount.defaultID
                 ))
             }
         }
@@ -219,6 +222,15 @@ enum ProviderSnapshotBuilder {
             ))
         }
 
+        if input.enabledServices.contains(.grok) {
+            result.append(snapshot(
+                title: "Grok",
+                service: .grok,
+                metrics: input.metrics[.grok],
+                emptyDetail: input.grokHasAccess ? "Waiting for refresh" : "Run grok login"
+            ))
+        }
+
         return result
     }
 
@@ -240,7 +252,8 @@ enum ProviderSnapshotBuilder {
             limits: limits(for: metrics, service: service),
             emptyDetail: emptyDetail,
             extraUsage: metrics?.extraUsage,
-            resetCreditsAvailable: metrics?.resetCreditsAvailable
+            resetCreditsAvailable: metrics?.resetCreditsAvailable,
+            accountID: accountID
         )
     }
 
