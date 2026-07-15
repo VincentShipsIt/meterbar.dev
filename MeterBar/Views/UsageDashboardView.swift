@@ -289,6 +289,7 @@ struct UsageDashboardView: View {
         } detail: {
             detailContent
                 .toolbar { dashboardToolbar }
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -415,11 +416,11 @@ struct UsageDashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        .scrollEdgeEffectHidden(for: .top)
         .background {
-            // Safe-area handling now lives inside MeterBarDetailBackground: the
-            // material bleeds full-bleed, the accent tint stays below the bar so
-            // the system scroll-edge effect is unobstructed behind toolbar items.
+            // This is one continuous surface through the titlebar. The toolbar
+            // still owns the refresh/settings controls, but paints no separate
+            // background band and adds no scroll-edge fade.
             MeterBarDetailBackground()
         }
         .navigationTitle("")

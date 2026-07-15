@@ -60,6 +60,13 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(account: custom, oauthEnabled: false))
     }
 
+    func testOnlyDefaultAccountPublishesProviderWideConnectionState() {
+        let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
+
+        XCTAssertTrue(ClaudeCodeLocalService.publishesSharedConnectionState(for: .defaultAccount))
+        XCTAssertFalse(ClaudeCodeLocalService.publishesSharedConnectionState(for: custom))
+    }
+
     // MARK: - Pure OAuth fetch (side-effect-free)
 
     func testOAuthFetchThrowsInvalidURLForEmptyEndpoint() async {

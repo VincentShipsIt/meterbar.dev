@@ -254,9 +254,12 @@ class ClaudeCodeLocalService: ObservableObject {
         do {
             let metrics = try await cliUsageService.fetchUsageMetrics(account: account)
             await MainActor.run {
-                self.lastError = nil
-                self.hasAccess = true
-                if account.isDefault || self.authState == .unavailable {
+                // This observable service describes the default Claude
+                // connection. A logged-out secondary profile must not overwrite
+                // the provider-wide state after the default profile refreshed.
+                if Self.publishesSharedConnectionState(for: account) {
+                    self.lastError = nil
+                    self.hasAccess = true
                     self.authState = .connected(.cli)
                 }
             }
@@ -269,8 +272,8 @@ class ClaudeCodeLocalService: ObservableObject {
         } catch {
             let serviceError = serviceError(from: error)
             await MainActor.run {
-                self.lastError = serviceError
-                if account.isDefault {
+                if Self.publishesSharedConnectionState(for: account) {
+                    self.lastError = serviceError
                     self.hasAccess = false
                     self.authState = authState(from: error)
                 }
@@ -291,6 +294,13 @@ class ClaudeCodeLocalService: ObservableObject {
     /// Keychain) and only when enabled.
     nonisolated static func prefersOAuth(account: ClaudeCodeAccount, oauthEnabled: Bool) -> Bool {
         account.isDefault && oauthEnabled
+    }
+
+    /// The singleton's published connection/error state backs the provider-wide
+    /// Settings overview, so only the default profile is allowed to mutate it.
+    /// Custom-profile failures are represented by their own no-data cards.
+    nonisolated static func publishesSharedConnectionState(for account: ClaudeCodeAccount) -> Bool {
+        account.isDefault
     }
 
     /// Maps an `/api/oauth/usage` response onto the shared `UsageMetrics`.

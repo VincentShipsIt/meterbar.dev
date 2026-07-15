@@ -309,11 +309,9 @@ struct MeterBarDetailBackground: View {
           .background(.regularMaterial)
           .ignoresSafeArea()
 
-        // Keep the accent tint inside the safe area so the macOS 26 automatic
-        // scroll-edge effect owns the toolbar region. Apple's guidance is to
-        // avoid custom darkening/tinting behind bar items; letting this gradient
-        // bleed under the bar (its densest corner is .topLeading) would compete
-        // with the system blur/fade that keeps toolbar controls legible.
+        // The toolbar background is hidden, so the same subtle tint must fill
+        // its safe area as well. Otherwise AppKit exposes a visually separate
+        // titlebar strip even though the window titlebar is transparent.
         LinearGradient(
           colors: [
             MeterBarTheme.codexAccent.opacity(0.04),
@@ -323,6 +321,7 @@ struct MeterBarDetailBackground: View {
           startPoint: .topLeading,
           endPoint: .bottomTrailing
         )
+        .ignoresSafeArea()
       }
     }
   }
