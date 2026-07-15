@@ -88,7 +88,7 @@ struct MenuBarView: View {
             openDashboard: openDashboard,
             openStatusDetail: openStatusDetail,
             openProviderOverview: openProviderDetail,
-            hoverProviderOverview: hoverOpenProviderDetail
+            hoverProviderOverview: hoverProviderDetailChanged
           )
 
           if SessionWakeMenuControl.shouldShow(
@@ -207,12 +207,16 @@ struct MenuBarView: View {
     )
   }
 
-  /// Hover-driven open: show the provider's detail panel when the pointer enters
-  /// the card. Unlike a click it never toggles closed — moving off the card (or
-  /// onto another) leaves the panel up / swaps it, so scanning the list with the
-  /// mouse feels continuous rather than flickering the panel in and out.
-  private func hoverOpenProviderDetail(_ snapshot: ProviderSnapshot) {
-    guard expandedDetailID != snapshot.id else { return }
+  /// Provider-card hover owns the detail panel together with the detail panel's
+  /// own hover region. Leaving both closes it; crossing the inter-panel gap is
+  /// covered by the detail panel's short deferred-dismiss window.
+  private func hoverProviderDetailChanged(_ snapshot: ProviderSnapshot, isHovered: Bool) {
+    MeterBarMenuDetailPanel.shared.setSourceHovered(isHovered) {
+      guard expandedDetailID == snapshot.id else { return }
+      expandedDetailID = nil
+    }
+
+    guard isHovered, expandedDetailID != snapshot.id else { return }
     openProviderDetail(snapshot)
   }
 
@@ -321,7 +325,7 @@ struct PopoverOverviewPanel: View {
   let openProviderOverview: (ProviderSnapshot) -> Void
   /// Hover-driven open for a provider card (opens its detail panel on pointer
   /// enter). Optional so existing/test call sites stay valid.
-  var hoverProviderOverview: ((ProviderSnapshot) -> Void)?
+  var hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)?
 
   @State private var setupReports: [ProviderReadiness] = []
   @StateObject private var onboarding = FirstRunOnboardingStore.shared
@@ -336,7 +340,7 @@ struct PopoverOverviewPanel: View {
     openDashboard: @escaping () -> Void,
     openStatusDetail: @escaping () -> Void,
     openProviderOverview: @escaping (ProviderSnapshot) -> Void,
-    hoverProviderOverview: ((ProviderSnapshot) -> Void)? = nil
+    hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)? = nil
   ) {
     self.snapshots = snapshots
     self.openDashboard = openDashboard
@@ -426,7 +430,7 @@ struct PopoverOverviewPanel: View {
         ForEach(snapshots) { snapshot in
           ProviderStatusCard(
             snapshot: snapshot,
-            onHoverOpen: hoverProviderOverview.map { open in { open(snapshot) } },
+            onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
             onSelect: { openProviderOverview(snapshot) }
           )
           .reportPopoverCardFrame(id: snapshot.id)
@@ -509,9 +513,11 @@ struct PopoverOverviewPanel: View {
 struct ProviderStatusCard: View {
   let snapshot: ProviderSnapshot
   var onSelect: (() -> Void)?
-  var onHoverOpen: (() -> Void)?
+  var onHoverChange: ((Bool) -> Void)?
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
   @StateObject private var codexService = CodexCliLocalService.shared
   @StateObject private var codexAccounts = CodexAccountStore.shared
   @StateObject private var dataManager = UsageDataManager.shared
@@ -524,11 +530,11 @@ struct ProviderStatusCard: View {
 
   init(
     snapshot: ProviderSnapshot,
-    onHoverOpen: (() -> Void)? = nil,
+    onHoverChange: ((Bool) -> Void)? = nil,
     onSelect: (() -> Void)? = nil
   ) {
     self.snapshot = snapshot
-    self.onHoverOpen = onHoverOpen
+    self.onHoverChange = onHoverChange
     self.onSelect = onSelect
   }
 
@@ -586,7 +592,7 @@ struct ProviderStatusCard: View {
       }
       .buttonStyle(ProviderCardButtonStyle())
       .accessibilityHint("Open \(snapshot.title) provider details")
-      .onHover { if $0 { onHoverOpen?() } }
+      .onHover { onHoverChange?($0) }
     } else {
       cardContent
     }
@@ -602,60 +608,135 @@ struct ProviderStatusCard: View {
 
   private var cardContent: some View {
     DashboardTile(padding: 11) {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(spacing: 7) {
-          ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-          VStack(alignment: .leading, spacing: 1) {
-            Text(snapshot.title)
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .lineLimit(1)
-            Text(updatedText)
-              .font(.caption2)
-              .foregroundColor(.secondary)
-              .lineLimit(1)
-          }
-          Spacer(minLength: 0)
-          Text(statusText)
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .foregroundColor(statusColor)
+      cardBody
+    }
+    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
+  }
 
-          disclosureChevron
-        }
+  @ViewBuilder private var cardBody: some View {
+    if !snapshot.hasMetrics {
+      offlineRow
+    } else if snapshot.hasExhaustedWeeklyLimit {
+      weeklyExhaustedRow
+    } else {
+      expandedCardBody
+    }
+  }
 
-        if snapshot.limits.isEmpty {
-          Text(snapshot.emptyDetail)
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        } else if snapshot.hasExhaustedLimit {
-          BlockingLimitResetCounter(
-            windows: snapshot.resetWindows,
-            accentColor: snapshot.accentColor,
-            format: menuBarDisplayPreferences.resetTimeFormat
-          )
-        } else {
-          VStack(alignment: .leading, spacing: 9) {
-            ForEach(snapshot.limits) { limit in
-              LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .compact)
-            }
-          }
-        }
+  /// Logged-out/no-data providers are terminal status rows. Recovery belongs in
+  /// Settings; the popover only needs to say that this profile is offline.
+  private var offlineRow: some View {
+    HStack(spacing: 7) {
+      ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+      Text(snapshot.title)
+        .font(.subheadline)
+        .fontWeight(.semibold)
+        .lineLimit(1)
+      Spacer(minLength: 8)
+      Text("Offline")
+        .font(.caption2)
+        .fontWeight(.semibold)
+        .foregroundStyle(.secondary)
+    }
+  }
 
-        let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
-        if badges.hasContent {
-          badges
-        }
+  /// A weekly block makes every shorter/model-specific gauge non-actionable.
+  /// Keep the shared card surface, but collapse its content to the provider and
+  /// the one reset that can restore service.
+  private var weeklyExhaustedRow: some View {
+    TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+      let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(snapshot.resetWindows, now: timeline.date)
+      let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
+      let counter = BlockingLimitResetCounter.counterText(
+        for: blockingWindow,
+        now: timeline.date,
+        format: menuBarDisplayPreferences.resetTimeFormat
+      )
+
+      HStack(spacing: 7) {
+        ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+        Text(snapshot.title)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .lineLimit(1)
+
+        Spacer(minLength: 8)
+
+        Text(statusText)
+          .font(.caption2)
+          .fontWeight(.semibold)
+          .foregroundColor(statusColor)
+
+        Label("\(title) \(counter)", systemImage: "hourglass")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundColor(snapshot.accentColor)
+          .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.72)
+          .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
 
         if showsResetCreditAction {
-          Divider()
-
-          resetCreditButton
+          Button {
+            showingResetCreditConfirmation = true
+          } label: {
+            Image(systemName: "arrow.clockwise.circle.fill")
+          }
+          .buttonStyle(.borderless)
+          .help("Use a Codex reset credit")
+          .disabled(isConsumingResetCredit)
         }
       }
     }
-    .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
+  }
+
+  private var expandedCardBody: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 7) {
+        ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(snapshot.title)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .lineLimit(1)
+          Text(updatedText)
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .lineLimit(1)
+        }
+        Spacer(minLength: 0)
+        Text(statusText)
+          .font(.caption2)
+          .fontWeight(.semibold)
+          .foregroundColor(statusColor)
+
+        disclosureChevron
+      }
+
+      if snapshot.hasExhaustedLimit {
+        BlockingLimitResetCounter(
+          windows: snapshot.resetWindows,
+          accentColor: snapshot.accentColor,
+          format: menuBarDisplayPreferences.resetTimeFormat
+        )
+      } else {
+        VStack(alignment: .leading, spacing: 9) {
+          ForEach(snapshot.limits) { limit in
+            LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .compact)
+          }
+        }
+      }
+
+      let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
+      if badges.hasContent {
+        badges
+      }
+
+      if showsResetCreditAction {
+        Divider()
+        resetCreditButton
+      }
+    }
   }
 
   private var resetCreditButton: some View {

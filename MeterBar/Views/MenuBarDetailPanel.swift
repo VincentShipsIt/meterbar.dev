@@ -30,6 +30,15 @@ final class MeterBarMenuDetailPanel {
   /// Whether present/dismiss animate. Honors Reduce Motion; overridable in tests.
   var motionEnabled = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
+  /// Hover ownership spans two separate windows with a 12pt gap between them.
+  /// A short deferred close lets the pointer cross that gap without flashing
+  /// the detail panel closed, while still dismissing as soon as it owns neither
+  /// the source card nor the detail surface.
+  private var sourceIsHovered = false
+  private var detailIsHovered = false
+  private var hoverDismissTask: Task<Void, Never>?
+  private var hoverDismissAction: (() -> Void)?
+
   /// Presents the detail card next to `anchor`. `preferredTopY` (screen
   /// coordinates) top-aligns the card with the row that opened it; without it
   /// the card aligns with the anchor's top edge.
@@ -55,6 +64,9 @@ final class MeterBarMenuDetailPanel {
     panel.contentView = NSHostingView(
       rootView: content
         .frame(width: frame.width, height: frame.height)
+        .onHover { [weak self] isHovered in
+          self?.setDetailHovered(isHovered)
+        }
     )
     panel.applyCompanionClipping()
 
@@ -90,6 +102,7 @@ final class MeterBarMenuDetailPanel {
 
   func dismiss() {
     guard let panel, panel.isVisible else { return }
+    resetHoverOwnership()
     presentationToken &+= 1
     let token = presentationToken
 
@@ -117,6 +130,46 @@ final class MeterBarMenuDetailPanel {
     return window === panel
   }
 
+  /// Updates hover ownership for the popover card that opened the detail. The
+  /// dismissal callback clears the SwiftUI selection only when the deferred
+  /// close actually wins; entering the detail panel cancels it.
+  func setSourceHovered(_ isHovered: Bool, onDismiss: @escaping () -> Void) {
+    sourceIsHovered = isHovered
+    hoverDismissAction = onDismiss
+    reconcileHoverDismissal()
+  }
+
+  private func setDetailHovered(_ isHovered: Bool) {
+    detailIsHovered = isHovered
+    reconcileHoverDismissal()
+  }
+
+  private func reconcileHoverDismissal() {
+    hoverDismissTask?.cancel()
+    hoverDismissTask = nil
+
+    guard MeterBarMenuDetailHoverPolicy.shouldDismiss(
+      sourceIsHovered: sourceIsHovered,
+      detailIsHovered: detailIsHovered
+    ), panel?.isVisible == true else { return }
+
+    hoverDismissTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 140_000_000)
+      guard let self, !Task.isCancelled, !self.sourceIsHovered, !self.detailIsHovered else { return }
+      let onDismiss = self.hoverDismissAction
+      self.dismiss()
+      onDismiss?()
+    }
+  }
+
+  private func resetHoverOwnership() {
+    hoverDismissTask?.cancel()
+    hoverDismissTask = nil
+    sourceIsHovered = false
+    detailIsHovered = false
+    hoverDismissAction = nil
+  }
+
   private func ensurePanel() -> NSPanel {
     if let panel { return panel }
     let panel = KeyableMenuPanel(
@@ -133,6 +186,12 @@ final class MeterBarMenuDetailPanel {
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     self.panel = panel
     return panel
+  }
+}
+
+enum MeterBarMenuDetailHoverPolicy {
+  static func shouldDismiss(sourceIsHovered: Bool, detailIsHovered: Bool) -> Bool {
+    !sourceIsHovered && !detailIsHovered
   }
 }
 

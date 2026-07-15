@@ -103,7 +103,7 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .fixedSize()
             }
 
             SettingsRowView(title: "Manual refresh") {
@@ -146,7 +146,7 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 240)
+                .fixedSize()
             }
 
             SettingsRowView(
@@ -163,7 +163,7 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .fixedSize()
             }
 
             SettingsRowView(
@@ -233,7 +233,7 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(width: 240)
+                    .fixedSize()
                 }
 
                 SettingsRowView(
@@ -250,7 +250,7 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(width: 240)
+                    .fixedSize()
                 }
             }
         }
@@ -303,7 +303,7 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 240)
+                .fixedSize()
                 .disabled(softwareUpdates.configurationError != nil)
             }
 

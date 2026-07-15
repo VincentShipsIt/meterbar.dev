@@ -12,6 +12,7 @@ import SwiftUI
 
 enum SettingsRowViewMetrics {
     static let labelWidth: CGFloat = 190
+    static let controlWidth: CGFloat = 240
 }
 
 // MARK: - SettingsInfoRow
@@ -121,7 +122,7 @@ struct SettingsRowView<Content: View>: View {
     let content: Content
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline)
@@ -139,10 +140,12 @@ struct SettingsRowView<Content: View>: View {
             // separate focusable element so its own label/actuation are intact.
             .accessibilityElement(children: .combine)
 
+            Spacer(minLength: 16)
+
             content
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(width: SettingsRowViewMetrics.controlWidth, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 

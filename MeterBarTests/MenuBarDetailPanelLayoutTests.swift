@@ -7,6 +7,21 @@ final class MenuBarDetailPanelLayoutTests: XCTestCase {
     private let visibleFrame = CGRect(x: 0, y: 0, width: 1512, height: 950)
     private let anchorFrame = CGRect(x: 1100, y: 300, width: 390, height: 600)
 
+    func testHoverPolicyDismissesOnlyAfterLeavingBothPanels() {
+        XCTAssertFalse(MeterBarMenuDetailHoverPolicy.shouldDismiss(
+            sourceIsHovered: true,
+            detailIsHovered: false
+        ))
+        XCTAssertFalse(MeterBarMenuDetailHoverPolicy.shouldDismiss(
+            sourceIsHovered: false,
+            detailIsHovered: true
+        ))
+        XCTAssertTrue(MeterBarMenuDetailHoverPolicy.shouldDismiss(
+            sourceIsHovered: false,
+            detailIsHovered: false
+        ))
+    }
+
     func testDefaultAlignsPanelTopToAnchorTop() {
         let frame = MeterBarMenuDetailPanelLayout.panelFrame(
             anchorFrame: anchorFrame,

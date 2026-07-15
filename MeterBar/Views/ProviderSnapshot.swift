@@ -79,12 +79,12 @@ struct ProviderSnapshot: Identifiable {
         blockingLimits.contains { $0.kind == .weekly }
     }
 
-    /// Detail panels should focus on the limit that is actually blocking use.
-    /// When the weekly subscription quota is exhausted, the shorter session
-    /// window is no longer actionable, even if it still has room.
+    /// Detail surfaces should focus on the limit that is actually blocking use.
+    /// When the weekly subscription quota is exhausted, every shorter or
+    /// model-specific window is non-actionable until that weekly reset.
     var detailLimits: [SnapshotLimit] {
         guard hasExhaustedWeeklyLimit else { return limits }
-        return limits.filter { $0.kind != .session }
+        return limits.filter { $0.kind == .weekly }
     }
 
     // MARK: - Accessibility

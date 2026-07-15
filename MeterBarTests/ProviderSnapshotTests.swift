@@ -398,7 +398,7 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.resetWindows.map(\.title), ["Session"])
     }
 
-    func testDetailLimitsHideSessionWhenWeeklyIsExhausted() {
+    func testDetailLimitsKeepOnlyWeeklyWhenWeeklyIsExhausted() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Claude",
             service: .claudeCode,
@@ -407,7 +407,7 @@ final class ProviderSnapshotTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.limits.map(\.id), ["session", "weekly", "codeReview"])
-        XCTAssertEqual(snapshot.detailLimits.map(\.id), ["weekly", "codeReview"])
+        XCTAssertEqual(snapshot.detailLimits.map(\.id), ["weekly"])
     }
 
     func testDetailLimitsKeepSessionWhenOnlySessionIsExhausted() {
