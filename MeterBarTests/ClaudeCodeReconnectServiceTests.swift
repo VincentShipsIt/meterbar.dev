@@ -2,12 +2,26 @@ import XCTest
 @testable import MeterBar
 
 final class ClaudeCodeReconnectServiceTests: XCTestCase {
-    func testDefaultProfileReconnectScriptUnsetsClaudeConfigDirectory() {
-        let script = ClaudeCodeReconnectService.reconnectScript(for: .defaultAccount)
+    func testDefaultProfileReconnectScriptExportsEffectiveConfigDirectory() {
+        let script = ClaudeCodeReconnectService.reconnectScript(
+            for: .defaultAccount,
+            environment: ["CLAUDE_CONFIG_DIR": "/tmp/.claude-genfeedai"],
+            realHomeDirectory: "/Users/tester"
+        )
 
-        XCTAssertTrue(script.contains("unset CLAUDE_CONFIG_DIR"))
+        XCTAssertTrue(script.contains("export CLAUDE_CONFIG_DIR='/tmp/.claude-genfeedai'"))
         XCTAssertTrue(script.contains("claude auth logout || true"))
         XCTAssertTrue(script.contains("claude auth login"))
+    }
+
+    func testUnscopedDefaultProfileReconnectScriptPinsHomeConfigDirectory() {
+        let script = ClaudeCodeReconnectService.reconnectScript(
+            for: .defaultAccount,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertTrue(script.contains("export CLAUDE_CONFIG_DIR='/Users/tester/.claude'"))
     }
 
     func testCustomProfileReconnectScriptExportsClaudeConfigDirectory() throws {

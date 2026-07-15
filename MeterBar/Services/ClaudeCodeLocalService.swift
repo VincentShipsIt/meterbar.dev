@@ -290,10 +290,19 @@ class ClaudeCodeLocalService: ObservableObject {
         (defaults.object(forKey: StorageKeys.claudeCodeOAuthFallback) as? Bool) ?? true
     }
 
-    /// OAuth is preferred only for the default account (whose token lives in the
-    /// Keychain) and only when enabled.
-    nonisolated static func prefersOAuth(account: ClaudeCodeAccount, oauthEnabled: Bool) -> Bool {
-        account.isDefault && oauthEnabled
+    /// OAuth is preferred only for the unscoped default account. When
+    /// `CLAUDE_CONFIG_DIR` explicitly selects a profile, the global Keychain
+    /// item may belong to a different Claude identity; use that profile's CLI
+    /// instead so account metrics cannot cross-contaminate.
+    nonisolated static func prefersOAuth(
+        account: ClaudeCodeAccount,
+        oauthEnabled: Bool,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        guard account.isDefault, oauthEnabled else { return false }
+        let configDirectory = environment["CLAUDE_CONFIG_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return configDirectory?.isEmpty != false
     }
 
     /// The singleton's published connection/error state backs the provider-wide

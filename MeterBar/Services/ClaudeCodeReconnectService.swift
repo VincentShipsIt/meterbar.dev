@@ -16,10 +16,20 @@ enum ClaudeCodeReconnectService {
         }
     }
 
-    static func reconnectScript(for account: ClaudeCodeAccount) -> String {
-        let homeDirectory = shellQuoted(ServiceSupport.realHomeDirectory())
+    static func reconnectScript(
+        for account: ClaudeCodeAccount,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
+        let homeDirectory = shellQuoted(realHomeDirectory)
         let profileName = shellQuoted(account.name)
-        let configExport = if let configDirectory = account.configDirectory?
+        let effectiveConfigDirectory = account.configDirectory ?? (account.isDefault
+            ? ClaudeCodeAccount.defaultConfigDirectory(
+                environment: environment,
+                realHomeDirectory: realHomeDirectory
+            )
+            : nil)
+        let configExport = if let configDirectory = effectiveConfigDirectory?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !configDirectory.isEmpty {
             "export CLAUDE_CONFIG_DIR=\(shellQuoted(configDirectory))"

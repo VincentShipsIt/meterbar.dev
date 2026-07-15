@@ -52,12 +52,36 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
     // MARK: - Source-selection policy
 
     func testPrefersOAuthOnlyForDefaultAccountWhenEnabled() {
-        XCTAssertTrue(ClaudeCodeLocalService.prefersOAuth(account: .defaultAccount, oauthEnabled: true))
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(account: .defaultAccount, oauthEnabled: false))
+        XCTAssertTrue(ClaudeCodeLocalService.prefersOAuth(
+            account: .defaultAccount,
+            oauthEnabled: true,
+            environment: [:]
+        ))
+        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
+            account: .defaultAccount,
+            oauthEnabled: false,
+            environment: [:]
+        ))
 
         let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(account: custom, oauthEnabled: true))
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(account: custom, oauthEnabled: false))
+        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
+            account: custom,
+            oauthEnabled: true,
+            environment: [:]
+        ))
+        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
+            account: custom,
+            oauthEnabled: false,
+            environment: [:]
+        ))
+    }
+
+    func testExplicitDefaultConfigDirectoryUsesProfileCLIInsteadOfGlobalOAuth() {
+        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
+            account: .defaultAccount,
+            oauthEnabled: true,
+            environment: ["CLAUDE_CONFIG_DIR": "/tmp/.claude-genfeedai"]
+        ))
     }
 
     func testOnlyDefaultAccountPublishesProviderWideConnectionState() {
