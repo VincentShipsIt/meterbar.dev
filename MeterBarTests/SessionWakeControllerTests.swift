@@ -273,6 +273,70 @@ final class SessionWakeControllerTests: XCTestCase {
 
         XCTAssertEqual(fakeAgent.unregisterCount, 1)
         XCTAssertFalse(agentState.loadConfiguration()?.isArmed ?? true)
+        XCTAssertEqual(sessionStatus.backgroundExecution, .inactive)
+    }
+
+    func testRegistrationFailureRemainsVisibleUntilSuccessfulRetry() {
+        let store = armedStore()
+        let fakeAgent = FakeSessionWakeAgent()
+        fakeAgent.registerError = FakeSessionWakeAgentError.registrationDenied
+        let agentState = SessionWakeAgentStateStore(userDefaults: defaults)
+        agentState.saveStatus(.init(state: .idle))
+        let sessionStatus = SessionWakeStatus()
+        let controller = SessionWakeController(
+            store: store,
+            status: sessionStatus,
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            agent: fakeAgent,
+            agentStateStore: agentState
+        )
+
+        controller.activate()
+        // Deliver the automatic off-state reconcile and the monitor's first
+        // registration-status refresh; neither may erase the failure.
+        pump(0.2)
+
+        XCTAssertEqual(fakeAgent.registerCount, 1)
+        XCTAssertFalse(store.isOn)
+        XCTAssertEqual(
+            sessionStatus.backgroundExecution,
+            .failed("Couldn't start the background watcher: operation not permitted")
+        )
+        guard case let .failed(reason) = sessionStatus.watcherState else {
+            return XCTFail("registration failure should remain visible in the watcher status")
+        }
+        XCTAssertTrue(reason.contains("operation not permitted"))
+
+        fakeAgent.registerError = nil
+        store.setOn(true)
+        pump(0.2)
+
+        XCTAssertEqual(fakeAgent.registerCount, 2)
+        XCTAssertTrue(store.isOn)
+        XCTAssertEqual(sessionStatus.backgroundExecution, .active)
+        XCTAssertEqual(sessionStatus.watcherState, .idle)
+    }
+
+    func testRegistrationFailureThatRequiresApprovalShowsLoginItemsState() {
+        let store = armedStore()
+        let fakeAgent = FakeSessionWakeAgent()
+        fakeAgent.registerError = FakeSessionWakeAgentError.registrationDenied
+        fakeAgent.registerFailureStatus = .requiresApproval
+        let sessionStatus = SessionWakeStatus()
+        let controller = SessionWakeController(
+            store: store,
+            status: sessionStatus,
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            agent: fakeAgent
+        )
+
+        controller.activate()
+        pump(0.2)
+
+        XCTAssertEqual(fakeAgent.registerCount, 1)
+        XCTAssertFalse(store.isOn)
+        XCTAssertEqual(sessionStatus.backgroundExecution, .requiresApproval)
+        XCTAssertEqual(sessionStatus.watcherState, .off)
     }
 }
 
@@ -316,9 +380,17 @@ nonisolated private struct FakeWatcher: WakeWatching {
     }
 }
 
+private enum FakeSessionWakeAgentError: LocalizedError {
+    case registrationDenied
+
+    var errorDescription: String? { "operation not permitted" }
+}
+
 private final class FakeSessionWakeAgent: SessionWakeAgentControlling {
     var isAvailable = true
     private(set) var status: SessionWakeAgentRegistrationStatus = .notRegistered
+    var registerError: Error?
+    var registerFailureStatus: SessionWakeAgentRegistrationStatus?
     private(set) var registerCount = 0
     private(set) var unregisterCount = 0
 
@@ -326,6 +398,12 @@ private final class FakeSessionWakeAgent: SessionWakeAgentControlling {
 
     func register() throws {
         registerCount += 1
+        if let registerError {
+            if let registerFailureStatus {
+                status = registerFailureStatus
+            }
+            throw registerError
+        }
         status = .enabled
     }
 
