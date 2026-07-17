@@ -923,7 +923,6 @@ struct UsageDashboardView: View {
         let errors = currentRefreshErrors()
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
         let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
-        let hasEnabledCustomClaudeAccount = enabledClaudeAccounts.contains { !$0.isDefault }
         let claudeMetrics = enabledClaudeAccounts.compactMap {
             dataManager.claudeCodeAccountMetrics[$0.id]
         }
@@ -932,7 +931,6 @@ struct UsageDashboardView: View {
                 providers: enabledProviders,
                 refreshErrors: errors,
                 claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-                claudeHasEnabledCustomAccount: hasEnabledCustomClaudeAccount,
                 claudeEnabledAccountMetrics: claudeMetrics
             )
         }.value

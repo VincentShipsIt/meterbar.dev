@@ -537,13 +537,11 @@ struct PopoverOverviewPanel: View {
   private func loadSetupReports() async {
     let requestedProviders = enabledProviders
     let defaultAccountEnabled = claudeDefaultAccountEnabled
-    let hasEnabledCustomAccount = !claudeEnabledCustomAccountIDs.isEmpty
     let accountMetrics = claudeEnabledAccountMetrics
     let reports = await Task.detached(priority: .utility) {
       ProviderReadinessInspector.reports(
         providers: requestedProviders,
         claudeDefaultAccountEnabled: defaultAccountEnabled,
-        claudeHasEnabledCustomAccount: hasEnabledCustomAccount,
         claudeEnabledAccountMetrics: accountMetrics
       )
     }.value

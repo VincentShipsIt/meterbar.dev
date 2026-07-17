@@ -107,32 +107,6 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertFalse(report.needsSetup)
     }
 
-    func testDisabledDefaultClaudeProfileUsesRecentSharedMetricsForEnabledCustomProfile() {
-        let now = Date(timeIntervalSince1970: 25_000)
-        let recentSharedMetrics = UsageMetrics(
-            service: .claudeCode,
-            lastUpdated: now.addingTimeInterval(-60)
-        )
-        var didReadCredentials = false
-
-        let report = ProviderReadinessInspector.claudeReport(
-            now: now,
-            cachedMetrics: recentSharedMetrics,
-            defaultAccountEnabled: false,
-            hasEnabledCustomAccount: true,
-            enabledAccountMetrics: [],
-            isCLIInstalled: true,
-            credentialsData: {
-                didReadCredentials = true
-                return nil
-            }
-        )
-
-        XCTAssertFalse(didReadCredentials)
-        XCTAssertEqual(report.check(ReadinessCheckID.auth)?.level, .pass)
-        XCTAssertFalse(report.needsSetup)
-    }
-
     func testDisabledDefaultClaudeProfileNeverReadsGlobalCredentials() {
         var didReadCredentials = false
 
