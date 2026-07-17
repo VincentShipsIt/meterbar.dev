@@ -899,10 +899,16 @@ struct UsageDashboardView: View {
 
         let enabledProviders = providerVisibility.enabledServices
         let errors = currentRefreshErrors()
+        let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
+        let claudeMetrics = claudeAccountStore.enabledAccounts.compactMap {
+            dataManager.claudeCodeAccountMetrics[$0.id]
+        }
         let reports = await Task.detached(priority: .userInitiated) {
             ProviderReadinessInspector.reports(
                 providers: enabledProviders,
-                refreshErrors: errors
+                refreshErrors: errors,
+                claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
+                claudeEnabledAccountMetrics: claudeMetrics
             )
         }.value
         readinessReports = reports
@@ -912,7 +918,10 @@ struct UsageDashboardView: View {
     /// "Last refresh" check reflects the app's actual runtime state.
     private func currentRefreshErrors() -> [ServiceType: ServiceError] {
         var result: [ServiceType: ServiceError] = [:]
-        if let error = claudeCodeService.lastError { result[.claudeCode] = error }
+        if claudeAccountStore.defaultAccountIsEnabled,
+           let error = claudeCodeService.lastError {
+            result[.claudeCode] = error
+        }
         if let error = codexCliService.lastError { result[.codexCli] = error }
         if let error = cursorService.lastError { result[.cursor] = error }
         if let error = openRouterService.lastError { result[.openRouter] = error }
