@@ -52,6 +52,7 @@ final class SessionWakeController: ObservableObject {
     private var watchTask: Task<Void, Never>?
     private var localLifetimeLock: WakeLock?
     private var agentMonitorTask: Task<Void, Never>?
+    private var failedRegistrationStatus: SessionWakeAgentRegistrationStatus?
     private var started = false
 
     /// The store defaults are `nil` sentinels resolved in the body because the
@@ -322,18 +323,30 @@ final class SessionWakeController: ObservableObject {
     private func registerAgentIfNeeded() {
         switch agent.currentStatus() {
         case .enabled:
-            status.updateBackgroundExecution(.active)
+            clearRegistrationFailure()
+            refreshAgentRegistrationStatus()
         case .requiresApproval:
+            clearRegistrationFailure()
             status.updateBackgroundExecution(.requiresApproval)
         case .notRegistered, .notFound, .unknown:
+            // Reaching this path while armed is an explicit retry.
+            clearRegistrationFailure()
             do {
                 try agent.register()
                 refreshAgentRegistrationStatus()
             } catch {
-                status.updateBackgroundExecution(.failed("Couldn't start the background watcher."))
-                status.update(
-                    state: .failed(reason: "Background watcher registration failed: \(error.localizedDescription)")
-                )
+                let registrationStatus = agent.currentStatus()
+                failedRegistrationStatus = registrationStatus
+                if registrationStatus == .requiresApproval {
+                    status.update(state: .off)
+                    status.updateBackgroundExecution(.requiresApproval)
+                } else {
+                    let reason = error.localizedDescription
+                    status.updateBackgroundExecution(.failed("Couldn't start the background watcher: \(reason)"))
+                    status.update(
+                        state: .failed(reason: "Background watcher registration failed: \(reason)")
+                    )
+                }
                 store.setOn(false)
                 saveAgentConfiguration(account: selectedAccount())
             }
@@ -342,7 +355,9 @@ final class SessionWakeController: ObservableObject {
 
     private func unregisterAgentIfNeeded() {
         guard usesBackgroundAgent else { return }
-        switch agent.currentStatus() {
+        let registrationStatus = agent.currentStatus()
+        guard !reconcileRegistrationFailure(with: registrationStatus) else { return }
+        switch registrationStatus {
         case .notRegistered, .notFound:
             status.updateBackgroundExecution(.inactive)
         case .enabled, .requiresApproval, .unknown:
@@ -370,7 +385,9 @@ final class SessionWakeController: ObservableObject {
 
     private func refreshAgentRegistrationStatus() {
         guard usesBackgroundAgent else { return }
-        switch agent.currentStatus() {
+        let registrationStatus = agent.currentStatus()
+        guard !reconcileRegistrationFailure(with: registrationStatus) else { return }
+        switch registrationStatus {
         case .enabled:
             if let record = agentStateStore.loadStatus(),
                Date().timeIntervalSince(record.heartbeat) < 10 {
@@ -385,6 +402,28 @@ final class SessionWakeController: ObservableObject {
             status.updateBackgroundExecution(.inactive)
         case .unknown:
             status.updateBackgroundExecution(.failed("Background watcher status is unavailable."))
+        }
+    }
+
+    /// Registration failure disarms the store, which immediately triggers both
+    /// an off-state reconcile and the agent monitor. Preserve only that exact
+    /// failure while ServiceManagement reports the same registration state.
+    private func reconcileRegistrationFailure(
+        with registrationStatus: SessionWakeAgentRegistrationStatus
+    ) -> Bool {
+        guard let failedRegistrationStatus else { return false }
+        guard failedRegistrationStatus != registrationStatus else { return true }
+        clearRegistrationFailure()
+        return false
+    }
+
+    /// A retry or external registration-state transition supersedes the prior
+    /// registration failure and restores the normal status lifecycle.
+    private func clearRegistrationFailure() {
+        guard failedRegistrationStatus != nil else { return }
+        failedRegistrationStatus = nil
+        if case .failed = status.watcherState {
+            status.update(state: .off)
         }
     }
 }
