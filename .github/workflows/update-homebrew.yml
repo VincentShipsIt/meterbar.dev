@@ -46,12 +46,13 @@ jobs:
       - name: Download SHA256
         id: sha
         env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           curl -fsSL \
             --connect-timeout 15 --max-time 120 --retry 3 \
-            "https://github.com/VincentShipsIt/meterbar.app/releases/download/${RELEASE_TAG}/MeterBar-${RELEASE_TAG}.zip.sha256" \
+            "https://github.com/${RELEASE_REPOSITORY}/releases/download/${RELEASE_TAG}/MeterBar-${RELEASE_TAG}.zip.sha256" \
             -o sha256.txt
           # Validate the asset is a bare 64-hex SHA256 before trusting it. On a 404 or
           # redirect-to-error, curl -f fails the step; this guards the case where a 200
@@ -73,18 +74,17 @@ jobs:
         env:
           FORMULA_VERSION: ${{ steps.version.outputs.formula }}
           RELEASE_SHA256: ${{ steps.sha.outputs.sha256 }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          cd homebrew-tap
-
-          # Update version
-          sed -i "s/version \".*\"/version \"${FORMULA_VERSION}\"/" Casks/meterbar.rb
-
-          # Update sha256
-          sed -i "s/sha256 \".*\"/sha256 \"${RELEASE_SHA256}\"/" Casks/meterbar.rb
+          scripts/update-homebrew-cask.sh \
+            homebrew-tap/Casks/meterbar.rb \
+            "$FORMULA_VERSION" \
+            "$RELEASE_SHA256" \
+            "$RELEASE_REPOSITORY"
 
           echo "Updated formula:"
-          cat Casks/meterbar.rb
+          cat homebrew-tap/Casks/meterbar.rb
 
       - name: Commit and push
         env:
