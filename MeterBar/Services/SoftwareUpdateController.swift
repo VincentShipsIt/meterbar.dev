@@ -171,7 +171,7 @@ final class SoftwareUpdateController: ObservableObject {
         _ = bundle
         userDefaults = defaults
         channel = Self.loadChannel(from: defaults)
-        configurationError = "Software updates are available in the app build."
+        configurationError = "Software updates are unavailable in this build."
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {

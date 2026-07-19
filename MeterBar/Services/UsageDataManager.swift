@@ -124,13 +124,12 @@ class UsageDataManager: ObservableObject {
             claudeCodeAccountMetrics = [:]
         }
 
-        if providerVisibilityStore.isEnabled(.codexCli) {
+        let hasEnabledCodexAccount = !codexAccountStore.enabledAccounts.isEmpty
+        if providerVisibilityStore.isEnabled(.codexCli), hasEnabledCodexAccount {
             let accountMetrics = await fetchCodexAccountMetrics()
             codexAccountMetrics = accountMetrics
             if let representative = representativeCodexMetrics(from: accountMetrics) {
                 newMetrics[.codexCli] = representative
-            } else if let cachedMetrics = self.metrics[.codexCli] {
-                newMetrics[.codexCli] = cachedMetrics
             }
         } else {
             codexAccountMetrics = [:]
@@ -153,6 +152,8 @@ class UsageDataManager: ObservableObject {
         // Merge new metrics with existing cached metrics for services that failed to fetch
         for service in ServiceType.allCases where providerVisibilityStore.isEnabled(service) {
             if service == .claudeCode, !hasEnabledClaudeAccount { continue }
+            // Codex cache entries are account-scoped and merged during account refresh.
+            if service == .codexCli { continue }
             if newMetrics[service] == nil, let cachedMetric = self.metrics[service] {
                 newMetrics[service] = cachedMetric
             }
@@ -192,6 +193,16 @@ class UsageDataManager: ObservableObject {
             return
         }
 
+        if service == .codexCli, codexAccountStore.enabledAccounts.isEmpty {
+            codexAccountMetrics = [:]
+            metrics.removeValue(forKey: service)
+            saveCachedData()
+            saveCachedCodexAccountMetrics()
+            saveSharedData(metrics)
+            isLoading = false
+            return
+        }
+
         do {
             let newMetrics = try await refreshedMetrics(for: service)
 
@@ -203,8 +214,17 @@ class UsageDataManager: ObservableObject {
             if lastError == nil {
                 lastError = error
             }
-            // Preserve existing cached metrics for this service on error
-            if metrics[service] == nil {
+            if service == .codexCli {
+                // Codex aggregate metrics carry no account identity. Scoped
+                // per-account caches are restored inside fetchCodexAccountMetrics;
+                // if none exist, showing no data is safer than relabeling a
+                // different profile's stale quota.
+                metrics.removeValue(forKey: service)
+                saveCachedData()
+                saveCachedCodexAccountMetrics()
+                saveSharedData(metrics)
+            } else if metrics[service] == nil {
+                // Preserve existing cached metrics for single-account services.
                 if let cachedData = loadCachedMetricsFromDisk()[service] {
                     metrics[service] = cachedData
                 }
@@ -239,6 +259,7 @@ class UsageDataManager: ObservableObject {
             let accountMetrics = await fetchCodexAccountMetrics()
             codexAccountMetrics = accountMetrics
             if let representative = representativeCodexMetrics(from: accountMetrics) { return representative }
+            throw ServiceError.notAuthenticated
         case .cursor, .openRouter, .grok:
             guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
             do {
@@ -290,7 +311,7 @@ class UsageDataManager: ObservableObject {
 
     private func saveSharedData(_ metrics: [ServiceType: UsageMetrics]) {
         sharedStore.saveMetrics(metrics)
-        let accountSnapshots = codexAccountStore.accounts.compactMap { account -> AccountUsageSnapshot? in
+        let accountSnapshots = codexAccountStore.enabledAccounts.compactMap { account -> AccountUsageSnapshot? in
             guard let metrics = codexAccountMetrics[account.id] else { return nil }
             return AccountUsageSnapshot(id: account.id, name: account.name, metrics: metrics)
         }
@@ -355,7 +376,7 @@ class UsageDataManager: ObservableObject {
         var firstFailure: Error?
         var successCount = 0
 
-        for account in codexAccountStore.accounts {
+        for account in codexAccountStore.enabledAccounts {
             guard await codexCliService.canAccess(account: account) else { continue }
             do {
                 refreshedMetrics[account.id] = try await codexCliService.fetchUsageMetrics(account: account)
@@ -379,8 +400,11 @@ class UsageDataManager: ObservableObject {
     }
 
     private func representativeCodexMetrics(from accountMetrics: [UUID: UsageMetrics]) -> UsageMetrics? {
-        accountMetrics[CodexAccount.defaultID]
-            ?? codexAccountStore.accounts.lazy.compactMap { accountMetrics[$0.id] }.first
+        if codexAccountStore.defaultAccountIsEnabled,
+           let defaultMetrics = accountMetrics[CodexAccount.defaultID] {
+            return defaultMetrics
+        }
+        return codexAccountStore.enabledAccounts.lazy.compactMap { accountMetrics[$0.id] }.first
     }
 
     // MARK: - Provider strategy

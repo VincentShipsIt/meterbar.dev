@@ -32,6 +32,41 @@ final class DashboardLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - Enabled quota-source count
+
+    func testEnabledQuotaSourceCountIncludesEveryEnabledAccount() {
+        XCTAssertEqual(
+            EnabledQuotaSourceCounter.count(
+                enabledServices: [.codexCli, .claudeCode, .cursor],
+                codexAccountCount: 3,
+                claudeAccountCount: 2
+            ),
+            6
+        )
+    }
+
+    func testEnabledQuotaSourceCountIncludesSingleAccountProviders() {
+        XCTAssertEqual(
+            EnabledQuotaSourceCounter.count(
+                enabledServices: Set(ServiceType.allCases),
+                codexAccountCount: 2,
+                claudeAccountCount: 3
+            ),
+            8
+        )
+    }
+
+    func testEnabledQuotaSourceCountIgnoresAccountsForHiddenProviders() {
+        XCTAssertEqual(
+            EnabledQuotaSourceCounter.count(
+                enabledServices: [.cursor],
+                codexAccountCount: 3,
+                claudeAccountCount: 2
+            ),
+            1
+        )
+    }
+
     // MARK: - DashboardCard trailing view slot
 
     func testDashboardCardAcceptsTrailingControl() {

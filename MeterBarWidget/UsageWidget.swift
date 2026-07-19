@@ -101,7 +101,8 @@ struct UsageWidgetProvider: TimelineProvider {
 
 struct UsageWidgetEntryView: View {
     var entry: UsageWidgetEntry
-    @Environment(\.widgetFamily) var family
+    @Environment(\.widgetFamily)
+    var family
 
     var body: some View {
         switch family {
@@ -172,15 +173,31 @@ struct ServiceMiniView: View {
 struct MediumWidgetView: View {
     let entry: UsageWidgetEntry
 
+    private var visibleRows: [WidgetUsageRow] {
+        let visibleLimit = MediumWidgetRowBudget.visibleRowCount(totalRowCount: entry.rows.count)
+        return Array(entry.rows.prefix(visibleLimit))
+    }
+
+    private var hiddenRowCount: Int {
+        MediumWidgetRowBudget.hiddenRowCount(totalRowCount: entry.rows.count)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if entry.rows.isEmpty {
                 Text("No services connected")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                ForEach(entry.rows) { row in
+                ForEach(visibleRows) { row in
                     ServiceCompactView(row: row)
+                }
+
+                if hiddenRowCount > 0 {
+                    Label("+\(hiddenRowCount) more", systemImage: "ellipsis.circle")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .accessibilityLabel("\(hiddenRowCount) more usage sources")
                 }
             }
         }

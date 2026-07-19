@@ -208,25 +208,26 @@ enum ProviderSnapshotBuilder {
         var result: [ProviderSnapshot] = []
 
         if input.enabledServices.contains(.codexCli) {
-            if !input.codexAccountMetrics.isEmpty {
-                for account in input.codexAccounts {
-                    let title = account.isDefault && input.codexAccounts.count == 1 ? "Codex" : account.name
+            let enabledAccounts = input.codexAccounts.filter(\.isEnabled)
+            if !enabledAccounts.isEmpty {
+                for account in enabledAccounts {
+                    let title = account.isDefault && enabledAccounts.count == 1 ? "Codex" : account.name
+                    let emptyDetail = account.isDefault && input.codexCliHasAccess
+                        ? "Waiting for refresh"
+                        : "Run codex login"
+                    let fallbackMetrics = account.isDefault
+                        && enabledAccounts.count == 1
+                        && input.codexAccountMetrics.isEmpty
+                        ? input.metrics[.codexCli]
+                        : nil
                     result.append(snapshot(
                         title: title,
                         service: .codexCli,
-                        metrics: input.codexAccountMetrics[account.id],
-                        emptyDetail: account.isDefault ? "Waiting for refresh" : "Run codex login",
+                        metrics: input.codexAccountMetrics[account.id] ?? fallbackMetrics,
+                        emptyDetail: emptyDetail,
                         accountID: account.id
                     ))
                 }
-            } else {
-                result.append(snapshot(
-                    title: "Codex",
-                    service: .codexCli,
-                    metrics: input.metrics[.codexCli],
-                    emptyDetail: input.codexCliHasAccess ? "Waiting for refresh" : "Run codex login",
-                    accountID: CodexAccount.defaultID
-                ))
             }
         }
 

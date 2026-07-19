@@ -3,6 +3,15 @@ import Foundation
 import XCTest
 
 final class SparkleUpdateTests: XCTestCase {
+    #if !canImport(Sparkle)
+    func testFallbackConfigurationExplainsUpdatesAreUnavailable() {
+        let controller = SoftwareUpdateController()
+
+        XCTAssertEqual(controller.configurationError, "Software updates are unavailable in this build.")
+        XCTAssertFalse(controller.canCheckForUpdates)
+    }
+    #endif
+
     func testKeyValidatorRejectsUnsubstitutedBuildVariable() {
         // Debug and PR-gate builds never substitute the build setting, so the
         // literal variable is exactly what ships in their Info.plist.

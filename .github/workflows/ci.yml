@@ -49,6 +49,12 @@ jobs:
       - name: Test release tag validation
         run: scripts/test-release-tag.sh
 
+      - name: Test Homebrew cask update
+        run: scripts/test-update-homebrew-cask.sh
+
+      - name: Verify canonical repository URLs
+        run: scripts/verify-canonical-repository-urls.sh
+
       - name: Build library (SwiftPM)
         run: swift build
 

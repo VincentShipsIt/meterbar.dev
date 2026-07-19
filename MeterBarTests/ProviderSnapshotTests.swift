@@ -21,12 +21,16 @@ final class ProviderSnapshotTests: XCTestCase {
 
     private func makeInput(
         metrics: [ServiceType: UsageMetrics] = [:],
+        codexAccounts: [CodexAccount] = [.defaultAccount],
+        codexAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         enabledServices: Set<ServiceType> = Set(ServiceType.allCases)
     ) -> ProviderSnapshotBuilder.Input {
         ProviderSnapshotBuilder.Input(
             metrics: metrics,
+            codexAccounts: codexAccounts,
+            codexAccountMetrics: codexAccountMetrics,
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
             enabledServices: enabledServices
@@ -160,6 +164,72 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshots.map(\.accountID), [CodexAccount.defaultID, work.id])
         XCTAssertEqual(snapshots.map { $0.primaryLimit?.usedPercent }, [25, 75])
         XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
+    }
+
+    func testDisabledCodexAccountsAreExcludedEvenWithCachedMetrics() {
+        let disabled = CodexAccount(
+            id: UUID(),
+            name: "Disabled",
+            homeDirectory: "/tmp/codex-disabled",
+            isEnabled: false
+        )
+        let enabled = CodexAccount(id: UUID(), name: "Enabled", homeDirectory: "/tmp/codex-enabled")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [disabled, enabled],
+            codexAccountMetrics: [
+                disabled.id: makeMetrics(service: .codexCli, weekly: 80),
+                enabled.id: makeMetrics(service: .codexCli, weekly: 20)
+            ],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Enabled"])
+        XCTAssertEqual(snapshots.first?.limits.first?.usageLimit.used, 20)
+    }
+
+    func testDefaultCodexAccountDoesNotBorrowAnotherEnabledAccountsMetrics() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let workMetrics = makeMetrics(service: .codexCli, weekly: 75)
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.codexCli: workMetrics],
+            codexAccounts: [.defaultAccount, work],
+            codexAccountMetrics: [work.id: workMetrics],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), [CodexAccount.defaultName, "Work"])
+        XCTAssertFalse(snapshots[0].hasMetrics)
+        XCTAssertEqual(snapshots[1].primaryLimit?.usedPercent, 75)
+    }
+
+    func testSoleDefaultCodexAccountDoesNotBorrowAggregateWhileAnotherAccountCacheExists() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let workMetrics = makeMetrics(service: .codexCli, weekly: 75)
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.codexCli: workMetrics],
+            codexAccounts: [.defaultAccount],
+            codexAccountMetrics: [work.id: workMetrics],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Codex"])
+        XCTAssertFalse(snapshots[0].hasMetrics)
+    }
+
+    func testCodexProviderHasNoSnapshotWhenAllAccountsAreDisabled() {
+        let disabledDefault = CodexAccount(
+            id: CodexAccount.defaultID,
+            name: CodexAccount.defaultName,
+            homeDirectory: nil,
+            isEnabled: false
+        )
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.codexCli: makeMetrics(service: .codexCli, weekly: 90)],
+            codexAccounts: [disabledDefault],
+            enabledServices: [.codexCli]
+        ))
+
+        XCTAssertTrue(snapshots.isEmpty)
     }
 
     func testStatusItemPinOptionsUseStableProviderAccountWindowKeys() {

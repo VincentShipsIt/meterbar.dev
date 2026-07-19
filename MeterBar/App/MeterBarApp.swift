@@ -715,18 +715,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusItem(metrics: UsageDataManager.shared.metrics)
     }
 
-    /// One menu-bar-title candidate whose on-disk activity probe has not run
-    /// yet. The probe is a `@Sendable` closure so the filesystem scan can run
-    /// off the main actor (it previously ran inline here and stalled the UI).
-    private struct StatusLimitCandidateSeed: Sendable {
-        let key: String
-        let pinKey: String
-        let displayName: String
-        let windowName: String
-        let limit: UsageLimit
-        let isAutoSelectable: Bool
-    }
-
     private struct StatusLimitProbeRequest: Sendable {
         let seeds: [StatusLimitCandidateSeed]
         let probe: @Sendable () -> Date?
@@ -738,7 +726,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let autoSelectionKey: String?
         let displayName: String
         let metrics: UsageMetrics
-        let autoWindowID: String?
     }
 
     @MainActor
@@ -876,8 +863,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     accountID: account.id,
                     autoSelectionKey: "claude:\(account.id.uuidString)",
                     displayName: "\(account.name) (\(ServiceType.claudeCode.displayName))",
-                    metrics: accountMetrics,
-                    autoWindowID: "session"
+                    metrics: accountMetrics
                 )
                 requests.append(statusLimitProbeRequest(
                     source: source,
@@ -886,9 +872,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if providerVisibilityStore.isEnabled(.codexCli) {
-            for account in CodexAccountStore.shared.accounts {
+            let enabledAccounts = CodexAccountStore.shared.enabledAccounts
+            for account in enabledAccounts {
+                let fallbackMetrics = account.isDefault
+                    && enabledAccounts.count == 1
+                    && UsageDataManager.shared.codexAccountMetrics.isEmpty
+                    ? metrics[.codexCli]
+                    : nil
                 let accountMetrics = UsageDataManager.shared.codexAccountMetrics[account.id]
-                    ?? (account.isDefault ? metrics[.codexCli] : nil)
+                    ?? fallbackMetrics
                 guard let accountMetrics else { continue }
                 let homeDirectory = account.homeDirectory
                 let source = StatusLimitSource(
@@ -896,8 +888,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     accountID: account.id,
                     autoSelectionKey: "codex:\(account.id.uuidString)",
                     displayName: "\(account.name) (\(ServiceType.codexCli.displayName))",
-                    metrics: accountMetrics,
-                    autoWindowID: "session"
+                    metrics: accountMetrics
                 )
                 requests.append(statusLimitProbeRequest(
                     source: source,
@@ -911,8 +902,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 accountID: nil,
                 autoSelectionKey: "cursor",
                 displayName: ServiceType.cursor.displayName,
-                metrics: cursorMetrics,
-                autoWindowID: "weekly"
+                metrics: cursorMetrics
             )
             requests.append(statusLimitProbeRequest(
                 source: source,
@@ -925,8 +915,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 accountID: nil,
                 autoSelectionKey: nil,
                 displayName: ServiceType.openRouter.displayName,
-                metrics: openRouterMetrics,
-                autoWindowID: nil
+                metrics: openRouterMetrics
             )
             requests.append(statusLimitProbeRequest(
                 source: source,
@@ -941,21 +930,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         source: StatusLimitSource,
         probe: @escaping @Sendable () -> Date?
     ) -> StatusLimitProbeRequest {
-        let seeds = ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service).map { limit in
-            let pinKey = StatusItemPinKey.make(
-                service: source.service,
-                accountID: source.accountID,
-                windowID: limit.id
-            )
-            return StatusLimitCandidateSeed(
-                key: limit.id == source.autoWindowID ? source.autoSelectionKey ?? pinKey : pinKey,
-                pinKey: pinKey,
-                displayName: source.displayName,
-                windowName: limit.title,
-                limit: limit.usageLimit,
-                isAutoSelectable: limit.id == source.autoWindowID
-            )
-        }
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: source.service,
+            accountID: source.accountID,
+            autoSelectionKey: source.autoSelectionKey,
+            displayName: source.displayName,
+            limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service)
+        )
         return StatusLimitProbeRequest(seeds: seeds, probe: probe)
     }
 

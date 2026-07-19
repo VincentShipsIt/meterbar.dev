@@ -55,8 +55,8 @@ These tools help maintain consistent code style across the project.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/VincentShipsIt/meterbar.app.git
-cd meterbar.app
+git clone https://github.com/VincentShipsIt/meterbar.dev.git
+cd meterbar.dev
 ```
 
 ### 2. Open in Xcode

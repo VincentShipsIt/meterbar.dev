@@ -49,6 +49,50 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(select([only])?.key, "codex")
     }
 
+    func testProviderAutoWindowPolicyPreservesExistingWindowsAndAddsOpenRouterCredits() {
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .claudeCode), "session")
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .codexCli), "session")
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .cursor), "weekly")
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .openRouter), "weekly")
+        XCTAssertNil(StatusItemAutoSelectionPolicy.windowID(for: .grok))
+    }
+
+    func testOpenRouterAccountCreditsParticipateInAutoSelection() {
+        let metrics = UsageMetrics(
+            service: .openRouter,
+            sessionLimit: UsageLimit(used: 10, total: 100, resetTime: now.addingTimeInterval(3600)),
+            weeklyLimit: UsageLimit(used: 80, total: 100, resetTime: nil)
+        )
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: .openRouter,
+            accountID: nil,
+            autoSelectionKey: nil,
+            displayName: ServiceType.openRouter.displayName,
+            limits: ProviderSnapshotBuilder.limits(for: metrics, service: .openRouter)
+        )
+        let candidates = seeds.map { seed in
+            StatusLimitCandidate(
+                key: seed.key,
+                pinKey: seed.pinKey,
+                displayName: seed.displayName,
+                windowName: seed.windowName,
+                limit: seed.limit,
+                lastActivity: nil,
+                isAutoSelectable: seed.isAutoSelectable
+            )
+        }
+        let idleCodex = candidate(key: "codex-idle", percentUsed: 30)
+        let activeCodex = candidate(
+            key: "codex-active",
+            percentUsed: 30,
+            activeMinutesAgo: 5
+        )
+
+        XCTAssertEqual(seeds.filter(\.isAutoSelectable).map(\.windowName), ["Account credits"])
+        XCTAssertEqual(select(candidates + [idleCodex])?.windowName, "Account credits")
+        XCTAssertEqual(select(candidates + [activeCodex])?.key, activeCodex.key)
+    }
+
     // MARK: - Active-account filtering
 
     func testTightestAmongActiveWinsOverTighterIdleAccount() {

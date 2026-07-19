@@ -21,9 +21,61 @@ struct StatusLimitCandidate: Equatable, Sendable {
     let isAutoSelectable: Bool
 }
 
+/// One menu-bar-title candidate whose on-disk activity probe has not run yet.
+struct StatusLimitCandidateSeed: Sendable {
+    let key: String
+    let pinKey: String
+    let displayName: String
+    let windowName: String
+    let limit: UsageLimit
+    let isAutoSelectable: Bool
+}
+
 nonisolated enum StatusItemPinKey {
     static func make(service: ServiceType, accountID: UUID?, windowID: String) -> String {
         "\(service.rawValue):\(accountID?.uuidString ?? "default"):\(windowID)"
+    }
+}
+
+/// Identifies the quota window each provider contributes to automatic menu-bar
+/// selection. Other windows remain available for explicit pinning only.
+nonisolated enum StatusItemAutoSelectionPolicy {
+    static func windowID(for service: ServiceType) -> String? {
+        switch service {
+        case .claudeCode, .codexCli:
+            return "session"
+        case .cursor, .openRouter:
+            return "weekly"
+        case .grok:
+            return nil
+        }
+    }
+}
+
+enum StatusItemLimitCandidateBuilder {
+    static func seeds(
+        service: ServiceType,
+        accountID: UUID?,
+        autoSelectionKey: String?,
+        displayName: String,
+        limits: [SnapshotLimit]
+    ) -> [StatusLimitCandidateSeed] {
+        let autoWindowID = StatusItemAutoSelectionPolicy.windowID(for: service)
+        return limits.map { limit in
+            let pinKey = StatusItemPinKey.make(
+                service: service,
+                accountID: accountID,
+                windowID: limit.id
+            )
+            return StatusLimitCandidateSeed(
+                key: limit.id == autoWindowID ? autoSelectionKey ?? pinKey : pinKey,
+                pinKey: pinKey,
+                displayName: displayName,
+                windowName: limit.title,
+                limit: limit.usageLimit,
+                isAutoSelectable: limit.id == autoWindowID
+            )
+        }
     }
 }
 

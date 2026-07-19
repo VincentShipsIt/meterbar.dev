@@ -94,8 +94,8 @@ Maintainer setup and release verification are documented in [docs/sparkle-update
 Prerequisites: macOS 26+, Xcode 26+
 
 ```bash
-git clone https://github.com/VincentShipsIt/meterbar.app.git
-cd meterbar.app
+git clone https://github.com/VincentShipsIt/meterbar.dev.git
+cd meterbar.dev
 open MeterBar.xcodeproj
 # Build and run (Cmd+R)
 ```

@@ -16,18 +16,20 @@ import XCTest
 ///
 /// Family row caps mirror `UsageWidget.swift`:
 ///   - SmallWidgetView:  `sortedServices.prefix(3)`
-///   - MediumWidgetView: `sortedServices` (all)
+///   - MediumWidgetView: 3 slots; overflow uses 2 rows plus a summary
 ///   - LargeWidgetView:  `sortedServices.prefix(7)`
 final class WidgetRenderingTests: XCTestCase {
-
     private enum WidgetFamily: CaseIterable {
         case small, medium, large
-        /// Max provider rows the widget renders for this family (nil = unbounded).
-        var rowCap: Int? {
+
+        func visibleRowCount(totalRowCount: Int) -> Int {
             switch self {
-            case .small: return 3
-            case .medium: return nil
-            case .large: return 7
+            case .small:
+                return min(totalRowCount, 3)
+            case .medium:
+                return MediumWidgetRowBudget.visibleRowCount(totalRowCount: totalRowCount)
+            case .large:
+                return min(totalRowCount, 7)
             }
         }
     }
@@ -38,8 +40,7 @@ final class WidgetRenderingTests: XCTestCase {
         family: WidgetFamily
     ) -> [ServiceType] {
         let sorted = metrics.keys.sorted { $0.sortOrder < $1.sortOrder }
-        guard let cap = family.rowCap else { return sorted }
-        return Array(sorted.prefix(cap))
+        return Array(sorted.prefix(family.visibleRowCount(totalRowCount: sorted.count)))
     }
 
     /// Asserts a single provider's metrics yield a fully-populated widget row.
@@ -81,7 +82,8 @@ final class WidgetRenderingTests: XCTestCase {
         for family in WidgetFamily.allCases {
             let services = renderedServices(metrics, family: family)
             XCTAssertEqual(
-                Set(services), Set(metrics.keys),
+                Set(services),
+                Set(metrics.keys),
                 "family \(family) dropped a provider (cap too low for the fixture set)"
             )
             for service in services {
@@ -120,6 +122,14 @@ final class WidgetRenderingTests: XCTestCase {
             renderedServices(metrics, family: .medium),
             [.claudeCode, .codexCli, .cursor]
         )
+    }
+
+    func testMediumWidgetReservesAThirdSlotForOverflowSummary() {
+        let totalRowCount = 6
+        let visibleRowCount = WidgetFamily.medium.visibleRowCount(totalRowCount: totalRowCount)
+
+        XCTAssertEqual(visibleRowCount, 2)
+        XCTAssertEqual(MediumWidgetRowBudget.hiddenRowCount(totalRowCount: totalRowCount), 4)
     }
 
     // MARK: - Empty state

@@ -186,6 +186,25 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum EnabledQuotaSourceCounter {
+    static func count(
+        enabledServices: Set<ServiceType>,
+        codexAccountCount: Int,
+        claudeAccountCount: Int
+    ) -> Int {
+        enabledServices.reduce(into: 0) { count, service in
+            switch service {
+            case .codexCli:
+                count += codexAccountCount
+            case .claudeCode:
+                count += claudeAccountCount
+            case .cursor, .openRouter, .grok:
+                count += 1
+            }
+        }
+    }
+}
+
 @MainActor
 final class DashboardNavigationStore: ObservableObject {
     static let shared = DashboardNavigationStore()
@@ -821,17 +840,11 @@ struct UsageDashboardView: View {
     }
 
     private var enabledQuotaSourceCount: Int {
-        var count = 0
-        if providerVisibility.isEnabled(.codexCli) {
-            count += 1
-        }
-        if providerVisibility.isEnabled(.claudeCode) {
-            count += claudeAccountStore.enabledAccounts.count
-        }
-        if providerVisibility.isEnabled(.cursor) {
-            count += 1
-        }
-        return count
+        EnabledQuotaSourceCounter.count(
+            enabledServices: providerVisibility.enabledServices,
+            codexAccountCount: codexAccountStore.enabledAccounts.count,
+            claudeAccountCount: claudeAccountStore.enabledAccounts.count
+        )
     }
 
     private var tightestLimit: SnapshotLimit? {
