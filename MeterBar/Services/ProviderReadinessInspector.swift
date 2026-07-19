@@ -23,13 +23,22 @@ nonisolated public enum ProviderReadinessInspector {
         providers: Set<ServiceType> = Set(ServiceType.allCases),
         refreshErrors: [ServiceType: ServiceError] = [:],
         now: Date = Date(),
+        claudeDefaultAccountEnabled: Bool = true,
+        claudeEnabledAccountMetrics: [UsageMetrics] = [],
         parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil
     ) -> [ProviderReadiness] {
         let baseReports = reports(
             providers: providers,
             refreshErrors: refreshErrors,
             now: now,
-            claudeReport: { claudeReport(refreshError: $0, now: $1) },
+            claudeReport: {
+                claudeReport(
+                    refreshError: $0,
+                    now: $1,
+                    defaultAccountEnabled: claudeDefaultAccountEnabled,
+                    enabledAccountMetrics: claudeEnabledAccountMetrics
+                )
+            },
             codexReport: { codexReport(refreshError: $0, now: $1) },
             cursorReport: { cursorReport(refreshError: $0, now: $1) },
             openRouterReport: { error, _ in openRouterReport(refreshError: error) },
@@ -88,24 +97,36 @@ nonisolated public enum ProviderReadinessInspector {
     static func claudeReport(
         refreshError: ServiceError? = nil,
         now: Date = Date(),
-        cachedMetrics: UsageMetrics? = SharedDataStore.shared.loadMetrics()[.claudeCode],
+        cachedMetrics: @autoclosure () -> UsageMetrics? = SharedDataStore.shared.loadMetrics()[.claudeCode],
+        defaultAccountEnabled: Bool = true,
+        enabledAccountMetrics: [UsageMetrics] = [],
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(
+            command: "claude",
+            overrideEnvVar: "CLAUDE_CLI_PATH"
+        ),
         isOAuthFallbackEnabled: () -> Bool = {
             ClaudeCodeLocalService.isOAuthUsageEnabled()
         },
         credentialsData: () -> Data? = { ClaudeCodeLocalService.shared.credentialsData() }
     ) -> ProviderReadiness {
-        let hasRecentUsageFetch = hasRecentClaudeUsageFetch(metrics: cachedMetrics, now: now)
+        let hasRecentUsageFetch = enabledAccountMetrics.contains {
+            hasRecentClaudeUsageFetch(metrics: $0, now: now)
+        } || (
+            defaultAccountEnabled
+                && hasRecentClaudeUsageFetch(metrics: cachedMetrics(), now: now)
+        )
         let credentialsJSON: Data?
-        if hasRecentUsageFetch || !isOAuthFallbackEnabled() {
+        if hasRecentUsageFetch || !defaultAccountEnabled || !isOAuthFallbackEnabled() {
             credentialsJSON = nil
         } else {
             credentialsJSON = credentialsData()
         }
         let input = ClaudeReadinessInput(
-            isCLIInstalled: CLIBinaryLocator.isAvailable(command: "claude", overrideEnvVar: "CLAUDE_CLI_PATH"),
+            isCLIInstalled: isCLIInstalled,
             // Direct CLI evidence wins, so do not even query Keychain when a
             // recent successful fetch already proves readiness. The legacy
-            // credential is likewise irrelevant while fallback is disabled.
+            // credential is likewise irrelevant while fallback or the default
+            // account is disabled.
             credentialsJSON: credentialsJSON,
             hasRecentUsageFetch: hasRecentUsageFetch,
             refreshError: sanitize(refreshError),
@@ -120,7 +141,7 @@ nonisolated public enum ProviderReadinessInspector {
     /// app cannot read (issue: keychain-only check false-negatived every
     /// `claude login` user). The cache is the same file `meterbar cost` and the
     /// widget already read, so the app and `meterbar doctor` agree.
-    private static func hasRecentClaudeUsageFetch(metrics: UsageMetrics?, now: Date) -> Bool {
+    static func hasRecentClaudeUsageFetch(metrics: UsageMetrics?, now: Date) -> Bool {
         guard let metrics else {
             return false
         }
