@@ -88,4 +88,6 @@ nonisolated enum StorageKeys {
     static let sessionWakeMaxSessionsPerRun = "SessionWakeMaxSessionsPerRun"
     /// Per-session max agent turns (Int).
     static let sessionWakeMaxTurns = "SessionWakeMaxTurns"
+    /// JSON-encoded `WakeEventHookConfiguration`; missing means no configured or enabled hooks.
+    static let sessionWakeEventHooks = "SessionWakeEventHooks"
 }

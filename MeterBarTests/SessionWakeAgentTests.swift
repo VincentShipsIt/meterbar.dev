@@ -26,7 +26,12 @@ final class SessionWakeAgentTests: XCTestCase {
             prompt: "continue",
             notifyOnCompletion: true,
             maxSessionsPerRun: 9_999,
-            maxTurns: 0
+            maxTurns: 0,
+            eventHooks: WakeEventHookConfiguration(
+                executablePath: "/usr/bin/true",
+                arguments: ["literal value"],
+                enabledEvents: [.wakeComplete]
+            )
         )
 
         store.saveConfiguration(configuration)
@@ -36,6 +41,7 @@ final class SessionWakeAgentTests: XCTestCase {
         XCTAssertTrue(restored.canRun)
         XCTAssertEqual(restored.bounds.maxSessionsPerRun, WakeBounds.sessionsRange.upperBound)
         XCTAssertEqual(restored.bounds.maxTurns, WakeBounds.maxTurnsRange.lowerBound)
+        XCTAssertTrue(restored.eventHooks.isEnabled(for: .wakeComplete))
     }
 
     func testBypassWithoutAcknowledgementFailsClosed() {
@@ -53,6 +59,29 @@ final class SessionWakeAgentTests: XCTestCase {
         )
 
         XCTAssertFalse(configuration.canRun)
+    }
+
+    func testLegacyConfigurationDecodesWithHooksDisabled() throws {
+        let legacy: [String: Any] = [
+            "featureEnabled": true,
+            "isArmed": true,
+            "provider": WakeProvider.claude.rawValue,
+            "permissionMode": WakePermissionMode.safe.rawValue,
+            "bypassAcknowledged": false,
+            "prompt": "continue",
+            "notifyOnCompletion": true,
+            "maxSessionsPerRun": 5,
+            "maxTurns": 40
+        ]
+        defaults.set(
+            try JSONSerialization.data(withJSONObject: legacy),
+            forKey: SessionWakeAgentStateStore.configurationKey
+        )
+
+        let restored = try XCTUnwrap(SessionWakeAgentStateStore(userDefaults: defaults).loadConfiguration())
+
+        XCTAssertEqual(restored.eventHooks, .disabled)
+        XCTAssertTrue(restored.canRun)
     }
 
     func testDisarmSynchronouslyUpdatesRunningAgentConfiguration() throws {
@@ -81,7 +110,7 @@ final class SessionWakeAgentTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(agentState.loadConfiguration()).isArmed)
     }
 
-    func testExecutionChangesRestartButNotificationOnlyChangeDoesNot() {
+    func testExecutionChangesRestartButNotificationAndHookChangesDoNot() {
         let baseline = SessionWakeAgentConfiguration(
             featureEnabled: true,
             isArmed: true,
@@ -118,9 +147,27 @@ final class SessionWakeAgentTests: XCTestCase {
             maxSessionsPerRun: 5,
             maxTurns: 40
         )
+        let hookChange = SessionWakeAgentConfiguration(
+            featureEnabled: true,
+            isArmed: true,
+            provider: .claude,
+            accountDirectory: nil,
+            permissionMode: .safe,
+            bypassAcknowledged: false,
+            prompt: "continue",
+            notifyOnCompletion: true,
+            maxSessionsPerRun: 5,
+            maxTurns: 40,
+            eventHooks: .init(
+                executablePath: "/usr/bin/true",
+                arguments: [],
+                enabledEvents: [.quotaReset]
+            )
+        )
 
         XCTAssertFalse(notificationOnly.requiresRuntimeRestart(comparedTo: baseline))
         XCTAssertTrue(saferPermission.requiresRuntimeRestart(comparedTo: baseline))
+        XCTAssertFalse(hookChange.requiresRuntimeRestart(comparedTo: baseline))
     }
 
     func testStatusRoundTripsEveryAssociatedValue() throws {

@@ -17,6 +17,33 @@ nonisolated struct SessionWakeAgentConfiguration: Codable, Equatable, Sendable {
     let notifyOnCompletion: Bool
     let maxSessionsPerRun: Int
     let maxTurns: Int
+    let eventHooks: WakeEventHookConfiguration
+
+    init(
+        featureEnabled: Bool,
+        isArmed: Bool,
+        provider: WakeProvider,
+        accountDirectory: String?,
+        permissionMode: WakePermissionMode,
+        bypassAcknowledged: Bool,
+        prompt: String,
+        notifyOnCompletion: Bool,
+        maxSessionsPerRun: Int,
+        maxTurns: Int,
+        eventHooks: WakeEventHookConfiguration = .disabled
+    ) {
+        self.featureEnabled = featureEnabled
+        self.isArmed = isArmed
+        self.provider = provider
+        self.accountDirectory = accountDirectory
+        self.permissionMode = permissionMode
+        self.bypassAcknowledged = bypassAcknowledged
+        self.prompt = prompt
+        self.notifyOnCompletion = notifyOnCompletion
+        self.maxSessionsPerRun = maxSessionsPerRun
+        self.maxTurns = maxTurns
+        self.eventHooks = eventHooks
+    }
 
     var canRun: Bool {
         featureEnabled
@@ -47,7 +74,8 @@ nonisolated struct SessionWakeAgentConfiguration: Codable, Equatable, Sendable {
             prompt: prompt,
             notifyOnCompletion: notifyOnCompletion,
             maxSessionsPerRun: maxSessionsPerRun,
-            maxTurns: maxTurns
+            maxTurns: maxTurns,
+            eventHooks: eventHooks
         )
     }
 
@@ -59,6 +87,35 @@ nonisolated struct SessionWakeAgentConfiguration: Codable, Equatable, Sendable {
             || prompt != other.prompt
             || maxSessionsPerRun != other.maxSessionsPerRun
             || maxTurns != other.maxTurns
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case featureEnabled
+        case isArmed
+        case provider
+        case accountDirectory
+        case permissionMode
+        case bypassAcknowledged
+        case prompt
+        case notifyOnCompletion
+        case maxSessionsPerRun
+        case maxTurns
+        case eventHooks
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        featureEnabled = try values.decode(Bool.self, forKey: .featureEnabled)
+        isArmed = try values.decode(Bool.self, forKey: .isArmed)
+        provider = try values.decode(WakeProvider.self, forKey: .provider)
+        accountDirectory = try values.decodeIfPresent(String.self, forKey: .accountDirectory)
+        permissionMode = try values.decode(WakePermissionMode.self, forKey: .permissionMode)
+        bypassAcknowledged = try values.decode(Bool.self, forKey: .bypassAcknowledged)
+        prompt = try values.decode(String.self, forKey: .prompt)
+        notifyOnCompletion = try values.decode(Bool.self, forKey: .notifyOnCompletion)
+        maxSessionsPerRun = try values.decode(Int.self, forKey: .maxSessionsPerRun)
+        maxTurns = try values.decode(Int.self, forKey: .maxTurns)
+        eventHooks = try values.decodeIfPresent(WakeEventHookConfiguration.self, forKey: .eventHooks) ?? .disabled
     }
 }
 

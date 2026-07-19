@@ -28,17 +28,20 @@ public enum SessionWakeAgent {
             lock.release()
         }
 
+        let hookDispatcher = WakeEventHookDispatcher()
         while !shouldCancel() {
             guard let configuration = stateStore.loadConfiguration(), configuration.canRun else {
                 return 0
             }
 
+            hookDispatcher.update(configuration: configuration.eventHooks)
             let runtime = makeRuntime(configuration: configuration)
             let coordinator = WakeCoordinator(
                 runner: runtime.makeRunner(),
                 bounds: configuration.bounds,
                 onState: { state in
                     stateStore.saveStatus(.init(state: state))
+                    hookDispatcher.observe(state, provider: configuration.provider)
                 }
             )
 
@@ -46,6 +49,7 @@ public enum SessionWakeAgent {
                 coordinator: coordinator,
                 runtime: runtime,
                 configuration: configuration,
+                hookDispatcher: hookDispatcher,
                 stateStore: stateStore,
                 shouldCancel: shouldCancel
             )
@@ -114,6 +118,7 @@ public enum SessionWakeAgent {
         coordinator: WakeCoordinator,
         runtime: WakeProviderRuntime,
         configuration: SessionWakeAgentConfiguration,
+        hookDispatcher: WakeEventHookDispatcher,
         stateStore: SessionWakeAgentStateStore,
         shouldCancel: @escaping @Sendable () -> Bool
     ) async -> Bool {
@@ -128,6 +133,11 @@ public enum SessionWakeAgent {
                     guard let latest = stateStore.loadConfiguration(), latest.canRun else {
                         return false
                     }
+                    // Hook edits are deliberately live configuration, not a
+                    // reason to restart a potentially hours-long wake pass.
+                    // Refresh the dispatcher from the same durable snapshot
+                    // before the coordinator can emit its next transition.
+                    hookDispatcher.update(configuration: latest.eventHooks)
                     if shouldCancel() || latest.requiresRuntimeRestart(comparedTo: configuration) { return false }
                     stateStore.refreshHeartbeat()
                     try? await Task.sleep(nanoseconds: 2_000_000_000)

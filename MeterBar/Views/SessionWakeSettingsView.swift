@@ -12,6 +12,8 @@ struct SessionWakeSettingsView: View {
     @ObservedObject private var accounts: ClaudeCodeAccountStore
     @ObservedObject private var codexAccounts: CodexAccountStore
     @State private var showingFirstRunConfirmation = false
+    @State private var isTestingHook = false
+    @State private var hookTestMessage: String?
 
     @MainActor
     init(
@@ -56,6 +58,7 @@ struct SessionWakeSettingsView: View {
         previewSection
         limitsSection
         permissionSection
+        eventHookSection
         notificationSection
     }
 
@@ -231,6 +234,102 @@ struct SessionWakeSettingsView: View {
         }
     }
 
+    private var eventHookSection: some View {
+        SettingsPanelSection(title: "Event hooks", systemImage: "terminal", color: MeterBarTheme.appAccent) {
+            SettingsNotice(
+                text: "Optional local commands run directly without a shell. " +
+                    "Each argument below is one literal argv entry.",
+                color: .secondary
+            )
+
+            SettingsRowView(
+                title: "Executable",
+                detail: "Use an absolute path to an executable file."
+            ) {
+                TextField("/usr/local/bin/my-hook", text: hookExecutableBinding)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            ForEach(store.eventHookConfiguration.arguments.indices, id: \.self) { index in
+                SettingsRowView(title: "Argument \(index + 1)") {
+                    HStack(spacing: 6) {
+                        TextField("Literal argument", text: hookArgumentBinding(at: index))
+                            .textFieldStyle(.roundedBorder)
+
+                        Button {
+                            store.removeHookArgument(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove argument \(index + 1)")
+                    }
+                }
+            }
+
+            SettingsRowView(
+                title: "Arguments",
+                detail: "Add one field for every argv entry, including flags and values."
+            ) {
+                Button("Add Argument") {
+                    store.addHookArgument()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            commandPreview
+
+            ForEach(WakeEventHookEvent.allCases, id: \.self) { event in
+                SettingsRowView(title: event.displayName) {
+                    Toggle(event.displayName, isOn: hookEventBinding(event))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!store.eventHookConfiguration.isConfigured)
+                }
+            }
+
+            SettingsRowView(
+                title: "Test hook",
+                detail: "Runs once with METERBAR_WAKE_EVENT=test and the same literal arguments."
+            ) {
+                Button(isTestingHook ? "Running…" : "Run Test") {
+                    testHook()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.eventHookConfiguration.isConfigured || isTestingHook)
+            }
+
+            if let hookTestMessage {
+                SettingsNotice(
+                    text: hookTestMessage,
+                    color: hookTestColor
+                )
+            }
+        }
+    }
+
+    private var commandPreview: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Exact command")
+                .font(.caption)
+                .fontWeight(.semibold)
+            Text("executable: \(store.eventHookConfiguration.normalizedExecutablePath)")
+            ForEach(Array(store.eventHookConfiguration.arguments.enumerated()), id: \.offset) { index, argument in
+                Text("argv[\(index)]: \(argument)")
+            }
+        }
+        .font(.system(.caption, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var hookTestColor: Color {
+        hookTestMessage == "Hook completed successfully." ? MeterBarTheme.success : MeterBarTheme.warning
+    }
+
     private var notificationSection: some View {
         SettingsPanelSection(title: "Notifications", systemImage: "bell", color: MeterBarTheme.appAccent) {
             SettingsRowView(
@@ -283,6 +382,30 @@ struct SessionWakeSettingsView: View {
         )
     }
 
+    private var hookExecutableBinding: Binding<String> {
+        Binding(
+            get: { store.eventHookConfiguration.executablePath },
+            set: { store.setHookExecutablePath($0) }
+        )
+    }
+
+    private func hookArgumentBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard store.eventHookConfiguration.arguments.indices.contains(index) else { return "" }
+                return store.eventHookConfiguration.arguments[index]
+            },
+            set: { store.setHookArgument($0, at: index) }
+        )
+    }
+
+    private func hookEventBinding(_ event: WakeEventHookEvent) -> Binding<Bool> {
+        Binding(
+            get: { store.eventHookConfiguration.enabledEvents.contains(event) },
+            set: { store.setHookEnabled($0, for: event) }
+        )
+    }
+
     /// The Claude config directory to preview against. Preview uses Claude
     /// session discovery, so it is only meaningful for the Claude provider.
     private var selectedConfigDirectory: String? {
@@ -292,6 +415,20 @@ struct SessionWakeSettingsView: View {
 
     private func binding<Value>(_ value: Value, _ setter: @escaping (Value) -> Void) -> Binding<Value> {
         Binding(get: { value }, set: { setter($0) })
+    }
+
+    private func testHook() {
+        let configuration = store.eventHookConfiguration
+        isTestingHook = true
+        hookTestMessage = nil
+        Task {
+            let result = await WakeEventHookRunner().run(
+                configuration: configuration,
+                context: .test
+            )
+            hookTestMessage = result.userMessage
+            isTestingHook = false
+        }
     }
 }
 

@@ -47,6 +47,7 @@ final class SessionWakeController: ObservableObject {
     private let rescanInterval: TimeInterval
     private let makeWatcher: WakeWatcherFactory
     private let makeLifetimeLock: @Sendable () -> WakeLock
+    private let hookDispatcher: WakeEventHookDispatcher
 
     private var cancellables = Set<AnyCancellable>()
     private var watchTask: Task<Void, Never>?
@@ -71,7 +72,8 @@ final class SessionWakeController: ObservableObject {
         makeWatcher: @escaping WakeWatcherFactory = { runner, bounds, onState in
             WakeCoordinator(runner: runner, bounds: bounds, onState: onState)
         },
-        makeLifetimeLock: @escaping @Sendable () -> WakeLock = { WakeLock(holderKind: .app) }
+        makeLifetimeLock: @escaping @Sendable () -> WakeLock = { WakeLock(holderKind: .app) },
+        hookDispatcher: WakeEventHookDispatcher? = nil
     ) {
         self.store = store ?? .shared
         self.status = status ?? .shared
@@ -84,6 +86,7 @@ final class SessionWakeController: ObservableObject {
         self.rescanInterval = rescanInterval
         self.makeWatcher = makeWatcher
         self.makeLifetimeLock = makeLifetimeLock
+        self.hookDispatcher = hookDispatcher ?? WakeEventHookDispatcher()
     }
 
     /// Begin observing the toggle and re-arm if it was left on. Idempotent;
@@ -107,7 +110,8 @@ final class SessionWakeController: ObservableObject {
             store.$prompt.map { _ in () }.eraseToAnyPublisher(),
             store.$notifyOnCompletion.map { _ in () }.eraseToAnyPublisher(),
             store.$maxSessionsPerRun.map { _ in () }.eraseToAnyPublisher(),
-            store.$maxTurns.map { _ in () }.eraseToAnyPublisher()
+            store.$maxTurns.map { _ in () }.eraseToAnyPublisher(),
+            store.$eventHookConfiguration.map { _ in () }.eraseToAnyPublisher()
         ]
         Publishers.MergeMany(triggers)
             .receive(on: RunLoop.main)
@@ -161,6 +165,7 @@ final class SessionWakeController: ObservableObject {
     // MARK: - Reconciliation
 
     private func reconcile() {
+        hookDispatcher.update(configuration: store.eventHookConfiguration)
         let account = selectedAccount()
         saveAgentConfiguration(account: account)
 
@@ -264,10 +269,13 @@ final class SessionWakeController: ObservableObject {
         let interval = rescanInterval
         let make = makeWatcher
         let publishedStatus = status
+        let hookDispatcher = hookDispatcher
+        let provider = runtime.provider
 
         watchTask = Task {
             while !Task.isCancelled {
                 let watcher = make(runner, bounds) { state in
+                    hookDispatcher.observe(state, provider: provider)
                     Task { @MainActor in publishedStatus.update(state: state) }
                 }
                 await watcher.start(runtime: runtime)
@@ -316,7 +324,8 @@ final class SessionWakeController: ObservableObject {
                 prompt: store.prompt,
                 notifyOnCompletion: notificationsAllowed,
                 maxSessionsPerRun: store.maxSessionsPerRun,
-                maxTurns: store.maxTurns
+                maxTurns: store.maxTurns,
+                eventHooks: store.eventHookConfiguration
             )
         )
     }
