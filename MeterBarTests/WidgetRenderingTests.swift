@@ -14,22 +14,25 @@ import XCTest
 /// selection the layouts apply. A regression in any of these (a nil percentage, an
 /// empty display name, a broken sort, a lost provider) would blank a widget row.
 ///
-/// Family row caps mirror `UsageWidget.swift`:
-///   - SmallWidgetView:  `sortedServices.prefix(3)`
-///   - MediumWidgetView: 3 slots; overflow uses 2 rows plus a summary
-///   - LargeWidgetView:  `sortedServices.prefix(7)`
+/// The family caps below exercise the same shared budget used by
+/// `WidgetPresentationPlanner`; focused preference/window/state coverage lives
+/// in `WidgetPresentationTests`.
 final class WidgetRenderingTests: XCTestCase {
     private enum WidgetFamily: CaseIterable {
         case small, medium, large
 
         func visibleRowCount(totalRowCount: Int) -> Int {
+            WidgetFamilyRowBudget.plan(
+                totalRowCount: totalRowCount,
+                family: presentationFamily
+            ).visibleRowCount
+        }
+
+        private var presentationFamily: WidgetPresentationFamily {
             switch self {
-            case .small:
-                return min(totalRowCount, 3)
-            case .medium:
-                return MediumWidgetRowBudget.visibleRowCount(totalRowCount: totalRowCount)
-            case .large:
-                return min(totalRowCount, 7)
+            case .small: return .small
+            case .medium: return .medium
+            case .large: return .large
             }
         }
     }
@@ -129,7 +132,10 @@ final class WidgetRenderingTests: XCTestCase {
         let visibleRowCount = WidgetFamily.medium.visibleRowCount(totalRowCount: totalRowCount)
 
         XCTAssertEqual(visibleRowCount, 2)
-        XCTAssertEqual(MediumWidgetRowBudget.hiddenRowCount(totalRowCount: totalRowCount), 4)
+        XCTAssertEqual(
+            WidgetFamilyRowBudget.plan(totalRowCount: totalRowCount, family: .medium).hiddenRowCount,
+            4
+        )
     }
 
     // MARK: - Empty state

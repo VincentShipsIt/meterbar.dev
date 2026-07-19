@@ -28,6 +28,7 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.preferences.showsResetTime)
         XCTAssertFalse(store.preferences.showsFreshness)
         XCTAssertEqual(store.preferences.accountOrdering, .provider)
+        XCTAssertTrue(store.preferences.preservesLegacyOpenRouterBalance)
     }
 
     func testPreferencesPersistAcrossRelaunch() {
@@ -37,7 +38,7 @@ final class WidgetPreferencesStoreTests: XCTestCase {
 
         store.setSelectedAccounts([claude, codex])
         store.setDisplayMode(.remaining)
-        store.setVisibleQuotaWindows([.session, .weekly])
+        store.setVisibleQuotaWindows([.session, .weekly, .codeReview])
         store.setShowsResetTime(true)
         store.setShowsFreshness(true)
         store.setAccountOrdering(.urgency)
@@ -46,10 +47,11 @@ final class WidgetPreferencesStoreTests: XCTestCase {
 
         XCTAssertEqual(reloaded.preferences.accountSelection.explicitIdentifiers, [claude, codex])
         XCTAssertEqual(reloaded.preferences.displayMode, .remaining)
-        XCTAssertEqual(reloaded.preferences.visibleQuotaWindows, [.session, .weekly])
+        XCTAssertEqual(reloaded.preferences.visibleQuotaWindows, [.session, .weekly, .codeReview])
         XCTAssertTrue(reloaded.preferences.showsResetTime)
         XCTAssertTrue(reloaded.preferences.showsFreshness)
         XCTAssertEqual(reloaded.preferences.accountOrdering, .urgency)
+        XCTAssertFalse(reloaded.preferences.preservesLegacyOpenRouterBalance)
     }
 
     func testSelectAllAutomaticallyIncludesNewEnabledAccounts() {
@@ -152,6 +154,20 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         XCTAssertEqual(reloadCount, 7)
     }
 
+    func testChoosingUsedModeDisablesLegacyOpenRouterBalanceAndReloads() {
+        var reloadCount = 0
+        let store = WidgetPreferencesStore(userDefaults: defaults) {
+            reloadCount += 1
+        }
+
+        store.setDisplayMode(.used)
+
+        XCTAssertEqual(store.preferences.displayMode, .used)
+        XCTAssertFalse(store.preferences.preservesLegacyOpenRouterBalance)
+        XCTAssertEqual(reloadCount, 1)
+        XCTAssertFalse(makeStore().preferences.preservesLegacyOpenRouterBalance)
+    }
+
     func testStableIdentifiersIncludeProviderAndAccountIdentity() {
         let accountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9))
 
@@ -163,6 +179,12 @@ final class WidgetPreferencesStoreTests: XCTestCase {
             WidgetAccountIdentifier.account(service: .claudeCode, id: accountID).rawValue,
             "account:Claude Code:00000000-0000-0000-0000-000000000009"
         )
+        XCTAssertEqual(WidgetAccountIdentifier.provider(.cursor).service, .cursor)
+        XCTAssertEqual(
+            WidgetAccountIdentifier.account(service: .claudeCode, id: accountID).service,
+            .claudeCode
+        )
+        XCTAssertNil(WidgetAccountIdentifier(rawValue: "removed").service)
     }
 
     func testOlderEncodedPreferencesUseDefaultsForMissingFields() throws {

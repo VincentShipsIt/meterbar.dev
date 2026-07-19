@@ -1,6 +1,6 @@
 import MeterBarShared
-import WidgetKit
 import SwiftUI
+import WidgetKit
 
 // MARK: - Status Colors (widget presentation for the shared UsageStatus)
 
@@ -33,25 +33,17 @@ struct UsageWidgetEntry: TimelineEntry {
     let date: Date
     let metrics: [ServiceType: UsageMetrics]
     let accountMetrics: [AccountUsageSnapshot]
+    let preferences: WidgetPreferences
 
-    var rows: [WidgetUsageRow] {
-        let accountServices = Set(accountMetrics.map { $0.metrics.service })
-        let accountRows = accountMetrics.map {
-            WidgetUsageRow(id: $0.id.uuidString, name: $0.name, metrics: $0.metrics)
-        }
-        let providerRows = metrics
-            .filter { !accountServices.contains($0.key) }
-            .map { WidgetUsageRow(id: $0.key.rawValue, name: $0.key.displayName, metrics: $0.value) }
-        return (accountRows + providerRows).sorted {
-            ($0.metrics.service.sortOrder, $0.name) < ($1.metrics.service.sortOrder, $1.name)
-        }
+    func presentation(for family: WidgetPresentationFamily) -> WidgetPresentation {
+        WidgetPresentationPlanner.makePresentation(
+            metrics: metrics,
+            accountMetrics: accountMetrics,
+            preferences: preferences,
+            family: family,
+            now: date
+        )
     }
-}
-
-struct WidgetUsageRow: Identifiable {
-    let id: String
-    let name: String
-    let metrics: UsageMetrics
 }
 
 struct UsageWidgetProvider: TimelineProvider {
@@ -72,30 +64,30 @@ struct UsageWidgetProvider: TimelineProvider {
                     weeklyLimit: UsageLimit(used: 90, total: 100, resetTime: nil)
                 )
             ],
-            accountMetrics: []
+            accountMetrics: [],
+            preferences: .defaults
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UsageWidgetEntry) -> Void) {
-        let entry = UsageWidgetEntry(
-            date: Date(),
-            metrics: SharedMetricsStore.loadMetrics(),
-            accountMetrics: SharedMetricsStore.loadAccountMetrics()
-        )
-        completion(entry)
+        completion(currentEntry())
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<UsageWidgetEntry>) -> Void) {
-        let cachedMetrics = SharedMetricsStore.loadMetrics()
-        let entry = UsageWidgetEntry(
-            date: Date(),
-            metrics: cachedMetrics,
-            accountMetrics: SharedMetricsStore.loadAccountMetrics()
-        )
+        let entry = currentEntry()
 
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date()
         let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
         completion(timeline)
+    }
+
+    private func currentEntry() -> UsageWidgetEntry {
+        UsageWidgetEntry(
+            date: Date(),
+            metrics: SharedMetricsStore.loadMetrics(),
+            accountMetrics: SharedMetricsStore.loadAccountMetrics(),
+            preferences: WidgetPreferencesStore().preferences
+        )
     }
 }
 
@@ -122,15 +114,15 @@ struct SmallWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
+        let presentation = entry.presentation(for: .small)
         VStack(alignment: .leading, spacing: 6) {
-            if entry.rows.isEmpty {
-                Text("No data")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            if let emptyState = presentation.emptyState {
+                WidgetEmptyStateView(state: emptyState, compact: true)
             } else {
-                ForEach(Array(entry.rows.prefix(3))) { row in
+                ForEach(presentation.rows) { row in
                     ServiceMiniView(row: row)
                 }
+                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
             }
         }
         .padding()
@@ -140,65 +132,55 @@ struct SmallWidgetView: View {
 }
 
 struct ServiceMiniView: View {
-    let row: WidgetUsageRow
+    let row: WidgetPresentationRow
 
     var body: some View {
-        HStack(spacing: 6) {
-            WidgetProviderIcon(service: row.metrics.service, size: 14)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                WidgetProviderIcon(service: row.service, size: 13)
 
-            Text(row.name)
-                .font(.caption2)
-                .lineLimit(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(row.accountName)
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text(row.quotaTitle)
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary)
+                }
 
-            if let weeklyLimit = row.metrics.weeklyLimit {
-                ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
-                    .tint(weeklyLimit.statusColor.color)
-                Text(limitSummary(weeklyLimit))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                if let progressValue = row.progressValue,
+                   let progressTotal = row.progressTotal {
+                    ProgressView(value: progressValue, total: progressTotal)
+                        .tint(row.usageStatus?.color ?? .secondary)
+                }
+
+                Text(row.compactSummaryText)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                WidgetHealthIndicator(row: row)
             }
 
-            WidgetStatusIndicator(status: row.metrics.overallStatus)
+            WidgetRowDetails(row: row)
         }
-    }
-
-    private func limitSummary(_ limit: UsageLimit) -> String {
-        if row.metrics.service == .openRouter {
-            return String(format: "$%.2f", max(0, limit.total - limit.used))
-        }
-        return limit.percentageText
+        .accessibilityElement(children: .combine)
     }
 }
 
 struct MediumWidgetView: View {
     let entry: UsageWidgetEntry
 
-    private var visibleRows: [WidgetUsageRow] {
-        let visibleLimit = MediumWidgetRowBudget.visibleRowCount(totalRowCount: entry.rows.count)
-        return Array(entry.rows.prefix(visibleLimit))
-    }
-
-    private var hiddenRowCount: Int {
-        MediumWidgetRowBudget.hiddenRowCount(totalRowCount: entry.rows.count)
-    }
-
     var body: some View {
+        let presentation = entry.presentation(for: .medium)
         VStack(alignment: .leading, spacing: 8) {
-            if entry.rows.isEmpty {
-                Text("No services connected")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            if let emptyState = presentation.emptyState {
+                WidgetEmptyStateView(state: emptyState)
             } else {
-                ForEach(visibleRows) { row in
+                ForEach(presentation.rows) { row in
                     ServiceCompactView(row: row)
                 }
-
-                if hiddenRowCount > 0 {
-                    Label("+\(hiddenRowCount) more", systemImage: "ellipsis.circle")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .accessibilityLabel("\(hiddenRowCount) more usage sources")
-                }
+                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
             }
         }
         .padding()
@@ -211,25 +193,18 @@ struct LargeWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
+        let presentation = entry.presentation(for: .large)
         VStack(alignment: .leading, spacing: 0) {
-            if entry.rows.isEmpty {
-                VStack {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundColor(.orange)
-                    Text("No services connected")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let emptyState = presentation.emptyState {
+                WidgetEmptyStateView(state: emptyState)
             } else {
-                let rows = Array(entry.rows.prefix(7))
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                ForEach(Array(presentation.rows.enumerated()), id: \.element.id) { index, row in
                     ServiceCompactView(row: row)
-                    if index < rows.count - 1 {
+                    if index < presentation.rows.count - 1 {
                         Spacer()
                     }
                 }
+                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
             }
         }
         .padding()
@@ -239,35 +214,125 @@ struct LargeWidgetView: View {
 }
 
 struct ServiceCompactView: View {
-    let row: WidgetUsageRow
+    let row: WidgetPresentationRow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack {
-                WidgetProviderIcon(service: row.metrics.service, size: 18)
-                Text(row.name)
+                WidgetProviderIcon(service: row.service, size: 18)
+                Text(row.accountName)
                     .font(.subheadline)
                     .bold()
+                    .lineLimit(1)
+                Text(row.quotaTitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                WidgetStatusIndicator(status: row.metrics.overallStatus)
+                WidgetHealthIndicator(row: row)
             }
 
-            if let weeklyLimit = row.metrics.weeklyLimit {
+            if let progressValue = row.progressValue,
+               let progressTotal = row.progressTotal {
                 HStack {
-                    ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
-                        .tint(weeklyLimit.statusColor.color)
-                    Text(limitSummary(weeklyLimit))
+                    ProgressView(value: progressValue, total: progressTotal)
+                        .tint(row.usageStatus?.color ?? .secondary)
+                    Text(row.summaryText)
                         .font(.caption)
                 }
+            } else {
+                Text(row.summaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
+            WidgetRowDetails(row: row)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct WidgetRowDetails: View {
+    let row: WidgetPresentationRow
+
+    var body: some View {
+        if row.resetTime != nil || row.freshnessDate != nil {
+            HStack(spacing: 6) {
+                if let resetTime = row.resetTime {
+                    Label {
+                        Text(resetTime, style: .relative)
+                    } icon: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                if let freshnessDate = row.freshnessDate {
+                    Label {
+                        Text(freshnessDate, style: .relative)
+                    } icon: {
+                        Image(systemName: "clock")
+                    }
+                }
+            }
+            .font(.system(size: 8))
+            .foregroundStyle(.secondary)
         }
     }
+}
 
-    private func limitSummary(_ limit: UsageLimit) -> String {
-        if row.metrics.service == .openRouter {
-            return String(format: "$%.2f left", max(0, limit.total - limit.used))
+struct WidgetHealthIndicator: View {
+    let row: WidgetPresentationRow
+
+    var body: some View {
+        switch row.health {
+        case .healthy:
+            if let status = row.usageStatus {
+                WidgetStatusIndicator(status: status)
+                    .accessibilityLabel("Current usage")
+            }
+        case .stale:
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Stale usage data")
+        case .unavailable:
+            Image(systemName: "xmark.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Usage unavailable")
         }
-        return limit.percentageText
+    }
+}
+
+struct WidgetOverflowView: View {
+    let hiddenRowCount: Int
+
+    var body: some View {
+        if hiddenRowCount > 0 {
+            Label("+\(hiddenRowCount) more", systemImage: "ellipsis.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(hiddenRowCount) more usage rows")
+        }
+    }
+}
+
+struct WidgetEmptyStateView: View {
+    let state: WidgetPresentationEmptyState
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: compact ? .leading : .center, spacing: 4) {
+            if !compact {
+                Image(systemName: state == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
+                    .font(.title2)
+                    .foregroundStyle(state == .noSelection ? Color.secondary : Color.orange)
+            }
+            Text(state.title)
+                .font(.caption)
+                .bold()
+            Text(state.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(compact ? .leading : .center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: compact ? .topLeading : .center)
     }
 }
 

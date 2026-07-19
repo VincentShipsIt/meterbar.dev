@@ -22,6 +22,25 @@ public struct WidgetAccountIdentifier: RawRepresentable, Codable, Hashable, Send
     public static func account(service: ServiceType, id: UUID) -> Self {
         Self(rawValue: "account:\(service.rawValue):\(id.uuidString)")
     }
+
+    /// Recovers the provider identity from a persisted row key.
+    ///
+    /// Explicit selections can outlive a metrics snapshot (for example while
+    /// an enabled account is temporarily unavailable). The widget uses this
+    /// provider identity to render an honest unavailable row instead of
+    /// silently relabeling or dropping the selection.
+    public var service: ServiceType? {
+        let providerPrefix = "provider:"
+        if rawValue.hasPrefix(providerPrefix) {
+            return ServiceType(rawValue: String(rawValue.dropFirst(providerPrefix.count)))
+        }
+
+        let accountPrefix = "account:"
+        guard rawValue.hasPrefix(accountPrefix) else { return nil }
+        let accountValue = rawValue.dropFirst(accountPrefix.count)
+        guard let separator = accountValue.firstIndex(of: ":") else { return nil }
+        return ServiceType(rawValue: String(accountValue[..<separator]))
+    }
 }
 
 public enum WidgetAccountSelectionMode: String, Codable, Sendable {
@@ -59,6 +78,7 @@ public enum WidgetUsageDisplayMode: String, Codable, CaseIterable, Sendable {
 public enum WidgetQuotaWindow: String, Codable, CaseIterable, Sendable {
     case session
     case weekly
+    case codeReview
 }
 
 public enum WidgetAccountOrdering: String, Codable, CaseIterable, Sendable {
@@ -76,6 +96,9 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
     public var showsResetTime: Bool
     public var showsFreshness: Bool
     public var accountOrdering: WidgetAccountOrdering
+    /// Keeps the pre-preference OpenRouter balance (`remaining`) until the
+    /// user explicitly chooses either usage display mode.
+    public var preservesLegacyOpenRouterBalance: Bool
 
     public static let defaults = WidgetPreferences(
         accountSelection: .all,
@@ -83,7 +106,8 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
         visibleQuotaWindows: [.weekly],
         showsResetTime: false,
         showsFreshness: false,
-        accountOrdering: .provider
+        accountOrdering: .provider,
+        preservesLegacyOpenRouterBalance: true
     )
 
     public init(
@@ -92,7 +116,8 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
         visibleQuotaWindows: Set<WidgetQuotaWindow>,
         showsResetTime: Bool,
         showsFreshness: Bool,
-        accountOrdering: WidgetAccountOrdering
+        accountOrdering: WidgetAccountOrdering,
+        preservesLegacyOpenRouterBalance: Bool = true
     ) {
         self.accountSelection = accountSelection
         self.displayMode = displayMode
@@ -100,6 +125,7 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
         self.showsResetTime = showsResetTime
         self.showsFreshness = showsFreshness
         self.accountOrdering = accountOrdering
+        self.preservesLegacyOpenRouterBalance = preservesLegacyOpenRouterBalance
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +154,10 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
             WidgetAccountOrdering.self,
             forKey: .accountOrdering
         ) ?? Self.defaults.accountOrdering
+        preservesLegacyOpenRouterBalance = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .preservesLegacyOpenRouterBalance
+        ) ?? Self.defaults.preservesLegacyOpenRouterBalance
     }
 }
 
@@ -246,7 +276,10 @@ public final class WidgetPreferencesStore: ObservableObject {
     }
 
     public func setDisplayMode(_ displayMode: WidgetUsageDisplayMode) {
-        update { $0.displayMode = displayMode }
+        update {
+            $0.displayMode = displayMode
+            $0.preservesLegacyOpenRouterBalance = false
+        }
     }
 
     public func setVisibleQuotaWindows(_ windows: Set<WidgetQuotaWindow>) {

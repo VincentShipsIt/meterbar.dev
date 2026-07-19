@@ -117,6 +117,7 @@ final class UsageDataManagerTests: XCTestCase {
         codexAccountStore: CodexAccountStore? = nil,
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
+        preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = false
@@ -129,6 +130,10 @@ final class UsageDataManagerTests: XCTestCase {
         }
         if !preload.isEmpty, let data = MetricsCodec.encode(preload) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedUsageMetrics)
+        }
+        if !preloadClaudeAccountMetrics.isEmpty,
+           let data = try? JSONEncoder().encode(preloadClaudeAccountMetrics) {
+            cacheDefaults.set(data, forKey: StorageKeys.cachedClaudeCodeAccountMetrics)
         }
         if let savedRefreshInterval {
             cacheDefaults.set(savedRefreshInterval.rawValue, forKey: StorageKeys.refreshInterval)
@@ -215,6 +220,70 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.metrics[.claudeCode]?.sessionLimit?.used, 7)
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadMetrics()[.claudeCode]?.sessionLimit?.used, 7)
+    }
+
+    func testRefreshAllBridgesEveryEnabledClaudeAccountToWidgetData() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-widget-accounts-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/claude-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let refreshed = MetricsFixtures.claudeCode(sessionUsedPercent: 17)
+        let claude = StubClaudeProvider(hasAccess: true, result: .success(refreshed))
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(Set(manager.claudeCodeAccountMetrics.keys), [ClaudeCodeAccount.defaultID, work.id])
+        sharedStore.flushPendingWrites()
+        XCTAssertEqual(
+            sharedStore.loadAccountMetrics().map(\.id),
+            [ClaudeCodeAccount.defaultID, work.id]
+        )
+        XCTAssertEqual(
+            sharedStore.loadAccountMetrics().map(\.name),
+            [ClaudeCodeAccount.defaultName, "Work"]
+        )
+    }
+
+    func testRefreshAllRestoresClaudeAccountCacheAfterRelaunchAndTransientFailure() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-cache-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        let cached = MetricsFixtures.claudeCode(sessionUsedPercent: 23)
+        let claude = StubClaudeProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            preloadClaudeAccountMetrics: [ClaudeCodeAccount.defaultID: cached]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[ClaudeCodeAccount.defaultID]?.sessionLimit?.used,
+            23
+        )
+        sharedStore.flushPendingWrites()
+        XCTAssertEqual(
+            sharedStore.loadAccountMetrics().first?.metrics.sessionLimit?.used,
+            23
+        )
     }
 
     func testChangingRefreshIntervalPublishesToObservers() {

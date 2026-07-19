@@ -44,6 +44,8 @@ nonisolated enum StorageKeys {
     static let claudeCodeDefaultAccountEnabled = "ClaudeCodeDefaultAccountEnabled"
     /// Persisted account display order (array of UUID strings).
     static let claudeCodeAccountOrder = "ClaudeCodeAccountOrder"
+    /// Cached per-account Claude Code metrics (JSON-encoded [UUID: UsageMetrics]).
+    static let cachedClaudeCodeAccountMetrics = "CachedClaudeCodeAccountMetrics"
     /// Extra Codex CLI account profiles (JSON-encoded [CodexAccount]).
     static let codexCustomAccounts = "CodexCustomAccounts"
     /// User-chosen display name for the default Codex CLI profile.

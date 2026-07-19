@@ -176,6 +176,7 @@ enum ProviderCardCommands {
             },
             hide: { service in
                 ProviderVisibilityStore.shared.set(service, isEnabled: false)
+                Task { await UsageDataManager.shared.refresh(service: service) }
             },
             openInDashboard: openInDashboard ?? {
                 UsageDashboardWindowController.shared.show(
