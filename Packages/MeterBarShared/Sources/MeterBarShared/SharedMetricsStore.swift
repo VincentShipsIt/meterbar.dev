@@ -24,7 +24,35 @@ public enum SharedMetricsStore {
     /// The shared App Group container, or `nil` when App Groups aren't
     /// provisioned for the running target.
     public static var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+        let fileManager = FileManager.default
+        return resolvedContainerURL(
+            entitledContainerURL: fileManager.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupIdentifier
+            ),
+            homeDirectory: fileManager.homeDirectoryForCurrentUser,
+            fileExists: fileManager.fileExists(atPath:)
+        )
+    }
+
+    /// Non-sandboxed local builds can carry the App Group entitlement while
+    /// `containerURL(forSecurityApplicationGroupIdentifier:)` still returns
+    /// `nil`. The app and bundled CLI must keep using the same existing
+    /// container in that case or successful provider refreshes remain trapped
+    /// in the app's private preferences cache.
+    static func resolvedContainerURL(
+        entitledContainerURL: URL?,
+        homeDirectory: URL,
+        fileExists: (String) -> Bool
+    ) -> URL? {
+        if let entitledContainerURL {
+            return entitledContainerURL
+        }
+
+        let fallback = homeDirectory
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Group Containers", isDirectory: true)
+            .appendingPathComponent(appGroupIdentifier, isDirectory: true)
+        return fileExists(fallback.path) ? fallback : nil
     }
 
     /// URL of the cached-metrics JSON file inside the shared container.
