@@ -107,7 +107,7 @@ open MeterBar.xcodeproj
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
 2. Log in: `claude login`
 3. The app reads usage from Claude Code's authenticated `/api/oauth/usage` endpoint using its Keychain login (first launch shows a one-time Keychain access prompt); if no token is available it falls back to parsing `claude /usage` output
-4. Add extra Claude accounts in Settings by pointing each one at a separate `CLAUDE_CONFIG_DIR` (custom accounts use the CLI, since only the default account has a Keychain token)
+4. Configure each Claude account in Settings with its own `CLAUDE_CONFIG_DIR`. The unscoped default account can use the global Keychain token; any explicitly scoped account uses the CLI.
 
 ### Codex CLI
 
@@ -198,10 +198,10 @@ It then uses the respective local source or API to fetch current usage data:
 - Grok: official `grok agent --no-leader stdio` ACP billing response
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
-- Additional Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no Keychain token of their own).
+- Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).
 - Cursor: Local SQLite queries
 
-**No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch); Grok authentication remains inside the official CLI process.
+**No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The unscoped default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch); Grok authentication remains inside the official CLI process.
 
 ## Privacy & Security
 

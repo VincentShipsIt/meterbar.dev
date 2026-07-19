@@ -129,8 +129,8 @@ class ClaudeCodeLocalService: ObservableObject {
         // same data Claude Code's own `/usage` screen reads. `claude /usage` no
         // longer renders in a headless (non-TTY) spawn (it prints a session cost
         // summary instead), so the CLI parser is now a fallback. Only the
-        // default account has a Keychain OAuth token; custom accounts
-        // (`CLAUDE_CONFIG_DIR`) have none and go straight to the CLI.
+        // unscoped default account can safely use the global Keychain token;
+        // accounts with an explicit `CLAUDE_CONFIG_DIR` go straight to the CLI.
         if Self.prefersOAuth(account: account, oauthEnabled: isOAuthFallbackEnabled) {
             // `nil` ⇒ no usable Keychain token; fall back to the CLI. A thrown
             // error means a token was in hand but the request/decode failed —
@@ -300,6 +300,11 @@ class ClaudeCodeLocalService: ObservableObject {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
         guard account.isDefault, oauthEnabled else { return false }
+        if let accountConfigDirectory = account.configDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !accountConfigDirectory.isEmpty {
+            return false
+        }
         let configDirectory = environment["CLAUDE_CONFIG_DIR"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return configDirectory?.isEmpty != false
@@ -351,12 +356,11 @@ class ClaudeCodeLocalService: ObservableObject {
 
     /// Best-effort fetch of the Claude "extra usage" on/off state from the OAuth usage endpoint.
     ///
-    /// Only the default account is supported, since its OAuth token lives in the Keychain.
+    /// Only the unscoped default account is supported, since its OAuth token lives in the Keychain.
     /// Reads credentials without mutating published state and never throws — any missing token,
     /// expired token, network failure, or decode failure resolves to `.unknown`.
     private func fetchExtraUsageStatus(account: ClaudeCodeAccount) async -> ExtraUsageStatus {
-        guard isOAuthFallbackEnabled else { return .unknown }
-        guard account.isDefault else { return .unknown }
+        guard Self.prefersOAuth(account: account, oauthEnabled: isOAuthFallbackEnabled) else { return .unknown }
         // Keychain read — off the main actor, same as the fallback-token path.
         let storedCredentials = await Task.detached(priority: .utility) { [self] in
             getCredentials()

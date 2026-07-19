@@ -2,7 +2,6 @@ import XCTest
 @testable import MeterBar
 
 final class ClaudeCodeAccountStoreTests: XCTestCase {
-
     // MARK: Internal
 
     override func setUp() {
@@ -31,6 +30,51 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
 
         let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
         XCTAssertEqual(reloaded.accounts.first?.name, "shipshitdev")
+        XCTAssertNil(reloaded.accounts.first?.configDirectory)
+    }
+
+    func testDefaultProfileConfigDirectoryCanBeEditedAndPersists() {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+
+        store.updateAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: "genfeedai",
+            configDirectory: "/tmp/old/../claude-genfeedai"
+        )
+
+        XCTAssertEqual(store.accounts.first?.name, "genfeedai")
+        XCTAssertEqual(store.accounts.first?.configDirectory, "/tmp/claude-genfeedai")
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.accounts.first?.name, "genfeedai")
+        XCTAssertEqual(reloaded.accounts.first?.configDirectory, "/tmp/claude-genfeedai")
+    }
+
+    func testDefaultProfileConfigDirectoryCanBeClearedAndRestoresOAuth() throws {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.updateAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: "genfeedai",
+            configDirectory: "/tmp/claude-genfeedai"
+        )
+
+        store.updateAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: "genfeedai",
+            configDirectory: "   "
+        )
+
+        XCTAssertNil(store.accounts.first?.configDirectory)
+        XCTAssertNil(defaults.object(forKey: StorageKeys.claudeCodeDefaultConfigDirectory))
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        let defaultAccount = try XCTUnwrap(reloaded.accounts.first)
+        XCTAssertNil(defaultAccount.configDirectory)
+        XCTAssertTrue(ClaudeCodeLocalService.prefersOAuth(
+            account: defaultAccount,
+            oauthEnabled: true,
+            environment: [:]
+        ))
     }
 
     func testDefaultConfigDirectoryFallsBackToClaudeUnderRealHome() {
@@ -80,13 +124,11 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.customAccounts.first?.configDirectory, "/tmp/genfeed-claude-profile")
     }
 
-    func testLegacyCustomProfileDefaultsToEnabled() throws {
+    func testLegacyCustomProfileDefaultsToEnabled() {
         let id = UUID()
-        let data = try XCTUnwrap(
-            """
-            [{"id":"\(id.uuidString)","name":"Legacy","configDirectory":"/tmp/legacy"}]
-            """.data(using: .utf8)
-        )
+        let data = Data("""
+        [{"id":"\(id.uuidString)","name":"Legacy","configDirectory":"/tmp/legacy"}]
+        """.utf8)
         defaults.set(data, forKey: StorageKeys.claudeCodeCustomAccounts)
 
         let store = ClaudeCodeAccountStore(userDefaults: defaults)
@@ -202,5 +244,4 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
 
     private var suiteName: String!
     private var defaults: UserDefaults!
-
 }

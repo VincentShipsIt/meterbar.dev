@@ -13,7 +13,7 @@ Providers tracked:
 
 | Provider | `ServiceType` case | Data source |
 |---|---|---|
-| Claude Code | `.claudeCode` | Default account: calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint with the `Claude Code-credentials` Keychain OAuth token (primary; on by default via the `ClaudeCodeEnableOAuthFallback` flag). Falls back to shelling out to `claude /usage` and regex-parsing terminal output when no token is available. Custom (`CLAUDE_CONFIG_DIR`) accounts use the CLI, since `claude /usage` no longer renders in a headless spawn |
+| Claude Code | `.claudeCode` | Unscoped default account: calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint with the global `Claude Code-credentials` Keychain OAuth token (primary; on by default via the `ClaudeCodeEnableOAuthFallback` flag). Falls back to shelling out to `claude /usage` and regex-parsing terminal output when no token is available. Any account with an explicit `CLAUDE_CONFIG_DIR`, including the editable default row, uses the CLI so credentials cannot cross-contaminate profiles. |
 | OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage`; exhausted accounts can consume a banked reset credit through the authenticated reset-credit endpoints after explicit confirmation |
 | Cursor | `.cursor` | Reads session JWT from Cursor's `state.vscdb` SQLite, calls `https://cursor.com/api/usage-summary` |
 | OpenRouter | `.openRouter` | User-provided API key in Keychain; calls documented `/api/v1/credits` and `/api/v1/key` endpoints |

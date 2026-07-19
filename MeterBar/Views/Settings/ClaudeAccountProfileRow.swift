@@ -14,8 +14,7 @@ enum AccountProfileRowMetrics {
 
 /// One editable Claude Code account row (name + config directory + enable /
 /// reconnect / save / delete). Extracted verbatim from the SettingsView
-/// monolith. The default profile is read-only for its config directory and
-/// cannot be removed.
+/// monolith. The default profile cannot be removed.
 struct AccountProfileRow: View {
     // MARK: Lifecycle
 
@@ -32,7 +31,7 @@ struct AccountProfileRow: View {
         self.onReconnect = onReconnect
         self.onRemove = onRemove
         _nameDraft = State(initialValue: account.name)
-        _configDirectoryDraft = State(initialValue: account.configDirectory ?? "")
+        _configDirectoryDraft = State(initialValue: Self.resolvedConfigDirectory(for: account))
     }
 
     // MARK: Internal
@@ -69,37 +68,23 @@ struct AccountProfileRow: View {
                 }
 
                 HStack(spacing: 8) {
-                    accountFieldLabel(account.isDefault ? "Default config directory" : "Config directory")
+                    accountFieldLabel("Config directory")
 
-                    if account.isDefault {
-                        SettingsReadonlyField(text: displayConfigDirectory)
+                    TextField("Config directory", text: $configDirectoryDraft)
+                        .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
+                        .onSubmit(saveChanges)
 
-                        Button {
-                            revealDefaultConfigDirectory()
-                        } label: {
-                            Image(systemName: "folder")
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Reveal config directory in Finder")
-                    } else {
-                        HStack(spacing: 8) {
-                            TextField("Config directory", text: $configDirectoryDraft)
-                                .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
-                                .onSubmit(saveChanges)
-
-                            Button {
-                                chooseConfigDirectory()
-                            } label: {
-                                Image(systemName: "folder")
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Choose config directory")
-                        }
+                    Button {
+                        chooseConfigDirectory()
+                    } label: {
+                        Image(systemName: "folder")
                     }
+                    .buttonStyle(.bordered)
+                    .help("Choose config directory")
                 }
 
                 if account.isDefault {
-                    Text("Mirrors the Claude CLI default (~/.claude, or $CLAUDE_CONFIG_DIR)")
+                    Text("Defaults to ~/.claude or $CLAUDE_CONFIG_DIR; clear the field to restore that default.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.leading, AccountProfileRowMetrics.labelWidth + 8)
@@ -153,7 +138,7 @@ struct AccountProfileRow: View {
         .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: account) { _, updatedAccount in
             nameDraft = updatedAccount.name
-            configDirectoryDraft = updatedAccount.configDirectory ?? ""
+            configDirectoryDraft = Self.resolvedConfigDirectory(for: updatedAccount)
         }
     }
 
@@ -170,15 +155,13 @@ struct AccountProfileRow: View {
         configDirectoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var displayConfigDirectory: String {
-        account.configDirectory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? account.configDirectory ?? ""
-            : ClaudeCodeAccount.defaultConfigDirectory()
+    private var resolvedConfigDirectory: String {
+        Self.resolvedConfigDirectory(for: account)
     }
 
     private var hasChanges: Bool {
         trimmedName != account.name ||
-            (!account.isDefault && trimmedConfigDirectory != (account.configDirectory ?? ""))
+            trimmedConfigDirectory != resolvedConfigDirectory
     }
 
     private var canSave: Bool {
@@ -189,7 +172,10 @@ struct AccountProfileRow: View {
         guard hasChanges, canSave else {
             return
         }
-        onSave(trimmedName, account.isDefault ? nil : trimmedConfigDirectory)
+        let changedConfigDirectory = trimmedConfigDirectory == resolvedConfigDirectory
+            ? nil
+            : trimmedConfigDirectory
+        onSave(trimmedName, changedConfigDirectory)
     }
 
     private func accountFieldLabel(_ title: String) -> some View {
@@ -200,10 +186,8 @@ struct AccountProfileRow: View {
             .frame(width: AccountProfileRowMetrics.labelWidth, alignment: .leading)
     }
 
-    private func revealDefaultConfigDirectory() {
-        NSWorkspace.shared.activateFileViewerSelecting([
-            URL(fileURLWithPath: ClaudeCodeAccount.defaultConfigDirectory(), isDirectory: true)
-        ])
+    private static func resolvedConfigDirectory(for account: ClaudeCodeAccount) -> String {
+        account.configDirectory ?? (account.isDefault ? ClaudeCodeAccount.defaultConfigDirectory() : "")
     }
 
     private func chooseConfigDirectory() {

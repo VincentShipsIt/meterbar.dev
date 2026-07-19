@@ -679,8 +679,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        Publishers.Merge(
+        Publishers.Merge3(
             ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
             ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
         )
             .sink { [weak self] _ in

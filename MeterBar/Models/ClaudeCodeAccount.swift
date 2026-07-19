@@ -70,12 +70,14 @@ final class ClaudeCodeAccountStore: ObservableObject {
 
     @Published private(set) var customAccounts: [ClaudeCodeAccount] = []
     @Published private(set) var defaultAccountName = ClaudeCodeAccount.defaultName
+    @Published private(set) var defaultAccountConfigDirectory: String?
     @Published private(set) var defaultAccountIsEnabled = true
     @Published private(set) var accountOrder: [UUID] = []
 
     private let userDefaults: UserDefaults
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
+    private let defaultConfigDirectoryStorageKey = StorageKeys.claudeCodeDefaultConfigDirectory
     private let defaultEnabledStorageKey = StorageKeys.claudeCodeDefaultAccountEnabled
     private let accountOrderStorageKey = StorageKeys.claudeCodeAccountOrder
 
@@ -84,7 +86,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
             ClaudeCodeAccount(
                 id: ClaudeCodeAccount.defaultID,
                 name: defaultAccountName,
-                configDirectory: nil,
+                configDirectory: defaultAccountConfigDirectory,
                 isEnabled: defaultAccountIsEnabled
             )
         ] + customAccounts)
@@ -122,10 +124,30 @@ final class ClaudeCodeAccountStore: ObservableObject {
         guard !trimmedName.isEmpty else { return }
 
         if id == ClaudeCodeAccount.defaultID {
-            guard trimmedName != defaultAccountName else { return }
-            defaultAccountName = trimmedName
-            saveDefaultAccountName()
+            if trimmedName != defaultAccountName {
+                defaultAccountName = trimmedName
+                saveDefaultAccountName()
+            }
+            if let configDirectory {
+                let trimmedDirectory = configDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                let updatedDirectory = trimmedDirectory.isEmpty
+                    ? nil
+                    : (trimmedDirectory as NSString).standardizingPath
+                if updatedDirectory != defaultAccountConfigDirectory {
+                    defaultAccountConfigDirectory = updatedDirectory
+                    saveDefaultAccountConfigDirectory()
+                }
+            }
             return
+        }
+
+        let standardizedDirectory: String?
+        if let configDirectory {
+            let trimmedDirectory = configDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedDirectory.isEmpty else { return }
+            standardizedDirectory = (trimmedDirectory as NSString).standardizingPath
+        } else {
+            standardizedDirectory = nil
         }
 
         guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
@@ -133,10 +155,8 @@ final class ClaudeCodeAccountStore: ObservableObject {
         var updatedAccount = customAccounts[index]
         updatedAccount.name = trimmedName
 
-        if let configDirectory {
-            let trimmedDirectory = configDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedDirectory.isEmpty else { return }
-            updatedAccount.configDirectory = (trimmedDirectory as NSString).standardizingPath
+        if let standardizedDirectory {
+            updatedAccount.configDirectory = standardizedDirectory
         }
 
         guard updatedAccount != customAccounts[index] else { return }
@@ -199,6 +219,12 @@ final class ClaudeCodeAccountStore: ObservableObject {
             defaultAccountName = storedDefaultName
         }
 
+        if let storedDefaultConfigDirectory = userDefaults.string(forKey: defaultConfigDirectoryStorageKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !storedDefaultConfigDirectory.isEmpty {
+            defaultAccountConfigDirectory = (storedDefaultConfigDirectory as NSString).standardizingPath
+        }
+
         if userDefaults.object(forKey: defaultEnabledStorageKey) != nil {
             defaultAccountIsEnabled = userDefaults.bool(forKey: defaultEnabledStorageKey)
         }
@@ -225,6 +251,14 @@ final class ClaudeCodeAccountStore: ObservableObject {
             userDefaults.removeObject(forKey: defaultNameStorageKey)
         } else {
             userDefaults.set(defaultAccountName, forKey: defaultNameStorageKey)
+        }
+    }
+
+    private func saveDefaultAccountConfigDirectory() {
+        if let defaultAccountConfigDirectory {
+            userDefaults.set(defaultAccountConfigDirectory, forKey: defaultConfigDirectoryStorageKey)
+        } else {
+            userDefaults.removeObject(forKey: defaultConfigDirectoryStorageKey)
         }
     }
 

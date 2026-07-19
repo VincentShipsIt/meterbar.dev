@@ -82,6 +82,17 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
             oauthEnabled: true,
             environment: ["CLAUDE_CONFIG_DIR": "/tmp/.claude-genfeedai"]
         ))
+
+        let savedDefault = ClaudeCodeAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: "genfeedai",
+            configDirectory: "/tmp/.claude-genfeedai"
+        )
+        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
+            account: savedDefault,
+            oauthEnabled: true,
+            environment: [:]
+        ))
     }
 
     func testOnlyDefaultAccountPublishesProviderWideConnectionState() {

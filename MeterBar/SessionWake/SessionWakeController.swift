@@ -122,8 +122,9 @@ final class SessionWakeController: ObservableObject {
             .sink { [weak self] _ in self?.reconcile() }
             .store(in: &cancellables)
 
-        Publishers.Merge(
+        Publishers.Merge3(
             accounts.$customAccounts.map { _ in () },
+            accounts.$defaultAccountConfigDirectory.map { _ in () },
             accounts.$defaultAccountIsEnabled.map { _ in () }
         )
             .receive(on: RunLoop.main)
