@@ -20,7 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Validate release tag
         id: version
@@ -33,6 +35,13 @@ jobs:
             echo "tag=$REF_NAME"
             echo "version=$RELEASE_VERSION"
           } >> "$GITHUB_OUTPUT"
+
+      # Accidental-release guard. Release-environment branch/reviewer rules
+      # remain the authorization boundary for anyone who can push a tag.
+      - name: Require release commit on origin/master
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: scripts/verify-release-ancestry.sh "$RELEASE_COMMIT"
 
   build:
     needs: version
