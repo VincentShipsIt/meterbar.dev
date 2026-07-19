@@ -43,6 +43,9 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Test Swift build parity validation
+        run: scripts/test-swift-build-parity.sh
+
       - name: Verify Debug and Release identities
         run: scripts/verify-build-identities.sh
 
