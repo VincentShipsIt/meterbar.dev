@@ -41,7 +41,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor, O
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, and Grok
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
-- **Real-time Updates**: Background refresh every 15 minutes
+- **Real-time Updates**: Background refresh every 10 minutes, including prompt catch-up after wake
 - **Pace-aware Bars**: Usage bars show quota left with an expected-pace marker and burn-rate projection
 - **Color-coded Status**: Green (healthy), Orange (tight), Red (critical/exhausted)
 

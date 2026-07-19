@@ -364,6 +364,9 @@ jobs:
           printf '%s' "$WAKE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['schemaVersion']==1 and d['dryRun'] is True and d['outcome']=='success', d; print('Session Wake dry-run OK on stapled artifact')"
           echo "::endgroup::"
 
+      - name: Smoke public CLI JSON commands on stapled artifact
+        run: scripts/verify-cli-json-smoke.sh "$APP_PATH/Contents/Helpers/meterbar"
+
       # Zip the STAPLED bundle and compute the SHA256 on that FINAL artifact
       # (this is what the Homebrew cask consumes via <zip>.sha256). The pre-staple
       # notarization zip differs byte-for-byte, so the SHA must be computed here,

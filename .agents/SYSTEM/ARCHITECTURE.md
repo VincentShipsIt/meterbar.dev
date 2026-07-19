@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-14 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-17 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -66,7 +66,7 @@ meterbar/
 
 ## Services (all `.shared` singletons)
 
-- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a `Timer` auto-refresh (default 15 min; `RefreshInterval` supports 1/2/5/15/30 min + manual).
+- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a non-overlapping `Timer` auto-refresh (default 10 min; `RefreshInterval` supports 1/2/5/10/15/30 min + manual). The app forwards system wake events so stale enabled data catches up once without replaying missed ticks.
 - **ClaudeCodeCLIUsageService** — fallback source. Resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. `/usage` no longer renders in a headless spawn (it prints a session cost summary), so the parser detects that shape and throws a legible error. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
 - **ClaudeCodeLocalService** — OAuth-primary wrapper. For the default account it reads `api.anthropic.com/api/oauth/usage` with the Keychain token (`metrics(from:)` maps windows + extra-usage), falling back to the CLI parser only when no token is available; custom accounts use the CLI. `prefersOAuth`/`isOAuthUsageEnabled` are the pure source-selection helpers.
 - **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off"). It also lists and consumes banked rate-limit resets with an idempotency key, then immediately refreshes usage. The exhausted popover card and `meterbar reset-credit --yes` are the two explicit-confirmation entry points.

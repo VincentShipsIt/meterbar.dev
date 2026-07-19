@@ -118,3 +118,36 @@ When cached input is unavailable, JSON mode still emits a versioned document:
 ```
 
 Stable version 1 error codes are `usage_cache_missing` and `cost_cache_missing`.
+
+## Doctor
+
+```sh
+meterbar doctor --json
+```
+
+Doctor emits a JSON array of redacted readiness reports. Unlike the usage and cost integration
+documents, it is a diagnostic DTO rather than a versioned cache schema:
+
+```json
+[
+  {
+    "provider": "Codex CLI",
+    "overall": "warn",
+    "healthy": false,
+    "checks": [
+      {
+        "id": "auth",
+        "title": "Signed in",
+        "level": "warn",
+        "detail": "Sign-in not verified yet.",
+        "recovery": "Run `codex login`."
+      }
+    ]
+  }
+]
+```
+
+`overall` and `checks[].level` are `pass`, `warn`, or `fail`. `healthy` is true only when
+`overall` is `pass`. The report contains only the fields shown above; credential, token, password,
+authorization, and secret-bearing fields are never emitted. Diagnostic messages may use standard
+error, but standard output remains one JSON document.

@@ -59,4 +59,9 @@ verify_target MeterBar Release dev.meterbar.app MeterBar MeterBar.app
 verify_target MeterBarWidgetExtension Release \
   dev.meterbar.app.Widget MeterBarWidgetExtension MeterBarWidgetExtension.appex
 
-echo "Debug and Release app/widget identities verified."
+"$script_dir/verify-swift-build-parity.sh" \
+  "$temporary_directory/MeterBar-Debug.json" \
+  "$temporary_directory/MeterBar-Release.json" \
+  "$repository_root/Package.swift"
+
+echo "Debug and Release app/widget identities and Swift build parity verified."

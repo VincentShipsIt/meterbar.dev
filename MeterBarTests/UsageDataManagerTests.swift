@@ -15,7 +15,9 @@ final class UsageDataManagerTests: XCTestCase {
     private final class StubProvider: SimpleUsageProviding, CodexUsageProviding {
         var hasAccess: Bool
         var result: Result<UsageMetrics, Error>
+        var suspendsFetch = false
         private(set) var fetchCount = 0
+        private var fetchContinuation: CheckedContinuation<Void, Never>?
 
         init(hasAccess: Bool, result: Result<UsageMetrics, Error>) {
             self.hasAccess = hasAccess
@@ -24,12 +26,23 @@ final class UsageDataManagerTests: XCTestCase {
 
         func fetchUsageMetrics() async throws -> UsageMetrics {
             fetchCount += 1
+            if suspendsFetch {
+                await withCheckedContinuation { continuation in
+                    fetchContinuation = continuation
+                }
+            }
             return try result.get()
         }
 
         func canAccess(account: CodexAccount) async -> Bool { hasAccess }
         func fetchUsageMetrics(account: CodexAccount) async throws -> UsageMetrics {
             try await fetchUsageMetrics()
+        }
+
+        func resumeFetch() {
+            suspendsFetch = false
+            fetchContinuation?.resume()
+            fetchContinuation = nil
         }
     }
 
@@ -86,7 +99,9 @@ final class UsageDataManagerTests: XCTestCase {
         codexAccountStore: CodexAccountStore? = nil,
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
-        parseHealthStore: ProviderParseHealthStore? = nil
+        savedRefreshInterval: RefreshInterval? = nil,
+        parseHealthStore: ProviderParseHealthStore? = nil,
+        schedulesAutoRefresh: Bool = false
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
         createdSuiteNames.append(contentsOf: [suiteName, "\(suiteName)-vis"])
@@ -96,6 +111,9 @@ final class UsageDataManagerTests: XCTestCase {
         }
         if !preload.isEmpty, let data = MetricsCodec.encode(preload) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedUsageMetrics)
+        }
+        if let savedRefreshInterval {
+            cacheDefaults.set(savedRefreshInterval.rawValue, forKey: StorageKeys.refreshInterval)
         }
 
         let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
@@ -111,9 +129,10 @@ final class UsageDataManagerTests: XCTestCase {
             codexAccountStore: codexAccountStore,
             providerVisibilityStore: visibility,
             sharedStore: sharedStore,
+            preferences: cacheDefaults,
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
-            schedulesAutoRefresh: false
+            schedulesAutoRefresh: schedulesAutoRefresh
         )
         return (manager, sharedStore)
     }
@@ -153,15 +172,6 @@ final class UsageDataManagerTests: XCTestCase {
     }
 
     func testChangingRefreshIntervalPublishesToObservers() {
-        let savedRefreshInterval = UserDefaults.standard.object(forKey: StorageKeys.refreshInterval)
-        defer {
-            if let savedRefreshInterval {
-                UserDefaults.standard.set(savedRefreshInterval, forKey: StorageKeys.refreshInterval)
-            } else {
-                UserDefaults.standard.removeObject(forKey: StorageKeys.refreshInterval)
-            }
-        }
-
         let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
         let (manager, _) = makeManager(codex: codex, cursor: cursor)
@@ -173,6 +183,147 @@ final class UsageDataManagerTests: XCTestCase {
 
         XCTAssertEqual(publicationCount, 1)
         withExtendedLifetime(cancellable) {}
+    }
+
+    func testMissingRefreshPreferenceDefaultsToTenMinutes() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        XCTAssertEqual(manager.refreshInterval, .tenMinutes)
+    }
+
+    func testExistingRefreshPreferencesArePreserved() {
+        let existingChoices: [RefreshInterval] = [
+            .oneMinute,
+            .twoMinutes,
+            .fiveMinutes,
+            .fifteenMinutes,
+            .thirtyMinutes,
+            .manual
+        ]
+
+        for existingChoice in existingChoices {
+            let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+            let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+            let (manager, _) = makeManager(
+                codex: codex,
+                cursor: cursor,
+                savedRefreshInterval: existingChoice
+            )
+
+            XCTAssertEqual(manager.refreshInterval, existingChoice)
+        }
+    }
+
+    func testDefaultBackgroundSchedulerUsesTenMinuteCadence() throws {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            schedulesAutoRefresh: true
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 600, accuracy: 0.01)
+
+        manager.refreshInterval = .manual
+        XCTAssertNil(manager.scheduledRefreshInterval)
+    }
+
+    func testRefreshAllSkipsOverlappingCycle() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        cursor.suspendsFetch = true
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        let firstRefresh = Task { await manager.refreshAll() }
+        for _ in 0..<100 where cursor.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard cursor.fetchCount == 1, manager.isLoading else {
+            cursor.resumeFetch()
+            await firstRefresh.value
+            return XCTFail("the first refresh should be suspended inside the provider fetch")
+        }
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(cursor.fetchCount, 1)
+        cursor.resumeFetch()
+        await firstRefresh.value
+        XCTAssertFalse(manager.isLoading)
+    }
+
+    func testWakeRefreshesWhenEnabledCachedDataIsTenMinutesOld() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let staleMetrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
+            lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds)
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.codexCli],
+            preload: [.cursor: staleMetrics]
+        )
+
+        await manager.refreshAfterWakeIfNeeded(now: now)
+
+        XCTAssertEqual(cursor.fetchCount, 1)
+    }
+
+    func testWakeDoesNotRefreshFreshOrManualOnlyData() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let freshMetrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
+            lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds + 1)
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.codexCli],
+            preload: [.cursor: freshMetrics]
+        )
+
+        await manager.refreshAfterWakeIfNeeded(now: now)
+        XCTAssertEqual(cursor.fetchCount, 0)
+
+        manager.metrics[.cursor] = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: freshMetrics.weeklyLimit,
+            lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds)
+        )
+        manager.refreshInterval = .manual
+        await manager.refreshAfterWakeIfNeeded(now: now)
+
+        XCTAssertEqual(cursor.fetchCount, 0)
+    }
+
+    func testWakeIgnoresMissingMetricsForInaccessibleCodexAccounts() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let freshMetrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
+            lastUpdated: now
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            preload: [.cursor: freshMetrics]
+        )
+
+        await manager.refreshAfterWakeIfNeeded(now: now)
+
+        XCTAssertEqual(cursor.fetchCount, 0)
     }
 
     func testRefreshAllPreservesCachedMetricsWhenProviderFails() async {

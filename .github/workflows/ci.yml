@@ -43,6 +43,9 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Test Swift build parity validation
+        run: scripts/test-swift-build-parity.sh
+
       - name: Verify Debug and Release identities
         run: scripts/verify-build-identities.sh
 
@@ -57,6 +60,9 @@ jobs:
 
       - name: Test Homebrew cask update
         run: scripts/test-update-homebrew-cask.sh
+
+      - name: Test CLI JSON smoke validator
+        run: scripts/test-cli-json-smoke.sh
 
       - name: Verify canonical repository URLs
         run: scripts/verify-canonical-repository-urls.sh
@@ -106,6 +112,11 @@ jobs:
           APP_PATH="$RUNNER_TEMP/MeterBarDerivedData/Build/Products/Release/MeterBar.app"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
           scripts/sign-and-verify-release.sh "$APP_PATH" "$APP_VERSION"
+
+      - name: Smoke public CLI JSON commands
+        run: |
+          APP_PATH="$RUNNER_TEMP/MeterBarDerivedData/Build/Products/Release/MeterBar.app"
+          scripts/verify-cli-json-smoke.sh "$APP_PATH/Contents/Helpers/meterbar"
 
   test:
     name: Tests + coverage gate

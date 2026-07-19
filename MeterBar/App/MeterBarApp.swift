@@ -71,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Keep Dock visibility in sync with the user's preference.
         observeDockVisibility()
+        observeSystemWake()
 
         // Create menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -414,6 +415,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] showInDock in
                 Task { @MainActor in
                     self?.applyActivationPolicy(showInDock: showInDock)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// A repeating timer may be delayed while macOS sleeps. Forward one wake
+    /// event to the usage manager, which owns cadence, freshness, and overlap
+    /// policy and only refreshes when enabled data is stale.
+    private func observeSystemWake() {
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didWakeNotification)
+            .sink { _ in
+                Task { @MainActor in
+                    await UsageDataManager.shared.refreshAfterWakeIfNeeded()
                 }
             }
             .store(in: &cancellables)

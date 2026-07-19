@@ -1,0 +1,7 @@
+[
+  {
+    "buildSettings": {
+      "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+      "SWIFT_VERSION": "5.0"
+    }
+  }
