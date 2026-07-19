@@ -49,6 +49,12 @@ jobs:
       - name: Test release tag validation
         run: scripts/test-release-tag.sh
 
+      - name: Test release ancestry validation
+        run: scripts/test-release-ancestry.sh
+
+      - name: Verify signed-release workflow contract
+        run: scripts/verify-release-workflow-contract.sh
+
       - name: Test Homebrew cask update
         run: scripts/test-update-homebrew-cask.sh
 
@@ -113,6 +119,8 @@ jobs:
       # and the Codex cost scan. Floor sits just under the measured baseline as a
       # regression gate. Ratchet this up as coverage improves; never lower it to make
       # a PR pass.
+      # Keep this value in parity with e2e.yml and _build-signed.yml; the
+      # signed-release workflow contract check fails CI if they drift.
       COVERAGE_THRESHOLD: 19
 
     steps:

@@ -33,9 +33,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
           # Full history + tags so `git describe` / `rev-list --count` work.
           fetch-depth: 0
+
+      # Scheduled runs are on master; this also prevents a manual dispatch from
+      # publishing an unmerged branch through the rolling signed channel.
+      - name: Require nightly commit on origin/master
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: scripts/verify-release-ancestry.sh "$RELEASE_COMMIT"
 
       - name: Derive nightly version
         id: version

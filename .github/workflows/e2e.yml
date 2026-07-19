@@ -20,7 +20,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     env:
-      # Keep in sync with the gate in ci.yml (`test` job). Never lower it.
+      # Keep in parity with ci.yml and _build-signed.yml. The signed-release
+      # workflow contract verifier fails PR CI if any broad gate drifts.
       COVERAGE_THRESHOLD: 19
 
     steps:
