@@ -1,7 +1,7 @@
 import Foundation
-import MeterBarShared
 import XCTest
 @testable import MeterBar
+@testable import MeterBarShared
 
 /// Covers `SharedDataStore`'s disk I/O path — encode → atomic write → decode —
 /// which the wire-format contract tests do not exercise (they round-trip through
@@ -89,5 +89,41 @@ final class SharedDataStoreTests: XCTestCase {
         let loaded = store.loadAccountMetrics()
         XCTAssertEqual(loaded.map(\.name), ["Personal", "Work"])
         XCTAssertEqual(loaded.map { $0.metrics.sessionLimit?.used }, [30, 90])
+    }
+
+    func testSharedMetricsLocationPrefersEntitledContainer() {
+        let entitled = URL(fileURLWithPath: "/entitled/group", isDirectory: true)
+        let resolved = SharedMetricsStore.resolvedContainerURL(
+            entitledContainerURL: entitled,
+            homeDirectory: URL(fileURLWithPath: "/Users/example", isDirectory: true),
+            fileExists: { _ in false }
+        )
+
+        XCTAssertEqual(resolved, entitled)
+    }
+
+    func testSharedMetricsLocationFallsBackToExistingCanonicalGroupContainer() {
+        let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+        let expected = home
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Group Containers", isDirectory: true)
+            .appendingPathComponent(SharedMetricsStore.appGroupIdentifier, isDirectory: true)
+        let resolved = SharedMetricsStore.resolvedContainerURL(
+            entitledContainerURL: nil,
+            homeDirectory: home,
+            fileExists: { $0 == expected.path }
+        )
+
+        XCTAssertEqual(resolved, expected)
+    }
+
+    func testSharedMetricsLocationDoesNotInventMissingGroupContainer() {
+        let resolved = SharedMetricsStore.resolvedContainerURL(
+            entitledContainerURL: nil,
+            homeDirectory: URL(fileURLWithPath: "/Users/example", isDirectory: true),
+            fileExists: { _ in false }
+        )
+
+        XCTAssertNil(resolved)
     }
 }
