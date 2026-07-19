@@ -88,7 +88,14 @@ struct MenuBarView: View {
             openDashboard: openDashboard,
             openStatusDetail: openStatusDetail,
             openProviderOverview: openProviderDetail,
-            hoverProviderOverview: hoverProviderDetailChanged
+            hoverProviderOverview: hoverProviderDetailChanged,
+            claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
+            claudeEnabledCustomAccountIDs: claudeAccountStore.enabledAccounts
+              .filter { !$0.isDefault }
+              .map(\.id),
+            claudeEnabledAccountMetrics: claudeAccountStore.enabledAccounts.compactMap {
+              dataManager.claudeCodeAccountMetrics[$0.id]
+            }
           )
 
           if SessionWakeMenuControl.shouldShow(
@@ -326,6 +333,9 @@ struct PopoverOverviewPanel: View {
   /// Hover-driven open for a provider card (opens its detail panel on pointer
   /// enter). Optional so existing/test call sites stay valid.
   var hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)?
+  let claudeDefaultAccountEnabled: Bool
+  let claudeEnabledCustomAccountIDs: [UUID]
+  let claudeEnabledAccountMetrics: [UsageMetrics]
 
   @State private var setupReports: [ProviderReadiness] = []
   @StateObject private var onboarding = FirstRunOnboardingStore.shared
@@ -340,13 +350,19 @@ struct PopoverOverviewPanel: View {
     openDashboard: @escaping () -> Void,
     openStatusDetail: @escaping () -> Void,
     openProviderOverview: @escaping (ProviderSnapshot) -> Void,
-    hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)? = nil
+    hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)? = nil,
+    claudeDefaultAccountEnabled: Bool = true,
+    claudeEnabledCustomAccountIDs: [UUID] = [],
+    claudeEnabledAccountMetrics: [UsageMetrics] = []
   ) {
     self.snapshots = snapshots
     self.openDashboard = openDashboard
     self.openStatusDetail = openStatusDetail
     self.openProviderOverview = openProviderOverview
     self.hoverProviderOverview = hoverProviderOverview
+    self.claudeDefaultAccountEnabled = claudeDefaultAccountEnabled
+    self.claudeEnabledCustomAccountIDs = claudeEnabledCustomAccountIDs
+    self.claudeEnabledAccountMetrics = claudeEnabledAccountMetrics
   }
 
   /// The enabled providers currently shown in the popover.
@@ -376,12 +392,31 @@ struct PopoverOverviewPanel: View {
     let snapshotIDs: [String]
   }
 
+  private struct ReadinessInputKey: Equatable {
+    let providers: [ServiceType]
+    let defaultClaudeAccountEnabled: Bool
+    let enabledClaudeCustomAccountIDs: [UUID]
+    let claudeMetricFreshness: [Bool]
+  }
+
   private var structuralKey: StructuralKey {
     StructuralKey(
       showsFirstRun: onboarding.shouldPresent,
       isEmpty: snapshots.isEmpty,
       setupProviders: providersNeedingSetup.map(\.provider),
       snapshotIDs: snapshots.map(\.id)
+    )
+  }
+
+  private var readinessInputKey: ReadinessInputKey {
+    let now = Date()
+    return ReadinessInputKey(
+      providers: ServiceType.allCases.filter { enabledProviders.contains($0) },
+      defaultClaudeAccountEnabled: claudeDefaultAccountEnabled,
+      enabledClaudeCustomAccountIDs: claudeEnabledCustomAccountIDs,
+      claudeMetricFreshness: claudeEnabledAccountMetrics.map {
+        ProviderReadinessInspector.hasRecentClaudeUsageFetch(metrics: $0, now: now)
+      }
     )
   }
 
@@ -442,7 +477,7 @@ struct PopoverOverviewPanel: View {
       MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
       value: structuralKey
     )
-    .task {
+    .task(id: readinessInputKey) {
       await loadSetupReports()
     }
   }
@@ -501,9 +536,16 @@ struct PopoverOverviewPanel: View {
   /// I/O) and publishes the reports back for the checklist.
   private func loadSetupReports() async {
     let requestedProviders = enabledProviders
+    let defaultAccountEnabled = claudeDefaultAccountEnabled
+    let accountMetrics = claudeEnabledAccountMetrics
     let reports = await Task.detached(priority: .utility) {
-      ProviderReadinessInspector.reports(providers: requestedProviders)
+      ProviderReadinessInspector.reports(
+        providers: requestedProviders,
+        claudeDefaultAccountEnabled: defaultAccountEnabled,
+        claudeEnabledAccountMetrics: accountMetrics
+      )
     }.value
+    guard !Task.isCancelled else { return }
     setupReports = reports
   }
 }
