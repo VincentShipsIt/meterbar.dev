@@ -43,7 +43,7 @@ nonisolated public enum ProviderReadinessInspector {
         return baseReports.map { report in
             let record = health[report.provider]
             let providerMetrics = metrics[report.provider]
-            ProviderReadiness(
+            return ProviderReadiness(
                 provider: report.provider,
                 checks: reconciledRefreshChecks(
                     report.checks,
