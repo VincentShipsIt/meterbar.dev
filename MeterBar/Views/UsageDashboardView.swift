@@ -538,6 +538,11 @@ struct UsageDashboardView: View {
                 formattedTokens: UsageFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
             )
 
+            LifetimeCostSummaryCard(
+                summary: visibleCostSummary?.lifetime,
+                isScanning: costTracker.isRefreshInProgress
+            )
+
             costTrendCard
 
             if let summary = visibleCostSummary, !summary.dailyUsage.isEmpty {

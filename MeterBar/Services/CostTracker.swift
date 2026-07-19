@@ -60,14 +60,15 @@ class CostTracker: ObservableObject {
         }
     }
 
-    /// Quietly backfills missing daily rows when Overview/Costs opens, without the
-    /// visible "Scanning" UI a manual scan shows. No-ops unless the cached summary
-    /// actually has gaps in the visible window (see `needsMissingDailyUsageRefresh`).
+    /// Quietly backfills a legacy cache's missing lifetime snapshot or missing
+    /// daily rows when Overview/Costs opens, without the visible "Scanning" UI
+    /// a manual scan shows.
     func refreshMissingDaysInBackground(days: Int = 30) async {
         let shouldStart = await MainActor.run {
             guard !isRefreshInProgress,
                   let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
-                  visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate) else {
+                  visibleSummary.lifetime == nil
+                    || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate) else {
                 return false
             }
             isRefreshingMissingDays = true
@@ -106,10 +107,38 @@ class CostTracker: ObservableObject {
         claudeAccounts: [ClaudeCodeAccount]
     ) -> CostSummary {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let periodScan = Self.scanCostSources(
+            since: cutoffDate,
+            includeClaudeCode: includeClaudeCode,
+            includeCodexCli: includeCodexCli,
+            claudeAccounts: claudeAccounts
+        )
+        let lifetimeScan = Self.scanCostSources(
+            since: .distantPast,
+            includeClaudeCode: includeClaudeCode,
+            includeCodexCli: includeCodexCli,
+            claudeAccounts: claudeAccounts
+        )
+
+        return CostSummary(
+            costs: periodScan.costs,
+            totalCostUSD: periodScan.costs.reduce(0) { $0 + $1.estimatedCostUSD },
+            totalTokens: periodScan.costs.reduce(0) { $0 + $1.totalTokens },
+            periodDays: days,
+            dailyUsage: periodScan.dailyUsage.sorted { $0.date < $1.date },
+            lifetime: LifetimeCostSummary(costs: lifetimeScan.costs)
+        )
+    }
+
+    nonisolated private static func scanCostSources(
+        since cutoffDate: Date,
+        includeClaudeCode: Bool,
+        includeCodexCli: Bool,
+        claudeAccounts: [ClaudeCodeAccount]
+    ) -> (costs: [TokenCost], dailyUsage: [DailyTokenUsage]) {
         var allCosts: [TokenCost] = []
         var dailyUsage: [DailyTokenUsage] = []
 
-        // Scan Claude Code sessions
         if includeClaudeCode,
            let (claudeCost, claudeDailyUsage) = Self.scanClaudeCodeSessions(
             since: cutoffDate,
@@ -125,17 +154,7 @@ class CostTracker: ObservableObject {
             dailyUsage.append(contentsOf: codexDailyUsage)
         }
 
-        // Calculate summary
-        let totalCost = allCosts.reduce(0) { $0 + $1.estimatedCostUSD }
-        let totalTokens = allCosts.reduce(0) { $0 + $1.totalTokens }
-
-        return CostSummary(
-            costs: allCosts,
-            totalCostUSD: totalCost,
-            totalTokens: totalTokens,
-            periodDays: days,
-            dailyUsage: dailyUsage.sorted { $0.date < $1.date }
-        )
+        return (allCosts, dailyUsage)
     }
 
     private func loadCachedSummary() {

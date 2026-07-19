@@ -134,6 +134,73 @@ struct CostOverviewStatusCard: View {
   }
 }
 
+struct LifetimeCostSummaryCard: View {
+  let summary: LifetimeCostSummary?
+  let isScanning: Bool
+
+  var body: some View {
+    DashboardCard(title: "Lifetime Local Cost", trailing: trackedDateRange) {
+      if let summary, summary.hasBillableHistory {
+        VStack(alignment: .leading, spacing: 12) {
+          Text(summary.formattedTotalCost)
+            .font(.largeTitle)
+            .fontWeight(.bold)
+            .contentTransition(.numericText())
+
+          ForEach(summary.providers) { provider in
+            HStack(spacing: 10) {
+              ProviderTitle(
+                title: provider.provider.displayName,
+                logoKind: .forService(provider.provider),
+                color: MeterBarTheme.accent(for: provider.provider),
+                font: .subheadline
+              )
+              Spacer()
+              Text(provider.formattedCost)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(provider.provider.displayName)
+            .accessibilityValue(provider.formattedCost)
+          }
+        }
+      } else if isScanning {
+        HStack(spacing: 10) {
+          ProgressView()
+            .controlSize(.small)
+          Text("Scanning all available local history…")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+      } else if summary == nil {
+        EmptyStateCard(
+          systemImage: "magnifyingglass",
+          title: "Lifetime scan needed",
+          message: "Run a local scan to calculate lifetime cost from available history."
+        )
+      } else {
+        EmptyStateCard(
+          systemImage: "clock.arrow.circlepath",
+          title: "No lifetime cost",
+          message: "No billable Claude or Codex history was found in local logs."
+        )
+      }
+    }
+  }
+
+  private var trackedDateRange: String? {
+    guard let firstDate = summary?.firstTrackedDate,
+          let lastDate = summary?.lastTrackedDate else {
+      return nil
+    }
+
+    let first = firstDate.formatted(date: .abbreviated, time: .omitted)
+    let last = lastDate.formatted(date: .abbreviated, time: .omitted)
+    return first == last ? first : "\(first) – \(last)"
+  }
+}
+
 /// Full-area loading treatment for the **first** scan, when there is no cost
 /// data to show yet. It replaces the entire chart with an animated shimmer so
 /// the empty slot reads as "working on it" rather than "nothing here." Contrast

@@ -140,25 +140,99 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }()
 }
 
+nonisolated public struct LifetimeProviderCost: Codable, Identifiable, Equatable, Sendable {
+    public var id: String { provider.rawValue }
+
+    public let provider: ServiceType
+    public let estimatedCostUSD: Double
+    public let firstTrackedDate: Date
+    public let lastTrackedDate: Date
+
+    public init(
+        provider: ServiceType,
+        estimatedCostUSD: Double,
+        firstTrackedDate: Date,
+        lastTrackedDate: Date
+    ) {
+        self.provider = provider
+        self.estimatedCostUSD = estimatedCostUSD
+        self.firstTrackedDate = firstTrackedDate
+        self.lastTrackedDate = lastTrackedDate
+    }
+
+    public var formattedCost: String {
+        UsageFormat.cost(estimatedCostUSD)
+    }
+}
+
+/// A complete, point-in-time total over every billable local session currently
+/// available to CostTracker. Each scan replaces this snapshot instead of
+/// merging with the previous cache, so overlapping or repeated scans cannot
+/// inflate the lifetime total.
+nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
+    public let providers: [LifetimeProviderCost]
+    public let totalCostUSD: Double
+    public let firstTrackedDate: Date?
+    public let lastTrackedDate: Date?
+
+    public init(costs: [TokenCost]) {
+        var byProvider: [ServiceType: LifetimeProviderCost] = [:]
+
+        for cost in costs where cost.estimatedCostUSD > 0 {
+            let existing = byProvider[cost.provider]
+            byProvider[cost.provider] = LifetimeProviderCost(
+                provider: cost.provider,
+                estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + cost.estimatedCostUSD,
+                firstTrackedDate: min(existing?.firstTrackedDate ?? cost.periodStart, cost.periodStart),
+                lastTrackedDate: max(existing?.lastTrackedDate ?? cost.periodEnd, cost.periodEnd)
+            )
+        }
+
+        self.init(providers: byProvider.values.sorted { $0.provider.rawValue < $1.provider.rawValue })
+    }
+
+    private init(providers: [LifetimeProviderCost]) {
+        self.providers = providers
+        totalCostUSD = providers.reduce(0) { $0 + $1.estimatedCostUSD }
+        firstTrackedDate = providers.map(\.firstTrackedDate).min()
+        lastTrackedDate = providers.map(\.lastTrackedDate).max()
+    }
+
+    public var hasBillableHistory: Bool {
+        !providers.isEmpty && totalCostUSD > 0
+    }
+
+    public var formattedTotalCost: String {
+        UsageFormat.cost(totalCostUSD)
+    }
+
+    public func filtered(to enabledServices: Set<ServiceType>) -> LifetimeCostSummary {
+        LifetimeCostSummary(providers: providers.filter { enabledServices.contains($0.provider) })
+    }
+}
+
 nonisolated public struct CostSummary: Codable, Sendable {
     public let costs: [TokenCost]
     public let totalCostUSD: Double
     public let totalTokens: Int
     public let periodDays: Int
     public let dailyUsage: [DailyTokenUsage]
+    public let lifetime: LifetimeCostSummary?
 
     public init(
         costs: [TokenCost],
         totalCostUSD: Double,
         totalTokens: Int,
         periodDays: Int,
-        dailyUsage: [DailyTokenUsage] = []
+        dailyUsage: [DailyTokenUsage] = [],
+        lifetime: LifetimeCostSummary? = nil
     ) {
         self.costs = costs
         self.totalCostUSD = totalCostUSD
         self.totalTokens = totalTokens
         self.periodDays = periodDays
         self.dailyUsage = dailyUsage
+        self.lifetime = lifetime
     }
 
     public var formattedTotalCost: String {
@@ -276,7 +350,8 @@ nonisolated public struct CostSummary: Codable, Sendable {
             totalCostUSD: visibleCosts.reduce(0) { $0 + $1.estimatedCostUSD },
             totalTokens: visibleCosts.reduce(0) { $0 + $1.totalTokens },
             periodDays: periodDays,
-            dailyUsage: visibleDailyUsage
+            dailyUsage: visibleDailyUsage,
+            lifetime: lifetime?.filtered(to: enabledServices)
         )
     }
 }
