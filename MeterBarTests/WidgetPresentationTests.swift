@@ -105,7 +105,9 @@ final class WidgetPresentationTests: XCTestCase {
     }
 
     func testUsedAndRemainingModesProduceComplementaryValues() throws {
-        let metrics = [.claudeCode: makeMetrics(.claudeCode, weeklyUsed: 25)]
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 25)
+        ]
         var usedPreferences = WidgetPreferences.defaults
         usedPreferences.displayMode = .used
         var remainingPreferences = usedPreferences
@@ -126,7 +128,9 @@ final class WidgetPresentationTests: XCTestCase {
     }
 
     func testOpenRouterDefaultsToLegacyRemainingBalanceUntilDisplayModeIsChosen() throws {
-        let metrics = [.openRouter: makeMetrics(.openRouter, weeklyUsed: 25)]
+        let metrics: [ServiceType: UsageMetrics] = [
+            .openRouter: makeMetrics(.openRouter, weeklyUsed: 25)
+        ]
         let legacy = try XCTUnwrap(presentation(metrics: metrics).rows.first)
         var explicitlyUsed = WidgetPreferences.defaults
         explicitlyUsed.preservesLegacyOpenRouterBalance = false
@@ -147,7 +151,7 @@ final class WidgetPresentationTests: XCTestCase {
     func testSelectedQuotaWindowsUseStableOrderAndIgnoreUnavailableWindows() {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = [.codeReview, .weekly, .session]
-        let metrics = [
+        let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(
                 .claudeCode,
                 sessionUsed: 10,
@@ -177,7 +181,7 @@ final class WidgetPresentationTests: XCTestCase {
 
     func testResetAndFreshnessMetadataObeyIndependentToggles() throws {
         let resetTime = now.addingTimeInterval(600)
-        let metrics = [
+        let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(
                 .claudeCode,
                 weeklyUsed: 25,
@@ -203,14 +207,14 @@ final class WidgetPresentationTests: XCTestCase {
 
     func testStalenessBoundaryIsHealthyAndOneSecondOlderIsStale() throws {
         let threshold: TimeInterval = 3_600
-        let atBoundary = [
+        let atBoundary: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(
                 .claudeCode,
                 weeklyUsed: 25,
                 lastUpdated: now.addingTimeInterval(-threshold)
             )
         ]
-        let older = [
+        let older: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(
                 .claudeCode,
                 weeklyUsed: 25,
@@ -316,7 +320,9 @@ final class WidgetPresentationTests: XCTestCase {
     func testAccountSnapshotsReplaceAggregateProviderRowAndPreserveNames() {
         let firstID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
         let secondID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2))
-        let aggregate = [.claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90)]
+        let aggregate: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90)
+        ]
         let accounts = [
             AccountUsageSnapshot(
                 id: firstID,
