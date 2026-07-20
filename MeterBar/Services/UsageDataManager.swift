@@ -427,6 +427,23 @@ class UsageDataManager: ObservableObject {
            let decoded = try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data) {
             codexAccountMetrics = decoded
         }
+
+        guard claudeCodeAccountMetrics.isEmpty || codexAccountMetrics.isEmpty else { return }
+        let sharedSnapshots = sharedStore.loadAccountMetrics()
+        if claudeCodeAccountMetrics.isEmpty {
+            claudeCodeAccountMetrics = Dictionary(
+                uniqueKeysWithValues: sharedSnapshots
+                    .filter { $0.metrics.service == .claudeCode }
+                    .map { ($0.id, $0.metrics) }
+            )
+        }
+        if codexAccountMetrics.isEmpty {
+            codexAccountMetrics = Dictionary(
+                uniqueKeysWithValues: sharedSnapshots
+                    .filter { $0.metrics.service == .codexCli }
+                    .map { ($0.id, $0.metrics) }
+            )
+        }
     }
 
     private func saveCachedAccountMetrics() {

@@ -3,6 +3,11 @@ import MeterBarShared
 
 /// Public facade used by the bundled `meterbar refresh` command.
 public enum UsageRefreshCLI {
+    @MainActor
+    private final class NoopFableSessionTracker: ClaudeFableSessionTracking {
+        func scheduleRefresh(accounts _: [ClaudeCodeAccount]) {}
+    }
+
     public static let defaultTimeout: TimeInterval = 60
     public static let minimumTimeout: TimeInterval = 1
     public static let maximumTimeout: TimeInterval = 600
@@ -73,6 +78,7 @@ public enum UsageRefreshCLI {
     ) -> UsageDataManager {
         UsageDataManager(
             claudeCodeAccountStore: ClaudeCodeAccountStore(accounts: configuration.claudeAccounts),
+            claudeFableSessionTracker: NoopFableSessionTracker(),
             codexAccountStore: CodexAccountStore(accounts: configuration.codexAccounts),
             providerVisibilityStore: ProviderVisibilityStore(hiddenServices: configuration.hiddenServices),
             sharedStore: sharedStore,
