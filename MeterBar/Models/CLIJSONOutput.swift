@@ -180,6 +180,41 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     }
 }
 
+/// Version 1 contract for the persisted, metadata-only Fable session snapshot.
+nonisolated public struct FableSessionsCLIJSONResponse: CLIJSONDocument {
+    public static let currentSchemaVersion = 1
+
+    private let schemaVersion = currentSchemaVersion
+    private let sessions: [Session]
+
+    public init(sessions: [ClaudeFableSession]) {
+        self.sessions = ClaudeFableSessionPresentation.normalized(sessions).map(Session.init)
+    }
+
+    private struct Session: Encodable {
+        let id: String
+        let profile: Profile
+        let model: String
+        let state: String
+        let firstObservedAt: Date
+        let lastObservedAt: Date
+
+        init(_ session: ClaudeFableSession) {
+            id = session.id
+            profile = Profile(id: session.accountID, name: session.accountName)
+            model = session.model
+            state = session.state.rawValue
+            firstObservedAt = session.firstObservedAt
+            lastObservedAt = session.lastObservedAt
+        }
+    }
+
+    private struct Profile: Encodable {
+        let id: UUID
+        let name: String
+    }
+}
+
 /// Versioned error envelope used when a JSON command has no cached input.
 nonisolated public struct CLIJSONErrorResponse: CLIJSONDocument {
     public static let currentSchemaVersion = 1

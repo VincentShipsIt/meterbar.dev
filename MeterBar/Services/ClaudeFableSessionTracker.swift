@@ -3,23 +3,23 @@ import Foundation
 import MeterBarShared
 import os
 
-nonisolated struct ClaudeFableSession: Codable, Equatable, Identifiable, Sendable {
-    enum State: String, Codable, Sendable {
+nonisolated public struct ClaudeFableSession: Codable, Equatable, Identifiable, Sendable {
+    public enum State: String, Codable, Sendable {
         case active
         case completed
         case unknown
     }
 
-    let id: String
-    let sourceSessionID: String
-    let accountID: UUID
-    let accountName: String
-    let model: String
-    let firstObservedAt: Date
-    let lastObservedAt: Date
-    let state: State
+    public let id: String
+    public let sourceSessionID: String
+    public let accountID: UUID
+    public let accountName: String
+    public let model: String
+    public let firstObservedAt: Date
+    public let lastObservedAt: Date
+    public let state: State
 
-    init(
+    public init(
         sourceSessionID: String,
         accountID: UUID,
         accountName: String,
@@ -433,16 +433,19 @@ actor ClaudeFableSessionScanner {
     }
 }
 
-@MainActor
-final class ClaudeFableSessionStore {
+nonisolated public final class ClaudeFableSessionStore {
     private let userDefaults: UserDefaults
     private let storageKey: String
     private let retention: TimeInterval
     private let activeWindow: TimeInterval
     private let maxRecords: Int
 
+    public convenience init() {
+        self.init(userDefaults: nil)
+    }
+
     init(
-        userDefaults: UserDefaults? = nil,
+        userDefaults: UserDefaults?,
         storageKey: String = StorageKeys.claudeFableSessions,
         retention: TimeInterval = ClaudeFableSessionPolicy.retention,
         activeWindow: TimeInterval = ClaudeFableSessionPolicy.activeWindow,
@@ -457,7 +460,7 @@ final class ClaudeFableSessionStore {
         self.maxRecords = max(1, maxRecords)
     }
 
-    func load(now: Date = Date()) -> [ClaudeFableSession] {
+    public func load(now: Date = Date()) -> [ClaudeFableSession] {
         guard let data = userDefaults.data(forKey: storageKey),
               let decoded = try? JSONDecoder().decode([ClaudeFableSession].self, from: data) else {
             return []
