@@ -631,7 +631,7 @@ struct UsageDashboardView: View {
     }
 
     private var costTrendCard: some View {
-        DashboardCard(title: "30 Day Token Spend", trailing: costRefreshStatusText) {
+        DashboardCard(title: "30 Day Spend", trailing: costRefreshStatusText) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
                     "Local subscription logs are estimated using API token rates "
@@ -640,10 +640,26 @@ struct UsageDashboardView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                if costTracker.isScanning {
-                    costScanChart(height: 220, compact: false, showsProgressBadge: true)
-                } else if let summary = visibleCostSummary {
-                    DailyUsageChart(dailyUsage: summary.dailyUsage)
+                if let summary = visibleCostSummary {
+                    let presentation = CostChartPresentation(summary: summary)
+                    ZStack {
+                        if presentation.hasSpend {
+                            CostSpendCharts(presentation: presentation)
+                                .opacity(costTracker.isScanning ? 0.42 : 1)
+                        } else {
+                            EmptyStateCard(
+                                systemImage: "chart.bar.xaxis",
+                                title: "No spend in this window",
+                                message: "No billable Claude or Codex usage was found in the last 30 days."
+                            )
+                        }
+
+                        if costTracker.isScanning {
+                            CostScanProgressBadge(compact: false)
+                        }
+                    }
+                } else if costTracker.isScanning {
+                    CostScanLoadingChart(compact: false)
                         .frame(height: 220)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
@@ -743,24 +759,6 @@ struct UsageDashboardView: View {
             from: visibleCostSummary.dailyUsage,
             now: generatedAt
         )
-    }
-
-    private func costScanChart(height: CGFloat, compact: Bool, showsProgressBadge: Bool = true) -> some View {
-        ZStack {
-            if let summary = visibleCostSummary, !summary.dailyUsage.isEmpty {
-                DailyUsageChart(dailyUsage: summary.dailyUsage)
-                    .opacity(costTracker.isScanning ? 0.42 : 1)
-            } else if costTracker.isScanning {
-                CostScanLoadingChart(compact: compact)
-            } else {
-                DailyUsageChart(dailyUsage: [])
-            }
-
-            if showsProgressBadge, costTracker.isScanning, visibleCostSummary?.dailyUsage.isEmpty == false {
-                CostScanProgressBadge(compact: compact)
-            }
-        }
-        .frame(height: height)
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
