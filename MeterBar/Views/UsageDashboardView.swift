@@ -167,6 +167,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
 enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     case general = "General"
     case providers = "Providers"
+    case widget = "Widget"
     case apiUsage = "API Usage"
     case cost = "Cost"
     case automation = "Automation"
@@ -178,6 +179,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general: return "gearshape"
         case .providers: return "square.grid.2x2"
+        case .widget: return "rectangle.3.group"
         case .apiUsage: return "key"
         case .cost: return "chart.bar"
         case .automation: return "moon.zzz"
@@ -475,6 +477,8 @@ struct UsageDashboardView: View {
             GeneralSettingsView()
         case .providers:
             ProviderSettingsView()
+        case .widget:
+            WidgetSettingsView()
         case .apiUsage:
             ApiUsageSettingsView()
         case .cost:
