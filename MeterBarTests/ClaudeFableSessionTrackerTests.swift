@@ -431,7 +431,7 @@ final class ClaudeFableSessionTrackerTests: XCTestCase {
             "cwd": cwd,
             "message": [
                 "model": model,
-                "stop_reason": stopReason ?? NSNull(),
+                "stop_reason": stopReason.map { $0 as Any } ?? NSNull(),
                 "content": promptContent,
                 "usage": [
                     "input_tokens": 10,
