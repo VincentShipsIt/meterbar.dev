@@ -109,7 +109,7 @@ final class WidgetSettingsTests: XCTestCase {
         }
     }
 
-    func testWidgetSettingsAndAllPreviewAppearancesRender() throws {
+    func testWidgetSettingsAndAllPreviewAppearancesRender() {
         let settingsView = NSHostingView(rootView: WidgetSettingsView().frame(width: 720))
         settingsView.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(settingsView.fittingSize.height, 0)
@@ -136,98 +136,6 @@ final class WidgetSettingsTests: XCTestCase {
             )
             gallery.layoutSubtreeIfNeeded()
             XCTAssertGreaterThan(gallery.fittingSize.height, 0, appearance.title)
-        }
-
-        try captureReviewScreenshots(data: data)
-    }
-
-    private func captureReviewScreenshots(
-        data: WidgetSettingsPreviewData
-    ) throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("WidgetSettingsReview-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-
-        try writeScreenshot(
-            WidgetSettingsView()
-                .frame(width: 720)
-                .padding(24)
-                .background(Color.white)
-                .environment(\.colorScheme, .light),
-            size: CGSize(width: 768, height: 1_650),
-            to: directory.appendingPathComponent("widget-settings.png")
-        )
-
-        for family in WidgetPresentationFamily.allCases {
-            let presentation = WidgetPresentationPlanner.makePresentation(
-                metrics: data.metrics,
-                accountMetrics: data.accountMetrics,
-                preferences: .defaults,
-                family: family,
-                now: Date()
-            )
-            let preview = WidgetSettingsPreviewSurface(
-                family: family,
-                presentation: presentation,
-                appearance: .light
-            )
-            try writeScreenshot(
-                preview,
-                size: family.reviewScreenshotSize,
-                to: directory.appendingPathComponent("\(family.reviewFilename).png")
-            )
-        }
-    }
-
-    private func writeScreenshot<Content: View>(
-        _ content: Content,
-        size: CGSize,
-        to url: URL
-    ) throws {
-        let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(origin: .zero, size: size)
-        hostingView.layoutSubtreeIfNeeded()
-        guard let representation = hostingView.bitmapImageRepForCachingDisplay(
-            in: hostingView.bounds
-        ) else {
-            XCTFail("Could not create screenshot bitmap for \(url.lastPathComponent)")
-            return
-        }
-        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
-        guard let png = representation.representation(using: .png, properties: [:]) else {
-            XCTFail("Could not encode screenshot \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url, options: .atomic)
-        let base64 = png.base64EncodedString(
-            options: [.lineLength76Characters, .endLineWithLineFeed]
-        )
-        let payload = """
-        METERBAR_SCREENSHOT_BEGIN \(url.lastPathComponent)
-        \(base64)
-        METERBAR_SCREENSHOT_END \(url.lastPathComponent)
-        """
-        FileHandle.standardOutput.write(Data(payload.utf8))
-    }
-}
-
-private extension WidgetPresentationFamily {
-    var reviewFilename: String {
-        switch self {
-        case .small: return "widget-small"
-        case .medium: return "widget-medium"
-        case .large: return "widget-large"
-        }
-    }
-
-    var reviewScreenshotSize: CGSize {
-        switch self {
-        case .small: return CGSize(width: 150, height: 150)
-        case .medium: return CGSize(width: 310, height: 150)
-        case .large: return CGSize(width: 310, height: 300)
         }
     }
 }
