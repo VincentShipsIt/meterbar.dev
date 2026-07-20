@@ -171,8 +171,6 @@ class UsageDataManager: ObservableObject {
             codexAccountMetrics = fetch.metrics
             if let representative = representativeCodexMetrics(from: fetch.metrics) {
                 newMetrics[.codexCli] = representative
-            } else if let cachedMetrics = self.metrics[.codexCli] {
-                newMetrics[.codexCli] = cachedMetrics
             }
             states[.codexCli] = accountFetchState(fetch)
         } else {
