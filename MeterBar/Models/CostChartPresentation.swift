@@ -35,11 +35,11 @@ nonisolated struct CostChartPresentation: Sendable {
     ) {
         let normalizedDays = max(1, requestedDays)
         let today = calendar.startOfDay(for: now)
-        let startDate = calendar.date(
-            byAdding: .day,
-            value: -(normalizedDays - 1),
-            to: today
-        ) ?? today
+        let startDate = CostTracker.costWindowStart(
+            days: normalizedDays,
+            now: now,
+            calendar: calendar
+        )
         let windowRows = summary.dailyUsage.filter { row in
             let day = calendar.startOfDay(for: row.date)
             return day >= startDate && day <= today
