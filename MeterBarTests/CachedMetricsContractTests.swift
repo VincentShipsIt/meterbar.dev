@@ -57,7 +57,11 @@ final class CachedMetricsContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: data) as? [String: Any]
         )
 
-        for key in ["id", "service", "sessionLimit", "weeklyLimit", "extraUsage", "resetCreditsAvailable", "lastUpdated"] {
+        let topLevelKeys = [
+            "id", "service", "sessionLimit", "weeklyLimit",
+            "extraUsage", "resetCreditsAvailable", "lastUpdated",
+        ]
+        for key in topLevelKeys {
             XCTAssertNotNil(object[key], "missing top-level key '\(key)'")
         }
 
@@ -113,6 +117,7 @@ final class CachedMetricsContractTests: XCTestCase {
         // writer from the readers, so pin the wire values here.
         XCTAssertEqual(SharedMetricsStore.appGroupIdentifier, "group.dev.meterbar.app")
         XCTAssertEqual(SharedMetricsStore.metricsKey, "cached_usage_metrics")
+        XCTAssertEqual(SharedMetricsStore.fableSessionsKey, "claude_fable_sessions_v1")
     }
 
     func testAppStorageKeyIsSingleSourcedFromShared() {

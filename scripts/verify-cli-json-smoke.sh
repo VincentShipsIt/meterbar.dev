@@ -35,12 +35,14 @@ run_json_command() {
 
 run_json_command usage
 run_json_command cost
+run_json_command fable-sessions
 run_json_command doctor
 
 python3 - \
   "$temporary_directory/usage.stdout" \
   "$temporary_directory/cost.stdout" \
-  "$temporary_directory/doctor.stdout" <<'PY'
+  "$temporary_directory/doctor.stdout" \
+  "$temporary_directory/fable-sessions.stdout" <<'PY'
 import json
 import math
 import sys
@@ -208,6 +210,38 @@ def validate_cost(document):
         require_number(provider.get("estimatedCostUSD"), f"{path}.estimatedCostUSD")
 
 
+def validate_fable_sessions(document):
+    require(isinstance(document, dict), "fable-sessions must be a JSON object")
+    require(document.get("schemaVersion") == 1, "fable-sessions.schemaVersion must equal 1")
+    sessions = document.get("sessions")
+    require(isinstance(sessions, list), "fable-sessions.sessions must be an array")
+    reject_secret_keys(document, path="fable-sessions")
+
+    allowed_states = {"active", "completed", "unknown"}
+    expected_keys = {
+        "id",
+        "profile",
+        "model",
+        "state",
+        "firstObservedAt",
+        "lastObservedAt",
+    }
+    for session_index, session in enumerate(sessions):
+        path = f"fable-sessions.sessions[{session_index}]"
+        require(isinstance(session, dict), f"{path} must be an object")
+        require(set(session) == expected_keys, f"{path} fields do not match the metadata-only DTO")
+        require(isinstance(session["id"], str) and session["id"], f"{path}.id must be non-empty")
+        require(isinstance(session["model"], str) and session["model"], f"{path}.model must be non-empty")
+        require(session["state"] in allowed_states, f"{path}.state is unexpected")
+        for field in ("firstObservedAt", "lastObservedAt"):
+            require(isinstance(session[field], str) and session[field], f"{path}.{field} must be non-empty")
+        profile = session["profile"]
+        require(isinstance(profile, dict), f"{path}.profile must be an object")
+        require(set(profile) == {"id", "name"}, f"{path}.profile fields are unexpected")
+        require(isinstance(profile["id"], str) and profile["id"], f"{path}.profile.id must be non-empty")
+        require(isinstance(profile["name"], str) and profile["name"], f"{path}.profile.name must be non-empty")
+
+
 def reject_secret_keys(value, path="doctor"):
     forbidden_fragments = (
         "authorization",
@@ -278,9 +312,11 @@ def validate_doctor(document):
 usage = load_document(sys.argv[1], "usage")
 cost = load_document(sys.argv[2], "cost")
 doctor = load_document(sys.argv[3], "doctor")
+fable_sessions = load_document(sys.argv[4], "fable-sessions")
 
 validate_usage(usage)
 validate_cost(cost)
 validate_doctor(doctor)
-print("Usage, cost, and doctor JSON command contracts verified.")
+validate_fable_sessions(fable_sessions)
+print("Usage, cost, Fable sessions, and doctor JSON command contracts verified.")
 PY

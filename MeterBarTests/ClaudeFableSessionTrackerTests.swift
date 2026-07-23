@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 import XCTest
 @testable import MeterBar
 
@@ -235,6 +236,64 @@ final class ClaudeFableSessionTrackerTests: XCTestCase {
         XCTAssertEqual(persisted.firstObservedAt, first.firstObservedAt)
         XCTAssertEqual(persisted.lastObservedAt, repeated.lastObservedAt)
         XCTAssertEqual(persisted.accountName, "Renamed")
+    }
+
+    func testStoreMirrorsSessionMetadataToSharedFileForCLI() throws {
+        let sharedFileURL = tempDirectory
+            .appendingPathComponent("\(SharedMetricsStore.fableSessionsKey).json")
+        let persisted = session(
+            id: "shared",
+            first: now.addingTimeInterval(-300),
+            last: now,
+            state: .completed
+        )
+        ClaudeFableSessionStore(
+            userDefaults: defaults,
+            sharedFileURL: sharedFileURL
+        ).merge([persisted], now: now)
+
+        let cliSuiteName = "ClaudeFableSessionTrackerTests-cli-\(UUID().uuidString)"
+        let cliDefaults = try XCTUnwrap(UserDefaults(suiteName: cliSuiteName))
+        defer { cliDefaults.removePersistentDomain(forName: cliSuiteName) }
+        cliDefaults.removePersistentDomain(forName: cliSuiteName)
+
+        let loaded = ClaudeFableSessionStore(
+            userDefaults: cliDefaults,
+            sharedFileURL: sharedFileURL
+        ).load(now: now)
+
+        XCTAssertNil(cliDefaults.data(forKey: StorageKeys.claudeFableSessions))
+        XCTAssertEqual(loaded, [persisted])
+    }
+
+    func testSharedFileWinsOverDivergentCLIPreferenceDomain() throws {
+        let sharedFileURL = tempDirectory
+            .appendingPathComponent("\(SharedMetricsStore.fableSessionsKey).json")
+        let shared = session(
+            id: "shared",
+            first: now.addingTimeInterval(-300),
+            last: now,
+            state: .completed
+        )
+        try JSONEncoder().encode([shared]).write(to: sharedFileURL, options: [.atomic])
+
+        let stale = session(
+            id: "stale",
+            first: now.addingTimeInterval(-600),
+            last: now.addingTimeInterval(-500),
+            state: .unknown
+        )
+        defaults.set(
+            try JSONEncoder().encode([stale]),
+            forKey: StorageKeys.claudeFableSessions
+        )
+
+        let loaded = ClaudeFableSessionStore(
+            userDefaults: defaults,
+            sharedFileURL: sharedFileURL
+        ).load(now: now)
+
+        XCTAssertEqual(loaded, [shared])
     }
 
     func testStoreRepairsDuplicatePersistedIdentifiersWithoutTrapping() throws {

@@ -3,23 +3,23 @@ import Foundation
 import MeterBarShared
 import os
 
-nonisolated struct ClaudeFableSession: Codable, Equatable, Identifiable, Sendable {
-    enum State: String, Codable, Sendable {
+nonisolated public struct ClaudeFableSession: Codable, Equatable, Identifiable, Sendable {
+    public enum State: String, Codable, Sendable {
         case active
         case completed
         case unknown
     }
 
-    let id: String
-    let sourceSessionID: String
-    let accountID: UUID
-    let accountName: String
-    let model: String
-    let firstObservedAt: Date
-    let lastObservedAt: Date
-    let state: State
+    public let id: String
+    public let sourceSessionID: String
+    public let accountID: UUID
+    public let accountName: String
+    public let model: String
+    public let firstObservedAt: Date
+    public let lastObservedAt: Date
+    public let state: State
 
-    init(
+    public init(
         sourceSessionID: String,
         accountID: UUID,
         accountName: String,
@@ -433,33 +433,52 @@ actor ClaudeFableSessionScanner {
     }
 }
 
-@MainActor
-final class ClaudeFableSessionStore {
+nonisolated public final class ClaudeFableSessionStore {
     private let userDefaults: UserDefaults
+    private let sharedFileURL: URL?
     private let storageKey: String
     private let retention: TimeInterval
     private let activeWindow: TimeInterval
     private let maxRecords: Int
 
+    public convenience init() {
+        self.init(userDefaults: nil)
+    }
+
     init(
-        userDefaults: UserDefaults? = nil,
+        userDefaults: UserDefaults?,
+        sharedFileURL: URL? = nil,
         storageKey: String = StorageKeys.claudeFableSessions,
         retention: TimeInterval = ClaudeFableSessionPolicy.retention,
         activeWindow: TimeInterval = ClaudeFableSessionPolicy.activeWindow,
         maxRecords: Int = 500
     ) {
-        self.userDefaults = userDefaults
+        let usesProductionStore = userDefaults == nil && sharedFileURL == nil
+        let resolvedDefaults = userDefaults
             ?? UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier)
             ?? .standard
+        self.userDefaults = resolvedDefaults
+        self.sharedFileURL = sharedFileURL
+            ?? (usesProductionStore ? SharedMetricsStore.fableSessionsFileURL : nil)
         self.storageKey = storageKey
         self.retention = retention
         self.activeWindow = activeWindow
         self.maxRecords = max(1, maxRecords)
+
+        // Migrate existing app-group preferences to the explicit shared file.
+        // The unentitled CLI can read the App Group container by path, but its
+        // UserDefaults suite resolves to a different preferences domain.
+        if usesProductionStore,
+           Self.decodedSessions(from: self.sharedFileURL) == nil,
+           let persistedData = resolvedDefaults.data(forKey: storageKey),
+           Self.decodedSessions(from: persistedData) != nil {
+            persistSharedData(persistedData)
+        }
     }
 
-    func load(now: Date = Date()) -> [ClaudeFableSession] {
-        guard let data = userDefaults.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([ClaudeFableSession].self, from: data) else {
+    public func load(now: Date = Date()) -> [ClaudeFableSession] {
+        guard let decoded = Self.decodedSessions(from: sharedFileURL)
+            ?? Self.decodedSessions(from: userDefaults.data(forKey: storageKey)) else {
             return []
         }
         var byID: [String: ClaudeFableSession] = [:]
@@ -498,15 +517,7 @@ final class ClaudeFableSessionStore {
         _ existing: ClaudeFableSession,
         _ observed: ClaudeFableSession
     ) -> ClaudeFableSession {
-        ClaudeFableSession(
-            sourceSessionID: observed.sourceSessionID,
-            accountID: observed.accountID,
-            accountName: observed.accountName,
-            model: observed.lastObservedAt >= existing.lastObservedAt ? observed.model : existing.model,
-            firstObservedAt: min(existing.firstObservedAt, observed.firstObservedAt),
-            lastObservedAt: max(existing.lastObservedAt, observed.lastObservedAt),
-            state: observed.lastObservedAt >= existing.lastObservedAt ? observed.state : existing.state
-        )
+        ClaudeFableSessionPresentation.merged(existing, observed)
     }
 
     private func aged(_ session: ClaudeFableSession, now: Date) -> ClaudeFableSession {
@@ -544,11 +555,45 @@ final class ClaudeFableSessionStore {
     private func save(_ sessions: [ClaudeFableSession]) {
         do {
             let data = try JSONEncoder().encode(sessions)
-            guard userDefaults.data(forKey: storageKey) != data else { return }
-            userDefaults.set(data, forKey: storageKey)
+            if userDefaults.data(forKey: storageKey) != data {
+                userDefaults.set(data, forKey: storageKey)
+            }
+            persistSharedData(data)
         } catch {
             AppLog.storage.error(
                 "Failed to persist Fable session metadata: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    nonisolated private static func decodedSessions(
+        from fileURL: URL?
+    ) -> [ClaudeFableSession]? {
+        guard let fileURL,
+              let data = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+        return decodedSessions(from: data)
+    }
+
+    nonisolated private static func decodedSessions(
+        from data: Data?
+    ) -> [ClaudeFableSession]? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode([ClaudeFableSession].self, from: data)
+    }
+
+    private func persistSharedData(_ data: Data) {
+        guard let sharedFileURL,
+              (try? Data(contentsOf: sharedFileURL)) != data else {
+            return
+        }
+
+        do {
+            try data.write(to: sharedFileURL, options: [.atomic])
+        } catch {
+            AppLog.storage.error(
+                "Failed to persist shared Fable session metadata: \(error.localizedDescription, privacy: .public)"
             )
         }
     }

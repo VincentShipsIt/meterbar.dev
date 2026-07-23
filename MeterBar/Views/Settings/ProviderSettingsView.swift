@@ -73,6 +73,7 @@ struct ProviderSettingsView: View {
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
+    @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
 
     @State private var selectedProviderTab: ServiceType = .claudeCode
     @State private var isAddingClaudeAccount = false
@@ -246,6 +247,10 @@ struct ProviderSettingsView: View {
         switch service {
         case .claudeCode:
             claudeCodeSection
+            FableSessionHistoryView(
+                sessions: fableSessionTracker.sessions,
+                diagnostics: fableSessionTracker.diagnostics
+            )
             providerExtraUsageSection(for: service)
         case .codexCli:
             codexCliSection

@@ -1,6 +1,7 @@
 # MeterBar CLI JSON schema
 
-`meterbar usage --json`, `meterbar cost --json`, and `meterbar refresh --json` emit stable,
+`meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`, and
+`meterbar fable-sessions --json` emit stable,
 versioned JSON for menu bars, shell prompts, dashboards, and other third-party integrations.
 Human-readable output remains the default when `--json` is absent.
 
@@ -14,7 +15,7 @@ Human-readable output remains the default when `--json` is absent.
 - Optional values are omitted when the provider or cached source did not supply them.
 - JSON is the only content written to standard output for these commands.
 
-Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, and `openrouter`.
+Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, and `grok`.
 
 ## Usage
 
@@ -102,6 +103,41 @@ Version 1 shape:
 With `--days`, MeterBar derives the response from cached daily rows without rescanning logs.
 Daily rows do not retain `cacheCreationTokens` or `sessionCount`, so those fields are omitted in a
 windowed response. `period.isTruncated` is true when the cache covers fewer days than requested.
+
+## Fable sessions
+
+```sh
+meterbar fable-sessions
+meterbar fable-sessions --json
+```
+
+This command reads the app's persisted Fable 5 tracker snapshot without scanning transcripts.
+An empty snapshot is successful and returns an empty `sessions` array.
+
+Version 1 shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "sessions": [
+    {
+      "id": "00000000-0000-0000-0000-000000000002:session-1",
+      "profile": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "name": "Ship"
+      },
+      "model": "claude-fable-5",
+      "state": "active",
+      "firstObservedAt": "2026-07-20T10:00:00Z",
+      "lastObservedAt": "2026-07-20T10:05:00Z"
+    }
+  ]
+}
+```
+
+`state` is `active`, `completed`, or `unknown`. Records are newest-first and deduplicated by the
+stable `id`. The response contains tracker metadata only: it never includes prompt/response
+content, credentials, working directories, or git metadata.
 
 ## Errors
 

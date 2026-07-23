@@ -23,6 +23,9 @@ case "$scenario:$command_name" in
     printf '%s\n' \
       '[{"provider":"Codex CLI","overall":"warn","healthy":false,"checks":[{"id":"auth","title":"Signed in","level":"warn","detail":"Sign-in not verified."}]}]'
     ;;
+  cache-missing:fable-sessions)
+    printf '%s\n' '{"schemaVersion":1,"sessions":[]}'
+    ;;
   data:usage)
     printf '%s\n' \
       '{"schemaVersion":1,"providers":[{"provider":"codex","displayName":"OpenAI Codex","lastUpdated":"2026-07-17T00:00:00Z","windows":[{"kind":"weekly","used":25,"total":100,"percentUsed":25,"percentLeft":75,"quotaBand":"healthy","estimated":false}]}]}'
@@ -36,6 +39,10 @@ case "$scenario:$command_name" in
     printf '%s\n' \
       '[{"provider":"Codex CLI","overall":"pass","healthy":true,"checks":[{"id":"auth","title":"Signed in","level":"pass","detail":"Signed in.","recovery":null}]}]'
     ;;
+  data:fable-sessions)
+    printf '%s\n' \
+      '{"schemaVersion":1,"sessions":[{"id":"profile:session","profile":{"id":"00000000-0000-0000-0000-000000000002","name":"Ship"},"model":"claude-fable-5","state":"active","firstObservedAt":"2026-07-17T00:00:00Z","lastObservedAt":"2026-07-17T00:05:00Z"}]}'
+    ;;
   malformed:usage)
     printf '%s\n' 'debug output that contaminates stdout'
     printf '%s\n' \
@@ -47,6 +54,9 @@ case "$scenario:$command_name" in
   malformed:doctor)
     METERBAR_CLI_SMOKE_FIXTURE=cache-missing "$0" "$@"
     ;;
+  malformed:fable-sessions)
+    METERBAR_CLI_SMOKE_FIXTURE=cache-missing "$0" "$@"
+    ;;
   secret-field:usage)
     METERBAR_CLI_SMOKE_FIXTURE=cache-missing "$0" "$@"
     ;;
@@ -56,6 +66,9 @@ case "$scenario:$command_name" in
   secret-field:doctor)
     printf '%s\n' \
       '[{"provider":"Codex CLI","overall":"pass","healthy":true,"accessToken":"must-not-ship","checks":[]}]'
+    ;;
+  secret-field:fable-sessions)
+    METERBAR_CLI_SMOKE_FIXTURE=cache-missing "$0" "$@"
     ;;
   *)
     echo "Unknown fixture scenario or command: $scenario:$command_name" >&2

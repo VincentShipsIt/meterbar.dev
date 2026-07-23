@@ -110,6 +110,74 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(try response.jsonString(), errorFixture)
     }
 
+    func testFableSessionsResponseIsVersionedDeduplicatedAndMetadataOnly() throws {
+        let accountID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let earlier = ClaudeFableSession(
+            sourceSessionID: "session-1",
+            accountID: accountID,
+            accountName: "Ship",
+            model: "claude-fable-5",
+            firstObservedAt: referenceDate.addingTimeInterval(-120),
+            lastObservedAt: referenceDate.addingTimeInterval(-60),
+            state: .active
+        )
+        let later = ClaudeFableSession(
+            sourceSessionID: "session-1",
+            accountID: accountID,
+            accountName: "Ship",
+            model: "claude-fable-5",
+            firstObservedAt: referenceDate.addingTimeInterval(-120),
+            lastObservedAt: referenceDate,
+            state: .completed
+        )
+        let unknown = ClaudeFableSession(
+            sourceSessionID: "session-2",
+            accountID: accountID,
+            accountName: "Ship",
+            model: "claude-fable-5",
+            firstObservedAt: referenceDate.addingTimeInterval(-240),
+            lastObservedAt: referenceDate.addingTimeInterval(-180),
+            state: .unknown
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: FableSessionsCLIJSONResponse(sessions: [unknown, earlier, later]).jsonData()
+            ) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        let sessions = try XCTUnwrap(object["sessions"] as? [[String: Any]])
+        XCTAssertEqual(sessions.count, 2)
+        let session = try XCTUnwrap(sessions.first)
+        XCTAssertEqual(
+            Set(session.keys),
+            ["id", "profile", "model", "state", "firstObservedAt", "lastObservedAt"]
+        )
+        XCTAssertEqual(session["state"] as? String, "completed")
+        XCTAssertEqual(session["model"] as? String, "claude-fable-5")
+        XCTAssertNil(session["sourceSessionID"])
+        XCTAssertNil(session["content"])
+        XCTAssertNil(session["cwd"])
+        XCTAssertNil(session["git"])
+
+        let profile = try XCTUnwrap(session["profile"] as? [String: Any])
+        XCTAssertEqual(Set(profile.keys), ["id", "name"])
+        XCTAssertEqual(profile["name"] as? String, "Ship")
+        XCTAssertEqual(sessions.last?["state"] as? String, "unknown")
+    }
+
+    func testFableSessionsResponseEncodesHonestEmptySnapshot() throws {
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: FableSessionsCLIJSONResponse(sessions: []).jsonData()
+            ) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual((object["sessions"] as? [Any])?.count, 0)
+    }
+
     private var usageFixture: String {
         """
         {

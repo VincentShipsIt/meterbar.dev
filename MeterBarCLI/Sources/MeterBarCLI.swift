@@ -11,7 +11,14 @@ struct MeterBarCLI: AsyncParsableCommand {
         abstract: "Track AI coding assistant usage from the command line",
         version: MeterBarCLIVersion.current,
         subcommands: [
-            Usage.self, Cost.self, Refresh.self, Doctor.self, Wake.self, WakeAgent.self, ResetCredit.self
+            Usage.self,
+            Cost.self,
+            Refresh.self,
+            FableSessions.self,
+            Doctor.self,
+            Wake.self,
+            WakeAgent.self,
+            ResetCredit.self,
         ],
         defaultSubcommand: Usage.self
     )
@@ -58,7 +65,7 @@ private enum MeterBarCLIVersion {
     }
 }
 
-private func emitJSON<T: CLIJSONDocument>(_ document: T) throws {
+func emitJSON<T: CLIJSONDocument>(_ document: T) throws {
     do {
         print(try document.jsonString())
     } catch {
