@@ -35,6 +35,11 @@ struct SettingsView: View {
             .tabItem { Label("Providers", systemImage: "square.grid.2x2") }
 
             settingsTab {
+                WidgetSettingsView()
+            }
+            .tabItem { Label("Widget", systemImage: "rectangle.3.group") }
+
+            settingsTab {
                 ApiUsageSettingsView()
             }
             .tabItem { Label("API Usage", systemImage: "key") }
