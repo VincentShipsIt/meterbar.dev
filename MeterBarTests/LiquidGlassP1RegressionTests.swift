@@ -8,11 +8,17 @@ import XCTest
 final class LiquidGlassP1RegressionTests: XCTestCase {
     // MARK: - Surface vocabulary invariants
 
-    /// Normal content surfaces stay translucent so the window material remains
-    /// visible instead of becoming opaque dark-gray slabs.
-    func testContentSurfaceTokensAreTranslucent() {
-        assertTranslucent(MeterBarTheme.Surface.content)
-        assertTranslucent(MeterBarTheme.Surface.inset)
+    /// Content layers use neutral semantic AppKit colors rather than a
+    /// product-colored wash, so they adapt with the active system appearance.
+    func testContentSurfaceTokensUseNeutralSystemColors() {
+        assertMatchesSystemColor(
+            MeterBarTheme.Surface.content,
+            systemColor: .controlBackgroundColor
+        )
+        assertMatchesSystemColor(
+            MeterBarTheme.Surface.inset,
+            systemColor: .windowBackgroundColor
+        )
     }
 
     /// Reduce Transparency still has an opaque semantic card fill.
@@ -54,20 +60,22 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         }
     }
 
-    private func assertTranslucent(
+    private func assertMatchesSystemColor(
         _ color: Color,
+        systemColor: NSColor,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         let appearances = [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)]
             .compactMap { $0 }
         for appearance in appearances {
-            var alpha: CGFloat = -1
+            var actual: NSColor?
+            var expected: NSColor?
             appearance.performAsCurrentDrawingAppearance {
-                alpha = NSColor(color).usingColorSpace(.sRGB)?.alphaComponent ?? -1
+                actual = NSColor(color).usingColorSpace(.sRGB)
+                expected = systemColor.usingColorSpace(.sRGB)
             }
-            XCTAssertGreaterThan(alpha, 0, file: file, line: line)
-            XCTAssertLessThan(alpha, 1, file: file, line: line)
+            XCTAssertEqual(actual, expected, file: file, line: line)
         }
     }
 

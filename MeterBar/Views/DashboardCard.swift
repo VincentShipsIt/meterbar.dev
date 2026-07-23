@@ -163,23 +163,28 @@ struct DashboardMetricTile: View {
   let value: String
   let caption: String
   let systemImage: String
-  let tint: Color
+  let indicatorTint: Color
   var style: Style = .regular
 
   var body: some View {
     DashboardTile(minHeight: style.minHeight) {
       VStack(alignment: .leading, spacing: style.spacing) {
-        Label(title, systemImage: systemImage)
+        Label {
+          Text(title)
+            .foregroundStyle(.secondary)
+        } icon: {
+          Image(systemName: systemImage)
+            .foregroundStyle(indicatorTint)
+        }
           .font(style.titleFont)
           .fontWeight(style.titleWeight)
-          .foregroundColor(.secondary)
           .labelStyle(.titleAndIcon)
           .lineLimit(1)
 
         Text(value)
           .font(style.valueFont)
           .fontWeight(.semibold)
-          .foregroundStyle(tint)
+          .foregroundStyle(.primary)
           .lineLimit(1)
           .minimumScaleFactor(style.valueMinimumScaleFactor)
           .contentTransition(.numericText())

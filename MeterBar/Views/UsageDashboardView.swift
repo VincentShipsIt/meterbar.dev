@@ -1140,7 +1140,7 @@ private struct OverviewSummaryStrip: View {
                     value: tightestValue(now: timeline.date),
                     caption: tightestCaption,
                     systemImage: tightestIconName,
-                    tint: tightestColor,
+                    indicatorTint: tightestColor,
                     style: .compact
                 )
             }
@@ -1150,7 +1150,7 @@ private struct OverviewSummaryStrip: View {
                 value: estimatedCost ?? "Scan needed",
                 caption: "\(formattedTokens) tokens",
                 systemImage: "chart.bar.xaxis",
-                tint: MeterBarTheme.success,
+                indicatorTint: .secondary,
                 style: .compact
             )
 
@@ -1159,7 +1159,7 @@ private struct OverviewSummaryStrip: View {
                 value: "\(sourceCount)",
                 caption: sourceCaption,
                 systemImage: "checklist.checked",
-                tint: MeterBarTheme.appAccent,
+                indicatorTint: .secondary,
                 style: .compact
             )
         }
