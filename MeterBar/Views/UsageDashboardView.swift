@@ -5,23 +5,23 @@ import MeterBarShared
 import UniformTypeIdentifiers
 
 @MainActor
-private func applyWindowChrome(_ window: NSWindow, section _: DashboardSection? = nil) {
-    window.title = ""
-    window.subtitle = ""
-    window.titleVisibility = .visible
-    window.titlebarAppearsTransparent = true
-    window.titlebarSeparatorStyle = .none
-    window.toolbarStyle = .unified
-}
-
-@MainActor
 final class UsageDashboardWindowController {
     static let shared = UsageDashboardWindowController()
+    static let windowID = "dashboard"
 
-    private var window: NSWindow?
-    private var closeObserver: NSObjectProtocol?
+    private var openWindow: OpenWindowAction?
+    private var shouldOpenWhenRegistered = false
 
     private init() {}
+
+    func register(openWindow: OpenWindowAction) {
+        self.openWindow = openWindow
+
+        if shouldOpenWhenRegistered {
+            shouldOpenWhenRegistered = false
+            presentDashboard()
+        }
+    }
 
     func show(section: DashboardSection? = nil, focusedProviderID: String? = nil) {
         if let section {
@@ -30,51 +30,7 @@ final class UsageDashboardWindowController {
             DashboardNavigationStore.shared.navigate(to: .limits, focusedProviderID: focusedProviderID)
         }
 
-        if window == nil {
-            let hostingController = NSHostingController(rootView: UsageDashboardView())
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            applyWindowChrome(window, section: DashboardNavigationStore.shared.selectedSection)
-            // Clear, not a solid fill: with a transparent titlebar over
-            // fullSizeContentView, a solid windowBackgroundColor paints the
-            // titlebar strip as a flat dead slab. Clearing it lets the sidebar's
-            // material and the detail's MeterBarDetailBackground bleed up under
-            // the bar, so the chrome reads as one continuous surface.
-            window.backgroundColor = .clear
-            window.isOpaque = false
-            window.isRestorable = false
-            window.contentMinSize = NSSize(width: 900, height: 600)
-            window.contentViewController = hostingController
-            window.isReleasedWhenClosed = false
-            window.center()
-            self.window = window
-
-            // Discard the window on close instead of resurrecting it forever.
-            // A long-lived cached window can accumulate stale window-server
-            // state (observed: a corner radius stuck at ~35pt instead of the
-            // standard ~26pt after display changes during a long uptime);
-            // recreating per open keeps the chrome fresh, matching the
-            // lifecycle a SwiftUI Window scene gives MacSweep.
-            closeObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification,
-                object: window,
-                queue: .main
-            ) { _ in
-                // Delivered on the main queue; tear down synchronously so a
-                // reopen between close and a deferred hop can't order-front
-                // the dying window and orphan it.
-                MainActor.assumeIsolated {
-                    UsageDashboardWindowController.shared.windowDidClose()
-                }
-            }
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        presentDashboard()
     }
 
     /// Open (or front) the dashboard window in its in-window settings mode. This
@@ -85,12 +41,14 @@ final class UsageDashboardWindowController {
         show()
     }
 
-    private func windowDidClose() {
-        if let closeObserver {
-            NotificationCenter.default.removeObserver(closeObserver)
+    private func presentDashboard() {
+        guard let openWindow else {
+            shouldOpenWhenRegistered = true
+            return
         }
-        closeObserver = nil
-        window = nil
+
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: Self.windowID)
     }
 }
 
@@ -284,12 +242,6 @@ struct UsageDashboardView: View {
 
     var body: some View {
         dashboardSplitView
-        .background {
-            MeterBarMenuWindowAccessor { window in
-                guard let window else { return }
-                applyWindowChrome(window, section: activeSection)
-            }
-        }
         .task {
             await refreshCostsIfMissingDays()
         }
