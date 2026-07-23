@@ -127,6 +127,7 @@ final class UsageDataManagerTests: XCTestCase {
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
         preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        preloadSharedAccountMetrics: [AccountUsageSnapshot] = [],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = false
@@ -155,6 +156,10 @@ final class UsageDataManagerTests: XCTestCase {
         }
 
         let sharedStore = SharedDataStore(directoryOverride: tempDirectory) {}
+        if !preloadSharedAccountMetrics.isEmpty {
+            sharedStore.saveAccountMetrics(preloadSharedAccountMetrics)
+            sharedStore.flushPendingWrites()
+        }
 
         let manager = UsageDataManager(
             codexCliService: codex,
@@ -184,11 +189,13 @@ final class UsageDataManagerTests: XCTestCase {
         let cursor = StubProvider(hasAccess: true, result: .failure(ServiceError.parsingError))
         let (manager, _) = makeManager(codex: codex, cursor: cursor, parseHealthStore: health)
 
-        await manager.refreshAll()
+        let report = await manager.refreshAll()
 
         XCTAssertEqual(health.records[.codexCli]?.consecutiveFailures, 0)
         XCTAssertEqual(health.records[.cursor]?.consecutiveFailures, 1)
         XCTAssertTrue(health.records[.cursor]?.lastFailureWasShapeMismatch ?? false)
+        XCTAssertEqual(report.outcome(for: .codexCli)?.state, .refreshed)
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
     }
 
     func testRefreshAllMergesBothEnabledProviders() async {
@@ -325,6 +332,85 @@ final class UsageDataManagerTests: XCTestCase {
             sharedStore.loadAccountMetrics().first?.metrics.sessionLimit?.used,
             23
         )
+    }
+
+    func testRefreshAllPreservesSharedClaudeAccountSnapshotOnColdCLICacheFailure() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-shared-cache-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        let cached = MetricsFixtures.claudeCode(sessionUsedPercent: 31)
+        let claude = StubClaudeProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let snapshot = AccountUsageSnapshot(
+            id: ClaudeCodeAccount.defaultID,
+            name: ClaudeCodeAccount.defaultName,
+            metrics: cached
+        )
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            preloadSharedAccountMetrics: [snapshot]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[ClaudeCodeAccount.defaultID]?.sessionLimit?.used,
+            31
+        )
+        sharedStore.flushPendingWrites()
+        let persisted = try XCTUnwrap(sharedStore.loadAccountMetrics().first)
+        XCTAssertEqual(persisted.id, ClaudeCodeAccount.defaultID)
+        XCTAssertEqual(persisted.metrics.sessionLimit?.used, 31)
+    }
+
+    func testRefreshAllPreservesFailedCodexAccountFromSharedSnapshotOnColdCLICache() async throws {
+        let accountSuite = "UsageDataManagerTests-codex-shared-cache-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = CodexAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/codex-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [
+            CodexAccount.defaultID: MetricsFixtures.codexCli(sessionUsedPercent: 20),
+            work.id: MetricsFixtures.codexCli(sessionUsedPercent: 80),
+        ])
+        provider.failingAccountIDs = [work.id]
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let sharedSnapshots = [
+            AccountUsageSnapshot(
+                id: CodexAccount.defaultID,
+                name: CodexAccount.defaultName,
+                metrics: MetricsFixtures.codexCli(sessionUsedPercent: 15)
+            ),
+            AccountUsageSnapshot(
+                id: work.id,
+                name: "Work",
+                metrics: MetricsFixtures.codexCli(sessionUsedPercent: 75)
+            ),
+        ]
+        let (manager, sharedStore) = makeManager(
+            codex: provider,
+            cursor: cursor,
+            codexAccountStore: accountStore,
+            preloadSharedAccountMetrics: sharedSnapshots
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
+        XCTAssertEqual(manager.codexAccountMetrics[work.id]?.sessionLimit?.used, 75)
+        sharedStore.flushPendingWrites()
+        let persisted = Dictionary(
+            uniqueKeysWithValues: sharedStore.loadAccountMetrics().map { ($0.id, $0.metrics) }
+        )
+        XCTAssertEqual(persisted[CodexAccount.defaultID]?.sessionLimit?.used, 20)
+        XCTAssertEqual(persisted[work.id]?.sessionLimit?.used, 75)
     }
 
     func testChangingRefreshIntervalPublishesToObservers() {
@@ -493,12 +579,16 @@ final class UsageDataManagerTests: XCTestCase {
             preload: [.codexCli: MetricsFixtures.codexCli(), .cursor: cachedCursor]
         )
 
-        await manager.refreshAll()
+        let report = await manager.refreshAll()
 
         // Codex refreshed; Cursor degraded gracefully to its cached value.
         XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .cursor])
         XCTAssertEqual(manager.metrics[.cursor]?.weeklyLimit?.used, 999)
         XCTAssertNotNil(manager.lastError)
+        XCTAssertEqual(report.outcome(for: .codexCli)?.state, .refreshed)
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
+        XCTAssertEqual(report.outcome(for: .cursor)?.servedFromCache, true)
+        XCTAssertEqual(report.outcome(for: .cursor)?.lastUpdated, cachedCursor.lastUpdated)
     }
 
     func testRefreshAllSkipsDisabledProvider() async {

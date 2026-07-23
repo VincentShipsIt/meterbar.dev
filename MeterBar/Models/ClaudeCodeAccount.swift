@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import MeterBarShared
 
 // MARK: - ClaudeCodeAccount
 
@@ -75,6 +76,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     @Published private(set) var accountOrder: [UUID] = []
 
     private let userDefaults: UserDefaults
+    private let refreshConfigurationDirectory: URL?
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
     private let defaultConfigDirectoryStorageKey = StorageKeys.claudeCodeDefaultConfigDirectory
@@ -96,9 +98,24 @@ final class ClaudeCodeAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
         self.userDefaults = userDefaults
+        self.refreshConfigurationDirectory = refreshConfigurationDirectory
+            ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
         load()
+        persistRefreshConfiguration()
+    }
+
+    /// Read-only projection used by the bundled CLI.
+    init(accounts: [ClaudeCodeAccount]) {
+        userDefaults = .standard
+        refreshConfigurationDirectory = nil
+        let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
+        defaultAccountName = defaultAccount.name
+        defaultAccountConfigDirectory = defaultAccount.configDirectory
+        defaultAccountIsEnabled = defaultAccount.isEnabled
+        customAccounts = accounts.filter { !$0.isDefault }
+        accountOrder = accounts.map(\.id)
     }
 
     func addAccount(name: String, configDirectory: String) {
@@ -244,6 +261,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     private func saveCustomAccounts() {
         guard let data = try? JSONEncoder().encode(customAccounts) else { return }
         userDefaults.set(data, forKey: storageKey)
+        persistRefreshConfiguration()
     }
 
     private func saveDefaultAccountName() {
@@ -252,6 +270,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
         } else {
             userDefaults.set(defaultAccountName, forKey: defaultNameStorageKey)
         }
+        persistRefreshConfiguration()
     }
 
     private func saveDefaultAccountConfigDirectory() {
@@ -260,6 +279,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
         } else {
             userDefaults.removeObject(forKey: defaultConfigDirectoryStorageKey)
         }
+        persistRefreshConfiguration()
     }
 
     private func saveDefaultAccountEnabled() {
@@ -268,6 +288,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
         } else {
             userDefaults.set(false, forKey: defaultEnabledStorageKey)
         }
+        persistRefreshConfiguration()
     }
 
     private func saveAccountOrder() {
@@ -276,6 +297,15 @@ final class ClaudeCodeAccountStore: ObservableObject {
         } else {
             userDefaults.set(accountOrder.map(\.uuidString), forKey: accountOrderStorageKey)
         }
+        persistRefreshConfiguration()
+    }
+
+    private func persistRefreshConfiguration() {
+        guard let refreshConfigurationDirectory else { return }
+        UsageRefreshConfigurationStore.saveClaudeAccounts(
+            accounts,
+            directory: refreshConfigurationDirectory
+        )
     }
 
     private func orderedAccounts(from unorderedAccounts: [ClaudeCodeAccount]) -> [ClaudeCodeAccount] {

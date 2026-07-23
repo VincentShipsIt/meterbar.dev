@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import MeterBarShared
 
 nonisolated struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
     static let defaultName = "Default CLI Profile"
@@ -45,6 +46,7 @@ final class CodexAccountStore: ObservableObject {
     @Published private(set) var accountOrder: [UUID] = []
 
     private let userDefaults: UserDefaults
+    private let refreshConfigurationDirectory: URL?
 
     var accounts: [CodexAccount] {
         orderedAccounts(from: [
@@ -61,9 +63,23 @@ final class CodexAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
         self.userDefaults = userDefaults
+        self.refreshConfigurationDirectory = refreshConfigurationDirectory
+            ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
         load()
+        persistRefreshConfiguration()
+    }
+
+    /// Read-only projection used by the bundled CLI.
+    init(accounts: [CodexAccount]) {
+        userDefaults = .standard
+        refreshConfigurationDirectory = nil
+        let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
+        defaultAccountName = defaultAccount.name
+        defaultAccountIsEnabled = defaultAccount.isEnabled
+        customAccounts = accounts.filter { !$0.isDefault }
+        accountOrder = accounts.map(\.id)
     }
 
     func addAccount(name: String, homeDirectory: String) {
@@ -169,6 +185,7 @@ final class CodexAccountStore: ObservableObject {
     private func saveCustomAccounts() {
         guard let data = try? JSONEncoder().encode(customAccounts) else { return }
         userDefaults.set(data, forKey: StorageKeys.codexCustomAccounts)
+        persistRefreshConfiguration()
     }
 
     private func saveDefaultAccountName() {
@@ -177,6 +194,7 @@ final class CodexAccountStore: ObservableObject {
         } else {
             userDefaults.set(defaultAccountName, forKey: StorageKeys.codexDefaultAccountName)
         }
+        persistRefreshConfiguration()
     }
 
     private func saveDefaultAccountEnabled() {
@@ -185,6 +203,7 @@ final class CodexAccountStore: ObservableObject {
         } else {
             userDefaults.set(false, forKey: StorageKeys.codexDefaultAccountEnabled)
         }
+        persistRefreshConfiguration()
     }
 
     private func saveAccountOrder() {
@@ -193,6 +212,15 @@ final class CodexAccountStore: ObservableObject {
         } else {
             userDefaults.set(accountOrder.map(\.uuidString), forKey: StorageKeys.codexAccountOrder)
         }
+        persistRefreshConfiguration()
+    }
+
+    private func persistRefreshConfiguration() {
+        guard let refreshConfigurationDirectory else { return }
+        UsageRefreshConfigurationStore.saveCodexAccounts(
+            accounts,
+            directory: refreshConfigurationDirectory
+        )
     }
 
     private func orderedAccounts(from unordered: [CodexAccount]) -> [CodexAccount] {

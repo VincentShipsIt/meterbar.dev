@@ -8,6 +8,7 @@ final class ProviderVisibilityStore: ObservableObject {
     @Published private(set) var hiddenServices: Set<ServiceType> = []
 
     private let userDefaults: UserDefaults
+    private let refreshConfigurationDirectory: URL?
     private let storageKey = StorageKeys.hiddenProviderServices
 
     var enabledServices: Set<ServiceType> {
@@ -16,9 +17,20 @@ final class ProviderVisibilityStore: ObservableObject {
 
     /// Internal (not private) so tests can construct an instance backed by an
     /// isolated `UserDefaults` suite; production code uses `shared`.
-    init(userDefaults: UserDefaults = .standard) {
+    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
         self.userDefaults = userDefaults
+        self.refreshConfigurationDirectory = refreshConfigurationDirectory
+            ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
         load()
+        persistRefreshConfiguration()
+    }
+
+    /// Read-only projection used by the CLI after decoding the app's explicit
+    /// shared configuration file.
+    init(hiddenServices: Set<ServiceType>) {
+        userDefaults = .standard
+        refreshConfigurationDirectory = nil
+        self.hiddenServices = hiddenServices
     }
 
     func isEnabled(_ service: ServiceType) -> Bool {
@@ -61,5 +73,14 @@ final class ProviderVisibilityStore: ObservableObject {
     private func save() {
         let rawValues = hiddenServices.map(\.rawValue).sorted()
         userDefaults.set(rawValues, forKey: storageKey)
+        persistRefreshConfiguration()
+    }
+
+    private func persistRefreshConfiguration() {
+        guard let refreshConfigurationDirectory else { return }
+        UsageRefreshConfigurationStore.saveVisibility(
+            hiddenServices,
+            directory: refreshConfigurationDirectory
+        )
     }
 }

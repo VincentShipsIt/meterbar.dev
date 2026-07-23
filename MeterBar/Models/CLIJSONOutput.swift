@@ -197,7 +197,10 @@ nonisolated public struct CLIJSONErrorResponse: CLIJSONDocument {
     }
 }
 
-nonisolated private extension ServiceType {
+/// The stable provider tokens every CLI JSON document uses (`docs/cli-json-schema.md`).
+/// Module-internal so `refresh --json` emits the same tokens as `usage --json`
+/// rather than a second, drift-prone mapping.
+nonisolated extension ServiceType {
     var cliIdentifier: String {
         switch self {
         case .claudeCode: return "claude"
