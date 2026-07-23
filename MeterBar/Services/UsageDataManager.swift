@@ -61,6 +61,7 @@ class UsageDataManager: ObservableObject {
     private let openRouterService: SimpleUsageProviding
     private let grokService: SimpleUsageProviding
     private let claudeCodeAccountStore: ClaudeCodeAccountStore
+    private let claudeFableSessionTracker: ClaudeFableSessionTracking
     private let codexAccountStore: CodexAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
     private let parseHealthStore: ProviderParseHealthStore
@@ -85,6 +86,7 @@ class UsageDataManager: ObservableObject {
         grokService: SimpleUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeUsageProviding = ClaudeCodeLocalService.shared,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
+        claudeFableSessionTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
         sharedStore: SharedDataStore = .shared,
@@ -99,6 +101,7 @@ class UsageDataManager: ObservableObject {
         self.grokService = grokService
         self.claudeCodeService = claudeCodeService
         self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
+        self.claudeFableSessionTracker = claudeFableSessionTracker ?? ClaudeFableSessionTracker.shared
         self.codexAccountStore = codexAccountStore ?? .shared
         self.providerVisibilityStore = providerVisibilityStore ?? .shared
         self.sharedStore = sharedStore
@@ -416,11 +419,12 @@ class UsageDataManager: ObservableObject {
     }
 
     private func fetchClaudeCodeAccountMetrics() async -> [UUID: UsageMetrics] {
+        let enabledAccounts = claudeCodeAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
 
-        for account in claudeCodeAccountStore.enabledAccounts {
+        for account in enabledAccounts {
             do {
                 refreshedMetrics[account.id] = try await claudeCodeService.fetchUsageMetrics(account: account)
                 successCount += 1
@@ -442,6 +446,7 @@ class UsageDataManager: ObservableObject {
             parseHealthStore.recordFailure(.claudeCode, error: firstFailure)
         }
 
+        claudeFableSessionTracker.scheduleRefresh(accounts: enabledAccounts)
         return refreshedMetrics
     }
 

@@ -106,7 +106,7 @@ class CostTracker: ObservableObject {
         includeCodexCli: Bool,
         claudeAccounts: [ClaudeCodeAccount]
     ) -> CostSummary {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let cutoffDate = Self.costWindowStart(days: days)
         let periodScan = Self.scanCostSources(
             since: cutoffDate,
             includeClaudeCode: includeClaudeCode,
@@ -128,6 +128,23 @@ class CostTracker: ObservableObject {
             dailyUsage: periodScan.dailyUsage.sorted { $0.date < $1.date },
             lifetime: LifetimeCostSummary(costs: lifetimeScan.costs)
         )
+    }
+
+    /// Inclusive calendar-day boundary shared by the scan and 30-day charts.
+    /// `days: 30` means today plus the previous 29 local calendar days, not a
+    /// rolling 720-hour interval that can spill into a 31st date bucket.
+    nonisolated static func costWindowStart(
+        days: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date {
+        let normalizedDays = max(1, days)
+        let today = calendar.startOfDay(for: now)
+        return calendar.date(
+            byAdding: .day,
+            value: -(normalizedDays - 1),
+            to: today
+        ) ?? today
     }
 
     nonisolated private static func scanCostSources(
