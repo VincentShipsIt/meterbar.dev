@@ -17,6 +17,15 @@ struct MeterBarApp: App {
     }
 
     var body: some Scene {
+        Window("MeterBar", id: UsageDashboardWindowController.windowID) {
+            UsageDashboardView()
+                .frame(minWidth: 900, minHeight: 600)
+        }
+        .defaultSize(width: 1040, height: 700)
+        .defaultPosition(.center)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
+
         // A menu-bar app still needs one Scene; `SettingsView` is kept as its
         // content for the smoke test, but the standard Settings command below is
         // replaced so ⌘, / "Settings…" open the dashboard's in-window settings
@@ -26,12 +35,23 @@ struct MeterBarApp: App {
             SettingsView()
         }
         .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    UsageDashboardWindowController.shared.showSettings()
-                }
-                .keyboardShortcut(",", modifiers: .command)
+            MeterBarCommands()
+        }
+    }
+}
+
+private struct MeterBarCommands: Commands {
+    @Environment(\.openWindow)
+    private var openWindow
+
+    var body: some Commands {
+        UsageDashboardWindowController.shared.register(openWindow: openWindow)
+
+        return CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                UsageDashboardWindowController.shared.showSettings()
             }
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 }
