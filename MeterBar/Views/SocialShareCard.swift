@@ -8,14 +8,36 @@ import SwiftUI
 enum SocialShareCardLayout {
     static let exportSize = CGSize(width: 1_200, height: 675)
     static let aspectRatio: CGFloat = exportSize.width / exportSize.height
+    static let maximumPreviewWidth: CGFloat = 860
+
+    /// Derives preview geometry from the dashboard viewport, which does not
+    /// change when the nested scroll view shows or hides its vertical scroller.
+    /// Reserving the legacy scroller width also keeps the explicit frame clear
+    /// of non-overlay scrollbars when the user's system preference is "Always."
+    static func previewSize(
+        viewportWidth: CGFloat,
+        horizontalInsets: CGFloat,
+        verticalScrollerWidth: CGFloat = NSScroller.scrollerWidth(
+            for: .regular,
+            scrollerStyle: .legacy
+        )
+    ) -> CGSize {
+        let availableWidth = max(
+            0,
+            viewportWidth - horizontalInsets - verticalScrollerWidth
+        )
+        let width = min(maximumPreviewWidth, availableWidth)
+        return CGSize(width: width, height: width / aspectRatio)
+    }
 }
 
 struct SocialShareCardPreview: View {
     let content: SocialShareCardContent
+    let size: CGSize
 
     var body: some View {
         Color.clear
-            .aspectRatio(SocialShareCardLayout.aspectRatio, contentMode: .fit)
+            .frame(width: size.width, height: size.height)
             .overlay {
                 SocialShareCard(content: content)
             }
