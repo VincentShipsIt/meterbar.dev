@@ -82,11 +82,11 @@ enum MeterBarTheme {
   /// glass is not the goal; consistency is). Under Reduce Transparency both
   /// collapse to ``chromeOpaqueFallback`` — good citizenship, preserved.
   ///
-  /// **Layer 2 — CONTENT.** ``content`` is the single subtle, translucent fill
-  /// for every dashboard, settings, and popover card. It lets the window's
-  /// material/tint remain visible instead of turning each section into an
-  /// opaque dark-gray slab. ``inset`` is the quieter nested-row fill. Reduce
-  /// Transparency switches cards to ``contentOpaqueFallback``.
+  /// **Layer 2 — CONTENT.** ``content`` is the single neutral semantic fill for
+  /// every dashboard, settings, and popover card. It follows the system's
+  /// control background across appearances instead of washing content with a
+  /// product tint. ``inset`` is the quieter nested-row fill. Reduce Transparency
+  /// keeps the same opaque semantic treatment.
   ///
   /// The existing "glass shell containing flat-fill cards" structure is the
   /// correct Apple pattern; these tokens make it deliberate rather than
@@ -109,28 +109,11 @@ enum MeterBarTheme {
     /// consumed by ``MeterBarDetailBackground``.
     static let chromeOpaqueFallback = Color(nsColor: .windowBackgroundColor)
 
-    /// **Layer 2 — content.** The single content-card fill. Every card sits on
-    /// this subtle, appearance-adaptive tint. Applied via
-    /// ``SwiftUI/View/meterBarCardSurface(cornerRadius:)`` — the one source of
-    /// truth for card fills.
-    static let content = Color.adaptive(
-      light: NSColor(srgbRed: 0.10, green: 0.42, blue: 0.50, alpha: 0.055),
-      dark: NSColor(srgbRed: 0.34, green: 0.72, blue: 0.80, alpha: 0.18),
-      lightHighContrast: NSColor(srgbRed: 0.08, green: 0.38, blue: 0.46, alpha: 0.12),
-      darkHighContrast: NSColor(srgbRed: 0.38, green: 0.76, blue: 0.84, alpha: 0.28)
-    )
-
-    /// Opaque accessibility fallback used only when Reduce Transparency is on.
-    static let contentOpaqueFallback = Color(nsColor: .controlBackgroundColor)
-
-    /// **Layer 2 — inset.** A row nested inside a ``content`` card, one step
-    /// recessed. Use for grouped rows *within* a card, not for the card itself.
-    static let inset = Color.adaptive(
-      light: NSColor(srgbRed: 0.08, green: 0.35, blue: 0.42, alpha: 0.04),
-      dark: NSColor(srgbRed: 0.28, green: 0.60, blue: 0.68, alpha: 0.10),
-      lightHighContrast: NSColor(srgbRed: 0.06, green: 0.32, blue: 0.39, alpha: 0.09),
-      darkHighContrast: NSColor(srgbRed: 0.32, green: 0.66, blue: 0.74, alpha: 0.18)
-    )
+    /// **Layer 2 — content.** The single opaque content-card fill in every
+    /// transparency mode. This neutral, appearance-adaptive system color is
+    /// applied via ``SwiftUI/View/meterBarCardSurface(cornerRadius:)`` — the
+    /// one source of truth for card fills.
+    static let content = Color(nsColor: .controlBackgroundColor)
   }
 
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
@@ -369,23 +352,16 @@ extension View {
 
 private struct MeterBarCardSurfaceModifier: ViewModifier {
   let cornerRadius: CGFloat
-  @Environment(\.accessibilityReduceTransparency)
-  private var reduceTransparency
 
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-    // Every content card funnels through here. The adaptive translucent tint
-    // preserves the window's material instead of painting opaque gray slabs;
-    // Reduce Transparency gets a semantic opaque fallback. A hairline provides
-    // the boundary without shadows or a second glass layer.
+    // Every content card funnels through here. The semantic system fill follows
+    // the active appearance and accessibility contrast without a product-color
+    // wash. A hairline provides the boundary without shadows or a second glass
+    // layer.
     content
-      .background(
-        reduceTransparency
-          ? MeterBarTheme.Surface.contentOpaqueFallback
-          : MeterBarTheme.Surface.content,
-        in: shape
-      )
+      .background(MeterBarTheme.Surface.content, in: shape)
       .overlay {
         shape.strokeBorder(MeterBarTheme.glassCardStroke, lineWidth: 1)
       }
