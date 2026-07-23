@@ -2,6 +2,46 @@ import XCTest
 @testable import MeterBar
 
 final class SocialShareCardContentTests: XCTestCase {
+    func testPreviewSizeUsesStableViewportGeometry() {
+        let size = SocialShareCardLayout.previewSize(
+            viewportWidth: 700,
+            horizontalInsets: 64,
+            verticalScrollerWidth: 16
+        )
+
+        XCTAssertEqual(size.width, 620)
+        XCTAssertEqual(
+            size.height,
+            size.width / SocialShareCardLayout.aspectRatio,
+            accuracy: 0.0001
+        )
+    }
+
+    func testPreviewSizeCapsWideWindowsAtMaximumWidth() {
+        let size = SocialShareCardLayout.previewSize(
+            viewportWidth: 1_400,
+            horizontalInsets: 64,
+            verticalScrollerWidth: 16
+        )
+
+        XCTAssertEqual(size.width, SocialShareCardLayout.maximumPreviewWidth)
+        XCTAssertEqual(
+            size.height,
+            SocialShareCardLayout.maximumPreviewWidth / SocialShareCardLayout.aspectRatio,
+            accuracy: 0.0001
+        )
+    }
+
+    func testPreviewSizeNeverBecomesNegative() {
+        let size = SocialShareCardLayout.previewSize(
+            viewportWidth: 40,
+            horizontalInsets: 64,
+            verticalScrollerWidth: 16
+        )
+
+        XCTAssertEqual(size, .zero)
+    }
+
     func testPublicWebsiteMetadataMatchesReadme() {
         XCTAssertEqual(SocialShareCardContent.websiteURL, "https://meterbar.dev")
         XCTAssertEqual(SocialShareCardContent.websiteDisplay, "meterbar.dev")
