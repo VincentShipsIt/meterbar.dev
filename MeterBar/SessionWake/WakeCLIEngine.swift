@@ -12,7 +12,7 @@ import Foundation
 /// caller that already speaks `ClaudeCodeAccount` keeps working unchanged.
 struct WakeCLIEngine {
     private let discovery: SessionDiscovery
-    private let authority: WakeQuotaAuthority
+    private let authority: WakeQuotaAuthority<ClaudeCodeAccount>
     private let makeRunner: @Sendable (ClaudeCodeAccount) -> WakeExecuting
     private let ledgerFactory: @Sendable () -> ReplayLedger
     private let lock: WakeLock
@@ -21,8 +21,10 @@ struct WakeCLIEngine {
 
     init(
         discovery: SessionDiscovery = SessionDiscovery(),
-        authority: WakeQuotaAuthority = WakeQuotaAuthority(),
-        makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting = { WakeProcessRunner(account: $0) },
+        authority: WakeQuotaAuthority<ClaudeCodeAccount> = WakeQuotaAuthority(provider: LiveWakeQuotaProvider()),
+        makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting = {
+            WakeProcessRunner.claude(account: $0)
+        },
         ledgerFactory: @escaping @Sendable () -> ReplayLedger = { ReplayLedger() },
         lock: WakeLock = WakeLock(holderKind: .cli),
         bounds: WakeBounds = .default,

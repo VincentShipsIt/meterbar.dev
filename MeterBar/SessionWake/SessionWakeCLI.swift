@@ -111,7 +111,7 @@ public enum SessionWakeCLI {
         case .claude:
             let account = resolveAccount(configDirectory: configDirectory)
             return ClaudeWakeRuntime(account: account) { runnerAccount in
-                WakeProcessRunner(
+                WakeProcessRunner.claude(
                     account: runnerAccount,
                     permissionMode: mode,
                     bypassAcknowledged: bypassAcknowledged
@@ -120,7 +120,7 @@ public enum SessionWakeCLI {
         case .codex:
             let account = resolveCodexAccount(homeDirectory: configDirectory)
             return CodexWakeRuntime(account: account) { runnerAccount in
-                CodexWakeProcessRunner(
+                WakeProcessRunner.codex(
                     account: runnerAccount,
                     permissionMode: mode,
                     bypassAcknowledged: bypassAcknowledged

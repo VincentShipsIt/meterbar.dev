@@ -71,7 +71,7 @@ final class WakeCLIEngineTests: XCTestCase {
             discovery: SessionDiscovery(),
             authority: WakeQuotaAuthority(provider: FixedProvider(.open), maxAge: 3600, now: { Date() }),
             makeRunner: { runnerAccount in
-                WakeProcessRunner(
+                WakeProcessRunner.claude(
                     account: runnerAccount,
                     executable: fake,
                     baseEnvironment: ["PATH": "/usr/bin:/bin"],
@@ -91,7 +91,7 @@ final class WakeCLIEngineTests: XCTestCase {
     }
 
     private func makeEngine(
-        provider: WakeQuotaProviding,
+        provider: any WakeQuotaProviding<ClaudeCodeAccount>,
         runner: WakeExecuting,
         shouldCancel: @escaping @Sendable () -> Bool = { false }
     ) -> WakeCLIEngine {

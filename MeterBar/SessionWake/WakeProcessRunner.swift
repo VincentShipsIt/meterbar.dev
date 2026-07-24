@@ -7,44 +7,54 @@ nonisolated enum WakeExecutionLockMode: Equatable, Sendable {
     case externallyOwned
 }
 
+/// The per-provider axes a Session Wake process run differs along. Everything
+/// else (revalidate cwd, take the lock, spawn with an argv, enforce timeout,
+/// honor cancellation, record a metadata-only log line) is identical across
+/// providers and lives in `WakeProcessRunner`.
+nonisolated struct WakeRunnerDescriptor: Sendable {
+    /// CLI binary to resolve/spawn; also used verbatim in outcome messages.
+    let binaryName: String
+    /// Env var that overrides binary resolution (e.g. `CLAUDE_CLI_PATH`).
+    let overrideEnvVar: String
+    /// Builds the argv+env+cwd for one resume. Captures the bound account,
+    /// permission mode, bypass ack, prompt, and base environment.
+    let buildCommand: @Sendable (
+        _ executable: String,
+        _ candidate: WakeSessionCandidate,
+        _ bounds: WakeBounds
+    ) -> WakeCommand
+    /// Optional denial classifier for a non-zero exit. `nil` ⇒ a non-zero exit
+    /// is always a plain failure (Codex: `approval_policy=never` can't stop at a
+    /// permission gate, so there is nothing to classify).
+    let classifyDenial: (@Sendable (ManagedProcess.Result) -> Bool)?
+}
+
 /// The one native process runner shared by MeterBar and its CLI.
 ///
 /// Responsibilities: revalidate the target immediately before exec, take the
-/// shared lock only when actually ready to run, spawn `claude` with an argument
-/// array (never a shell), enforce a timeout with process-tree cleanup, honor
-/// structured-task cancellation, and record a metadata-only log line. A dead
-/// worktree is a structured skip, not a failure that aborts the queue.
+/// shared lock only when actually ready to run, spawn the provider CLI with an
+/// argument array (never a shell), enforce a timeout with process-tree cleanup,
+/// honor structured-task cancellation, and record a metadata-only log line. A
+/// dead worktree is a structured skip, not a failure that aborts the queue.
 nonisolated struct WakeProcessRunner: WakeExecuting {
-    /// Explicit executable path; when nil the `claude` binary is resolved.
+    /// Explicit executable path; when nil the descriptor's binary is resolved.
     let executable: String?
-    let permissionMode: WakePermissionMode
-    let bypassAcknowledged: Bool
-    let prompt: String
-    let account: ClaudeCodeAccount
-    private let baseEnvironment: [String: String]
+    private let descriptor: WakeRunnerDescriptor
     private let lockFactory: @Sendable () -> WakeLock
     private let lockMode: WakeExecutionLockMode
     private let logger: WakeRunLogger
     private let now: @Sendable () -> Date
 
     init(
-        account: ClaudeCodeAccount,
+        descriptor: WakeRunnerDescriptor,
         executable: String? = nil,
-        permissionMode: WakePermissionMode = .safe,
-        bypassAcknowledged: Bool = false,
-        prompt: String = WakeCommandBuilder.defaultPrompt,
-        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         lockFactory: @escaping @Sendable () -> WakeLock = { WakeLock() },
         lockMode: WakeExecutionLockMode = .acquirePerRun,
         logger: WakeRunLogger = WakeRunLogger(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.account = account
+        self.descriptor = descriptor
         self.executable = executable
-        self.permissionMode = permissionMode
-        self.bypassAcknowledged = bypassAcknowledged
-        self.prompt = prompt
-        self.baseEnvironment = baseEnvironment
         self.lockFactory = lockFactory
         self.lockMode = lockMode
         self.logger = logger
@@ -59,10 +69,14 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             return .skipped(reason: .missingWorkingDirectory)
         }
 
-        let claudePath = executable ?? CLIBinaryLocator.resolve(command: "claude", overrideEnvVar: "CLAUDE_CLI_PATH")
-        guard let resolved = claudePath else {
-            record(candidate: candidate, outcome: .failed(reason: "claude binary not found"), result: nil, start: now())
-            return .failed(reason: "claude binary not found")
+        let path = executable ?? CLIBinaryLocator.resolve(
+            command: descriptor.binaryName,
+            overrideEnvVar: descriptor.overrideEnvVar
+        )
+        guard let resolved = path else {
+            let outcome = WakeRunOutcome.failed(reason: "\(descriptor.binaryName) binary not found")
+            record(candidate: candidate, outcome: outcome, result: nil, start: now())
+            return outcome
         }
 
         let lock = lockMode == .acquirePerRun ? lockFactory() : nil
@@ -90,16 +104,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         }
         defer { lock?.release() }
 
-        let command = WakeCommandBuilder.build(
-            executable: resolved,
-            candidate: candidate,
-            account: account,
-            bounds: bounds,
-            prompt: prompt,
-            permissionMode: permissionMode,
-            bypassAcknowledged: bypassAcknowledged,
-            baseEnvironment: baseEnvironment
-        )
+        let command = descriptor.buildCommand(resolved, candidate, bounds)
         // Overwrite the resolved cwd with the just-revalidated one.
         let validated = WakeCommand(
             executable: command.executable,
@@ -116,7 +121,7 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             cancellation.cancel()
         }
 
-        let outcome = Self.mapOutcome(result, permissionMode: permissionMode)
+        let outcome = Self.mapOutcome(result, descriptor: descriptor)
         record(candidate: candidate, outcome: outcome, result: result, start: start)
         return outcome
     }
@@ -148,20 +153,19 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
-    static func mapOutcome(_ result: ManagedProcess.Result, permissionMode: WakePermissionMode) -> WakeRunOutcome {
+    static func mapOutcome(_ result: ManagedProcess.Result, descriptor: WakeRunnerDescriptor) -> WakeRunOutcome {
         switch result.termination {
         case .exited(0):
             return .succeeded
         case let .exited(code):
-            // Classification only — the bounded capture is inspected here and
-            // never logged or retained beyond this call. Bypass runs skip the
-            // permission gate entirely, so a denial label can't apply there.
-            if permissionMode != .bypass, indicatesPermissionDenial(result) {
+            // Classification only — the bounded capture is inspected here and never
+            // logged or retained beyond this call.
+            if descriptor.classifyDenial?(result) == true {
                 return .permissionDenied
             }
-            return .failed(reason: "claude exited with status \(code)")
+            return .failed(reason: "\(descriptor.binaryName) exited with status \(code)")
         case let .signalled(signal):
-            return .failed(reason: "claude terminated by signal \(signal)")
+            return .failed(reason: "\(descriptor.binaryName) terminated by signal \(signal)")
         case .timedOut:
             return .failed(reason: "session timed out")
         case .cancelled:
@@ -169,22 +173,6 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
         case let .launchFailed(message):
             return .failed(reason: message)
         }
-    }
-
-    /// Whether a non-zero exit reads as a stop at the permission-approval gate.
-    /// The captured output exists only in memory on `result`; nothing here (or
-    /// downstream) writes it anywhere.
-    private static func indicatesPermissionDenial(_ result: ManagedProcess.Result) -> Bool {
-        // Lossy decode: a capture truncated at the byte cap can split a
-        // multibyte character, and strict decoding would drop the WHOLE
-        // capture — disabling classification in exactly the long-output case
-        // the bounded sink exists for.
-        // swiftlint:disable optional_data_string_conversion
-        let combined = String(decoding: result.stdoutCapture, as: UTF8.self)
-            + "\n"
-            + String(decoding: result.stderrCapture, as: UTF8.self)
-        // swiftlint:enable optional_data_string_conversion
-        return PermissionDenialDetector.indicatesDenial(in: combined)
     }
 
     private func record(
@@ -209,6 +197,82 @@ nonisolated struct WakeProcessRunner: WakeExecuting {
             stdoutBytes: result?.stdoutByteCount,
             stderrBytes: result?.stderrByteCount
         ))
+    }
+}
+
+nonisolated extension WakeRunnerDescriptor {
+    /// Descriptor for a Claude Code resume.
+    static func claude(
+        account: ClaudeCodeAccount,
+        permissionMode: WakePermissionMode,
+        bypassAcknowledged: Bool,
+        prompt: String,
+        baseEnvironment: [String: String]
+    ) -> WakeRunnerDescriptor {
+        WakeRunnerDescriptor(
+            binaryName: "claude",
+            overrideEnvVar: "CLAUDE_CLI_PATH",
+            buildCommand: { executable, candidate, bounds in
+                WakeCommandBuilder.build(
+                    executable: executable,
+                    candidate: candidate,
+                    account: account,
+                    bounds: bounds,
+                    prompt: prompt,
+                    permissionMode: permissionMode,
+                    bypassAcknowledged: bypassAcknowledged,
+                    baseEnvironment: baseEnvironment
+                )
+            },
+            classifyDenial: { result in
+                // BUG-FOR-BUG PRESERVATION: the original gate keyed off the RAW
+                // requested `permissionMode` (NOT the effective/acknowledged
+                // mode). A bypass request skips the permission gate entirely, so
+                // a denial label can't apply there. Keep this exact check.
+                guard permissionMode != .bypass else { return false }
+                // Lossy decode: a capture truncated at the byte cap can split a
+                // multibyte character; strict decoding would drop the WHOLE
+                // capture and disable classification in exactly the long-output
+                // case the bounded sink exists for.
+                // swiftlint:disable optional_data_string_conversion
+                let combined = String(decoding: result.stdoutCapture, as: UTF8.self)
+                    + "\n"
+                    + String(decoding: result.stderrCapture, as: UTF8.self)
+                // swiftlint:enable optional_data_string_conversion
+                return PermissionDenialDetector.indicatesDenial(in: combined)
+            }
+        )
+    }
+}
+
+nonisolated extension WakeProcessRunner {
+    /// Claude Code runner — same defaults the old `WakeProcessRunner.init` had.
+    static func claude(
+        account: ClaudeCodeAccount,
+        executable: String? = nil,
+        permissionMode: WakePermissionMode = .safe,
+        bypassAcknowledged: Bool = false,
+        prompt: String = WakeCommandBuilder.defaultPrompt,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        lockFactory: @escaping @Sendable () -> WakeLock = { WakeLock() },
+        lockMode: WakeExecutionLockMode = .acquirePerRun,
+        logger: WakeRunLogger = WakeRunLogger(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) -> WakeProcessRunner {
+        WakeProcessRunner(
+            descriptor: .claude(
+                account: account,
+                permissionMode: permissionMode,
+                bypassAcknowledged: bypassAcknowledged,
+                prompt: prompt,
+                baseEnvironment: baseEnvironment
+            ),
+            executable: executable,
+            lockFactory: lockFactory,
+            lockMode: lockMode,
+            logger: logger,
+            now: now
+        )
     }
 }
 

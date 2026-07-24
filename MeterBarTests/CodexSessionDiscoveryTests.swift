@@ -125,7 +125,7 @@ final class CodexSessionDiscoveryTests: XCTestCase {
         let runtime = CodexWakeRuntime(
             account: CodexAccount(id: UUID(), name: "a", homeDirectory: home.path),
             discovery: CodexSessionDiscovery(),
-            authority: CodexWakeQuotaAuthority(provider: OpenCodexProvider(), maxAge: 3600, now: { Date() }),
+            authority: WakeQuotaAuthority(provider: OpenCodexProvider(), maxAge: 3600, now: { Date() }),
             makeRunner: { _ in runner }
         )
         let engine = WakeCLIEngine(
@@ -145,7 +145,7 @@ final class CodexSessionDiscoveryTests: XCTestCase {
         let runner = CodexRecordingRunner(outcome: .succeeded)
         let runtime = CodexWakeRuntime(
             account: CodexAccount(id: UUID(), name: "a", homeDirectory: home.path),
-            authority: CodexWakeQuotaAuthority(provider: ThrowingCodexProvider2()),
+            authority: WakeQuotaAuthority(provider: ThrowingCodexProvider2()),
             makeRunner: { _ in runner }
         )
         let engine = WakeCLIEngine(
@@ -173,13 +173,13 @@ private actor CodexRecordingRunner: WakeExecuting {
     }
 }
 
-private struct OpenCodexProvider: CodexWakeQuotaProviding {
+private struct OpenCodexProvider: WakeQuotaProviding {
     func fetchMetrics(account: CodexAccount) async throws -> UsageMetrics {
         UsageMetrics(service: .codexCli, sessionLimit: UsageLimit(used: 5, total: 100, resetTime: nil), lastUpdated: Date())
     }
 }
 
-private struct ThrowingCodexProvider2: CodexWakeQuotaProviding {
+private struct ThrowingCodexProvider2: WakeQuotaProviding {
     struct Boom: Error {}
     func fetchMetrics(account: CodexAccount) async throws -> UsageMetrics { throw Boom() }
 }

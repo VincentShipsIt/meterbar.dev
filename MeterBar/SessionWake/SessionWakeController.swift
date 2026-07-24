@@ -209,7 +209,7 @@ final class SessionWakeController: ObservableObject {
             guard let id = store.wakeAccountID,
                   let account = accounts.enabledAccounts.first(where: { $0.id == id }) else { return nil }
             return ClaudeWakeRuntime(account: account) { runnerAccount in
-                WakeProcessRunner(
+                WakeProcessRunner.claude(
                     account: runnerAccount,
                     permissionMode: mode,
                     bypassAcknowledged: bypass,
@@ -220,7 +220,7 @@ final class SessionWakeController: ObservableObject {
             guard let id = store.wakeCodexAccountID,
                   let account = codexAccounts.enabledAccounts.first(where: { $0.id == id }) else { return nil }
             return CodexWakeRuntime(account: account) { runnerAccount in
-                CodexWakeProcessRunner(
+                WakeProcessRunner.codex(
                     account: runnerAccount,
                     permissionMode: mode,
                     bypassAcknowledged: bypass,

@@ -6,13 +6,13 @@ import Foundation
 nonisolated struct CodexWakeRuntime: WakeProviderRuntime {
     let account: CodexAccount
     private let discovery: CodexSessionDiscovery
-    private let authority: CodexWakeQuotaAuthority
+    private let authority: WakeQuotaAuthority<CodexAccount>
     private let makeRunnerForAccount: @Sendable (CodexAccount) -> WakeExecuting
 
     init(
         account: CodexAccount,
         discovery: CodexSessionDiscovery = CodexSessionDiscovery(),
-        authority: CodexWakeQuotaAuthority = CodexWakeQuotaAuthority(),
+        authority: WakeQuotaAuthority<CodexAccount> = WakeQuotaAuthority(provider: LiveCodexWakeQuotaProvider()),
         makeRunner: @escaping @Sendable (CodexAccount) -> WakeExecuting
     ) {
         self.account = account

@@ -85,7 +85,7 @@ public enum SessionWakeAgent {
                 configDirectory: configuration.accountDirectory
             )
             return ClaudeWakeRuntime(account: account) { runnerAccount in
-                WakeProcessRunner(
+                WakeProcessRunner.claude(
                     account: runnerAccount,
                     permissionMode: configuration.permissionMode,
                     bypassAcknowledged: configuration.bypassAcknowledged,
@@ -100,7 +100,7 @@ public enum SessionWakeAgent {
                 homeDirectory: configuration.accountDirectory
             )
             return CodexWakeRuntime(account: account) { runnerAccount in
-                CodexWakeProcessRunner(
+                WakeProcessRunner.codex(
                     account: runnerAccount,
                     permissionMode: configuration.permissionMode,
                     bypassAcknowledged: configuration.bypassAcknowledged,

@@ -21,7 +21,12 @@ final class WakeRunnerTests: XCTestCase {
         let script = """
         #!/bin/bash
         if [ -n "$WAKE_TEST_OUT" ]; then
-          { echo "ARGS:$*"; echo "PWD:$(pwd)"; echo "CFG:${CLAUDE_CONFIG_DIR}"; } >> "$WAKE_TEST_OUT"
+          {
+            echo "ARGS:$*"
+            echo "PWD:$(pwd)"
+            echo "CFG:${CLAUDE_CONFIG_DIR}"
+            echo "CODEX_HOME:${CODEX_HOME}"
+          } >> "$WAKE_TEST_OUT"
         fi
         if [ -n "$WAKE_STDERR_MSG" ]; then echo "$WAKE_STDERR_MSG" >&2; fi
         exit "${WAKE_EXIT:-0}"
@@ -51,6 +56,10 @@ final class WakeRunnerTests: XCTestCase {
         ClaudeCodeAccount(id: UUID(), name: "acct", configDirectory: tempDir.appendingPathComponent("cfg").path)
     }
 
+    private func codexAccount() -> CodexAccount {
+        CodexAccount(id: UUID(), name: "codex", homeDirectory: tempDir.appendingPathComponent("codex-home").path)
+    }
+
     private func makeRunner(
         fake: String,
         env: [String: String],
@@ -61,7 +70,7 @@ final class WakeRunnerTests: XCTestCase {
         var env = env
         env["PATH"] = env["PATH"] ?? "/usr/bin:/bin"
         let lockURL = tempDir.appendingPathComponent("wake.lock")
-        return WakeProcessRunner(
+        return WakeProcessRunner.claude(
             account: account(),
             executable: fake,
             permissionMode: permissionMode,
@@ -124,6 +133,36 @@ final class WakeRunnerTests: XCTestCase {
         XCTAssertTrue(command.arguments.contains(String(WakeBounds.default.maxTurns)))
     }
 
+    // MARK: - Descriptors
+
+    func testClaudeDescriptorShape() {
+        let descriptor = WakeRunnerDescriptor.claude(
+            account: account(),
+            permissionMode: .safe,
+            bypassAcknowledged: false,
+            prompt: "continue",
+            baseEnvironment: [:]
+        )
+
+        XCTAssertEqual(descriptor.binaryName, "claude")
+        XCTAssertEqual(descriptor.overrideEnvVar, "CLAUDE_CLI_PATH")
+        XCTAssertNotNil(descriptor.classifyDenial)
+    }
+
+    func testCodexDescriptorShape() {
+        let descriptor = WakeRunnerDescriptor.codex(
+            account: codexAccount(),
+            permissionMode: .safe,
+            bypassAcknowledged: false,
+            prompt: "continue",
+            baseEnvironment: [:]
+        )
+
+        XCTAssertEqual(descriptor.binaryName, "codex")
+        XCTAssertEqual(descriptor.overrideEnvVar, "CODEX_CLI_PATH")
+        XCTAssertNil(descriptor.classifyDenial)
+    }
+
     // MARK: - Runner
 
     func testRunPassesExactArgvEnvAndCwd() async throws {
@@ -137,6 +176,46 @@ final class WakeRunnerTests: XCTestCase {
         XCTAssertTrue(recorded.contains("--permission-mode default"))
         XCTAssertTrue(recorded.contains("PWD:") && recorded.contains(tempDir.lastPathComponent))
         XCTAssertTrue(recorded.contains("CFG:\(account().configDirectory!)"))
+    }
+
+    func testCodexRunnerPassesArgvEnvironmentAndKeepsDenialAsFailure() async throws {
+        let fake = try makeFake()
+        let out = tempDir.appendingPathComponent("codex-out.txt")
+        let lockURL = tempDir.appendingPathComponent("codex-wake.lock")
+        let account = codexAccount()
+        let codexCandidate = candidate(sessionID: "codex-sid", cwd: tempDir.path)
+        let runner = WakeProcessRunner.codex(
+            account: account,
+            executable: fake,
+            baseEnvironment: ["PATH": "/usr/bin:/bin", "WAKE_TEST_OUT": out.path],
+            lockFactory: { WakeLock(lockURL: lockURL, legacyLockURLs: []) },
+            logger: WakeRunLogger(directory: tempDir.appendingPathComponent("codex-logs"))
+        )
+
+        let outcome = await runner.run(codexCandidate, bounds: .default)
+        XCTAssertEqual(outcome, .succeeded)
+
+        let recorded = try String(contentsOf: out, encoding: .utf8)
+        XCTAssertTrue(recorded.contains(
+            "ARGS:exec resume codex-sid continue -c sandbox_mode=\"workspace-write\" -c approval_policy=\"never\""
+        ))
+        XCTAssertTrue(recorded.contains("PWD:") && recorded.contains(tempDir.lastPathComponent))
+        XCTAssertTrue(recorded.contains("CODEX_HOME:\(account.homeDirectory ?? "")"))
+
+        let denialRunner = WakeProcessRunner.codex(
+            account: account,
+            executable: fake,
+            baseEnvironment: [
+                "PATH": "/usr/bin:/bin",
+                "WAKE_EXIT": "7",
+                "WAKE_STDERR_MSG": "requires approval"
+            ],
+            lockFactory: { WakeLock(lockURL: lockURL, legacyLockURLs: []) },
+            logger: WakeRunLogger(directory: tempDir.appendingPathComponent("codex-denial-logs"))
+        )
+        let denialOutcome = await denialRunner.run(codexCandidate, bounds: .default)
+        XCTAssertEqual(denialOutcome, .failed(reason: "codex exited with status 7"))
+        XCTAssertNotEqual(denialOutcome, .permissionDenied)
     }
 
     func testDeadWorktreeIsSkippedWithoutLaunching() async throws {

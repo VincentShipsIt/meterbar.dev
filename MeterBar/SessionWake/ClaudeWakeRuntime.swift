@@ -6,13 +6,13 @@ import Foundation
 nonisolated struct ClaudeWakeRuntime: WakeProviderRuntime {
     let account: ClaudeCodeAccount
     private let discovery: SessionDiscovery
-    private let authority: WakeQuotaAuthority
+    private let authority: WakeQuotaAuthority<ClaudeCodeAccount>
     private let makeRunnerForAccount: @Sendable (ClaudeCodeAccount) -> WakeExecuting
 
     init(
         account: ClaudeCodeAccount,
         discovery: SessionDiscovery = SessionDiscovery(),
-        authority: WakeQuotaAuthority = WakeQuotaAuthority(),
+        authority: WakeQuotaAuthority<ClaudeCodeAccount> = WakeQuotaAuthority(provider: LiveWakeQuotaProvider()),
         makeRunner: @escaping @Sendable (ClaudeCodeAccount) -> WakeExecuting
     ) {
         self.account = account

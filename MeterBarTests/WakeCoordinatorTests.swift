@@ -48,7 +48,7 @@ final class WakeCoordinatorTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        provider: WakeQuotaProviding,
+        provider: any WakeQuotaProviding<ClaudeCodeAccount>,
         runner: WakeExecuting,
         bounds: WakeBounds = WakeBounds.default,
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void

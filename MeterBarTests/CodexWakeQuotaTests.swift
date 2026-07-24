@@ -8,14 +8,14 @@ final class CodexWakeQuotaTests: XCTestCase {
     private func account() -> CodexAccount { CodexAccount(id: UUID(), name: "a", homeDirectory: nil) }
 
     func testFetchFailureIsUnknown() async {
-        let authority = CodexWakeQuotaAuthority(provider: ThrowingCodexProvider(), maxAge: 3600, now: { Date() })
+        let authority = WakeQuotaAuthority(provider: ThrowingCodexProvider(), maxAge: 3600, now: { Date() })
         let quota = await authority.freshQuota(account: account())
         guard case .unknown = quota else { return XCTFail("fetch failure must fail closed, got \(quota)") }
     }
 
     func testStaleMetricsAreUnknownNotAuthority() async {
         let stale = Date(timeIntervalSince1970: 0)
-        let authority = CodexWakeQuotaAuthority(
+        let authority = WakeQuotaAuthority(
             provider: FixedCodexProvider(.open, lastUpdated: stale), maxAge: 120, now: { Date() }
         )
         let quota = await authority.freshQuota(account: account())
@@ -23,13 +23,13 @@ final class CodexWakeQuotaTests: XCTestCase {
     }
 
     func testFreshOpenMetricsAreAvailable() async {
-        let authority = CodexWakeQuotaAuthority(provider: FixedCodexProvider(.open), maxAge: 3600, now: { Date() })
+        let authority = WakeQuotaAuthority(provider: FixedCodexProvider(.open), maxAge: 3600, now: { Date() })
         let quota = await authority.freshQuota(account: account())
         XCTAssertEqual(quota, .available)
     }
 
     func testFreshBlockedMetricsAreBlocked() async {
-        let authority = CodexWakeQuotaAuthority(provider: FixedCodexProvider(.blocked), maxAge: 3600, now: { Date() })
+        let authority = WakeQuotaAuthority(provider: FixedCodexProvider(.blocked), maxAge: 3600, now: { Date() })
         let quota = await authority.freshQuota(account: account())
         guard case .blocked = quota else { return XCTFail("maxed session window must block, got \(quota)") }
     }
@@ -37,12 +37,12 @@ final class CodexWakeQuotaTests: XCTestCase {
 
 // MARK: - Doubles
 
-private struct ThrowingCodexProvider: CodexWakeQuotaProviding {
+private struct ThrowingCodexProvider: WakeQuotaProviding {
     struct Boom: Error {}
     func fetchMetrics(account: CodexAccount) async throws -> UsageMetrics { throw Boom() }
 }
 
-private struct FixedCodexProvider: CodexWakeQuotaProviding {
+private struct FixedCodexProvider: WakeQuotaProviding {
     enum Kind { case open, blocked }
     let kind: Kind
     let lastUpdated: Date

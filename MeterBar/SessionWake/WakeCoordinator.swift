@@ -12,7 +12,7 @@ import Foundation
 /// structured cancellation semantics are identical in both processes.
 actor WakeCoordinator {
     private let discovery: SessionDiscovery
-    private let authority: WakeQuotaAuthority
+    private let authority: WakeQuotaAuthority<ClaudeCodeAccount>
     private let runner: WakeExecuting
     private let ledger: ReplayLedger
     private let bounds: WakeBounds
@@ -26,7 +26,7 @@ actor WakeCoordinator {
 
     init(
         discovery: SessionDiscovery = SessionDiscovery(),
-        authority: WakeQuotaAuthority = WakeQuotaAuthority(),
+        authority: WakeQuotaAuthority<ClaudeCodeAccount> = WakeQuotaAuthority(provider: LiveWakeQuotaProvider()),
         runner: WakeExecuting,
         ledger: ReplayLedger = ReplayLedger(),
         bounds: WakeBounds = .default,

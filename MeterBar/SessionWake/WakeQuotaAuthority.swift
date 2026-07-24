@@ -3,9 +3,11 @@ import MeterBarShared
 
 /// Source of *fresh* account-scoped quota. Cached UI metrics are never passed
 /// here — the authority always pulls a live reading so a launch decision can
-/// never rest on stale numbers.
-nonisolated protocol WakeQuotaProviding: Sendable {
-    func fetchMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics
+/// never rest on stale numbers. Generic over the provider's account type so one
+/// authority serves every provider (Claude, Codex, ...).
+nonisolated protocol WakeQuotaProviding<Account>: Sendable {
+    associatedtype Account
+    func fetchMetrics(account: Account) async throws -> UsageMetrics
 }
 
 /// Default provider. For the default account it prefers the authenticated
@@ -56,16 +58,14 @@ nonisolated struct LiveWakeQuotaProvider: WakeQuotaProviding {
 }
 
 /// Resolves a fresh quota decision for the selected account, failing closed on
-/// any error, staleness, or ambiguity.
-nonisolated struct WakeQuotaAuthority: Sendable {
-    private let provider: WakeQuotaProviding
-    /// Metrics older than this are not accepted as execution authority even if
-    /// a fetch returned them.
+/// any error, staleness, or ambiguity. Generic over the account type.
+nonisolated struct WakeQuotaAuthority<Account>: Sendable {
+    private let provider: any WakeQuotaProviding<Account>
     private let maxAge: TimeInterval
     private let now: @Sendable () -> Date
 
     init(
-        provider: WakeQuotaProviding = LiveWakeQuotaProvider(),
+        provider: any WakeQuotaProviding<Account>,
         maxAge: TimeInterval = 120,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -75,10 +75,9 @@ nonisolated struct WakeQuotaAuthority: Sendable {
     }
 
     /// Fetch and classify fresh quota for `account`.
-    ///
-    /// - A thrown fetch (missing OAuth, CLI error) ⇒ `.unknown` (fail closed).
+    /// - A thrown fetch ⇒ `.unknown` (fail closed).
     /// - Metrics older than `maxAge` ⇒ `.unknown` (never treat cache as truth).
-    func freshQuota(account: ClaudeCodeAccount) async -> WakeQuota {
+    func freshQuota(account: Account) async -> WakeQuota {
         let metrics: UsageMetrics
         do {
             metrics = try await provider.fetchMetrics(account: account)
