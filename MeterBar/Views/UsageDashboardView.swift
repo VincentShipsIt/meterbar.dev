@@ -712,21 +712,11 @@ struct UsageDashboardView: View {
     }
 
     private func makeSocialShareCardContent(generatedAt: Date) -> SocialShareCardContent {
-        SocialShareCardContent(
-            tokenTotal: visibleCostSummary?.totalTokens,
-            sessionCount: socialSessionCount,
-            providerNames: socialProviderNames,
-            topProviderName: socialTopProviderName,
-            dailyTokenTotals: socialDailyTokenTotals(generatedAt: generatedAt),
+        SocialCardRenderer.content(
+            costSummary: visibleCostSummary,
+            providerSnapshotTitles: providerSnapshots.map(\.title),
+            enabledSourceLabels: enabledSourceLabels,
             generatedAt: generatedAt
-        )
-    }
-
-    private func socialDailyTokenTotals(generatedAt: Date) -> [Int] {
-        guard let visibleCostSummary else { return [] }
-        return SocialShareCardContent.dailyTokenTotals(
-            from: visibleCostSummary.dailyUsage,
-            now: generatedAt
         )
     }
 
@@ -774,30 +764,6 @@ struct UsageDashboardView: View {
         makeSocialShareCardContent(generatedAt: socialCardGeneratedAt)
     }
 
-    private var socialSessionCount: Int? {
-        guard let costs = visibleCostSummary?.costs else { return nil }
-        return costs.reduce(0) { $0 + $1.sessionCount }
-    }
-
-    private var socialTopProviderName: String? {
-        visibleCostSummary?.costs.max { lhs, rhs in
-            lhs.totalTokens < rhs.totalTokens
-        }?.provider.displayName
-    }
-
-    private var socialProviderNames: [String] {
-        if let costs = visibleCostSummary?.costs, !costs.isEmpty {
-            return costs.map(\.provider.displayName)
-        }
-
-        let snapshotTitles = providerSnapshots.map(\.title)
-        if !snapshotTitles.isEmpty {
-            return snapshotTitles
-        }
-
-        return enabledSourceLabels
-    }
-
     private var enabledSourceLabels: [String] {
         var labels: [String] = []
         if providerVisibility.isEnabled(.codexCli) {
@@ -826,7 +792,10 @@ struct UsageDashboardView: View {
 
     private var diagnosticsContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(title: "Provider Diagnostics", trailing: diagnosticsSummary) {
+            DashboardCard(
+                title: "Provider Diagnostics",
+                trailing: DiagnosticsRunner.summary(for: readinessReports)
+            ) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("These checks run locally. Every line is redacted — safe to paste into a GitHub issue.")
                         .font(.subheadline)
@@ -870,25 +839,14 @@ struct UsageDashboardView: View {
         }
     }
 
-    private struct DiagnosticsInputKey: Equatable {
-        let providers: [ServiceType]
-        let defaultClaudeAccountEnabled: Bool
-        let enabledClaudeCustomAccountIDs: [UUID]
-    }
-
-    private var diagnosticsInputKey: DiagnosticsInputKey {
-        DiagnosticsInputKey(
+    private var diagnosticsInputKey: DiagnosticsRunner.InputKey {
+        DiagnosticsRunner.InputKey(
             providers: ServiceType.allCases.filter { providerVisibility.enabledServices.contains($0) },
             defaultClaudeAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
             enabledClaudeCustomAccountIDs: claudeAccountStore.enabledAccounts
                 .filter { !$0.isDefault }
                 .map(\.id)
         )
-    }
-
-    private var diagnosticsSummary: String? {
-        guard !readinessReports.isEmpty else { return nil }
-        return ProviderReadinessSummary(reports: readinessReports).displayText
     }
 
     /// Runs the readiness inspector off the main actor (it does keychain / file /
@@ -906,39 +864,29 @@ struct UsageDashboardView: View {
 
     private func inspectReadiness() async -> [ProviderReadiness] {
         let enabledProviders = providerVisibility.enabledServices
-        let errors = currentRefreshErrors()
+        let errors = DiagnosticsRunner.refreshErrors(
+            claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
+            claudeError: claudeCodeService.lastError,
+            codexError: codexCliService.lastError,
+            cursorError: cursorService.lastError,
+            openRouterError: openRouterService.lastError,
+            grokError: grokService.lastError
+        )
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
         let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
         let claudeMetrics = enabledClaudeAccounts.compactMap {
             dataManager.claudeCodeAccountMetrics[$0.id]
         }
-        return await Task.detached(priority: .userInitiated) {
-            ProviderReadinessInspector.reports(
-                providers: enabledProviders,
-                refreshErrors: errors,
-                claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-                claudeEnabledAccountMetrics: claudeMetrics
-            )
-        }.value
-    }
-
-    /// Each provider's live last-refresh error, fed into the readiness core so the
-    /// "Last refresh" check reflects the app's actual runtime state.
-    private func currentRefreshErrors() -> [ServiceType: ServiceError] {
-        var result: [ServiceType: ServiceError] = [:]
-        if claudeAccountStore.defaultAccountIsEnabled,
-           let error = claudeCodeService.lastError {
-            result[.claudeCode] = error
-        }
-        if let error = codexCliService.lastError { result[.codexCli] = error }
-        if let error = cursorService.lastError { result[.cursor] = error }
-        if let error = openRouterService.lastError { result[.openRouter] = error }
-        if let error = grokService.lastError { result[.grok] = error }
-        return result
+        return await DiagnosticsRunner.inspect(
+            enabledProviders: enabledProviders,
+            refreshErrors: errors,
+            claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
+            claudeEnabledAccountMetrics: claudeMetrics
+        )
     }
 
     private func copyDiagnosticsToClipboard() {
-        let text = DiagnosticsReportText.plainText(readinessReports)
+        let text = DiagnosticsRunner.reportText(for: readinessReports)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -1000,7 +948,7 @@ struct UsageDashboardView: View {
         let content = makeSocialShareCardContent(generatedAt: generatedAt)
         socialCardGeneratedAt = generatedAt
 
-        guard let image = renderSocialCardImage(content: content) else {
+        guard let image = SocialCardRenderer.image(for: content) else {
             setSocialShareStatus("PNG render failed")
             return
         }
@@ -1019,7 +967,7 @@ struct UsageDashboardView: View {
         let content = makeSocialShareCardContent(generatedAt: generatedAt)
         socialCardGeneratedAt = generatedAt
 
-        guard let pngData = renderSocialCardPNGData(content: content) else {
+        guard let pngData = SocialCardRenderer.pngData(for: content) else {
             setSocialShareStatus("PNG render failed")
             return
         }
@@ -1048,29 +996,6 @@ struct UsageDashboardView: View {
         pasteboard.clearContents()
         pasteboard.setString(content.shareCaption, forType: .string)
         setSocialShareStatus("Caption copied")
-    }
-
-    private func renderSocialCardImage(content: SocialShareCardContent) -> NSImage? {
-        let exportSize = SocialShareCardLayout.exportSize
-        let renderer = ImageRenderer(
-            content: SocialShareCard(content: content)
-                .frame(width: exportSize.width, height: exportSize.height)
-        )
-        renderer.proposedSize = ProposedViewSize(width: exportSize.width, height: exportSize.height)
-        renderer.scale = 1
-        return renderer.nsImage
-    }
-
-    private func renderSocialCardPNGData(content: SocialShareCardContent) -> Data? {
-        guard
-            let image = renderSocialCardImage(content: content),
-            let tiffData = image.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: tiffData)
-        else {
-            return nil
-        }
-
-        return bitmap.representation(using: .png, properties: [:])
     }
 
     private func setSocialShareStatus(_ status: String) {
