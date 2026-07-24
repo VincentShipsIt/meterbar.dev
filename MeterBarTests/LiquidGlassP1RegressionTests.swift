@@ -8,9 +8,11 @@ import XCTest
 final class LiquidGlassP1RegressionTests: XCTestCase {
     // MARK: - Surface vocabulary invariants
 
-    /// Content uses a neutral, opaque fill that genuinely adapts between the
-    /// system's light and dark appearances rather than a product-colored wash.
-    func testContentSurfaceIsNeutralOpaqueAndAppearanceAdaptive() {
+    /// Content cards are a neutral *translucent lift* over whatever chrome sits
+    /// behind them, adapting between light and dark. Two shipped regressions are
+    /// pinned here: a product-colored wash (hue in the fill), and an opaque slab
+    /// that punches a visibly different surface into the shell.
+    func testContentSurfaceIsNeutralTranslucentAndAppearanceAdaptive() {
         let aqua = resolvedSRGB(
             MeterBarTheme.Surface.content,
             appearanceName: .aqua
@@ -21,15 +23,23 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         )
 
         for color in [aqua, darkAqua] {
-            XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.0001)
-            let channels = [color.redComponent, color.greenComponent, color.blueComponent]
-            XCTAssertLessThan(
-                (channels.max() ?? 1) - (channels.min() ?? 0),
-                0.02
-            )
+            assertHueNeutral(color)
+            XCTAssertGreaterThan(color.alphaComponent, 0.02, "the card must still read as a card")
+            XCTAssertLessThan(color.alphaComponent, 0.75, "the shell must read through the card")
         }
 
         XCTAssertNotEqual(aqua, darkAqua)
+    }
+
+    /// The glass shell tint carries no product color. Tinted chrome wrapped
+    /// around neutral content cards is the "blue window, gray cards" split this
+    /// vocabulary exists to prevent — both layers must read as one system.
+    func testChromeTintIsHueNeutral() {
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+            assertHueNeutral(
+                resolvedSRGB(MeterBarTheme.companionTint, appearanceName: appearanceName)
+            )
+        }
     }
 
     /// Chrome glass collapses to this fill under Reduce Transparency; the whole
@@ -45,6 +55,24 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         XCTAssertEqual(
             MeterBarTheme.Surface.chrome().radius,
             MeterBarTheme.companionShellRadius
+        )
+    }
+
+    /// Asserts a resolved color carries no hue: its three sRGB channels sit
+    /// within a hair of each other, so the surface is graphite, not a product
+    /// wash.
+    private func assertHueNeutral(
+        _ color: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let channels = [color.redComponent, color.greenComponent, color.blueComponent]
+        XCTAssertLessThan(
+            (channels.max() ?? 1) - (channels.min() ?? 0),
+            0.02,
+            "expected a hue-neutral surface, got \(channels)",
+            file: file,
+            line: line
         )
     }
 

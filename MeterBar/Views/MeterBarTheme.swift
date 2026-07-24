@@ -61,8 +61,8 @@ enum MeterBarTheme {
   // MARK: - Fill / stroke opacity
 
   /// Opacity tokens for the recurring tinted fills and hairline strokes on
-  /// chips, badges, and quota bars. One-off decorative gradients (cost-card
-  /// shimmer, detail-background wash) intentionally keep their own literals.
+  /// chips, badges, and quota bars. One-off decorative gradients (the cost-card
+  /// shimmer) intentionally keep their own literals.
   enum Fill {
     /// Tinted chip / badge / bar background.
     static let subtle: Double = 0.14
@@ -82,11 +82,11 @@ enum MeterBarTheme {
   /// glass is not the goal; consistency is). Under Reduce Transparency both
   /// collapse to ``chromeOpaqueFallback`` — good citizenship, preserved.
   ///
-  /// **Layer 2 — CONTENT.** ``content`` is the single neutral semantic fill for
-  /// every dashboard, settings, and popover card. It follows the system's
-  /// control background across appearances instead of washing content with a
-  /// product tint. ``inset`` is the quieter nested-row fill. Reduce Transparency
-  /// keeps the same opaque semantic treatment.
+  /// **Layer 2 — CONTENT.** ``content`` is the single neutral fill for every
+  /// dashboard, settings, and popover card: a hue-free translucent lift over
+  /// whatever chrome sits behind it, never a product wash and never an opaque
+  /// slab. Both layers are graphite on purpose — a tinted shell around neutral
+  /// cards reads as two competing surface systems in one window.
   ///
   /// The existing "glass shell containing flat-fill cards" structure is the
   /// correct Apple pattern; these tokens make it deliberate rather than
@@ -109,11 +109,23 @@ enum MeterBarTheme {
     /// consumed by ``MeterBarDetailBackground``.
     static let chromeOpaqueFallback = Color(nsColor: .windowBackgroundColor)
 
-    /// **Layer 2 — content.** The single opaque content-card fill in every
-    /// transparency mode. This neutral, appearance-adaptive system color is
-    /// applied via ``SwiftUI/View/meterBarCardSurface(cornerRadius:)`` — the
-    /// one source of truth for card fills.
-    static let content = Color(nsColor: .controlBackgroundColor)
+    /// **Layer 2 — content.** The single content-card fill, everywhere, in
+    /// every transparency mode: a neutral translucent lift over the chrome
+    /// behind it. Neutral because color belongs to provider/status indicators,
+    /// not to surfaces. Translucent because an opaque fill punches a visibly
+    /// different surface into the shell — in dark mode `controlBackgroundColor`
+    /// is *darker* than the material around it, so cards read as recessed gray
+    /// slabs instead of lifted content. This is a flat alpha wash, not
+    /// vibrancy, so it stays correct under Reduce Transparency without a
+    /// separate fallback token. Applied via
+    /// ``SwiftUI/View/meterBarCardSurface(cornerRadius:)`` — the one source of
+    /// truth for card fills.
+    static let content = Color.adaptive(
+      light: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55),
+      dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.08),
+      lightHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85),
+      darkHighContrast: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.14)
+    )
   }
 
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
@@ -153,11 +165,15 @@ enum MeterBarTheme {
     darkHighContrast: NSColor(srgbRed: 145 / 255, green: 176 / 255, blue: 188 / 255, alpha: 1)
   )
 
+  /// Glass tint for the popover / detail-panel shell. Deliberately hue-free:
+  /// chrome carries no product color, so the neutral cards inside it read as
+  /// the same surface system instead of gray slabs dropped into a teal window.
+  /// Luminance matches the tint this replaced, so the shell keeps its weight.
   static let companionTint = Color.adaptive(
-    light: NSColor(srgbRed: 0.50, green: 0.66, blue: 0.72, alpha: 0.16),
-    dark: NSColor(srgbRed: 0.08, green: 0.20, blue: 0.24, alpha: 0.18),
-    lightHighContrast: NSColor(srgbRed: 0.50, green: 0.66, blue: 0.72, alpha: 0.20),
-    darkHighContrast: NSColor(srgbRed: 0.08, green: 0.20, blue: 0.24, alpha: 0.20)
+    light: NSColor(srgbRed: 0.64, green: 0.64, blue: 0.64, alpha: 0.16),
+    dark: NSColor(srgbRed: 0.16, green: 0.16, blue: 0.16, alpha: 0.18),
+    lightHighContrast: NSColor(srgbRed: 0.64, green: 0.64, blue: 0.64, alpha: 0.20),
+    darkHighContrast: NSColor(srgbRed: 0.16, green: 0.16, blue: 0.16, alpha: 0.20)
   )
 
   // MARK: - Quota status (system colors; adapt to appearance + Increase Contrast)
@@ -281,32 +297,20 @@ struct MeterBarDetailBackground: View {
   private var reduceTransparency
 
   var body: some View {
-    ZStack {
+    Group {
       if reduceTransparency {
         // Opaque fallback fills the whole window, bar region included.
         MeterBarTheme.Surface.chromeOpaqueFallback
-          .ignoresSafeArea()
       } else {
-        // The material is the window backing and may bleed under the toolbar.
+        // Plain material, full-bleed through the hidden toolbar's safe area so
+        // AppKit never exposes a separate titlebar strip. No accent wash: a
+        // product-tinted window around neutral content cards is two surface
+        // systems fighting, and color here belongs to status indicators only.
         Color.clear
           .background(.regularMaterial)
-          .ignoresSafeArea()
-
-        // The toolbar background is hidden, so the same subtle tint must fill
-        // its safe area as well. Otherwise AppKit exposes a visually separate
-        // titlebar strip even though the window titlebar is transparent.
-        LinearGradient(
-          colors: [
-            MeterBarTheme.codexAccent.opacity(0.04),
-            MeterBarTheme.appAccent.opacity(0.025),
-            .clear,
-          ],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
       }
     }
+    .ignoresSafeArea()
   }
 }
 
@@ -356,10 +360,11 @@ private struct MeterBarCardSurfaceModifier: ViewModifier {
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-    // Every content card funnels through here. The semantic system fill follows
-    // the active appearance and accessibility contrast without a product-color
-    // wash. A hairline provides the boundary without shadows or a second glass
-    // layer.
+    // Every content card funnels through here. The neutral translucent fill
+    // follows the active appearance and accessibility contrast without a
+    // product-color wash, and lets the chrome behind it read through so cards
+    // lift off the shell rather than punching an opaque hole in it. A hairline
+    // provides the boundary without shadows or a second glass layer.
     content
       .background(MeterBarTheme.Surface.content, in: shape)
       .overlay {

@@ -16,7 +16,7 @@ colors:
   text-secondary: "Color.secondary / NSColor.secondaryLabelColor"
   text-tertiary: ".tertiary"
   window-background: "Color(nsColor: .windowBackgroundColor)"
-  content-surface: "Color(nsColor: .controlBackgroundColor) — neutral, semantic, and appearance-adaptive"
+  content-surface: "MeterBarTheme.Surface.content — a hue-free translucent white lift (0.55 light / 0.08 dark), appearance- and contrast-adaptive. Never a product wash, never an opaque slab."
   separator: "Color(nsColor: .separatorColor) / .quaternary"
   fill-subtle: ".quaternary  # tracks, inactive chips, zebra rows"
   accent: "Color.accentColor  # follows the user's system accent"
@@ -63,7 +63,8 @@ Both surfaces stay lean. Avoid decorative hero layouts, big nested cards, and ex
 Liquid Glass is the system's **chrome layer** — the menu bar, the popover surface, toolbars, sidebars, and the occasional floating control. We get it for free by using standard components and **removing** custom chrome. The work is subtraction, not decoration:
 
 - **Do not** paint popover/window backgrounds with a color + material. Let the system popover/window surface (and `NavigationSplitView` sidebar/toolbar) supply the glass.
-- **Do not** paint content cards with fixed dark-gray or product-colored washes. Use the shared semantic `controlBackgroundColor` and hairline.
+- **Do not** paint content cards with fixed dark-gray or product-colored washes. Use the shared `MeterBarTheme.Surface.content` lift and hairline.
+- **Do not** tint chrome with a product color while content stays neutral (or the reverse). Chrome and content are one graphite system; a teal shell around gray cards reads as two designs in one window.
 - **Do not** wrap content cards in a second material layer ("fake glass"). Content is **not** a glass layer.
 - **Never** stack a material over another material (glass-on-glass).
 - For genuinely free-floating custom controls only, use a single `.glassEffect(.regular, in:)` inside a `GlassEffectContainer`. Use it sparingly.

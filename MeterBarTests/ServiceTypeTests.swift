@@ -63,12 +63,17 @@ final class ServiceTypeTests: XCTestCase {
     }
 
     // Centralized rule (popover, dashboard, widget, and notification copy all
-    // route through this): the third quota window is "Sonnet" for Claude Code
-    // and "Code Review" for every other provider.
+    // route through this): Claude Code's third quota window is model-scoped —
+    // it echoes the parsed model label, falling back to "Model" when absent,
+    // and is never a hardcoded model name. Every other provider shows
+    // "Code Review" regardless of any label.
     func testCodeReviewQuotaTitle() {
-        XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle, "Sonnet")
+        XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Fable")
+        XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Sonnet"), "Sonnet")
+        XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: nil), "Model")
         for service in ServiceType.allCases where service != .claudeCode {
-            XCTAssertEqual(service.codeReviewQuotaTitle, "Code Review")
+            XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Code Review")
+            XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: nil), "Code Review")
         }
     }
 }

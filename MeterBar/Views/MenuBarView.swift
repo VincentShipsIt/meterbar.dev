@@ -22,6 +22,7 @@ struct MenuBarView: View {
   @StateObject private var openRouterService = OpenRouterService.shared
   @StateObject private var grokService = GrokCLIUsageService.shared
   @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+  @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
   @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
@@ -78,6 +79,7 @@ struct MenuBarView: View {
                 codexAccountMetrics: dataManager.codexAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                fableSessions: fableSessionTracker.sessions,
                 enabledServices: providerVisibility.enabledServices,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
@@ -769,6 +771,8 @@ struct ProviderStatusCard: View {
         }
       }
 
+      fableActivitySection
+
       let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
       if badges.hasContent {
         badges
@@ -778,6 +782,68 @@ struct ProviderStatusCard: View {
         Divider()
         resetCreditButton
       }
+    }
+  }
+
+  @ViewBuilder private var fableActivitySection: some View {
+    if let fableActivity = snapshot.fableActivity {
+      Divider()
+      fableActivityRow(fableActivity)
+    }
+  }
+
+  private func fableActivityRow(_ activity: FableSessionCardActivity) -> some View {
+    TimelineView(.periodic(from: .now, by: 60)) { context in
+      let status = activity.status(now: context.date)
+
+      HStack(spacing: 7) {
+        Label("Fable 5", systemImage: "sparkles")
+          .font(.caption)
+          .fontWeight(.medium)
+          .foregroundStyle(.secondary)
+
+        Spacer(minLength: 8)
+
+        switch status {
+        case .active:
+          Label("Active", systemImage: "circle.fill")
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(MeterBarTheme.success)
+        case .recent:
+          if let lastObservedAt = activity.session?.lastObservedAt {
+            HStack(spacing: 3) {
+              Text("Last seen")
+              Text(lastObservedAt, style: .relative)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+          }
+        case .noActivity:
+          Text("No activity")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      }
+      .accessibilityElement(children: .combine)
+      .accessibilityLabel(fableActivityAccessibilityLabel(activity, status: status))
+    }
+  }
+
+  private func fableActivityAccessibilityLabel(
+    _ activity: FableSessionCardActivity,
+    status: FableSessionCardActivity.Status
+  ) -> String {
+    switch status {
+    case .active:
+      return "Fable 5, active"
+    case .recent:
+      guard let lastObservedAt = activity.session?.lastObservedAt else {
+        return "Fable 5, recent activity"
+      }
+      return "Fable 5, last seen \(lastObservedAt.formatted(date: .abbreviated, time: .shortened))"
+    case .noActivity:
+      return "Fable 5, no activity"
     }
   }
 
