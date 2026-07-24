@@ -144,6 +144,7 @@ final class ProviderResponseContractTests: XCTestCase {
         XCTAssertEqual(response.fiveHour.utilization, 61.5)
         XCTAssertEqual(response.sevenDay.utilization, 30.0)
         XCTAssertEqual(response.sevenDaySonnet?.utilization, 12.0)
+        XCTAssertNil(response.sevenDayFable)
         // Minor-unit money: 750 with exponent 2 is $7.50.
         XCTAssertEqual(response.spend?.used?.amount, 7.5)
         XCTAssertEqual(response.extraUsageStatus.state, .on)

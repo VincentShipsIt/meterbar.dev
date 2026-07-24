@@ -29,6 +29,7 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertEqual(weekly.percentage, 30.0, accuracy: 0.01)
         XCTAssertEqual(weekly.windowSeconds, 7 * 24 * 60 * 60)
         XCTAssertEqual(sonnet.percentage, 12.0, accuracy: 0.01)
+        XCTAssertEqual(metrics.modelLimitLabel, "Sonnet")
         XCTAssertEqual(sonnet.windowSeconds, 7 * 24 * 60 * 60)
         XCTAssertNotNil(session.resetTime)
         XCTAssertEqual(metrics.extraUsage?.state, .on)
@@ -47,6 +48,25 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertNotNil(metrics.sessionLimit)
         XCTAssertNotNil(metrics.weeklyLimit)
         XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertNil(metrics.modelLimitLabel)
+    }
+
+    func testMetricsMapsFableWindowWithoutRelabelingItAsSonnet() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": {"utilization": 16.0, "resets_at": "2026-07-02T14:00:00Z"},
+          "seven_day": {"utilization": 71.0, "resets_at": "2026-07-08T00:00:00Z"},
+          "seven_day_fable": {"utilization": 100.0, "resets_at": "2026-07-08T00:00:00Z"}
+        }
+        """#)
+
+        let metrics = ClaudeCodeLocalService.metrics(from: response)
+
+        XCTAssertEqual(metrics.codeReviewLimit?.percentage, 100.0)
+        XCTAssertEqual(metrics.modelLimitLabel, "Fable")
+        guard case .good = metrics.overallStatus else {
+            return XCTFail("A Fable-only exhaustion must not mark Claude unavailable.")
+        }
     }
 
     // MARK: - Source-selection policy

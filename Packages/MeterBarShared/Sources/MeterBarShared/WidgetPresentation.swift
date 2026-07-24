@@ -35,6 +35,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public let service: ServiceType
     public let accountName: String
     public let quotaWindow: WidgetQuotaWindow
+    public let modelLimitLabel: String?
     public let limit: UsageLimit?
     public let health: WidgetDataHealth
     public let displayMode: WidgetUsageDisplayMode
@@ -49,7 +50,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         case (.openRouter, .weekly):
             return "Account credits"
         case (.claudeCode, .codeReview):
-            return "Sonnet"
+            return modelLimitLabel ?? "Model"
         case (_, .codeReview):
             return "Code Review"
         case (_, .session):
@@ -324,6 +325,7 @@ public enum WidgetPresentationPlanner {
             service: source.service,
             accountName: source.name,
             quotaWindow: window,
+            modelLimitLabel: source.metrics?.modelLimitLabel,
             limit: limit,
             health: health,
             displayMode: preferences.displayMode,

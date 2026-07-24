@@ -156,7 +156,8 @@ final class WidgetPresentationTests: XCTestCase {
                 .claudeCode,
                 sessionUsed: 10,
                 weeklyUsed: 20,
-                codeReviewUsed: 30
+                codeReviewUsed: 30,
+                modelLimitLabel: "Fable"
             ),
             .cursor: makeMetrics(.cursor, sessionUsed: nil, weeklyUsed: 40)
         ]
@@ -176,7 +177,7 @@ final class WidgetPresentationTests: XCTestCase {
                 "Cursor:weekly"
             ]
         )
-        XCTAssertEqual(result.rows[2].quotaTitle, "Sonnet")
+        XCTAssertEqual(result.rows[2].quotaTitle, "Fable")
     }
 
     func testResetAndFreshnessMetadataObeyIndependentToggles() throws {
@@ -374,6 +375,7 @@ final class WidgetPresentationTests: XCTestCase {
         sessionUsed: Double? = nil,
         weeklyUsed: Double? = nil,
         codeReviewUsed: Double? = nil,
+        modelLimitLabel: String? = nil,
         resetTime: Date? = nil,
         lastUpdated: Date? = nil
     ) -> UsageMetrics {
@@ -388,6 +390,7 @@ final class WidgetPresentationTests: XCTestCase {
             codeReviewLimit: codeReviewUsed.map {
                 UsageLimit(used: $0, total: 100, resetTime: resetTime)
             },
+            modelLimitLabel: modelLimitLabel,
             lastUpdated: lastUpdated ?? now
         )
     }

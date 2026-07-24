@@ -8,16 +8,38 @@ import XCTest
 final class LiquidGlassP1RegressionTests: XCTestCase {
     // MARK: - Surface vocabulary invariants
 
-    /// Normal content surfaces stay translucent so the window material remains
-    /// visible instead of becoming opaque dark-gray slabs.
-    func testContentSurfaceTokensAreTranslucent() {
-        assertTranslucent(MeterBarTheme.Surface.content)
-        assertTranslucent(MeterBarTheme.Surface.inset)
+    /// Content cards are a neutral *translucent lift* over whatever chrome sits
+    /// behind them, adapting between light and dark. Two shipped regressions are
+    /// pinned here: a product-colored wash (hue in the fill), and an opaque slab
+    /// that punches a visibly different surface into the shell.
+    func testContentSurfaceIsNeutralTranslucentAndAppearanceAdaptive() {
+        let aqua = resolvedSRGB(
+            MeterBarTheme.Surface.content,
+            appearanceName: .aqua
+        )
+        let darkAqua = resolvedSRGB(
+            MeterBarTheme.Surface.content,
+            appearanceName: .darkAqua
+        )
+
+        for color in [aqua, darkAqua] {
+            assertHueNeutral(color)
+            XCTAssertGreaterThan(color.alphaComponent, 0.02, "the card must still read as a card")
+            XCTAssertLessThan(color.alphaComponent, 0.75, "the shell must read through the card")
+        }
+
+        XCTAssertNotEqual(aqua, darkAqua)
     }
 
-    /// Reduce Transparency still has an opaque semantic card fill.
-    func testContentReduceTransparencyFallbackIsOpaque() {
-        assertOpaque(MeterBarTheme.Surface.contentOpaqueFallback)
+    /// The glass shell tint carries no product color. Tinted chrome wrapped
+    /// around neutral content cards is the "blue window, gray cards" split this
+    /// vocabulary exists to prevent — both layers must read as one system.
+    func testChromeTintIsHueNeutral() {
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+            assertHueNeutral(
+                resolvedSRGB(MeterBarTheme.companionTint, appearanceName: appearanceName)
+            )
+        }
     }
 
     /// Chrome glass collapses to this fill under Reduce Transparency; the whole
@@ -33,6 +55,24 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         XCTAssertEqual(
             MeterBarTheme.Surface.chrome().radius,
             MeterBarTheme.companionShellRadius
+        )
+    }
+
+    /// Asserts a resolved color carries no hue: its three sRGB channels sit
+    /// within a hair of each other, so the surface is graphite, not a product
+    /// wash.
+    private func assertHueNeutral(
+        _ color: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let channels = [color.redComponent, color.greenComponent, color.blueComponent]
+        XCTAssertLessThan(
+            (channels.max() ?? 1) - (channels.min() ?? 0),
+            0.02,
+            "expected a hue-neutral surface, got \(channels)",
+            file: file,
+            line: line
         )
     }
 
@@ -54,21 +94,27 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         }
     }
 
-    private func assertTranslucent(
+    private func resolvedSRGB(
         _ color: Color,
+        appearanceName: NSAppearance.Name,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) {
-        let appearances = [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)]
-            .compactMap { $0 }
-        for appearance in appearances {
-            var alpha: CGFloat = -1
-            appearance.performAsCurrentDrawingAppearance {
-                alpha = NSColor(color).usingColorSpace(.sRGB)?.alphaComponent ?? -1
-            }
-            XCTAssertGreaterThan(alpha, 0, file: file, line: line)
-            XCTAssertLessThan(alpha, 1, file: file, line: line)
+    ) -> NSColor {
+        guard let appearance = NSAppearance(named: appearanceName) else {
+            XCTFail("Missing \(appearanceName) appearance", file: file, line: line)
+            return .clear
         }
+
+        var resolved: NSColor?
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = NSColor(color).usingColorSpace(.sRGB)
+        }
+
+        guard let resolved else {
+            XCTFail("Could not resolve color in sRGB", file: file, line: line)
+            return .clear
+        }
+        return resolved
     }
 
     func testMenuPanelCanBecomeKey() {

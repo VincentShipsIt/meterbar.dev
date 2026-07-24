@@ -44,6 +44,12 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     public let sessionLimit: UsageLimit?
     public let weeklyLimit: UsageLimit?
     public let codeReviewLimit: UsageLimit?
+    /// Provider-reported label for the model-scoped third quota window.
+    ///
+    /// Claude CLI has used both "Sonnet" and "Fable" for this window. Keeping
+    /// the optional label alongside the existing limit preserves that identity
+    /// without renaming the shared cache key or breaking older cached payloads.
+    public let modelLimitLabel: String?
     public let extraUsage: ExtraUsageStatus?
     /// Number of banked rate-limit resets the account can trigger on demand.
     /// Codex-only (OpenAI "reset credits"); `nil` for providers/accounts without the feature.
@@ -55,6 +61,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         sessionLimit: UsageLimit? = nil,
         weeklyLimit: UsageLimit? = nil,
         codeReviewLimit: UsageLimit? = nil,
+        modelLimitLabel: String? = nil,
         extraUsage: ExtraUsageStatus? = nil,
         resetCreditsAvailable: Int? = nil,
         lastUpdated: Date = Date()
@@ -64,6 +71,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         self.sessionLimit = sessionLimit
         self.weeklyLimit = weeklyLimit
         self.codeReviewLimit = codeReviewLimit
+        self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
         self.lastUpdated = lastUpdated
@@ -75,6 +83,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         sessionLimit: UsageLimit?,
         weeklyLimit: UsageLimit?,
         codeReviewLimit: UsageLimit?,
+        modelLimitLabel: String?,
         extraUsage: ExtraUsageStatus?,
         resetCreditsAvailable: Int?,
         lastUpdated: Date
@@ -84,6 +93,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         self.sessionLimit = sessionLimit
         self.weeklyLimit = weeklyLimit
         self.codeReviewLimit = codeReviewLimit
+        self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
         self.lastUpdated = lastUpdated
@@ -98,16 +108,20 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
             sessionLimit: sessionLimit,
             weeklyLimit: weeklyLimit,
             codeReviewLimit: codeReviewLimit,
+            modelLimitLabel: modelLimitLabel,
             extraUsage: status,
             resetCreditsAvailable: resetCreditsAvailable,
             lastUpdated: lastUpdated
         )
     }
 
-    /// Worst three-level status across this service's limits, derived from the
-    /// shared `QuotaBand` thresholds. Used by the widget's status dots.
+    /// Provider-wide status derived from the windows that can block normal use.
+    ///
+    /// A model-scoped Sonnet/Fable or code-review limit can be exhausted while
+    /// the rest of a provider remains available, so it stays visible on its row
+    /// without turning the widget's provider status critical.
     public var overallStatus: UsageStatus {
-        let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
+        let limits = [sessionLimit, weeklyLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
 
         if limits.contains(where: { $0.statusColor == .critical }) {

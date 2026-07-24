@@ -18,6 +18,7 @@ struct ProviderSnapshot: Identifiable {
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
     let accountID: UUID?
+    let fableActivity: FableSessionCardActivity?
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -35,9 +36,12 @@ struct ProviderSnapshot: Identifiable {
     /// dashboard renders a card for it).
     var hasMetrics: Bool { updatedAt != nil }
 
-    /// The limit closest to exhaustion — what the card's status reflects.
+    /// The provider-wide limit closest to exhaustion — what the card's status
+    /// reflects. Model-scoped Sonnet/Fable and code-review windows remain
+    /// visible on their own rows but do not mean the provider is unavailable.
     var primaryLimit: SnapshotLimit? {
-        limits.min { $0.percentLeft < $1.percentLeft }
+        let providerLimits = limits.filter(\.isProviderBlocking)
+        return providerLimits.min { $0.percentLeft < $1.percentLeft }
     }
 
     /// Severity band of the primary limit; `nil` when no limits are reported.
@@ -51,7 +55,7 @@ struct ProviderSnapshot: Identifiable {
     var blockingLimits: [SnapshotLimit] {
         guard extraUsage?.state != .on else { return [] }
         return limits.filter {
-            ($0.kind == .session || $0.kind == .weekly)
+            $0.isProviderBlocking
                 && !$0.usageLimit.isEstimated
                 && $0.usageLimit.isAtLimit
         }
@@ -154,6 +158,10 @@ struct SnapshotLimit: Identifiable {
         QuotaMath.percentLeft(for: usageLimit)
     }
 
+    var isProviderBlocking: Bool {
+        kind == .session || kind == .weekly
+    }
+
     /// Pace copy differs for rolling session windows vs weekly/billing windows.
     /// Derived from the limit's kind, not by string-matching the display title.
     var paceContext: PaceLabelContext {
@@ -192,6 +200,7 @@ enum ProviderSnapshotBuilder {
         var codexAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
+        var fableSessions: [ClaudeFableSession] = []
         var enabledServices: Set<ServiceType>
         var claudeCodeHasAccess: Bool = false
         var codexCliHasAccess: Bool = false
@@ -234,6 +243,7 @@ enum ProviderSnapshotBuilder {
         if input.enabledServices.contains(.claudeCode) {
             let enabledAccounts = input.claudeAccounts.filter(\.isEnabled)
             let accountMetrics = input.claudeAccountMetrics
+            let fableActivityByAccount = FableSessionCardActivity.byAccount(sessions: input.fableSessions)
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
                     let title = account.isDefault && enabledAccounts.count == 1 ? "Claude" : account.name
@@ -245,7 +255,9 @@ enum ProviderSnapshotBuilder {
                         service: .claudeCode,
                         metrics: accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil),
                         emptyDetail: emptyDetail,
-                        accountID: account.id
+                        accountID: account.id,
+                        fableActivity: fableActivityByAccount[account.id]
+                            ?? FableSessionCardActivity(session: nil)
                     ))
                 }
             }
@@ -286,7 +298,8 @@ enum ProviderSnapshotBuilder {
         service: ServiceType,
         metrics: UsageMetrics?,
         emptyDetail: String,
-        accountID: UUID? = nil
+        accountID: UUID? = nil,
+        fableActivity: FableSessionCardActivity? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             // Disambiguate by account id so two accounts that share a display
@@ -300,7 +313,8 @@ enum ProviderSnapshotBuilder {
             emptyDetail: emptyDetail,
             extraUsage: metrics?.extraUsage,
             resetCreditsAvailable: metrics?.resetCreditsAvailable,
-            accountID: accountID
+            accountID: accountID,
+            fableActivity: fableActivity
         )
     }
 
@@ -327,10 +341,10 @@ enum ProviderSnapshotBuilder {
             ))
         }
         if let codeReview = metrics.codeReviewLimit {
-            // Claude's third window is the Sonnet-only weekly quota; Codex's is
-            // its code-review quota. (The popover and dashboard previously
-            // implemented this rule with inverted defaults.)
-            let title = service == .claudeCode ? "Sonnet" : "Code Review"
+            // Claude's third window is model-scoped and has changed names
+            // across CLI releases. Preserve the parsed label instead of
+            // relabeling Fable as Sonnet; legacy caches use a neutral fallback.
+            let title = service == .claudeCode ? (metrics.modelLimitLabel ?? "Model") : "Code Review"
             result.append(SnapshotLimit(id: "codeReview", kind: .codeReview, title: title, usageLimit: codeReview))
         }
         return result
@@ -355,9 +369,10 @@ extension Array where Element == ProviderSnapshot {
 }
 
 extension Array where Element == ProviderSnapshot {
-    /// The single tightest quota window across every provider — what the
-    /// overview hero and menu-bar summaries report.
+    /// The single tightest provider-wide quota window across every provider —
+    /// what the overview hero reports. Model-specific exhaustion is scoped to
+    /// its own row and must not collapse the global provider summary.
     var tightestLimit: SnapshotLimit? {
-        flatMap(\.limits).min { $0.percentLeft < $1.percentLeft }
+        compactMap(\.primaryLimit).min { $0.percentLeft < $1.percentLeft }
     }
 }

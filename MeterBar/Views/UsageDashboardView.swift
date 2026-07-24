@@ -198,9 +198,12 @@ final class DashboardNavigationStore: ObservableObject {
 }
 
 struct UsageDashboardView: View {
+    private static let detailHorizontalPadding = MeterBarTheme.Spacing.xxl
+
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+    @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
@@ -375,33 +378,36 @@ struct UsageDashboardView: View {
     }
 
     private var detailContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if navigation.isShowingSettings {
-                    settingsSectionContent
-                } else {
-                    monitoringSectionContent
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if navigation.isShowingSettings {
+                        settingsSectionContent
+                    } else {
+                        monitoringSectionContent(viewportWidth: viewport.size.width)
+                    }
                 }
+                .padding(.horizontal, Self.detailHorizontalPadding)
+                .padding(.top, MeterBarTheme.Spacing.md)
+                .padding(.bottom, MeterBarTheme.Spacing.xxl)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, MeterBarTheme.Spacing.xxl)
-            .padding(.top, MeterBarTheme.Spacing.md)
-            .padding(.bottom, MeterBarTheme.Spacing.xxl)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .scrollContentBackground(.hidden)
+            .scrollEdgeEffectHidden(for: .top)
+            .background {
+                // This is one continuous surface through the titlebar. The toolbar
+                // still owns the refresh/settings controls, but paints no separate
+                // background band and adds no scroll-edge fade.
+                MeterBarDetailBackground()
+            }
+            .navigationTitle("")
+            .navigationSubtitle("")
         }
-        .scrollContentBackground(.hidden)
-        .scrollEdgeEffectHidden(for: .top)
-        .background {
-            // This is one continuous surface through the titlebar. The toolbar
-            // still owns the refresh/settings controls, but paints no separate
-            // background band and adds no scroll-edge fade.
-            MeterBarDetailBackground()
-        }
-        .navigationTitle("")
-        .navigationSubtitle("")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    @ViewBuilder private var monitoringSectionContent: some View {
+    @ViewBuilder
+    private func monitoringSectionContent(viewportWidth: CGFloat) -> some View {
         switch activeSection {
         case .overview:
             overviewContent
@@ -416,7 +422,7 @@ struct UsageDashboardView: View {
         case .diagnostics:
             diagnosticsContent
         case .share:
-            shareContent
+            shareContent(viewportWidth: viewportWidth)
         }
     }
 
@@ -637,10 +643,17 @@ struct UsageDashboardView: View {
         }
     }
 
-    private var shareContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SocialShareCardPreview(content: socialShareCardContent)
-                .frame(maxWidth: 860)
+    private func shareContent(viewportWidth: CGFloat) -> some View {
+        let previewSize = SocialShareCardLayout.previewSize(
+            viewportWidth: viewportWidth,
+            horizontalInsets: Self.detailHorizontalPadding * 2
+        )
+
+        return VStack(alignment: .leading, spacing: 14) {
+            SocialShareCardPreview(
+                content: socialShareCardContent,
+                size: previewSize
+            )
                 .accessibilityLabel("MeterBar 30-day token receipt preview")
 
             HStack(spacing: 10) {
@@ -726,6 +739,7 @@ struct UsageDashboardView: View {
             codexAccountMetrics: dataManager.codexAccountMetrics,
             claudeAccounts: claudeAccountStore.accounts,
             claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+            fableSessions: fableSessionTracker.sessions,
             enabledServices: providerVisibility.enabledServices,
             claudeCodeHasAccess: claudeCodeService.hasAccess,
             codexCliHasAccess: codexCliService.hasAccess,
@@ -1092,7 +1106,7 @@ private struct OverviewSummaryStrip: View {
                     value: tightestValue(now: timeline.date),
                     caption: tightestCaption,
                     systemImage: tightestIconName,
-                    tint: tightestColor,
+                    indicatorTint: tightestColor,
                     style: .compact
                 )
             }
@@ -1102,7 +1116,6 @@ private struct OverviewSummaryStrip: View {
                 value: estimatedCost ?? "Scan needed",
                 caption: "\(formattedTokens) tokens",
                 systemImage: "chart.bar.xaxis",
-                tint: MeterBarTheme.success,
                 style: .compact
             )
 
@@ -1111,7 +1124,6 @@ private struct OverviewSummaryStrip: View {
                 value: "\(sourceCount)",
                 caption: sourceCaption,
                 systemImage: "checklist.checked",
-                tint: MeterBarTheme.appAccent,
                 style: .compact
             )
         }

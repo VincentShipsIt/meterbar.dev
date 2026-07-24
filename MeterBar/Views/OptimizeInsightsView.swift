@@ -107,28 +107,26 @@ struct OptimizeInsightsView: View {
         value: insights.formattedPremiumShare,
         caption: "of tokens on premium models",
         systemImage: "bolt.fill",
-        tint: Self.shareTint(insights.premiumTokenShare)
+        indicatorTint: Self.shareTint(insights.premiumTokenShare)
       )
       DashboardMetricTile(
         title: "Cache reuse",
         value: insights.formattedCacheReuse,
         caption: "cache reads vs new context",
         systemImage: "arrow.triangle.2.circlepath",
-        tint: Self.cacheTint(insights.cacheReuseRatio)
+        indicatorTint: Self.cacheTint(insights.cacheReuseRatio)
       )
       DashboardMetricTile(
         title: "Input : output",
         value: insights.formattedInputOutputRatio,
         caption: "context sent vs generated",
-        systemImage: "text.append",
-        tint: .secondary
+        systemImage: "text.append"
       )
       DashboardMetricTile(
         title: "Last 7 days",
         value: UsageFormat.tokens(insights.tokens7Day),
         caption: "\(UsageFormat.tokens(insights.tokens30Day)) over 30 days",
-        systemImage: "calendar",
-        tint: .secondary
+        systemImage: "calendar"
       )
     }
     .frame(maxWidth: .infinity)

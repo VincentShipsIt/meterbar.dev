@@ -22,6 +22,8 @@ final class CachedMetricsContractTests: XCTestCase {
                 isEstimated: true
             ),
             weeklyLimit: UsageLimit(used: 12, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 32, total: 100, resetTime: nil),
+            modelLimitLabel: "Fable",
             extraUsage: ExtraUsageStatus(state: .on, detail: "$0.00 used"),
             resetCreditsAvailable: 2,
             lastUpdated: Date(timeIntervalSinceReferenceDate: 699_999_000)
@@ -43,7 +45,8 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertEqual(metrics.service, .claudeCode)
         XCTAssertEqual(metrics.sessionLimit, original["Claude Code"]?.sessionLimit)
         XCTAssertEqual(metrics.weeklyLimit, original["Claude Code"]?.weeklyLimit)
-        XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertEqual(metrics.codeReviewLimit, original["Claude Code"]?.codeReviewLimit)
+        XCTAssertEqual(metrics.modelLimitLabel, "Fable")
         XCTAssertEqual(metrics.extraUsage, ExtraUsageStatus(state: .on, detail: "$0.00 used"))
         XCTAssertEqual(metrics.resetCreditsAvailable, 2)
         XCTAssertEqual(metrics.lastUpdated, original["Claude Code"]?.lastUpdated)
@@ -58,7 +61,7 @@ final class CachedMetricsContractTests: XCTestCase {
         )
 
         let topLevelKeys = [
-            "id", "service", "sessionLimit", "weeklyLimit",
+            "id", "service", "sessionLimit", "weeklyLimit", "codeReviewLimit", "modelLimitLabel",
             "extraUsage", "resetCreditsAvailable", "lastUpdated",
         ]
         for key in topLevelKeys {
@@ -107,6 +110,7 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertNil(metrics.extraUsage)
         XCTAssertNil(metrics.resetCreditsAvailable)
+        XCTAssertNil(metrics.modelLimitLabel)
     }
 
     // MARK: - Shared App Group location (issue #13 — a rename must break CI)
