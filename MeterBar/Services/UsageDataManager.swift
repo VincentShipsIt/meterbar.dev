@@ -149,33 +149,47 @@ class UsageDataManager: ObservableObject {
         var newMetrics: [ServiceType: UsageMetrics] = [:]
         var states: [ServiceType: (state: ProviderRefreshState, reason: String?)] = [:]
 
-        // Fetch Claude Code metrics (local files)
         let hasEnabledClaudeAccount = !claudeCodeAccountStore.enabledAccounts.isEmpty
-        if providerVisibilityStore.isEnabled(.claudeCode), hasEnabledClaudeAccount {
-            let fetch = await fetchClaudeCodeAccountMetrics()
-            claudeCodeAccountMetrics = fetch.metrics
+        let hasEnabledCodexAccount = !codexAccountStore.enabledAccounts.isEmpty
 
-            if let representativeMetrics = representativeClaudeCodeMetrics(from: fetch.metrics) {
+        // The three phases own disjoint state, so they run concurrently: a cycle
+        // now costs the slowest phase instead of the sum of all three. Every
+        // published assignment is deferred until all three have collected, which
+        // is what lets the account fetchers keep reading the *previous* cache for
+        // their graceful-degradation fallbacks.
+        async let claudeFetch = claudeAccountFetch(
+            isEnabled: providerVisibilityStore.isEnabled(.claudeCode) && hasEnabledClaudeAccount
+        )
+        async let codexFetch = codexAccountFetch(
+            isEnabled: providerVisibilityStore.isEnabled(.codexCli) && hasEnabledCodexAccount
+        )
+        async let simpleFetch = refreshSimpleProviders()
+
+        let claudeResult = await claudeFetch
+        let codexResult = await codexFetch
+        let simpleResults = await simpleFetch
+
+        // Claude Code metrics (local files)
+        if let claudeResult {
+            claudeCodeAccountMetrics = claudeResult.metrics
+
+            if let representativeMetrics = representativeClaudeCodeMetrics(from: claudeResult.metrics) {
                 newMetrics[.claudeCode] = representativeMetrics
             } else if let cachedMetrics = self.metrics[.claudeCode] {
                 newMetrics[.claudeCode] = cachedMetrics
             }
-            states[.claudeCode] = accountFetchState(fetch)
+            states[.claudeCode] = accountFetchState(claudeResult)
         } else {
-            if !providerVisibilityStore.isEnabled(.claudeCode) || !hasEnabledClaudeAccount {
-                claudeCodeAccountMetrics = [:]
-            }
+            claudeCodeAccountMetrics = [:]
             states[.claudeCode] = (.skipped, claudeCodeSkipReason(hasEnabledAccount: hasEnabledClaudeAccount))
         }
 
-        let hasEnabledCodexAccount = !codexAccountStore.enabledAccounts.isEmpty
-        if providerVisibilityStore.isEnabled(.codexCli), hasEnabledCodexAccount {
-            let fetch = await fetchCodexAccountMetrics()
-            codexAccountMetrics = fetch.metrics
-            if let representative = representativeCodexMetrics(from: fetch.metrics) {
+        if let codexResult {
+            codexAccountMetrics = codexResult.metrics
+            if let representative = representativeCodexMetrics(from: codexResult.metrics) {
                 newMetrics[.codexCli] = representative
             }
-            states[.codexCli] = accountFetchState(fetch)
+            states[.codexCli] = accountFetchState(codexResult)
         } else {
             codexAccountMetrics = [:]
             states[.codexCli] = (
@@ -184,9 +198,8 @@ class UsageDataManager: ObservableObject {
             )
         }
 
-        // Fetch the simple (single-account) providers. On failure the final
-        // merge loop below preserves any cached metrics (graceful degradation).
-        let simpleResults = await refreshSimpleProviders()
+        // Simple (single-account) providers. On failure the final merge loop
+        // below preserves any cached metrics (graceful degradation).
         newMetrics.merge(simpleResults.metrics) { _, refreshed in refreshed }
         states.merge(simpleResults.states) { _, refreshed in refreshed }
 
@@ -241,13 +254,64 @@ class UsageDataManager: ObservableObject {
         return (.skipped, Self.notSignedInReason)
     }
 
-    private func refreshSimpleProviders() async -> (
-        metrics: [ServiceType: UsageMetrics],
-        states: [ServiceType: (state: ProviderRefreshState, reason: String?)]
-    ) {
+    /// One fanned-out fetch leg, tagged with its position in the original store
+    /// order so the fold can restore deterministic ordering.
+    ///
+    /// `@unchecked Sendable` is honest here: every leg runs on the main actor,
+    /// exactly like its parent, so nothing genuinely crosses an isolation
+    /// domain. The annotation only satisfies the task-group signature for a
+    /// payload carrying an `any Error`.
+    private struct IndexedFetch: @unchecked Sendable {
+        let index: Int
+        let metrics: UsageMetrics?
+        let error: Error?
+    }
+
+    /// Run `body` once per index concurrently and return the legs in index order.
+    ///
+    /// `{ @MainActor in }` is required, not decorative: `addTask` closures are
+    /// `@Sendable` and therefore nonisolated by default, and the provider
+    /// services are not thread-safe. Staying on the main actor is still
+    /// concurrent — a main-actor `async` call releases the actor at each of its
+    /// own suspension points, so the providers' process and network waits
+    /// overlap. That overlap is the whole point.
+    private func fanOut(
+        count: Int,
+        _ body: @escaping @Sendable @MainActor (Int) async throws -> UsageMetrics
+    ) async -> [IndexedFetch] {
+        guard count > 0 else { return [] }
+        return await withTaskGroup(of: IndexedFetch.self) { group in
+            for index in 0..<count {
+                group.addTask { @MainActor in
+                    do {
+                        let metrics = try await body(index)
+                        return IndexedFetch(index: index, metrics: metrics, error: nil)
+                    } catch {
+                        return IndexedFetch(index: index, metrics: nil, error: error)
+                    }
+                }
+            }
+            var legs: [IndexedFetch] = []
+            for await leg in group { legs.append(leg) }
+            return legs.sorted { $0.index < $1.index }
+        }
+    }
+
+    /// Named (rather than a tuple) so it can be returned from an `async let` leg.
+    /// `@unchecked Sendable` for the same reason as `IndexedFetch`: main-actor
+    /// state that never actually leaves the main actor.
+    private struct SimpleProviderRefresh: @unchecked Sendable {
+        let metrics: [ServiceType: UsageMetrics]
+        let states: [ServiceType: (state: ProviderRefreshState, reason: String?)]
+    }
+
+    private func refreshSimpleProviders() async -> SimpleProviderRefresh {
         var metrics: [ServiceType: UsageMetrics] = [:]
         var states: [ServiceType: (state: ProviderRefreshState, reason: String?)] = [:]
+        var pending: [ServiceType] = []
 
+        // Visibility and access are synchronous, so resolve them up front and
+        // fan out only the legs that will actually reach a provider.
         for service in [ServiceType.cursor, .openRouter, .grok] {
             guard providerVisibilityStore.isEnabled(service) else {
                 states[service] = (.skipped, Self.disabledReason)
@@ -257,10 +321,20 @@ class UsageDataManager: ObservableObject {
                 states[service] = (.skipped, Self.notSignedInReason)
                 continue
             }
-            do {
-                metrics[service] = try await fetchSimpleProviderMetrics(service)
+            pending.append(service)
+        }
+
+        let legs = await fanOut(count: pending.count) { [pending] index in
+            try await self.fetchSimpleProviderMetrics(pending[index])
+        }
+
+        // Fold in the original provider order so `lastError` stays deterministic
+        // rather than reflecting whichever leg happened to finish last.
+        for (service, leg) in zip(pending, legs) {
+            if let fetched = leg.metrics {
+                metrics[service] = fetched
                 states[service] = (.refreshed, nil)
-            } catch {
+            } else if let error = leg.error {
                 lastError = error
                 let safeMessage = ServiceSupport.safeErrorMessage(for: error)
                 let detail = "Failed to fetch \(service.rawValue) metrics: \(safeMessage)"
@@ -269,7 +343,7 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        return (metrics, states)
+        return SimpleProviderRefresh(metrics: metrics, states: states)
     }
 
     func refresh(service: ServiceType) async {
@@ -535,10 +609,27 @@ class UsageDataManager: ObservableObject {
         return now.timeIntervalSince(oldestUpdate) >= RefreshInterval.tenMinutes.seconds
     }
 
-    private struct AccountFetchResult {
+    /// `@unchecked Sendable` for the same reason as `IndexedFetch`: main-actor
+    /// state that never actually leaves the main actor, carrying an `any Error`.
+    private struct AccountFetchResult: @unchecked Sendable {
         let metrics: [UUID: UsageMetrics]
         let successCount: Int
         let firstFailure: Error?
+    }
+
+    /// Sentinel that lets the `canAccess` probe move inside the concurrent leg
+    /// while still folding back to today's plain-skip semantics: an unreachable
+    /// account contributes no metrics, no cached fallback, and no failure.
+    private struct CodexAccountUnreachable: Error {}
+
+    private func claudeAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
+        guard isEnabled else { return nil }
+        return await fetchClaudeCodeAccountMetrics()
+    }
+
+    private func codexAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
+        guard isEnabled else { return nil }
+        return await fetchCodexAccountMetrics()
     }
 
     private func fetchClaudeCodeAccountMetrics() async -> AccountFetchResult {
@@ -547,11 +638,18 @@ class UsageDataManager: ObservableObject {
         var firstFailure: Error?
         var successCount = 0
 
-        for account in enabledAccounts {
-            do {
-                refreshedMetrics[account.id] = try await claudeCodeService.fetchUsageMetrics(account: account)
+        let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
+            try await self.claudeCodeService.fetchUsageMetrics(account: enabledAccounts[index])
+        }
+
+        // Fold in account-store order, never completion order, so `firstFailure`
+        // (and therefore the surfaced reason) is stable across runs. `zip`
+        // rather than subscripting: a count mismatch truncates instead of trapping.
+        for (account, leg) in zip(enabledAccounts, legs) {
+            if let metrics = leg.metrics {
+                refreshedMetrics[account.id] = metrics
                 successCount += 1
-            } catch {
+            } else if let error = leg.error {
                 if firstFailure == nil { firstFailure = error }
                 lastError = error
                 if let cachedMetrics = claudeCodeAccountMetrics[account.id] {
@@ -586,16 +684,29 @@ class UsageDataManager: ObservableObject {
     }
 
     private func fetchCodexAccountMetrics() async -> AccountFetchResult {
+        let enabledAccounts = codexAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
 
-        for account in codexAccountStore.enabledAccounts {
-            guard await codexCliService.canAccess(account: account) else { continue }
-            do {
-                refreshedMetrics[account.id] = try await codexCliService.fetchUsageMetrics(account: account)
+        // `canAccess` is itself an async probe, so it moves into the leg rather
+        // than gating it serially; an unreachable account throws the sentinel.
+        let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
+            let account = enabledAccounts[index]
+            guard await self.codexCliService.canAccess(account: account) else {
+                throw CodexAccountUnreachable()
+            }
+            return try await self.codexCliService.fetchUsageMetrics(account: account)
+        }
+
+        for (account, leg) in zip(enabledAccounts, legs) {
+            if let metrics = leg.metrics {
+                refreshedMetrics[account.id] = metrics
                 successCount += 1
-            } catch {
+            } else if let error = leg.error {
+                // Matches the previous `continue`: an inaccessible account is a
+                // skip, not a failure, and must not resurrect a stale cache.
+                if error is CodexAccountUnreachable { continue }
                 if firstFailure == nil { firstFailure = error }
                 lastError = error
                 if let cachedMetrics = codexAccountMetrics[account.id] {

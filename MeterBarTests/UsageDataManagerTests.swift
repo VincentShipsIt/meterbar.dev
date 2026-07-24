@@ -11,9 +11,39 @@ import XCTest
 /// account-aware provider seam directly.
 @MainActor
 final class UsageDataManagerTests: XCTestCase {
+    /// Distinguishes a serial orchestration from a concurrent one without ever
+    /// risking a hang: each fetch registers itself, spins on `Task.yield()` for
+    /// a bounded number of turns waiting for its peers to arrive, then proceeds
+    /// regardless. A serial implementation simply never sees more than one leg
+    /// in flight, so `maxInFlight` stays 1.
+    ///
+    /// Everything here runs on the main actor alongside the manager, so plain
+    /// mutable state is safe.
+    @MainActor
+    private final class ConcurrencyProbe {
+        private(set) var maxInFlight = 0
+        private var inFlight = 0
+        private let expected: Int
+
+        init(expected: Int) {
+            self.expected = expected
+        }
+
+        func recordFetch() async {
+            inFlight += 1
+            maxInFlight = max(maxInFlight, inFlight)
+            for _ in 0..<200 where inFlight < expected {
+                await Task.yield()
+            }
+            inFlight -= 1
+        }
+    }
+
     private final class StubClaudeProvider: ClaudeCodeUsageProviding {
         var hasAccess: Bool
         var result: Result<UsageMetrics, Error>
+        var resultsByAccount: [UUID: Result<UsageMetrics, Error>] = [:]
+        var probe: ConcurrencyProbe?
         private(set) var fetchCount = 0
 
         init(hasAccess: Bool, result: Result<UsageMetrics, Error>) {
@@ -23,7 +53,8 @@ final class UsageDataManagerTests: XCTestCase {
 
         func fetchUsageMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics {
             fetchCount += 1
-            return try result.get()
+            await probe?.recordFetch()
+            return try (resultsByAccount[account.id] ?? result).get()
         }
     }
 
@@ -40,6 +71,7 @@ final class UsageDataManagerTests: XCTestCase {
         var hasAccess: Bool
         var result: Result<UsageMetrics, Error>
         var suspendsFetch = false
+        var probe: ConcurrencyProbe?
         private(set) var fetchCount = 0
         private var fetchContinuation: CheckedContinuation<Void, Never>?
 
@@ -55,6 +87,7 @@ final class UsageDataManagerTests: XCTestCase {
                     fetchContinuation = continuation
                 }
             }
+            await probe?.recordFetch()
             return try result.get()
         }
 
@@ -75,6 +108,7 @@ final class UsageDataManagerTests: XCTestCase {
     private final class MultiAccountCodexProvider: CodexUsageProviding {
         var metricsByAccount: [UUID: UsageMetrics]
         var failingAccountIDs: Set<UUID> = []
+        var probe: ConcurrencyProbe?
 
         init(metricsByAccount: [UUID: UsageMetrics]) {
             self.metricsByAccount = metricsByAccount
@@ -85,6 +119,7 @@ final class UsageDataManagerTests: XCTestCase {
         }
 
         func fetchUsageMetrics(account: CodexAccount) async throws -> UsageMetrics {
+            await probe?.recordFetch()
             if failingAccountIDs.contains(account.id) { throw StubError.fetchFailed }
             guard let metrics = metricsByAccount[account.id] else { throw StubError.fetchFailed }
             return metrics
@@ -656,6 +691,134 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 20)
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.name), [CodexAccount.defaultName, "Work"])
+    }
+
+    // MARK: - Concurrency
+
+    /// A refresh used to walk every account and provider strictly serially, so
+    /// a cycle cost the sum of every round trip. `ConcurrencyProbe` fails these
+    /// by observing `maxInFlight == 1`; it can never hang a serial build
+    /// because its wait is a bounded yield loop.
+    func testRefreshAllFetchesEveryEnabledClaudeAccountConcurrently() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-concurrency-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/claude-work")
+        let probe = ConcurrencyProbe(expected: 2)
+        let claude = StubClaudeProvider(hasAccess: true, result: .success(MetricsFixtures.claudeCode()))
+        claude.probe = probe
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(claude.fetchCount, 2)
+        XCTAssertEqual(probe.maxInFlight, 2, "both Claude accounts must be in flight at once")
+    }
+
+    func testRefreshAllFetchesEveryEnabledCodexAccountConcurrently() async throws {
+        let accountSuite = "UsageDataManagerTests-codex-concurrency-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = CodexAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/codex-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [
+            CodexAccount.defaultID: MetricsFixtures.codexCli(sessionUsedPercent: 20),
+            work.id: MetricsFixtures.codexCli(sessionUsedPercent: 80)
+        ])
+        let probe = ConcurrencyProbe(expected: 2)
+        provider.probe = probe
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: provider,
+            cursor: cursor,
+            codexAccountStore: accountStore,
+            hidden: [.cursor, .openRouter, .grok]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(probe.maxInFlight, 2, "both Codex accounts must be in flight at once")
+    }
+
+    /// The three phases of `refreshAll` — Claude accounts, Codex accounts, the
+    /// single-account providers — must overlap with each other too, not just
+    /// internally, or the cycle still costs three serial round trips.
+    func testRefreshAllOverlapsClaudeCodexAndSimpleProviderFetches() async throws {
+        let codexSuite = "UsageDataManagerTests-overlap-codex-\(UUID().uuidString)"
+        createdSuiteNames.append(codexSuite)
+        let codexDefaults = try XCTUnwrap(UserDefaults(suiteName: codexSuite))
+        let codexStore = CodexAccountStore(userDefaults: codexDefaults)
+        let probe = ConcurrencyProbe(expected: 3)
+        let claude = StubClaudeProvider(hasAccess: true, result: .success(MetricsFixtures.claudeCode()))
+        claude.probe = probe
+        let codex = MultiAccountCodexProvider(metricsByAccount: [
+            CodexAccount.defaultID: MetricsFixtures.codexCli()
+        ])
+        codex.probe = probe
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        cursor.probe = probe
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            codexAccountStore: codexStore,
+            hidden: [.openRouter, .grok]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(probe.maxInFlight, 3, "Claude, Codex and simple-provider fetches must overlap")
+    }
+
+    /// Concurrency must not scramble attribution: the reported failure is still
+    /// the *first enabled account's*, not whichever leg happened to finish
+    /// first, so the surfaced reason is stable across runs.
+    func testRefreshAllAttributesClaudeFailuresInAccountOrderDespiteConcurrency() async throws {
+        XCTAssertNotEqual(
+            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError),
+            ServiceSupport.safeErrorMessage(for: StubError.fetchFailed),
+            "fixture guard: the two failures must be distinguishable"
+        )
+        let accountSuite = "UsageDataManagerTests-claude-failure-order-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/claude-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let claude = StubClaudeProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        claude.resultsByAccount = [
+            ClaudeCodeAccount.defaultID: .failure(ServiceError.parsingError),
+            work.id: .failure(StubError.fetchFailed)
+        ]
+        claude.probe = ConcurrencyProbe(expected: 2)
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(report.outcome(for: .claudeCode)?.state, .failed)
+        XCTAssertEqual(
+            report.outcome(for: .claudeCode)?.reason,
+            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError),
+            "the first enabled account's failure must win regardless of completion order"
+        )
     }
 
     func testRefreshAllExcludesDisabledCodexAccountsFromMetricsAndWidgetData() async throws {
