@@ -141,7 +141,10 @@ struct NotificationDecider {
 
             let band = QuotaBand.forLimit(limit)
             let bandRank = Self.severityRank(band)
-            let quotaDisplayName = quotaKind.displayName(for: metrics.service)
+            let quotaDisplayName = quotaKind.displayName(
+                for: metrics.service,
+                modelLimitLabel: metrics.modelLimitLabel
+            )
             let blocksProvider = quotaKind != .codeReview && metrics.extraUsage?.state != .on
 
             if bandRank >= criticalRank {
@@ -227,20 +230,20 @@ struct NotificationDecider {
     }
 
     /// Stable quota key plus provider-specific display copy. `codeReviewLimit`
-    /// represents Sonnet-only usage for Claude and Code Review usage for Codex.
+    /// represents a model-scoped quota for Claude and Code Review for Codex.
     private enum QuotaKind: String, CaseIterable, Equatable, Sendable {
         case session
         case weekly
         case codeReview
 
-        func displayName(for service: ServiceType) -> String {
+        func displayName(for service: ServiceType, modelLimitLabel: String?) -> String {
             switch self {
             case .session:
                 return service == .openRouter ? "Key Limit" : "Session"
             case .weekly:
                 return service == .openRouter ? "Account Credits" : "Weekly"
             case .codeReview:
-                return service == .claudeCode ? "Sonnet" : "Code Review"
+                return service == .claudeCode ? (modelLimitLabel ?? "Model") : "Code Review"
             }
         }
     }

@@ -142,7 +142,8 @@ struct Usage: ParsableCommand {
                 )
             }
             if let codeReview = metric.codeReviewLimit {
-                printLimit(service == .claudeCode ? "  Sonnet" : "  Code Review", codeReview)
+                let label = service == .claudeCode ? (metric.modelLimitLabel ?? "Model") : "Code Review"
+                printLimit("  \(label)", codeReview)
             }
             print()
         }

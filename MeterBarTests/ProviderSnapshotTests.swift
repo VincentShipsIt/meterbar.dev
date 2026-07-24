@@ -8,6 +8,7 @@ final class ProviderSnapshotTests: XCTestCase {
         session: Double? = nil,
         weekly: Double? = nil,
         codeReview: Double? = nil,
+        modelLimitLabel: String? = nil,
         extraUsage: ExtraUsageStatus? = nil
     ) -> UsageMetrics {
         UsageMetrics(
@@ -15,6 +16,7 @@ final class ProviderSnapshotTests: XCTestCase {
             sessionLimit: session.map { UsageLimit(used: $0, total: 100, resetTime: nil) },
             weeklyLimit: weekly.map { UsageLimit(used: $0, total: 100, resetTime: nil) },
             codeReviewLimit: codeReview.map { UsageLimit(used: $0, total: 100, resetTime: nil) },
+            modelLimitLabel: modelLimitLabel,
             extraUsage: extraUsage
         )
     }
@@ -25,6 +27,7 @@ final class ProviderSnapshotTests: XCTestCase {
         codexAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        fableSessions: [ClaudeFableSession] = [],
         enabledServices: Set<ServiceType> = Set(ServiceType.allCases)
     ) -> ProviderSnapshotBuilder.Input {
         ProviderSnapshotBuilder.Input(
@@ -33,6 +36,7 @@ final class ProviderSnapshotTests: XCTestCase {
             codexAccountMetrics: codexAccountMetrics,
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
+            fableSessions: fableSessions,
             enabledServices: enabledServices
         )
     }
@@ -104,6 +108,43 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshots.map(\.title), [ClaudeCodeAccount.defaultAccount.name, "Work"])
         // Two accounts sharing a name must still produce distinct card ids.
         XCTAssertEqual(Set(snapshots.map(\.id)).count, snapshots.count)
+    }
+
+    func testClaudeSnapshotsCarryOnlyTheirAccountFableActivity() {
+        let now = Date()
+        let work = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            claudeAccounts: [.defaultAccount, work],
+            claudeAccountMetrics: [
+                ClaudeCodeAccount.defaultID: makeMetrics(service: .claudeCode, weekly: 40),
+                work.id: makeMetrics(service: .claudeCode, weekly: 60)
+            ],
+            fableSessions: [
+                ClaudeFableSession(
+                    sourceSessionID: "default-session",
+                    accountID: ClaudeCodeAccount.defaultID,
+                    accountName: ClaudeCodeAccount.defaultName,
+                    model: "claude-fable-5",
+                    firstObservedAt: now.addingTimeInterval(-180),
+                    lastObservedAt: now.addingTimeInterval(-60),
+                    state: .completed
+                ),
+                ClaudeFableSession(
+                    sourceSessionID: "work-session",
+                    accountID: work.id,
+                    accountName: work.name,
+                    model: "claude-fable-5",
+                    firstObservedAt: now.addingTimeInterval(-120),
+                    lastObservedAt: now,
+                    state: .active
+                )
+            ],
+            enabledServices: [.claudeCode]
+        ))
+
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots[0].fableActivity?.session?.sourceSessionID, "default-session")
+        XCTAssertEqual(snapshots[1].fableActivity?.session?.sourceSessionID, "work-session")
     }
 
     func testDisabledClaudeAccountsAreExcludedEvenWithCachedMetrics() {
@@ -262,9 +303,9 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Limits
 
-    func testThirdLimitLabelIsSonnetForClaudeAndCodeReviewForCodex() {
+    func testThirdLimitUsesReportedClaudeModelLabelAndCodeReviewForCodex() {
         let claudeLimits = ProviderSnapshotBuilder.limits(
-            for: makeMetrics(service: .claudeCode, codeReview: 10),
+            for: makeMetrics(service: .claudeCode, codeReview: 10, modelLimitLabel: "Fable"),
             service: .claudeCode
         )
         let codexLimits = ProviderSnapshotBuilder.limits(
@@ -272,8 +313,17 @@ final class ProviderSnapshotTests: XCTestCase {
             service: .codexCli
         )
 
-        XCTAssertEqual(claudeLimits.map(\.title), ["Sonnet"])
+        XCTAssertEqual(claudeLimits.map(\.title), ["Fable"])
         XCTAssertEqual(codexLimits.map(\.title), ["Code Review"])
+    }
+
+    func testLegacyClaudeModelLimitUsesNeutralLabel() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .claudeCode, codeReview: 10),
+            service: .claudeCode
+        )
+
+        XCTAssertEqual(limits.map(\.title), ["Model"])
     }
 
     func testOpenRouterUsesCurrencyCreditLabels() {
@@ -321,6 +371,19 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertFalse(snapshot.hasMetrics)
     }
 
+    func testModelScopedExhaustionDoesNotMarkProviderOut() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Claude",
+            service: .claudeCode,
+            metrics: makeMetrics(service: .claudeCode, session: 16, weekly: 71, codeReview: 100),
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.band, .healthy)
+        XCTAssertEqual(snapshot.limits.last?.percentLeft, 0)
+        XCTAssertFalse(snapshot.hasExhaustedLimit)
+    }
+
     func testTightestLimitAcrossSnapshots() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
@@ -333,6 +396,24 @@ final class ProviderSnapshotTests: XCTestCase {
         let tightest = snapshots.tightestLimit
         XCTAssertEqual(tightest?.percentLeft, 3)
         XCTAssertEqual(QuotaBand.forPercentLeft(tightest?.percentLeft ?? 100), .critical)
+    }
+
+    func testTightestLimitIgnoresModelScopedExhaustion() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [
+                .claudeCode: makeMetrics(
+                    service: .claudeCode,
+                    session: 16,
+                    weekly: 71,
+                    codeReview: 100,
+                    modelLimitLabel: "Sonnet"
+                ),
+                .cursor: makeMetrics(service: .cursor, weekly: 80)
+            ],
+            enabledServices: [.claudeCode, .cursor]
+        ))
+
+        XCTAssertEqual(snapshots.tightestLimit?.percentLeft, 20)
     }
 
     func testExhaustedLimitDetection() {

@@ -23,6 +23,7 @@ final class NotificationDeciderTests: XCTestCase {
         session: UsageLimit? = nil,
         weekly: UsageLimit? = nil,
         codeReview: UsageLimit? = nil,
+        modelLimitLabel: String? = nil,
         extraUsage: ExtraUsageStatus? = nil,
         lastUpdated: Date? = nil
     ) -> UsageMetrics {
@@ -31,6 +32,8 @@ final class NotificationDeciderTests: XCTestCase {
             sessionLimit: session,
             weeklyLimit: weekly,
             codeReviewLimit: codeReview,
+            modelLimitLabel: modelLimitLabel
+                ?? (service == .claudeCode && codeReview != nil ? "Sonnet" : nil),
             extraUsage: extraUsage,
             lastUpdated: lastUpdated ?? now
         )
@@ -314,6 +317,23 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertFalse(fired.blocksProvider)
         XCTAssertEqual(fired.title, "Claude Code Sonnet Quota Exhausted")
         XCTAssertTrue(fired.body.contains("does not block all Claude Code usage"))
+    }
+
+    func testClaudeSecondaryExhaustionPreservesFableLabel() {
+        let result = decider().evaluate(
+            metrics: metrics(
+                session: healthyLimit(),
+                codeReview: exhaustedLimit(),
+                modelLimitLabel: "Fable"
+            ),
+            providerEnabled: true,
+            alreadyNotified: [],
+            now: now
+        )
+
+        XCTAssertEqual(result.notifications[0].quotaDisplayName, "Fable")
+        XCTAssertEqual(result.notifications[0].title, "Claude Code Fable Quota Exhausted")
+        XCTAssertFalse(result.notifications[0].blocksProvider)
     }
 
     func testCodexSecondaryExhaustionNamesCodeReviewWithoutBlockingProvider() {

@@ -1,4 +1,5 @@
 import AppKit
+import MeterBarShared
 import SwiftUI
 import XCTest
 @testable import MeterBar
@@ -71,6 +72,50 @@ final class FableSessionHistoryTests: XCTestCase {
         XCTAssertEqual(model.recent.first?.state, .unknown)
     }
 
+    func testCardActivityIsAccountAttributedAndPrefersFreshActiveSession() {
+        let activity = FableSessionCardActivity.make(
+            accountID: accountA,
+            sessions: [
+                session("other-account", accountID: accountB, accountName: "Gen", state: .active, offset: 0),
+                session("recent", accountID: accountA, accountName: "Ship", state: .completed, offset: -30),
+                session("active", accountID: accountA, accountName: "Ship", state: .active, offset: -60),
+            ],
+            now: now
+        )
+
+        XCTAssertEqual(activity.session?.sourceSessionID, "active")
+        XCTAssertEqual(activity.status(now: now), .active)
+    }
+
+    func testCardActivityReportsRecentAndNoActivityHonestly() {
+        let recent = FableSessionCardActivity.make(
+            accountID: accountA,
+            sessions: [
+                session("completed", accountID: accountA, accountName: "Ship", state: .completed, offset: -60)
+            ],
+            now: now
+        )
+        let none = FableSessionCardActivity.make(accountID: accountB, sessions: [], now: now)
+
+        XCTAssertEqual(recent.status(now: now), .recent)
+        XCTAssertEqual(none.status(now: now), .noActivity)
+    }
+
+    func testCardActivityDemotesStaleActiveSessionOnTimelineTick() {
+        let activity = FableSessionCardActivity.make(
+            accountID: accountA,
+            sessions: [
+                session("active", accountID: accountA, accountName: "Ship", state: .active, offset: 0)
+            ],
+            now: now
+        )
+
+        XCTAssertEqual(
+            activity.status(now: now.addingTimeInterval(ClaudeFableSessionPolicy.activeWindow + 1)),
+            .recent
+        )
+    }
+
     func testHumanOutputCoversEmptyAndPopulatedSnapshots() {
         XCTAssertEqual(
             FableSessionsTextFormatter.format([]),
@@ -112,6 +157,34 @@ final class FableSessionHistoryTests: XCTestCase {
         )
         assertRenders(populated)
         assertRenders(FableSessionHistoryView(sessions: []))
+    }
+
+    func testSharedProviderCardRendersFableActivitySummary() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 16, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 71, total: 100, resetTime: nil)
+        )
+        let activity = FableSessionCardActivity.make(
+            accountID: accountA,
+            sessions: [
+                session("active", accountID: accountA, accountName: "Ship", state: .active, offset: 0)
+            ],
+            now: now
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Ship",
+            service: .claudeCode,
+            metrics: metrics,
+            emptyDetail: "",
+            accountID: accountA,
+            fableActivity: activity
+        )
+        let host = NSHostingView(rootView: ProviderStatusCard(snapshot: snapshot).frame(width: 360))
+
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
     private func session(

@@ -203,6 +203,7 @@ struct UsageDashboardView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
+    @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
@@ -738,6 +739,7 @@ struct UsageDashboardView: View {
             codexAccountMetrics: dataManager.codexAccountMetrics,
             claudeAccounts: claudeAccountStore.accounts,
             claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+            fableSessions: fableSessionTracker.sessions,
             enabledServices: providerVisibility.enabledServices,
             claudeCodeHasAccess: claudeCodeService.hasAccess,
             codexCliHasAccess: codexCliService.hasAccess,

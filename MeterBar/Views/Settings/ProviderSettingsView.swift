@@ -95,6 +95,7 @@ struct ProviderSettingsView: View {
                 codexAccountMetrics: dataManager.codexAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                fableSessions: fableSessionTracker.sessions,
                 enabledServices: providerVisibility.enabledServices,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,

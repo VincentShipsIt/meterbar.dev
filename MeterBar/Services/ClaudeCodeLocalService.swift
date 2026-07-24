@@ -319,7 +319,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
     /// Maps an `/api/oauth/usage` response onto the shared `UsageMetrics`.
     /// Session = 5-hour window, weekly = 7-day (all models), code-review =
-    /// per-model weekly window (Sonnet/Fable) when the server emits one.
+    /// the provider-named model weekly window when the server emits one.
     nonisolated static func metrics(from response: ClaudeCodeUsageResponse) -> UsageMetrics {
         let sessionLimit = UsageLimit(
             used: response.fiveHour.utilization,
@@ -335,12 +335,20 @@ class ClaudeCodeLocalService: ObservableObject {
             windowSeconds: 7 * 24 * 60 * 60
         )
 
-        var codeReviewLimit: UsageLimit?
-        if let sonnet = response.sevenDaySonnet {
-            codeReviewLimit = UsageLimit(
-                used: sonnet.utilization,
+        let modelWindow: (window: UsageWindow, label: String)?
+        if let fable = response.sevenDayFable {
+            modelWindow = (fable, "Fable")
+        } else if let sonnet = response.sevenDaySonnet {
+            modelWindow = (sonnet, "Sonnet")
+        } else {
+            modelWindow = nil
+        }
+
+        let codeReviewLimit = modelWindow.map {
+            UsageLimit(
+                used: $0.window.utilization,
                 total: 100.0,
-                resetTime: sonnet.resetsAt,
+                resetTime: $0.window.resetsAt,
                 windowSeconds: 7 * 24 * 60 * 60
             )
         }
@@ -350,6 +358,7 @@ class ClaudeCodeLocalService: ObservableObject {
             sessionLimit: sessionLimit,
             weeklyLimit: weeklyLimit,
             codeReviewLimit: codeReviewLimit,
+            modelLimitLabel: modelWindow?.label,
             extraUsage: response.extraUsageStatus
         )
     }
@@ -503,6 +512,7 @@ nonisolated struct ClaudeCodeUsageResponse: Codable {
     let fiveHour: UsageWindow
     let sevenDay: UsageWindow
     let sevenDaySonnet: UsageWindow?
+    let sevenDayFable: UsageWindow?
     let extraUsage: ClaudeExtraUsage?
     let spend: ClaudeSpend?
 
@@ -510,6 +520,7 @@ nonisolated struct ClaudeCodeUsageResponse: Codable {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDaySonnet = "seven_day_sonnet"
+        case sevenDayFable = "seven_day_fable"
         case extraUsage = "extra_usage"
         case spend
     }

@@ -21,6 +21,7 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
         XCTAssertEqual(sessionLimit.percentage, 36, accuracy: 0.01)
         XCTAssertEqual(weeklyLimit.percentage, 100, accuracy: 0.01)
         XCTAssertEqual(codeReviewLimit.percentage, 83, accuracy: 0.01)
+        XCTAssertEqual(metrics.modelLimitLabel, "Sonnet")
         XCTAssertNotNil(sessionLimit.resetTime)
         XCTAssertNotNil(weeklyLimit.resetTime)
         XCTAssertNotNil(codeReviewLimit.resetTime)
@@ -66,6 +67,7 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
         XCTAssertEqual(sessionLimit.percentage, 13, accuracy: 0.01)
         XCTAssertEqual(weeklyLimit.percentage, 23, accuracy: 0.01)
         XCTAssertEqual(modelLimit.percentage, 32, accuracy: 0.01)
+        XCTAssertEqual(metrics.modelLimitLabel, "Fable")
     }
 
     func testThrowsWhenNoUsageWindowsArePresent() {

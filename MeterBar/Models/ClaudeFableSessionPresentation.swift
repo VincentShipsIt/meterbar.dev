@@ -36,6 +36,60 @@ nonisolated enum ClaudeFableSessionPresentation {
     }
 }
 
+/// Compact account-scoped activity shown on the shared Claude provider card.
+///
+/// The full history remains in Settings. This projection deliberately keeps
+/// only the most relevant session so the popover and dashboard can answer the
+/// immediate question — "is Fable active on this account?" — without exposing
+/// transcript content or crowding the quota card.
+nonisolated struct FableSessionCardActivity: Equatable, Sendable {
+    enum Status: Equatable, Sendable {
+        case active
+        case recent
+        case noActivity
+    }
+
+    let session: ClaudeFableSession?
+
+    static func make(
+        accountID: UUID,
+        sessions: [ClaudeFableSession],
+        now: Date = Date()
+    ) -> FableSessionCardActivity {
+        let accountSessions = ClaudeFableSessionPresentation.normalized(sessions)
+            .filter { $0.accountID == accountID }
+        return make(normalizedAccountSessions: accountSessions, now: now)
+    }
+
+    static func byAccount(
+        sessions: [ClaudeFableSession],
+        now: Date = Date()
+    ) -> [UUID: FableSessionCardActivity] {
+        Dictionary(grouping: ClaudeFableSessionPresentation.normalized(sessions), by: \.accountID)
+            .mapValues { make(normalizedAccountSessions: $0, now: now) }
+    }
+
+    private static func make(
+        normalizedAccountSessions accountSessions: [ClaudeFableSession],
+        now: Date
+    ) -> FableSessionCardActivity {
+        let active = accountSessions.first {
+            $0.state == .active
+                && now.timeIntervalSince($0.lastObservedAt) <= ClaudeFableSessionPolicy.activeWindow
+        }
+        return FableSessionCardActivity(session: active ?? accountSessions.first)
+    }
+
+    func status(now: Date = Date()) -> Status {
+        guard let session else { return .noActivity }
+        guard session.state == .active,
+              now.timeIntervalSince(session.lastObservedAt) <= ClaudeFableSessionPolicy.activeWindow else {
+            return .recent
+        }
+        return .active
+    }
+}
+
 /// Human-readable output shared by the CLI implementation and contract tests.
 nonisolated public enum FableSessionsTextFormatter {
     public static func format(_ sessions: [ClaudeFableSession]) -> String {
