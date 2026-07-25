@@ -38,6 +38,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor, O
 ## Features
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
+- **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, and Grok
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry

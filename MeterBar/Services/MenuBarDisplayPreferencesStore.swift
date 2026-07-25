@@ -18,19 +18,36 @@ nonisolated enum StatusItemLabelMetric: String, CaseIterable, Identifiable {
     }
 }
 
-/// How many status items MeterBar owns in the menu bar.
+/// How many status items MeterBar owns in the menu bar, and what scopes them.
 nonisolated enum MenuBarPresentationMode: String, CaseIterable, Identifiable, Sendable {
     /// One status item showing a single quota (Auto or an explicit pin).
     case merged
     /// One status item per tracked provider account, CodexBar-style.
     case perProvider
+    /// One status item per account the user selected, capped at
+    /// `MenuBarAccountItemPlanner.maximumConcurrentItems` (issue #266).
+    case perAccount
+    /// One status item bound to a single account, switchable from its own
+    /// right-click menu (issue #266).
+    case accountSwitcher
 
     var id: String { rawValue }
+
+    /// True for the modes whose items are scoped to one account, so callers can
+    /// ask that question without enumerating cases at every call site.
+    var isAccountScoped: Bool {
+        switch self {
+        case .merged, .perProvider: return false
+        case .perAccount, .accountSwitcher: return true
+        }
+    }
 
     var displayName: String {
         switch self {
         case .merged: return "Single Item"
         case .perProvider: return "One Per Provider"
+        case .perAccount: return "One Per Account"
+        case .accountSwitcher: return "One Account With Switcher"
         }
     }
 }

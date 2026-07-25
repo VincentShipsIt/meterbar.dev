@@ -13,8 +13,9 @@ struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
     let id: String
     /// Provider whose logo the item wears; nil for the placeholder item.
     let service: ServiceType?
-    /// Legacy Auto key fed back to `StatusItemLimitSelector` as `previousKey`,
-    /// so hysteresis survives. Only merged mode has a meaningful value.
+    /// Auto key fed back to `StatusItemLimitSelector` as this item's
+    /// `previousKey` on the next refresh, so the 5-point hysteresis survives.
+    /// Nil for per-provider items, which are nailed to one window already.
     let selectionKey: String?
     /// Menu bar label. Empty renders icon-only, and a non-empty title carries
     /// the leading space that separates it from the icon.
@@ -27,32 +28,52 @@ struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
 enum MenuBarStatusItemPlanner {
     /// Identity of the single item in merged mode, and of the placeholder that
     /// keeps MeterBar reachable when there is nothing to show.
-    static let mergedItemID = "merged"
+    ///
+    /// `nonisolated` because `MenuBarAccountItemEntry.aggregate` reuses it to
+    /// keep the fallback item in the same menu-bar slot.
+    nonisolated static let mergedItemID = "merged"
 
+    /// - Parameter accountPlan: which accounts own an item, for the two
+    ///   account-scoped modes. Nil means "not account-scoped", which is what the
+    ///   provider-level modes always want.
+    /// - Parameter previousKey: what the merged item showed last refresh.
+    /// - Parameter previousKeys: what each *account* item showed last refresh,
+    ///   by item id. Account items each own a slot, so they each need their own
+    ///   history; sharing the merged key would hand every item the same anchor.
     static func plan(
         mode: MenuBarPresentationMode,
+        accountPlan: MenuBarAccountItemPlan? = nil,
         candidates: [StatusLimitCandidate],
         previousKey: String?,
+        previousKeys: [String: String] = [:],
         pinnedKey: String?,
         metric: StatusItemLabelMetric,
         size: StatusItemLabelSize,
         now: Date = Date()
     ) -> [MenuBarStatusItemDescriptor] {
+        let context = SelectionContext(
+            previousKey: previousKey,
+            previousKeys: previousKeys,
+            pinnedKey: pinnedKey,
+            metric: metric,
+            size: size,
+            now: now
+        )
+
         switch mode {
         case .merged:
-            let descriptor = mergedDescriptor(
-                candidates: candidates,
-                previousKey: previousKey,
-                pinnedKey: pinnedKey,
-                metric: metric,
-                size: size,
-                now: now
-            )
-            return [descriptor]
+            return [mergedDescriptor(candidates: candidates, context: context)]
         case .perProvider:
             let descriptors = perProviderDescriptors(candidates: candidates, metric: metric, size: size)
             // Never return an empty plan: with no status item left the popover,
             // settings, and Quit all become unreachable.
+            return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
+        case .perAccount, .accountSwitcher:
+            let descriptors = accountDescriptors(
+                entries: (accountPlan ?? .aggregate(mode: mode)).entries,
+                candidates: candidates,
+                context: context
+            )
             return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
         }
     }
@@ -86,33 +107,48 @@ enum MenuBarStatusItemPlanner {
         )
     }
 
+    /// Everything `StatusItemLimitSelector` needs apart from the candidates
+    /// themselves. Grouped so the per-account path can hand the same selection
+    /// rules to each scoped candidate set without threading four arguments.
+    private struct SelectionContext {
+        let previousKey: String?
+        let previousKeys: [String: String]
+        let pinnedKey: String?
+        let metric: StatusItemLabelMetric
+        let size: StatusItemLabelSize
+        let now: Date
+
+        /// What the item with this id showed last refresh. The merged slot
+        /// falls back to the standalone `previousKey` so a mode change into an
+        /// account mode inherits the history instead of starting cold.
+        func previousKey(forItem id: String) -> String? {
+            previousKeys[id] ?? (id == mergedItemID ? previousKey : nil)
+        }
+    }
+
     private static func mergedDescriptor(
         candidates: [StatusLimitCandidate],
-        previousKey: String?,
-        pinnedKey: String?,
-        metric: StatusItemLabelMetric,
-        size: StatusItemLabelSize,
-        now: Date
+        context: SelectionContext
     ) -> MenuBarStatusItemDescriptor {
         guard let selection = StatusItemLimitSelector.select(
             candidates: candidates,
-            previousKey: previousKey,
-            pinnedKey: pinnedKey,
-            now: now
+            previousKey: context.previousKey(forItem: mergedItemID),
+            pinnedKey: context.pinnedKey,
+            now: context.now
         ) else {
             return placeholderDescriptor
         }
 
         // Auto already implies "whichever window matters", so the window name is
         // noise there; a pin is a deliberate choice of one window and says so.
-        let isPinned = pinnedKey == selection.pinKey
+        let isPinned = context.pinnedKey == selection.pinKey
         return descriptor(
             id: mergedItemID,
             selectionKey: selection.key,
             candidate: selection,
             qualifiedName: isPinned,
-            metric: metric,
-            size: size
+            metric: context.metric,
+            size: context.size
         )
     }
 
@@ -140,26 +176,74 @@ enum MenuBarStatusItemPlanner {
             }
     }
 
+    /// One item per account the plan named, each competing only within its own
+    /// account's candidates.
+    private static func accountDescriptors(
+        entries: [MenuBarAccountItemEntry],
+        candidates: [StatusLimitCandidate],
+        context: SelectionContext
+    ) -> [MenuBarStatusItemDescriptor] {
+        entries.compactMap { entry in
+            let scoped = MenuBarAccountCandidateFilter.candidates(for: entry, in: candidates)
+            // The unscoped fallback entry *is* the legacy merged item, so it
+            // keeps the merged behavior including the placeholder.
+            guard entry.accountKey != nil else {
+                return mergedDescriptor(candidates: scoped, context: context)
+            }
+            // A pin naming a window outside this account simply doesn't match,
+            // so passing it through only honors pins that belong here.
+            guard let selection = StatusItemLimitSelector.select(
+                candidates: scoped,
+                previousKey: context.previousKey(forItem: entry.id),
+                pinnedKey: context.pinnedKey,
+                now: context.now
+            ) else { return nil }
+            // Same rule as the merged item: Auto already means "whichever
+            // window matters", but a pin is a deliberate choice and says which.
+            let isPinned = context.pinnedKey == selection.pinKey
+            return descriptor(
+                // Every account item feeds its own selection back, so each slot
+                // keeps its own hysteresis across refreshes.
+                id: entry.id,
+                selectionKey: selection.key,
+                candidate: selection,
+                qualifiedName: isPinned,
+                metric: context.metric,
+                size: context.size,
+                badge: entry.badge,
+                accountName: entry.displayName
+            )
+        }
+    }
+
     private static func descriptor(
         id: String,
         selectionKey: String?,
         candidate: StatusLimitCandidate,
         qualifiedName: Bool,
         metric: StatusItemLabelMetric,
-        size: StatusItemLabelSize
+        size: StatusItemLabelSize,
+        badge: String = "",
+        accountName: String = ""
     ) -> MenuBarStatusItemDescriptor {
-        let name = qualifiedName
+        let windowName = qualifiedName
             ? "\(candidate.displayName) · \(candidate.windowName)"
             : candidate.displayName
-        let title = StatusItemLabelFormatter.title(for: candidate.limit, metric: metric, size: size)
+        // Two items for the same provider wear the same logo, so the account
+        // name is what tells them apart in the tooltip.
+        let name = accountName.isEmpty ? windowName : "\(accountName) · \(windowName)"
+        let value = StatusItemLabelFormatter.title(for: candidate.limit, metric: metric, size: size)
         let spokenValue = StatusItemLabelFormatter.spokenValue(for: candidate.limit, metric: metric)
         let suffix = spokenValue.map { "\($0) on \(name)" } ?? name
+        // Icon-only still shows the badge: without it, per-account items are
+        // indistinguishable from each other in the menu bar.
+        let segments = [badge, value ?? ""].filter { !$0.isEmpty }
 
         return MenuBarStatusItemDescriptor(
             id: id,
             service: candidate.service,
             selectionKey: selectionKey,
-            title: title.map { " \($0)" } ?? "",
+            title: segments.isEmpty ? "" : " " + segments.joined(separator: " "),
             tooltip: "MeterBar: \(suffix)",
             accessibilityLabel: "MeterBar \(suffix)"
         )
