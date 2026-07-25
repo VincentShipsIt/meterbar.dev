@@ -204,7 +204,7 @@ class CursorLocalService: ObservableObject {
     }
 
     /// Format authentication cookie for Cursor API
-    private func formatAuthCookie(userId: String, token: String) -> String {
+    private static func formatAuthCookie(userId: String, token: String) -> String {
         // Format: userId::token (URL encoded)
         "\(userId)%3A%3A\(token)"
     }
@@ -311,17 +311,13 @@ class CursorLocalService: ObservableObject {
 
     // MARK: - API Calls
 
-    /// Build browser-like headers for Cursor API requests
-    private func buildHeaders(userId: String, token: String) -> [String: String] {
-        let authCookie = formatAuthCookie(userId: userId, token: token)
-        return [
-            "Accept": "*/*",
-            "Content-Type": "application/json",
-            "Cookie": "WorkosCursorSessionToken=\(authCookie)",
-            "Origin": "https://cursor.com",
-            "Referer": "https://cursor.com/dashboard?tab=usage",
-            "User-Agent": ServiceSupport.browserUserAgent
-        ]
+    /// Cursor's session cookie layered on top of the shared browser identity.
+    /// Static so the header contract can be asserted without a live service.
+    static func dashboardHeaders(userId: String, token: String) -> [String: String] {
+        var headers = ServiceSupport.browserHeaders(for: .cursorDashboard, accept: "*/*")
+        headers["Content-Type"] = "application/json"
+        headers["Cookie"] = "WorkosCursorSessionToken=\(formatAuthCookie(userId: userId, token: token))"
+        return headers
     }
 
     private func fetchUsageSummary(userId: String, token: String) async throws -> CursorUsageSummaryResponse {
@@ -331,10 +327,9 @@ class CursorLocalService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 30.0
+        request.timeoutInterval = ServiceSupport.usageRequestTimeout
 
-        // Set browser-like headers
-        for (key, value) in buildHeaders(userId: userId, token: token) {
+        for (key, value) in Self.dashboardHeaders(userId: userId, token: token) {
             request.setValue(value, forHTTPHeaderField: key)
         }
 

@@ -77,11 +77,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let notificationPreferences = NotificationPreferencesStore.shared
     private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     private var cancellables = Set<AnyCancellable>()
+    /// The launch refresh, held so it can be cancelled instead of orphaned.
     private var monitorTask: Task<Void, Never>?
 
     /// Tracks which (service, limit, level) notifications have already fired so
-    /// the 5-minute monitor loop doesn't re-alert every cycle while usage stays
-    /// above a threshold. Keys are cleared when usage drops back below.
+    /// repeated trigger events don't re-alert while usage stays above a
+    /// threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
     /// The account whose quota the menu bar title currently shows; feeds the
@@ -608,32 +609,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Monitor usage and send notifications. Store the task so it can be
-        // cancelled, and so it isn't an orphaned unstructured Task.
+        // Subscribe before the first refresh so its committed snapshot is
+        // observed rather than raced past.
+        observeNotificationTriggers()
+
+        // Kick off the launch refresh. Store the task so it can be cancelled,
+        // and so it isn't an orphaned unstructured Task.
         monitorTask?.cancel()
-        monitorTask = Task { @MainActor [weak self] in
-            await self?.monitorUsage()
+        monitorTask = Task { @MainActor in
+            await UsageDataManager.shared.refreshAll()
         }
     }
 
-    @MainActor
-    private func monitorUsage() async {
-        // Initial refresh on app launch
-        await UsageDataManager.shared.refreshAll()
+    /// Re-evaluates limits whenever something a notification decision depends on
+    /// actually changes, instead of on a five-minute timer.
+    ///
+    /// Deleting the poll is safe because elapsed time alone can never newly fire
+    /// a notification: `NotificationDecider` reads `now` only for its staleness
+    /// gate (`now - lastUpdated <= threshold`), so a tick can flip a provider
+    /// from deliverable to stale but never the reverse. Everything that *can*
+    /// newly fire one — a committed metric snapshot, an account being added or
+    /// enabled, a provider being unhidden, a threshold being lowered — is
+    /// published below. `checkAndNotify()` is idempotent through
+    /// `notifiedLimitKeys`, so overlapping triggers cost nothing.
+    private func observeNotificationTriggers() {
+        let claudeAccountChanges = Publishers.Merge3(
+            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
+        let codexAccountChanges = Publishers.Merge(
+            CodexAccountStore.shared.$customAccounts.map { _ in () },
+            CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
+        let thresholdChanges = Publishers.Merge3(
+            notificationPreferences.$isEnabled.map { _ in () },
+            notificationPreferences.$warningThreshold.map { _ in () },
+            notificationPreferences.$criticalThreshold.map { _ in () }
+        )
 
-        // Check for approaching limits periodically.
-        // Note: UsageDataManager handles its own auto-refresh; this loop only
-        // checks metrics for notification purposes.
-        while !Task.isCancelled {
-            checkAndNotify()
+        let triggers: [AnyPublisher<Void, Never>] = [
+            UsageDataManager.shared.$refreshGeneration.map { _ in () }.eraseToAnyPublisher(),
+            claudeAccountChanges.eraseToAnyPublisher(),
+            codexAccountChanges.eraseToAnyPublisher(),
+            providerVisibilityStore.$hiddenServices.map { _ in () }.eraseToAnyPublisher(),
+            thresholdChanges.eraseToAnyPublisher()
+        ]
 
-            // Wait 5 minutes before next notification check. A thrown
-            // CancellationError exits the loop instead of busy-looping.
-            do {
-                try await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
-            } catch {
-                break
-            }
+        for trigger in triggers {
+            trigger
+                .sink { [weak self] _ in
+                    // Deferred to the next main-actor hop so the published
+                    // property has committed before it is read back.
+                    Task { @MainActor in
+                        self?.checkAndNotify()
+                    }
+                }
+                .store(in: &cancellables)
         }
     }
 
