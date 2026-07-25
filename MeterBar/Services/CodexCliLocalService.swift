@@ -308,8 +308,42 @@ class CodexCliLocalService: ObservableObject {
 // MARK: - Reset-credit models and public CLI facade
 
 nonisolated enum CodexResetCreditEligibility {
-    static func isEligible(isBlocked: Bool, availableCredits: Int?, isAuthenticated: Bool) -> Bool {
-        isBlocked && (availableCredits ?? 0) > 0 && isAuthenticated
+    /// `hasResolvedAccount` guards the multi-account case: a snapshot whose
+    /// `accountID` no longer matches a stored Codex profile has no `CODEX_HOME`
+    /// to redeem against, so the control is hidden rather than offered with a
+    /// handler that would silently no-op.
+    static func isEligible(
+        isBlocked: Bool,
+        availableCredits: Int?,
+        isAuthenticated: Bool,
+        hasResolvedAccount: Bool
+    ) -> Bool {
+        isBlocked && (availableCredits ?? 0) > 0 && isAuthenticated && hasResolvedAccount
+    }
+}
+
+/// Confirmation copy for the irreversible redemption, kept next to the service
+/// so the UI dialog and the CLI's `--yes` gate describe the same spend. Both
+/// strings name the account because a Codex profile is selected per
+/// `CODEX_HOME` and the popover can show several cards at once.
+nonisolated enum CodexResetCreditConfirmation {
+    static func title(accountName: String) -> String {
+        "Use a reset credit for \(accountName)?"
+    }
+
+    static func message(accountName: String, availableCredits: Int?) -> String {
+        let remaining = max(availableCredits ?? 0, 0)
+        let spend: String
+        switch remaining {
+        case 0:
+            // Unknown or stale count: never render a remainder we cannot trust.
+            spend = "This spends one reset credit on \(accountName)"
+        case 1:
+            spend = "This spends your last reset credit on \(accountName)"
+        default:
+            spend = "This spends 1 of \(remaining) reset credits on \(accountName)"
+        }
+        return "\(spend) and resets its blocked usage window. This cannot be undone."
     }
 }
 

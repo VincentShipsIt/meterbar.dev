@@ -102,28 +102,76 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertTrue(CodexResetCreditEligibility.isEligible(
             isBlocked: true,
             availableCredits: 1,
-            isAuthenticated: true
+            isAuthenticated: true,
+            hasResolvedAccount: true
         ))
         XCTAssertFalse(CodexResetCreditEligibility.isEligible(
             isBlocked: false,
             availableCredits: 1,
-            isAuthenticated: true
+            isAuthenticated: true,
+            hasResolvedAccount: true
         ))
         XCTAssertFalse(CodexResetCreditEligibility.isEligible(
             isBlocked: true,
             availableCredits: 0,
-            isAuthenticated: true
+            isAuthenticated: true,
+            hasResolvedAccount: true
         ))
         XCTAssertFalse(CodexResetCreditEligibility.isEligible(
             isBlocked: true,
             availableCredits: nil,
-            isAuthenticated: true
+            isAuthenticated: true,
+            hasResolvedAccount: true
         ))
         XCTAssertFalse(CodexResetCreditEligibility.isEligible(
             isBlocked: true,
             availableCredits: 1,
-            isAuthenticated: false
+            isAuthenticated: false,
+            hasResolvedAccount: true
         ))
+    }
+
+    /// An unresolvable account (snapshot without a matching stored profile) has
+    /// nothing to redeem against. Hide the control rather than offering a button
+    /// whose handler silently no-ops.
+    func testActionIsIneligibleWithoutAResolvedAccount() {
+        XCTAssertFalse(CodexResetCreditEligibility.isEligible(
+            isBlocked: true,
+            availableCredits: 1,
+            isAuthenticated: true,
+            hasResolvedAccount: false
+        ))
+    }
+
+    // MARK: - Confirmation copy
+
+    func testConfirmationNamesTheTargetAccount() {
+        let title = CodexResetCreditConfirmation.title(accountName: "Work")
+        XCTAssertTrue(title.contains("Work"), "confirmation title must name the account being spent from")
+    }
+
+    func testConfirmationMessageNamesAccountAndRemainingCredits() {
+        let message = CodexResetCreditConfirmation.message(accountName: "Work", availableCredits: 3)
+        XCTAssertTrue(message.contains("Work"), "message must name the target account")
+        XCTAssertTrue(message.contains("3"), "message must state the remaining credit count")
+        XCTAssertTrue(
+            message.lowercased().contains("cannot be undone"),
+            "message must state that the spend is irreversible"
+        )
+    }
+
+    func testConfirmationMessageCallsOutTheFinalCredit() {
+        let message = CodexResetCreditConfirmation.message(accountName: "Default CLI Profile", availableCredits: 1)
+        XCTAssertTrue(message.contains("Default CLI Profile"))
+        XCTAssertTrue(message.lowercased().contains("last reset credit"))
+    }
+
+    /// Defensive: a missing or negative count must never render "1 of -1" copy
+    /// on a dialog that authorizes an irreversible spend.
+    func testConfirmationMessageToleratesMissingCount() {
+        let message = CodexResetCreditConfirmation.message(accountName: "Work", availableCredits: nil)
+        XCTAssertFalse(message.contains("-"), "unknown counts must not render a negative remainder")
+        XCTAssertTrue(message.contains("Work"))
     }
 
     func testConsumeUsesAvailableCreditAndImmediatelyRefreshesUsage() async throws {
@@ -220,6 +268,104 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertEqual(result.usageRefreshErrorDescription, "HTTP 500")
     }
 
+    /// Multi-account targeting: the redemption must read the acted-on card's
+    /// `CODEX_HOME` and address the provider with that profile's account id, not
+    /// the default profile's.
+    func testConsumeTargetsTheAccountWhoseCardActed() async throws {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let readAccounts = AccountRecorder()
+        let service = CodexCliLocalService(
+            accountAuthFileDataProvider: { account in
+                readAccounts.record(account.homeDirectory)
+                return self.authFileData(accountID: account.isDefault ? "account-default" : "account-work")
+            },
+            urlSession: makeStubSession()
+        )
+        var accountHeaders: [String?] = []
+
+        StubURLProtocol.handler = { request in
+            accountHeaders.append(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"))
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+
+            switch (request.httpMethod, url.path) {
+            case ("GET", "/backend-api/wham/rate-limit-reset-credits"):
+                return (response, Self.availableCreditsBody)
+            case ("POST", "/backend-api/wham/rate-limit-reset-credits/consume"):
+                return (response, Data(#"{"code":"reset","credit":null,"windows_reset":1}"#.utf8))
+            default:
+                return (response, Data(#"{"plan_type":"pro","rate_limit":null}"#.utf8))
+            }
+        }
+
+        _ = try await service.consumeResetCredit(account: work)
+
+        // `nil` is the default profile's (unset) CODEX_HOME, read by the
+        // init-time access probe. What matters is that no *other* configured
+        // profile's home was consulted for this redemption.
+        XCTAssertEqual(Set(readAccounts.homeDirectories.compactMap { $0 }), ["/tmp/codex-work"])
+        XCTAssertEqual(Set(accountHeaders.compactMap { $0 }), ["account-work"])
+    }
+
+    /// A failed redemption must surface an error and never claim a credit was
+    /// spent, so the caller can leave the previously displayed metrics intact.
+    func testFailedConsumeThrowsAndSkipsTheUsageRefresh() async {
+        let service = CodexCliLocalService(
+            authFileDataProvider: { self.authFileData() },
+            urlSession: makeStubSession()
+        )
+        var paths: [String] = []
+
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            paths.append(url.path)
+            let statusCode = request.httpMethod == "POST" ? 500 : 200
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: nil, headerFields: nil)
+            )
+            if request.httpMethod == "POST" {
+                return (response, Data())
+            }
+            return (response, Self.availableCreditsBody)
+        }
+
+        do {
+            _ = try await service.consumeResetCredit()
+            XCTFail("Expected the failed redemption to throw")
+        } catch {
+            XCTAssertFalse(
+                error.localizedDescription.isEmpty,
+                "failure must carry an actionable message for the UI alert"
+            )
+        }
+
+        XCTAssertFalse(
+            paths.contains("/backend-api/wham/usage"),
+            "a failed redemption must not refresh usage and overwrite displayed metrics"
+        )
+    }
+
+    /// `homeDirectory` values seen by the auth-file provider, recorded across the
+    /// concurrency boundary the provider closure crosses.
+    private final class AccountRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [String?] = []
+
+        func record(_ homeDirectory: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            values.append(homeDirectory)
+        }
+
+        var homeDirectories: [String?] {
+            lock.lock()
+            defer { lock.unlock() }
+            return values
+        }
+    }
+
     private func makeStubSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
@@ -250,12 +396,17 @@ final class CodexResetCreditsTests: XCTestCase {
         return body
     }
 
-    private func authFileData() -> Data {
+    /// One available credit, the shape the GET endpoint returns.
+    private static let availableCreditsBody = Data(#"""
+    {"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"}]}
+    """#.utf8)
+
+    private func authFileData(accountID: String = "account-1") -> Data {
         let payload = Data(#"{"exp":4102444800}"#.utf8)
             .base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        return Data(#"{"tokens":{"access_token":"header.\#(payload).signature","account_id":"account-1"}}"#.utf8)
+        return Data(#"{"tokens":{"access_token":"header.\#(payload).signature","account_id":"\#(accountID)"}}"#.utf8)
     }
 }
