@@ -130,7 +130,8 @@ final class UsageDataManagerTests: XCTestCase {
         preloadSharedAccountMetrics: [AccountUsageSnapshot] = [],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
-        schedulesAutoRefresh: Bool = false
+        schedulesAutoRefresh: Bool = false,
+        demoMode: Bool = false
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
         createdSuiteNames.append(contentsOf: [suiteName, "\(suiteName)-vis"])
@@ -173,9 +174,37 @@ final class UsageDataManagerTests: XCTestCase {
             preferences: cacheDefaults,
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
-            schedulesAutoRefresh: schedulesAutoRefresh
+            schedulesAutoRefresh: schedulesAutoRefresh,
+            demoMode: demoMode
         )
         return (manager, sharedStore)
+    }
+
+    // MARK: - Demo mode
+
+    func testDemoModePublishesSyntheticMetricsAndNeverWritesTheSharedStore() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(codex: codex, cursor: cursor, demoMode: true)
+
+        // Publishes the synthetic fixture rather than any real/cached account data.
+        let expected = DemoData.metrics()
+        XCTAssertEqual(Set(manager.metrics.keys), Set(expected.keys))
+        XCTAssertEqual(manager.metrics[.codexCli]?.weeklyLimit?.used, 82)
+        XCTAssertEqual(manager.metrics[.claudeCode]?.modelLimitLabel, "Fable")
+
+        // The widget/CLI cache lives in a separate process; demo mode must never
+        // clobber the real user's on-disk metrics.
+        sharedStore.flushPendingWrites()
+        XCTAssertTrue(sharedStore.loadMetrics().isEmpty)
+
+        // Refreshing is a no-op that reports every provider as skipped-for-demo,
+        // and still leaves the shared cache untouched.
+        let report = await manager.refreshAll()
+        XCTAssertEqual(report.outcome(for: .codexCli)?.state, .skipped)
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .skipped)
+        sharedStore.flushPendingWrites()
+        XCTAssertTrue(sharedStore.loadMetrics().isEmpty)
     }
 
     func testRefreshRecordsSuccessAndFailureHealth() async {
@@ -497,6 +526,93 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertFalse(manager.isLoading)
     }
 
+    // MARK: - Refresh generation
+
+    /// `refreshGeneration` is the notification layer's trigger: it must advance
+    /// exactly once for every committed snapshot, so a subscriber can re-evaluate
+    /// limits on real change instead of polling a timer.
+    func testRefreshGenerationAdvancesOncePerCommittedSnapshot() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        XCTAssertEqual(manager.refreshGeneration, 0)
+
+        await manager.refreshAll()
+        XCTAssertEqual(manager.refreshGeneration, 1)
+
+        await manager.refresh(service: .cursor)
+        XCTAssertEqual(manager.refreshGeneration, 2)
+    }
+
+    func testRefreshGenerationDoesNotAdvanceForASkippedOverlappingCycle() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        cursor.suspendsFetch = true
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        let firstRefresh = Task { await manager.refreshAll() }
+        for _ in 0..<100 where cursor.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard cursor.fetchCount == 1, manager.isLoading else {
+            cursor.resumeFetch()
+            await firstRefresh.value
+            return XCTFail("the first refresh should be suspended inside the provider fetch")
+        }
+
+        // The overlapping call returns without committing anything.
+        await manager.refreshAll()
+        XCTAssertEqual(manager.refreshGeneration, 0)
+
+        cursor.resumeFetch()
+        await firstRefresh.value
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    /// Clearing a provider that was just turned off is a committed change even
+    /// though nothing was fetched — subscribers must see it.
+    func testRefreshGenerationAdvancesWhenADisabledProviderIsCleared() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.cursor],
+            preload: [.cursor: MetricsFixtures.cursor()]
+        )
+
+        await manager.refresh(service: .cursor)
+
+        XCTAssertEqual(cursor.fetchCount, 0)
+        XCTAssertNil(manager.metrics[.cursor])
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    func testRefreshGenerationAdvancesForCodexResetCreditRefresh() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        manager.applyCodexResetCreditRefresh(MetricsFixtures.codexCli(), accountID: CodexAccount.defaultID)
+
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    func testRefreshGenerationPublishesEveryCommitToSubscribers() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        var observed: [UInt64] = []
+        let cancellable = manager.$refreshGeneration.dropFirst().sink { observed.append($0) }
+
+        await manager.refreshAll()
+        await manager.refreshAll()
+
+        XCTAssertEqual(observed, [1, 2])
+        withExtendedLifetime(cancellable) {}
+    }
+
     func testWakeRefreshesWhenEnabledCachedDataIsTenMinutesOld() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let staleMetrics = UsageMetrics(
@@ -800,5 +916,37 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 0)
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.resetCreditsAvailable, 0)
+    }
+
+    /// Redemption is scoped to the card that acted: refreshing one Codex profile
+    /// must leave every other profile's cached metrics exactly as they were.
+    func testApplyResetCreditRefreshOnlyTouchesTheRedeemingAccount() async throws {
+        let accountSuite = "UsageDataManagerTests-reset-credit-scope-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = CodexAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/codex-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [
+            CodexAccount.defaultID: MetricsFixtures.codexCli(sessionUsedPercent: 20, resetCreditsAvailable: 2),
+            work.id: MetricsFixtures.codexCli(sessionUsedPercent: 100, resetCreditsAvailable: 2)
+        ])
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: provider,
+            cursor: cursor,
+            codexAccountStore: accountStore
+        )
+
+        await manager.refreshAll()
+        manager.applyCodexResetCreditRefresh(
+            MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 1),
+            accountID: work.id
+        )
+
+        XCTAssertEqual(manager.codexAccountMetrics[work.id]?.sessionLimit?.used, 0)
+        XCTAssertEqual(manager.codexAccountMetrics[work.id]?.resetCreditsAvailable, 1)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 2)
     }
 }

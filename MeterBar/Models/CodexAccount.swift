@@ -38,7 +38,13 @@ nonisolated struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
 }
 
 final class CodexAccountStore: ObservableObject {
-    static let shared = CodexAccountStore()
+    /// In demo mode the store is projected from the default account only, so
+    /// provider cards title generically ("Codex") and never surface the owner's
+    /// real custom-account names. The `init(accounts:)` projection reads and
+    /// writes no real `.standard` data.
+    static let shared = DemoMode.isActive
+        ? CodexAccountStore(accounts: [.defaultAccount])
+        : CodexAccountStore()
 
     @Published private(set) var customAccounts: [CodexAccount] = []
     @Published private(set) var defaultAccountName = CodexAccount.defaultName

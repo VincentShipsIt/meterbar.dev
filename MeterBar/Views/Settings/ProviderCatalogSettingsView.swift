@@ -73,7 +73,7 @@ struct ProviderCatalogSettingsView: View {
         case .codexCli: return "Track Codex CLI quota from local Codex auth."
         case .cursor: return "Track Cursor quota from local Cursor state."
         case .openRouter: return "Track credit balance, spend, and per-key limits."
-        case .grok: return "Track Grok Build weekly quota from its cached CLI login."
+        case .grok: return "Track Grok Build session and weekly quota from its cached CLI login."
         }
     }
 

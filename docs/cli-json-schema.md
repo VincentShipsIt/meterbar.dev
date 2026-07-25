@@ -1,7 +1,7 @@
 # MeterBar CLI JSON schema
 
-`meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`, and
-`meterbar fable-sessions --json` emit stable,
+`meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`,
+`meterbar guard --json`, and `meterbar fable-sessions --json` emit stable,
 versioned JSON for menu bars, shell prompts, dashboards, and other third-party integrations.
 Human-readable output remains the default when `--json` is absent.
 
@@ -208,6 +208,104 @@ Version 1 shape:
 Exit codes are stable for scripting: `0` success, `10` already running, `11` timeout,
 `12` partial provider failure, `13` complete/configuration failure, and `130` cancellation.
 Non-success JSON remains on standard output; optional human diagnostics use standard error.
+
+## Guard
+
+```sh
+meterbar guard --provider claude --limit session --min-remaining 25
+meterbar guard --provider codex --limit weekly --json
+meterbar guard --config-dir ~/.claude-work --refresh --json
+```
+
+Guard answers one question — may this caller spend quota right now? — and encodes the answer in
+its exit code. It reads the cached snapshot MeterBar maintains, so a shell hook costs a file read
+rather than a provider round trip; `--refresh` opts into one bounded refresh through the same
+coordinator `meterbar refresh` uses, then evaluates the resulting cache. Guard never waits for a
+quota to reset and never consumes a reset credit — that is `meterbar wake`.
+
+Severity comes from the shared quota band model the menu bar and `meterbar usage` already use, so
+a band threshold change moves guard's behavior with it.
+
+`--limit` accepts `session`, `weekly`, and `code-review`. `--min-remaining` is a percentage of
+quota that must remain; without it, only exhaustion blocks. `--config-dir` narrows the check to one
+configured Claude Code or OpenAI Codex account by its configuration directory.
+
+Version 1 shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "outcome": "belowThreshold",
+  "exitCode": 10,
+  "checkedAt": "2026-07-20T17:00:00Z",
+  "provider": "claude",
+  "displayName": "Claude Code",
+  "window": "session",
+  "account": {
+    "scope": "provider",
+    "name": "All accounts"
+  },
+  "used": 82,
+  "total": 100,
+  "percentUsed": 82,
+  "percentLeft": 18,
+  "quotaBand": "tight",
+  "estimated": false,
+  "resetAt": "2026-07-20T18:00:00Z",
+  "minRemainingPercent": 25,
+  "snapshot": {
+    "lastUpdated": "2026-07-20T16:59:00Z",
+    "ageSeconds": 60,
+    "isStale": false
+  },
+  "message": "Claude Code session quota below threshold: 18% left (minimum 25%). Resets in 1h."
+}
+```
+
+`outcome` is `available`, `belowThreshold`, `exhausted`, `dataUnavailable`, or `usageError`.
+`quotaBand` uses the same tokens as `meterbar usage --json`. `account.scope` is `provider` for the
+provider-wide roll-up or `account` when `--config-dir` selected one account.
+
+Every field beyond `schemaVersion`, `outcome`, `exitCode`, `checkedAt`, and `message` is optional:
+a usage error never reaches a provider, and an unavailable snapshot has no numbers to report.
+Omission means "not known" — guard never emits a zero that could read as available.
+
+Non-success outcomes add an `error` object with a stable `code`, plus `flag` and `value` when a
+caller-supplied input was at fault:
+
+```json
+{
+  "schemaVersion": 1,
+  "outcome": "usageError",
+  "exitCode": 13,
+  "checkedAt": "2026-07-20T17:00:00Z",
+  "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review.",
+  "error": {
+    "code": "invalid_window",
+    "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review.",
+    "flag": "--limit",
+    "value": "hourly"
+  }
+}
+```
+
+Stable version 1 guard error codes are `snapshot_missing`, `snapshot_stale`, `window_unavailable`,
+`account_lookup_unavailable`, `invalid_provider`, `invalid_window`, `invalid_threshold`,
+`invalid_refresh_timeout`, `unsupported_config_dir`, and `unknown_account`.
+
+Exit codes are stable for scripting:
+
+| Code | Outcome | Meaning |
+| --- | --- | --- |
+| `0` | `available` | The evaluated window is at or above `--min-remaining` and not exhausted. |
+| `10` | `belowThreshold` | Quota remains, but less than `--min-remaining`. Distinct from exhausted so a caller can throttle before it is blocked. |
+| `11` | `exhausted` | The window is spent. `resetAt` and the message carry the reset time. |
+| `12` | `dataUnavailable` | No usable snapshot, a snapshot older than the freshness bound without `--refresh`, or a window the provider did not report. Never reported as available. |
+| `13` | `usageError` | An invalid `--provider`, `--limit`, `--min-remaining`, `--refresh-timeout`, or `--config-dir`. The message names the offending input. |
+
+The freshness bound is two hours, shared with the provider parse-health model. A snapshot older
+than that is `dataUnavailable` rather than a stale pass. Non-success JSON stays on standard output;
+the human-readable reason uses standard error.
 
 ## Doctor
 

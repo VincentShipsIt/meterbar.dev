@@ -33,13 +33,18 @@ extension CodexCliLocalService: CodexUsageProviding {}
 
 @MainActor
 class UsageDataManager: ObservableObject {
-    static let shared = UsageDataManager()
+    static let shared = UsageDataManager(demoMode: DemoMode.isActive)
 
     @Published var metrics: [ServiceType: UsageMetrics] = [:]
     @Published var claudeCodeAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
+
+    /// Advances once per committed metric snapshot. Notification checks subscribe
+    /// to this rather than polling on a timer, so a limit crossing is evaluated
+    /// the moment a refresh lands instead of up to five minutes later.
+    @Published private(set) var refreshGeneration: UInt64 = 0
 
     @Published private var refreshIntervalRaw: Int {
         didSet {
@@ -65,6 +70,11 @@ class UsageDataManager: ObservableObject {
     private let codexAccountStore: CodexAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
     private let parseHealthStore: ProviderParseHealthStore
+
+    /// When true, the manager publishes the synthetic `DemoData` fixture and
+    /// performs no real fetches, cache reads, or shared-store writes. Gated at
+    /// `shared` on `DemoMode.isActive`; never touches real user data.
+    private let demoMode: Bool
 
     private var refreshTimer: Timer?
     private(set) var scheduledRefreshInterval: TimeInterval?
@@ -93,8 +103,10 @@ class UsageDataManager: ObservableObject {
         preferences: UserDefaults = .standard,
         cacheDefaults: UserDefaults = .standard,
         parseHealthStore: ProviderParseHealthStore? = nil,
-        schedulesAutoRefresh: Bool = true
+        schedulesAutoRefresh: Bool = true,
+        demoMode: Bool = false
     ) {
+        self.demoMode = demoMode
         self.codexCliService = codexCliService ?? CodexCliLocalService.shared
         self.cursorService = cursorService
         self.openRouterService = openRouterService
@@ -109,6 +121,15 @@ class UsageDataManager: ObservableObject {
         self.cacheDefaults = cacheDefaults
         self.parseHealthStore = parseHealthStore ?? .shared
         refreshIntervalRaw = Self.savedRefreshInterval(in: preferences).rawValue
+
+        guard !demoMode else {
+            // Publish the synthetic fixture and stop: no cached reads, no
+            // per-account metrics, no auto-refresh timer. Real caches are left
+            // untouched so a normal launch is unaffected.
+            metrics = DemoData.metrics()
+            return
+        }
+
         loadCachedData()
         loadCachedAccountMetrics()
         if schedulesAutoRefresh {
@@ -125,6 +146,21 @@ class UsageDataManager: ObservableObject {
     @discardableResult
     func refreshAll() async -> UsageRefreshReport {
         let startedAt = Date()
+        guard !demoMode else {
+            return UsageRefreshReport(
+                startedAt: startedAt,
+                finishedAt: Date(),
+                outcomes: ServiceType.allCases.map {
+                    ProviderRefreshOutcome(
+                        provider: $0,
+                        state: .skipped,
+                        reason: Self.demoModeReason,
+                        servedFromCache: metrics[$0] != nil,
+                        lastUpdated: metrics[$0]?.lastUpdated
+                    )
+                }
+            )
+        }
         guard !isLoading else {
             return UsageRefreshReport(
                 startedAt: startedAt,
@@ -201,9 +237,7 @@ class UsageDataManager: ObservableObject {
         }
 
         metrics = newMetrics
-        saveCachedData()
-        saveCachedAccountMetrics()
-        saveSharedData(newMetrics)
+        publishMetrics()
 
         return UsageRefreshReport(
             startedAt: startedAt,
@@ -221,6 +255,7 @@ class UsageDataManager: ObservableObject {
     }
 
     private static let disabledReason = "Provider is turned off in MeterBar."
+    private static let demoModeReason = "Demo mode is showing sample data."
     private static let notSignedInReason = "No readable credentials for this provider."
     private static let noEnabledAccountsReason = "No enabled accounts for this provider."
 
@@ -273,6 +308,7 @@ class UsageDataManager: ObservableObject {
     }
 
     func refresh(service: ServiceType) async {
+        guard !demoMode else { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -285,27 +321,21 @@ class UsageDataManager: ObservableObject {
             } else if service == .codexCli {
                 codexAccountMetrics = [:]
             }
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
         if service == .claudeCode, claudeCodeAccountStore.enabledAccounts.isEmpty {
             claudeCodeAccountMetrics = [:]
             metrics.removeValue(forKey: service)
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
         if service == .codexCli, codexAccountStore.enabledAccounts.isEmpty {
             codexAccountMetrics = [:]
             metrics.removeValue(forKey: service)
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
@@ -313,9 +343,7 @@ class UsageDataManager: ObservableObject {
             let newMetrics = try await refreshedMetrics(for: service)
 
             metrics[service] = newMetrics
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
         } catch {
             if lastError == nil {
                 lastError = error
@@ -326,13 +354,14 @@ class UsageDataManager: ObservableObject {
                 // if none exist, showing no data is safer than relabeling a
                 // different profile's stale quota.
                 metrics.removeValue(forKey: service)
-                saveCachedData()
-                saveCachedAccountMetrics()
-                saveSharedData(metrics)
+                publishMetrics()
             } else if metrics[service] == nil {
                 // Preserve existing cached metrics for single-account services.
                 if let cachedData = loadCachedMetricsFromDisk()[service] {
                     metrics[service] = cachedData
+                    // Restoring from cache still changes what subscribers see,
+                    // so it publishes like any other committed snapshot.
+                    publishMetrics()
                 }
             }
         }
@@ -343,6 +372,7 @@ class UsageDataManager: ObservableObject {
     /// enabled source has no data or its oldest successful snapshot is at least
     /// ten minutes old. Manual-only mode remains fully manual.
     func refreshAfterWakeIfNeeded(now: Date = Date()) async {
+        guard !demoMode else { return }
         guard refreshInterval != .manual, await shouldCatchUpAfterWake(now: now) else { return }
         await refreshAll()
     }
@@ -351,14 +381,13 @@ class UsageDataManager: ObservableObject {
     /// used by the popover, dashboard, widget, and CLI. The service has already
     /// performed the network refresh; this method only publishes that result.
     func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
+        guard !demoMode else { return }
         codexAccountMetrics[accountID] = refreshedMetrics
         if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
             metrics[.codexCli] = representative
         }
         lastError = nil
-        saveCachedData()
-        saveCachedAccountMetrics()
-        saveSharedData(metrics)
+        publishMetrics()
     }
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
@@ -410,6 +439,17 @@ class UsageDataManager: ObservableObject {
             return [:]
         }
         return MetricsCodec.decode(data)
+    }
+
+    /// Persist and broadcast the current snapshot. Every mutation that changes
+    /// what an observer would see funnels through here, so the three caches can
+    /// never drift apart and `refreshGeneration` advances exactly once per
+    /// committed change — which is what the notification layer subscribes to.
+    private func publishMetrics() {
+        saveCachedData()
+        saveCachedAccountMetrics()
+        saveSharedData(metrics)
+        refreshGeneration &+= 1
     }
 
     private func saveCachedData() {

@@ -19,6 +19,55 @@ nonisolated enum ServiceSupport {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
         "(KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
+    /// Per-request timeout for provider usage calls. Matches the session-level
+    /// timeout so a request built by hand behaves like one built from `session`.
+    static let usageRequestTimeout: TimeInterval = 30
+
+    /// The dashboard a spoofed request claims to originate from.
+    ///
+    /// `Origin` and `Referer` are checked together by these APIs, so they are
+    /// paired in one value rather than passed as two strings that a call site
+    /// could let drift apart.
+    struct BrowserSite {
+        let origin: String
+        let referer: String
+
+        static let cursorDashboard = BrowserSite(
+            origin: "https://cursor.com",
+            referer: "https://cursor.com/dashboard?tab=usage"
+        )
+
+        static let chatGPT = BrowserSite(
+            origin: "https://chatgpt.com",
+            referer: "https://chatgpt.com/"
+        )
+    }
+
+    /// Headers that make a request look like it came from `site`'s own web
+    /// dashboard. Cursor and Codex each hand-rolled this set; the only thing
+    /// that legitimately varies between them is `accept`.
+    static func browserHeaders(for site: BrowserSite, accept: String = "application/json") -> [String: String] {
+        [
+            "Accept": accept,
+            "Origin": site.origin,
+            "Referer": site.referer,
+            "User-Agent": browserUserAgent
+        ]
+    }
+
+    /// Applies `browserHeaders(for:accept:)` plus the standard timeout to a
+    /// request. Uses `setValue` so re-applying replaces rather than comma-joins.
+    static func applyBrowserHeaders(
+        to request: inout URLRequest,
+        for site: BrowserSite,
+        accept: String = "application/json"
+    ) {
+        for (field, value) in browserHeaders(for: site, accept: accept) {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        request.timeoutInterval = usageRequestTimeout
+    }
+
     static func makeUsageSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
