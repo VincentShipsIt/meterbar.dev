@@ -249,6 +249,137 @@ final class ManagedProcessTests: XCTestCase {
         XCTAssertFalse(processAlive(childPid), "Child process leaked after cancellation")
     }
 
+    // MARK: - Descriptor hygiene
+
+    /// `pipe()` for stderr can fail after the stdout pair already exists. Those
+    /// two descriptors have no owner at that point — nothing is spawned, no
+    /// drain is running — so bailing out without closing them strands a pair per
+    /// call until the process exits.
+    func testFailedSecondPipeDoesNotLeakTheFirstPair() throws {
+        var hogged: [Int32] = []
+        // Take the whole descriptor table, then hand back exactly three slots:
+        // enough for the stdout pipe and one spare, never enough for stderr's.
+        while hogged.count < 200_000 {
+            let descriptor = open("/dev/null", O_RDONLY | O_CLOEXEC)
+            if descriptor < 0 { break }
+            hogged.append(descriptor)
+        }
+        guard (8..<200_000).contains(hogged.count) else {
+            for descriptor in hogged { close(descriptor) }
+            throw XCTSkip("descriptor limit (\(hogged.count) free) cannot be exhausted safely here")
+        }
+        for _ in 0 ..< 3 { close(hogged.removeLast()) }
+
+        let result = ManagedProcess.run(
+            executable: "/bin/echo",
+            arguments: [],
+            environment: [:],
+            workingDirectory: tempDir.path,
+            timeout: 5
+        )
+
+        // Probe *before* releasing the hogged descriptors: only the launcher
+        // giving the stdout pair back leaves room for another pipe.
+        let probe = UnsafeMutablePointer<Int32>.allocate(capacity: 2)
+        let probeSucceeded = pipe(probe) == 0
+        if probeSucceeded { close(probe[0]); close(probe[1]) }
+        probe.deallocate()
+
+        // Restore the table before asserting — a failing assertion needs
+        // descriptors of its own to report itself.
+        for descriptor in hogged { close(descriptor) }
+
+        XCTAssertEqual(result.termination, .launchFailed("pipe() failed"))
+        XCTAssertTrue(probeSucceeded, "the stdout pipe was leaked when the stderr pipe failed")
+    }
+
+    // MARK: - Wait-poll interruption
+
+    /// A signal delivered to the waiting thread aborts `waitpid` with `EINTR`
+    /// and tells us nothing about the child. Treating that as a failure would
+    /// abandon a live process group un-reaped.
+    func testInterruptedPollIsRetriedRatherThanReportedAsFailure() {
+        var polls = 0
+        let termination = ManagedProcess.wait(
+            pid: 4242,
+            timeout: 10,
+            cancellation: .init(),
+            poll: { pid -> (result: pid_t, status: Int32, errorNumber: Int32) in
+                polls += 1
+                if polls <= 3 { return (-1, 0, EINTR) }
+                return (pid, 0, 0)
+            },
+            escalate: { _ in XCTFail("a retried poll must not escalate to a kill") }
+        )
+
+        XCTAssertEqual(termination, .exited(code: 0))
+        XCTAssertEqual(polls, 4, "each interruption must cost exactly one retry")
+    }
+
+    /// EINTR is the only recoverable `-1`. `ECHILD` means the child is not ours
+    /// to wait for and retrying would spin until the deadline.
+    func testUnrecoverablePollErrorIsStillReportedAsFailure() {
+        let termination = ManagedProcess.wait(
+            pid: 4242,
+            timeout: 10,
+            cancellation: .init(),
+            poll: { _ in (-1, 0, ECHILD) },
+            escalate: { _ in XCTFail("a fatal poll error must not escalate to a kill") }
+        )
+
+        guard case let .launchFailed(message) = termination else {
+            return XCTFail("expected launchFailed, got \(termination)")
+        }
+        XCTAssertTrue(message.contains("waitpid"), "message should name the failing call: \(message)")
+        XCTAssertTrue(message.contains("\(ECHILD)"), "message should carry the errno: \(message)")
+    }
+
+    /// Retrying must not become an unbounded loop: an interruption that never
+    /// stops still has to hit the timeout and kill the tree.
+    func testUnendingInterruptionsStillHonourTheTimeout() {
+        var escalated: [pid_t] = []
+        let termination = ManagedProcess.wait(
+            pid: 4242,
+            timeout: 0,
+            cancellation: .init(),
+            poll: { _ in (-1, 0, EINTR) },
+            escalate: { escalated.append($0) }
+        )
+
+        XCTAssertEqual(termination, .timedOut)
+        XCTAssertEqual(escalated, [4242], "the timeout path must still escalate exactly once")
+    }
+
+    /// The poll seam must not change how a reaped child is classified.
+    func testSignalledChildIsClassifiedThroughThePollSeam() {
+        let termination = ManagedProcess.wait(
+            pid: 4242,
+            timeout: 10,
+            cancellation: .init(),
+            poll: { pid in (pid, SIGKILL, 0) },
+            escalate: { _ in XCTFail("a reaped child must not escalate to a kill") }
+        )
+
+        XCTAssertEqual(termination, .signalled(signal: SIGKILL))
+    }
+
+    /// A cancel that lands before the poll observes the exit still reports
+    /// `.cancelled` rather than the SIGKILL that carried it out.
+    func testCancellationOutranksTheReapedStatus() {
+        let cancellation = ManagedProcess.Cancellation()
+        cancellation.cancel()
+
+        let termination = ManagedProcess.wait(
+            pid: 4242,
+            timeout: 10,
+            cancellation: cancellation,
+            poll: { pid in (pid, SIGKILL, 0) },
+            escalate: { _ in XCTFail("a reaped child must not escalate to a kill") }
+        )
+
+        XCTAssertEqual(termination, .cancelled)
+    }
+
     // MARK: - Process helpers
 
     private func pid(from file: URL) throws -> pid_t {
