@@ -107,26 +107,27 @@ class CostTracker: ObservableObject {
         claudeAccounts: [ClaudeCodeAccount]
     ) -> CostSummary {
         let cutoffDate = Self.costWindowStart(days: days)
-        let periodScan = Self.scanCostSources(
+        // One traversal fills both windows. The lifetime scan reads a strict
+        // superset of the period scan, so running it separately meant reading
+        // every transcript twice for the same numbers.
+        let scan = Self.scanCostSources(
             since: cutoffDate,
             includeClaudeCode: includeClaudeCode,
             includeCodexCli: includeCodexCli,
             claudeAccounts: claudeAccounts
         )
-        let lifetimeScan = Self.scanCostSources(
-            since: .distantPast,
-            includeClaudeCode: includeClaudeCode,
-            includeCodexCli: includeCodexCli,
-            claudeAccounts: claudeAccounts
-        )
+
+        let costs = scan.period.costs
+        let totalCostUSD: Double = costs.reduce(0) { $0 + $1.estimatedCostUSD }
+        let totalTokens: Int = costs.reduce(0) { $0 + $1.totalTokens }
 
         return CostSummary(
-            costs: periodScan.costs,
-            totalCostUSD: periodScan.costs.reduce(0) { $0 + $1.estimatedCostUSD },
-            totalTokens: periodScan.costs.reduce(0) { $0 + $1.totalTokens },
+            costs: costs,
+            totalCostUSD: totalCostUSD,
+            totalTokens: totalTokens,
             periodDays: days,
-            dailyUsage: periodScan.dailyUsage.sorted { $0.date < $1.date },
-            lifetime: LifetimeCostSummary(costs: lifetimeScan.costs)
+            dailyUsage: scan.period.dailyUsage.sorted { $0.date < $1.date },
+            lifetime: LifetimeCostSummary(costs: scan.lifetime.costs)
         )
     }
 
@@ -152,26 +153,22 @@ class CostTracker: ObservableObject {
         includeClaudeCode: Bool,
         includeCodexCli: Bool,
         claudeAccounts: [ClaudeCodeAccount]
-    ) -> (costs: [TokenCost], dailyUsage: [DailyTokenUsage]) {
-        var allCosts: [TokenCost] = []
-        var dailyUsage: [DailyTokenUsage] = []
+    ) -> ScanWindows<CostScanResult> {
+        var scan = ScanWindows(period: CostScanResult(), lifetime: CostScanResult(), cutoff: cutoffDate)
 
-        if includeClaudeCode,
-           let (claudeCost, claudeDailyUsage) = Self.scanClaudeCodeSessions(
-            since: cutoffDate,
-            claudeAccounts: claudeAccounts
-           ) {
-            allCosts.append(claudeCost)
-            dailyUsage.append(contentsOf: claudeDailyUsage)
+        if includeClaudeCode {
+            let claude = Self.scanClaudeCodeSessions(since: cutoffDate, claudeAccounts: claudeAccounts)
+            scan.period.append(Self.makeClaudeCost(from: claude.period, windowStart: cutoffDate))
+            scan.lifetime.append(Self.makeClaudeCost(from: claude.lifetime, windowStart: .distantPast))
         }
 
-        if includeCodexCli,
-           let (codexCost, codexDailyUsage) = Self.scanCodexSessions(since: cutoffDate) {
-            allCosts.append(codexCost)
-            dailyUsage.append(contentsOf: codexDailyUsage)
+        if includeCodexCli {
+            let codex = Self.scanCodexSessions(since: cutoffDate)
+            scan.period.append(Self.makeCodexCost(from: codex.period))
+            scan.lifetime.append(Self.makeCodexCost(from: codex.lifetime))
         }
 
-        return (allCosts, dailyUsage)
+        return scan
     }
 
     private func loadCachedSummary() {
@@ -193,90 +190,71 @@ class CostTracker: ObservableObject {
     nonisolated private static func scanClaudeCodeSessions(
         since cutoffDate: Date,
         claudeAccounts: [ClaudeCodeAccount]
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        var windows = ScanWindows(
+            period: ClaudeSessionTotals(),
+            lifetime: ClaudeSessionTotals(),
+            cutoff: cutoffDate
+        )
         let projectRoots = Self.claudeProjectRoots(accounts: claudeAccounts)
-        guard !projectRoots.isEmpty else { return nil }
-
-        var totalInput = 0
-        var totalOutput = 0
-        var totalCacheCreation = 0
-        var totalCacheRead = 0
-        var totalEstimatedCost = 0.0
-        var sessionCount = 0
-        var earliestDate = Date()
-        var latestDate = cutoffDate
-        var dailyTotals: [Date: TokenAccumulator] = [:]
-        var modelTotals: [String: TokenAccumulator] = [:]
-        var originTotals: [String: TokenAccumulator] = [:]
+        guard !projectRoots.isEmpty else { return windows }
 
         for root in projectRoots {
             guard Self.isLocalDirectory(root) else { continue }
 
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+                includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else {
                 continue
             }
 
-            for case let url as URL in enumerator {
-                guard url.pathExtension == "jsonl",
-                      let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                      let modificationDate = values.contentModificationDate,
-                      modificationDate >= cutoffDate else {
-                    continue
-                }
-
-                let (input, output, cacheCreate, cacheReadTokens, estimatedCost, dates, daily, models, origins) =
-                    Self.parseSessionFile(at: url, since: cutoffDate)
-
-                if input > 0 || output > 0 || cacheCreate > 0 || cacheReadTokens > 0 {
-                    totalInput += input
-                    totalOutput += output
-                    totalCacheCreation += cacheCreate
-                    totalCacheRead += cacheReadTokens
-                    totalEstimatedCost += estimatedCost
-                    sessionCount += 1
-                    mergeDailyTotals(&dailyTotals, with: daily)
-                    mergeNamedTotals(&modelTotals, with: models)
-                    mergeNamedTotals(&originTotals, with: origins)
-
-                    if let minDate = dates.min(), minDate < earliestDate {
-                        earliestDate = minDate
-                    }
-                    if let maxDate = dates.max(), maxDate > latestDate {
-                        latestDate = maxDate
-                    }
-                }
+            // No mtime prefilter: the lifetime window needs every file, and the
+            // period window is already bounded by the per-event timestamp check
+            // (an event is never newer than the file that holds it).
+            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                let file = Self.parseSessionWindows(at: url, since: cutoffDate)
+                windows.period.merge(file.period)
+                windows.lifetime.merge(file.lifetime)
             }
         }
 
-        guard totalInput > 0 || totalOutput > 0 || totalCacheCreation > 0 || totalCacheRead > 0 else { return nil }
+        return windows
+    }
+
+    /// `windowStart` is the floor the old code seeded `latestDate` with — the
+    /// cutoff for the period window, `.distantPast` for lifetime.
+    nonisolated private static func makeClaudeCost(
+        from totals: ClaudeSessionTotals,
+        windowStart: Date
+    ) -> (TokenCost, [DailyTokenUsage])? {
+        guard totals.hasUsage else { return nil }
 
         let pricing = ModelPricing.claude(for: nil)
         let fallbackCost = Self.calculateCost(
-            input: totalInput,
-            output: totalOutput,
-            cacheCreation: totalCacheCreation,
-            cacheRead: totalCacheRead,
+            input: totals.input,
+            output: totals.output,
+            cacheCreation: totals.cacheCreation,
+            cacheRead: totals.cacheRead,
             pricing: pricing
         )
-        let cost = totalEstimatedCost > 0 ? totalEstimatedCost : fallbackCost
+        let cost = totals.estimatedCost > 0 ? totals.estimatedCost : fallbackCost
+        let now = Date()
 
         return (TokenCost(
             provider: .claudeCode,
-            inputTokens: totalInput,
-            outputTokens: totalOutput,
-            cacheCreationTokens: totalCacheCreation,
-            cacheReadTokens: totalCacheRead,
+            inputTokens: totals.input,
+            outputTokens: totals.output,
+            cacheCreationTokens: totals.cacheCreation,
+            cacheReadTokens: totals.cacheRead,
             estimatedCostUSD: cost,
-            sessionCount: sessionCount,
-            periodStart: earliestDate,
-            periodEnd: latestDate,
-            modelBreakdowns: Self.makeBreakdowns(from: modelTotals, provider: .claudeCode, pricing: pricing),
-            originBreakdowns: Self.makeBreakdowns(from: originTotals, provider: .claudeCode, pricing: pricing)
-        ), Self.makeDailyUsage(from: dailyTotals, provider: .claudeCode, pricing: pricing))
+            sessionCount: totals.sessions,
+            periodStart: min(now, totals.earliest ?? now),
+            periodEnd: max(windowStart, totals.latest ?? windowStart),
+            modelBreakdowns: Self.makeBreakdowns(from: totals.models, provider: .claudeCode, pricing: pricing),
+            originBreakdowns: Self.makeBreakdowns(from: totals.origins, provider: .claudeCode, pricing: pricing)
+        ), Self.makeDailyUsage(from: totals.daily, provider: .claudeCode, pricing: pricing))
     }
 
     nonisolated private static func claudeProjectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
@@ -333,76 +311,74 @@ class CostTracker: ObservableObject {
         return url.appendingPathComponent("projects", isDirectory: true)
     }
 
-    nonisolated static func parseSessionFile(
+    /// Convenience wrapper for the reporting window alone.
+    nonisolated static func parseSessionFile(at url: URL, since cutoffDate: Date) -> ClaudeSessionTotals {
+        Self.parseSessionWindows(at: url, since: cutoffDate).period
+    }
+
+    /// Parses one transcript into both windows in a single streaming pass.
+    ///
+    /// Dedup state is deliberately kept per window. Two events can share a
+    /// `messageID:requestID` key while straddling the cutoff; one shared map
+    /// would let the older copy overwrite the in-window one and change the
+    /// period total.
+    nonisolated static func parseSessionWindows(
         at url: URL,
         since cutoffDate: Date
-    ) -> (
-        input: Int,
-        output: Int,
-        cacheCreation: Int,
-        cacheRead: Int,
-        estimatedCost: Double,
-        dates: [Date],
-        daily: [Date: TokenAccumulator],
-        models: [String: TokenAccumulator],
-        origins: [String: TokenAccumulator]
-    ) {
-        var totalInput = 0
-        var totalOutput = 0
-        var totalCacheCreation = 0
-        var totalCacheRead = 0
-        var totalEstimatedCost = 0.0
-        var dates: [Date] = []
-        var dailyTotals: [Date: TokenAccumulator] = [:]
-        var modelTotals: [String: TokenAccumulator] = [:]
-        var originTotals: [String: TokenAccumulator] = [:]
-        var keyedEvents: [String: ClaudeUsageEvent] = [:]
-        var unkeyedEvents: [ClaudeUsageEvent] = []
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        var periodKeyed: [String: ClaudeUsageEvent] = [:]
+        var periodUnkeyed: [ClaudeUsageEvent] = []
+        var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
+        var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        guard let data = try? Data(contentsOf: url),
-              let content = String(data: data, encoding: .utf8) else {
-            return (0, 0, 0, 0, 0, [], [:], [:], [:])
-        }
-
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines where !line.isEmpty {
-            guard let lineData = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                continue
-            }
-
-            guard let timestampStr = json["timestamp"] as? String,
+        FileLineReader.forEachLine(in: url) { lineData in
+            guard !lineData.isEmpty,
+                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let timestampStr = json["timestamp"] as? String,
                   let timestamp = FlexibleISO8601.date(from: timestampStr),
-                  timestamp >= cutoffDate else {
-                continue
+                  let message = json["message"] as? [String: Any],
+                  let usage = message["usage"] as? [String: Any] else {
+                return
             }
 
-            if let message = json["message"] as? [String: Any],
-               let usage = message["usage"] as? [String: Any] {
-                let event = ClaudeUsageEvent(
-                    timestamp: timestamp,
-                    model: message["model"] as? String,
-                    messageID: message["id"] as? String,
-                    requestID: json["requestId"] as? String,
-                    input: intValue(usage["input_tokens"]),
-                    output: intValue(usage["output_tokens"]),
-                    cacheCreation: intValue(usage["cache_creation_input_tokens"]),
-                    cacheCreationOneHour: Self.claudeOneHourCacheCreationTokens(in: usage),
-                    cacheRead: intValue(usage["cache_read_input_tokens"]),
-                    origin: Self.claudeUsageOrigin(json: json, message: message, url: url)
-                )
+            let event = ClaudeUsageEvent(
+                timestamp: timestamp,
+                model: message["model"] as? String,
+                messageID: message["id"] as? String,
+                requestID: json["requestId"] as? String,
+                input: intValue(usage["input_tokens"]),
+                output: intValue(usage["output_tokens"]),
+                cacheCreation: intValue(usage["cache_creation_input_tokens"]),
+                cacheCreationOneHour: Self.claudeOneHourCacheCreationTokens(in: usage),
+                cacheRead: intValue(usage["cache_read_input_tokens"]),
+                origin: Self.claudeUsageOrigin(json: json, message: message, url: url)
+            )
+            guard event.hasUsage else { return }
 
-                guard event.hasUsage else { continue }
-
-                if let key = event.deduplicationKey {
-                    keyedEvents[key] = event
-                } else {
-                    unkeyedEvents.append(event)
-                }
+            let inPeriod = timestamp >= cutoffDate
+            if let key = event.deduplicationKey {
+                lifetimeKeyed[key] = event
+                if inPeriod { periodKeyed[key] = event }
+            } else {
+                lifetimeUnkeyed.append(event)
+                if inPeriod { periodUnkeyed.append(event) }
             }
         }
 
-        let events = keyedEvents.keys.sorted().compactMap { keyedEvents[$0] } + unkeyedEvents
+        return ScanWindows(
+            period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed),
+            lifetime: Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed),
+            cutoff: cutoffDate
+        )
+    }
+
+    nonisolated private static func tally(
+        keyed: [String: ClaudeUsageEvent],
+        unkeyed: [ClaudeUsageEvent]
+    ) -> ClaudeSessionTotals {
+        var totals = ClaudeSessionTotals()
+        let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
+
         for event in events {
             let pricing = Self.claudePricing(for: event.model)
             let eventCost = Self.calculateClaudeCost(
@@ -415,27 +391,27 @@ class CostTracker: ObservableObject {
             )
             let day = Calendar.current.startOfDay(for: event.timestamp)
 
-            totalInput += event.input
-            totalOutput += event.output
-            totalCacheCreation += event.cacheCreation
-            totalCacheRead += event.cacheRead
-            totalEstimatedCost += eventCost
-            dates.append(event.timestamp)
-            dailyTotals[day, default: TokenAccumulator()].add(
+            totals.input += event.input
+            totals.output += event.output
+            totals.cacheCreation += event.cacheCreation
+            totals.cacheRead += event.cacheRead
+            totals.estimatedCost += eventCost
+            totals.note(event.timestamp)
+            totals.daily[day, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
-            modelTotals[Self.displayModelName(event.model), default: TokenAccumulator()].add(
+            totals.models[Self.displayModelName(event.model), default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
-            originTotals[event.origin, default: TokenAccumulator()].add(
+            totals.origins[event.origin, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,
@@ -444,8 +420,10 @@ class CostTracker: ObservableObject {
             )
         }
 
-        return (totalInput, totalOutput, totalCacheCreation, totalCacheRead, totalEstimatedCost,
-                dates, dailyTotals, modelTotals, originTotals)
+        // One transcript with usage counts as one session, matching the old
+        // per-file `sessionCount += 1`.
+        totals.sessions = totals.hasUsage ? 1 : 0
+        return totals
     }
 
     nonisolated private static func claudeOneHourCacheCreationTokens(in usage: [String: Any]) -> Int {
@@ -463,15 +441,33 @@ class CostTracker: ObservableObject {
         ModelPricing.normalizeClaudeModel(raw)
     }
 
-    nonisolated private static func scanCodexSessions(since cutoffDate: Date) -> (TokenCost, [DailyTokenUsage])? {
+    nonisolated private static func scanCodexSessions(since cutoffDate: Date) -> ScanWindows<CodexScanContext> {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
         let archivedDir = codexDir.appendingPathComponent("archived_sessions")
         let logsDatabase = codexDir.appendingPathComponent("logs_2.sqlite")
-        var context = CodexScanContext(earliestDate: Date(), latestDate: cutoffDate)
+        var windows = Self.codexScanWindows(cutoff: cutoffDate)
 
-        Self.scanCodexArchivedSessions(directory: archivedDir, since: cutoffDate, context: &context)
-        Self.scanCodexSQLiteLogs(database: logsDatabase, since: cutoffDate, context: &context)
+        Self.scanCodexArchivedSessions(directory: archivedDir, windows: &windows)
+        Self.scanCodexSQLiteLogs(database: logsDatabase, windows: &windows)
 
+        return windows
+    }
+
+    /// Seeds both windows the way the two separate scans used to seed themselves:
+    /// `earliestDate` starts at now and only decreases, `latestDate` starts at the
+    /// window floor (the cutoff for the period, `.distantPast` for lifetime) and
+    /// only increases.
+    nonisolated static func codexScanWindows(cutoff: Date) -> ScanWindows<CodexScanContext> {
+        ScanWindows(
+            period: CodexScanContext(earliestDate: Date(), latestDate: cutoff),
+            lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
+            cutoff: cutoff
+        )
+    }
+
+    nonisolated private static func makeCodexCost(
+        from context: CodexScanContext
+    ) -> (TokenCost, [DailyTokenUsage])? {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
@@ -501,58 +497,81 @@ class CostTracker: ObservableObject {
         ), Self.makeDailyUsage(from: context.dailyTotals, provider: .codexCli, pricing: pricing))
     }
 
+    /// The byte-level equivalent of the old `line.contains("\"token_count\"")`
+    /// prefilter. Rollout files are mostly non-usage events, so skipping
+    /// `JSONSerialization` on them is what keeps the scan cheap.
+    nonisolated private static let codexTokenCountMarker = Data("\"token_count\"".utf8)
+
     /// Internal (not private) so the archived-session parsing — the Codex
     /// counterpart to `parseSessionFile`, and where CLI-vs-app cost divergence
     /// hides — can be fixture-tested against a temp directory.
     nonisolated static func scanCodexArchivedSessions(
         directory: URL,
-        since cutoffDate: Date,
-        context: inout CodexScanContext
+        windows: inout ScanWindows<CodexScanContext>
     ) {
         guard Self.isLocalDirectory(directory) else { return }
 
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else {
             return
         }
 
+        // The per-file mtime prefilter is gone on purpose: the lifetime window
+        // needs every file, and the period window is still bounded by the
+        // per-event timestamp check inside `ScanWindows.update` (an event is
+        // never newer than the file holding it).
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            guard let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
-                  let modificationDate = values.contentModificationDate,
-                  modificationDate >= cutoffDate,
-                  let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
-                continue
-            }
-
-            for line in content.split(separator: "\n") {
-                guard line.contains("\"token_count\""),
-                      let data = String(line).data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let timestampText = json["timestamp"] as? String,
-                      let timestamp = FlexibleISO8601.date(from: timestampText),
-                      timestamp >= cutoffDate,
-                      let payload = json["payload"] as? [String: Any],
-                      payload["type"] as? String == "token_count",
-                      let info = payload["info"] as? [String: Any],
-                      let usage = (info["last_token_usage"] ?? info["total_token_usage"]) as? [String: Any] else {
-                    continue
-                }
-
-                let sessionID = (((payload["rate_limits"] as? [String: Any])?["conversation_id"] as? String)
-                    ?? fileURL.deletingPathExtension().lastPathComponent)
-                Self.addCodexUsage(
-                    usage,
-                    timestamp: timestamp,
-                    sessionID: sessionID,
-                    modelName: Self.codexModelName(from: info, payload: payload),
-                    originName: "Codex CLI",
-                    context: &context
-                )
+            FileLineReader.forEachLine(in: fileURL) { line in
+                Self.addCodexArchivedLine(line, fileURL: fileURL, windows: &windows)
             }
         }
+    }
+
+    /// Single-window entry point kept for callers that only care about one
+    /// period. Scans into `context` as the period window and discards lifetime.
+    nonisolated static func scanCodexArchivedSessions(
+        directory: URL,
+        since cutoffDate: Date,
+        context: inout CodexScanContext
+    ) {
+        var windows = ScanWindows(
+            period: context,
+            lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
+            cutoff: cutoffDate
+        )
+        Self.scanCodexArchivedSessions(directory: directory, windows: &windows)
+        context = windows.period
+    }
+
+    nonisolated private static func addCodexArchivedLine(
+        _ line: Data,
+        fileURL: URL,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        guard line.contains(Self.codexTokenCountMarker),
+              let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let timestampText = json["timestamp"] as? String,
+              let timestamp = FlexibleISO8601.date(from: timestampText),
+              let payload = json["payload"] as? [String: Any],
+              payload["type"] as? String == "token_count",
+              let info = payload["info"] as? [String: Any],
+              let usage = (info["last_token_usage"] ?? info["total_token_usage"]) as? [String: Any] else {
+            return
+        }
+
+        let sessionID = (((payload["rate_limits"] as? [String: Any])?["conversation_id"] as? String)
+            ?? fileURL.deletingPathExtension().lastPathComponent)
+        Self.addCodexUsage(
+            usage,
+            timestamp: timestamp,
+            sessionID: sessionID,
+            modelName: Self.codexModelName(from: info, payload: payload),
+            originName: "Codex CLI",
+            windows: &windows
+        )
     }
 
     nonisolated private static func isLocalDirectory(_ url: URL) -> Bool {
@@ -572,8 +591,7 @@ class CostTracker: ObservableObject {
 
     nonisolated private static func scanCodexSQLiteLogs(
         database: URL,
-        since cutoffDate: Date,
-        context: inout CodexScanContext
+        windows: inout ScanWindows<CodexScanContext>
     ) {
         guard FileManager.default.fileExists(atPath: database.path) else { return }
 
@@ -594,7 +612,9 @@ class CostTracker: ObservableObject {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let bodyPointer = sqlite3_column_text(statement, 0) else { continue }
             let body = String(cString: bodyPointer)
-            guard let timestamp = Self.codexLogDate(in: body), timestamp >= cutoffDate else { continue }
+            // No cutoff skip: the window split now happens per event, and the
+            // lifetime window needs the rows this used to drop.
+            guard let timestamp = Self.codexLogDate(in: body) else { continue }
 
             let usage: [String: Any] = [
                 "input_tokens": Self.codexLogInt("input_token_count", in: body),
@@ -611,18 +631,21 @@ class CostTracker: ObservableObject {
                 sessionID: sessionID,
                 modelName: Self.codexLogValue("model", in: body) ?? Self.codexLogValue("slug", in: body),
                 originName: Self.codexLogValue("originator", in: body) ?? "Codex CLI",
-                context: &context
+                windows: &windows
             )
         }
     }
 
+    /// Stays at six parameters — SwiftLint's `function_parameter_count` warns at
+    /// seven and CI lints with `--strict` — because the cutoff travels inside
+    /// `ScanWindows` rather than as its own argument.
     nonisolated private static func addCodexUsage(
         _ usage: [String: Any],
         timestamp: Date,
         sessionID: String,
         modelName: String?,
         originName: String?,
-        context: inout CodexScanContext
+        windows: inout ScanWindows<CodexScanContext>
     ) {
         let input = intValue(usage["input_tokens"])
         let cached = intValue(usage["cached_input_tokens"])
@@ -635,31 +658,45 @@ class CostTracker: ObservableObject {
         // vary and risks both false matches and false misses).
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
-        guard context.eventKeys.insert(key).inserted else { return }
-
-        context.sessionIDs.insert(sessionID)
-        context.totals.add(input: input, output: output, cacheCreation: 0, cacheRead: cached, reasoning: reasoning)
         let day = Calendar.current.startOfDay(for: timestamp)
-        context.dailyTotals[day, default: TokenAccumulator()].add(
-            input: input,
-            output: output + reasoning,
-            cacheCreation: 0,
-            cacheRead: cached
-        )
-        context.modelTotals[Self.displayModelName(modelName), default: TokenAccumulator()].add(
-            input: input,
-            output: output + reasoning,
-            cacheCreation: 0,
-            cacheRead: cached
-        )
-        context.originTotals[Self.displayOriginName(originName), default: TokenAccumulator()].add(
-            input: input,
-            output: output + reasoning,
-            cacheCreation: 0,
-            cacheRead: cached
-        )
-        if timestamp < context.earliestDate { context.earliestDate = timestamp }
-        if timestamp > context.latestDate { context.latestDate = timestamp }
+        let modelKey = Self.displayModelName(modelName)
+        let originKey = Self.displayOriginName(originName)
+
+        // Each window keeps its own `eventKeys`, so an event that lands in both
+        // is deduplicated independently in each — exactly what the two separate
+        // scans did.
+        windows.update(at: timestamp) { context in
+            guard context.eventKeys.insert(key).inserted else { return }
+
+            context.sessionIDs.insert(sessionID)
+            context.totals.add(
+                input: input,
+                output: output,
+                cacheCreation: 0,
+                cacheRead: cached,
+                reasoning: reasoning
+            )
+            context.dailyTotals[day, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.modelTotals[modelKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.originTotals[originKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            if timestamp < context.earliestDate { context.earliestDate = timestamp }
+            if timestamp > context.latestDate { context.latestDate = timestamp }
+        }
     }
 
     nonisolated private static func makeDailyUsage(
@@ -722,24 +759,6 @@ class CostTracker: ObservableObject {
                 return lhs.totalTokens > rhs.totalTokens
             }
             return lhs.estimatedCostUSD > rhs.estimatedCostUSD
-        }
-    }
-
-    nonisolated private static func mergeDailyTotals(
-        _ target: inout [Date: TokenAccumulator],
-        with source: [Date: TokenAccumulator]
-    ) {
-        for (day, tokens) in source {
-            target[day, default: TokenAccumulator()].merge(tokens)
-        }
-    }
-
-    nonisolated private static func mergeNamedTotals(
-        _ target: inout [String: TokenAccumulator],
-        with source: [String: TokenAccumulator]
-    ) {
-        for (name, tokens) in source {
-            target[name, default: TokenAccumulator()].merge(tokens)
         }
     }
 
@@ -874,62 +893,8 @@ class CostTracker: ObservableObject {
     }
 }
 
-/// Mutable accumulators threaded through the Codex scan. Bundling these into one
-/// value collapses `addCodexUsage`/`scanCodexArchivedSessions`/`scanCodexSQLiteLogs`
-/// from 10–13 parameters (a SwiftLint `function_parameter_count` error) down to
-/// a single `inout` argument.
-///
-/// Internal (not private) so `scanCodexArchivedSessions` can be fixture-tested.
-nonisolated struct CodexScanContext: Sendable {
-    var totals = TokenAccumulator()
-    var dailyTotals: [Date: TokenAccumulator] = [:]
-    var modelTotals: [String: TokenAccumulator] = [:]
-    var originTotals: [String: TokenAccumulator] = [:]
-    var eventKeys: Set<String> = []
-    var sessionIDs: Set<String> = []
-    var earliestDate: Date
-    var latestDate: Date
-}
-
-nonisolated struct TokenAccumulator: Sendable {
-    var input = 0
-    var output = 0
-    var cacheCreation = 0
-    var cacheRead = 0
-    var reasoning = 0
-    var estimatedCostUSD = 0.0
-    var events = 0
-
-    mutating func add(
-        input: Int,
-        output: Int,
-        cacheCreation: Int,
-        cacheRead: Int,
-        reasoning: Int = 0,
-        estimatedCostUSD: Double = 0,
-        events: Int = 1
-    ) {
-        self.input += input
-        self.output += output
-        self.cacheCreation += cacheCreation
-        self.cacheRead += cacheRead
-        self.reasoning += reasoning
-        self.estimatedCostUSD += estimatedCostUSD
-        self.events += events
-    }
-
-    mutating func merge(_ other: TokenAccumulator) {
-        add(
-            input: other.input,
-            output: other.output,
-            cacheCreation: other.cacheCreation,
-            cacheRead: other.cacheRead,
-            reasoning: other.reasoning,
-            estimatedCostUSD: other.estimatedCostUSD,
-            events: other.events
-        )
-    }
-}
+// `CodexScanContext` and `TokenAccumulator` live in `CostScanWindows.swift`
+// alongside the window types that thread them.
 
 nonisolated private struct ClaudeUsageEvent: Sendable {
     let timestamp: Date
