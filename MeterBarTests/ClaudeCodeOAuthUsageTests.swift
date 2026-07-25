@@ -139,6 +139,45 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         }
     }
 
+    // MARK: - Shared usage request builder
+
+    func testUsageRequestCarriesTheOAuthHeaderSet() throws {
+        let request = try XCTUnwrap(ClaudeCodeLocalService.usageRequest(
+            token: "secret-token",
+            endpoint: ClaudeCodeLocalService.defaultUsageEndpoint,
+            timeout: 30
+        ))
+
+        XCTAssertEqual(request.url?.absoluteString, ClaudeCodeLocalService.defaultUsageEndpoint)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-beta"), "oauth-2025-04-20")
+    }
+
+    func testUsageRequestKeepsCallerTimeoutsDistinct() throws {
+        // The two call sites deliberately differ: the metrics fetch is the
+        // user-visible reading and gets 30s, while the extra-usage probe is
+        // best-effort and must not stall a refresh, so it gets 15s. Collapsing
+        // them onto one value would be a behaviour change, not a dedupe.
+        let metrics = try XCTUnwrap(ClaudeCodeLocalService.usageRequest(
+            token: "t",
+            timeout: ClaudeCodeLocalService.usageRequestTimeout
+        ))
+        let extraUsage = try XCTUnwrap(ClaudeCodeLocalService.usageRequest(
+            token: "t",
+            timeout: ClaudeCodeLocalService.extraUsageRequestTimeout
+        ))
+
+        XCTAssertEqual(metrics.timeoutInterval, 30)
+        XCTAssertEqual(extraUsage.timeoutInterval, 15)
+    }
+
+    func testUsageRequestRejectsAnUnusableEndpoint() {
+        XCTAssertNil(ClaudeCodeLocalService.usageRequest(token: "t", endpoint: "", timeout: 30))
+    }
+
     // MARK: - Enabled-by-default flag
 
     func testOAuthUsageEnabledDefaultsTrueWhenUnset() throws {
