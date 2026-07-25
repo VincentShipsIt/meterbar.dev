@@ -44,6 +44,89 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertEqual(ready.check("data")?.level, .pass)
     }
 
+    func testGrokUnreadableCachedLoginIsDistinctFromMissingOne() {
+        // Presence only — MeterBar must never open `~/.grok/auth.json`, so an
+        // existing-but-unreadable file still has to produce its own advice.
+        let unreadable = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: false)
+        )
+
+        XCTAssertEqual(unreadable.check("auth")?.level, .fail)
+        XCTAssertTrue((unreadable.check("auth")?.detail ?? "").contains("could not be read"))
+        XCTAssertTrue((unreadable.check("auth")?.recovery ?? "").contains("grok login"))
+        XCTAssertEqual(unreadable.check("data")?.level, .warn)
+    }
+
+    func testGrokAgentStartFailureBlamesTheCLINotTheLogin() {
+        let report = grokReport(failure: .agentStartFailed)
+
+        XCTAssertEqual(report.check("installed")?.level, .fail)
+        XCTAssertTrue((report.check("installed")?.detail ?? "").contains("could not be started"))
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("refresh")?.recovery, GrokRefreshFailure.agentStartFailed.recovery)
+    }
+
+    func testGrokRejectedLoginFailsAuthWithLoginRecovery() {
+        let report = grokReport(failure: .notSignedIn)
+
+        XCTAssertEqual(report.check("installed")?.level, .pass)
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        XCTAssertTrue((report.check("auth")?.detail ?? "").contains("rejected"))
+        XCTAssertTrue((report.check("auth")?.recovery ?? "").contains("grok login"))
+        XCTAssertTrue(report.needsSetup)
+    }
+
+    func testGrokUnparseableResponseFailsTheDataCheck() {
+        let report = grokReport(failure: .unparseableResponse)
+
+        XCTAssertEqual(report.check("installed")?.level, .pass)
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .fail)
+        XCTAssertTrue((report.check("data")?.detail ?? "").contains("could not read"))
+    }
+
+    func testGrokTimeoutWarnsRatherThanFailingSetup() {
+        // A hung agent is a transient transport problem, not a broken install.
+        let report = grokReport(failure: .agentTimedOut)
+
+        XCTAssertEqual(report.check("installed")?.level, .pass)
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .warn)
+        XCTAssertFalse(report.needsSetup)
+    }
+
+    func testGrokUnsupportedVersionAsksForAnUpdate() {
+        let report = grokReport(failure: .unsupportedVersion)
+
+        XCTAssertEqual(report.check("installed")?.level, .fail)
+        XCTAssertTrue((report.check("installed")?.detail ?? "").contains("too old"))
+        XCTAssertTrue((report.check("installed")?.recovery ?? "").lowercased().contains("update"))
+    }
+
+    func testGrokRefreshHintsAreCarriedFromTheFailureItself() {
+        for failure in GrokRefreshFailure.allCases {
+            let report = grokReport(failure: failure)
+
+            XCTAssertEqual(report.check("refresh")?.level, .fail, "\(failure)")
+            XCTAssertEqual(report.check("refresh")?.recovery, failure.recovery, "\(failure)")
+            XCTAssertTrue(
+                (report.check("refresh")?.detail ?? "").contains(failure.message),
+                "\(failure) lost its sanitized message"
+            )
+        }
+    }
+
+    private func grokReport(failure: GrokRefreshFailure) -> ProviderReadiness {
+        ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(
+                isCLIInstalled: true,
+                authFileExists: true,
+                authFileReadable: true,
+                refreshError: failure.message
+            )
+        )
+    }
+
     // MARK: - Claude Code
 
     func testClaudeHealthy() {

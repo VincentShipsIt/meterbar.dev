@@ -6,6 +6,26 @@ import MeterBarShared
 /// audit found ~1,000 lines of money math with zero tests, which is exactly
 /// where the CLI-vs-app cost divergence hid.
 final class CostTrackerTests: XCTestCase {
+    // MARK: - Demo mode
+
+    func testDemoModePublishesSyntheticNonAlarmingSummaryWithoutScanning() {
+        let tracker = CostTracker(demoMode: true)
+
+        let summary = tracker.costSummary
+        XCTAssertNotNil(summary, "demo mode should publish a summary at construction")
+        XCTAssertEqual(summary?.totalCostUSD ?? 0, 204.90, accuracy: 0.001)
+        XCTAssertEqual(summary?.periodDays, 30)
+        XCTAssertNil(summary?.lifetime)
+        XCTAssertNotNil(tracker.lastScanDate)
+        XCTAssertFalse(tracker.isScanning)
+
+        // Never leaks real project paths or private model routing.
+        for cost in summary?.costs ?? [] {
+            XCTAssertTrue(cost.modelBreakdowns.isEmpty)
+            XCTAssertTrue(cost.originBreakdowns.isEmpty)
+        }
+    }
+
     // MARK: - Model-id normalization
 
     func testNormalizeClaudeModelStripsDateSuffix() {

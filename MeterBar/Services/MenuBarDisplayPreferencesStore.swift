@@ -18,6 +18,23 @@ nonisolated enum StatusItemLabelMetric: String, CaseIterable, Identifiable {
     }
 }
 
+/// How many status items MeterBar owns in the menu bar.
+nonisolated enum MenuBarPresentationMode: String, CaseIterable, Identifiable, Sendable {
+    /// One status item showing a single quota (Auto or an explicit pin).
+    case merged
+    /// One status item per tracked provider account, CodexBar-style.
+    case perProvider
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .merged: return "Single Item"
+        case .perProvider: return "One Per Provider"
+        }
+    }
+}
+
 nonisolated enum StatusItemLabelSize: String, CaseIterable, Identifiable {
     case compact
     case regular
@@ -48,6 +65,7 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     static let shared = MenuBarDisplayPreferencesStore()
 
     @Published private(set) var pinnedCandidateKey: String?
+    @Published private(set) var presentationMode: MenuBarPresentationMode
     @Published private(set) var labelMetric: StatusItemLabelMetric
     @Published private(set) var labelSize: StatusItemLabelSize
     @Published private(set) var resetTimeFormat: ResetTimeFormat
@@ -58,6 +76,8 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         self.userDefaults = userDefaults
         pinnedCandidateKey = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
             .flatMap(Self.normalizedPin)
+        presentationMode = userDefaults.string(forKey: StorageKeys.statusItemPresentationMode)
+            .flatMap(MenuBarPresentationMode.init(rawValue:)) ?? .merged
         labelMetric = userDefaults.string(forKey: StorageKeys.statusItemLabelMetric)
             .flatMap(StatusItemLabelMetric.init(rawValue:)) ?? .percentLeft
         labelSize = userDefaults.string(forKey: StorageKeys.statusItemLabelSize)
@@ -75,6 +95,12 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         } else {
             userDefaults.removeObject(forKey: StorageKeys.statusItemPinnedCandidate)
         }
+    }
+
+    func setPresentationMode(_ mode: MenuBarPresentationMode) {
+        guard mode != presentationMode else { return }
+        presentationMode = mode
+        userDefaults.set(mode.rawValue, forKey: StorageKeys.statusItemPresentationMode)
     }
 
     func setLabelMetric(_ metric: StatusItemLabelMetric) {
