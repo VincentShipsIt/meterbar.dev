@@ -144,27 +144,79 @@ struct UsageDashboardView: View {
             Section {
                 ForEach(availableSettingsSections) { section in
                     Label(section.rawValue, systemImage: section.iconName)
-                        .tag(section)
+                        .tag(SettingsSidebarItem.section(section))
                 }
             } header: {
                 Text("Settings")
+            }
+
+            Section {
+                ForEach(trackedProviders, id: \.self) { service in
+                    settingsProviderRow(service)
+                        .tag(SettingsSidebarItem.provider(service))
+                }
+
+                Label("All Providers", systemImage: SettingsSidebarModel.catalogPage.iconName)
+                    .tag(SettingsSidebarItem.section(SettingsSidebarModel.catalogPage))
+            } header: {
+                Text("Providers")
             }
         }
         .listStyle(.sidebar)
         .tint(MeterBarTheme.sidebarMenuTint)
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+        .onChange(of: providerVisibility.enabledServices) { _, enabled in
+            navigation.settingsProvidersChanged(enabledServices: enabled)
+        }
     }
 
+    /// A provider row: logo, name, and a health dot on the trailing edge. The
+    /// dot reads the same facts the provider's own page shows, so the sidebar
+    /// and the Status row can never disagree.
+    private func settingsProviderRow(_ service: ServiceType) -> some View {
+        let facts = ProviderSettingsFacts.live(for: service, snapshots: providerSnapshots)
+        return HStack(spacing: 6) {
+            Label {
+                Text(service.displayName)
+            } icon: {
+                ProviderLogoView(
+                    kind: .forService(service),
+                    size: 14,
+                    foregroundColor: MeterBarTheme.accent(for: service)
+                )
+            }
+
+            Spacer(minLength: 4)
+
+            Circle()
+                .fill(facts.statusColor)
+                .frame(width: 7, height: 7)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(service.displayName), \(facts.statusText)")
+    }
+
+    /// Provider rows for the sidebar — only the tracked ones. Untracked
+    /// providers stay reachable from the All Providers row below them.
+    private var trackedProviders: [ServiceType] {
+        SettingsSidebarModel.trackedProviders(enabledServices: providerVisibility.enabledServices)
+    }
+
+    /// Settings pages available right now: Automation only when Session Wake is
+    /// enabled, and Providers excluded because it is surfaced as the
+    /// "All Providers" row under the provider list instead.
     private var availableSettingsSections: [SettingsSection] {
-        SettingsSection.available(sessionWakeEnabled: sessionWakeStore.featureEnabled)
+        let appPages = Set(SettingsSidebarModel.appPages)
+        return SettingsSection.available(sessionWakeEnabled: sessionWakeStore.featureEnabled)
+            .filter(appPages.contains)
     }
 
-    private var settingsSelection: Binding<SettingsSection?> {
+    private var settingsSelection: Binding<SettingsSidebarItem?> {
         Binding(
-            get: { navigation.selectedSettingsSection },
-            set: { section in
-                guard let section else { return }
-                navigation.selectedSettingsSection = section
+            get: { navigation.settingsSidebarItem },
+            set: { item in
+                guard let item else { return }
+                navigation.selectSettingsItem(item)
             }
         )
     }
@@ -253,11 +305,19 @@ struct UsageDashboardView: View {
     /// the exact section views the old macOS Settings window hosted; the shell's
     /// ScrollView + padding wrap them, so nothing double-scrolls.
     @ViewBuilder private var settingsSectionContent: some View {
+        if let service = navigation.selectedSettingsProvider {
+            ProviderSettingsView(service: service)
+        } else {
+            settingsPageContent
+        }
+    }
+
+    @ViewBuilder private var settingsPageContent: some View {
         switch navigation.selectedSettingsSection {
         case .general:
             GeneralSettingsView()
         case .providers:
-            ProviderSettingsView()
+            ProviderCatalogSettingsView()
         case .widget:
             WidgetSettingsView()
         case .apiUsage:

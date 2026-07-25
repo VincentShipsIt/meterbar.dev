@@ -10,7 +10,6 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            trackedProvidersSection
             refreshSection
             menuBarDisplaySection
             notificationsSection
@@ -58,36 +57,6 @@ struct GeneralSettingsView: View {
 
     private var statusItemPinOptions: [StatusItemPinOption] {
         providerSnapshots.statusItemPinOptions
-    }
-
-    private var trackedProvidersSection: some View {
-        SettingsPanelSection(title: "Tracked Providers", systemImage: "switch.2", color: MeterBarTheme.appAccent) {
-            providerToggleRow(
-                title: "Claude Code",
-                detail: "Track Pro/Max quota via Claude CLI profiles.",
-                service: .claudeCode
-            )
-            providerToggleRow(
-                title: "OpenAI Codex",
-                detail: "Track Codex CLI quota from local Codex auth.",
-                service: .codexCli
-            )
-            providerToggleRow(
-                title: "Cursor",
-                detail: "Track Cursor quota from local Cursor state.",
-                service: .cursor
-            )
-            providerToggleRow(
-                title: "OpenRouter",
-                detail: "Track credit balance, spend, and per-key limits.",
-                service: .openRouter
-            )
-            providerToggleRow(
-                title: "Grok",
-                detail: "Track Grok Build session and weekly quota from its cached CLI login.",
-                service: .grok
-            )
-        }
     }
 
     private var refreshSection: some View {
@@ -356,22 +325,6 @@ struct GeneralSettingsView: View {
             // Settings, so re-read it whenever settings is shown.
             launchAtLogin.refreshStatus()
             softwareUpdates.refreshState()
-        }
-    }
-
-    private func providerToggleRow(title: String, detail: String, service: ServiceType) -> some View {
-        SettingsRowView(title: title, detail: detail) {
-            Toggle("", isOn: Binding(
-                get: { providerVisibility.isEnabled(service) },
-                set: { isEnabled in
-                    providerVisibility.set(service, isEnabled: isEnabled)
-                    Task {
-                        await dataManager.refreshAll()
-                    }
-                }
-            ))
-            .labelsHidden()
-            .toggleStyle(.switch)
         }
     }
 }
