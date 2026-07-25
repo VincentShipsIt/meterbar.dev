@@ -53,6 +53,6 @@ nonisolated public enum CostSummaryStore {
         let directory = cacheURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try encoder.encode(cache)
-        try data.write(to: cacheURL, options: [.atomic])
+        try SecureFileWriter.write(data, to: cacheURL)
     }
 }
