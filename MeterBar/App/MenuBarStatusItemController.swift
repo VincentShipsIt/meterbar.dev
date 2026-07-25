@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 /// Owns the app's live `NSStatusItem`s and reconciles them against a plan.
 ///
