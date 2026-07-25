@@ -57,12 +57,13 @@ private struct MeterBarCommands: Commands {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
+    private var statusItemController: MenuBarStatusItemController?
     private var menuPanel: MeterBarMenuPanelController?
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notificationPreferences = NotificationPreferencesStore.shared
     private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+    private let menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     private var cancellables = Set<AnyCancellable>()
     private var monitorTask: Task<Void, Never>?
 
@@ -71,9 +72,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// above a threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
-    /// The account whose quota the menu bar title currently shows; feeds the
-    /// sticky selection so concurrent Claude + Codex use doesn't flip the title.
-    private var shownStatusItemKey: String?
+    /// Per status item, the account whose quota its title currently shows; feeds
+    /// the sticky selection so concurrent Claude + Codex use doesn't flip a title.
+    private var shownStatusItemKeys: [String: String] = [:]
+
+    /// The plan the live status items were last reconciled to.
+    private var currentPlan: MenuBarStatusItemPlan?
 
     /// Monotonic stamp for status-item updates: activity probes run off the
     /// main actor, so a stale in-flight result must not overwrite a newer one.
@@ -93,29 +97,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         observeDockVisibility()
         observeSystemWake()
 
-        // Create menu bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        guard let button = statusItem?.button else {
-            AppLog.app.error("Failed to create status item button")
-            return
+        // Create the menu bar items the persisted selection asks for. Defaults
+        // resolve to the single legacy item, so an upgrade changes nothing.
+        let controller = MenuBarStatusItemController(makeIcon: { AppDelegate.createMenuBarIcon() })
+        controller.onClick = { [weak self] itemID in
+            self?.handleStatusItemClick(itemID: itemID)
         }
-
-        // Set up the menu bar icon with 3 progress bars
-        let image = createMenuBarIcon()
-        image.isTemplate = true
-        button.image = image
-
-        button.action = #selector(handleStatusItemClick)
-        button.target = self
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = "MeterBar"
-        button.imagePosition = .imageLeft
-        button.font = .systemFont(ofSize: 14, weight: .semibold)
+        statusItemController = controller
+        refreshStatusItemPlan()
 
         menuPanel = MeterBarMenuPanelController(
             statusButtonProvider: { [weak self] in
-                self?.statusItem?.button
+                self?.statusItemController?.primaryButton
             },
             onDismiss: {
                 // Closing the popover only tears down the transient detail
@@ -160,14 +153,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Left-click opens the popover; right-click (or control-click) opens a
     /// native menu so Quit stays reachable even when the Dock icon is hidden.
-    @objc
-    private func handleStatusItemClick() {
+    private func handleStatusItemClick(itemID: String) {
         let event = NSApp.currentEvent
         let isSecondaryClick = event?.type == .rightMouseUp
             || (event?.modifierFlags.contains(.control) ?? false)
 
         if isSecondaryClick {
-            showStatusMenu()
+            showStatusMenu(for: itemID)
         } else {
             togglePopover()
         }
@@ -190,18 +182,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Shows a native menu anchored to the menu bar icon. This is the always-on
     /// escape hatch for Quit (and Dock visibility), independent of the popover.
-    private func showStatusMenu() {
-        guard let button = statusItem?.button else { return }
+    private func showStatusMenu(for itemID: String) {
+        guard let button = statusItemController?.button(for: itemID) else { return }
 
         menuPanel?.dismiss()
 
-        let menu = makeStatusMenu()
+        let menu = makeStatusMenu(for: itemID)
         let location = NSPoint(x: 0, y: button.bounds.height + 4)
         menu.popUp(positioning: nil, at: location, in: button)
     }
 
-    private func makeStatusMenu() -> NSMenu {
+    private func makeStatusMenu(for itemID: String) -> NSMenu {
         let menu = NSMenu()
+
+        addAccountSwitcherItems(to: menu, itemID: itemID)
 
         let dockItem = NSMenuItem(
             title: "Show in Dock",
@@ -236,6 +230,76 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         return menu
+    }
+
+    /// Merged mode shows one item, so the account it is bound to is switched
+    /// from its own right-click menu. Every tracked account is listed — disabled
+    /// ones are shown inert rather than omitted, so the menu explains why an
+    /// account holds no status item.
+    private func addAccountSwitcherItems(to menu: NSMenu, itemID: String) {
+        guard let entry = currentPlan?.entries.first(where: { $0.id == itemID }),
+              entry.showsAccountSwitcher else { return }
+
+        let header = NSMenuItem(title: "Menu Bar Account", action: nil, keyEquivalent: "")
+        menu.addItem(header)
+
+        let entries = MenuBarAccountSwitcher.entries(
+            accounts: menuBarAccounts(),
+            activeKey: entry.accountKey
+        )
+        for switcherEntry in entries {
+            let title = switcherEntry.isEnabled
+                ? switcherEntry.title
+                : "\(switcherEntry.title) (Not Tracked)"
+            // A nil action leaves the item disabled under menu validation, so a
+            // disabled account can be seen but never selected.
+            let item = NSMenuItem(
+                title: title,
+                action: switcherEntry.isEnabled ? #selector(selectMergedAccount(_:)) : nil,
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = switcherEntry.key
+            item.state = switcherEntry.isActive ? .on : .off
+            item.indentationLevel = 1
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+    }
+
+    @objc
+    private func selectMergedAccount(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        menuBarAccountSelection.setMergedAccountKey(key)
+    }
+
+    /// Every tracked Claude and Codex account, already sanitized for display.
+    private func menuBarAccounts() -> [MenuBarAccountIdentity] {
+        MenuBarAccountCatalog.identities(
+            claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
+            codexAccounts: CodexAccountStore.shared.accounts,
+            enabledServices: providerVisibilityStore.enabledServices
+        )
+    }
+
+    /// Reconciles the live status items against the current mode and selection.
+    /// Only the difference is applied, so disabling one account leaves every
+    /// other item — and its menu-bar slot — untouched.
+    @discardableResult
+    private func refreshStatusItemPlan() -> MenuBarStatusItemPlan {
+        let plan = MenuBarStatusItemPlanner.plan(
+            mode: menuBarAccountSelection.mode,
+            selectedAccountKeys: menuBarAccountSelection.selectedAccountKeys,
+            mergedAccountKey: menuBarAccountSelection.mergedAccountKey,
+            accounts: menuBarAccounts()
+        )
+
+        guard plan != currentPlan else { return plan }
+        currentPlan = plan
+        statusItemController?.reconcile(to: plan.itemIDs)
+        shownStatusItemKeys = shownStatusItemKeys.filter { plan.itemIDs.contains($0.key) }
+        return plan
     }
 
     private func makeProviderStatusMenu() -> NSMenu {
@@ -664,11 +728,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        Publishers.Merge3(
-            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
-            ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
-            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
-        )
+        // Account identity feeds both the title and the status-item plan: a
+        // renamed, disabled, or removed account must drop or relabel its item.
+        Publishers.MergeMany([
+            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            ClaudeCodeAccountStore.shared.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
+            ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () }.eraseToAnyPublisher(),
+            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+            CodexAccountStore.shared.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            CodexAccountStore.shared.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
+            CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher()
+        ])
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
@@ -676,7 +746,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        CodexAccountStore.shared.$customAccounts
+        Publishers.Merge3(
+            menuBarAccountSelection.$mode.map { _ in () },
+            menuBarAccountSelection.$selectedAccountKeys.map { _ in () },
+            menuBarAccountSelection.$mergedAccountKey.map { _ in () }
+        )
             .sink { [weak self] _ in
                 Task { @MainActor in
                     self?.updateStatusItem(metrics: UsageDataManager.shared.metrics)
@@ -723,6 +797,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private struct StatusLimitSource {
         let service: ServiceType
         let accountID: UUID?
+        /// `MenuBarAccountKey` when the provider supports multiple accounts, so
+        /// a per-account status item can be scoped to its own quotas.
+        let accountKey: String?
         let autoSelectionKey: String?
         let displayName: String
         let metrics: UsageMetrics
@@ -730,7 +807,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func updateStatusItem(metrics: [ServiceType: UsageMetrics]) {
-        guard statusItem?.button != nil else { return }
+        guard statusItemController != nil else { return }
 
         // Gather the cheap main-actor inputs now; run the activity probes
         // (directory scans) off the main actor; apply on return. A generation
@@ -747,6 +824,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         StatusLimitCandidate(
                             key: seed.key,
                             pinKey: seed.pinKey,
+                            accountKey: seed.accountKey,
                             displayName: seed.displayName,
                             windowName: seed.windowName,
                             limit: seed.limit,
@@ -763,23 +841,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func applyStatusItemSelection(candidates: [StatusLimitCandidate]) {
-        guard let button = statusItem?.button else { return }
+        // The plan is re-derived here so a candidate refresh also picks up an
+        // account that was just enabled, disabled, added, or removed.
+        let plan = refreshStatusItemPlan()
 
+        for entry in plan.entries {
+            guard let button = statusItemController?.button(for: entry.id) else { continue }
+            applyStatusItemSelection(
+                for: entry,
+                candidates: MenuBarStatusItemCandidateFilter.candidates(for: entry, in: candidates),
+                to: button
+            )
+        }
+    }
+
+    @MainActor
+    private func applyStatusItemSelection(
+        for entry: MenuBarStatusItemPlanEntry,
+        candidates: [StatusLimitCandidate],
+        to button: NSStatusBarButton
+    ) {
         guard let selection = StatusItemLimitSelector.select(
             candidates: candidates,
-            previousKey: shownStatusItemKey,
+            previousKey: shownStatusItemKeys[entry.id],
             pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
         ) else {
-            shownStatusItemKey = nil
-            setStatusButtonTitle(button, to: "")
-            button.imagePosition = .imageOnly
-            button.toolTip = "MeterBar"
-            button.setAccessibilityLabel("MeterBar")
+            shownStatusItemKeys[entry.id] = nil
+            // An account item keeps its badge with no value: the item stays
+            // identifiable while its provider has nothing to report.
+            setStatusButtonTitle(button, to: statusButtonTitle(badge: entry.badge, value: nil))
+            button.imagePosition = entry.badge.isEmpty ? .imageOnly : .imageLeft
+            let name = entry.displayName.isEmpty ? "MeterBar" : "MeterBar: \(entry.displayName)"
+            button.toolTip = name
+            button.setAccessibilityLabel(name)
             applyParseHealthAppearance(to: button)
             return
         }
 
-        shownStatusItemKey = selection.key
+        shownStatusItemKeys[entry.id] = selection.key
         let isPinned = menuBarDisplayPreferences.pinnedCandidateKey == selection.pinKey
         let selectionName = isPinned
             ? "\(selection.displayName) · \(selection.windowName)"
@@ -794,8 +893,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             metric: menuBarDisplayPreferences.labelMetric
         )
 
-        button.imagePosition = title == nil ? .imageOnly : .imageLeft
-        setStatusButtonTitle(button, to: title.map { " \($0)" } ?? "")
+        let buttonTitle = statusButtonTitle(badge: entry.badge, value: title)
+        button.imagePosition = buttonTitle.isEmpty ? .imageOnly : .imageLeft
+        setStatusButtonTitle(button, to: buttonTitle)
         if let spokenValue {
             button.toolTip = "MeterBar: \(spokenValue) on \(selectionName)"
             button.setAccessibilityLabel("MeterBar \(spokenValue) on \(selectionName)")
@@ -804,6 +904,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.setAccessibilityLabel("MeterBar \(selectionName)")
         }
         applyParseHealthAppearance(to: button)
+    }
+
+    /// The aggregate item carries an empty badge, so single-item mode produces
+    /// exactly the title it did before #266.
+    private func statusButtonTitle(badge: String, value: String?) -> String {
+        [badge, value]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .map { " \($0)" }
+            .joined()
     }
 
     /// Sets the status-button title, crossfading the change so the menu-bar
@@ -858,11 +968,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             for account in ClaudeCodeAccountStore.shared.enabledAccounts {
                 guard let accountMetrics = claudeMetrics(for: account, metrics: metrics) else { continue }
                 let configDirectory = account.configDirectory
+                // Account names are user-supplied and often pasted config-dir
+                // paths, so they are sanitized before reaching a tooltip.
+                let accountName = MenuBarAccountLabel.displayName(for: account.name)
                 let source = StatusLimitSource(
                     service: .claudeCode,
                     accountID: account.id,
+                    accountKey: MenuBarAccountKey.make(service: .claudeCode, accountID: account.id),
                     autoSelectionKey: "claude:\(account.id.uuidString)",
-                    displayName: "\(account.name) (\(ServiceType.claudeCode.displayName))",
+                    displayName: "\(accountName) (\(ServiceType.claudeCode.displayName))",
                     metrics: accountMetrics
                 )
                 requests.append(statusLimitProbeRequest(
@@ -883,11 +997,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     ?? fallbackMetrics
                 guard let accountMetrics else { continue }
                 let homeDirectory = account.homeDirectory
+                let accountName = MenuBarAccountLabel.displayName(for: account.name)
                 let source = StatusLimitSource(
                     service: .codexCli,
                     accountID: account.id,
+                    accountKey: MenuBarAccountKey.make(service: .codexCli, accountID: account.id),
                     autoSelectionKey: "codex:\(account.id.uuidString)",
-                    displayName: "\(account.name) (\(ServiceType.codexCli.displayName))",
+                    displayName: "\(accountName) (\(ServiceType.codexCli.displayName))",
                     metrics: accountMetrics
                 )
                 requests.append(statusLimitProbeRequest(
@@ -900,6 +1016,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let source = StatusLimitSource(
                 service: .cursor,
                 accountID: nil,
+                accountKey: nil,
                 autoSelectionKey: "cursor",
                 displayName: ServiceType.cursor.displayName,
                 metrics: cursorMetrics
@@ -913,6 +1030,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let source = StatusLimitSource(
                 service: .openRouter,
                 accountID: nil,
+                accountKey: nil,
                 autoSelectionKey: nil,
                 displayName: ServiceType.openRouter.displayName,
                 metrics: openRouterMetrics
@@ -933,6 +1051,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let seeds = StatusItemLimitCandidateBuilder.seeds(
             service: source.service,
             accountID: source.accountID,
+            accountKey: source.accountKey,
             autoSelectionKey: source.autoSelectionKey,
             displayName: source.displayName,
             limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service)
@@ -945,7 +1064,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UsageDataManager.shared.claudeCodeAccountMetrics[account.id] ?? (account.isDefault ? metrics[.claudeCode] : nil)
     }
 
-    private func createMenuBarIcon() -> NSImage {
+    private static func createMenuBarIcon() -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             let barHeight: CGFloat = 3

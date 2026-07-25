@@ -28,6 +28,14 @@ nonisolated enum StorageKeys {
     static let statusItemLabelSize = "StatusItemLabelSize"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
+    /// `MenuBarAccountDisplayMode` raw value. Missing means `.single`, which is
+    /// the pre-#266 single-status-item menu bar.
+    static let menuBarAccountDisplayMode = "MenuBarAccountDisplayMode"
+    /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
+    /// in the order the user selected them.
+    static let menuBarSelectedAccountKeys = "MenuBarSelectedAccountKeys"
+    /// Account the merged status item is currently bound to (MenuBarAccountKey).
+    static let menuBarMergedAccountKey = "MenuBarMergedAccountKey"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
     /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the

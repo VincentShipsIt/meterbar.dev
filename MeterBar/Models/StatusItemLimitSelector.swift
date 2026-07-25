@@ -3,12 +3,39 @@ import MeterBarShared
 
 /// One account/provider quota competing for the menu bar percentage slot.
 struct StatusLimitCandidate: Equatable, Sendable {
+    // MARK: Lifecycle
+
+    init(
+        key: String,
+        pinKey: String,
+        accountKey: String? = nil,
+        displayName: String,
+        windowName: String,
+        limit: UsageLimit,
+        lastActivity: Date?,
+        isAutoSelectable: Bool
+    ) {
+        self.key = key
+        self.pinKey = pinKey
+        self.accountKey = accountKey
+        self.displayName = displayName
+        self.windowName = windowName
+        self.limit = limit
+        self.lastActivity = lastActivity
+        self.isAutoSelectable = isAutoSelectable
+    }
+
+    // MARK: Internal
+
     /// Legacy Auto identity (e.g. "claude:<uuid>", "codex:<uuid>", "cursor")
     /// retained byte-for-byte so sticky selection and equal-quota tie-breaks do
     /// not change when the user leaves the new preference set to Auto.
     let key: String
     /// Stable provider/account/window identity persisted for explicit pins.
     let pinKey: String
+    /// `MenuBarAccountKey` of the owning account, nil for single-account
+    /// providers. Scopes a per-account status item to its own quotas (#266).
+    let accountKey: String?
     /// Human-readable label for the status item tooltip.
     let displayName: String
     /// Provider-specific quota-window label (Session, Weekly, Sonnet, etc.).
@@ -25,6 +52,7 @@ struct StatusLimitCandidate: Equatable, Sendable {
 struct StatusLimitCandidateSeed: Sendable {
     let key: String
     let pinKey: String
+    let accountKey: String?
     let displayName: String
     let windowName: String
     let limit: UsageLimit
@@ -56,6 +84,7 @@ enum StatusItemLimitCandidateBuilder {
     static func seeds(
         service: ServiceType,
         accountID: UUID?,
+        accountKey: String? = nil,
         autoSelectionKey: String?,
         displayName: String,
         limits: [SnapshotLimit]
@@ -70,6 +99,7 @@ enum StatusItemLimitCandidateBuilder {
             return StatusLimitCandidateSeed(
                 key: limit.id == autoWindowID ? autoSelectionKey ?? pinKey : pinKey,
                 pinKey: pinKey,
+                accountKey: accountKey,
                 displayName: displayName,
                 windowName: limit.title,
                 limit: limit.usageLimit,

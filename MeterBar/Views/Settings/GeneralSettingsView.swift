@@ -13,6 +13,7 @@ struct GeneralSettingsView: View {
             trackedProvidersSection
             refreshSection
             menuBarDisplaySection
+            menuBarAccountsSection
             notificationsSection
             generalSection
         }
@@ -31,9 +32,22 @@ struct GeneralSettingsView: View {
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
     @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+    @StateObject private var menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared
+
+    /// Explains a rejected menu-bar account selection; nil while under the cap.
+    @State private var capNotice: String?
+
+    /// Every tracked Claude/Codex account, already sanitized for display.
+    private var menuBarAccounts: [MenuBarAccountIdentity] {
+        MenuBarAccountCatalog.identities(
+            claudeAccounts: claudeAccountStore.accounts,
+            codexAccounts: codexAccountStore.accounts,
+            enabledServices: providerVisibility.enabledServices
+        )
+    }
 
     // The menu-bar "shows" picker enumerates pin options derived from the live
     // provider snapshots, so this tab builds the same snapshot set the Providers
@@ -200,6 +214,111 @@ struct GeneralSettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
             }
+        }
+    }
+
+    /// Which Claude/Codex accounts own a menu-bar status item (issue #266).
+    /// Only these two providers support multiple accounts; the others are always
+    /// served by the single aggregate item.
+    private var menuBarAccountsSection: some View {
+        SettingsPanelSection(
+            title: "Menu Bar Accounts",
+            systemImage: "person.2",
+            color: MeterBarTheme.appAccent
+        ) {
+            SettingsRowView(
+                title: "Layout",
+                detail: "Single Item keeps today’s behavior. "
+                    + "One Per Account gives each selected account its own status item "
+                    + "(up to \(menuBarAccountSelection.itemLimit)). "
+                    + "Merged shows one item with an account switcher in its right-click menu."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarAccountSelection.mode },
+                    set: { (mode: MenuBarAccountDisplayMode) in
+                        menuBarAccountSelection.setMode(mode)
+                        capNotice = nil
+                    }
+                )) {
+                    ForEach(MenuBarAccountDisplayMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+
+            switch menuBarAccountSelection.mode {
+            case .single:
+                EmptyView()
+            case .perAccount:
+                perAccountSelectionRows
+            case .merged:
+                mergedAccountRow
+            }
+        }
+    }
+
+    @ViewBuilder private var perAccountSelectionRows: some View {
+        if menuBarAccounts.isEmpty {
+            SettingsNotice(text: "No tracked accounts yet.", color: .secondary)
+        } else {
+            ForEach(menuBarAccounts) { account in
+                SettingsRowView(
+                    title: "\(account.badge) · \(account.displayName)",
+                    detail: account.isEnabled
+                        ? account.service.displayName
+                        : "\(account.service.displayName) — not tracked, so it claims no status item."
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { menuBarAccountSelection.isSelected(account.key) },
+                        set: { isOn in
+                            switch menuBarAccountSelection.setSelected(isOn, for: account.key) {
+                            case .rejectedLimit(let limit):
+                                capNotice = "The menu bar holds at most \(limit) account items. "
+                                    + "Turn one off before adding another."
+                            case .updated, .unchanged:
+                                capNotice = nil
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!account.isEnabled)
+                }
+            }
+
+            if let capNotice {
+                SettingsNotice(text: capNotice, color: MeterBarTheme.warning)
+            }
+        }
+    }
+
+    @ViewBuilder private var mergedAccountRow: some View {
+        if menuBarAccounts.contains(where: \.isEnabled) {
+            SettingsRowView(
+                title: "Shown account",
+                detail: "Switchable at any time from the status item’s right-click menu."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarAccountSelection.mergedAccountKey },
+                    set: { menuBarAccountSelection.setMergedAccountKey($0) }
+                )) {
+                    Text("First Available").tag(nil as String?)
+                    ForEach(menuBarAccounts.filter(\.isEnabled)) { account in
+                        Text(account.displayName).tag(account.key as String?)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        } else {
+            SettingsNotice(
+                text: "No tracked accounts yet — the menu bar keeps its single combined item.",
+                color: .secondary
+            )
         }
     }
 
