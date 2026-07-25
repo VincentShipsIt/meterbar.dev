@@ -16,6 +16,7 @@ struct MeterBarCLI: AsyncParsableCommand {
             Refresh.self,
             FableSessions.self,
             Doctor.self,
+            Guard.self,
             Wake.self,
             WakeAgent.self,
             ResetCredit.self,
