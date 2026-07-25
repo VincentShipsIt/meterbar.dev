@@ -1,4 +1,7 @@
 import AppKit
+// ObservableObject / @Published came in transitively while the store lived in
+// UsageDashboardView.swift; this file has to import Combine itself.
+import Combine
 import MeterBarShared
 import SwiftUI
 
