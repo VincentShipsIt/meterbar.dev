@@ -1,201 +1,9 @@
-import AppKit
-import Combine
-import SwiftUI
 import MeterBarShared
-import UniformTypeIdentifiers
+import SwiftUI
 
-@MainActor
-final class UsageDashboardWindowController {
-    static let shared = UsageDashboardWindowController()
-    static let windowID = "dashboard"
-
-    private var openWindow: OpenWindowAction?
-    private var shouldOpenWhenRegistered = false
-
-    private init() {}
-
-    func register(openWindow: OpenWindowAction) {
-        self.openWindow = openWindow
-
-        if shouldOpenWhenRegistered {
-            shouldOpenWhenRegistered = false
-            presentDashboard()
-        }
-    }
-
-    func show(section: DashboardSection? = nil, focusedProviderID: String? = nil) {
-        if let section {
-            DashboardNavigationStore.shared.navigate(to: section, focusedProviderID: focusedProviderID)
-        } else if let focusedProviderID {
-            DashboardNavigationStore.shared.navigate(to: .limits, focusedProviderID: focusedProviderID)
-        }
-
-        presentDashboard()
-    }
-
-    /// Open (or front) the dashboard window in its in-window settings mode. This
-    /// is what ⌘,, the app menu's "Settings…", and the popover's settings entry
-    /// points now call — there is no separate Settings window.
-    func showSettings(_ section: SettingsSection = .general) {
-        DashboardNavigationStore.shared.openSettings(section)
-        show()
-    }
-
-    private func presentDashboard() {
-        guard let openWindow else {
-            shouldOpenWhenRegistered = true
-            return
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: Self.windowID)
-    }
-}
-
-enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
-    case overview = "Overview"
-    case limits = "Limits"
-    case status = "Status"
-    case costs = "Costs"
-    case optimize = "Optimize"
-    case diagnostics = "Diagnostics"
-    case share = "Share"
-
-    var id: String { rawValue }
-
-    var iconName: String {
-        switch self {
-        case .overview:
-            return "gauge.with.dots.needle.bottom.50percent"
-        case .limits:
-            return "chart.bar.fill"
-        case .status:
-            return "waveform.path.ecg"
-        case .costs:
-            return "dollarsign.circle.fill"
-        case .optimize:
-            return "leaf.fill"
-        case .diagnostics:
-            return "stethoscope"
-        case .share:
-            return "square.and.arrow.up.fill"
-        }
-    }
-
-    /// Sidebar layout: frequency-ordered monitoring pages first, then health
-    /// checks, then utilities. App settings live in the dedicated macOS
-    /// Settings scene rather than masquerading as dashboard content.
-    struct SidebarGroup: Identifiable {
-        let title: String?
-        let sections: [DashboardSection]
-
-        var id: String { sections.first?.id ?? title ?? "" }
-    }
-
-    static let sidebarGroups: [SidebarGroup] = [
-        SidebarGroup(title: nil, sections: [.overview, .limits, .costs, .optimize]),
-        SidebarGroup(title: "Health", sections: [.status, .diagnostics]),
-        SidebarGroup(title: "Utilities", sections: [.share]),
-    ]
-
-    var titlebarSubtitle: String {
-        switch self {
-        case .overview:
-            return "Current health and local token history"
-        case .limits:
-            return "Every tracked quota window"
-        case .status:
-            return "Provider service health"
-        case .costs:
-            return "Local 30-day token spend"
-        case .optimize:
-            return "Where tokens go and how to trim them"
-        case .diagnostics:
-            return "Provider setup health"
-        case .share:
-            return "Social card export"
-        }
-    }
-}
-
-/// The app-settings pages, surfaced as an in-window mode of the dashboard rather
-/// than a separate macOS Settings window. Mirrors the tabs the old `SettingsView`
-/// shell carried, reusing the same section views. `.automation` is feature-gated
-/// and only appears when Session Wake is enabled.
-enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case general = "General"
-    case providers = "Providers"
-    case widget = "Widget"
-    case apiUsage = "API Usage"
-    case cost = "Cost"
-    case automation = "Automation"
-    case about = "About"
-
-    var id: String { rawValue }
-
-    var iconName: String {
-        switch self {
-        case .general: return "gearshape"
-        case .providers: return "square.grid.2x2"
-        case .widget: return "rectangle.3.group"
-        case .apiUsage: return "key"
-        case .cost: return "chart.bar"
-        case .automation: return "moon.zzz"
-        case .about: return "info.circle"
-        }
-    }
-}
-
-enum EnabledQuotaSourceCounter {
-    static func count(
-        enabledServices: Set<ServiceType>,
-        codexAccountCount: Int,
-        claudeAccountCount: Int
-    ) -> Int {
-        enabledServices.reduce(into: 0) { count, service in
-            switch service {
-            case .codexCli:
-                count += codexAccountCount
-            case .claudeCode:
-                count += claudeAccountCount
-            case .cursor, .openRouter, .grok:
-                count += 1
-            }
-        }
-    }
-}
-
-@MainActor
-final class DashboardNavigationStore: ObservableObject {
-    static let shared = DashboardNavigationStore()
-
-    @Published var selectedSection: DashboardSection = .overview
-    @Published var focusedProviderID: ProviderSnapshot.ID?
-
-    /// When true the dashboard swaps its sidebar + content for the settings
-    /// pages (the gear next to Refresh, or ⌘,/Settings…). No separate window.
-    @Published var isShowingSettings = false
-    @Published var selectedSettingsSection: SettingsSection = .general
-
-    private init() {}
-
-    func navigate(to section: DashboardSection, focusedProviderID: ProviderSnapshot.ID? = nil) {
-        selectedSection = section
-        self.focusedProviderID = focusedProviderID
-        isShowingSettings = false
-    }
-
-    /// Enter the in-window settings mode on `section` (defaults to General).
-    func openSettings(_ section: SettingsSection = .general) {
-        selectedSettingsSection = section
-        isShowingSettings = true
-    }
-
-    /// Return from settings to the monitoring dashboard.
-    func closeSettings() {
-        isShowingSettings = false
-    }
-}
+// The dashboard shell: window chrome, sidebar, toolbar, and the shared data the
+// pages are fed. Each page lives in its own `Dashboard*Section` file (C1 split);
+// the navigation types live in `DashboardNavigation.swift`.
 
 struct UsageDashboardView: View {
     private static let detailHorizontalPadding = MeterBarTheme.Spacing.xxl
@@ -216,10 +24,18 @@ struct UsageDashboardView: View {
     @StateObject private var navigation = DashboardNavigationStore.shared
     @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
+    /// Owned by the shell rather than the Share page because the toolbar's
+    /// Refresh also re-stamps the card.
+    @State private var socialCardGeneratedAt = Date()
+    /// Also shell-owned. The page views are `switch` branches, so SwiftUI tears
+    /// their subtree down — and with it any page-local `@State` — the moment the
+    /// user navigates to another section. Keeping these here is what the pages
+    /// had before the split: the diagnostics sweep survives a round trip instead
+    /// of re-running its keychain / file / SQLite I/O from an empty checklist,
+    /// and the share toast doesn't silently vanish on tab switch.
     @State private var readinessReports: [ProviderReadiness] = []
     @State private var isRunningDiagnostics = false
-    @State private var socialCardGeneratedAt = Date()
-    @State private var socialShareStatus: String?
+    @State private var shareStatus: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -236,13 +52,6 @@ struct UsageDashboardView: View {
         )
     }
 
-    private var overviewGridColumns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(minimum: 320), spacing: 12, alignment: .top),
-            count: 2
-        )
-    }
-
     var body: some View {
         dashboardSplitView
         .task {
@@ -250,9 +59,6 @@ struct UsageDashboardView: View {
         }
         .onChange(of: navigation.selectedSection) {
             Task { await refreshCostsIfMissingDays() }
-            if navigation.selectedSection == .diagnostics {
-                Task { await runDiagnostics() }
-            }
             if navigation.selectedSection != .limits {
                 navigation.focusedProviderID = nil
             }
@@ -349,12 +155,8 @@ struct UsageDashboardView: View {
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
-    /// Settings sections available right now — Automation only when Session Wake
-    /// is enabled, matching the old settings shell's feature gate.
     private var availableSettingsSections: [SettingsSection] {
-        SettingsSection.allCases.filter { section in
-            section != .automation || sessionWakeStore.featureEnabled
-        }
+        SettingsSection.available(sessionWakeEnabled: sessionWakeStore.featureEnabled)
     }
 
     private var settingsSelection: Binding<SettingsSection?> {
@@ -410,19 +212,40 @@ struct UsageDashboardView: View {
     private func monitoringSectionContent(viewportWidth: CGFloat) -> some View {
         switch activeSection {
         case .overview:
-            overviewContent
+            DashboardOverviewSection(
+                snapshots: providerSnapshots,
+                tightestLimit: tightestLimit,
+                enabledSourceCount: enabledQuotaSourceCount,
+                costSummary: visibleCostSummary,
+                onSelectProvider: { providerID in
+                    navigation.navigate(to: .limits, focusedProviderID: providerID)
+                }
+            )
         case .limits:
             limitsContent
         case .status:
-            statusPagesContent
+            DashboardStatusSection()
         case .costs:
-            costsContent
+            DashboardCostsSection(
+                summary: visibleCostSummary,
+                quotaSnapshot: providerSnapshot(for:)
+            )
         case .optimize:
             OptimizeInsightsView()
         case .diagnostics:
-            diagnosticsContent
+            DashboardDiagnosticsSection(
+                reports: $readinessReports,
+                isRunning: $isRunningDiagnostics
+            )
         case .share:
-            shareContent(viewportWidth: viewportWidth)
+            DashboardShareSection(
+                costSummary: visibleCostSummary,
+                providerTitles: providerSnapshots.map(\.title),
+                viewportWidth: viewportWidth,
+                horizontalInsets: Self.detailHorizontalPadding * 2,
+                generatedAt: $socialCardGeneratedAt,
+                shareStatus: $shareStatus
+            )
         }
     }
 
@@ -448,30 +271,6 @@ struct UsageDashboardView: View {
         }
     }
 
-    private var overviewContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            OverviewSummaryStrip(
-                tightestLimit: tightestLimit,
-                sourceCount: providerSnapshots.count,
-                enabledSourceCount: enabledQuotaSourceCount,
-                estimatedCost: visibleCostSummary?.formattedTotalCost,
-                formattedTokens: UsageFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
-            )
-
-            LazyVGrid(columns: overviewGridColumns, alignment: .leading, spacing: 12) {
-                ForEach(providerSnapshots) { snapshot in
-                    // Same shared provider card as the popover and the Limits
-                    // page; tapping it jumps to that provider in Limits.
-                    ProviderStatusCard(
-                        snapshot: snapshot,
-                        onSelect: { navigation.navigate(to: .limits, focusedProviderID: snapshot.id) }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
     private var limitsContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             if providerSnapshots.isEmpty {
@@ -489,235 +288,6 @@ struct UsageDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var costsContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            CostOverviewStatusCard(
-                summary: visibleCostSummary,
-                isScanning: costTracker.isScanning,
-                isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
-                formattedTokens: UsageFormat.tokens(visibleCostSummary?.totalTokens ?? 0)
-            )
-
-            LifetimeCostSummaryCard(
-                summary: visibleCostSummary?.lifetime,
-                isScanning: costTracker.isRefreshInProgress
-            )
-
-            costTrendCard
-
-            if let summary = visibleCostSummary, !summary.dailyUsage.isEmpty {
-                DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
-                    DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)
-                }
-            }
-
-            if let summary = visibleCostSummary, !summary.costs.isEmpty {
-                ForEach(summary.costs) { cost in
-                    ProviderCostBreakdown(
-                        cost: cost,
-                        quotaSnapshot: providerSnapshot(for: cost.provider)
-                    )
-                }
-            } else {
-                DashboardCard(title: "No Local Logs Found") {
-                    Text("Run a local scan to load 30-day token history.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            if apiUsageStore.hasAnyAuthenticated {
-                DashboardCard(title: "Estimated API cost") {
-                    ApiUsageSection(store: apiUsageStore, embedded: true)
-                }
-            }
-        }
-        .task {
-            if apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
-                await apiUsageStore.refresh()
-            }
-        }
-    }
-
-    private var statusPagesContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(title: "Provider Status Pages", trailing: statusPagesSummary) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text("Live status from each provider's public status page.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button {
-                        Task { await providerStatusMonitor.refreshAll() }
-                    } label: {
-                        Label("Refresh Status", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .disabled(providerStatusMonitor.isRefreshing)
-                }
-            }
-
-            ProviderStatusTable(
-                reports: providerStatusMonitor.reports,
-                errors: providerStatusMonitor.errors,
-                openStatusPage: openStatusPage
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task {
-            await providerStatusMonitor.refreshAllIfNeeded()
-        }
-    }
-
-    private var statusPagesSummary: String? {
-        if providerStatusMonitor.isRefreshing {
-            return "Refreshing..."
-        }
-
-        let issueCount = providerStatusMonitor.reports.values.filter(\.hasIssue).count
-        if issueCount == 0, providerStatusMonitor.reports.count == ServiceType.allCases.count {
-            return "All operational"
-        }
-        if issueCount == 1 {
-            return "1 issue"
-        }
-        if issueCount > 1 {
-            return "\(issueCount) issues"
-        }
-        return nil
-    }
-
-    private var costTrendCard: some View {
-        DashboardCard(title: "30 Day Spend", trailing: costRefreshStatusText) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(
-                    "Local subscription logs are estimated using API token rates "
-                        + "so Codex and Claude can be compared."
-                )
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if let summary = visibleCostSummary {
-                    let presentation = CostChartPresentation(summary: summary)
-                    ZStack {
-                        if presentation.hasSpend {
-                            CostSpendCharts(presentation: presentation)
-                                .opacity(costTracker.isScanning ? 0.42 : 1)
-                        } else {
-                            EmptyStateCard(
-                                systemImage: "chart.bar.xaxis",
-                                title: "No spend in this window",
-                                message: "No billable Claude or Codex usage was found in the last 30 days."
-                            )
-                        }
-
-                        if costTracker.isScanning {
-                            CostScanProgressBadge(compact: false)
-                        }
-                    }
-                } else if costTracker.isScanning {
-                    CostScanLoadingChart(compact: false)
-                        .frame(height: 220)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Run a local scan to load 30-day token history.")
-                            .foregroundColor(.secondary)
-                        Button {
-                            Task {
-                                await costTracker.scanCosts(days: 30)
-                            }
-                        } label: {
-                            Label("Scan 30 Days", systemImage: "magnifyingglass")
-                        }
-                        .buttonStyle(.glassProminent)
-                        .disabled(costTracker.isRefreshInProgress)
-                    }
-                    .frame(height: 220, alignment: .center)
-                }
-            }
-        }
-    }
-
-    private func shareContent(viewportWidth: CGFloat) -> some View {
-        let previewSize = SocialShareCardLayout.previewSize(
-            viewportWidth: viewportWidth,
-            horizontalInsets: Self.detailHorizontalPadding * 2
-        )
-
-        return VStack(alignment: .leading, spacing: 14) {
-            SocialShareCardPreview(
-                content: socialShareCardContent,
-                size: previewSize
-            )
-                .accessibilityLabel("MeterBar 30-day token receipt preview")
-
-            HStack(spacing: 10) {
-                Button {
-                    copySocialCardImage()
-                } label: {
-                    Label("Copy PNG", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(.glassProminent)
-
-                Button {
-                    saveSocialCardImage()
-                } label: {
-                    Label("Save PNG", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    copyShareCaption()
-                } label: {
-                    Label("Copy Caption", systemImage: "text.quote")
-                }
-                .buttonStyle(.bordered)
-
-                if visibleCostSummary?.dailyUsage.isEmpty ?? true {
-                    Button {
-                        Task {
-                            await costTracker.scanCosts(days: 30)
-                            socialCardGeneratedAt = Date()
-                        }
-                    } label: {
-                        Label("Scan 30 Days", systemImage: "magnifyingglass")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(costTracker.isRefreshInProgress)
-                }
-
-                Spacer()
-
-                if let socialShareStatus {
-                    Text(socialShareStatus)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .transition(.opacity)
-                }
-            }
-
-            DashboardCard(title: "Share Caption") {
-                Text(socialShareCardContent.shareCaption)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func makeSocialShareCardContent(generatedAt: Date) -> SocialShareCardContent {
-        SocialCardRenderer.content(
-            costSummary: visibleCostSummary,
-            providerSnapshotTitles: providerSnapshots.map(\.title),
-            enabledSourceLabels: enabledSourceLabels,
-            generatedAt: generatedAt
-        )
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
@@ -760,24 +330,6 @@ struct UsageDashboardView: View {
         costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
     }
 
-    private var socialShareCardContent: SocialShareCardContent {
-        makeSocialShareCardContent(generatedAt: socialCardGeneratedAt)
-    }
-
-    private var enabledSourceLabels: [String] {
-        var labels: [String] = []
-        if providerVisibility.isEnabled(.codexCli) {
-            labels.append("Codex logs")
-        }
-        if providerVisibility.isEnabled(.claudeCode) {
-            labels.append("Claude JSONL")
-        }
-        if providerVisibility.isEnabled(.cursor) {
-            labels.append("Cursor local state")
-        }
-        return labels
-    }
-
     private var enabledQuotaSourceCount: Int {
         EnabledQuotaSourceCounter.count(
             enabledServices: providerVisibility.enabledServices,
@@ -790,312 +342,41 @@ struct UsageDashboardView: View {
         providerSnapshots.tightestLimit
     }
 
-    private var diagnosticsContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(
-                title: "Provider Diagnostics",
-                trailing: DiagnosticsRunner.summary(for: readinessReports)
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("These checks run locally. Every line is redacted — safe to paste into a GitHub issue.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await runDiagnostics() }
-                        } label: {
-                            Label("Re-run checks", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(isRunningDiagnostics)
-
-                        Button {
-                            copyDiagnosticsToClipboard()
-                        } label: {
-                            Label("Copy report", systemImage: "doc.on.doc")
-                        }
-                        .disabled(readinessReports.isEmpty)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-
-            if readinessReports.isEmpty {
-                DashboardCard(title: "Running checks…") {
-                    Text("Gathering provider setup status.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                ReadinessChecklist(reports: readinessReports)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: diagnosticsInputKey) {
-            let reports = await inspectReadiness()
-            guard !Task.isCancelled else { return }
-            readinessReports = reports
-        }
-    }
-
-    private var diagnosticsInputKey: DiagnosticsRunner.InputKey {
-        DiagnosticsRunner.InputKey(
-            providers: ServiceType.allCases.filter { providerVisibility.enabledServices.contains($0) },
-            defaultClaudeAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
-            enabledClaudeCustomAccountIDs: claudeAccountStore.enabledAccounts
-                .filter { !$0.isDefault }
-                .map(\.id)
-        )
-    }
-
-    /// Runs the readiness inspector off the main actor (it does keychain / file /
-    /// SQLite I/O) and publishes the reports back on the main actor.
-    @MainActor
-    private func runDiagnostics() async {
-        guard !isRunningDiagnostics else { return }
-        isRunningDiagnostics = true
-        defer { isRunningDiagnostics = false }
-
-        let reports = await inspectReadiness()
-        guard !Task.isCancelled else { return }
-        readinessReports = reports
-    }
-
-    private func inspectReadiness() async -> [ProviderReadiness] {
-        let enabledProviders = providerVisibility.enabledServices
-        let errors = DiagnosticsRunner.refreshErrors(
-            claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
-            claudeError: claudeCodeService.lastError,
-            codexError: codexCliService.lastError,
-            cursorError: cursorService.lastError,
-            openRouterError: openRouterService.lastError,
-            grokError: grokService.lastError
-        )
-        let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
-        let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
-        let claudeMetrics = enabledClaudeAccounts.compactMap {
-            dataManager.claudeCodeAccountMetrics[$0.id]
-        }
-        return await DiagnosticsRunner.inspect(
-            enabledProviders: enabledProviders,
-            refreshErrors: errors,
-            claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-            claudeEnabledAccountMetrics: claudeMetrics
-        )
-    }
-
-    private func copyDiagnosticsToClipboard() {
-        let text = DiagnosticsRunner.reportText(for: readinessReports)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    private var costRefreshStatusText: String? {
-        if costTracker.isScanning {
-            return "Scanning..."
-        }
-        if costTracker.isRefreshingMissingDays {
-            return "Updating..."
-        }
-        return nil
-    }
-
     private var isRefreshButtonDisabled: Bool {
         isRefreshButtonAnimating
     }
 
     private var isRefreshButtonAnimating: Bool {
-        switch activeSection {
-        case .costs:
-            return costTracker.isRefreshInProgress || apiUsageStore.isLoading
-        case .share, .optimize:
-            return costTracker.isRefreshInProgress
-        case .status:
+        switch activeSection.refreshTarget {
+        case .providerStatus:
             return providerStatusMonitor.isRefreshing
-        case .overview, .limits, .diagnostics:
+        case .costs:
+            return costTracker.isRefreshInProgress
+                || (activeSection.refreshesApiUsage && apiUsageStore.isLoading)
+        case .usage:
             return dataManager.isLoading
         }
     }
 
     private func refreshDashboard() async {
-        if activeSection == .status {
+        switch activeSection.refreshTarget {
+        case .providerStatus:
             await providerStatusMonitor.refreshAll()
-        } else if activeSection == .costs || activeSection == .share || activeSection == .optimize {
+        case .costs:
             await costTracker.scanCosts(days: 30)
-            if activeSection == .costs, apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
+            if activeSection.refreshesApiUsage,
+               apiUsageStore.hasAnyAuthenticated,
+               !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
             }
             socialCardGeneratedAt = Date()
-        } else {
+        case .usage:
             await dataManager.refreshAll()
         }
     }
 
-    private func openStatusPage(for service: ServiceType) {
-        guard let url = service.statusPageURL else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     private func refreshCostsIfMissingDays() async {
-        let costBackedSections: Set<DashboardSection> = [.costs, .share, .optimize]
-        guard costBackedSections.contains(activeSection) else { return }
+        guard activeSection.refreshTarget == .costs else { return }
         await costTracker.refreshMissingDaysInBackground(days: 30)
-    }
-
-    private func copySocialCardImage() {
-        let generatedAt = Date()
-        let content = makeSocialShareCardContent(generatedAt: generatedAt)
-        socialCardGeneratedAt = generatedAt
-
-        guard let image = SocialCardRenderer.image(for: content) else {
-            setSocialShareStatus("PNG render failed")
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        if pasteboard.writeObjects([image]) {
-            setSocialShareStatus("PNG copied")
-        } else {
-            setSocialShareStatus("Copy failed")
-        }
-    }
-
-    private func saveSocialCardImage() {
-        let generatedAt = Date()
-        let content = makeSocialShareCardContent(generatedAt: generatedAt)
-        socialCardGeneratedAt = generatedAt
-
-        guard let pngData = SocialCardRenderer.pngData(for: content) else {
-            setSocialShareStatus("PNG render failed")
-            return
-        }
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = content.defaultFilename
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                // Deliberately not routed through `SecureFileWriter`: the user
-                // picked this destination in order to share the card, so the
-                // owner-only default the app applies to its own state would be
-                // wrong here. Normal umask semantics are the correct behavior.
-                try pngData.write(to: url, options: .atomic)
-                setSocialShareStatus("PNG saved")
-            } catch {
-                setSocialShareStatus("Save failed")
-            }
-        }
-    }
-
-    private func copyShareCaption() {
-        let generatedAt = Date()
-        let content = makeSocialShareCardContent(generatedAt: generatedAt)
-        socialCardGeneratedAt = generatedAt
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(content.shareCaption, forType: .string)
-        setSocialShareStatus("Caption copied")
-    }
-
-    private func setSocialShareStatus(_ status: String) {
-        withAnimation(MeterBarTheme.Motion.standard) {
-            socialShareStatus = status
-        }
-    }
-}
-
-private struct OverviewSummaryStrip: View {
-    let tightestLimit: SnapshotLimit?
-    let sourceCount: Int
-    let enabledSourceCount: Int
-    let estimatedCost: String?
-    let formattedTokens: String
-
-    private let columns = [
-        GridItem(.flexible(minimum: 180), spacing: 12),
-        GridItem(.flexible(minimum: 180), spacing: 12),
-        GridItem(.flexible(minimum: 180), spacing: 12)
-    ]
-
-    var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            TimelineView(
-                .periodic(
-                    from: ResetCountdownSchedule.anchor,
-                    by: ResetCountdownSchedule.interval
-                )
-            ) { timeline in
-                DashboardMetricTile(
-                    title: "Tightest window",
-                    value: tightestValue(now: timeline.date),
-                    caption: tightestCaption,
-                    systemImage: tightestIconName,
-                    indicatorTint: tightestColor,
-                    style: .compact
-                )
-            }
-
-            DashboardMetricTile(
-                title: "30-day estimate",
-                value: estimatedCost ?? "Scan needed",
-                caption: "\(formattedTokens) tokens",
-                systemImage: "chart.bar.xaxis",
-                style: .compact
-            )
-
-            DashboardMetricTile(
-                title: "Tracked sources",
-                value: "\(sourceCount)",
-                caption: sourceCaption,
-                systemImage: "checklist.checked",
-                style: .compact
-            )
-        }
-    }
-
-    private var tightestBand: QuotaBand? {
-        tightestLimit.map { QuotaBand.forPercentLeft($0.percentLeft) }
-    }
-
-    private var tightestColor: Color {
-        tightestBand?.color ?? .secondary
-    }
-
-    private var tightestIconName: String {
-        tightestBand?.iconName ?? "circle.dashed"
-    }
-
-    private var tightestCaption: String {
-        guard let tightestLimit else { return "Waiting for provider refresh" }
-        return "\(tightestLimit.title) quota"
-    }
-
-    private var sourceCaption: String {
-        if enabledSourceCount == 0 {
-            return "Enable providers in Settings"
-        }
-        if sourceCount == enabledSourceCount {
-            return "All enabled sources reporting"
-        }
-        return "\(sourceCount) of \(enabledSourceCount) enabled reporting"
-    }
-
-    private func tightestValue(now: Date) -> String {
-        guard let tightestLimit else { return "No data" }
-        guard tightestLimit.usageLimit.isAtLimit else {
-            return tightestLimit.usageLimit.percentLeftText
-        }
-        if tightestLimit.usageLimit.isEstimated {
-            return tightestLimit.usageLimit.percentLeftText
-        }
-        guard let countdown = tightestLimit.usageLimit.resetCountdownText(now: now) else {
-            return "Reset unknown"
-        }
-        return countdown == "now" ? "Reset due" : "Resets in \(countdown)"
     }
 }

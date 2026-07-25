@@ -65,8 +65,15 @@ final class ProviderVisibilityStore: ObservableObject {
         if !userDefaults.bool(forKey: StorageKeys.openRouterProviderEnabled) {
             hiddenServices.insert(.openRouter)
         }
-        if !userDefaults.bool(forKey: StorageKeys.grokProviderEnabled) {
+        // Grok is a first-class provider, so only an explicit opt-out hides it.
+        // While it was opt-in, `load()` inserted it into `hiddenServices` and any
+        // later `save()` persisted "Grok" into the hidden list — including for
+        // users who never opened the setting. An entry there is therefore not a
+        // decision on its own; only the preference key is.
+        if userDefaults.object(forKey: StorageKeys.grokProviderEnabled) as? Bool == false {
             hiddenServices.insert(.grok)
+        } else {
+            hiddenServices.remove(.grok)
         }
     }
 
