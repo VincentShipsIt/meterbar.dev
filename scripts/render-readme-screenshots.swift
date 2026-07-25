@@ -13,11 +13,11 @@ struct UsageLimit: Equatable {
     }
 
     var isNearLimit: Bool {
-        return percentage >= 80
+        percentage >= 80
     }
 
     var isAtLimit: Bool {
-        return percentage >= 100
+        percentage >= 100
     }
 
     var statusColor: UsageStatus {
@@ -446,7 +446,10 @@ struct WidgetServiceCompactView: View {
 
             if let weeklyLimit = metrics.weeklyLimit {
                 HStack {
-                    UsageProgressBar(progress: weeklyLimit.total > 0 ? weeklyLimit.used / weeklyLimit.total : 0, tint: weeklyLimit.statusColor.color)
+                    UsageProgressBar(
+                        progress: weeklyLimit.total > 0 ? weeklyLimit.used / weeklyLimit.total : 0,
+                        tint: weeklyLimit.statusColor.color
+                    )
                     Text("\(Int(weeklyLimit.percentage))%")
                         .font(.caption)
                 }
@@ -555,8 +558,10 @@ func captureWindow(_ window: NSWindow, to url: URL) throws {
     }
 }
 
+// Caseless enum, not a struct: this type only hosts `main`, so making it
+// uninstantiable is both the lint rule's intent and the honest shape.
 @main
-struct SnapshotRenderer {
+enum SnapshotRenderer {
     @MainActor
     static func main() throws {
         let app = NSApplication.shared
