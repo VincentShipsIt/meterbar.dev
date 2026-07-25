@@ -306,7 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ),
                 accounts: MenuBarAccountSwitcher.entries(
                     accounts: statusItemPresenter.menuBarAccounts(),
-                    activeKey: menuBarAccountSelection.mergedAccountKey
+                    activeKey: statusItemPresenter.activeSwitcherAccountKey()
                 )
             ),
             status: StatusMenuBuilder.StatusSnapshot(

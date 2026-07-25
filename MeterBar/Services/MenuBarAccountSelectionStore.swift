@@ -68,6 +68,22 @@ final class MenuBarAccountSelectionStore: ObservableObject {
         isSelected ? select(key) : deselect(key)
     }
 
+    /// Drops every trace of an account that no longer exists.
+    ///
+    /// A removed account's key would otherwise sit in the persisted selection
+    /// forever: the planner skips unknown keys, so the item silently vanishes
+    /// while still consuming one of the four slots, and a later account reusing
+    /// the id would inherit the stale choice.
+    func forget(_ key: String) {
+        guard let normalized = Self.normalizedKey(key) else { return }
+        if selectedAccountKeys.contains(normalized) {
+            persistSelection(selectedAccountKeys.filter { $0 != normalized })
+        }
+        if mergedAccountKey == normalized {
+            setMergedAccountKey(nil)
+        }
+    }
+
     func setMergedAccountKey(_ key: String?) {
         let normalized = key.flatMap(Self.normalizedKey)
         guard normalized != mergedAccountKey else { return }

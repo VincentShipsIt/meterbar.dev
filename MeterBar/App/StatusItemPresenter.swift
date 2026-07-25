@@ -16,9 +16,11 @@ final class StatusItemPresenter {
     /// and calls `apply(_:to:)` back for each surviving button.
     private let applyDescriptors: ([MenuBarStatusItemDescriptor]) -> Void
 
-    /// The account whose quota the menu bar title currently shows; feeds the
-    /// sticky selection so concurrent Claude + Codex use doesn't flip the title.
-    private var shownKey: String?
+    /// The quota each status item currently shows, by item id; feeds the sticky
+    /// selection so concurrent Claude + Codex use doesn't flip the title.
+    /// Per-item rather than a single key because account modes give each account
+    /// its own slot, and one shared anchor would apply one item's history to all.
+    private var shownKeys: [String: String] = [:]
 
     /// Monotonic stamp for status-item updates: activity probes run off the
     /// main actor, so a stale in-flight result must not overwrite a newer one.
@@ -70,17 +72,19 @@ final class StatusItemPresenter {
             mode: preferences.presentationMode,
             accountPlan: plan,
             candidates: candidates,
-            previousKey: shownKey,
+            previousKey: shownKeys[MenuBarStatusItemPlanner.mergedItemID],
+            previousKeys: shownKeys,
             pinnedKey: preferences.pinnedCandidateKey,
             metric: preferences.labelMetric,
             size: preferences.labelSize
         )
 
-        // Only the merged item feeds sticky selection; per-provider and
-        // per-account items are each nailed to one scope and report no key.
-        shownKey = descriptors
-            .first { $0.id == MenuBarStatusItemPlanner.mergedItemID }?
-            .selectionKey
+        // Rebuilt rather than merged, so an item that just left the plan doesn't
+        // keep anchoring a slot it no longer owns. Per-provider items report no
+        // key and so contribute nothing.
+        shownKeys = descriptors.reduce(into: [:]) { keys, descriptor in
+            if let key = descriptor.selectionKey { keys[descriptor.id] = key }
+        }
 
         applyDescriptors(descriptors)
     }
@@ -90,6 +94,16 @@ final class StatusItemPresenter {
     @MainActor
     func accountEntry(for itemID: String) -> MenuBarAccountItemEntry? {
         accountItemPlan?.entries.first { $0.id == itemID }
+    }
+
+    /// The account the switcher item actually shows, which is not always the
+    /// persisted preference: the planner falls back to the first enabled account
+    /// when the stored key names a removed or untracked one. Checking the raw
+    /// preference in the menu would tick an account the menu bar isn't showing.
+    @MainActor
+    func activeSwitcherAccountKey() -> String? {
+        accountItemPlan?.entries.first { $0.showsAccountSwitcher }?.accountKey
+            ?? MenuBarAccountSelectionStore.shared.mergedAccountKey
     }
 
     /// Every tracked Claude and Codex account, already sanitized for display.

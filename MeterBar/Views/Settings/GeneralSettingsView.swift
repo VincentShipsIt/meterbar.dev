@@ -262,7 +262,10 @@ struct GeneralSettingsView: View {
                     ))
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .disabled(!account.isEnabled)
+                    // A disabled account can still be turned *off*: it may have
+                    // been selected while enabled, and locking the toggle would
+                    // strand it holding one of the four slots forever.
+                    .disabled(!account.isEnabled && !menuBarAccountSelection.isSelected(account.key))
                 }
             }
 

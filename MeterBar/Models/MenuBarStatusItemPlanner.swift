@@ -13,8 +13,9 @@ struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
     let id: String
     /// Provider whose logo the item wears; nil for the placeholder item.
     let service: ServiceType?
-    /// Legacy Auto key fed back to `StatusItemLimitSelector` as `previousKey`,
-    /// so hysteresis survives. Only merged mode has a meaningful value.
+    /// Auto key fed back to `StatusItemLimitSelector` as this item's
+    /// `previousKey` on the next refresh, so the 5-point hysteresis survives.
+    /// Nil for per-provider items, which are nailed to one window already.
     let selectionKey: String?
     /// Menu bar label. Empty renders icon-only, and a non-empty title carries
     /// the leading space that separates it from the icon.
@@ -35,11 +36,16 @@ enum MenuBarStatusItemPlanner {
     /// - Parameter accountPlan: which accounts own an item, for the two
     ///   account-scoped modes. Nil means "not account-scoped", which is what the
     ///   provider-level modes always want.
+    /// - Parameter previousKey: what the merged item showed last refresh.
+    /// - Parameter previousKeys: what each *account* item showed last refresh,
+    ///   by item id. Account items each own a slot, so they each need their own
+    ///   history; sharing the merged key would hand every item the same anchor.
     static func plan(
         mode: MenuBarPresentationMode,
         accountPlan: MenuBarAccountItemPlan? = nil,
         candidates: [StatusLimitCandidate],
         previousKey: String?,
+        previousKeys: [String: String] = [:],
         pinnedKey: String?,
         metric: StatusItemLabelMetric,
         size: StatusItemLabelSize,
@@ -47,6 +53,7 @@ enum MenuBarStatusItemPlanner {
     ) -> [MenuBarStatusItemDescriptor] {
         let context = SelectionContext(
             previousKey: previousKey,
+            previousKeys: previousKeys,
             pinnedKey: pinnedKey,
             metric: metric,
             size: size,
@@ -105,10 +112,18 @@ enum MenuBarStatusItemPlanner {
     /// rules to each scoped candidate set without threading four arguments.
     private struct SelectionContext {
         let previousKey: String?
+        let previousKeys: [String: String]
         let pinnedKey: String?
         let metric: StatusItemLabelMetric
         let size: StatusItemLabelSize
         let now: Date
+
+        /// What the item with this id showed last refresh. The merged slot
+        /// falls back to the standalone `previousKey` so a mode change into an
+        /// account mode inherits the history instead of starting cold.
+        func previousKey(forItem id: String) -> String? {
+            previousKeys[id] ?? (id == mergedItemID ? previousKey : nil)
+        }
     }
 
     private static func mergedDescriptor(
@@ -117,7 +132,7 @@ enum MenuBarStatusItemPlanner {
     ) -> MenuBarStatusItemDescriptor {
         guard let selection = StatusItemLimitSelector.select(
             candidates: candidates,
-            previousKey: context.previousKey,
+            previousKey: context.previousKey(forItem: mergedItemID),
             pinnedKey: context.pinnedKey,
             now: context.now
         ) else {
@@ -179,17 +194,20 @@ enum MenuBarStatusItemPlanner {
             // so passing it through only honors pins that belong here.
             guard let selection = StatusItemLimitSelector.select(
                 candidates: scoped,
-                previousKey: context.previousKey,
+                previousKey: context.previousKey(forItem: entry.id),
                 pinnedKey: context.pinnedKey,
                 now: context.now
             ) else { return nil }
+            // Same rule as the merged item: Auto already means "whichever
+            // window matters", but a pin is a deliberate choice and says which.
+            let isPinned = context.pinnedKey == selection.pinKey
             return descriptor(
-                // Only the switcher item feeds its selection back as the next
-                // `previousKey`; per-account items each own a slot already.
+                // Every account item feeds its own selection back, so each slot
+                // keeps its own hysteresis across refreshes.
                 id: entry.id,
-                selectionKey: entry.showsAccountSwitcher ? selection.key : nil,
+                selectionKey: selection.key,
                 candidate: selection,
-                qualifiedName: false,
+                qualifiedName: isPinned,
                 metric: context.metric,
                 size: context.size,
                 badge: entry.badge,

@@ -204,6 +204,35 @@ final class MenuBarAccountSelectionTests: XCTestCase {
         XCTAssertEqual(Set(store.selectedAccountKeys).count, store.selectedAccountKeys.count)
     }
 
+    /// Removing an account in Settings must drop it from both preferences.
+    /// A leftover key is invisible — the planner skips accounts it cannot find,
+    /// so the item never appears while still consuming one of the four slots.
+    func testForgetClearsBothTheSelectionAndTheSwitcherBinding() throws {
+        let defaults = try XCTUnwrap(defaults)
+        let store = MenuBarAccountSelectionStore(userDefaults: defaults)
+        store.select("claudeCode:a")
+        store.select("codexCli:b")
+        store.setMergedAccountKey("claudeCode:a")
+
+        store.forget("claudeCode:a")
+
+        XCTAssertEqual(store.selectedAccountKeys, ["codexCli:b"])
+        XCTAssertNil(store.mergedAccountKey)
+        XCTAssertNil(defaults.string(forKey: StorageKeys.menuBarMergedAccountKey))
+        XCTAssertEqual(defaults.stringArray(forKey: StorageKeys.menuBarSelectedAccountKeys), ["codexCli:b"])
+    }
+
+    func testForgetLeavesUnrelatedAccountsAlone() throws {
+        let store = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        store.select("claudeCode:a")
+        store.setMergedAccountKey("claudeCode:a")
+
+        store.forget("codexCli:gone")
+
+        XCTAssertEqual(store.selectedAccountKeys, ["claudeCode:a"])
+        XCTAssertEqual(store.mergedAccountKey, "claudeCode:a")
+    }
+
     func testBlankMergedKeyClearsThePreference() throws {
         let defaults = try XCTUnwrap(defaults)
         let store = MenuBarAccountSelectionStore(userDefaults: defaults)

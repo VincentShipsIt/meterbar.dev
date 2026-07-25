@@ -247,9 +247,10 @@ final class AppDelegateSplitTests: XCTestCase {
 
     func testRefreshTriggerFansInEverySource() {
         // One publisher per input that can change the menu-bar title: metrics,
-        // the two account-metric maps, Claude accounts, Codex accounts, provider
-        // visibility, parse health, and the label preferences.
-        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 8)
+        // the two account-metric maps, Claude accounts, Codex accounts, the
+        // menu-bar account selection, provider visibility, parse health, and the
+        // label preferences.
+        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 9)
     }
 
     func testRefreshTriggerPublisherEmitsOnSubscribe() {

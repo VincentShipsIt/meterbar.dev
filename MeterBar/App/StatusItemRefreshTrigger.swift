@@ -31,6 +31,15 @@ enum StatusItemRefreshTrigger {
             MenuBarDisplayPreferencesStore.shared.$labelSize.map { _ in () }
         )
 
+        // Which accounts own items, and which one the switcher shows. Without
+        // these, picking an account from the switcher submenu (or toggling one
+        // in Settings) only persists the choice — the menu bar keeps the old
+        // layout until some unrelated refresh happens to fire.
+        let accountSelectionChanges = Publishers.Merge(
+            MenuBarAccountSelectionStore.shared.$selectedAccountKeys.map { _ in () },
+            MenuBarAccountSelectionStore.shared.$mergedAccountKey.map { _ in () }
+        )
+
         let metricsChanges = UsageDataManager.shared.$metrics.map { _ in () }
         let claudeMetricsChanges = UsageDataManager.shared.$claudeCodeAccountMetrics.map { _ in () }
         let codexMetricsChanges = UsageDataManager.shared.$codexAccountMetrics.map { _ in () }
@@ -43,6 +52,7 @@ enum StatusItemRefreshTrigger {
             codexMetricsChanges.eraseToAnyPublisher(),
             claudeAccountChanges.eraseToAnyPublisher(),
             codexAccountChanges.eraseToAnyPublisher(),
+            accountSelectionChanges.eraseToAnyPublisher(),
             visibilityChanges.eraseToAnyPublisher(),
             parseHealthChanges.eraseToAnyPublisher(),
             displayPreferenceChanges.eraseToAnyPublisher()
