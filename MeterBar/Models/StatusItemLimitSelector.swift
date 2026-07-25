@@ -9,6 +9,9 @@ struct StatusLimitCandidate: Equatable, Sendable {
     let key: String
     /// Stable provider/account/window identity persisted for explicit pins.
     let pinKey: String
+    /// Provider this quota belongs to, used for per-provider status item icons
+    /// and deterministic left-to-right ordering in the menu bar.
+    let service: ServiceType
     /// Human-readable label for the status item tooltip.
     let displayName: String
     /// Provider-specific quota-window label (Session, Weekly, Sonnet, etc.).
@@ -25,6 +28,7 @@ struct StatusLimitCandidate: Equatable, Sendable {
 struct StatusLimitCandidateSeed: Sendable {
     let key: String
     let pinKey: String
+    let service: ServiceType
     let displayName: String
     let windowName: String
     let limit: UsageLimit
@@ -70,6 +74,7 @@ enum StatusItemLimitCandidateBuilder {
             return StatusLimitCandidateSeed(
                 key: limit.id == autoWindowID ? autoSelectionKey ?? pinKey : pinKey,
                 pinKey: pinKey,
+                service: service,
                 displayName: displayName,
                 windowName: limit.title,
                 limit: limit.usageLimit,
@@ -91,7 +96,9 @@ struct StatusItemPinOption: Identifiable, Equatable {
 /// selector instead follows the accounts with recent on-disk activity, and is
 /// sticky: when several accounts are active at once (one Claude + one Codex),
 /// the shown account only changes when it goes idle or another active account
-/// becomes clearly tighter — never ping-ponging on small fluctuations.
+/// becomes clearly tighter — never ping-ponging on small fluctuations. Accounts
+/// with nothing left are skipped entirely, since "tightest" would otherwise mean
+/// "the one you can't use" for as long as it stays drained.
 enum StatusItemLimitSelector {
     /// Activity newer than this counts as "in use".
     static let activityWindow: TimeInterval = 30 * 60
@@ -114,14 +121,23 @@ enum StatusItemLimitSelector {
         let autoCandidates = candidates.filter(\.isAutoSelectable)
         guard !autoCandidates.isEmpty else { return nil }
 
-        let active = autoCandidates.filter { candidate in
+        // A spent quota is always the tightest, so without this it wins every
+        // round it enters and freezes the menu bar on 0% for days — the exact
+        // symptom that made the title read "Codex 0%" while Claude had half its
+        // session left. Filtered before the activity pass, since a spent account
+        // is usually also the *only* recently active one. If everything is spent
+        // the whole pool comes back so the title still shows a number.
+        let withQuotaLeft = autoCandidates.filter { QuotaMath.percentLeft(for: $0.limit) > 0 }
+        let selectable = withQuotaLeft.isEmpty ? autoCandidates : withQuotaLeft
+
+        let active = selectable.filter { candidate in
             guard let lastActivity = candidate.lastActivity else { return false }
             return now.timeIntervalSince(lastActivity) <= activityWindow
         }
 
         // No detectable activity anywhere: fall back to the old behavior and
         // let every enabled account compete.
-        let pool = active.isEmpty ? autoCandidates : active
+        let pool = active.isEmpty ? selectable : active
 
         guard let tightest = pool.min(by: { lhs, rhs in
             let lhsLeft = QuotaMath.percentLeft(for: lhs.limit)
