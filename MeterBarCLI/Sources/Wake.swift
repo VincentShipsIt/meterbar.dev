@@ -32,7 +32,15 @@ struct Wake: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Provider: 'claude' (default) or 'codex'.")
     var provider: String = "claude"
 
-    @Option(name: .long, help: "Explicit config dir for the wake account (CLAUDE_CONFIG_DIR for claude, CODEX_HOME for codex).")
+    // `ArgumentHelp` is only `ExpressibleByStringLiteral`, so the wrapped text
+    // has to be built explicitly rather than concatenated in place.
+    @Option(
+        name: .long,
+        help: ArgumentHelp(
+            "Explicit config dir for the wake account "
+                + "(CLAUDE_CONFIG_DIR for claude, CODEX_HOME for codex)."
+        )
+    )
     var configDir: String?
 
     @Option(name: .shortAndLong, help: "Maximum sessions to resume this run.")
