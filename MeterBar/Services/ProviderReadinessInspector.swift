@@ -366,6 +366,13 @@ nonisolated public enum ProviderReadinessInspector {
             if safeNetworkMessages.contains(message) {
                 return message
             }
+            // Fixed, interpolation-free strings the Grok transport emits in place
+            // of provider text. Collapsing these to "API error" would throw away
+            // the one thing that tells a user whether to run `grok login`, update
+            // the CLI, or just refresh again.
+            if GrokRefreshFailure.messages.contains(message) {
+                return message
+            }
             if let status = httpStatus(in: message) {
                 return "API error (HTTP \(status))"
             }

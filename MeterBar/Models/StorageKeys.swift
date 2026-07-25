@@ -16,7 +16,9 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
-    /// Grok Build is CLI-backed but opt-in while its ACP billing method is in beta.
+    /// Grok Build is tracked by default; this key records an explicit opt-out.
+    /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
+    /// distinguish "never touched" from "turned off" now that the default flipped.
     static let grokProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"

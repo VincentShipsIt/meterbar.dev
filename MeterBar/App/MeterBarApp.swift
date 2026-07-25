@@ -85,6 +85,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyActivationPolicy(showInDock: dockVisibilityStore.showInDock)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // A quit that lands mid-refresh must not leave a `grok` agent behind:
+        // the subprocess is spawned into its own process group precisely so it
+        // can be reaped as a tree from here.
+        GrokAgentProcess.terminateAll()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("MeterBar finished launching")
         SoftwareUpdateController.shared.refreshState()
