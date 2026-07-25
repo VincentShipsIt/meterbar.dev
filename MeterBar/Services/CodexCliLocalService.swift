@@ -129,28 +129,15 @@ class CodexCliLocalService: ObservableObject {
             throw error
         }
 
-        guard let url = URL(string: usageEndpoint) else {
-            throw ServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-
-        // Use Bearer token auth (from CODEX_HOME/auth.json)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        // CRITICAL: Include ChatGPT-Account-Id header to get team/workspace data
-        // Without this header, API returns free plan data even for team accounts
-        if let accountId = auth.accountId {
-            request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
-        }
-
-        // Browser-like headers to avoid blocks
-        request.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
-        request.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue(ServiceSupport.browserUserAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 30.0
+        // The usage endpoint is the one Codex call that wants `*/*` rather than
+        // JSON; everything else about the request is the shared shape.
+        let request = try makeCodexRequest(
+            endpoint: usageEndpoint,
+            method: "GET",
+            token: token,
+            accountID: auth.accountId,
+            accept: "*/*"
+        )
 
         do {
             let (data, response) = try await urlSession.data(for: request)
@@ -281,11 +268,17 @@ class CodexCliLocalService: ObservableObject {
         }
     }
 
+    /// Builds every ChatGPT-backed request: bearer auth, the workspace account
+    /// header, and the browser identity the endpoint requires.
+    ///
+    /// The `ChatGPT-Account-Id` header is what makes the API return team data —
+    /// without it a team account is reported as free.
     private func makeCodexRequest(
         endpoint: String,
         method: String,
         token: String,
-        accountID: String?
+        accountID: String?,
+        accept: String = "application/json"
     ) throws -> URLRequest {
         guard let url = URL(string: endpoint) else {
             throw ServiceError.invalidURL
@@ -297,11 +290,7 @@ class CodexCliLocalService: ObservableObject {
         if let accountID {
             request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
-        request.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
-        request.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(ServiceSupport.browserUserAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 30.0
+        ServiceSupport.applyBrowserHeaders(to: &request, for: .chatGPT, accept: accept)
         return request
     }
 
