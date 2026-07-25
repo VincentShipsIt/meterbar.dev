@@ -84,7 +84,7 @@ struct GeneralSettingsView: View {
             )
             providerToggleRow(
                 title: "Grok",
-                detail: "Track Grok Build weekly quota from its cached CLI login.",
+                detail: "Track Grok Build session and weekly quota from its cached CLI login.",
                 service: .grok
             )
         }
@@ -128,6 +128,23 @@ struct GeneralSettingsView: View {
             color: MeterBarTheme.appAccent
         ) {
             SettingsRowView(
+                title: "Menu bar layout",
+                detail: "One Per Provider gives every tracked account its own menu bar item."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.presentationMode },
+                    set: { menuBarDisplayPreferences.setPresentationMode($0) }
+                )) {
+                    ForEach(MenuBarPresentationMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+            }
+
+            SettingsRowView(
                 title: "Menu bar shows",
                 detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota window visible."
             ) {
@@ -147,6 +164,9 @@ struct GeneralSettingsView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .fixedSize()
+                // One-per-provider already shows every account, so there is
+                // nothing left for a pin to choose between.
+                .disabled(menuBarDisplayPreferences.presentationMode == .perProvider)
             }
 
             SettingsRowView(
