@@ -526,6 +526,93 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertFalse(manager.isLoading)
     }
 
+    // MARK: - Refresh generation
+
+    /// `refreshGeneration` is the notification layer's trigger: it must advance
+    /// exactly once for every committed snapshot, so a subscriber can re-evaluate
+    /// limits on real change instead of polling a timer.
+    func testRefreshGenerationAdvancesOncePerCommittedSnapshot() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        XCTAssertEqual(manager.refreshGeneration, 0)
+
+        await manager.refreshAll()
+        XCTAssertEqual(manager.refreshGeneration, 1)
+
+        await manager.refresh(service: .cursor)
+        XCTAssertEqual(manager.refreshGeneration, 2)
+    }
+
+    func testRefreshGenerationDoesNotAdvanceForASkippedOverlappingCycle() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        cursor.suspendsFetch = true
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        let firstRefresh = Task { await manager.refreshAll() }
+        for _ in 0..<100 where cursor.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard cursor.fetchCount == 1, manager.isLoading else {
+            cursor.resumeFetch()
+            await firstRefresh.value
+            return XCTFail("the first refresh should be suspended inside the provider fetch")
+        }
+
+        // The overlapping call returns without committing anything.
+        await manager.refreshAll()
+        XCTAssertEqual(manager.refreshGeneration, 0)
+
+        cursor.resumeFetch()
+        await firstRefresh.value
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    /// Clearing a provider that was just turned off is a committed change even
+    /// though nothing was fetched — subscribers must see it.
+    func testRefreshGenerationAdvancesWhenADisabledProviderIsCleared() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.cursor],
+            preload: [.cursor: MetricsFixtures.cursor()]
+        )
+
+        await manager.refresh(service: .cursor)
+
+        XCTAssertEqual(cursor.fetchCount, 0)
+        XCTAssertNil(manager.metrics[.cursor])
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    func testRefreshGenerationAdvancesForCodexResetCreditRefresh() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+
+        manager.applyCodexResetCreditRefresh(MetricsFixtures.codexCli(), accountID: CodexAccount.defaultID)
+
+        XCTAssertEqual(manager.refreshGeneration, 1)
+    }
+
+    func testRefreshGenerationPublishesEveryCommitToSubscribers() async {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        var observed: [UInt64] = []
+        let cancellable = manager.$refreshGeneration.dropFirst().sink { observed.append($0) }
+
+        await manager.refreshAll()
+        await manager.refreshAll()
+
+        XCTAssertEqual(observed, [1, 2])
+        withExtendedLifetime(cancellable) {}
+    }
+
     func testWakeRefreshesWhenEnabledCachedDataIsTenMinutesOld() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let staleMetrics = UsageMetrics(
