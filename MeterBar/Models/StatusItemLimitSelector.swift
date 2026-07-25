@@ -3,6 +3,32 @@ import MeterBarShared
 
 /// One account/provider quota competing for the menu bar percentage slot.
 struct StatusLimitCandidate: Equatable, Sendable {
+    // MARK: Lifecycle
+
+    init(
+        key: String,
+        pinKey: String,
+        service: ServiceType,
+        accountKey: String? = nil,
+        displayName: String,
+        windowName: String,
+        limit: UsageLimit,
+        lastActivity: Date?,
+        isAutoSelectable: Bool
+    ) {
+        self.key = key
+        self.pinKey = pinKey
+        self.service = service
+        self.accountKey = accountKey
+        self.displayName = displayName
+        self.windowName = windowName
+        self.limit = limit
+        self.lastActivity = lastActivity
+        self.isAutoSelectable = isAutoSelectable
+    }
+
+    // MARK: Internal
+
     /// Legacy Auto identity (e.g. "claude:<uuid>", "codex:<uuid>", "cursor")
     /// retained byte-for-byte so sticky selection and equal-quota tie-breaks do
     /// not change when the user leaves the new preference set to Auto.
@@ -12,6 +38,9 @@ struct StatusLimitCandidate: Equatable, Sendable {
     /// Provider this quota belongs to, used for per-provider status item icons
     /// and deterministic left-to-right ordering in the menu bar.
     let service: ServiceType
+    /// `MenuBarAccountKey` of the owning account, nil for single-account
+    /// providers. Scopes a per-account status item to its own quotas (#266).
+    let accountKey: String?
     /// Human-readable label for the status item tooltip.
     let displayName: String
     /// Provider-specific quota-window label (Session, Weekly, Sonnet, etc.).
@@ -29,6 +58,9 @@ struct StatusLimitCandidateSeed: Sendable {
     let key: String
     let pinKey: String
     let service: ServiceType
+    /// `var` so the memberwise init defaults it to nil: single-account providers
+    /// and the provider-level tests never name it.
+    var accountKey: String?
     let displayName: String
     let windowName: String
     let limit: UsageLimit
@@ -60,6 +92,7 @@ enum StatusItemLimitCandidateBuilder {
     static func seeds(
         service: ServiceType,
         accountID: UUID?,
+        accountKey: String? = nil,
         autoSelectionKey: String?,
         displayName: String,
         limits: [SnapshotLimit]
@@ -75,6 +108,7 @@ enum StatusItemLimitCandidateBuilder {
                 key: limit.id == autoWindowID ? autoSelectionKey ?? pinKey : pinKey,
                 pinKey: pinKey,
                 service: service,
+                accountKey: accountKey,
                 displayName: displayName,
                 windowName: limit.title,
                 limit: limit.usageLimit,

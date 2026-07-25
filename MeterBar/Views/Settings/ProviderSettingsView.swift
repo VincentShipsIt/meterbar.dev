@@ -402,6 +402,9 @@ struct ProviderSettingsView: View {
                             onReconnect: { reconnectClaudeAccount(account) },
                             onRemove: {
                                 claudeAccountStore.removeAccount(id: account.id)
+                                MenuBarAccountSelectionStore.shared.forget(
+                                    MenuBarAccountKey.make(service: .claudeCode, accountID: account.id)
+                                )
                                 Task { await dataManager.refreshAll() }
                             }
                         )
@@ -488,6 +491,9 @@ struct ProviderSettingsView: View {
                             },
                             onRemove: {
                                 codexAccountStore.removeAccount(id: account.id)
+                                MenuBarAccountSelectionStore.shared.forget(
+                                    MenuBarAccountKey.make(service: .codexCli, accountID: account.id)
+                                )
                                 Task { await dataManager.refreshAll() }
                             }
                         )

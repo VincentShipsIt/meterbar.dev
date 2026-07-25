@@ -11,6 +11,7 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
     private func candidate(
         key: String,
         service: ServiceType = .claudeCode,
+        accountKey: String? = nil,
         percentUsed: Double,
         displayName: String? = nil,
         windowName: String = "Session",
@@ -22,6 +23,7 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
             key: key,
             pinKey: pinKey ?? key,
             service: service,
+            accountKey: accountKey,
             displayName: displayName ?? key,
             windowName: windowName,
             limit: UsageLimit(used: percentUsed, total: 100, resetTime: nil),
@@ -230,5 +232,143 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         let duplicate = candidate(key: "claude:gen", percentUsed: 47, pinKey: "Claude Code:gen:session")
 
         XCTAssertEqual(MenuBarStatusItemPlanner.switcherOptions(for: [first, duplicate]).count, 1)
+    }
+
+    // MARK: - Per-account mode
+
+    /// Two accounts, each holding a tight window and a slightly looser one that
+    /// sits inside the 5-point hysteresis band, so the previously shown window
+    /// wins only when this item's own history says it should.
+    private var twoAccountCandidates: [StatusLimitCandidate] {
+        [
+            candidate(key: "a-session", accountKey: "claudeCode:a", percentUsed: 78, windowName: "Session"),
+            candidate(key: "a-weekly", accountKey: "claudeCode:a", percentUsed: 80, windowName: "Weekly"),
+            candidate(
+                key: "b-session",
+                service: .codexCli,
+                accountKey: "codexCli:b",
+                percentUsed: 70,
+                windowName: "Session"
+            ),
+            candidate(
+                key: "b-weekly",
+                service: .codexCli,
+                accountKey: "codexCli:b",
+                percentUsed: 72,
+                windowName: "Weekly"
+            )
+        ]
+    }
+
+    private var twoAccountEntries: [MenuBarAccountItemEntry] {
+        [
+            MenuBarAccountItemEntry(
+                id: "claudeCode:a",
+                accountKey: "claudeCode:a",
+                displayName: "Work",
+                badge: "W",
+                showsAccountSwitcher: false
+            ),
+            MenuBarAccountItemEntry(
+                id: "codexCli:b",
+                accountKey: "codexCli:b",
+                displayName: "Personal",
+                badge: "P",
+                showsAccountSwitcher: false
+            )
+        ]
+    }
+
+    private func planAccounts(
+        _ candidates: [StatusLimitCandidate],
+        entries: [MenuBarAccountItemEntry],
+        previousKey: String? = nil,
+        previousKeys: [String: String] = [:],
+        pinnedKey: String? = nil
+    ) -> [MenuBarStatusItemDescriptor] {
+        MenuBarStatusItemPlanner.plan(
+            mode: .perAccount,
+            accountPlan: MenuBarAccountItemPlan(mode: .perAccount, entries: entries),
+            candidates: candidates,
+            previousKey: previousKey,
+            previousKeys: previousKeys,
+            pinnedKey: pinnedKey,
+            metric: .percentLeft,
+            size: .compact,
+            now: now
+        )
+    }
+
+    /// Baseline: with no history at all every item lands on its own tightest
+    /// window, which is what the sticky assertions below have to move away from.
+    func testPerAccountItemsWithoutHistoryShowTheirOwnTightestWindow() {
+        let descriptors = planAccounts(twoAccountCandidates, entries: twoAccountEntries)
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["a-weekly", "b-weekly"])
+    }
+
+    /// The core of the per-item history: each slot is anchored by what *it*
+    /// showed last refresh, so two accounts can hold two different windows.
+    func testPerAccountItemsEachKeepTheirOwnStickySelection() {
+        let descriptors = planAccounts(
+            twoAccountCandidates,
+            entries: twoAccountEntries,
+            previousKeys: ["claudeCode:a": "a-session", "codexCli:b": "b-session"]
+        )
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["a-session", "b-session"])
+    }
+
+    /// One item's history must not anchor another's. Before the per-item map,
+    /// every account item was handed the merged item's key, so at most one of
+    /// them could ever match and the rest lost their hysteresis entirely.
+    func testOneAccountsHistoryDoesNotAnchorAnother() {
+        let descriptors = planAccounts(
+            twoAccountCandidates,
+            entries: twoAccountEntries,
+            previousKeys: ["claudeCode:a": "a-session"]
+        )
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["a-session", "b-weekly"])
+    }
+
+    /// The merged item's key belongs to the merged slot. Feeding it to account
+    /// items would apply one account's history to windows it does not own.
+    func testTheMergedKeyNeverAnchorsAnAccountItem() {
+        let descriptors = planAccounts(
+            twoAccountCandidates,
+            entries: twoAccountEntries,
+            previousKey: "a-session"
+        )
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["a-weekly", "b-weekly"])
+    }
+
+    /// Reporting a key is what closes the loop: the presenter stores it per item
+    /// id and hands it straight back on the next refresh.
+    func testPerAccountItemsReportTheItemIDTheyBelongTo() {
+        let descriptors = planAccounts(twoAccountCandidates, entries: twoAccountEntries)
+
+        XCTAssertEqual(descriptors.map(\.id), ["claudeCode:a", "codexCli:b"])
+        XCTAssertFalse(descriptors.contains { $0.selectionKey == nil })
+    }
+
+    /// Same rule the merged item follows: Auto means "whichever window matters",
+    /// so naming it is noise — but a pin is a deliberate choice of one window.
+    func testPerAccountItemNamesTheWindowOnlyWhenPinned() {
+        let auto = planAccounts(twoAccountCandidates, entries: twoAccountEntries)
+        let pinned = planAccounts(twoAccountCandidates, entries: twoAccountEntries, pinnedKey: "a-session")
+
+        XCTAssertEqual(auto.first?.tooltip, "MeterBar: 20% left on Work · a-weekly")
+        XCTAssertEqual(pinned.first?.tooltip, "MeterBar: 22% left on Work · a-session · Session")
+    }
+
+    /// A pin naming a window in another account must not drag this item onto it,
+    /// and must not qualify this item's own auto choice either.
+    func testAPinOutsideTheAccountLeavesTheItemOnAuto() {
+        let descriptors = planAccounts(twoAccountCandidates, entries: twoAccountEntries, pinnedKey: "b-session")
+
+        XCTAssertEqual(descriptors.first?.selectionKey, "a-weekly")
+        XCTAssertEqual(descriptors.first?.tooltip, "MeterBar: 20% left on Work · a-weekly")
     }
 }

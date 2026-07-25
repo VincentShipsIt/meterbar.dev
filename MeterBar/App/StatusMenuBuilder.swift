@@ -17,6 +17,11 @@ struct StatusMenuBuilder {
         let selectMenuBarAuto: Selector
         let selectMenuBarPin: Selector
         let selectMenuBarAllProviders: Selector
+        let selectMenuBarPerAccount: Selector
+        let selectMenuBarAccountSwitcher: Selector
+        /// Repoints the switcher item at the account carried in
+        /// `representedObject`.
+        let selectMenuBarAccount: Selector
         let toggleShowInDock: Selector
         let openDashboard: Selector
         let refreshProviderStatuses: Selector
@@ -32,6 +37,9 @@ struct StatusMenuBuilder {
         var mode: MenuBarPresentationMode = .merged
         var pinnedKey: String?
         var options: [StatusItemPinOption] = []
+        /// Tracked accounts offered by the switcher, only rendered in
+        /// `.accountSwitcher` mode where exactly one item is up for grabs.
+        var accounts: [MenuBarAccountSwitcherEntry] = []
     }
 
     /// The provider-status state the menu renders, copied out of
@@ -133,7 +141,54 @@ struct StatusMenuBuilder {
         allItem.state = mode == .perProvider ? .on : .off
         menu.addItem(allItem)
 
+        // Titles come from the mode itself so the menu can never drift from the
+        // Settings picker.
+        let perAccountItem = NSMenuItem(
+            title: MenuBarPresentationMode.perAccount.displayName,
+            action: actions.selectMenuBarPerAccount,
+            keyEquivalent: ""
+        )
+        perAccountItem.target = target
+        perAccountItem.state = mode == .perAccount ? .on : .off
+        menu.addItem(perAccountItem)
+
+        let switcherItem = NSMenuItem(
+            title: MenuBarPresentationMode.accountSwitcher.displayName,
+            action: actions.selectMenuBarAccountSwitcher,
+            keyEquivalent: ""
+        )
+        switcherItem.target = target
+        switcherItem.state = mode == .accountSwitcher ? .on : .off
+        menu.addItem(switcherItem)
+
+        addAccountSwitcherItems(to: menu)
+
         return menu
+    }
+
+    /// The switcher item's own account list. Only meaningful in
+    /// `.accountSwitcher` mode, where a single item is repointed in place; the
+    /// per-account items are chosen in Settings instead.
+    func addAccountSwitcherItems(to menu: NSMenu) {
+        guard menuBarShows.mode == .accountSwitcher, !menuBarShows.accounts.isEmpty else { return }
+
+        menu.addItem(.separator())
+        menu.addItem(Self.disabledMenuItem(title: "Menu Bar Account"))
+
+        for account in menuBarShows.accounts {
+            // A nil action leaves the item disabled under menu validation, so an
+            // untracked account can be seen but never selected.
+            let item = NSMenuItem(
+                title: account.isEnabled ? account.title : "\(account.title) (Not Tracked)",
+                action: account.isEnabled ? actions.selectMenuBarAccount : nil,
+                keyEquivalent: ""
+            )
+            item.target = target
+            item.representedObject = account.key
+            item.state = account.isActive ? .on : .off
+            item.indentationLevel = 1
+            menu.addItem(item)
+        }
     }
 
     func makeProviderStatusMenu() -> NSMenu {

@@ -15,6 +15,9 @@ struct StatusLimitProbeRequest: Sendable {
 struct StatusLimitSource {
     let service: ServiceType
     let accountID: UUID?
+    /// `<service>:<accountID>` for the multi-account providers, nil for the
+    /// single-account ones. `var` so the memberwise init defaults it to nil.
+    var accountKey: String?
     let autoSelectionKey: String?
     let displayName: String
     let metrics: UsageMetrics
@@ -47,6 +50,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 let source = StatusLimitSource(
                     service: .claudeCode,
                     accountID: account.id,
+                    accountKey: MenuBarAccountKey.make(service: .claudeCode, accountID: account.id),
                     autoSelectionKey: "claude:\(account.id.uuidString)",
                     displayName: "\(account.name) (\(ServiceType.claudeCode.displayName))",
                     metrics: accountMetrics
@@ -70,6 +74,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 let source = StatusLimitSource(
                     service: .codexCli,
                     accountID: account.id,
+                    accountKey: MenuBarAccountKey.make(service: .codexCli, accountID: account.id),
                     autoSelectionKey: "codex:\(account.id.uuidString)",
                     displayName: "\(account.name) (\(ServiceType.codexCli.displayName))",
                     metrics: accountMetrics
@@ -120,6 +125,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
         let seeds = StatusItemLimitCandidateBuilder.seeds(
             service: source.service,
             accountID: source.accountID,
+            accountKey: source.accountKey,
             autoSelectionKey: source.autoSelectionKey,
             displayName: source.displayName,
             limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service)
@@ -137,6 +143,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                     key: seed.key,
                     pinKey: seed.pinKey,
                     service: seed.service,
+                    accountKey: seed.accountKey,
                     displayName: seed.displayName,
                     windowName: seed.windowName,
                     limit: seed.limit,

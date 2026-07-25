@@ -22,6 +22,9 @@ final class AppDelegateSplitTests: XCTestCase {
         selectMenuBarAuto: placeholderSelector,
         selectMenuBarPin: placeholderSelector,
         selectMenuBarAllProviders: placeholderSelector,
+        selectMenuBarPerAccount: placeholderSelector,
+        selectMenuBarAccountSwitcher: placeholderSelector,
+        selectMenuBarAccount: placeholderSelector,
         toggleShowInDock: placeholderSelector,
         openDashboard: placeholderSelector,
         refreshProviderStatuses: placeholderSelector,
@@ -244,9 +247,10 @@ final class AppDelegateSplitTests: XCTestCase {
 
     func testRefreshTriggerFansInEverySource() {
         // One publisher per input that can change the menu-bar title: metrics,
-        // the two account-metric maps, Claude accounts, Codex accounts, provider
-        // visibility, parse health, and the label preferences.
-        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 8)
+        // the two account-metric maps, Claude accounts, Codex accounts, the
+        // menu-bar account selection, provider visibility, parse health, and the
+        // label preferences.
+        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 9)
     }
 
     func testRefreshTriggerPublisherEmitsOnSubscribe() {
@@ -391,8 +395,9 @@ final class AppDelegateSplitTests: XCTestCase {
 
         let items = builder.makeMenuBarShowsMenu().items
 
-        // Auto + separator + one pinnable window + separator + All Providers
-        XCTAssertEqual(items.count, 5)
+        // Auto + separator + one pinnable window + separator + the three
+        // provider/account modes. No switcher list: the mode isn't the switcher.
+        XCTAssertEqual(items.count, 7)
         XCTAssertEqual(items[0].title, "Auto")
         XCTAssertEqual(items[0].state, .on)
         XCTAssertEqual(items[2].title, "Work · Session")
@@ -433,10 +438,58 @@ final class AppDelegateSplitTests: XCTestCase {
         let items = builder.makeMenuBarShowsMenu().items
 
         // No pinnable windows, so the separator between Auto and All collapses.
-        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items.count, 5)
         XCTAssertEqual(items[0].state, .off)
         XCTAssertEqual(items[2].title, "All Providers")
         XCTAssertEqual(items[2].state, .on)
+        XCTAssertEqual(items[3].title, MenuBarPresentationMode.perAccount.displayName)
+        XCTAssertEqual(items[3].state, .off)
+        XCTAssertEqual(items[4].title, MenuBarPresentationMode.accountSwitcher.displayName)
+        XCTAssertEqual(items[4].state, .off)
+    }
+
+    /// The switcher is the only mode that owns a single repointable item, so it
+    /// is the only one that grows an account list inside the submenu.
+    func testMenuBarShowsSubmenuListsAccountsOnlyInSwitcherMode() {
+        func items(mode: MenuBarPresentationMode) -> [NSMenuItem] {
+            StatusMenuBuilder(
+                target: nil,
+                actions: Self.actions,
+                showInDock: true,
+                menuBarShows: StatusMenuBuilder.MenuBarShowsSnapshot(
+                    mode: mode,
+                    accounts: [
+                        MenuBarAccountSwitcherEntry(
+                            key: "claudeCode:a",
+                            title: "Work",
+                            badge: "W",
+                            isEnabled: true,
+                            isActive: true
+                        ),
+                        MenuBarAccountSwitcherEntry(
+                            key: "codexCli:b",
+                            title: "Personal",
+                            badge: "P",
+                            isEnabled: false,
+                            isActive: false
+                        ),
+                    ]
+                ),
+                status: StatusMenuBuilder.StatusSnapshot()
+            ).makeMenuBarShowsMenu().items
+        }
+
+        XCTAssertEqual(items(mode: .perAccount).count, 5)
+
+        // Auto + separator + three modes + separator + header + two accounts.
+        let switcher = items(mode: .accountSwitcher)
+        XCTAssertEqual(switcher.count, 9)
+        XCTAssertEqual(switcher[6].title, "Menu Bar Account")
+        XCTAssertEqual(switcher[7].title, "Work")
+        XCTAssertEqual(switcher[7].state, .on)
+        XCTAssertEqual(switcher[7].representedObject as? String, "claudeCode:a")
+        XCTAssertEqual(switcher[8].title, "Personal (Not Tracked)")
+        XCTAssertNil(switcher[8].action)
     }
 
     // MARK: - StatusItemPresenter

@@ -16,9 +16,11 @@ final class StatusItemPresenter {
     /// and calls `apply(_:to:)` back for each surviving button.
     private let applyDescriptors: ([MenuBarStatusItemDescriptor]) -> Void
 
-    /// The account whose quota the menu bar title currently shows; feeds the
-    /// sticky selection so concurrent Claude + Codex use doesn't flip the title.
-    private var shownKey: String?
+    /// The quota each status item currently shows, by item id; feeds the sticky
+    /// selection so concurrent Claude + Codex use doesn't flip the title.
+    /// Per-item rather than a single key because account modes give each account
+    /// its own slot, and one shared anchor would apply one item's history to all.
+    private var shownKeys: [String: String] = [:]
 
     /// Monotonic stamp for status-item updates: activity probes run off the
     /// main actor, so a stale in-flight result must not overwrite a newer one.
@@ -27,6 +29,11 @@ final class StatusItemPresenter {
     /// Latest probed candidates, kept so the right-click switcher can list every
     /// pinnable window without re-running the probes.
     private(set) var latestCandidates: [StatusLimitCandidate] = []
+
+    /// Account scope of the items currently in the menu bar. Held so a
+    /// right-click can ask which account the clicked item speaks for without
+    /// recomputing the plan (and risking a different answer than what is shown).
+    private var accountItemPlan: MenuBarAccountItemPlan?
 
     /// Menu bar icons are rebuilt on every refresh; rasterizing the provider
     /// logos once keeps that off the hot path.
@@ -59,22 +66,67 @@ final class StatusItemPresenter {
         latestCandidates = candidates
 
         let preferences = MenuBarDisplayPreferencesStore.shared
+        let plan = accountPlan(mode: preferences.presentationMode)
+        accountItemPlan = plan
         let descriptors = MenuBarStatusItemPlanner.plan(
             mode: preferences.presentationMode,
+            accountPlan: plan,
             candidates: candidates,
-            previousKey: shownKey,
+            previousKey: shownKeys[MenuBarStatusItemPlanner.mergedItemID],
+            previousKeys: shownKeys,
             pinnedKey: preferences.pinnedCandidateKey,
             metric: preferences.labelMetric,
             size: preferences.labelSize
         )
 
-        // Only the merged item feeds sticky selection; per-provider items are
-        // each nailed to one account and report no key at all.
-        shownKey = descriptors
-            .first { $0.id == MenuBarStatusItemPlanner.mergedItemID }?
-            .selectionKey
+        // Rebuilt rather than merged, so an item that just left the plan doesn't
+        // keep anchoring a slot it no longer owns. Per-provider items report no
+        // key and so contribute nothing.
+        shownKeys = descriptors.reduce(into: [:]) { keys, descriptor in
+            if let key = descriptor.selectionKey { keys[descriptor.id] = key }
+        }
 
         applyDescriptors(descriptors)
+    }
+
+    /// Which accounts own an item right now, so the delegate can build the
+    /// switcher submenu for the item the user right-clicked.
+    @MainActor
+    func accountEntry(for itemID: String) -> MenuBarAccountItemEntry? {
+        accountItemPlan?.entries.first { $0.id == itemID }
+    }
+
+    /// The account the switcher item actually shows, which is not always the
+    /// persisted preference: the planner falls back to the first enabled account
+    /// when the stored key names a removed or untracked one. Checking the raw
+    /// preference in the menu would tick an account the menu bar isn't showing.
+    @MainActor
+    func activeSwitcherAccountKey() -> String? {
+        accountItemPlan?.entries.first { $0.showsAccountSwitcher }?.accountKey
+            ?? MenuBarAccountSelectionStore.shared.mergedAccountKey
+    }
+
+    /// Every tracked Claude and Codex account, already sanitized for display.
+    @MainActor
+    func menuBarAccounts() -> [MenuBarAccountIdentity] {
+        MenuBarAccountCatalog.identities(
+            claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
+            codexAccounts: CodexAccountStore.shared.accounts,
+            enabledServices: ProviderVisibilityStore.shared.enabledServices
+        )
+    }
+
+    /// Reads the account stores on the main actor so the planners themselves
+    /// stay pure and testable.
+    @MainActor
+    private func accountPlan(mode: MenuBarPresentationMode) -> MenuBarAccountItemPlan {
+        let selection = MenuBarAccountSelectionStore.shared
+        return MenuBarAccountItemPlanner.plan(
+            mode: mode,
+            selectedAccountKeys: selection.selectedAccountKeys,
+            mergedAccountKey: selection.mergedAccountKey,
+            accounts: menuBarAccounts()
+        )
     }
 
     @MainActor

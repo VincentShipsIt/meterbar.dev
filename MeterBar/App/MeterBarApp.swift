@@ -74,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeStatusItemID: String?
     private var menuPanel: MeterBarMenuPanelController?
     private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+    private let menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notifications = UsageNotificationCoordinator()
     private var cancellables = Set<AnyCancellable>()
@@ -287,6 +288,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 selectMenuBarAuto: #selector(selectMenuBarAuto),
                 selectMenuBarPin: #selector(selectMenuBarPin(_:)),
                 selectMenuBarAllProviders: #selector(selectMenuBarAllProviders),
+                selectMenuBarPerAccount: #selector(selectMenuBarPerAccount),
+                selectMenuBarAccountSwitcher: #selector(selectMenuBarAccountSwitcher),
+                selectMenuBarAccount: #selector(selectMenuBarAccount(_:)),
                 toggleShowInDock: #selector(toggleShowInDock),
                 openDashboard: #selector(openDashboardFromStatusMenu),
                 refreshProviderStatuses: #selector(refreshProviderStatusesFromStatusMenu),
@@ -299,6 +303,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey,
                 options: MenuBarStatusItemPlanner.switcherOptions(
                     for: statusItemPresenter.latestCandidates
+                ),
+                accounts: MenuBarAccountSwitcher.entries(
+                    accounts: statusItemPresenter.menuBarAccounts(),
+                    activeKey: statusItemPresenter.activeSwitcherAccountKey()
                 )
             ),
             status: StatusMenuBuilder.StatusSnapshot(
@@ -326,6 +334,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func selectMenuBarAllProviders() {
         menuBarDisplayPreferences.setPresentationMode(.perProvider)
+    }
+
+    @objc
+    private func selectMenuBarPerAccount() {
+        menuBarDisplayPreferences.setPresentationMode(.perAccount)
+    }
+
+    @objc
+    private func selectMenuBarAccountSwitcher() {
+        menuBarDisplayPreferences.setPresentationMode(.accountSwitcher)
+    }
+
+    @objc
+    private func selectMenuBarAccount(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        menuBarAccountSelection.setMergedAccountKey(key)
     }
 
     @objc
