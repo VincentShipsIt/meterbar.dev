@@ -324,7 +324,7 @@ actor ClaudeFableSessionScanner {
                 continue
             }
 
-            let model = CostTracker.normalizeClaudeModel(rawModel)
+            let model = ClaudeCostScanner.normalizeModel(rawModel)
             guard model.hasPrefix("claude-fable-5") else { continue }
 
             let sourceSessionID = nonEmptyString(json["sessionId"]) ?? fallbackSessionID

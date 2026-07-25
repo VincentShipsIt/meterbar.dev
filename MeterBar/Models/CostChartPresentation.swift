@@ -35,7 +35,7 @@ nonisolated struct CostChartPresentation: Sendable {
     ) {
         let normalizedDays = max(1, requestedDays)
         let today = calendar.startOfDay(for: now)
-        let startDate = CostTracker.costWindowStart(
+        let startDate = CostWindow.start(
             days: normalizedDays,
             now: now,
             calendar: calendar

@@ -27,13 +27,13 @@ final class ModelPricingTests: XCTestCase {
     func testCostTrackerUsesTheSharedLookup() {
         let models = [nil, "claude-fable-9", "claude-opus-4-7", "claude-haiku-4-5", "unknown"]
         for model in models {
-            XCTAssertEqual(CostTracker.claudePricing(for: model), ModelPricing.claude(for: model))
+            XCTAssertEqual(ClaudeCostScanner.pricing(for: model), ModelPricing.claude(for: model))
         }
     }
 
     func testSharedPricingProducesStableFixtureTotal() {
         let pricing = ModelPricing.claude(for: "claude-sonnet-4-6")
-        let total = CostTracker.calculateClaudeCost(
+        let total = TokenCostMath.calculateClaudeCost(
             input: 1_000_000,
             output: 2_000_000,
             cacheCreation: 500_000,
