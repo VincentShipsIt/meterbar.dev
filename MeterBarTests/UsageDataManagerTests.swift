@@ -801,4 +801,36 @@ final class UsageDataManagerTests: XCTestCase {
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.resetCreditsAvailable, 0)
     }
+
+    /// Redemption is scoped to the card that acted: refreshing one Codex profile
+    /// must leave every other profile's cached metrics exactly as they were.
+    func testApplyResetCreditRefreshOnlyTouchesTheRedeemingAccount() async throws {
+        let accountSuite = "UsageDataManagerTests-reset-credit-scope-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = CodexAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/codex-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [
+            CodexAccount.defaultID: MetricsFixtures.codexCli(sessionUsedPercent: 20, resetCreditsAvailable: 2),
+            work.id: MetricsFixtures.codexCli(sessionUsedPercent: 100, resetCreditsAvailable: 2)
+        ])
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: provider,
+            cursor: cursor,
+            codexAccountStore: accountStore
+        )
+
+        await manager.refreshAll()
+        manager.applyCodexResetCreditRefresh(
+            MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 1),
+            accountID: work.id
+        )
+
+        XCTAssertEqual(manager.codexAccountMetrics[work.id]?.sessionLimit?.used, 0)
+        XCTAssertEqual(manager.codexAccountMetrics[work.id]?.resetCreditsAvailable, 1)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 2)
+    }
 }
