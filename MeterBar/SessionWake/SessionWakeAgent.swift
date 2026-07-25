@@ -169,29 +169,49 @@ public enum SessionWakeAgent {
         return true
     }
 
+    static let completionNotificationTitle = "Session Wake — Run Complete"
+
     /// A launch-agent executable has no independent app UI. Use a direct
     /// `osascript` process (argument array, never a shell) for the completion
     /// banner so delivery still works while MeterBar itself is quit.
     private static func postCompletionNotification(summary: WakeRunSummary, provider: WakeProvider) {
-        let attempted = summary.attempted
-        guard attempted > 0 || summary.remaining > 0 else { return }
-
-        var body = "Resumed \(summary.resumed) of \(attempted) \(provider.displayName) sessions."
-        if summary.failed > 0 { body += " \(summary.failed) failed." }
-        if summary.remaining > 0 { body += " \(summary.remaining) still queued." }
+        guard summary.attempted > 0 || summary.remaining > 0 else { return }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = [
-            "-e",
-            "display notification \"\(appleScriptEscaped(body))\" with title \"Session Wake — Run Complete\""
-        ]
+        process.arguments = notificationArguments(
+            body: completionNotificationBody(summary: summary, provider: provider),
+            title: completionNotificationTitle
+        )
         try? process.run()
     }
 
-    private static func appleScriptEscaped(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+    static func completionNotificationBody(summary: WakeRunSummary, provider: WakeProvider) -> String {
+        var body = "Resumed \(summary.resumed) of \(summary.attempted) \(provider.displayName) sessions."
+        if summary.failed > 0 { body += " \(summary.failed) failed." }
+        if summary.remaining > 0 { body += " \(summary.remaining) still queued." }
+        return body
+    }
+
+    /// `osascript -e '<script>' <body> <title>`: the two runtime values are
+    /// trailing process arguments, delivered to the `run` handler as `argv`.
+    ///
+    /// The script text is a compile-time constant — no caller-supplied string is
+    /// ever interpolated into AppleScript source, so there is no escaping to get
+    /// wrong and nothing a value can do to break out into executable script.
+    /// Today the body is assembled from integers and a fixed provider name, but
+    /// the previous escape-and-interpolate form put one unescaped path away from
+    /// arbitrary AppleScript, which is not a property worth relying on.
+    static func notificationArguments(body: String, title: String) -> [String] {
+        [
+            "-e",
+            """
+            on run argv
+            display notification (item 1 of argv) with title (item 2 of argv)
+            end run
+            """,
+            body,
+            title
+        ]
     }
 }

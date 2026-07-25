@@ -163,14 +163,16 @@ final class ProviderCardPresentationTests: XCTestCase {
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
                 didConsumeResetCredit: false,
-                isAuthenticated: true
+                isAuthenticated: true,
+                hasResolvedAccount: true
             )
         )
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
                 didConsumeResetCredit: true,
-                isAuthenticated: true
+                isAuthenticated: true,
+                hasResolvedAccount: true
             ),
             "a credit already spent in this session must not be offered again"
         )
@@ -178,23 +180,35 @@ final class ProviderCardPresentationTests: XCTestCase {
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
                 didConsumeResetCredit: false,
-                isAuthenticated: false
+                isAuthenticated: false,
+                hasResolvedAccount: true
             )
         )
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: snapshot(used: 100, resetCreditsAvailable: 0),
                 didConsumeResetCredit: false,
-                isAuthenticated: true
+                isAuthenticated: true,
+                hasResolvedAccount: true
             )
         )
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: snapshot(used: 100, resetCreditsAvailable: 1, service: .claudeCode),
                 didConsumeResetCredit: false,
-                isAuthenticated: true
+                isAuthenticated: true,
+                hasResolvedAccount: true
             ),
             "reset credits are a Codex CLI concept only"
+        )
+        XCTAssertFalse(
+            ProviderCardPresentation.showsResetCreditAction(
+                snapshot: exhausted,
+                didConsumeResetCredit: false,
+                isAuthenticated: true,
+                hasResolvedAccount: false
+            ),
+            "redemption targets a specific CODEX_HOME, so an unresolved account cannot be spent"
         )
     }
 

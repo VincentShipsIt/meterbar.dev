@@ -245,9 +245,23 @@ nonisolated extension ServiceType {
         case .grok: return "grok"
         }
     }
+
+    /// The same tokens in documented order, for `--provider` help and error text.
+    static var cliIdentifiers: String {
+        allCases.sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.cliIdentifier)
+            .joined(separator: ", ")
+    }
+
+    /// Parses a caller-supplied `--provider` value. Tolerant of surrounding
+    /// whitespace and casing so shell interpolation doesn't become a usage error.
+    static func fromCLIIdentifier(_ raw: String) -> ServiceType? {
+        let needle = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return allCases.first { $0.cliIdentifier == needle }
+    }
 }
 
-nonisolated private extension QuotaBand {
+nonisolated extension QuotaBand {
     var cliIdentifier: String {
         switch self {
         case .healthy: return "healthy"

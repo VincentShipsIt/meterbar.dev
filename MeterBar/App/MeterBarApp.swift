@@ -57,18 +57,32 @@ private struct MeterBarCommands: Commands {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
+    /// Live status items keyed by `MenuBarStatusItemDescriptor.id`. Merged mode
+    /// keeps exactly one; per-provider mode owns one slot per tracked account.
+    private var statusItems: [String: NSStatusItem] = [:]
+    /// Descriptor ids in plan order, used to pick a stable fallback anchor.
+    private var statusItemIDs: [String] = []
+    /// The item the user last clicked, so the popover and the right-click menu
+    /// open under that icon instead of always under the leftmost one.
+    private var activeStatusItemID: String?
+    /// Latest probed candidates, kept so the right-click switcher can list every
+    /// pinnable window without re-running the probes.
+    private var latestStatusCandidates: [StatusLimitCandidate] = []
+    /// Menu bar icons are rebuilt on every refresh; rasterizing the provider
+    /// logos once keeps that off the hot path.
+    private var statusItemImageCache: [String: NSImage] = [:]
     private var menuPanel: MeterBarMenuPanelController?
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notificationPreferences = NotificationPreferencesStore.shared
     private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     private var cancellables = Set<AnyCancellable>()
+    /// The launch refresh, held so it can be cancelled instead of orphaned.
     private var monitorTask: Task<Void, Never>?
 
     /// Tracks which (service, limit, level) notifications have already fired so
-    /// the 5-minute monitor loop doesn't re-alert every cycle while usage stays
-    /// above a threshold. Keys are cleared when usage drops back below.
+    /// repeated trigger events don't re-alert while usage stays above a
+    /// threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
     /// The account whose quota the menu bar title currently shows; feeds the
@@ -85,6 +99,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyActivationPolicy(showInDock: dockVisibilityStore.showInDock)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // A quit that lands mid-refresh must not leave a `grok` agent behind:
+        // the subprocess is spawned into its own process group precisely so it
+        // can be reaped as a tree from here.
+        GrokAgentProcess.terminateAll()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("MeterBar finished launching")
         SoftwareUpdateController.shared.refreshState()
@@ -93,29 +114,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         observeDockVisibility()
         observeSystemWake()
 
-        // Create menu bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        guard let button = statusItem?.button else {
+        // Create the initial menu bar item. The presentation plan takes over on
+        // the first metrics update and may add or remove items from there.
+        guard makeStatusItem(id: MenuBarStatusItemPlanner.mergedItemID) != nil else {
             AppLog.app.error("Failed to create status item button")
             return
         }
-
-        // Set up the menu bar icon with 3 progress bars
-        let image = createMenuBarIcon()
-        image.isTemplate = true
-        button.image = image
-
-        button.action = #selector(handleStatusItemClick)
-        button.target = self
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = "MeterBar"
-        button.imagePosition = .imageLeft
-        button.font = .systemFont(ofSize: 14, weight: .semibold)
+        statusItemIDs = [MenuBarStatusItemPlanner.mergedItemID]
 
         menuPanel = MeterBarMenuPanelController(
             statusButtonProvider: { [weak self] in
-                self?.statusItem?.button
+                self?.anchorStatusButton()
             },
             onDismiss: {
                 // Closing the popover only tears down the transient detail
@@ -158,16 +167,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Creates one menu bar slot and wires its button. Returns nil when AppKit
+    /// refuses the button, in which case the (useless) item is released again.
+    @discardableResult
+    private func makeStatusItem(id: String) -> NSStatusItem? {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Per-id autosave name so macOS restores each item's user-dragged
+        // position separately instead of collapsing them onto one slot.
+        item.autosaveName = "MeterBarStatusItem-\(id)"
+
+        guard let button = item.button else {
+            NSStatusBar.system.removeStatusItem(item)
+            return nil
+        }
+
+        button.image = statusItemImage(for: nil)
+        button.action = #selector(handleStatusItemClick(_:))
+        button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.toolTip = "MeterBar"
+        button.imagePosition = .imageLeft
+        button.font = .systemFont(ofSize: 14, weight: .semibold)
+
+        statusItems[id] = item
+        return item
+    }
+
+    /// Button the popover and menus attach to: the one just clicked, or the
+    /// leftmost surviving item when nothing has been clicked yet.
+    private func anchorStatusButton() -> NSStatusBarButton? {
+        if let activeStatusItemID, let button = statusItems[activeStatusItemID]?.button {
+            return button
+        }
+        return statusItemIDs.compactMap { statusItems[$0]?.button }.first
+    }
+
     /// Left-click opens the popover; right-click (or control-click) opens a
     /// native menu so Quit stays reachable even when the Dock icon is hidden.
     @objc
-    private func handleStatusItemClick() {
+    private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        // Remember which of the (possibly several) items was hit so the panel
+        // and menu don't jump to a different icon than the one clicked.
+        activeStatusItemID = statusItemIDs.first { statusItems[$0]?.button === sender }
+
         let event = NSApp.currentEvent
         let isSecondaryClick = event?.type == .rightMouseUp
             || (event?.modifierFlags.contains(.control) ?? false)
 
         if isSecondaryClick {
-            showStatusMenu()
+            showStatusMenu(from: sender)
         } else {
             togglePopover()
         }
@@ -190,9 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Shows a native menu anchored to the menu bar icon. This is the always-on
     /// escape hatch for Quit (and Dock visibility), independent of the popover.
-    private func showStatusMenu() {
-        guard let button = statusItem?.button else { return }
-
+    private func showStatusMenu(from button: NSStatusBarButton) {
         menuPanel?.dismiss()
 
         let menu = makeStatusMenu()
@@ -202,6 +248,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
+
+        let showsItem = NSMenuItem(title: "Menu Bar Shows", action: nil, keyEquivalent: "")
+        showsItem.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: nil)
+        showsItem.submenu = makeMenuBarShowsMenu()
+        menu.addItem(showsItem)
+
+        menu.addItem(.separator())
 
         let dockItem = NSMenuItem(
             title: "Show in Dock",
@@ -236,6 +289,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         return menu
+    }
+
+    /// The menu-bar-side twin of the Settings picker: switch the shown quota (or
+    /// spread every provider across its own item) without opening Settings.
+    private func makeMenuBarShowsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let mode = menuBarDisplayPreferences.presentationMode
+        let pinnedKey = menuBarDisplayPreferences.pinnedCandidateKey
+
+        let autoItem = NSMenuItem(title: "Auto", action: #selector(selectMenuBarAuto), keyEquivalent: "")
+        autoItem.target = self
+        autoItem.state = mode == .merged && pinnedKey == nil ? .on : .off
+        menu.addItem(autoItem)
+
+        let options = MenuBarStatusItemPlanner.switcherOptions(for: latestStatusCandidates)
+        if !options.isEmpty {
+            menu.addItem(.separator())
+            for option in options {
+                let item = NSMenuItem(
+                    title: option.title,
+                    action: #selector(selectMenuBarPin(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = option.id
+                item.state = mode == .merged && pinnedKey == option.id ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        menu.addItem(.separator())
+
+        let allItem = NSMenuItem(
+            title: "All Providers",
+            action: #selector(selectMenuBarAllProviders),
+            keyEquivalent: ""
+        )
+        allItem.target = self
+        allItem.state = mode == .perProvider ? .on : .off
+        menu.addItem(allItem)
+
+        return menu
+    }
+
+    @objc
+    private func selectMenuBarAuto() {
+        menuBarDisplayPreferences.setPresentationMode(.merged)
+        menuBarDisplayPreferences.setPinnedCandidateKey(nil)
+    }
+
+    @objc
+    private func selectMenuBarPin(_ sender: NSMenuItem) {
+        guard let pinKey = sender.representedObject as? String else { return }
+        menuBarDisplayPreferences.setPresentationMode(.merged)
+        menuBarDisplayPreferences.setPinnedCandidateKey(pinKey)
+    }
+
+    @objc
+    private func selectMenuBarAllProviders() {
+        menuBarDisplayPreferences.setPresentationMode(.perProvider)
     }
 
     private func makeProviderStatusMenu() -> NSMenu {
@@ -492,32 +605,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Monitor usage and send notifications. Store the task so it can be
-        // cancelled, and so it isn't an orphaned unstructured Task.
+        // Subscribe before the first refresh so its committed snapshot is
+        // observed rather than raced past.
+        observeNotificationTriggers()
+
+        // Kick off the launch refresh. Store the task so it can be cancelled,
+        // and so it isn't an orphaned unstructured Task.
         monitorTask?.cancel()
-        monitorTask = Task { @MainActor [weak self] in
-            await self?.monitorUsage()
+        monitorTask = Task { @MainActor in
+            await UsageDataManager.shared.refreshAll()
         }
     }
 
-    @MainActor
-    private func monitorUsage() async {
-        // Initial refresh on app launch
-        await UsageDataManager.shared.refreshAll()
+    /// Re-evaluates limits whenever something a notification decision depends on
+    /// actually changes, instead of on a five-minute timer.
+    ///
+    /// Deleting the poll is safe because elapsed time alone can never newly fire
+    /// a notification: `NotificationDecider` reads `now` only for its staleness
+    /// gate (`now - lastUpdated <= threshold`), so a tick can flip a provider
+    /// from deliverable to stale but never the reverse. Everything that *can*
+    /// newly fire one — a committed metric snapshot, an account being added or
+    /// enabled, a provider being unhidden, a threshold being lowered — is
+    /// published below. `checkAndNotify()` is idempotent through
+    /// `notifiedLimitKeys`, so overlapping triggers cost nothing.
+    private func observeNotificationTriggers() {
+        let claudeAccountChanges = Publishers.Merge3(
+            ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
+            ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
+        let codexAccountChanges = Publishers.Merge(
+            CodexAccountStore.shared.$customAccounts.map { _ in () },
+            CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
+        let thresholdChanges = Publishers.Merge3(
+            notificationPreferences.$isEnabled.map { _ in () },
+            notificationPreferences.$warningThreshold.map { _ in () },
+            notificationPreferences.$criticalThreshold.map { _ in () }
+        )
 
-        // Check for approaching limits periodically.
-        // Note: UsageDataManager handles its own auto-refresh; this loop only
-        // checks metrics for notification purposes.
-        while !Task.isCancelled {
-            checkAndNotify()
+        let triggers: [AnyPublisher<Void, Never>] = [
+            UsageDataManager.shared.$refreshGeneration.map { _ in () }.eraseToAnyPublisher(),
+            claudeAccountChanges.eraseToAnyPublisher(),
+            codexAccountChanges.eraseToAnyPublisher(),
+            providerVisibilityStore.$hiddenServices.map { _ in () }.eraseToAnyPublisher(),
+            thresholdChanges.eraseToAnyPublisher()
+        ]
 
-            // Wait 5 minutes before next notification check. A thrown
-            // CancellationError exits the loop instead of busy-looping.
-            do {
-                try await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
-            } catch {
-                break
-            }
+        for trigger in triggers {
+            trigger
+                .sink { [weak self] _ in
+                    // Deferred to the next main-actor hop so the published
+                    // property has committed before it is read back.
+                    Task { @MainActor in
+                        self?.checkAndNotify()
+                    }
+                }
+                .store(in: &cancellables)
         }
     }
 
@@ -700,8 +844,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        Publishers.Merge3(
+        Publishers.Merge4(
             menuBarDisplayPreferences.$pinnedCandidateKey.map { _ in () },
+            menuBarDisplayPreferences.$presentationMode.map { _ in () },
             menuBarDisplayPreferences.$labelMetric.map { _ in () },
             menuBarDisplayPreferences.$labelSize.map { _ in () }
         )
@@ -730,7 +875,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func updateStatusItem(metrics: [ServiceType: UsageMetrics]) {
-        guard statusItem?.button != nil else { return }
+        guard !statusItems.isEmpty else { return }
 
         // Gather the cheap main-actor inputs now; run the activity probes
         // (directory scans) off the main actor; apply on return. A generation
@@ -747,6 +892,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         StatusLimitCandidate(
                             key: seed.key,
                             pinKey: seed.pinKey,
+                            service: seed.service,
                             displayName: seed.displayName,
                             windowName: seed.windowName,
                             limit: seed.limit,
@@ -757,54 +903,102 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }.value
             guard let self, generation == self.statusItemUpdateGeneration else { return }
-            self.applyStatusItemSelection(candidates: candidates)
+            self.applyStatusItemPlan(candidates: candidates)
         }
     }
 
     @MainActor
-    private func applyStatusItemSelection(candidates: [StatusLimitCandidate]) {
-        guard let button = statusItem?.button else { return }
+    private func applyStatusItemPlan(candidates: [StatusLimitCandidate]) {
+        latestStatusCandidates = candidates
 
-        guard let selection = StatusItemLimitSelector.select(
+        let descriptors = MenuBarStatusItemPlanner.plan(
+            mode: menuBarDisplayPreferences.presentationMode,
             candidates: candidates,
             previousKey: shownStatusItemKey,
-            pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
-        ) else {
-            shownStatusItemKey = nil
-            setStatusButtonTitle(button, to: "")
-            button.imagePosition = .imageOnly
-            button.toolTip = "MeterBar"
-            button.setAccessibilityLabel("MeterBar")
-            applyParseHealthAppearance(to: button)
-            return
-        }
-
-        shownStatusItemKey = selection.key
-        let isPinned = menuBarDisplayPreferences.pinnedCandidateKey == selection.pinKey
-        let selectionName = isPinned
-            ? "\(selection.displayName) · \(selection.windowName)"
-            : selection.displayName
-        let title = StatusItemLabelFormatter.title(
-            for: selection.limit,
+            pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey,
             metric: menuBarDisplayPreferences.labelMetric,
             size: menuBarDisplayPreferences.labelSize
         )
-        let spokenValue = StatusItemLabelFormatter.spokenValue(
-            for: selection.limit,
-            metric: menuBarDisplayPreferences.labelMetric
-        )
 
-        button.imagePosition = title == nil ? .imageOnly : .imageLeft
-        setStatusButtonTitle(button, to: title.map { " \($0)" } ?? "")
-        if let spokenValue {
-            button.toolTip = "MeterBar: \(spokenValue) on \(selectionName)"
-            button.setAccessibilityLabel("MeterBar \(spokenValue) on \(selectionName)")
-        } else {
-            button.toolTip = "MeterBar: \(selectionName)"
-            button.setAccessibilityLabel("MeterBar \(selectionName)")
+        // Only the merged item feeds sticky selection; per-provider items are
+        // each nailed to one account and report no key at all.
+        shownStatusItemKey = descriptors
+            .first { $0.id == MenuBarStatusItemPlanner.mergedItemID }?
+            .selectionKey
+
+        applyStatusItemDescriptors(descriptors)
+    }
+
+    /// Reconciles the live status items with the plan: drop the ones that are
+    /// gone, create the ones that are new, restyle the rest in place.
+    @MainActor
+    private func applyStatusItemDescriptors(_ descriptors: [MenuBarStatusItemDescriptor]) {
+        let liveIDs = Set(descriptors.map(\.id))
+
+        // Snapshot the keys: the loop mutates the dictionary it reads from.
+        for id in Array(statusItems.keys) where !liveIDs.contains(id) {
+            if let item = statusItems.removeValue(forKey: id) {
+                NSStatusBar.system.removeStatusItem(item)
+            }
         }
+
+        if let activeStatusItemID, !liveIDs.contains(activeStatusItemID) {
+            self.activeStatusItemID = nil
+        }
+
+        statusItemIDs = descriptors.map(\.id)
+
+        for descriptor in descriptors {
+            let item = statusItems[descriptor.id] ?? makeStatusItem(id: descriptor.id)
+            guard let button = item?.button else { continue }
+            apply(descriptor, to: button)
+        }
+    }
+
+    @MainActor
+    private func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
+        button.image = statusItemImage(for: descriptor.service)
+        button.imagePosition = descriptor.title.isEmpty ? .imageOnly : .imageLeft
+        setStatusButtonTitle(button, to: descriptor.title)
+        button.toolTip = descriptor.tooltip
+        button.setAccessibilityLabel(descriptor.accessibilityLabel)
         applyParseHealthAppearance(to: button)
     }
+
+    /// Provider glyph for the item, so a bare `52%` says *whose* 52% it is.
+    /// Providers without a bundled logo keep MeterBar's own bars mark.
+    @MainActor
+    private func statusItemImage(for service: ServiceType?) -> NSImage {
+        guard let resourceName = service.flatMap({ ProviderLogoKind.forService($0).resourceName }) else {
+            return fallbackStatusItemImage()
+        }
+
+        if let cached = statusItemImageCache[resourceName] { return cached }
+
+        // The logo cache vends shared instances, so resize a copy — mutating
+        // the original would shrink every popover icon too.
+        guard let logo = ProviderLogoImageCache.image(named: resourceName)?.copy() as? NSImage else {
+            return fallbackStatusItemImage()
+        }
+        logo.size = NSSize(width: 16, height: 16)
+        logo.isTemplate = true
+        statusItemImageCache[resourceName] = logo
+        return logo
+    }
+
+    @MainActor
+    private func fallbackStatusItemImage() -> NSImage {
+        if let cached = statusItemImageCache[Self.fallbackStatusImageKey] { return cached }
+
+        let image = createMenuBarIcon()
+        image.isTemplate = true
+        statusItemImageCache[Self.fallbackStatusImageKey] = image
+        return image
+    }
+
+    /// Cache slot for the generic mark. Not a resource name, so it can't
+    /// collide with a provider logo.
+    private static let fallbackStatusImageKey = "meterbar.fallback"
 
     /// Sets the status-button title, crossfading the change so the menu-bar
     /// `NN%` doesn't snap on refresh. SwiftUI's `.contentTransition(.numericText())`

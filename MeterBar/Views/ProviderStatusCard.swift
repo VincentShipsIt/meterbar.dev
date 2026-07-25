@@ -55,7 +55,7 @@ struct ProviderStatusCard: View {
                 await refreshCodexAuthenticationState()
             }
             .confirmationDialog(
-                "Use a Codex reset credit?",
+                CodexResetCreditConfirmation.title(accountName: resetCreditAccountName),
                 isPresented: $showingResetCreditConfirmation,
                 titleVisibility: .visible
             ) {
@@ -63,8 +63,10 @@ struct ProviderStatusCard: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text(
-                    "This spends one of your finite Codex reset credits and resets the active blocked usage window. " +
-                        "The action cannot be undone."
+                    CodexResetCreditConfirmation.message(
+                        accountName: resetCreditAccountName,
+                        availableCredits: snapshot.resetCreditsAvailable
+                    )
                 )
             }
             .alert(
@@ -151,41 +153,58 @@ struct ProviderStatusCard: View {
                 format: menuBarDisplayPreferences.resetTimeFormat
             )
 
-            HStack(spacing: 7) {
-                ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-                Text(snapshot.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+                    Text(snapshot.title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                Text(statusText)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(statusColor)
+                    Text(statusText)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(statusColor)
 
-                Label("\(title) \(counter)", systemImage: "hourglass")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(snapshot.accentColor)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
+                    Label("\(title) \(counter)", systemImage: "hourglass")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(snapshot.accentColor)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
+                }
 
-                if showsResetCreditAction {
-                    Button {
-                        showingResetCreditConfirmation = true
-                    } label: {
-                        Image(systemName: "arrow.clockwise.circle.fill")
+                // Blocked is exactly when a banked reset is worth spending, so the
+                // collapsed row states how many are left instead of hiding the count
+                // behind an icon-only button. The count stands on its own when the
+                // action isn't usable — a visible control that would fail is worse.
+                if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
+                    Divider()
+                    HStack(spacing: 7) {
+                        resetCreditsCountLabel(resetCount)
+                        Spacer(minLength: 8)
+                        if showsResetCreditAction {
+                            resetCreditButton(isCompact: true)
+                        }
                     }
-                    .buttonStyle(.borderless)
-                    .help("Use a Codex reset credit")
-                    .disabled(isConsumingResetCredit)
                 }
             }
         }
+    }
+
+    private func resetCreditsCountLabel(_ resetCount: Int) -> some View {
+        Label(
+            ProviderStatusBadges.resetCreditsLabel(resetCount),
+            systemImage: "arrow.clockwise.circle.fill"
+        )
+        .font(.caption2)
+        .fontWeight(.semibold)
+        .foregroundColor(snapshot.accentColor)
+        .lineLimit(1)
     }
 
     private var expandedCardBody: some View {
@@ -234,7 +253,7 @@ struct ProviderStatusCard: View {
 
             if showsResetCreditAction {
                 Divider()
-                resetCreditButton
+                resetCreditButton(isCompact: false)
             }
         }
     }
@@ -246,7 +265,10 @@ struct ProviderStatusCard: View {
         }
     }
 
-    private var resetCreditButton: some View {
+    /// `isCompact` keeps the collapsed blocked row on one line; the expanded card
+    /// stretches the same control to full width. One implementation either way so
+    /// the two states cannot drift in copy or behavior.
+    private func resetCreditButton(isCompact: Bool) -> some View {
         Button {
             showingResetCreditConfirmation = true
         } label: {
@@ -258,25 +280,39 @@ struct ProviderStatusCard: View {
                     Image(systemName: "arrow.clockwise.circle.fill")
                 }
                 Text(isConsumingResetCredit ? "Using reset credit…" : "Use reset credit")
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: isCompact ? nil : .infinity)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
         .disabled(isConsumingResetCredit)
+        .help(
+            CodexResetCreditConfirmation.message(
+                accountName: resetCreditAccountName,
+                availableCredits: snapshot.resetCreditsAvailable
+            )
+        )
     }
 
     private var showsResetCreditAction: Bool {
         ProviderCardPresentation.showsResetCreditAction(
             snapshot: snapshot,
             didConsumeResetCredit: didConsumeResetCredit,
-            isAuthenticated: isCodexAuthenticated
+            isAuthenticated: isCodexAuthenticated,
+            hasResolvedAccount: codexAccount != nil
         )
     }
 
     private var codexAccount: CodexAccount? {
         guard snapshot.service == .codexCli, let accountID = snapshot.accountID else { return nil }
         return codexAccounts.accounts.first { $0.id == accountID }
+    }
+
+    /// The profile name the redemption will hit — the same label Settings shows,
+    /// so a multi-account popover confirms which `CODEX_HOME` is being spent.
+    private var resetCreditAccountName: String {
+        codexAccount?.name ?? snapshot.title
     }
 
     private func refreshCodexAuthenticationState() async {

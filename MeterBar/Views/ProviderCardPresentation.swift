@@ -30,13 +30,15 @@ enum ProviderCardPresentation {
     static func showsResetCreditAction(
         snapshot: ProviderSnapshot,
         didConsumeResetCredit: Bool,
-        isAuthenticated: Bool
+        isAuthenticated: Bool,
+        hasResolvedAccount: Bool
     ) -> Bool {
         guard snapshot.service == .codexCli, !didConsumeResetCredit else { return false }
         return CodexResetCreditEligibility.isEligible(
             isBlocked: snapshot.hasExhaustedLimit,
             availableCredits: snapshot.resetCreditsAvailable,
-            isAuthenticated: isAuthenticated
+            isAuthenticated: isAuthenticated,
+            hasResolvedAccount: hasResolvedAccount
         )
     }
 
