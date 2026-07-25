@@ -30,7 +30,9 @@ nonisolated public enum QuotaGuardCLI {
         public let minRemaining: String?
         public let configDirectory: String?
         public let refresh: Bool
-        public let refreshTimeout: TimeInterval
+        /// Raw `--refresh-timeout` text, parsed in the core for the same reason
+        /// as `minRemaining`. `nil` means `defaultRefreshTimeout`.
+        public let refreshTimeout: String?
 
         public init(
             provider: String = defaultProvider,
@@ -38,7 +40,7 @@ nonisolated public enum QuotaGuardCLI {
             minRemaining: String? = nil,
             configDirectory: String? = nil,
             refresh: Bool = false,
-            refreshTimeout: TimeInterval = defaultRefreshTimeout
+            refreshTimeout: String? = nil
         ) {
             self.provider = provider
             self.window = window

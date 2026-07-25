@@ -41,8 +41,11 @@ struct Guard: AsyncParsableCommand {
     @Flag(name: .long, help: "Refresh usage before deciding instead of reading the cached snapshot.")
     var refresh: Bool = false
 
+    // Text for the same reason as --min-remaining: typed as Double, a
+    // non-numeric value dies inside ArgumentParser's own conversion with
+    // EX_USAGE and no JSON document, never reaching the documented exit 13.
     @Option(name: .long, help: "Seconds to allow for --refresh before falling back to the cache.")
-    var refreshTimeout: Double = QuotaGuardCLI.defaultRefreshTimeout
+    var refreshTimeout: String?
 
     func run() async throws {
         let result = await QuotaGuardCLI.run(

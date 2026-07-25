@@ -65,11 +65,25 @@ final class QuotaGuardTests: XCTestCase {
         }
     }
 
-    func testOutOfRangeRefreshTimeoutIsAUsageError() {
-        let failure = expectFailure(refreshTimeout: 100_000)
-        XCTAssertEqual(failure.outcome, .usageError)
-        XCTAssertEqual(failure.code, "invalid_refresh_timeout")
-        XCTAssertEqual(failure.flag, "--refresh-timeout")
+    /// `--refresh-timeout` is taken as text so a non-numeric value reaches this
+    /// check at all: typed as `Double` it died inside ArgumentParser's own
+    /// conversion with EX_USAGE and no JSON document, never producing the
+    /// exit 13 that docs/cli-json-schema.md promises for this flag.
+    func testMalformedOrOutOfRangeRefreshTimeoutIsAUsageErrorNamingTheInput() {
+        for raw in ["abc", "100000", "0", "-5", "", "1e"] {
+            let failure = expectFailure(refreshTimeout: raw)
+            XCTAssertEqual(failure.outcome, .usageError, raw)
+            XCTAssertEqual(failure.outcome.exitCode, 13, raw)
+            XCTAssertEqual(failure.code, "invalid_refresh_timeout", raw)
+            XCTAssertEqual(failure.flag, "--refresh-timeout", raw)
+            XCTAssertEqual(failure.value, raw, raw)
+            XCTAssertTrue(failure.message.contains("--refresh-timeout"), failure.message)
+        }
+    }
+
+    func testRefreshTimeoutFallsBackToTheDefaultWhenOmitted() throws {
+        XCTAssertEqual(try target().refreshTimeout, QuotaGuardCLI.defaultRefreshTimeout)
+        XCTAssertEqual(try target(refreshTimeout: " 45 ").refreshTimeout, 45)
     }
 
     func testConfigDirIsRejectedForProvidersWithoutAccounts() {
@@ -436,7 +450,7 @@ final class QuotaGuardTests: XCTestCase {
         window: String = "session",
         minRemaining: String? = nil,
         configDirectory: String? = nil,
-        refreshTimeout: Double = QuotaGuardCLI.defaultRefreshTimeout
+        refreshTimeout: String? = nil
     ) throws -> QuotaGuardTarget {
         try QuotaGuardTarget.resolve(
             provider: provider,
@@ -452,7 +466,7 @@ final class QuotaGuardTests: XCTestCase {
         window: String = "session",
         minRemaining: String? = nil,
         configDirectory: String? = nil,
-        refreshTimeout: Double = QuotaGuardCLI.defaultRefreshTimeout,
+        refreshTimeout: String? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> QuotaGuardFailure {

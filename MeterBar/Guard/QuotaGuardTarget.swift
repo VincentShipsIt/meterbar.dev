@@ -62,7 +62,7 @@ nonisolated struct QuotaGuardTarget: Equatable, Sendable {
         window: String,
         minRemaining: String?,
         configDirectory: String?,
-        refreshTimeout: Double
+        refreshTimeout: String?
     ) -> Result<QuotaGuardTarget, QuotaGuardFailure> {
         guard let service = ServiceType.fromCLIIdentifier(provider) else {
             return .failure(QuotaGuardFailure(
@@ -103,18 +103,23 @@ nonisolated struct QuotaGuardTarget: Equatable, Sendable {
             threshold = parsed
         }
 
-        guard refreshTimeout.isFinite,
-              (QuotaGuardCLI.minimumRefreshTimeout...QuotaGuardCLI.maximumRefreshTimeout)
-                  .contains(refreshTimeout) else {
-            return .failure(QuotaGuardFailure(
-                outcome: .usageError,
-                code: "invalid_refresh_timeout",
-                message: "Invalid --refresh-timeout value '\(QuotaGuardNumber.text(refreshTimeout))'. "
-                    + "Expected \(QuotaGuardNumber.text(QuotaGuardCLI.minimumRefreshTimeout))"
-                    + "...\(QuotaGuardNumber.text(QuotaGuardCLI.maximumRefreshTimeout)) seconds.",
-                flag: "--refresh-timeout",
-                value: QuotaGuardNumber.text(refreshTimeout)
-            ))
+        var timeout = QuotaGuardCLI.defaultRefreshTimeout
+        if let refreshTimeout {
+            guard let parsed = Double(refreshTimeout.trimmed),
+                  parsed.isFinite,
+                  (QuotaGuardCLI.minimumRefreshTimeout...QuotaGuardCLI.maximumRefreshTimeout)
+                      .contains(parsed) else {
+                return .failure(QuotaGuardFailure(
+                    outcome: .usageError,
+                    code: "invalid_refresh_timeout",
+                    message: "Invalid --refresh-timeout value '\(refreshTimeout.trimmed)'. "
+                        + "Expected \(QuotaGuardNumber.text(QuotaGuardCLI.minimumRefreshTimeout))"
+                        + "...\(QuotaGuardNumber.text(QuotaGuardCLI.maximumRefreshTimeout)) seconds.",
+                    flag: "--refresh-timeout",
+                    value: refreshTimeout.trimmed
+                ))
+            }
+            timeout = parsed
         }
 
         let trimmedConfigDirectory = configDirectory?.trimmed
@@ -136,7 +141,7 @@ nonisolated struct QuotaGuardTarget: Equatable, Sendable {
             window: resolvedWindow,
             minRemainingPercent: threshold,
             configDirectory: trimmedConfigDirectory?.isEmpty == false ? trimmedConfigDirectory : nil,
-            refreshTimeout: refreshTimeout
+            refreshTimeout: timeout
         ))
     }
 }
