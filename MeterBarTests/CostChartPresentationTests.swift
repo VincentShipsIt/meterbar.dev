@@ -231,7 +231,7 @@ final class CostChartPresentationTests: XCTestCase {
     }
 
     func testCostWindowStartUsesTodayPlusPreviousTwentyNineDays() {
-        let start = CostTracker.costWindowStart(days: 30, now: now, calendar: calendar)
+        let start = CostWindow.start(days: 30, now: now, calendar: calendar)
 
         XCTAssertEqual(start, dailyDate(daysAgo: 29))
         XCTAssertEqual(calendar.component(.hour, from: start), 0)

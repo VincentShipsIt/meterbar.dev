@@ -111,11 +111,11 @@ nonisolated struct CostScanResult {
 }
 
 /// Mutable accumulators threaded through the Codex scan. Bundling these into one
-/// value collapses `addCodexUsage`/`scanCodexRollouts`/`scanCodexSQLiteLogs`
+/// value collapses `CodexCostScanner`'s `addUsage`/`scanRollouts`/`scanSQLiteLogs`
 /// from 10–13 parameters (a SwiftLint `function_parameter_count` error) down to
 /// a single `inout` argument.
 ///
-/// Internal (not private) so `scanCodexRollouts` can be fixture-tested.
+/// Internal (not private) so `CodexCostScanner.scanRollouts` can be fixture-tested.
 nonisolated struct CodexScanContext: Sendable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
