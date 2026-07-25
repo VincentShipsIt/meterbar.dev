@@ -294,8 +294,8 @@ struct ClaudeCodeSnapshotRow: View {
                 LimitRow(title: "All Models (7d)", limit: weeklyLimit)
             }
 
-            if let sonnetLimit = metrics.codeReviewLimit {
-                LimitRow(title: "Sonnet (7d)", limit: sonnetLimit)
+            if let modelLimit = metrics.codeReviewLimit {
+                LimitRow(title: "Fable (5h)", limit: modelLimit)
             }
 
             HStack {
@@ -577,28 +577,38 @@ enum SnapshotRenderer {
 
         let now = Date()
 
+        // This standalone renderer is intentionally self-contained (its own model
+        // copies above) so it compiles with a single `swiftc` invocation and never
+        // links the app. The FIXTURE below, however, must stay in lockstep with the
+        // in-app demo scenario in `MeterBarShared/DemoData.swift` and its cost
+        // companion `MeterBar/Models/DemoData+Cost.swift`, so the landing-page
+        // screenshots match exactly what `METERBAR_DEMO=1` shows in the app:
+        // mostly-green windows, EXACTLY ONE amber "tight" band (the OpenAI/Codex
+        // weekly at 82%), zero red, generic product labels — never owner project
+        // names. When you change the scenario in DemoData, mirror the headline
+        // percentages here (and vice versa).
         let claudeCodeMetrics = UsageMetrics(
             service: .claudeCode,
             sessionLimit: UsageLimit(used: 42, total: 100, resetTime: now.addingTimeInterval(2 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 78, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
-            codeReviewLimit: UsageLimit(used: 91, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
-            lastUpdated: now.addingTimeInterval(-18 * 60)
+            weeklyLimit: UsageLimit(used: 58, total: 100, resetTime: now.addingTimeInterval(24 * 60 * 60)),
+            codeReviewLimit: UsageLimit(used: 34, total: 100, resetTime: now.addingTimeInterval((2 * 60 + 30) * 60)),
+            lastUpdated: now.addingTimeInterval(-3 * 60)
         )
 
         let openAIMetrics = UsageMetrics(
             service: .openai,
-            sessionLimit: UsageLimit(used: 1200, total: 5000, resetTime: now.addingTimeInterval(5 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 6200, total: 10000, resetTime: now.addingTimeInterval(6 * 24 * 60 * 60)),
+            sessionLimit: UsageLimit(used: 61, total: 100, resetTime: now.addingTimeInterval(2 * 60 * 60)),
+            weeklyLimit: UsageLimit(used: 82, total: 100, resetTime: now.addingTimeInterval(24 * 60 * 60)),
             codeReviewLimit: nil,
-            lastUpdated: now.addingTimeInterval(-42 * 60)
+            lastUpdated: now.addingTimeInterval(-5 * 60)
         )
 
         let cursorMetrics = UsageMetrics(
             service: .cursor,
-            sessionLimit: UsageLimit(used: 180, total: 500, resetTime: now.addingTimeInterval(3 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 760, total: 1000, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
-            codeReviewLimit: UsageLimit(used: 140, total: 200, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
-            lastUpdated: now.addingTimeInterval(-95 * 60)
+            sessionLimit: UsageLimit(used: 2, total: 20, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 205, total: 500, resetTime: nil),
+            codeReviewLimit: nil,
+            lastUpdated: now.addingTimeInterval(-7 * 60)
         )
 
         let menuBarView = MenuBarSnapshotView(
