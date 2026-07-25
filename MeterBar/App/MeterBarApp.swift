@@ -89,6 +89,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppLog.app.info("MeterBar finished launching")
         SoftwareUpdateController.shared.refreshState()
 
+        // Reconnect scripts are generated on demand and executed by Terminal;
+        // sweep any the previous run left behind.
+        ClaudeCodeReconnectService.purgeReconnectScripts()
+
         // Keep Dock visibility in sync with the user's preference.
         observeDockVisibility()
         observeSystemWake()
