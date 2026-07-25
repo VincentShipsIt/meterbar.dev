@@ -269,4 +269,113 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(context.totals.input, 100)
         XCTAssertEqual(context.sessionIDs, ["new"])
     }
+
+    // MARK: - Period/lifetime windows (single-pass scan)
+
+    func testParseSessionWindowsSplitsPeriodFromLifetime() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-05-01T10:00:00.000Z", messageID: "old", requestID: "old",
+                      input: 10, output: 1),
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "new", requestID: "new",
+                      input: 42, output: 8)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+
+        let windows = CostTracker.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 42)
+        XCTAssertEqual(windows.period.output, 8)
+        XCTAssertEqual(windows.lifetime.input, 52)
+        XCTAssertEqual(windows.lifetime.output, 9)
+        XCTAssertEqual(windows.period.sessions, 1)
+        XCTAssertEqual(windows.lifetime.sessions, 1)
+    }
+
+    func testParseSessionWindowsMatchesTwoSeparateScans() throws {
+        // The whole point of the single-pass rewrite: one traversal must produce
+        // exactly what two independently-cutoff traversals used to produce.
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-05-01T10:00:00.000Z", messageID: "a", requestID: "a",
+                      input: 1_000_000, output: 0),
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "b", requestID: "b",
+                      input: 1_000_000, output: 0)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+
+        let windows = CostTracker.parseSessionWindows(at: url, since: cutoff)
+        let period = CostTracker.parseSessionFile(at: url, since: cutoff)
+        let lifetime = CostTracker.parseSessionFile(at: url, since: .distantPast)
+
+        XCTAssertEqual(windows.period.input, period.input)
+        XCTAssertEqual(windows.period.estimatedCost, period.estimatedCost, accuracy: 0.0001)
+        XCTAssertEqual(windows.lifetime.input, lifetime.input)
+        XCTAssertEqual(windows.lifetime.estimatedCost, lifetime.estimatedCost, accuracy: 0.0001)
+        // period ⊆ lifetime is structural, not incidental.
+        XCTAssertEqual(windows.lifetime.input, 2_000_000)
+        XCTAssertEqual(windows.period.input, 1_000_000)
+    }
+
+    func testParseSessionWindowsDeduplicatesWithinEachWindow() throws {
+        // A retried event whose duplicate straddles the cutoff. Deduplicating
+        // once across the whole file and filtering afterwards would let the
+        // pre-cutoff copy win and change the period total, so each window keeps
+        // its own dedup map.
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 100, output: 50),
+            eventLine(timestamp: "2026-05-01T10:00:00.000Z", input: 7, output: 3)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+
+        let windows = CostTracker.parseSessionWindows(at: url, since: cutoff)
+
+        // Period only ever saw the in-window copy.
+        XCTAssertEqual(windows.period.input, 100)
+        XCTAssertEqual(windows.period.output, 50)
+        // Lifetime saw both copies as one event; last line in the file wins,
+        // matching what a `.distantPast` scan produces today.
+        XCTAssertEqual(windows.lifetime.input, 7)
+        XCTAssertEqual(windows.lifetime.output, 3)
+    }
+
+    func testParseSessionWindowsTracksEarliestAndLatestPerWindow() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-05-01T10:00:00.000Z", messageID: "old", requestID: "old"),
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "new", requestID: "new")
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+
+        let windows = CostTracker.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.earliest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
+        XCTAssertEqual(windows.lifetime.earliest, FlexibleISO8601.date(from: "2026-05-01T10:00:00.000Z"))
+        XCTAssertEqual(windows.lifetime.latest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
+    }
+
+    func testScanCodexArchivedWindowsSplitsPeriodFromLifetime() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexTokenLine(timestamp: "2025-01-01T00:00:00Z", conversationID: "old", input: 9_000),
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "new", input: 100)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var windows = CostTracker.codexScanWindows(cutoff: cutoff)
+
+        CostTracker.scanCodexArchivedSessions(directory: dir, windows: &windows)
+
+        XCTAssertEqual(windows.period.totals.input, 100)
+        XCTAssertEqual(windows.period.sessionIDs, ["new"])
+        XCTAssertEqual(windows.lifetime.totals.input, 9_100)
+        XCTAssertEqual(windows.lifetime.sessionIDs, ["new", "old"])
+    }
+
+    func testScanCodexArchivedWindowsDeduplicateIndependently() throws {
+        let line = codexTokenLine(timestamp: "2026-06-15T10:00:00Z")
+        let dir = try writeCodexArchive(lines: [line, line])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var windows = CostTracker.codexScanWindows(cutoff: cutoff)
+
+        CostTracker.scanCodexArchivedSessions(directory: dir, windows: &windows)
+
+        XCTAssertEqual(windows.period.totals.input, 1_000)
+        XCTAssertEqual(windows.lifetime.totals.input, 1_000)
+    }
 }
