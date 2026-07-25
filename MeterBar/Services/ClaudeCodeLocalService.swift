@@ -14,6 +14,14 @@ class ClaudeCodeLocalService: ObservableObject {
     /// without touching main-actor state.
     nonisolated static let defaultUsageEndpoint = "https://api.anthropic.com/api/oauth/usage"
 
+    /// Timeout for the metrics fetch — the user-visible reading, worth waiting on.
+    nonisolated static let usageRequestTimeout: TimeInterval = 30.0
+
+    /// Timeout for the extra-usage probe. Deliberately shorter than
+    /// `usageRequestTimeout`: it is best-effort, resolves to `.unknown` on any
+    /// failure, and must not stall a refresh behind a hung connection.
+    nonisolated static let extraUsageRequestTimeout: TimeInterval = 15.0
+
     private let usageEndpoint = ClaudeCodeLocalService.defaultUsageEndpoint
 
     private let keychainService = "Claude Code-credentials"
@@ -182,6 +190,33 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
+    /// Builds an authenticated GET against the OAuth usage endpoint.
+    ///
+    /// Both callers — the metrics fetch and the extra-usage probe — hit the same
+    /// URL with the same four headers and differed only in `timeoutInterval`, so
+    /// the header set had to be kept in sync by hand. `timeout` stays a required
+    /// parameter precisely because that difference is intentional: see
+    /// `usageRequestTimeout` and `extraUsageRequestTimeout`.
+    ///
+    /// - Returns: `nil` when `endpoint` is empty or unparseable, which each
+    ///   caller maps onto its own failure mode.
+    nonisolated static func usageRequest(
+        token: String,
+        endpoint: String = defaultUsageEndpoint,
+        timeout: TimeInterval
+    ) -> URLRequest? {
+        guard !endpoint.isEmpty, let url = URL(string: endpoint) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.timeoutInterval = timeout
+        return request
+    }
+
     /// Pure, side-effect-free fetch of Claude Code usage from `/api/oauth/usage`.
     ///
     /// Reads no `@Published` state and performs no `MainActor` mutation, so it
@@ -196,17 +231,13 @@ class ClaudeCodeLocalService: ObservableObject {
         endpoint: String = defaultUsageEndpoint,
         session: URLSession = ServiceSupport.session
     ) async throws -> UsageMetrics {
-        guard let url = URL(string: endpoint), !endpoint.isEmpty else {
+        guard let request = Self.usageRequest(
+            token: token,
+            endpoint: endpoint,
+            timeout: Self.usageRequestTimeout
+        ) else {
             throw ServiceError.invalidURL
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.timeoutInterval = 30.0
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -379,15 +410,13 @@ class ClaudeCodeLocalService: ObservableObject {
             return .unknown
         }
 
-        guard let url = URL(string: usageEndpoint) else { return .unknown }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(credentials.claudeAiOauth.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.timeoutInterval = 15.0
+        guard let request = Self.usageRequest(
+            token: credentials.claudeAiOauth.accessToken,
+            endpoint: usageEndpoint,
+            timeout: Self.extraUsageRequestTimeout
+        ) else {
+            return .unknown
+        }
 
         do {
             let (data, response) = try await urlSession.data(for: request)
