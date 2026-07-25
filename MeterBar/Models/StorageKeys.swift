@@ -30,6 +30,11 @@ nonisolated enum StorageKeys {
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
+    /// Hidden opt-in for demo / sample-data mode. When set (or `METERBAR_DEMO=1`
+    /// in the environment) the app publishes synthetic `DemoData` instead of the
+    /// signed-in account's real usage, for landing-page screenshots and the
+    /// first-run onboarding preview. Off by default; never affects real data.
+    static let demoMode = "DemoMode"
     /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the
     /// primary reader for the default account. On by default; off forces the CLI
     /// output fallback. Legacy key name kept to preserve existing user settings.

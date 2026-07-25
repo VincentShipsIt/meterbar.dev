@@ -130,7 +130,8 @@ final class UsageDataManagerTests: XCTestCase {
         preloadSharedAccountMetrics: [AccountUsageSnapshot] = [],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
-        schedulesAutoRefresh: Bool = false
+        schedulesAutoRefresh: Bool = false,
+        demoMode: Bool = false
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
         createdSuiteNames.append(contentsOf: [suiteName, "\(suiteName)-vis"])
@@ -173,9 +174,37 @@ final class UsageDataManagerTests: XCTestCase {
             preferences: cacheDefaults,
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
-            schedulesAutoRefresh: schedulesAutoRefresh
+            schedulesAutoRefresh: schedulesAutoRefresh,
+            demoMode: demoMode
         )
         return (manager, sharedStore)
+    }
+
+    // MARK: - Demo mode
+
+    func testDemoModePublishesSyntheticMetricsAndNeverWritesTheSharedStore() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(codex: codex, cursor: cursor, demoMode: true)
+
+        // Publishes the synthetic fixture rather than any real/cached account data.
+        let expected = DemoData.metrics()
+        XCTAssertEqual(Set(manager.metrics.keys), Set(expected.keys))
+        XCTAssertEqual(manager.metrics[.codexCli]?.weeklyLimit?.used, 82)
+        XCTAssertEqual(manager.metrics[.claudeCode]?.modelLimitLabel, "Fable")
+
+        // The widget/CLI cache lives in a separate process; demo mode must never
+        // clobber the real user's on-disk metrics.
+        sharedStore.flushPendingWrites()
+        XCTAssertTrue(sharedStore.loadMetrics().isEmpty)
+
+        // Refreshing is a no-op that reports every provider as skipped-for-demo,
+        // and still leaves the shared cache untouched.
+        let report = await manager.refreshAll()
+        XCTAssertEqual(report.outcome(for: .codexCli)?.state, .skipped)
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .skipped)
+        sharedStore.flushPendingWrites()
+        XCTAssertTrue(sharedStore.loadMetrics().isEmpty)
     }
 
     func testRefreshRecordsSuccessAndFailureHealth() async {
