@@ -105,6 +105,10 @@ final class UsageDataManagerTests: XCTestCase {
 
     private enum StubError: Error { case fetchFailed }
 
+    /// Carries a phase label so a test can assert *which* leg's failure ended up
+    /// in `lastError`, rather than merely that some failure did.
+    private struct TaggedError: Error { let tag: String }
+
     private final class MultiAccountCodexProvider: CodexUsageProviding {
         var metricsByAccount: [UUID: UsageMetrics]
         var failingAccountIDs: Set<UUID> = []
@@ -847,6 +851,71 @@ final class UsageDataManagerTests: XCTestCase {
             report.outcome(for: .claudeCode)?.reason,
             ServiceSupport.safeErrorMessage(for: ServiceError.parsingError),
             "the first enabled account's failure must win regardless of completion order"
+        )
+    }
+
+    /// `lastError` must be a property of the inputs, not of scheduling. The
+    /// three phases race, so whichever finishes last must not get to claim the
+    /// surfaced error: Claude outranks Codex outranks the simple providers,
+    /// every run.
+    func testRefreshAllSurfacesClaudeFailureAheadOfConcurrentPhases() async throws {
+        let (manager, _) = try makeAllPhasesFailingManager(
+            claudeResult: .failure(TaggedError(tag: "claude")),
+            codexResult: .failure(TaggedError(tag: "codex"))
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            (manager.lastError as? TaggedError)?.tag,
+            "claude",
+            "the Claude phase outranks the others regardless of completion order"
+        )
+    }
+
+    /// Same ordering guarantee one rung down: with Claude healthy, the Codex
+    /// phase's failure wins over the simple providers'.
+    func testRefreshAllSurfacesCodexFailureAheadOfSimpleProviders() async throws {
+        let (manager, _) = try makeAllPhasesFailingManager(
+            claudeResult: .success(MetricsFixtures.claudeCode()),
+            codexResult: .failure(TaggedError(tag: "codex"))
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            (manager.lastError as? TaggedError)?.tag,
+            "codex",
+            "the Codex phase outranks the simple providers regardless of completion order"
+        )
+    }
+
+    /// Builds a manager whose three refresh phases all run — and whose simple
+    /// provider always fails — so a test only has to say how Claude and Codex
+    /// behave. The shared probe holds every leg open until all three are in
+    /// flight, which is what makes completion order genuinely non-deterministic.
+    private func makeAllPhasesFailingManager(
+        claudeResult: Result<UsageMetrics, Error>,
+        codexResult: Result<UsageMetrics, Error>
+    ) throws -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
+        let accountSuite = "UsageDataManagerTests-phase-order-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let probe = ConcurrencyProbe(expected: 3)
+
+        let claude = StubClaudeProvider(hasAccess: true, result: claudeResult)
+        claude.probe = probe
+        let codex = StubProvider(hasAccess: true, result: codexResult)
+        codex.probe = probe
+        let cursor = StubProvider(hasAccess: true, result: .failure(TaggedError(tag: "simple")))
+        cursor.probe = probe
+
+        return makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: ClaudeCodeAccountStore(userDefaults: accountDefaults),
+            hidden: [.openRouter, .grok]
         )
     }
 

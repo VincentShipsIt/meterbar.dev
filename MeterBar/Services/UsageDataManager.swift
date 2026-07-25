@@ -200,6 +200,11 @@ class UsageDataManager: ObservableObject {
         let codexResult = await codexFetch
         let simpleResults = await simpleFetch
 
+        // Rank the phases here, in a fixed order, rather than letting each one
+        // assign `lastError` as it finishes: the three race, so completion order
+        // is arbitrary and the surfaced error would otherwise change run to run.
+        lastError = claudeResult?.firstFailure ?? codexResult?.firstFailure ?? simpleResults.firstFailure
+
         // Claude Code metrics (local files)
         if let claudeResult {
             claudeCodeAccountMetrics = claudeResult.metrics
@@ -335,6 +340,10 @@ class UsageDataManager: ObservableObject {
     private struct SimpleProviderRefresh: @unchecked Sendable {
         let metrics: [ServiceType: UsageMetrics]
         let states: [ServiceType: (state: ProviderRefreshState, reason: String?)]
+        /// First failure in provider order. Reported back rather than written
+        /// straight to `lastError` so the caller — not the scheduler — decides
+        /// how this phase ranks against the ones racing alongside it.
+        let firstFailure: Error?
     }
 
     private func refreshSimpleProviders() async -> SimpleProviderRefresh {
@@ -360,14 +369,15 @@ class UsageDataManager: ObservableObject {
             try await self.fetchSimpleProviderMetrics(pending[index])
         }
 
-        // Fold in the original provider order so `lastError` stays deterministic
-        // rather than reflecting whichever leg happened to finish last.
+        // Fold in the original provider order so the reported failure stays
+        // deterministic rather than reflecting whichever leg finished last.
+        var firstFailure: Error?
         for (service, leg) in zip(pending, legs) {
             if let fetched = leg.metrics {
                 metrics[service] = fetched
                 states[service] = (.refreshed, nil)
             } else if let error = leg.error {
-                lastError = error
+                if firstFailure == nil { firstFailure = error }
                 let safeMessage = ServiceSupport.safeErrorMessage(for: error)
                 let detail = "Failed to fetch \(service.rawValue) metrics: \(safeMessage)"
                 AppLog.usage.error("\(detail, privacy: .public)")
@@ -375,7 +385,7 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        return SimpleProviderRefresh(metrics: metrics, states: states)
+        return SimpleProviderRefresh(metrics: metrics, states: states, firstFailure: firstFailure)
     }
 
     func refresh(service: ServiceType) async {
@@ -472,14 +482,18 @@ class UsageDataManager: ObservableObject {
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
+        // The account fetchers report their first failure instead of writing
+        // `lastError` themselves (see `refreshAll`), so this path surfaces it.
         case .claudeCode:
-            let accountMetrics = await fetchClaudeCodeAccountMetrics().metrics
-            claudeCodeAccountMetrics = accountMetrics
-            if let representative = representativeClaudeCodeMetrics(from: accountMetrics) { return representative }
+            let fetch = await fetchClaudeCodeAccountMetrics()
+            claudeCodeAccountMetrics = fetch.metrics
+            if let failure = fetch.firstFailure { lastError = failure }
+            if let representative = representativeClaudeCodeMetrics(from: fetch.metrics) { return representative }
         case .codexCli:
-            let accountMetrics = await fetchCodexAccountMetrics().metrics
-            codexAccountMetrics = accountMetrics
-            if let representative = representativeCodexMetrics(from: accountMetrics) { return representative }
+            let fetch = await fetchCodexAccountMetrics()
+            codexAccountMetrics = fetch.metrics
+            if let failure = fetch.firstFailure { lastError = failure }
+            if let representative = representativeCodexMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
         case .cursor, .openRouter, .grok:
             guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
@@ -686,7 +700,6 @@ class UsageDataManager: ObservableObject {
                 successCount += 1
             } else if let error = leg.error {
                 if firstFailure == nil { firstFailure = error }
-                lastError = error
                 if let cachedMetrics = claudeCodeAccountMetrics[account.id] {
                     refreshedMetrics[account.id] = cachedMetrics
                 }
@@ -743,7 +756,6 @@ class UsageDataManager: ObservableObject {
                 // skip, not a failure, and must not resurrect a stale cache.
                 if error is CodexAccountUnreachable { continue }
                 if firstFailure == nil { firstFailure = error }
-                lastError = error
                 if let cachedMetrics = codexAccountMetrics[account.id] {
                     refreshedMetrics[account.id] = cachedMetrics
                 }

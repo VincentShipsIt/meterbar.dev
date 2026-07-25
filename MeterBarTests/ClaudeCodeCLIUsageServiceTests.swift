@@ -190,10 +190,15 @@ final class ClaudeCodeCLIUsageServiceTests: XCTestCase {
         }
     }
 
+    /// Fails loudly on an unreadable pid file instead of returning a sentinel:
+    /// a `-1` here makes `processAlive` false forever, so the leak assertions
+    /// would pass without ever having observed the grandchild they guard.
     private func pid(from file: URL) throws -> pid_t {
         let text = try String(contentsOf: file, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return pid_t(text) ?? -1
+        let parsed = try XCTUnwrap(pid_t(text), "unparsable pid file contents: \(text)")
+        XCTAssertGreaterThan(parsed, 0, "pid file must name a real process")
+        return parsed
     }
 
     private func processAlive(_ pid: pid_t) -> Bool {
