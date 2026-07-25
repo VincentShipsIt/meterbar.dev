@@ -1,17 +1,29 @@
 # SwiftLint Configuration for MeterBar
 # https://github.com/realm/SwiftLint
 
-# Paths to include
+# Paths to include.
+# Every first-party Swift target that ships to a user is linted — the app, the
+# widget extension, the CLI, the shared package, and the repo's helper scripts.
+# Previously only `MeterBar` was, so four of the five went unchecked.
 included:
   - MeterBar
+  - MeterBarWidget
+  - MeterBarCLI
+  - Packages
+  - scripts
+# Not yet included: MeterBarTests (332 → 246 of the violations this widening
+# surfaced live there, almost all mechanical). Landing them here would bury the
+# production-code fixes in test churn, so they stay a separate pass.
 
-# Paths to exclude
+# Paths to exclude.
+# `**/.build` (not just `.build`) matters now that the SwiftPM targets are
+# linted: MeterBarCLI and Packages each carry their own build directory full of
+# vendored dependency checkouts, which are not ours to lint.
 excluded:
   - Pods
   - DerivedData
-  - .build
   - Build
-  - Packages
+  - "**/.build"
 
 # Rules configuration
 disabled_rules:
@@ -110,6 +122,14 @@ custom_rules:
   no_print_statements:
     name: "No Print Statements"
     regex: "\\bprint\\s*\\("
+    # Scoped to the GUI targets. In a menu-bar app or a widget extension there is
+    # no terminal attached, so `print` writes to a stream nobody reads and the
+    # unified log is the only place a message survives. In `MeterBarCLI` and the
+    # helper scripts stdout *is* the product — every line the user sees is a
+    # `print` — so applying the rule there would invert its own rationale.
+    excluded:
+      - ".*/MeterBarCLI/.*"
+      - ".*/scripts/.*"
     message: "Use os_log or Logger instead of print"
     severity: warning
 

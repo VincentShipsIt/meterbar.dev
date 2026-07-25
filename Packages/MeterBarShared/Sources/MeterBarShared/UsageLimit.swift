@@ -46,7 +46,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     }
 
     public var percentage: Double {
-        return min(100, rawPercentage)
+        min(100, rawPercentage)
     }
 
     /// User-facing percentage labels shared by the app, widget, and CLI. A
@@ -71,18 +71,18 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     /// `used` clamped into `0...total`, for progress bars that reject
     /// out-of-range values (e.g. `ProgressView`).
     public var clampedUsed: Double {
-        return max(0, min(used, total))
+        max(0, min(used, total))
     }
 
     /// `total` clamped away from zero so progress-bar math never divides by 0.
     public var clampedTotal: Double {
-        return max(0.001, total)
+        max(0.001, total)
     }
 
     // Severity thresholds and "% left" live in `QuotaBands` — the single
     // source of truth for every surface. Only the hard at-limit check stays.
     public var isAtLimit: Bool {
-        return percentage >= 100
+        percentage >= 100
     }
 
     /// Three-level status derived from the shared `QuotaBand` thresholds, for

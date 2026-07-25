@@ -353,6 +353,26 @@ final class WidgetPresentationTests: XCTestCase {
         )
     }
 
+    // MARK: - Demo mode
+
+    func testMediumWidgetRendersDemoDataAsHealthyRowsWithSingleAmberBand() {
+        let result = presentation(
+            metrics: DemoData.metrics(now: now),
+            family: .medium
+        )
+
+        XCTAssertNil(result.emptyState)
+        XCTAssertFalse(result.rows.isEmpty)
+        // Fresh (`lastUpdated == now`), so every row is healthy — never stale.
+        XCTAssertTrue(result.rows.allSatisfy { $0.health == .healthy })
+        // Mostly green with exactly one amber band, and zero red.
+        let statuses = result.rows.map(\.usageStatus)
+        XCTAssertEqual(statuses.filter { $0 == .warning }.count, 1)
+        XCTAssertFalse(statuses.contains(.critical))
+        // Only generic product providers, never owner project names.
+        XCTAssertTrue(result.rows.allSatisfy { [.claudeCode, .codexCli, .cursor].contains($0.service) })
+    }
+
     private func presentation(
         metrics: [ServiceType: UsageMetrics],
         accountMetrics: [AccountUsageSnapshot] = [],
