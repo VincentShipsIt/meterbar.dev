@@ -162,7 +162,11 @@ final class LimitRowTests: XCTestCase {
 /// content for the limit list without swapping to a second card design.
 @MainActor
 final class ProviderStatusCardSmokeTests: XCTestCase {
-    private func snapshot(exhausted: Bool) -> ProviderSnapshot {
+    private func snapshot(
+        exhausted: Bool,
+        resetCreditsAvailable: Int? = nil,
+        accountID: UUID? = nil
+    ) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: exhausted ? 100 : 40,
             total: 100,
@@ -179,8 +183,8 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
             ],
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
-            resetCreditsAvailable: nil,
-            accountID: nil,
+            resetCreditsAvailable: resetCreditsAvailable,
+            accountID: accountID,
             fableActivity: nil
         )
     }
@@ -197,6 +201,18 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         let card = ProviderStatusCard(snapshot: snapshot(exhausted: true))
         XCTAssertTrue(card.snapshot.hasExhaustedLimit, "fixture should drive the reset-only content")
         let host = NSHostingView(rootView: card.frame(width: 360))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
+    }
+
+    /// The blocked Codex card grows a reset-credit line (count + action) once
+    /// credits are banked. It must still lay out on the popover's narrow width.
+    func testExhaustedCardWithResetCreditsRenders() {
+        let card = ProviderStatusCard(
+            snapshot: snapshot(exhausted: true, resetCreditsAvailable: 2, accountID: CodexAccount.defaultID)
+        )
+        XCTAssertEqual(card.snapshot.resetCreditsAvailable, 2)
+        let host = NSHostingView(rootView: card.frame(width: 300))
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
