@@ -120,6 +120,20 @@ nonisolated final class KeychainManager {
         case failure
     }
 
+    /// Accessibility class for every item this manager writes.
+    ///
+    /// `AfterFirstUnlock` rather than `WhenUnlocked`: usage refresh runs in the
+    /// background and must still be able to read the admin key while the screen
+    /// is locked. `ThisDeviceOnly` because these are org-wide API credentials —
+    /// they are never eligible for iCloud Keychain sync and never leave the Mac
+    /// they were entered on. Without this, items take the platform default,
+    /// which is both sync-eligible and restored onto new devices from backup.
+    private static let accessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+    /// Identity only. Deliberately excludes `kSecAttrAccessible`: on
+    /// `SecItemCopyMatching` and `SecItemDelete` that attribute is a match
+    /// predicate, so including it here would silently stop resolving any item
+    /// written before this change. It belongs on the write path alone.
     private func baseQuery(key: String, service: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -130,7 +144,13 @@ nonisolated final class KeychainManager {
 
     private func save(data: Data, key: String, service: String) -> Bool {
         let query = baseQuery(key: key, service: service)
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        // Re-asserted on update as well as add: an item written by an earlier
+        // build carries the default class, and every later save takes the update
+        // path, so update is the only place such an item can be hardened.
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: Self.accessibility
+        ]
         let updateStatus = backend.update(query: query, attributes: attributes)
 
         switch updateStatus {
@@ -139,6 +159,7 @@ nonisolated final class KeychainManager {
         case errSecItemNotFound:
             var addQuery = query
             addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = Self.accessibility
             return backend.add(query: addQuery) == errSecSuccess
         default:
             return false
