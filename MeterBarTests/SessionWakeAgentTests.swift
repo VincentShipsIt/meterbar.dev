@@ -210,4 +210,55 @@ final class SessionWakeAgentTests: XCTestCase {
         XCTAssertEqual(cli.acquire(), .acquired)
         cli.release()
     }
+
+    // MARK: - Completion notification
+
+    func testCompletionNotificationBodyReportsEveryNonZeroBucket() {
+        let summary = WakeRunSummary(resumed: 2, failed: 1, skipped: 0, remaining: 3)
+        let body = SessionWakeAgent.completionNotificationBody(summary: summary, provider: .claude)
+
+        XCTAssertTrue(body.hasPrefix("Resumed 2 of 3 "))
+        XCTAssertTrue(body.contains("1 failed."))
+        XCTAssertTrue(body.contains("3 still queued."))
+    }
+
+    func testCompletionNotificationBodyOmitsEmptyBuckets() {
+        let summary = WakeRunSummary(resumed: 1, failed: 0, skipped: 0, remaining: 0)
+        let body = SessionWakeAgent.completionNotificationBody(summary: summary, provider: .claude)
+
+        XCTAssertFalse(body.contains("failed."))
+        XCTAssertFalse(body.contains("still queued."))
+    }
+
+    func testNotificationArgumentsPassTextAsArgvNotScriptSource() {
+        let arguments = SessionWakeAgent.notificationArguments(body: "plain body", title: "plain title")
+
+        // `-e <script> <arg1> <arg2>`: the two runtime values are trailing argv,
+        // read by the handler via `item n of argv`.
+        XCTAssertEqual(arguments.first, "-e")
+        XCTAssertEqual(arguments.count, 4)
+        XCTAssertEqual(arguments[2], "plain body")
+        XCTAssertEqual(arguments[3], "plain title")
+    }
+
+    func testNotificationScriptSourceIsConstantAcrossInputs() {
+        let benign = SessionWakeAgent.notificationArguments(body: "ok", title: "title")
+        let hostile = SessionWakeAgent.notificationArguments(
+            body: #"" & (do shell script "touch /tmp/pwned") & ""#,
+            title: #"back\slash and "quotes""#
+        )
+
+        // The whole point of the argv form: nothing a caller supplies can reach
+        // the compiled script text, so there is no escaping to get wrong.
+        XCTAssertEqual(benign[1], hostile[1])
+    }
+
+    func testNotificationArgumentsDoNotEscapeTheirInputs() {
+        let hostileBody = #"" & (do shell script "touch /tmp/pwned") & ""#
+        let arguments = SessionWakeAgent.notificationArguments(body: hostileBody, title: "t")
+
+        // Passed through verbatim — osascript hands argv to the handler as data,
+        // so escaping would corrupt the displayed text rather than protect it.
+        XCTAssertEqual(arguments[2], hostileBody)
+    }
 }
