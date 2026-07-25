@@ -556,44 +556,159 @@ public enum ProviderReadinessEvaluator {
 
     // MARK: Grok
 
+    /// Grok is read by driving a subprocess, so "installed and signed in" is not
+    /// the whole story: the agent can start and still refuse, hang, or answer in
+    /// a shape MeterBar cannot read. The last refresh failure therefore feeds the
+    /// setup checks too, so the row that is actually wrong is the row that
+    /// carries the advice.
     public static func grok(_ input: GrokReadinessInput) -> ProviderReadiness {
-        let installed = ReadinessCheck(
-            id: ReadinessCheckID.installed,
-            title: "CLI installed",
-            level: input.isCLIInstalled ? .pass : .fail,
-            detail: input.isCLIInstalled ? "Grok Build CLI found on PATH." : "Grok Build CLI not found on PATH.",
-            recovery: input.isCLIInstalled ? nil : "Install Grok Build, then run `grok login`."
-        )
-        let authLevel: ReadinessLevel = input.authFileReadable ? .pass : .fail
-        let auth = ReadinessCheck(
-            id: ReadinessCheckID.auth,
-            title: "Signed in",
-            level: authLevel,
-            detail: input.authFileReadable
-                ? "A readable Grok Build cached login is available."
-                : input.authFileExists
-                    ? "Grok Build cached login exists but could not be read."
-                    : "Not signed in — no Grok Build cached login found.",
-            recovery: input.authFileReadable ? nil : "Run `grok login`."
-        )
-        let dataReady = input.isCLIInstalled && input.authFileReadable
-        let data = ReadinessCheck(
-            id: ReadinessCheckID.data,
-            title: "Usage readable",
-            level: dataReady ? .pass : .warn,
-            detail: dataReady
-                ? "Weekly usage is readable through the Grok Build ACP billing method."
-                : "Usage becomes readable once Grok Build is installed and signed in."
-        )
+        let failure = input.refreshError.flatMap(GrokRefreshFailure.init(message:))
         return ProviderReadiness(
             provider: .grok,
-            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+            checks: [
+                grokInstalledCheck(input, failure: failure),
+                grokAuthCheck(input, failure: failure),
+                grokDataCheck(input, failure: failure),
+                refreshCheck(input.refreshError, recovery: failure?.recovery)
+            ]
         )
+    }
+
+    private static func grokInstalledCheck(
+        _ input: GrokReadinessInput,
+        failure: GrokRefreshFailure?
+    ) -> ReadinessCheck {
+        let title = "CLI installed"
+        guard input.isCLIInstalled else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.installed,
+                title: title,
+                level: .fail,
+                detail: "Grok Build CLI not found on PATH.",
+                recovery: "Install Grok Build, then run `grok login`."
+            )
+        }
+
+        // Found on PATH but unusable as an agent: report it here rather than
+        // letting a bare "installed ✓" sit above a failing usage row.
+        switch failure {
+        case .agentStartFailed:
+            return ReadinessCheck(
+                id: ReadinessCheckID.installed,
+                title: title,
+                level: .fail,
+                detail: "Grok Build CLI was found, but the agent could not be started.",
+                recovery: failure?.recovery
+            )
+        case .unsupportedVersion:
+            return ReadinessCheck(
+                id: ReadinessCheckID.installed,
+                title: title,
+                level: .fail,
+                detail: "This Grok Build is too old to report billing.",
+                recovery: failure?.recovery
+            )
+        default:
+            return ReadinessCheck(
+                id: ReadinessCheckID.installed,
+                title: title,
+                level: .pass,
+                detail: "Grok Build CLI found on PATH."
+            )
+        }
+    }
+
+    private static func grokAuthCheck(
+        _ input: GrokReadinessInput,
+        failure: GrokRefreshFailure?
+    ) -> ReadinessCheck {
+        let title = "Signed in"
+        let loginRecovery = "Run `grok login`."
+
+        guard input.authFileReadable else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: title,
+                level: .fail,
+                detail: input.authFileExists
+                    ? "Grok Build cached login exists but could not be read."
+                    : "Not signed in — no Grok Build cached login found.",
+                recovery: loginRecovery
+            )
+        }
+
+        // The cached login file is present, but the agent itself rejected it —
+        // the file's existence is only ever a hint, never proof of a session.
+        if failure == .notSignedIn {
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: title,
+                level: .fail,
+                detail: "Grok Build rejected the cached login.",
+                recovery: loginRecovery
+            )
+        }
+
+        return ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: title,
+            level: .pass,
+            detail: "A readable Grok Build cached login is available."
+        )
+    }
+
+    private static func grokDataCheck(
+        _ input: GrokReadinessInput,
+        failure: GrokRefreshFailure?
+    ) -> ReadinessCheck {
+        let title = "Usage readable"
+        guard input.isCLIInstalled, input.authFileReadable else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: title,
+                level: .warn,
+                detail: "Usage becomes readable once Grok Build is installed and signed in."
+            )
+        }
+
+        switch failure {
+        case .unparseableResponse:
+            return ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: title,
+                level: .fail,
+                detail: "Grok Build answered in a format MeterBar could not read.",
+                recovery: failure?.recovery
+            )
+        case .agentTimedOut:
+            return ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: title,
+                level: .warn,
+                detail: "Grok Build did not answer the billing request in time.",
+                recovery: failure?.recovery
+            )
+        case .agentStartFailed, .unsupportedVersion, .notSignedIn, .requestFailed:
+            return ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: title,
+                level: .warn,
+                detail: "Usage could not be read on the last refresh.",
+                recovery: failure?.recovery
+            )
+        case nil:
+            return ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: title,
+                level: .pass,
+                detail: "Session and weekly usage are readable through the Grok Build ACP billing method."
+            )
+        }
     }
 
     // MARK: Shared
 
-    private static func refreshCheck(_ error: String?) -> ReadinessCheck {
+    private static func refreshCheck(_ error: String?, recovery: String? = nil) -> ReadinessCheck {
         guard let error, !error.isEmpty else {
             return ReadinessCheck(
                 id: ReadinessCheckID.refresh,
@@ -606,7 +721,8 @@ public enum ProviderReadinessEvaluator {
             id: ReadinessCheckID.refresh,
             title: "Last refresh",
             level: .fail,
-            detail: "Last refresh failed: \(error)"
+            detail: "Last refresh failed: \(error)",
+            recovery: recovery
         )
     }
 }

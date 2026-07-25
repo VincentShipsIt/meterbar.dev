@@ -84,7 +84,7 @@ struct GeneralSettingsView: View {
             )
             providerToggleRow(
                 title: "Grok",
-                detail: "Track Grok Build weekly quota from its cached CLI login.",
+                detail: "Track Grok Build session and weekly quota from its cached CLI login.",
                 service: .grok
             )
         }
