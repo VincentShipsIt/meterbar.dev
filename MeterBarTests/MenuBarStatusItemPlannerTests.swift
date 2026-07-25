@@ -359,8 +359,8 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         let auto = planAccounts(twoAccountCandidates, entries: twoAccountEntries)
         let pinned = planAccounts(twoAccountCandidates, entries: twoAccountEntries, pinnedKey: "a-session")
 
-        XCTAssertEqual(auto.first?.tooltip, "MeterBar: Work · a-weekly")
-        XCTAssertEqual(pinned.first?.tooltip, "MeterBar: Work · a-session · Session")
+        XCTAssertEqual(auto.first?.tooltip, "MeterBar: 20% left on Work · a-weekly")
+        XCTAssertEqual(pinned.first?.tooltip, "MeterBar: 22% left on Work · a-session · Session")
     }
 
     /// A pin naming a window in another account must not drag this item onto it,
@@ -369,6 +369,6 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         let descriptors = planAccounts(twoAccountCandidates, entries: twoAccountEntries, pinnedKey: "b-session")
 
         XCTAssertEqual(descriptors.first?.selectionKey, "a-weekly")
-        XCTAssertEqual(descriptors.first?.tooltip, "MeterBar: Work · a-weekly")
+        XCTAssertEqual(descriptors.first?.tooltip, "MeterBar: 20% left on Work · a-weekly")
     }
 }
