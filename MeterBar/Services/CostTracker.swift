@@ -459,11 +459,12 @@ class CostTracker: ObservableObject {
 
     nonisolated private static func scanCodexSessions(since cutoffDate: Date) -> ScanWindows<CodexScanContext> {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
-        let archivedDir = codexDir.appendingPathComponent("archived_sessions")
         let logsDatabase = codexDir.appendingPathComponent("logs_2.sqlite")
         var windows = Self.codexScanWindows(cutoff: cutoffDate)
 
-        Self.scanCodexArchivedSessions(directory: archivedDir, windows: &windows)
+        for directory in Self.codexRolloutDirectories(in: codexDir) {
+            Self.scanCodexRollouts(directory: directory, windows: &windows)
+        }
         Self.scanCodexSQLiteLogs(database: logsDatabase, windows: &windows)
 
         return windows
@@ -508,9 +509,25 @@ class CostTracker: ObservableObject {
             sessionCount: context.sessionIDs.count,
             periodStart: context.earliestDate,
             periodEnd: context.latestDate,
-            modelBreakdowns: Self.makeBreakdowns(from: context.modelTotals, provider: .codexCli, pricing: pricing),
+            modelBreakdowns: Self.makeBreakdowns(
+                from: context.modelTotals,
+                provider: .codexCli,
+                pricing: pricing,
+                pricingForName: { ModelPricing.codex(for: $0) }
+            ),
             originBreakdowns: Self.makeBreakdowns(from: context.originTotals, provider: .codexCli, pricing: pricing)
         ), Self.makeDailyUsage(from: context.dailyTotals, provider: .codexCli, pricing: pricing))
+    }
+
+    /// Directories holding Codex rollout `.jsonl` files. Codex only moves a
+    /// rollout into `archived_sessions` when the session closes, so scanning
+    /// that alone silently dropped every still-open session — which is most of
+    /// the recent days on an actively used machine.
+    nonisolated static func codexRolloutDirectories(in codexDir: URL) -> [URL] {
+        [
+            codexDir.appendingPathComponent("archived_sessions", isDirectory: true),
+            codexDir.appendingPathComponent("sessions", isDirectory: true)
+        ]
     }
 
     /// The byte-level equivalent of the old `line.contains("\"token_count\"")`
@@ -518,10 +535,20 @@ class CostTracker: ObservableObject {
     /// `JSONSerialization` on them is what keeps the scan cheap.
     nonisolated private static let codexTokenCountMarker = Data("\"token_count\"".utf8)
 
-    /// Internal (not private) so the archived-session parsing — the Codex
-    /// counterpart to `parseSessionFile`, and where CLI-vs-app cost divergence
-    /// hides — can be fixture-tested against a temp directory.
-    nonisolated static func scanCodexArchivedSessions(
+    /// Same prefilter for the two events that carry the attribution a
+    /// `token_count` line lacks. Cheap enough to run on every non-usage line.
+    nonisolated private static let codexTurnContextMarker = Data("\"turn_context\"".utf8)
+    nonisolated private static let codexSessionMetaMarker = Data("\"session_meta\"".utf8)
+
+    /// Internal (not private) so the rollout parsing — the Codex counterpart to
+    /// `parseSessionFile`, and where CLI-vs-app cost divergence hides — can be
+    /// fixture-tested against a temp directory.
+    ///
+    /// A `token_count` event names neither the model nor the front end, so the
+    /// scan streams each file in order and carries the last `turn_context`
+    /// model and the opening `session_meta` originator forward. Attribution is
+    /// per file: state resets on every rollout.
+    nonisolated static func scanCodexRollouts(
         directory: URL,
         windows: inout ScanWindows<CodexScanContext>
     ) {
@@ -540,15 +567,22 @@ class CostTracker: ObservableObject {
         // per-event timestamp check inside `ScanWindows.update` (an event is
         // never newer than the file holding it).
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
+            // Reset per file: attribution carried across rollouts would label
+            // one session's spend with another's model.
+            var rollout = CodexRolloutContext()
             FileLineReader.forEachLine(in: fileURL) { line in
-                Self.addCodexArchivedLine(line, fileURL: fileURL, windows: &windows)
+                guard line.contains(Self.codexTokenCountMarker) else {
+                    Self.updateCodexRolloutContext(&rollout, from: line)
+                    return
+                }
+                Self.addCodexTokenCountLine(line, fileURL: fileURL, rollout: rollout, windows: &windows)
             }
         }
     }
 
     /// Single-window entry point kept for callers that only care about one
     /// period. Scans into `context` as the period window and discards lifetime.
-    nonisolated static func scanCodexArchivedSessions(
+    nonisolated static func scanCodexRollouts(
         directory: URL,
         since cutoffDate: Date,
         context: inout CodexScanContext
@@ -558,17 +592,34 @@ class CostTracker: ObservableObject {
             lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
             cutoff: cutoffDate
         )
-        Self.scanCodexArchivedSessions(directory: directory, windows: &windows)
+        Self.scanCodexRollouts(directory: directory, windows: &windows)
         context = windows.period
     }
 
-    nonisolated private static func addCodexArchivedLine(
+    /// Picks up the model/originator carried by the non-usage rollout events.
+    nonisolated private static func updateCodexRolloutContext(
+        _ rollout: inout CodexRolloutContext,
+        from line: Data
+    ) {
+        if line.contains(Self.codexTurnContextMarker) {
+            guard let payload = Self.codexEventPayload(in: line, type: "turn_context") else { return }
+            rollout.turnModel = (payload["model"] as? String) ?? rollout.turnModel
+        } else if line.contains(Self.codexSessionMetaMarker) {
+            guard let payload = Self.codexEventPayload(in: line, type: "session_meta") else { return }
+            // `model` is null on every rollout observed so far, but read it
+            // anyway so pre-turn events get named the day Codex populates it.
+            rollout.sessionModel = (payload["model"] as? String) ?? rollout.sessionModel
+            rollout.originator = (payload["originator"] as? String) ?? rollout.originator
+        }
+    }
+
+    nonisolated private static func addCodexTokenCountLine(
         _ line: Data,
         fileURL: URL,
+        rollout: CodexRolloutContext,
         windows: inout ScanWindows<CodexScanContext>
     ) {
-        guard line.contains(Self.codexTokenCountMarker),
-              let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+        guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let timestampText = json["timestamp"] as? String,
               let timestamp = FlexibleISO8601.date(from: timestampText),
               let payload = json["payload"] as? [String: Any],
@@ -580,14 +631,31 @@ class CostTracker: ObservableObject {
 
         let sessionID = (((payload["rate_limits"] as? [String: Any])?["conversation_id"] as? String)
             ?? fileURL.deletingPathExtension().lastPathComponent)
+        // The event's own model wins when present (older rollouts stamped it
+        // there); otherwise fall back to the surrounding rollout context.
+        let modelName = Self.codexModelName(from: info, payload: payload)
+            ?? rollout.turnModel
+            ?? rollout.sessionModel
         Self.addCodexUsage(
             usage,
             timestamp: timestamp,
             sessionID: sessionID,
-            modelName: Self.codexModelName(from: info, payload: payload),
-            originName: "Codex CLI",
+            modelName: modelName,
+            originName: rollout.originator ?? "Codex CLI",
             windows: &windows
         )
+    }
+
+    nonisolated private static func codexEventPayload(
+        in line: Data,
+        type: String
+    ) -> [String: Any]? {
+        guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              json["type"] as? String == type,
+              let payload = json["payload"] as? [String: Any] else {
+            return nil
+        }
+        return payload
     }
 
     nonisolated private static func isLocalDirectory(_ url: URL) -> Bool {
@@ -742,12 +810,17 @@ class CostTracker: ObservableObject {
         }
     }
 
+    /// `pricingForName` lets a provider price each row by its own model instead
+    /// of the flat provider rate. Codex slugs all bill at the same published
+    /// rate today, so rows still sum to the provider total.
     nonisolated private static func makeBreakdowns(
         from totals: [String: TokenAccumulator],
         provider: ServiceType,
-        pricing: TokenPricing
+        pricing: TokenPricing,
+        pricingForName: ((String) -> TokenPricing)? = nil
     ) -> [TokenUsageBreakdown] {
         totals.map { name, tokens in
+            let rowPricing = pricingForName?(name) ?? pricing
             let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
             let output = tokens.output + tokens.reasoning
             let cost = tokens.estimatedCostUSD > 0
@@ -757,7 +830,7 @@ class CostTracker: ObservableObject {
                     output: output,
                     cacheCreation: tokens.cacheCreation,
                     cacheRead: tokens.cacheRead,
-                    pricing: pricing
+                    pricing: rowPricing
                 )
             return TokenUsageBreakdown(
                 provider: provider,
@@ -907,6 +980,16 @@ class CostTracker: ObservableObject {
         }
         return String(text[range]).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     }
+}
+
+/// Attribution carried forward while streaming a single rollout file. Codex
+/// `token_count` events name neither the model nor the front end: the model is
+/// declared once per turn in `turn_context`, the front end once per session in
+/// `session_meta`. Reset per file so one rollout never labels another's spend.
+nonisolated struct CodexRolloutContext: Sendable {
+    var turnModel: String?
+    var sessionModel: String?
+    var originator: String?
 }
 
 // `CodexScanContext` and `TokenAccumulator` live in `CostScanWindows.swift`

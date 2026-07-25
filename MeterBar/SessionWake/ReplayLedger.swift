@@ -92,11 +92,7 @@ actor ReplayLedger {
             // Persist in recording order (oldest first): the on-disk order *is*
             // the pruning order across relaunches.
             let data = try JSONEncoder().encode(order)
-            try data.write(to: fileURL, options: .atomic)
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: fileURL.path
-            )
+            try SecureFileWriter.write(data, to: fileURL)
         } catch {
             AppLog.wake.error("Failed to persist replay ledger: \(error.localizedDescription, privacy: .public)")
         }

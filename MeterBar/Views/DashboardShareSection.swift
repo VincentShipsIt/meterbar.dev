@@ -173,6 +173,10 @@ struct DashboardShareSection: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             do {
+                // Deliberately not routed through `SecureFileWriter`: the user
+                // picked this destination in order to share the card, so the
+                // owner-only default the app applies to its own state would be
+                // wrong here. Normal umask semantics are the correct behavior.
                 try pngData.write(to: url, options: .atomic)
                 setShareStatus("PNG saved")
             } catch {

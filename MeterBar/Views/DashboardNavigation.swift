@@ -184,6 +184,47 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// A row in the settings sidebar. Providers used to be a second, horizontal
+/// picker *inside* the Providers page — two navigation layers for one hierarchy.
+/// They now share the sidebar's selection with the app's settings pages, so a
+/// provider is one click from anywhere in settings.
+enum SettingsSidebarItem: Hashable, Identifiable {
+    case section(SettingsSection)
+    case provider(ServiceType)
+
+    var id: String {
+        switch self {
+        case let .section(section): return "section.\(section.id)"
+        case let .provider(service): return "provider.\(service.id)"
+        }
+    }
+}
+
+/// Row composition for the settings sidebar. Pure so the ordering and
+/// reachability rules are testable without hosting the view.
+enum SettingsSidebarModel {
+    /// The page that lists every supported provider with its tracking toggle.
+    /// It sits at the foot of the Providers group rather than in the app-pages
+    /// group, because it reads as "the rest of the providers".
+    static let catalogPage: SettingsSection = .providers
+
+    /// The app's own settings pages. Providers is excluded: it is surfaced as
+    /// the "All Providers" row under the provider list instead.
+    static var appPages: [SettingsSection] {
+        SettingsSection.allCases.filter { $0 != catalogPage }
+    }
+
+    /// Provider rows for the sidebar: the *tracked* providers in display order.
+    ///
+    /// Driven by the enabled set rather than `ServiceType.allCases` on purpose.
+    /// The old segmented picker rendered every case, so it degraded with each
+    /// provider MeterBar added; this group only ever holds what the user
+    /// actually tracks, and everything else stays reachable from All Providers.
+    static func trackedProviders(enabledServices: Set<ServiceType>) -> [ServiceType] {
+        enabledServices.sorted { $0.sortOrder < $1.sortOrder }
+    }
+}
+
 enum EnabledQuotaSourceCounter {
     static func count(
         enabledServices: Set<ServiceType>,
@@ -215,7 +256,40 @@ final class DashboardNavigationStore: ObservableObject {
     @Published var isShowingSettings = false
     @Published var selectedSettingsSection: SettingsSection = .general
 
+    /// The provider whose page is showing, when the sidebar selection is a
+    /// provider row rather than a settings page. `nil` means the page in
+    /// `selectedSettingsSection` is showing.
+    @Published var selectedSettingsProvider: ServiceType?
+
     private init() {}
+
+    /// The sidebar's current row — a provider outranks the page behind it.
+    var settingsSidebarItem: SettingsSidebarItem {
+        if let selectedSettingsProvider {
+            return .provider(selectedSettingsProvider)
+        }
+        return .section(selectedSettingsSection)
+    }
+
+    func selectSettingsItem(_ item: SettingsSidebarItem) {
+        switch item {
+        case let .section(section):
+            selectedSettingsSection = section
+            selectedSettingsProvider = nil
+        case let .provider(service):
+            selectedSettingsProvider = service
+        }
+    }
+
+    /// Keeps the sidebar selection valid when the tracked set changes — turning
+    /// the selected provider off from its own page removes its row, so fall back
+    /// to All Providers, which is where it can be turned back on.
+    func settingsProvidersChanged(enabledServices: Set<ServiceType>) {
+        guard let selectedSettingsProvider,
+              !enabledServices.contains(selectedSettingsProvider) else { return }
+        self.selectedSettingsProvider = nil
+        selectedSettingsSection = SettingsSidebarModel.catalogPage
+    }
 
     func navigate(to section: DashboardSection, focusedProviderID: ProviderSnapshot.ID? = nil) {
         selectedSection = section
@@ -226,6 +300,7 @@ final class DashboardNavigationStore: ObservableObject {
     /// Enter the in-window settings mode on `section` (defaults to General).
     func openSettings(_ section: SettingsSection = .general) {
         selectedSettingsSection = section
+        selectedSettingsProvider = nil
         isShowingSettings = true
     }
 

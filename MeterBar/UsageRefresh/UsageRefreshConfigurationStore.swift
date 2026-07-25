@@ -68,7 +68,7 @@ nonisolated enum UsageRefreshConfigurationStore {
               let data = try? JSONEncoder().encode(value) else {
             return
         }
-        try? data.write(to: directory.appendingPathComponent(fileName), options: [.atomic])
+        try? SecureFileWriter.write(data, to: directory.appendingPathComponent(fileName))
     }
 
     private static func read<T: Decodable>(fileName: String, directory: URL) -> T? {
