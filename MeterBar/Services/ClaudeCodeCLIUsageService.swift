@@ -7,10 +7,14 @@ import MeterBarShared
 nonisolated final class ClaudeCodeCLIUsageService: Sendable {
     static let shared = ClaudeCodeCLIUsageService()
 
-    private let commandTimeout: TimeInterval = 12
+    static let commandTimeout: TimeInterval = 12
 
-    /// Dedicated queue for the blocking process run so the semaphore wait happens
-    /// on a GCD thread rather than blocking a Swift-concurrency cooperative thread.
+    /// The usage screen is a few KB. This cap only bounds a pathological child;
+    /// truncation keeps the leading bytes, which is exactly where the windows are.
+    private static let maxCaptureBytes = 256 * 1024
+
+    /// Dedicated queue for the blocking process run so the wait happens on a GCD
+    /// thread rather than blocking a Swift-concurrency cooperative thread.
     private let processQueue = DispatchQueue(
         label: "dev.meterbar.app.ClaudeCLI.process",
         qos: .userInitiated,
@@ -52,45 +56,55 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
         }
     }
 
-    private func runClaudeUsageBlocking(binaryPath: String, account: ClaudeCodeAccount) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binaryPath)
-        process.arguments = ["/usage"]
-        process.environment = processEnvironment(account: account)
+    /// Runs through `ManagedProcess` rather than Foundation `Process`: both
+    /// streams are drained while the child runs, so a chatty CLI cannot fill a
+    /// pipe buffer and hang, and the child is spawned into its own process group
+    /// so a timeout kills the tree instead of orphaning `node` grandchildren.
+    ///
+    /// Internal (not private) so tests can drive the launch path with a fake
+    /// binary and a short timeout.
+    func runClaudeUsageBlocking(
+        binaryPath: String,
+        account: ClaudeCodeAccount,
+        timeout: TimeInterval = ClaudeCodeCLIUsageService.commandTimeout
+    ) throws -> String {
+        let result = ManagedProcess.run(
+            executable: binaryPath,
+            arguments: ["/usage"],
+            environment: processEnvironment(account: account),
+            workingDirectory: ServiceSupport.realHomeDirectory(),
+            timeout: timeout,
+            maxCaptureBytes: Self.maxCaptureBytes
+        )
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
+        // Lossy decode (same rationale as WakeProcessRunner): a capture truncated
+        // at the byte cap can split a multibyte character, and strict decoding
+        // would drop the WHOLE capture — losing the leading usage screen that is
+        // the only part we parse.
+        // swiftlint:disable optional_data_string_conversion
+        let output = String(decoding: result.stdoutCapture, as: UTF8.self)
+        let errorOutput = String(decoding: result.stderrCapture, as: UTF8.self)
+        // swiftlint:enable optional_data_string_conversion
 
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in
-            semaphore.signal()
-        }
-
-        do {
-            try process.run()
-        } catch {
-            throw ClaudeCodeCLIUsageError.launchFailed(error.localizedDescription)
-        }
-
-        if semaphore.wait(timeout: .now() + commandTimeout) == .timedOut {
-            process.terminate()
-            _ = semaphore.wait(timeout: .now() + 2)
+        switch result.termination {
+        case .exited(0):
+            return output
+        case let .exited(code):
+            let detail = errorOutput.isEmpty ? output : errorOutput
+            throw ClaudeCodeCLIUsageError.commandFailed(
+                detail.isEmpty ? "Claude CLI exited with status \(code)." : detail
+            )
+        case let .signalled(signal):
+            throw ClaudeCodeCLIUsageError.commandFailed("Claude CLI was terminated by signal \(signal).")
+        case .timedOut:
             throw ClaudeCodeCLIUsageError.timedOut
+        case .cancelled:
+            // No cancellation handle is passed, so this is unreachable today;
+            // an aborted run is indistinguishable from a timeout to the caller.
+            throw ClaudeCodeCLIUsageError.timedOut
+        case let .launchFailed(message):
+            throw ClaudeCodeCLIUsageError.launchFailed(message)
         }
-
-        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8) ?? ""
-        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw ClaudeCodeCLIUsageError.commandFailed(errorOutput.isEmpty ? output : errorOutput)
-        }
-
-        return output
     }
 
     /// Internal (not private) so tests can verify the spawned environment.

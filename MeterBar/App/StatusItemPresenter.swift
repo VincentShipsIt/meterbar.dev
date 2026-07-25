@@ -2,28 +2,42 @@ import AppKit
 import MeterBarShared
 import QuartzCore
 
-/// Owns everything that decides what the menu-bar button shows, extracted from
+/// Owns everything that decides what the menu bar shows, extracted from
 /// `MeterBarApp.swift` (C1 split).
 ///
 /// The moving parts are unchanged: cheap main-actor inputs are gathered first,
 /// the directory-scanning probes run off the main actor, and a generation
-/// counter lets a newer update supersede an in-flight probe. What is new is that
-/// the button is reached through an injected provider instead of a stored
-/// `NSStatusItem`, and the string formatting is split into pure statics so the
-/// label/tooltip/accessibility branches are testable without a status bar.
+/// counter lets a newer update supersede an in-flight probe. What is new is the
+/// boundary — the presenter decides, `MenuBarStatusItemPlanner` does the pure
+/// per-item formatting, and creating or removing the items themselves is handed
+/// back to the delegate, which is the only place that may touch `NSStatusBar`.
 final class StatusItemPresenter {
-    private let statusButtonProvider: () -> NSStatusBarButton?
+    /// Realizes a plan: the delegate adds, removes, and reuses the status items
+    /// and calls `apply(_:to:)` back for each surviving button.
+    private let applyDescriptors: ([MenuBarStatusItemDescriptor]) -> Void
+
+    /// The account whose quota the menu bar title currently shows; feeds the
+    /// sticky selection so concurrent Claude + Codex use doesn't flip the title.
     private var shownKey: String?
+
+    /// Monotonic stamp for status-item updates: activity probes run off the
+    /// main actor, so a stale in-flight result must not overwrite a newer one.
     private var updateGeneration = 0
 
-    init(statusButtonProvider: @escaping () -> NSStatusBarButton?) {
-        self.statusButtonProvider = statusButtonProvider
+    /// Latest probed candidates, kept so the right-click switcher can list every
+    /// pinnable window without re-running the probes.
+    private(set) var latestCandidates: [StatusLimitCandidate] = []
+
+    /// Menu bar icons are rebuilt on every refresh; rasterizing the provider
+    /// logos once keeps that off the hot path.
+    private var imageCache: [String: NSImage] = [:]
+
+    init(applyDescriptors: @escaping ([MenuBarStatusItemDescriptor]) -> Void) {
+        self.applyDescriptors = applyDescriptors
     }
 
     @MainActor
     func update(metrics: [ServiceType: UsageMetrics]) {
-        guard statusButtonProvider() != nil else { return }
-
         // Gather the cheap main-actor inputs now; run the activity probes
         // (directory scans) off the main actor; apply on return. A generation
         // counter lets a newer update supersede an in-flight probe.
@@ -42,47 +56,71 @@ final class StatusItemPresenter {
 
     @MainActor
     func apply(candidates: [StatusLimitCandidate]) {
-        guard let button = statusButtonProvider() else { return }
-        let preferences = MenuBarDisplayPreferencesStore.shared
+        latestCandidates = candidates
 
-        guard let selection = StatusItemLimitSelector.select(
+        let preferences = MenuBarDisplayPreferencesStore.shared
+        let descriptors = MenuBarStatusItemPlanner.plan(
+            mode: preferences.presentationMode,
             candidates: candidates,
             previousKey: shownKey,
-            pinnedKey: preferences.pinnedCandidateKey
-        ) else {
-            shownKey = nil
-            setTitle(button, to: "")
-            button.imagePosition = .imageOnly
-            button.toolTip = Self.fallbackLabel
-            button.setAccessibilityLabel(Self.fallbackLabel)
-            applyParseHealthAppearance(to: button)
-            return
-        }
-
-        shownKey = selection.key
-        let selectionName = Self.selectionName(
-            displayName: selection.displayName,
-            windowName: selection.windowName,
-            isPinned: preferences.pinnedCandidateKey == selection.pinKey
-        )
-        let title = StatusItemLabelFormatter.title(
-            for: selection.limit,
+            pinnedKey: preferences.pinnedCandidateKey,
             metric: preferences.labelMetric,
             size: preferences.labelSize
         )
-        let spokenValue = StatusItemLabelFormatter.spokenValue(
-            for: selection.limit,
-            metric: preferences.labelMetric
-        )
 
-        button.imagePosition = title == nil ? .imageOnly : .imageLeft
-        setTitle(button, to: Self.buttonTitle(for: title))
-        button.toolTip = Self.toolTip(spokenValue: spokenValue, selectionName: selectionName)
-        button.setAccessibilityLabel(
-            Self.accessibilityLabel(spokenValue: spokenValue, selectionName: selectionName)
-        )
+        // Only the merged item feeds sticky selection; per-provider items are
+        // each nailed to one account and report no key at all.
+        shownKey = descriptors
+            .first { $0.id == MenuBarStatusItemPlanner.mergedItemID }?
+            .selectionKey
+
+        applyDescriptors(descriptors)
+    }
+
+    @MainActor
+    func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
+        button.image = image(for: descriptor.service)
+        button.imagePosition = descriptor.title.isEmpty ? .imageOnly : .imageLeft
+        setTitle(button, to: descriptor.title)
+        button.toolTip = descriptor.tooltip
+        button.setAccessibilityLabel(descriptor.accessibilityLabel)
         applyParseHealthAppearance(to: button)
     }
+
+    /// Provider glyph for the item, so a bare `52%` says *whose* 52% it is.
+    /// Providers without a bundled logo keep MeterBar's own bars mark.
+    @MainActor
+    func image(for service: ServiceType?) -> NSImage {
+        guard let resourceName = service.flatMap({ ProviderLogoKind.forService($0).resourceName }) else {
+            return fallbackImage()
+        }
+
+        if let cached = imageCache[resourceName] { return cached }
+
+        // The logo cache vends shared instances, so resize a copy — mutating
+        // the original would shrink every popover icon too.
+        guard let logo = ProviderLogoImageCache.image(named: resourceName)?.copy() as? NSImage else {
+            return fallbackImage()
+        }
+        logo.size = NSSize(width: 16, height: 16)
+        logo.isTemplate = true
+        imageCache[resourceName] = logo
+        return logo
+    }
+
+    @MainActor
+    private func fallbackImage() -> NSImage {
+        if let cached = imageCache[Self.fallbackImageKey] { return cached }
+
+        let image = MenuBarIconRenderer.meterIcon()
+        image.isTemplate = true
+        imageCache[Self.fallbackImageKey] = image
+        return image
+    }
+
+    /// Cache slot for the generic mark. Not a resource name, so it can't
+    /// collide with a provider logo.
+    private static let fallbackImageKey = "meterbar.fallback"
 
     /// Sets the status-button title, crossfading the change so the menu-bar
     /// `NN%` doesn't snap on refresh. SwiftUI's `.contentTransition(.numericText())`
@@ -130,28 +168,6 @@ final class StatusItemPresenter {
 
 extension StatusItemPresenter {
     static let fallbackLabel = "MeterBar"
-
-    /// A pinned candidate names its window too, because the user chose that
-    /// specific quota rather than letting activity pick one.
-    static func selectionName(displayName: String, windowName: String, isPinned: Bool) -> String {
-        isPinned ? "\(displayName) · \(windowName)" : displayName
-    }
-
-    /// Leading space separates the label from the meter icon; no value means
-    /// icon-only, so the title collapses to empty rather than a stray space.
-    static func buttonTitle(for title: String?) -> String {
-        title.map { " \($0)" } ?? ""
-    }
-
-    static func toolTip(spokenValue: String?, selectionName: String) -> String {
-        guard let spokenValue else { return "\(fallbackLabel): \(selectionName)" }
-        return "\(fallbackLabel): \(spokenValue) on \(selectionName)"
-    }
-
-    static func accessibilityLabel(spokenValue: String?, selectionName: String) -> String {
-        guard let spokenValue else { return "\(fallbackLabel) \(selectionName)" }
-        return "\(fallbackLabel) \(spokenValue) on \(selectionName)"
-    }
 
     static func attentionToolTip(base: String?) -> String {
         "\(base ?? fallbackLabel) · Provider data needs attention"

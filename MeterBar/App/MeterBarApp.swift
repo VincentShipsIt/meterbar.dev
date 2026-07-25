@@ -64,19 +64,25 @@ private struct MeterBarCommands: Commands {
 /// the delegate: activation policy, the status item itself, and the `@objc`
 /// menu actions.
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
+    /// Live status items keyed by `MenuBarStatusItemDescriptor.id`. Merged mode
+    /// keeps exactly one; per-provider mode owns one slot per tracked account.
+    private var statusItems: [String: NSStatusItem] = [:]
+    /// Descriptor ids in plan order, used to pick a stable fallback anchor.
+    private var statusItemIDs: [String] = []
+    /// The item the user last clicked, so the popover and the right-click menu
+    /// open under that icon instead of always under the leftmost one.
+    private var activeStatusItemID: String?
     private var menuPanel: MeterBarMenuPanelController?
+    private let menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notifications = UsageNotificationCoordinator()
     private var cancellables = Set<AnyCancellable>()
 
-    /// Reads the button lazily: the status item does not exist until
-    /// `applicationDidFinishLaunching`, and it can be torn down independently.
-    private lazy var statusItemPresenter = StatusItemPresenter(
-        statusButtonProvider: { [weak self] in
-            self?.statusItem?.button
-        }
-    )
+    /// Decides what each menu bar item shows and styles its button. Item
+    /// lifecycle stays here; the presenter never creates or removes one.
+    private lazy var statusItemPresenter = StatusItemPresenter { [weak self] descriptors in
+        self?.applyStatusItemDescriptors(descriptors)
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Apply the persisted Dock visibility as early as possible so users who
@@ -84,37 +90,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyActivationPolicy(showInDock: dockVisibilityStore.showInDock)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // A quit that lands mid-refresh must not leave a `grok` agent behind:
+        // the subprocess is spawned into its own process group precisely so it
+        // can be reaped as a tree from here.
+        GrokAgentProcess.terminateAll()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("MeterBar finished launching")
         SoftwareUpdateController.shared.refreshState()
+
+        // Reconnect scripts are generated on demand and executed by Terminal;
+        // sweep any the previous run left behind.
+        ClaudeCodeReconnectService.purgeReconnectScripts()
 
         // Keep Dock visibility in sync with the user's preference.
         observeDockVisibility()
         observeSystemWake()
 
-        // Create menu bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        guard let button = statusItem?.button else {
+        // Create the initial menu bar item. The presentation plan takes over on
+        // the first metrics update and may add or remove items from there.
+        guard makeStatusItem(id: MenuBarStatusItemPlanner.mergedItemID) != nil else {
             AppLog.app.error("Failed to create status item button")
             return
         }
-
-        // Set up the menu bar icon with 3 progress bars
-        let image = MenuBarIconRenderer.meterIcon()
-        image.isTemplate = true
-        button.image = image
-
-        button.action = #selector(handleStatusItemClick)
-        button.target = self
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = "MeterBar"
-        button.imagePosition = .imageLeft
-        button.font = .systemFont(ofSize: 14, weight: .semibold)
+        statusItemIDs = [MenuBarStatusItemPlanner.mergedItemID]
 
         menuPanel = MeterBarMenuPanelController(
             statusButtonProvider: { [weak self] in
-                self?.statusItem?.button
+                self?.anchorStatusButton()
             },
             onDismiss: {
                 // Closing the popover only tears down the transient detail
@@ -157,16 +162,82 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Creates one menu bar slot and wires its button. Returns nil when AppKit
+    /// refuses the button, in which case the (useless) item is released again.
+    @discardableResult
+    private func makeStatusItem(id: String) -> NSStatusItem? {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Per-id autosave name so macOS restores each item's user-dragged
+        // position separately instead of collapsing them onto one slot.
+        item.autosaveName = "MeterBarStatusItem-\(id)"
+
+        guard let button = item.button else {
+            NSStatusBar.system.removeStatusItem(item)
+            return nil
+        }
+
+        button.image = statusItemPresenter.image(for: nil)
+        button.action = #selector(handleStatusItemClick(_:))
+        button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.toolTip = "MeterBar"
+        button.imagePosition = .imageLeft
+        button.font = .systemFont(ofSize: 14, weight: .semibold)
+
+        statusItems[id] = item
+        return item
+    }
+
+    /// Reconciles the live status items with the plan: drop the ones that are
+    /// gone, create the ones that are new, restyle the rest in place. This is
+    /// the delegate's half of the split — deciding *what* each item says is the
+    /// presenter's, and it calls back in here to have the plan realized.
+    private func applyStatusItemDescriptors(_ descriptors: [MenuBarStatusItemDescriptor]) {
+        let liveIDs = Set(descriptors.map(\.id))
+
+        // Snapshot the keys: the loop mutates the dictionary it reads from.
+        for id in Array(statusItems.keys) where !liveIDs.contains(id) {
+            if let item = statusItems.removeValue(forKey: id) {
+                NSStatusBar.system.removeStatusItem(item)
+            }
+        }
+
+        if let activeStatusItemID, !liveIDs.contains(activeStatusItemID) {
+            self.activeStatusItemID = nil
+        }
+
+        statusItemIDs = descriptors.map(\.id)
+
+        for descriptor in descriptors {
+            let item = statusItems[descriptor.id] ?? makeStatusItem(id: descriptor.id)
+            guard let button = item?.button else { continue }
+            statusItemPresenter.apply(descriptor, to: button)
+        }
+    }
+
+    /// Button the popover and menus attach to: the one just clicked, or the
+    /// leftmost surviving item when nothing has been clicked yet.
+    private func anchorStatusButton() -> NSStatusBarButton? {
+        if let activeStatusItemID, let button = statusItems[activeStatusItemID]?.button {
+            return button
+        }
+        return statusItemIDs.compactMap { statusItems[$0]?.button }.first
+    }
+
     /// Left-click opens the popover; right-click (or control-click) opens a
     /// native menu so Quit stays reachable even when the Dock icon is hidden.
     @objc
-    private func handleStatusItemClick() {
+    private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        // Remember which of the (possibly several) items was hit so the panel
+        // and menu don't jump to a different icon than the one clicked.
+        activeStatusItemID = statusItemIDs.first { statusItems[$0]?.button === sender }
+
         let event = NSApp.currentEvent
         let isSecondaryClick = event?.type == .rightMouseUp
             || (event?.modifierFlags.contains(.control) ?? false)
 
         if isSecondaryClick {
-            showStatusMenu()
+            showStatusMenu(from: sender)
         } else {
             togglePopover()
         }
@@ -189,9 +260,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Shows a native menu anchored to the menu bar icon. This is the always-on
     /// escape hatch for Quit (and Dock visibility), independent of the popover.
-    private func showStatusMenu() {
-        guard let button = statusItem?.button else { return }
-
+    private func showStatusMenu(from button: NSStatusBarButton) {
         menuPanel?.dismiss()
 
         let menu = makeStatusMenu()
@@ -215,6 +284,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let builder = StatusMenuBuilder(
             target: self,
             actions: StatusMenuBuilder.Actions(
+                selectMenuBarAuto: #selector(selectMenuBarAuto),
+                selectMenuBarPin: #selector(selectMenuBarPin(_:)),
+                selectMenuBarAllProviders: #selector(selectMenuBarAllProviders),
                 toggleShowInDock: #selector(toggleShowInDock),
                 openDashboard: #selector(openDashboardFromStatusMenu),
                 refreshProviderStatuses: #selector(refreshProviderStatusesFromStatusMenu),
@@ -222,6 +294,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 quit: #selector(quitApp)
             ),
             showInDock: dockVisibilityStore.showInDock,
+            menuBarShows: StatusMenuBuilder.MenuBarShowsSnapshot(
+                mode: menuBarDisplayPreferences.presentationMode,
+                pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey,
+                options: MenuBarStatusItemPlanner.switcherOptions(
+                    for: statusItemPresenter.latestCandidates
+                )
+            ),
             status: StatusMenuBuilder.StatusSnapshot(
                 reports: monitor.reports,
                 errors: monitor.errors,
@@ -229,6 +308,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         return builder.makeMenu()
+    }
+
+    @objc
+    private func selectMenuBarAuto() {
+        menuBarDisplayPreferences.setPresentationMode(.merged)
+        menuBarDisplayPreferences.setPinnedCandidateKey(nil)
+    }
+
+    @objc
+    private func selectMenuBarPin(_ sender: NSMenuItem) {
+        guard let pinKey = sender.representedObject as? String else { return }
+        menuBarDisplayPreferences.setPresentationMode(.merged)
+        menuBarDisplayPreferences.setPinnedCandidateKey(pinKey)
+    }
+
+    @objc
+    private func selectMenuBarAllProviders() {
+        menuBarDisplayPreferences.setPresentationMode(.perProvider)
     }
 
     @objc

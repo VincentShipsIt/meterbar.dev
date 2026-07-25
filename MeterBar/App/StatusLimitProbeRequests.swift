@@ -136,6 +136,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 StatusLimitCandidate(
                     key: seed.key,
                     pinKey: seed.pinKey,
+                    service: seed.service,
                     displayName: seed.displayName,
                     windowName: seed.windowName,
                     limit: seed.limit,

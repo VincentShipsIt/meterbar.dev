@@ -65,7 +65,7 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
         // avoids a torn file if two saves race.
         ioQueue.async { [weak self] in
             do {
-                try data.write(to: fileURL, options: [.atomic])
+                try SecureFileWriter.write(data, to: fileURL)
                 self?.didWrite()
             } catch {
                 AppLog.storage.error("Failed to save shared metrics: \(error.localizedDescription, privacy: .public)")
@@ -82,7 +82,7 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
 
         ioQueue.async { [weak self] in
             do {
-                try data.write(to: fileURL, options: [.atomic])
+                try SecureFileWriter.write(data, to: fileURL)
                 self?.didWrite()
             } catch {
                 AppLog.storage.error(

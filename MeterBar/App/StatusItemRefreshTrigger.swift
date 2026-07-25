@@ -24,8 +24,9 @@ enum StatusItemRefreshTrigger {
         // Codex has no configurable default-account directory, so its account
         // fan-in has one source where Claude has three. Not an oversight.
         let codexAccountChanges = CodexAccountStore.shared.$customAccounts.map { _ in () }
-        let displayPreferenceChanges = Publishers.Merge3(
+        let displayPreferenceChanges = Publishers.Merge4(
             MenuBarDisplayPreferencesStore.shared.$pinnedCandidateKey.map { _ in () },
+            MenuBarDisplayPreferencesStore.shared.$presentationMode.map { _ in () },
             MenuBarDisplayPreferencesStore.shared.$labelMetric.map { _ in () },
             MenuBarDisplayPreferencesStore.shared.$labelSize.map { _ in () }
         )

@@ -14,11 +14,24 @@ struct StatusMenuBuilder {
     /// Selectors invoked on `target`. Passed in so the builder never needs to
     /// know about `AppDelegate`.
     struct Actions {
+        let selectMenuBarAuto: Selector
+        let selectMenuBarPin: Selector
+        let selectMenuBarAllProviders: Selector
         let toggleShowInDock: Selector
         let openDashboard: Selector
         let refreshProviderStatuses: Selector
         let openProviderStatusPage: Selector
         let quit: Selector
+    }
+
+    /// What the menu-bar switcher renders, copied out of
+    /// `MenuBarDisplayPreferencesStore` and the last probe at build time. Kept
+    /// as a value for the same reason as `StatusSnapshot`: the submenu's check
+    /// marks are testable without a preferences store or a status bar.
+    struct MenuBarShowsSnapshot {
+        var mode: MenuBarPresentationMode = .merged
+        var pinnedKey: String?
+        var options: [StatusItemPinOption] = []
     }
 
     /// The provider-status state the menu renders, copied out of
@@ -32,10 +45,20 @@ struct StatusMenuBuilder {
     let target: AnyObject?
     let actions: Actions
     let showInDock: Bool
+    /// Defaulted like `StatusSnapshot`'s fields: the provider-status tests build
+    /// a builder just to reach the submenus and don't care what the switcher says.
+    var menuBarShows = MenuBarShowsSnapshot()
     let status: StatusSnapshot
 
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
+
+        let showsItem = NSMenuItem(title: "Menu Bar Shows", action: nil, keyEquivalent: "")
+        showsItem.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: nil)
+        showsItem.submenu = makeMenuBarShowsMenu()
+        menu.addItem(showsItem)
+
+        menu.addItem(.separator())
 
         let dockItem = NSMenuItem(
             title: "Show in Dock",
@@ -68,6 +91,47 @@ struct StatusMenuBuilder {
         )
         quitItem.target = target
         menu.addItem(quitItem)
+
+        return menu
+    }
+
+    /// The menu-bar-side twin of the Settings picker: switch the shown quota (or
+    /// spread every provider across its own item) without opening Settings.
+    func makeMenuBarShowsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let mode = menuBarShows.mode
+        let pinnedKey = menuBarShows.pinnedKey
+
+        let autoItem = NSMenuItem(title: "Auto", action: actions.selectMenuBarAuto, keyEquivalent: "")
+        autoItem.target = target
+        autoItem.state = mode == .merged && pinnedKey == nil ? .on : .off
+        menu.addItem(autoItem)
+
+        if !menuBarShows.options.isEmpty {
+            menu.addItem(.separator())
+            for option in menuBarShows.options {
+                let item = NSMenuItem(
+                    title: option.title,
+                    action: actions.selectMenuBarPin,
+                    keyEquivalent: ""
+                )
+                item.target = target
+                item.representedObject = option.id
+                item.state = mode == .merged && pinnedKey == option.id ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        menu.addItem(.separator())
+
+        let allItem = NSMenuItem(
+            title: "All Providers",
+            action: actions.selectMenuBarAllProviders,
+            keyEquivalent: ""
+        )
+        allItem.target = target
+        allItem.state = mode == .perProvider ? .on : .off
+        menu.addItem(allItem)
 
         return menu
     }

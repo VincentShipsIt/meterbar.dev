@@ -19,6 +19,9 @@ final class AppDelegateSplitTests: XCTestCase {
     private static let placeholderSelector = #selector(NSApplication.terminate(_:))
 
     private static let actions = StatusMenuBuilder.Actions(
+        selectMenuBarAuto: placeholderSelector,
+        selectMenuBarPin: placeholderSelector,
+        selectMenuBarAllProviders: placeholderSelector,
         toggleShowInDock: placeholderSelector,
         openDashboard: placeholderSelector,
         refreshProviderStatuses: placeholderSelector,
@@ -55,15 +58,18 @@ final class AppDelegateSplitTests: XCTestCase {
 
         let menu = builder.makeMenu()
 
-        XCTAssertEqual(menu.items.count, 5)
-        XCTAssertEqual(menu.items[0].title, "Show in Dock")
-        XCTAssertEqual(menu.items[0].state, .on)
-        XCTAssertEqual(menu.items[1].title, "Open Usage Dashboard")
-        XCTAssertEqual(menu.items[2].title, "Status Pages")
-        XCTAssertNotNil(menu.items[2].submenu)
-        XCTAssertTrue(menu.items[3].isSeparatorItem)
-        XCTAssertEqual(menu.items[4].title, "Quit MeterBar")
-        XCTAssertEqual(menu.items[4].keyEquivalent, "q")
+        XCTAssertEqual(menu.items.count, 7)
+        XCTAssertEqual(menu.items[0].title, "Menu Bar Shows")
+        XCTAssertNotNil(menu.items[0].submenu)
+        XCTAssertTrue(menu.items[1].isSeparatorItem)
+        XCTAssertEqual(menu.items[2].title, "Show in Dock")
+        XCTAssertEqual(menu.items[2].state, .on)
+        XCTAssertEqual(menu.items[3].title, "Open Usage Dashboard")
+        XCTAssertEqual(menu.items[4].title, "Status Pages")
+        XCTAssertNotNil(menu.items[4].submenu)
+        XCTAssertTrue(menu.items[5].isSeparatorItem)
+        XCTAssertEqual(menu.items[6].title, "Quit MeterBar")
+        XCTAssertEqual(menu.items[6].keyEquivalent, "q")
     }
 
     func testStatusMenuDockItemReflectsHiddenDock() {
@@ -74,7 +80,7 @@ final class AppDelegateSplitTests: XCTestCase {
             status: StatusMenuBuilder.StatusSnapshot()
         )
 
-        XCTAssertEqual(builder.makeMenu().items[0].state, .off)
+        XCTAssertEqual(builder.makeMenu().items[2].state, .off)
     }
 
     func testProviderStatusMenuTitleUsesReportSummaryDescription() {
@@ -368,40 +374,69 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(probeCount, 1)
     }
 
+    func testMenuBarShowsSubmenuChecksAutoWhenNothingIsPinned() {
+        let builder = StatusMenuBuilder(
+            target: nil,
+            actions: Self.actions,
+            showInDock: true,
+            menuBarShows: StatusMenuBuilder.MenuBarShowsSnapshot(
+                mode: .merged,
+                options: [StatusItemPinOption(id: "claude:1", title: "Work · Session")]
+            ),
+            status: StatusMenuBuilder.StatusSnapshot()
+        )
+
+        let items = builder.makeMenuBarShowsMenu().items
+
+        // Auto + separator + one pinnable window + separator + All Providers
+        XCTAssertEqual(items.count, 5)
+        XCTAssertEqual(items[0].title, "Auto")
+        XCTAssertEqual(items[0].state, .on)
+        XCTAssertEqual(items[2].title, "Work · Session")
+        XCTAssertEqual(items[2].state, .off)
+        XCTAssertEqual(items[2].representedObject as? String, "claude:1")
+        XCTAssertEqual(items[4].title, "All Providers")
+        XCTAssertEqual(items[4].state, .off)
+    }
+
+    func testMenuBarShowsSubmenuChecksThePinnedWindowInsteadOfAuto() {
+        let builder = StatusMenuBuilder(
+            target: nil,
+            actions: Self.actions,
+            showInDock: true,
+            menuBarShows: StatusMenuBuilder.MenuBarShowsSnapshot(
+                mode: .merged,
+                pinnedKey: "claude:1",
+                options: [StatusItemPinOption(id: "claude:1", title: "Work · Session")]
+            ),
+            status: StatusMenuBuilder.StatusSnapshot()
+        )
+
+        let items = builder.makeMenuBarShowsMenu().items
+
+        XCTAssertEqual(items[0].state, .off)
+        XCTAssertEqual(items[2].state, .on)
+    }
+
+    func testMenuBarShowsSubmenuChecksAllProvidersInPerProviderMode() {
+        let builder = StatusMenuBuilder(
+            target: nil,
+            actions: Self.actions,
+            showInDock: true,
+            menuBarShows: StatusMenuBuilder.MenuBarShowsSnapshot(mode: .perProvider),
+            status: StatusMenuBuilder.StatusSnapshot()
+        )
+
+        let items = builder.makeMenuBarShowsMenu().items
+
+        // No pinnable windows, so the separator between Auto and All collapses.
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items[0].state, .off)
+        XCTAssertEqual(items[2].title, "All Providers")
+        XCTAssertEqual(items[2].state, .on)
+    }
+
     // MARK: - StatusItemPresenter
-
-    func testSelectionNameAppendsTheWindowOnlyWhenPinned() {
-        XCTAssertEqual(
-            StatusItemPresenter.selectionName(displayName: "Work", windowName: "Session", isPinned: false),
-            "Work"
-        )
-        XCTAssertEqual(
-            StatusItemPresenter.selectionName(displayName: "Work", windowName: "Session", isPinned: true),
-            "Work · Session"
-        )
-    }
-
-    func testToolTipAndAccessibilityLabelIncludeTheSpokenValueWhenPresent() {
-        XCTAssertEqual(
-            StatusItemPresenter.toolTip(spokenValue: "42% used", selectionName: "Work"),
-            "MeterBar: 42% used on Work"
-        )
-        XCTAssertEqual(
-            StatusItemPresenter.accessibilityLabel(spokenValue: "42% used", selectionName: "Work"),
-            "MeterBar 42% used on Work"
-        )
-    }
-
-    func testToolTipAndAccessibilityLabelDropTheValueWhenIconOnly() {
-        XCTAssertEqual(
-            StatusItemPresenter.toolTip(spokenValue: nil, selectionName: "Work"),
-            "MeterBar: Work"
-        )
-        XCTAssertEqual(
-            StatusItemPresenter.accessibilityLabel(spokenValue: nil, selectionName: "Work"),
-            "MeterBar Work"
-        )
-    }
 
     func testAttentionToolTipAppendsToTheExistingTipOrTheDefault() {
         XCTAssertEqual(
@@ -412,11 +447,6 @@ final class AppDelegateSplitTests: XCTestCase {
             StatusItemPresenter.attentionToolTip(base: nil),
             "MeterBar · Provider data needs attention"
         )
-    }
-
-    func testTitlePrefixesASpaceOnlyWhenALabelIsShown() {
-        XCTAssertEqual(StatusItemPresenter.buttonTitle(for: "42%"), " 42%")
-        XCTAssertEqual(StatusItemPresenter.buttonTitle(for: nil), "")
     }
 
     // MARK: - UsageNotificationCoordinator
