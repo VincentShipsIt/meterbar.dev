@@ -590,7 +590,7 @@ nonisolated public final class ClaudeFableSessionStore {
         }
 
         do {
-            try data.write(to: sharedFileURL, options: [.atomic])
+            try SecureFileWriter.write(data, to: sharedFileURL)
         } catch {
             AppLog.storage.error(
                 "Failed to persist shared Fable session metadata: \(error.localizedDescription, privacy: .public)"

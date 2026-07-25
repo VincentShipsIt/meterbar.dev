@@ -18,16 +18,6 @@ nonisolated enum WakePaths {
     /// Ensure `directory` exists with private (`0700`) permissions.
     @discardableResult
     static func ensurePrivateDirectory(_ directory: URL) throws -> URL {
-        let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: directory.path) {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700]
-            )
-        } else {
-            try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-        }
-        return directory
+        try SecureFileWriter.ensurePrivateDirectory(directory)
     }
 }

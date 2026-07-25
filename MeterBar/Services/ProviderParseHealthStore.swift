@@ -191,7 +191,7 @@ final class ProviderParseHealthStore: ObservableObject {
         guard let sharedFileURL else { return }
         ioQueue.async {
             do {
-                try data.write(to: sharedFileURL, options: [.atomic])
+                try SecureFileWriter.write(data, to: sharedFileURL)
             } catch {
                 AppLog.storage.error(
                     "Failed to save provider health: \(error.localizedDescription, privacy: .public)"
