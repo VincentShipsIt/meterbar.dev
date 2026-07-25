@@ -3,6 +3,12 @@ import Foundation
 // MARK: - ClaudeCodeReconnectService
 
 enum ClaudeCodeReconnectService {
+    /// How long a generated script may sit in the temporary directory before it
+    /// is swept. Long enough that a Terminal window still working through a
+    /// login flow keeps the file it is executing; short enough that scripts do
+    /// not accumulate for the life of the machine.
+    static let scriptRetention: TimeInterval = 24 * 60 * 60
+
     static func openReconnectTerminal(for account: ClaudeCodeAccount) throws {
         let scriptURL = try writeReconnectScript(for: account)
         let process = Process()
@@ -83,14 +89,56 @@ enum ClaudeCodeReconnectService {
         """
     }
 
-    private static func writeReconnectScript(for account: ClaudeCodeAccount) throws -> URL {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    /// The directory generated reconnect scripts are staged in.
+    static func scriptsDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("MeterBarClaudeReconnect", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    /// Deletes reconnect scripts older than `retention`.
+    ///
+    /// The scripts are executable and carry the user's profile paths, so they
+    /// should not outlive the reconnect they were generated for. Best-effort by
+    /// design: a sweep that cannot read the directory is not a reason to fail
+    /// the reconnect the user actually asked for.
+    static func purgeReconnectScripts(
+        in directory: URL = scriptsDirectory(),
+        olderThan retention: TimeInterval = scriptRetention,
+        now: Date = Date()
+    ) {
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for entry in entries where entry.pathExtension == "command" {
+            let modified = try? entry.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate
+            guard let modified, now.timeIntervalSince(modified) > retention else { continue }
+            try? fileManager.removeItem(at: entry)
+        }
+    }
+
+    static func writeReconnectScript(
+        for account: ClaudeCodeAccount,
+        in directory: URL = scriptsDirectory()
+    ) throws -> URL {
+        // Owner-only, and tightened even when an older build already created it
+        // at the default 0755.
+        try SecureFileWriter.ensurePrivateDirectory(directory)
+        purgeReconnectScripts(in: directory)
 
         let scriptURL = directory.appendingPathComponent("reconnect-\(account.id.uuidString).command")
-        try reconnectScript(for: account).write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+        // The script is executed by Terminal, so it must never be writable by
+        // anyone else — not even for the instant a write-then-chmod would leave
+        // it at the umask default.
+        try SecureFileWriter.write(
+            reconnectScript(for: account),
+            to: scriptURL,
+            permissions: SecureFileWriter.privateExecutable
+        )
         return scriptURL
     }
 

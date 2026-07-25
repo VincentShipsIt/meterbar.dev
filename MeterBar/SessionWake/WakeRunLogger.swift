@@ -52,12 +52,7 @@ nonisolated struct WakeRunLogger: Sendable {
     }
 
     private func appendData(_ data: Data, to fileURL: URL) {
-        let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: fileURL.path) {
-            fileManager.createFile(atPath: fileURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        } else {
-            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
-        }
+        SecureFileWriter.ensurePrivateFile(at: fileURL)
         guard let handle = try? FileHandle(forWritingTo: fileURL) else { return }
         defer { try? handle.close() }
         _ = try? handle.seekToEnd()
