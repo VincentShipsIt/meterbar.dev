@@ -1,18 +1,18 @@
 import Foundation
 
-/// Pure, testable provider-readiness check logic shared by the app and the CLI.
-///
-/// This is the single core behind three surfaces: the `meterbar doctor` CLI
-/// subcommand, the app's Diagnostics view, and the first-run/empty-state
-/// checklist. Lives in `MeterBarShared` — mirroring how the wire-format metrics
-/// types were unified — so `MeterBarCLI` and `MeterBar` genuinely share it
-/// instead of each re-deriving the checks.
-///
-/// The evaluators are pure functions of fixture-able inputs: the impure
-/// gathering (PATH scan, keychain, `CODEX_HOME/auth.json`, Cursor SQLite) is done
-/// by `ProviderReadinessInspector` in the app target. Every string produced here
-/// is safe to paste into a public GitHub issue — no token, account id, or raw
-/// file/response body is ever emitted.
+// Pure, testable provider-readiness check logic shared by the app and the CLI.
+//
+// This is the single core behind three surfaces: the `meterbar doctor` CLI
+// subcommand, the app's Diagnostics view, and the first-run/empty-state
+// checklist. Lives in `MeterBarShared` — mirroring how the wire-format metrics
+// types were unified — so `MeterBarCLI` and `MeterBar` genuinely share it
+// instead of each re-deriving the checks.
+//
+// The evaluators are pure functions of fixture-able inputs: the impure
+// gathering (PATH scan, keychain, `CODEX_HOME/auth.json`, Cursor SQLite) is done
+// by `ProviderReadinessInspector` in the app target. Every string produced here
+// is safe to paste into a public GitHub issue — no token, account id, or raw
+// file/response body is ever emitted.
 
 // MARK: - Result types
 
@@ -367,7 +367,9 @@ public enum ProviderReadinessEvaluator {
             detail: input.isCLIInstalled
                 ? "Codex CLI found on PATH."
                 : "Codex CLI not found on PATH (usage is still read from CODEX_HOME/auth.json).",
-            recovery: input.isCLIInstalled ? nil : "Install the Codex CLI (`npm i -g @openai/codex`) to use `codex login`."
+            recovery: input.isCLIInstalled
+                ? nil
+                : "Install the Codex CLI (`npm i -g @openai/codex`) to use `codex login`."
         )
 
         let auth = codexAuthCheck(input)
