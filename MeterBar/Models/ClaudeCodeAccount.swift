@@ -67,7 +67,13 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
 // MARK: - ClaudeCodeAccountStore
 
 final class ClaudeCodeAccountStore: ObservableObject {
-    static let shared = ClaudeCodeAccountStore()
+    /// In demo mode the store is projected from the default account only, so
+    /// provider cards title generically ("Claude") and never surface the owner's
+    /// real custom-account names. The `init(accounts:)` projection reads and
+    /// writes no real `.standard` data.
+    static let shared = DemoMode.isActive
+        ? ClaudeCodeAccountStore(accounts: [.defaultAccount])
+        : ClaudeCodeAccountStore()
 
     @Published private(set) var customAccounts: [ClaudeCodeAccount] = []
     @Published private(set) var defaultAccountName = ClaudeCodeAccount.defaultName

@@ -27,6 +27,13 @@ final class KeychainManagerTests: XCTestCase {
         var addFailureServices: Set<String> = []
         var deleteFailureServices: Set<String> = []
 
+        // Captured so the accessibility tests can assert not just *that* the
+        // attribute is set, but on which of the four calls it appears.
+        private(set) var lastAddQuery: [String: Any] = [:]
+        private(set) var lastUpdateAttributes: [String: Any] = [:]
+        private(set) var lastCopyMatchingQuery: [String: Any] = [:]
+        private(set) var lastDeleteQuery: [String: Any] = [:]
+
         func seed(service: String, account: String, value: String) {
             storage[ItemKey(service: service, account: account)] = Data(value.utf8)
         }
@@ -46,6 +53,7 @@ final class KeychainManagerTests: XCTestCase {
 
         func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
             updateCallCount += 1
+            lastUpdateAttributes = attributes
             guard let itemKey = itemKey(in: query), storage[itemKey] != nil else {
                 return errSecItemNotFound
             }
@@ -58,6 +66,7 @@ final class KeychainManagerTests: XCTestCase {
 
         func add(query: [String: Any]) -> OSStatus {
             addCallCount += 1
+            lastAddQuery = query
             guard let itemKey = itemKey(in: query),
                   let data = query[kSecValueData as String] as? Data else {
                 return errSecParam
@@ -71,6 +80,7 @@ final class KeychainManagerTests: XCTestCase {
         }
 
         func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
+            lastCopyMatchingQuery = query
             guard let itemKey = itemKey(in: query), let data = storage[itemKey] else {
                 return errSecItemNotFound
             }
@@ -79,6 +89,7 @@ final class KeychainManagerTests: XCTestCase {
         }
 
         func delete(query: [String: Any]) -> OSStatus {
+            lastDeleteQuery = query
             guard let itemKey = itemKey(in: query) else { return errSecParam }
             if deleteFailureServices.contains(itemKey.service) {
                 return errSecAuthFailed
@@ -241,6 +252,66 @@ final class KeychainManagerTests: XCTestCase {
         XCTAssertNil(backend.value(service: Self.currentService, account: "anthropic"))
         XCTAssertNil(backend.value(service: Self.legacyService, account: "anthropic"))
         XCTAssertNil(manager.get(key: "anthropic"))
+    }
+
+    // MARK: - Accessibility class
+
+    /// Admin API keys are long-lived org credentials. `AfterFirstUnlock` (not
+    /// `WhenUnlocked`) because a background quota refresh has to read them with
+    /// the screen locked; `ThisDeviceOnly` so they are never eligible for iCloud
+    /// Keychain sync and never leave the Mac they were entered on.
+    private var expectedAccessibility: String {
+        kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
+    }
+
+    func testFirstSavePinsTheItemAccessibilityClass() {
+        let (manager, backend) = makeManager()
+        XCTAssertTrue(manager.save(key: "openai", value: "sk-secret"))
+
+        XCTAssertEqual(
+            backend.lastAddQuery[kSecAttrAccessible as String] as? String,
+            expectedAccessibility
+        )
+    }
+
+    func testOverwriteRepinsTheAccessibilityClass() {
+        let (manager, backend) = makeManager()
+        XCTAssertTrue(manager.save(key: "openai", value: "first"))
+        XCTAssertTrue(manager.save(key: "openai", value: "second"))
+
+        // The update path must carry it too, otherwise an item written by an
+        // older build keeps its default (`WhenUnlocked`, sync-eligible) class
+        // forever — every subsequent save would go through update, not add.
+        XCTAssertEqual(
+            backend.lastUpdateAttributes[kSecAttrAccessible as String] as? String,
+            expectedAccessibility
+        )
+    }
+
+    func testLookupQueriesOmitTheAccessibilityAttribute() {
+        let (manager, backend) = makeManager()
+        XCTAssertTrue(manager.save(key: "openai", value: "sk-secret"))
+        XCTAssertEqual(manager.get(key: "openai"), "sk-secret")
+        XCTAssertTrue(manager.delete(key: "openai"))
+
+        // `kSecAttrAccessible` is a search *predicate* on copy/delete: including
+        // it would stop matching any item stored before this change. It belongs
+        // only on the write path.
+        XCTAssertNil(backend.lastCopyMatchingQuery[kSecAttrAccessible as String])
+        XCTAssertNil(backend.lastDeleteQuery[kSecAttrAccessible as String])
+    }
+
+    func testLegacyMigrationWritesTheHardenedAccessibilityClass() {
+        let (manager, backend) = makeManager()
+        backend.seed(service: Self.legacyService, account: "anthropic", value: "legacy-key")
+
+        XCTAssertEqual(manager.get(key: "anthropic"), "legacy-key")
+        // The migrated copy is a fresh add into the current service, so it is
+        // hardened even though the legacy item never was.
+        XCTAssertEqual(
+            backend.lastAddQuery[kSecAttrAccessible as String] as? String,
+            expectedAccessibility
+        )
     }
 
     func testAuthenticationManagerClearsCredentialAfterCompleteDelete() {

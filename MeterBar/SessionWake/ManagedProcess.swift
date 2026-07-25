@@ -116,7 +116,15 @@ nonisolated enum ManagedProcess {
         let outPipe = UnsafeMutablePointer<Int32>.allocate(capacity: 2)
         let errPipe = UnsafeMutablePointer<Int32>.allocate(capacity: 2)
         defer { outPipe.deallocate(); errPipe.deallocate() }
-        guard pipe(outPipe) == 0, pipe(errPipe) == 0 else {
+        guard pipe(outPipe) == 0 else {
+            return .empty(.launchFailed("pipe() failed"))
+        }
+        guard pipe(errPipe) == 0 else {
+            // The stdout pair already exists and has no owner yet — nothing is
+            // spawned and no drain is running — so returning without closing it
+            // strands two descriptors for the lifetime of the process. The
+            // `defer` above frees the pointer memory, never the descriptors.
+            close(outPipe[0]); close(outPipe[1])
             return .empty(.launchFailed("pipe() failed"))
         }
 
@@ -264,11 +272,27 @@ nonisolated enum ManagedProcess {
 
     // MARK: - Waiting
 
-    private static func wait(pid: pid_t, timeout: TimeInterval, cancellation: Cancellation) -> Result.Termination {
-        let deadline = Date().addingTimeInterval(timeout)
-        while true {
+    /// One non-blocking `waitpid` poll: its return value, the status it filled
+    /// in, and the `errno` that accompanies a `-1`. Injectable so the retry
+    /// contract below can be asserted directly instead of raced against real
+    /// signal delivery, which lands in the 20 ms sleep far more often than in
+    /// the syscall it is supposed to interrupt.
+    typealias WaitPoll = (pid_t) -> (result: pid_t, status: Int32, errorNumber: Int32)
+
+    static func wait(
+        pid: pid_t,
+        timeout: TimeInterval,
+        cancellation: Cancellation,
+        poll: WaitPoll = { pid in
             var status: Int32 = 0
             let result = waitpid(pid, &status, WNOHANG)
+            return (result, status, errno)
+        },
+        escalate: (pid_t) -> Void = { ManagedProcess.escalateTimeout(pid: $0) }
+    ) -> Result.Termination {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let (result, status, errorNumber) = poll(pid)
             if result == pid {
                 if cancellation.wasCancelled() { return .cancelled }
                 if _WSTATUS(status) == 0 {
@@ -276,11 +300,16 @@ nonisolated enum ManagedProcess {
                 }
                 return .signalled(signal: _WSTATUS(status))
             }
-            if result == -1 {
-                return .launchFailed("waitpid failed")
+            // A signal delivered to this thread aborts the poll without saying
+            // anything about the child: it is still running and still ours to
+            // reap. Reporting that as a launch failure abandons a live process
+            // group. Fall through to the deadline check so an unending stream of
+            // interruptions still times out instead of spinning.
+            if result == -1, errorNumber != EINTR {
+                return .launchFailed("waitpid failed (\(errorNumber))")
             }
             if Date() >= deadline {
-                escalateTimeout(pid: pid)
+                escalate(pid)
                 return .timedOut
             }
             usleep(20_000) // 20ms poll
@@ -291,7 +320,11 @@ nonisolated enum ManagedProcess {
     /// well-behaved child can flush and exit, wait a bounded grace for it to
     /// reap, then `SIGKILL` the group and block until it is gone. Going straight
     /// to `SIGKILL` would deny the child any chance to clean up.
-    private static func escalateTimeout(pid: pid_t) {
+    ///
+    /// Internal rather than private only because ``wait(pid:timeout:cancellation:poll:escalate:)``
+    /// names it as a default argument, which must be at least as visible as the
+    /// function that declares it.
+    static func escalateTimeout(pid: pid_t) {
         Cancellation.killGroup(pid, signal: SIGTERM)
         let graceDeadline = Date().addingTimeInterval(terminationGrace)
         var status: Int32 = 0
