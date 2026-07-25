@@ -21,7 +21,7 @@ Providers tracked:
 | Claude (admin) | `.claude` | Anthropic Admin API key (user-provided, stored in our keychain), `/v1/organizations/usage_report/messages` |
 | OpenAI (admin) | `.openai` | OpenAI Admin API key (user-provided, stored in our keychain), `/v1/organization/usage/completions` |
 
-Plus local **cost estimation**: `CostTracker` scans `~/.claude*/projects/**/*.jsonl` and Codex's `$CODEX_HOME/archived_sessions` + `$CODEX_HOME/logs_2.sqlite` (`CODEX_HOME` defaults to `~/.codex`), priced from a hardcoded per-model table.
+Plus local **cost estimation**: `CostTracker` scans `~/.claude*/projects/**/*.jsonl` and Codex's rollout directories — `$CODEX_HOME/archived_sessions` *and* `$CODEX_HOME/sessions` (live rollouts; Codex only archives on session close) — plus `$CODEX_HOME/logs_2.sqlite` (`CODEX_HOME` defaults to `~/.codex`), priced from a hardcoded per-model table. Codex `token_count` events name neither model nor front end, so the scan streams each rollout in order and carries the last `turn_context` model and the opening `session_meta` originator forward; the two directories are deduped by event content, not filename.
 
 ---
 

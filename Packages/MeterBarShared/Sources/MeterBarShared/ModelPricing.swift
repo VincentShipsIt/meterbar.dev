@@ -50,11 +50,25 @@ public enum ModelPricing {
         "claude-haiku-4-5": TokenPricing(
             input: 1.0, output: 5.0, cacheCreation: 1.25, cacheRead: 0.10, cacheCreationOneHour: 2.0),
         "codex": TokenPricing(input: 1.25, output: 10.0, cacheCreation: 0, cacheRead: 0.125),
+        // Every published Codex slug currently bills at the base `codex` rate.
+        // They are listed anyway so a future per-slug divergence is a one-line
+        // table edit instead of re-plumbing the lookup.
+        "gpt-5.6-sol": TokenPricing(input: 1.25, output: 10.0, cacheCreation: 0, cacheRead: 0.125),
+        "gpt-5.6-terra": TokenPricing(input: 1.25, output: 10.0, cacheCreation: 0, cacheRead: 0.125),
+        "gpt-5.6-luna": TokenPricing(input: 1.25, output: 10.0, cacheCreation: 0, cacheRead: 0.125),
         "default": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
     ]
 
     public static var codex: TokenPricing {
         table["codex"] ?? fallback
+    }
+
+    /// Per-model Codex rate, falling back to the flat provider rate for slugs
+    /// the table does not know yet.
+    public static func codex(for model: String?) -> TokenPricing {
+        guard let model else { return codex }
+        let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return table[normalized] ?? codex
     }
 
     public static func claude(for model: String?) -> TokenPricing {

@@ -12,6 +12,18 @@ final class ModelPricingTests: XCTestCase {
         XCTAssertEqual(ModelPricing.codex.cacheRead, 0.125)
     }
 
+    func testCodexLookupResolvesNamedModelsAndFallsBack() {
+        // Every Codex slug bills at the same published rate today, so the named
+        // rows exist to make a future divergence a one-line table edit rather
+        // than a re-plumb — and so unknown slugs never price at zero.
+        XCTAssertEqual(ModelPricing.codex(for: "gpt-5.6-sol"), ModelPricing.codex)
+        XCTAssertEqual(ModelPricing.codex(for: "gpt-5.6-terra"), ModelPricing.codex)
+        XCTAssertEqual(ModelPricing.codex(for: "gpt-5.6-luna"), ModelPricing.codex)
+        XCTAssertEqual(ModelPricing.codex(for: "  GPT-5.6-Sol  "), ModelPricing.codex)
+        XCTAssertEqual(ModelPricing.codex(for: "gpt-9-unreleased"), ModelPricing.codex)
+        XCTAssertEqual(ModelPricing.codex(for: nil), ModelPricing.codex)
+    }
+
     func testCostTrackerUsesTheSharedLookup() {
         let models = [nil, "claude-fable-9", "claude-opus-4-7", "claude-haiku-4-5", "unknown"]
         for model in models {
