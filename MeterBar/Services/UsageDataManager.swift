@@ -41,6 +41,11 @@ class UsageDataManager: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
 
+    /// Advances once per committed metric snapshot. Notification checks subscribe
+    /// to this rather than polling on a timer, so a limit crossing is evaluated
+    /// the moment a refresh lands instead of up to five minutes later.
+    @Published private(set) var refreshGeneration: UInt64 = 0
+
     @Published private var refreshIntervalRaw: Int {
         didSet {
             preferences.set(refreshIntervalRaw, forKey: StorageKeys.refreshInterval)
@@ -201,9 +206,7 @@ class UsageDataManager: ObservableObject {
         }
 
         metrics = newMetrics
-        saveCachedData()
-        saveCachedAccountMetrics()
-        saveSharedData(newMetrics)
+        publishMetrics()
 
         return UsageRefreshReport(
             startedAt: startedAt,
@@ -285,27 +288,21 @@ class UsageDataManager: ObservableObject {
             } else if service == .codexCli {
                 codexAccountMetrics = [:]
             }
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
         if service == .claudeCode, claudeCodeAccountStore.enabledAccounts.isEmpty {
             claudeCodeAccountMetrics = [:]
             metrics.removeValue(forKey: service)
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
         if service == .codexCli, codexAccountStore.enabledAccounts.isEmpty {
             codexAccountMetrics = [:]
             metrics.removeValue(forKey: service)
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
             return
         }
 
@@ -313,9 +310,7 @@ class UsageDataManager: ObservableObject {
             let newMetrics = try await refreshedMetrics(for: service)
 
             metrics[service] = newMetrics
-            saveCachedData()
-            saveCachedAccountMetrics()
-            saveSharedData(metrics)
+            publishMetrics()
         } catch {
             if lastError == nil {
                 lastError = error
@@ -326,13 +321,14 @@ class UsageDataManager: ObservableObject {
                 // if none exist, showing no data is safer than relabeling a
                 // different profile's stale quota.
                 metrics.removeValue(forKey: service)
-                saveCachedData()
-                saveCachedAccountMetrics()
-                saveSharedData(metrics)
+                publishMetrics()
             } else if metrics[service] == nil {
                 // Preserve existing cached metrics for single-account services.
                 if let cachedData = loadCachedMetricsFromDisk()[service] {
                     metrics[service] = cachedData
+                    // Restoring from cache still changes what subscribers see,
+                    // so it publishes like any other committed snapshot.
+                    publishMetrics()
                 }
             }
         }
@@ -356,9 +352,7 @@ class UsageDataManager: ObservableObject {
             metrics[.codexCli] = representative
         }
         lastError = nil
-        saveCachedData()
-        saveCachedAccountMetrics()
-        saveSharedData(metrics)
+        publishMetrics()
     }
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
@@ -410,6 +404,17 @@ class UsageDataManager: ObservableObject {
             return [:]
         }
         return MetricsCodec.decode(data)
+    }
+
+    /// Persist and broadcast the current snapshot. Every mutation that changes
+    /// what an observer would see funnels through here, so the three caches can
+    /// never drift apart and `refreshGeneration` advances exactly once per
+    /// committed change — which is what the notification layer subscribes to.
+    private func publishMetrics() {
+        saveCachedData()
+        saveCachedAccountMetrics()
+        saveSharedData(metrics)
+        refreshGeneration &+= 1
     }
 
     private func saveCachedData() {
