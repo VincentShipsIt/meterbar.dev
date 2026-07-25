@@ -16,21 +16,22 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
-    /// Grok Build is CLI-backed but opt-in while its ACP billing method is in beta.
+    /// Grok Build is tracked by default; this key records an explicit opt-out.
+    /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
+    /// distinguish "never touched" from "turned off" now that the default flipped.
     static let grokProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
     /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
     static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
+    /// `MenuBarPresentationMode` raw value: one merged status item or one per provider.
+    static let statusItemPresentationMode = "StatusItemPresentationMode"
     /// `StatusItemLabelMetric` raw value (percent left, percent used, or icon only).
     static let statusItemLabelMetric = "StatusItemLabelMetric"
     /// `StatusItemLabelSize` raw value (compact or regular).
     static let statusItemLabelSize = "StatusItemLabelSize"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
-    /// `MenuBarAccountDisplayMode` raw value. Missing means `.single`, which is
-    /// the pre-#266 single-status-item menu bar.
-    static let menuBarAccountDisplayMode = "MenuBarAccountDisplayMode"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
     /// in the order the user selected them.
     static let menuBarSelectedAccountKeys = "MenuBarSelectedAccountKeys"
@@ -38,6 +39,11 @@ nonisolated enum StorageKeys {
     static let menuBarMergedAccountKey = "MenuBarMergedAccountKey"
     /// Whether the one-time first-launch popover has been completed or dismissed.
     static let hasCompletedFirstRun = "HasCompletedFirstRun"
+    /// Hidden opt-in for demo / sample-data mode. When set (or `METERBAR_DEMO=1`
+    /// in the environment) the app publishes synthetic `DemoData` instead of the
+    /// signed-in account's real usage, for landing-page screenshots and the
+    /// first-run onboarding preview. Off by default; never affects real data.
+    static let demoMode = "DemoMode"
     /// Enables the Claude Code OAuth usage source (`/api/oauth/usage`), the
     /// primary reader for the default account. On by default; off forces the CLI
     /// output fallback. Legacy key name kept to preserve existing user settings.

@@ -1,198 +1,233 @@
 import Foundation
 import MeterBarShared
 
-// MARK: - MenuBarStatusItemPlanEntry
-
-/// One status item the menu bar should own.
-nonisolated struct MenuBarStatusItemPlanEntry: Equatable, Identifiable, Sendable {
-    // MARK: Internal
-
-    /// Identity of the live `NSStatusItem`. Stable across retitles so an item
-    /// keeps its slot in the menu bar.
-    static let aggregateID = "aggregate"
-    static let mergedID = "merged"
-
-    /// The legacy item: no account scope, competes across every candidate.
-    static let aggregate = MenuBarStatusItemPlanEntry(
-        id: aggregateID,
-        accountKey: nil,
-        displayName: "",
-        badge: "",
-        showsAccountSwitcher: false
-    )
-
+/// One `NSStatusItem` the app should own, fully resolved.
+///
+/// The AppDelegate can't be reached by `swift test` (the SwiftPM target excludes
+/// `App/`), so every decision about *what* the menu bar shows lives here and the
+/// delegate is left with nothing but "create, update, remove" mechanics.
+struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
+    /// Stable identity across refreshes. Reusing it keeps the item's menu-bar
+    /// position (and its autosaved user ordering) instead of respawning it at
+    /// the far left on every update.
     let id: String
-    /// nil for the aggregate item; otherwise the account this item is scoped to.
-    let accountKey: String?
-    /// Sanitized account name (empty for the aggregate item).
-    let displayName: String
-    /// Distinguishing affordance prefixed onto the item's title.
-    let badge: String
-    /// Whether this item's right-click menu offers the account switcher.
-    let showsAccountSwitcher: Bool
+    /// Provider whose logo the item wears; nil for the placeholder item.
+    let service: ServiceType?
+    /// Legacy Auto key fed back to `StatusItemLimitSelector` as `previousKey`,
+    /// so hysteresis survives. Only merged mode has a meaningful value.
+    let selectionKey: String?
+    /// Menu bar label. Empty renders icon-only, and a non-empty title carries
+    /// the leading space that separates it from the icon.
+    let title: String
+    let tooltip: String
+    let accessibilityLabel: String
 }
 
-// MARK: - MenuBarStatusItemPlan
+/// Turns the current quota candidates into the menu bar's status item layout.
+enum MenuBarStatusItemPlanner {
+    /// Identity of the single item in merged mode, and of the placeholder that
+    /// keeps MeterBar reachable when there is nothing to show.
+    ///
+    /// `nonisolated` because `MenuBarAccountItemEntry.aggregate` reuses it to
+    /// keep the fallback item in the same menu-bar slot.
+    nonisolated static let mergedItemID = "merged"
 
-nonisolated struct MenuBarStatusItemPlan: Equatable, Sendable {
-    let mode: MenuBarAccountDisplayMode
-    let entries: [MenuBarStatusItemPlanEntry]
-
-    var itemIDs: [String] { entries.map(\.id) }
-}
-
-// MARK: - MenuBarStatusItemPlanner
-
-/// Turns a display mode plus a persisted account selection into the concrete set
-/// of status items the app should own.
-nonisolated enum MenuBarStatusItemPlanner {
-    /// Menu-bar width is finite and shared with every other app's items, and
-    /// macOS silently hides items that no longer fit. Four is deliberately
-    /// conservative: it covers the common "work + personal, Claude + Codex"
-    /// setup while still fitting a laptop-width menu bar.
-    static let maximumConcurrentItems = 4
-
+    /// - Parameter accountPlan: which accounts own an item, for the two
+    ///   account-scoped modes. Nil means "not account-scoped", which is what the
+    ///   provider-level modes always want.
     static func plan(
-        mode: MenuBarAccountDisplayMode,
-        selectedAccountKeys: [String],
-        mergedAccountKey: String?,
-        accounts: [MenuBarAccountIdentity]
-    ) -> MenuBarStatusItemPlan {
+        mode: MenuBarPresentationMode,
+        accountPlan: MenuBarAccountItemPlan? = nil,
+        candidates: [StatusLimitCandidate],
+        previousKey: String?,
+        pinnedKey: String?,
+        metric: StatusItemLabelMetric,
+        size: StatusItemLabelSize,
+        now: Date = Date()
+    ) -> [MenuBarStatusItemDescriptor] {
+        let context = SelectionContext(
+            previousKey: previousKey,
+            pinnedKey: pinnedKey,
+            metric: metric,
+            size: size,
+            now: now
+        )
+
         switch mode {
-        case .single:
-            MenuBarStatusItemPlan(mode: .single, entries: [.aggregate])
-        case .perAccount:
-            perAccountPlan(selectedAccountKeys: selectedAccountKeys, accounts: accounts)
         case .merged:
-            mergedPlan(mergedAccountKey: mergedAccountKey, accounts: accounts)
+            return [mergedDescriptor(candidates: candidates, context: context)]
+        case .perProvider:
+            let descriptors = perProviderDescriptors(candidates: candidates, metric: metric, size: size)
+            // Never return an empty plan: with no status item left the popover,
+            // settings, and Quit all become unreachable.
+            return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
+        case .perAccount, .accountSwitcher:
+            let descriptors = accountDescriptors(
+                entries: (accountPlan ?? .aggregate(mode: mode)).entries,
+                candidates: candidates,
+                context: context
+            )
+            return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
         }
     }
 
-    // MARK: Private
-
-    private static func perAccountPlan(
-        selectedAccountKeys: [String],
-        accounts: [MenuBarAccountIdentity]
-    ) -> MenuBarStatusItemPlan {
-        let enabled = accounts.filter(\.isEnabled)
-        let entries = selectedAccountKeys
-            .compactMap { key in enabled.first { $0.key == key } }
-            .prefix(maximumConcurrentItems)
-            .map { identity in
-                MenuBarStatusItemPlanEntry(
-                    id: identity.key,
-                    accountKey: identity.key,
-                    displayName: identity.displayName,
-                    badge: identity.badge,
-                    showsAccountSwitcher: false
+    /// Every window the user can pin from the menu bar itself, deduplicated by
+    /// pin key and ordered like the rest of the app.
+    static func switcherOptions(for candidates: [StatusLimitCandidate]) -> [StatusItemPinOption] {
+        var seen: Set<String> = []
+        return candidates
+            .sorted { lhs, rhs in
+                (lhs.service.sortOrder, lhs.displayName, lhs.windowName)
+                    < (rhs.service.sortOrder, rhs.displayName, rhs.windowName)
+            }
+            .compactMap { candidate in
+                guard seen.insert(candidate.pinKey).inserted else { return nil }
+                return StatusItemPinOption(
+                    id: candidate.pinKey,
+                    title: "\(candidate.displayName) · \(candidate.windowName)"
                 )
             }
-        // Every selected account being disabled or removed must not leave the
-        // user without a menu bar, so fall back to the legacy aggregate item.
-        guard !entries.isEmpty else {
-            return MenuBarStatusItemPlan(mode: .perAccount, entries: [.aggregate])
-        }
-        return MenuBarStatusItemPlan(mode: .perAccount, entries: entries)
     }
 
-    private static func mergedPlan(
-        mergedAccountKey: String?,
-        accounts: [MenuBarAccountIdentity]
-    ) -> MenuBarStatusItemPlan {
-        let enabled = accounts.filter(\.isEnabled)
-        let active = mergedAccountKey.flatMap { key in enabled.first { $0.key == key } } ?? enabled.first
-        guard let active else {
-            return MenuBarStatusItemPlan(mode: .merged, entries: [.aggregate])
-        }
-        return MenuBarStatusItemPlan(mode: .merged, entries: [
-            MenuBarStatusItemPlanEntry(
-                id: MenuBarStatusItemPlanEntry.mergedID,
-                accountKey: active.key,
-                displayName: active.displayName,
-                badge: active.badge,
-                showsAccountSwitcher: true
-            )
-        ])
-    }
-}
-
-// MARK: - MenuBarStatusItemDiff
-
-/// Minimal reconciliation between the live status items and a new plan.
-///
-/// Menu-bar slots are positional: a re-created `NSStatusItem` reappears at the
-/// end of the bar. Adding and removing only the difference keeps every retained
-/// item — and its position — undisturbed when one account is disabled.
-nonisolated struct MenuBarStatusItemDiff: Equatable, Sendable {
-    let added: [String]
-    let removed: [String]
-    /// Existing items that survive, in their current order.
-    let retained: [String]
-
-    static func between(existing: [String], desired: [String]) -> MenuBarStatusItemDiff {
-        let existingIDs = Set(existing)
-        let desiredIDs = Set(desired)
-        return MenuBarStatusItemDiff(
-            added: desired.filter { !existingIDs.contains($0) },
-            removed: existing.filter { !desiredIDs.contains($0) },
-            retained: existing.filter { desiredIDs.contains($0) }
+    private static var placeholderDescriptor: MenuBarStatusItemDescriptor {
+        MenuBarStatusItemDescriptor(
+            id: mergedItemID,
+            service: nil,
+            selectionKey: nil,
+            title: "",
+            tooltip: "MeterBar",
+            accessibilityLabel: "MeterBar"
         )
     }
-}
 
-// MARK: - MenuBarAccountSwitcherEntry
+    /// Everything `StatusItemLimitSelector` needs apart from the candidates
+    /// themselves. Grouped so the per-account path can hand the same selection
+    /// rules to each scoped candidate set without threading four arguments.
+    private struct SelectionContext {
+        let previousKey: String?
+        let pinnedKey: String?
+        let metric: StatusItemLabelMetric
+        let size: StatusItemLabelSize
+        let now: Date
+    }
 
-nonisolated struct MenuBarAccountSwitcherEntry: Equatable, Identifiable, Sendable {
-    let key: String
-    let title: String
-    let badge: String
-    let isEnabled: Bool
-    let isActive: Bool
+    private static func mergedDescriptor(
+        candidates: [StatusLimitCandidate],
+        context: SelectionContext
+    ) -> MenuBarStatusItemDescriptor {
+        guard let selection = StatusItemLimitSelector.select(
+            candidates: candidates,
+            previousKey: context.previousKey,
+            pinnedKey: context.pinnedKey,
+            now: context.now
+        ) else {
+            return placeholderDescriptor
+        }
 
-    var id: String { key }
-}
+        // Auto already implies "whichever window matters", so the window name is
+        // noise there; a pin is a deliberate choice of one window and says so.
+        let isPinned = context.pinnedKey == selection.pinKey
+        return descriptor(
+            id: mergedItemID,
+            selectionKey: selection.key,
+            candidate: selection,
+            qualifiedName: isPinned,
+            metric: context.metric,
+            size: context.size
+        )
+    }
 
-// MARK: - MenuBarAccountSwitcher
+    private static func perProviderDescriptors(
+        candidates: [StatusLimitCandidate],
+        metric: StatusItemLabelMetric,
+        size: StatusItemLabelSize
+    ) -> [MenuBarStatusItemDescriptor] {
+        candidates
+            .filter(\.isAutoSelectable)
+            .sorted { lhs, rhs in
+                // Deterministic order, otherwise the items reshuffle whenever
+                // the candidate list is rebuilt.
+                (lhs.service.sortOrder, lhs.key) < (rhs.service.sortOrder, rhs.key)
+            }
+            .map { candidate in
+                descriptor(
+                    id: candidate.pinKey,
+                    selectionKey: nil,
+                    candidate: candidate,
+                    qualifiedName: true,
+                    metric: metric,
+                    size: size
+                )
+            }
+    }
 
-/// The merged item's in-menu account switcher.
-nonisolated enum MenuBarAccountSwitcher {
-    /// Every tracked account, disabled ones included, so the menu can explain
-    /// why an account holds no status item instead of silently omitting it.
-    static func entries(
-        accounts: [MenuBarAccountIdentity],
-        activeKey: String?
-    ) -> [MenuBarAccountSwitcherEntry] {
-        accounts.map { identity in
-            MenuBarAccountSwitcherEntry(
-                key: identity.key,
-                title: identity.displayName,
-                badge: identity.badge,
-                isEnabled: identity.isEnabled,
-                isActive: identity.key == activeKey
+    /// One item per account the plan named, each competing only within its own
+    /// account's candidates.
+    private static func accountDescriptors(
+        entries: [MenuBarAccountItemEntry],
+        candidates: [StatusLimitCandidate],
+        context: SelectionContext
+    ) -> [MenuBarStatusItemDescriptor] {
+        entries.compactMap { entry in
+            let scoped = MenuBarAccountCandidateFilter.candidates(for: entry, in: candidates)
+            // The unscoped fallback entry *is* the legacy merged item, so it
+            // keeps the merged behavior including the placeholder.
+            guard entry.accountKey != nil else {
+                return mergedDescriptor(candidates: scoped, context: context)
+            }
+            // A pin naming a window outside this account simply doesn't match,
+            // so passing it through only honors pins that belong here.
+            guard let selection = StatusItemLimitSelector.select(
+                candidates: scoped,
+                previousKey: context.previousKey,
+                pinnedKey: context.pinnedKey,
+                now: context.now
+            ) else { return nil }
+            return descriptor(
+                // Only the switcher item feeds its selection back as the next
+                // `previousKey`; per-account items each own a slot already.
+                id: entry.id,
+                selectionKey: entry.showsAccountSwitcher ? selection.key : nil,
+                candidate: selection,
+                qualifiedName: false,
+                metric: context.metric,
+                size: context.size,
+                badge: entry.badge,
+                accountName: entry.displayName
             )
         }
     }
 
-    /// Next enabled account after `activeKey`, wrapping around.
-    static func nextKey(after activeKey: String?, accounts: [MenuBarAccountIdentity]) -> String? {
-        let enabled = accounts.filter(\.isEnabled)
-        guard !enabled.isEmpty else { return nil }
-        guard let activeKey, let index = enabled.firstIndex(where: { $0.key == activeKey }) else {
-            return enabled.first?.key
-        }
-        return enabled[(index + 1) % enabled.count].key
-    }
-}
+    private static func descriptor(
+        id: String,
+        selectionKey: String?,
+        candidate: StatusLimitCandidate,
+        qualifiedName: Bool,
+        metric: StatusItemLabelMetric,
+        size: StatusItemLabelSize,
+        badge: String = "",
+        accountName: String = ""
+    ) -> MenuBarStatusItemDescriptor {
+        let windowName = qualifiedName
+            ? "\(candidate.displayName) · \(candidate.windowName)"
+            : candidate.displayName
+        // Two items for the same provider wear the same logo, so the account
+        // name is what tells them apart in the tooltip.
+        let name = accountName.isEmpty ? windowName : "\(accountName) · \(windowName)"
+        let value = StatusItemLabelFormatter.title(for: candidate.limit, metric: metric, size: size)
+        let spokenValue = StatusItemLabelFormatter.spokenValue(for: candidate.limit, metric: metric)
+        let suffix = spokenValue.map { "\($0) on \(name)" } ?? name
+        // Icon-only still shows the badge: without it, per-account items are
+        // indistinguishable from each other in the menu bar.
+        let segments = [badge, value ?? ""].filter { !$0.isEmpty }
 
-// MARK: - MenuBarStatusItemCandidateFilter
-
-/// Scopes the shared candidate set to the account one status item represents.
-enum MenuBarStatusItemCandidateFilter {
-    static func candidates(
-        for entry: MenuBarStatusItemPlanEntry,
-        in candidates: [StatusLimitCandidate]
-    ) -> [StatusLimitCandidate] {
-        guard let accountKey = entry.accountKey else { return candidates }
-        return candidates.filter { $0.accountKey == accountKey }
+        return MenuBarStatusItemDescriptor(
+            id: id,
+            service: candidate.service,
+            selectionKey: selectionKey,
+            title: segments.isEmpty ? "" : " " + segments.joined(separator: " "),
+            tooltip: "MeterBar: \(suffix)",
+            accessibilityLabel: "MeterBar \(suffix)"
+        )
     }
 }

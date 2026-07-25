@@ -16,16 +16,15 @@ nonisolated enum MenuBarAccountSelectionOutcome: Equatable, Sendable {
 
 /// Persists which accounts own a menu-bar status item (issue #266).
 ///
-/// Defaults reproduce the pre-#266 menu bar exactly: `.single` mode, no selected
-/// accounts, no merged binding — so an existing installation that never opts in
-/// sees no change after upgrading.
+/// The mode itself lives in `MenuBarDisplayPreferencesStore` alongside the
+/// provider-level modes, so there is exactly one menu-bar layout preference.
+/// Defaults reproduce the pre-#266 menu bar exactly: no selected accounts and no
+/// switcher binding, so an existing installation sees no change after upgrading.
 final class MenuBarAccountSelectionStore: ObservableObject {
     // MARK: Lifecycle
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        mode = userDefaults.string(forKey: StorageKeys.menuBarAccountDisplayMode)
-            .flatMap(MenuBarAccountDisplayMode.init(rawValue:)) ?? .single
         selectedAccountKeys = Self.normalizedSelection(
             userDefaults.stringArray(forKey: StorageKeys.menuBarSelectedAccountKeys) ?? []
         )
@@ -37,18 +36,11 @@ final class MenuBarAccountSelectionStore: ObservableObject {
 
     static let shared = MenuBarAccountSelectionStore()
 
-    @Published private(set) var mode: MenuBarAccountDisplayMode
     @Published private(set) var selectedAccountKeys: [String]
     @Published private(set) var mergedAccountKey: String?
 
     /// Documented cap on concurrent status items.
-    var itemLimit: Int { MenuBarStatusItemPlanner.maximumConcurrentItems }
-
-    func setMode(_ newMode: MenuBarAccountDisplayMode) {
-        guard newMode != mode else { return }
-        mode = newMode
-        userDefaults.set(newMode.rawValue, forKey: StorageKeys.menuBarAccountDisplayMode)
-    }
+    var itemLimit: Int { MenuBarAccountItemPlanner.maximumConcurrentItems }
 
     func isSelected(_ key: String) -> Bool {
         selectedAccountKeys.contains(key)
@@ -103,7 +95,7 @@ final class MenuBarAccountSelectionStore: ObservableObject {
         let unique = keys
             .compactMap(normalizedKey)
             .filter { seen.insert($0).inserted }
-        return Array(unique.prefix(MenuBarStatusItemPlanner.maximumConcurrentItems))
+        return Array(unique.prefix(MenuBarAccountItemPlanner.maximumConcurrentItems))
     }
 
     private func persistSelection(_ keys: [String]) {

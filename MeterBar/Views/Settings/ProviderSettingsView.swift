@@ -2,11 +2,15 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-/// The "Providers" settings tab: a segmented provider picker over a per-provider
-/// pane (header, overview, usage bars, and provider-specific connection
-/// settings). Extracted from the SettingsView monolith. The two account sheets
-/// and the reconnect-failure alert live here because they're driven entirely by
-/// controls inside this tab.
+/// One provider's settings page: header, overview, usage bars, and that
+/// provider's connection settings. The two account sheets and the
+/// reconnect-failure alert live here because they're driven entirely by controls
+/// on this page.
+///
+/// Which provider is showing is the *sidebar's* selection — this view used to
+/// own a second, horizontal segmented picker over the same choice, which meant
+/// two navigation layers for one hierarchy and a control that widened with every
+/// provider MeterBar added.
 ///
 /// The overview facts (source/status/plan/error) are derived once via
 /// `ProviderSettingsFacts` rather than through the old per-helper `switch`
@@ -14,23 +18,11 @@ import SwiftUI
 struct ProviderSettingsView: View {
     // MARK: Internal
 
+    let service: ServiceType
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Compact segmented "pill", left-aligned — the same control style as
-            // the provider/mode pickers elsewhere (Session Wake), instead of a
-            // full-width bar that read as tabs. `fixedSize` stops the segmented
-            // control from stretching edge-to-edge.
-            Picker("Provider", selection: $selectedProviderTab) {
-                ForEach(ServiceType.allCases) { service in
-                    Text(service.displayName).tag(service)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .padding(.bottom, MeterBarTheme.Spacing.xs)
-
-            providerSettingsPane(for: selectedProviderTab)
+            providerSettingsPane(for: service)
         }
         .alert(
             "Claude Reconnect Failed",
@@ -75,7 +67,6 @@ struct ProviderSettingsView: View {
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
 
-    @State private var selectedProviderTab: ServiceType = .claudeCode
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
     @State private var claudeReconnectError: String?
@@ -677,70 +668,10 @@ struct ProviderSettingsView: View {
 
     // MARK: - Derivation
 
-    /// Gathers this provider's live primitive state in a single `switch`, then
-    /// hands it to `ProviderSettingsFacts` which derives every displayed
-    /// string/color. This is the only place that switches over services to read
-    /// their status; the display rules live in the value type.
+    /// Shared with the settings sidebar's health dot, so a provider's row and its
+    /// page can never disagree about whether it's connected.
     private func facts(for service: ServiceType) -> ProviderSettingsFacts {
-        let live: (hasAccess: Bool, subscription: String?, tier: String?, error: String?) =
-            switch service {
-            case .claudeCode:
-                (
-                    claudeCodeService.hasAccess,
-                    claudeCodeService.subscriptionType,
-                    claudeCodeService.rateLimitTier,
-                    claudeCodeService.lastError?.localizedDescription
-                )
-            case .codexCli:
-                (
-                    codexCliService.hasAccess,
-                    codexCliService.subscriptionType,
-                    nil,
-                    codexCliService.lastError?.localizedDescription
-                )
-            case .cursor:
-                (
-                    cursorService.hasAccess,
-                    cursorService.subscriptionType,
-                    nil,
-                    cursorService.lastError?.localizedDescription
-                )
-            case .openRouter:
-                (
-                    openRouterService.hasAccess,
-                    nil,
-                    nil,
-                    openRouterService.lastError?.localizedDescription
-                )
-            case .grok:
-                (
-                    grokService.hasAccess,
-                    grokService.subscriptionType,
-                    nil,
-                    grokService.lastError?.localizedDescription
-                )
-            }
-
-        return ProviderSettingsFacts(
-            service: service,
-            isEnabled: providerVisibility.isEnabled(service),
-            hasAccess: live.hasAccess,
-            subscriptionType: live.subscription,
-            rateLimitTier: live.tier,
-            errorText: live.error,
-            updatedText: providerUpdatedText(for: service),
-            worstBand: providerSnapshots(for: service)
-                .compactMap(\.band)
-                .max(by: { $0.severity < $1.severity }),
-            codexAuthFileDisplayPath: codexAuthFileDisplayPath
-        )
-    }
-
-    private func providerUpdatedText(for service: ServiceType) -> String {
-        providerSnapshots(for: service)
-            .filter(\.hasMetrics)
-            .map(\.updatedText)
-            .first ?? "No data"
+        ProviderSettingsFacts.live(for: service, snapshots: providerSnapshots)
     }
 
     private func providerSnapshots(for service: ServiceType) -> [ProviderSnapshot] {

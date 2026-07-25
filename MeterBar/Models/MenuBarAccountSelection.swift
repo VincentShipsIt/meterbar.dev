@@ -1,32 +1,9 @@
 import Foundation
 import MeterBarShared
 
-// MARK: - MenuBarAccountDisplayMode
-
-/// How the menu bar presents MeterBar's tracked accounts (issue #266).
-nonisolated enum MenuBarAccountDisplayMode: String, CaseIterable, Identifiable, Sendable {
-    /// One status item that follows Auto/pin selection across every account.
-    /// This is the pre-#266 behavior and stays the default, so an existing
-    /// installation that never opts in keeps the menu bar it had before.
-    case single
-    /// One status item per explicitly selected account, capped by
-    /// `MenuBarStatusItemPlanner.maximumConcurrentItems`.
-    case perAccount
-    /// One status item bound to a chosen account, with an in-menu switcher.
-    case merged
-
-    // MARK: Internal
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .single: "Single Item"
-        case .perAccount: "One Per Account"
-        case .merged: "Merged With Switcher"
-        }
-    }
-}
+// Account-scoped presentation is expressed by `MenuBarPresentationMode`'s
+// `.perAccount` / `.accountSwitcher` cases, so this file is purely about account
+// *identity*: keys, sanitized labels, and the catalog that builds them.
 
 // MARK: - MenuBarAccountKey
 

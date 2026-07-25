@@ -29,8 +29,11 @@ struct SettingsView: View {
             }
             .tabItem { Label("General", systemImage: "gearshape") }
 
+            // The catalog, not a single provider's page: this legacy shell has no
+            // sidebar to pick a provider from, and a provider picker *inside* the
+            // tab is exactly the second navigation layer this redesign removed.
             settingsTab {
-                ProviderSettingsView()
+                ProviderCatalogSettingsView()
             }
             .tabItem { Label("Providers", systemImage: "square.grid.2x2") }
 

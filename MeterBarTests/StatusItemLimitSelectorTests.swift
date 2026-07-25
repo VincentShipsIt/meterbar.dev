@@ -12,11 +12,13 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         displayName: String? = nil,
         pinKey: String? = nil,
         windowName: String = "Session",
-        isAutoSelectable: Bool = true
+        isAutoSelectable: Bool = true,
+        service: ServiceType = .claudeCode
     ) -> StatusLimitCandidate {
         StatusLimitCandidate(
             key: key,
             pinKey: pinKey ?? key,
+            service: service,
             displayName: displayName ?? key,
             windowName: windowName,
             limit: UsageLimit(used: percentUsed, total: 100, resetTime: nil),
@@ -74,6 +76,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
             StatusLimitCandidate(
                 key: seed.key,
                 pinKey: seed.pinKey,
+                service: seed.service,
                 displayName: seed.displayName,
                 windowName: seed.windowName,
                 limit: seed.limit,
@@ -120,6 +123,50 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         let loose = candidate(key: "codex", percentUsed: 20, activeMinutesAgo: nil)
         let tight = candidate(key: "claude:ship", percentUsed: 80, activeMinutesAgo: 120)
         XCTAssertEqual(select([loose, tight])?.key, "claude:ship")
+    }
+
+    // MARK: - Exhausted quotas
+
+    func testExhaustedActiveAccountYieldsToAnAccountThatHasQuotaLeft() {
+        // The reported bug: Codex sat at 0% for days, and because it is always
+        // the tightest candidate it owned the menu bar the whole time.
+        let spentCodex = candidate(key: "codex", percentUsed: 100, activeMinutesAgo: 1)
+        let liveClaude = candidate(key: "claude:gen", percentUsed: 48)
+        XCTAssertEqual(select([spentCodex, liveClaude])?.key, "claude:gen")
+    }
+
+    func testExhaustedAccountIsSkippedInTheIdleFallbackPoolToo() {
+        let spentCodex = candidate(key: "codex", percentUsed: 100)
+        let liveClaude = candidate(key: "claude:gen", percentUsed: 60)
+        XCTAssertEqual(select([spentCodex, liveClaude])?.key, "claude:gen")
+    }
+
+    func testNearlyExhaustedAccountStillCompetes() {
+        // 99.6% used still reads "1% left" — only a truly spent quota is skipped.
+        let nearlySpent = candidate(key: "codex", percentUsed: 99.6, activeMinutesAgo: 1)
+        let claude = candidate(key: "claude:gen", percentUsed: 48, activeMinutesAgo: 1)
+        XCTAssertEqual(select([nearlySpent, claude])?.key, "codex")
+    }
+
+    func testEveryCandidateExhaustedStillShowsAQuota() {
+        // Skipping them all would blank the label; the pool is restored instead.
+        let codex = candidate(key: "codex", percentUsed: 100, activeMinutesAgo: 1)
+        let claude = candidate(key: "claude:gen", percentUsed: 100)
+        XCTAssertEqual(select([codex, claude])?.key, "codex")
+    }
+
+    func testStickySelectionDoesNotKeepAnExhaustedAccount() {
+        // Without the exhausted filter, hysteresis re-elects the 0% account.
+        let spentCodex = candidate(key: "codex", percentUsed: 100, activeMinutesAgo: 1)
+        let claude = candidate(key: "claude:gen", percentUsed: 97, activeMinutesAgo: 1)
+        XCTAssertEqual(select([spentCodex, claude], previousKey: "codex")?.key, "claude:gen")
+    }
+
+    func testExplicitPinStillShowsAnExhaustedQuota() {
+        // Pinning is a deliberate choice: "show me Codex" must keep showing 0%.
+        let spentCodex = candidate(key: "codex", percentUsed: 100, activeMinutesAgo: 1)
+        let claude = candidate(key: "claude:gen", percentUsed: 48, activeMinutesAgo: 1)
+        XCTAssertEqual(select([spentCodex, claude], pinnedKey: "codex")?.key, "codex")
     }
 
     // MARK: - Sticky selection (hysteresis)

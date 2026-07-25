@@ -10,7 +10,6 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            trackedProvidersSection
             refreshSection
             menuBarDisplaySection
             menuBarAccountsSection
@@ -74,36 +73,6 @@ struct GeneralSettingsView: View {
         providerSnapshots.statusItemPinOptions
     }
 
-    private var trackedProvidersSection: some View {
-        SettingsPanelSection(title: "Tracked Providers", systemImage: "switch.2", color: MeterBarTheme.appAccent) {
-            providerToggleRow(
-                title: "Claude Code",
-                detail: "Track Pro/Max quota via Claude CLI profiles.",
-                service: .claudeCode
-            )
-            providerToggleRow(
-                title: "OpenAI Codex",
-                detail: "Track Codex CLI quota from local Codex auth.",
-                service: .codexCli
-            )
-            providerToggleRow(
-                title: "Cursor",
-                detail: "Track Cursor quota from local Cursor state.",
-                service: .cursor
-            )
-            providerToggleRow(
-                title: "OpenRouter",
-                detail: "Track credit balance, spend, and per-key limits.",
-                service: .openRouter
-            )
-            providerToggleRow(
-                title: "Grok",
-                detail: "Track Grok Build weekly quota from its cached CLI login.",
-                service: .grok
-            )
-        }
-    }
-
     private var refreshSection: some View {
         SettingsPanelSection(title: "Refresh", systemImage: "arrow.clockwise", color: MeterBarTheme.appAccent) {
             SettingsRowView(title: "Auto-refresh interval") {
@@ -142,6 +111,30 @@ struct GeneralSettingsView: View {
             color: MeterBarTheme.appAccent
         ) {
             SettingsRowView(
+                title: "Menu bar layout",
+                detail: "Single Item keeps today’s behavior. "
+                    + "One Per Provider gives every tracked provider its own item. "
+                    + "One Per Account gives each selected account its own item "
+                    + "(up to \(menuBarAccountSelection.itemLimit)). "
+                    + "One Account With Switcher shows a single item you can repoint from its right-click menu."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.presentationMode },
+                    set: { (mode: MenuBarPresentationMode) in
+                        menuBarDisplayPreferences.setPresentationMode(mode)
+                        capNotice = nil
+                    }
+                )) {
+                    ForEach(MenuBarPresentationMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+
+            SettingsRowView(
                 title: "Menu bar shows",
                 detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota window visible."
             ) {
@@ -161,6 +154,9 @@ struct GeneralSettingsView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .fixedSize()
+                // One-per-provider already shows every account, so there is
+                // nothing left for a pin to choose between.
+                .disabled(menuBarDisplayPreferences.presentationMode == .perProvider)
             }
 
             SettingsRowView(
@@ -226,36 +222,17 @@ struct GeneralSettingsView: View {
             systemImage: "person.2",
             color: MeterBarTheme.appAccent
         ) {
-            SettingsRowView(
-                title: "Layout",
-                detail: "Single Item keeps today’s behavior. "
-                    + "One Per Account gives each selected account its own status item "
-                    + "(up to \(menuBarAccountSelection.itemLimit)). "
-                    + "Merged shows one item with an account switcher in its right-click menu."
-            ) {
-                Picker("", selection: Binding(
-                    get: { menuBarAccountSelection.mode },
-                    set: { (mode: MenuBarAccountDisplayMode) in
-                        menuBarAccountSelection.setMode(mode)
-                        capNotice = nil
-                    }
-                )) {
-                    ForEach(MenuBarAccountDisplayMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .fixedSize()
-            }
-
-            switch menuBarAccountSelection.mode {
-            case .single:
-                EmptyView()
+            switch menuBarDisplayPreferences.presentationMode {
+            case .merged, .perProvider:
+                SettingsNotice(
+                    text: "Switch the menu bar layout to One Per Account or "
+                        + "One Account With Switcher to scope items to an account.",
+                    color: .secondary
+                )
             case .perAccount:
                 perAccountSelectionRows
-            case .merged:
-                mergedAccountRow
+            case .accountSwitcher:
+                switcherAccountRow
             }
         }
     }
@@ -295,7 +272,7 @@ struct GeneralSettingsView: View {
         }
     }
 
-    @ViewBuilder private var mergedAccountRow: some View {
+    @ViewBuilder private var switcherAccountRow: some View {
         if menuBarAccounts.contains(where: \.isEnabled) {
             SettingsRowView(
                 title: "Shown account",
@@ -455,22 +432,6 @@ struct GeneralSettingsView: View {
             // Settings, so re-read it whenever settings is shown.
             launchAtLogin.refreshStatus()
             softwareUpdates.refreshState()
-        }
-    }
-
-    private func providerToggleRow(title: String, detail: String, service: ServiceType) -> some View {
-        SettingsRowView(title: title, detail: detail) {
-            Toggle("", isOn: Binding(
-                get: { providerVisibility.isEnabled(service) },
-                set: { isEnabled in
-                    providerVisibility.set(service, isEnabled: isEnabled)
-                    Task {
-                        await dataManager.refreshAll()
-                    }
-                }
-            ))
-            .labelsHidden()
-            .toggleStyle(.switch)
         }
     }
 }

@@ -131,7 +131,6 @@ final class MenuBarAccountSelectionTests: XCTestCase {
     func testDefaultsPreserveTheLegacySingleStatusItem() throws {
         let store = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
 
-        XCTAssertEqual(store.mode, .single)
         XCTAssertTrue(store.selectedAccountKeys.isEmpty)
         XCTAssertNil(store.mergedAccountKey)
     }
@@ -140,21 +139,19 @@ final class MenuBarAccountSelectionTests: XCTestCase {
         let defaults = try XCTUnwrap(defaults)
         let store = MenuBarAccountSelectionStore(userDefaults: defaults)
 
-        store.setMode(.perAccount)
         XCTAssertEqual(store.select("claudeCode:a"), .updated)
         XCTAssertEqual(store.select("codexCli:b"), .updated)
         store.setMergedAccountKey("codexCli:b")
 
         let relaunched = MenuBarAccountSelectionStore(userDefaults: defaults)
 
-        XCTAssertEqual(relaunched.mode, .perAccount)
         XCTAssertEqual(relaunched.selectedAccountKeys, ["claudeCode:a", "codexCli:b"])
         XCTAssertEqual(relaunched.mergedAccountKey, "codexCli:b")
     }
 
     func testSelectionRejectsAdditionsBeyondTheDocumentedCap() throws {
         let store = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
-        let limit = MenuBarStatusItemPlanner.maximumConcurrentItems
+        let limit = MenuBarAccountItemPlanner.maximumConcurrentItems
 
         for index in 0 ..< limit {
             XCTAssertEqual(store.select("claudeCode:\(index)"), .updated)
@@ -167,7 +164,7 @@ final class MenuBarAccountSelectionTests: XCTestCase {
 
     func testReselectingAKeyAtTheCapIsUnchangedRatherThanRejected() throws {
         let store = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
-        for index in 0 ..< MenuBarStatusItemPlanner.maximumConcurrentItems {
+        for index in 0 ..< MenuBarAccountItemPlanner.maximumConcurrentItems {
             store.select("claudeCode:\(index)")
         }
 
@@ -198,12 +195,12 @@ final class MenuBarAccountSelectionTests: XCTestCase {
     /// cap or install duplicate items on load.
     func testLoadNormalizesDuplicateAndOverCapPersistedSelections() throws {
         let defaults = try XCTUnwrap(defaults)
-        let overCap = (0 ... MenuBarStatusItemPlanner.maximumConcurrentItems).map { "claudeCode:\($0)" }
+        let overCap = (0 ... MenuBarAccountItemPlanner.maximumConcurrentItems).map { "claudeCode:\($0)" }
         defaults.set(overCap + ["claudeCode:0", "  "], forKey: StorageKeys.menuBarSelectedAccountKeys)
 
         let store = MenuBarAccountSelectionStore(userDefaults: defaults)
 
-        XCTAssertEqual(store.selectedAccountKeys.count, MenuBarStatusItemPlanner.maximumConcurrentItems)
+        XCTAssertEqual(store.selectedAccountKeys.count, MenuBarAccountItemPlanner.maximumConcurrentItems)
         XCTAssertEqual(Set(store.selectedAccountKeys).count, store.selectedAccountKeys.count)
     }
 

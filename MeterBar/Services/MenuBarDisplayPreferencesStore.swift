@@ -18,6 +18,40 @@ nonisolated enum StatusItemLabelMetric: String, CaseIterable, Identifiable {
     }
 }
 
+/// How many status items MeterBar owns in the menu bar, and what scopes them.
+nonisolated enum MenuBarPresentationMode: String, CaseIterable, Identifiable, Sendable {
+    /// One status item showing a single quota (Auto or an explicit pin).
+    case merged
+    /// One status item per tracked provider account, CodexBar-style.
+    case perProvider
+    /// One status item per account the user selected, capped at
+    /// `MenuBarAccountItemPlanner.maximumConcurrentItems` (issue #266).
+    case perAccount
+    /// One status item bound to a single account, switchable from its own
+    /// right-click menu (issue #266).
+    case accountSwitcher
+
+    var id: String { rawValue }
+
+    /// True for the modes whose items are scoped to one account, so callers can
+    /// ask that question without enumerating cases at every call site.
+    var isAccountScoped: Bool {
+        switch self {
+        case .merged, .perProvider: return false
+        case .perAccount, .accountSwitcher: return true
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .merged: return "Single Item"
+        case .perProvider: return "One Per Provider"
+        case .perAccount: return "One Per Account"
+        case .accountSwitcher: return "One Account With Switcher"
+        }
+    }
+}
+
 nonisolated enum StatusItemLabelSize: String, CaseIterable, Identifiable {
     case compact
     case regular
@@ -48,6 +82,7 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     static let shared = MenuBarDisplayPreferencesStore()
 
     @Published private(set) var pinnedCandidateKey: String?
+    @Published private(set) var presentationMode: MenuBarPresentationMode
     @Published private(set) var labelMetric: StatusItemLabelMetric
     @Published private(set) var labelSize: StatusItemLabelSize
     @Published private(set) var resetTimeFormat: ResetTimeFormat
@@ -58,6 +93,8 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         self.userDefaults = userDefaults
         pinnedCandidateKey = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
             .flatMap(Self.normalizedPin)
+        presentationMode = userDefaults.string(forKey: StorageKeys.statusItemPresentationMode)
+            .flatMap(MenuBarPresentationMode.init(rawValue:)) ?? .merged
         labelMetric = userDefaults.string(forKey: StorageKeys.statusItemLabelMetric)
             .flatMap(StatusItemLabelMetric.init(rawValue:)) ?? .percentLeft
         labelSize = userDefaults.string(forKey: StorageKeys.statusItemLabelSize)
@@ -75,6 +112,12 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         } else {
             userDefaults.removeObject(forKey: StorageKeys.statusItemPinnedCandidate)
         }
+    }
+
+    func setPresentationMode(_ mode: MenuBarPresentationMode) {
+        guard mode != presentationMode else { return }
+        presentationMode = mode
+        userDefaults.set(mode.rawValue, forKey: StorageKeys.statusItemPresentationMode)
     }
 
     func setLabelMetric(_ metric: StatusItemLabelMetric) {
