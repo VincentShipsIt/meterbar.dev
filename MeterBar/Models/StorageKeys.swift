@@ -22,6 +22,8 @@ nonisolated enum StorageKeys {
     static let showInDock = "ShowMeterBarInDock"
     /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
     static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
+    /// `MenuBarPresentationMode` raw value: one merged status item or one per provider.
+    static let statusItemPresentationMode = "StatusItemPresentationMode"
     /// `StatusItemLabelMetric` raw value (percent left, percent used, or icon only).
     static let statusItemLabelMetric = "StatusItemLabelMetric"
     /// `StatusItemLabelSize` raw value (compact or regular).
