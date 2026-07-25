@@ -333,6 +333,7 @@ final class AppDelegateSplitTests: XCTestCase {
         let seed = StatusLimitCandidateSeed(
             key: "cursor",
             pinKey: "cursor:default:weekly",
+            service: .cursor,
             displayName: "Cursor",
             windowName: "Weekly",
             limit: UsageLimit(used: 42, total: 100, resetTime: nil),
@@ -345,6 +346,7 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(candidates.count, 1)
         XCTAssertEqual(candidates[0].key, "cursor")
         XCTAssertEqual(candidates[0].pinKey, "cursor:default:weekly")
+        XCTAssertEqual(candidates[0].service, .cursor)
         XCTAssertEqual(candidates[0].displayName, "Cursor")
         XCTAssertEqual(candidates[0].windowName, "Weekly")
         XCTAssertEqual(candidates[0].lastActivity, probed)
@@ -357,6 +359,7 @@ final class AppDelegateSplitTests: XCTestCase {
             StatusLimitCandidateSeed(
                 key: "claude:\(index)",
                 pinKey: "claudeCode:default:\(index)",
+                service: .claudeCode,
                 displayName: "Claude",
                 windowName: "Session",
                 limit: UsageLimit(used: Double(index), total: 100, resetTime: nil),
