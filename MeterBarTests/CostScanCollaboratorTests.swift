@@ -49,6 +49,17 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(CostScanValues.int(nil), 0)
     }
 
+    /// The scan reads on-disk JSONL written by third-party CLIs, so a doubles
+    /// path that traps would crash the whole refresh on one malformed line.
+    func testIntSurvivesNonFiniteAndOutOfRangeDoubles() {
+        XCTAssertEqual(CostScanValues.int(Double.nan), 0)
+        XCTAssertEqual(CostScanValues.int(Double.infinity), Int.max)
+        XCTAssertEqual(CostScanValues.int(-Double.infinity), Int.min)
+        XCTAssertEqual(CostScanValues.int(1e30), Int.max)
+        XCTAssertEqual(CostScanValues.int(-1e30), Int.min)
+        XCTAssertEqual(CostScanValues.int(-42.9), -42)
+    }
+
     func testDisplayModelNameNormalizesAndLabelsBlanks() {
         XCTAssertEqual(CostScanValues.displayModelName("claude-opus-4-8-20260101"), "claude-opus-4-8")
         XCTAssertEqual(CostScanValues.displayModelName("  "), "Unknown model")

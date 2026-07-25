@@ -10,7 +10,15 @@ enum CostScanValues {
     nonisolated static func int(_ value: Any?) -> Int {
         if let value = value as? Int { return value }
         if let value = value as? Int64 { return Int(value) }
-        if let value = value as? Double { return Int(value) }
+        // `Int(Double)` traps on NaN, infinities, and anything outside Int's
+        // range. These logs are written by third-party CLIs, so one malformed
+        // line would otherwise crash the entire refresh — saturate instead.
+        if let value = value as? Double {
+            guard !value.isNaN else { return 0 }
+            guard value > Double(Int.min) else { return Int.min }
+            guard value < Double(Int.max) else { return Int.max }
+            return Int(value)
+        }
         if let value = value as? String { return Int(value) ?? 0 }
         return 0
     }

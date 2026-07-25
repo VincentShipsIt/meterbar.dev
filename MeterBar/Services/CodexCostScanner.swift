@@ -237,8 +237,11 @@ enum CodexCostScanner {
         guard FileManager.default.fileExists(atPath: database.path) else { return }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return }
+        // SQLite hands back a handle even for most open failures, so the close
+        // has to be armed before the status check or the failure path leaks it.
+        let openResult = sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READONLY, nil)
         defer { sqlite3_close(db) }
+        guard openResult == SQLITE_OK else { return }
 
         let sql = """
             SELECT feedback_log_body
