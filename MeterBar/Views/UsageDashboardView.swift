@@ -27,6 +27,15 @@ struct UsageDashboardView: View {
     /// Owned by the shell rather than the Share page because the toolbar's
     /// Refresh also re-stamps the card.
     @State private var socialCardGeneratedAt = Date()
+    /// Also shell-owned. The page views are `switch` branches, so SwiftUI tears
+    /// their subtree down — and with it any page-local `@State` — the moment the
+    /// user navigates to another section. Keeping these here is what the pages
+    /// had before the split: the diagnostics sweep survives a round trip instead
+    /// of re-running its keychain / file / SQLite I/O from an empty checklist,
+    /// and the share toast doesn't silently vanish on tab switch.
+    @State private var readinessReports: [ProviderReadiness] = []
+    @State private var isRunningDiagnostics = false
+    @State private var shareStatus: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -224,14 +233,18 @@ struct UsageDashboardView: View {
         case .optimize:
             OptimizeInsightsView()
         case .diagnostics:
-            DashboardDiagnosticsSection()
+            DashboardDiagnosticsSection(
+                reports: $readinessReports,
+                isRunning: $isRunningDiagnostics
+            )
         case .share:
             DashboardShareSection(
                 costSummary: visibleCostSummary,
                 providerTitles: providerSnapshots.map(\.title),
                 viewportWidth: viewportWidth,
                 horizontalInsets: Self.detailHorizontalPadding * 2,
-                generatedAt: $socialCardGeneratedAt
+                generatedAt: $socialCardGeneratedAt,
+                shareStatus: $shareStatus
             )
         }
     }

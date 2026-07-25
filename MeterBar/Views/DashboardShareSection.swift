@@ -3,9 +3,12 @@ import MeterBarShared
 import SwiftUI
 import UniformTypeIdentifiers
 
-// Share page extracted from UsageDashboardView.swift (C1 split). Pure move — the
-// page takes the card's inputs explicitly and writes the "generated at" stamp
-// back through a binding, because the toolbar's Refresh also re-stamps it. The
+// Share page extracted from UsageDashboardView.swift (C1 split). The page takes
+// the card's inputs explicitly and writes the "generated at" stamp back through
+// a binding, because the toolbar's Refresh also re-stamps it. The export toast
+// is a binding for a different reason: this page is a `switch` branch, so a
+// page-local `@State` toast would be discarded the moment the user navigates
+// away, where before the split it lived on the shell and survived. The
 // enabled-source labels are lifted to a static so the card's provenance line can
 // be asserted without hosting the page.
 
@@ -16,8 +19,7 @@ struct DashboardShareSection: View {
     private let horizontalInsets: CGFloat
 
     @Binding private var generatedAt: Date
-
-    @State private var shareStatus: String?
+    @Binding private var shareStatus: String?
 
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var costTracker = CostTracker.shared
@@ -27,13 +29,15 @@ struct DashboardShareSection: View {
         providerTitles: [String],
         viewportWidth: CGFloat,
         horizontalInsets: CGFloat,
-        generatedAt: Binding<Date>
+        generatedAt: Binding<Date>,
+        shareStatus: Binding<String?>
     ) {
         self.costSummary = costSummary
         self.providerTitles = providerTitles
         self.viewportWidth = viewportWidth
         self.horizontalInsets = horizontalInsets
         self._generatedAt = generatedAt
+        self._shareStatus = shareStatus
     }
 
     /// The card's provenance line. Only the three log-backed providers contribute

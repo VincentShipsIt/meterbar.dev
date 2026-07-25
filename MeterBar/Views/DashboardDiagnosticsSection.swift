@@ -10,8 +10,21 @@ import SwiftUI
 // concurrent passes of keychain / file / SQLite I/O, because the `.task` path
 // bypassed the in-flight guard. The page now owns the single entry point and the
 // shell no longer fires one.
+//
+// The sweep's results live on the shell and arrive here as bindings: this page
+// is a `switch` branch, so page-local `@State` would be torn down every time the
+// user navigates elsewhere and the checklist would restart empty — and redo its
+// keychain / file / SQLite I/O — on every single revisit.
 
 struct DashboardDiagnosticsSection: View {
+    @Binding private var readinessReports: [ProviderReadiness]
+    @Binding private var isRunningDiagnostics: Bool
+
+    init(reports: Binding<[ProviderReadiness]>, isRunning: Binding<Bool>) {
+        self._readinessReports = reports
+        self._isRunningDiagnostics = isRunning
+    }
+
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
@@ -20,9 +33,6 @@ struct DashboardDiagnosticsSection: View {
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
-
-    @State private var readinessReports: [ProviderReadiness] = []
-    @State private var isRunningDiagnostics = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

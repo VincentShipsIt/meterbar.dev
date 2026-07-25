@@ -205,7 +205,7 @@ final class DashboardSectionSplitTests: XCTestCase {
     }
 
     func testDiagnosticsSectionRenders() {
-        assertRenders(DashboardDiagnosticsSection())
+        assertRenders(DashboardDiagnosticsSection(reports: .constant([]), isRunning: .constant(false)))
     }
 
     func testShareSectionRenders() {
@@ -215,8 +215,46 @@ final class DashboardSectionSplitTests: XCTestCase {
                 providerTitles: ["Codex"],
                 viewportWidth: 900,
                 horizontalInsets: 48,
-                generatedAt: .constant(Date(timeIntervalSince1970: 1_700_000_000))
+                generatedAt: .constant(Date(timeIntervalSince1970: 1_700_000_000)),
+                shareStatus: .constant(nil)
             )
+        )
+    }
+
+    /// The pages are `switch` branches, so anything they own as `@State` is
+    /// destroyed on navigation. These two carried shell state before the split
+    /// and must keep taking it from outside, or Diagnostics re-runs its whole
+    /// readiness sweep — and Share drops its toast — on every revisit.
+    func testNavigationScopedStateStaysOwnedByTheShell() {
+        let diagnostics = DashboardDiagnosticsSection(reports: .constant([]), isRunning: .constant(false))
+        assertIsBinding(diagnostics, "_readinessReports", Binding<[ProviderReadiness]>.self)
+        assertIsBinding(diagnostics, "_isRunningDiagnostics", Binding<Bool>.self)
+
+        let share = DashboardShareSection(
+            costSummary: nil,
+            providerTitles: [],
+            viewportWidth: 900,
+            horizontalInsets: 48,
+            generatedAt: .constant(Date(timeIntervalSince1970: 1_700_000_000)),
+            shareStatus: .constant(nil)
+        )
+        assertIsBinding(share, "_shareStatus", Binding<String?>.self)
+    }
+
+    private func assertIsBinding<Wrapper>(
+        _ view: some View,
+        _ label: String,
+        _ expected: Wrapper.Type,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let stored = Mirror(reflecting: view).children.first { $0.label == label }?.value
+        XCTAssertNotNil(stored, "\(label) is gone — did it move back onto the page?", file: file, line: line)
+        XCTAssertTrue(
+            stored is Wrapper,
+            "\(label) must be a \(expected), not page-local @State that navigation destroys.",
+            file: file,
+            line: line
         )
     }
 
