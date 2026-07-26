@@ -103,8 +103,12 @@ nonisolated struct ClaudeCredentialStore: Sendable {
     private let readFile: @Sendable (String) -> Data?
 
     init(
-        readKeychain: @escaping @Sendable (String) -> Data? = ClaudeCredentialStore.keychainPayload,
-        readFile: @escaping @Sendable (String) -> Data? = ClaudeCredentialStore.filePayload
+        readKeychain: @escaping @Sendable (String) -> Data? = {
+            ClaudeCredentialStore.keychainPayload(service: $0)
+        },
+        readFile: @escaping @Sendable (String) -> Data? = {
+            ClaudeCredentialStore.filePayload(path: $0)
+        }
     ) {
         self.readKeychain = readKeychain
         self.readFile = readFile

@@ -143,6 +143,20 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         }
     }
 
+    func testCredentialAccessDistinguishesMissingExpiredAndValidTokens() {
+        XCTAssertEqual(ClaudeCodeLocalService.oauthCredentialAccess(from: nil), .missing)
+        XCTAssertEqual(
+            ClaudeCodeLocalService.oauthCredentialAccess(from: credentials(expiresAt: 0)),
+            .expired
+        )
+        XCTAssertEqual(
+            ClaudeCodeLocalService.oauthCredentialAccess(
+                from: credentials(expiresAt: 4_102_444_800, accessToken: "current")
+            ),
+            .valid(token: "current")
+        )
+    }
+
     // MARK: - Shared usage request builder
 
     func testUsageRequestCarriesTheOAuthHeaderSet() throws {
@@ -205,6 +219,22 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let data = try XCTUnwrap(json.data(using: .utf8))
         return try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+    }
+
+    private func credentials(
+        expiresAt: Int64,
+        accessToken: String = "token"
+    ) -> ClaudeCodeCredentials {
+        ClaudeCodeCredentials(
+            claudeAiOauth: ClaudeAiOAuth(
+                accessToken: accessToken,
+                refreshToken: "refresh",
+                expiresAt: expiresAt,
+                scopes: [],
+                subscriptionType: nil,
+                rateLimitTier: nil
+            )
+        )
     }
 
     private func makeEmptyDefaults() throws -> UserDefaults {

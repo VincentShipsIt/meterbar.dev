@@ -25,6 +25,20 @@ protocol ClaudeCodeUsageProviding: AnyObject {
     /// account's cache with no way to mark the card as stale or logged out.
     var accountAuthStates: [UUID: ClaudeCodeAuthState] { get }
     func fetchUsageMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics
+    func fetchUsageMetrics(
+        account: ClaudeCodeAccount,
+        trigger: ClaudeTokenRefreshTrigger
+    ) async throws -> UsageMetrics
+}
+
+extension ClaudeCodeUsageProviding {
+    func fetchUsageMetrics(
+        account: ClaudeCodeAccount,
+        trigger: ClaudeTokenRefreshTrigger
+    ) async throws -> UsageMetrics {
+        _ = trigger
+        return try await fetchUsageMetrics(account: account)
+    }
 }
 
 extension ClaudeCodeLocalService: ClaudeCodeUsageProviding {}
@@ -153,7 +167,9 @@ class UsageDataManager: ObservableObject {
     /// refresh` uses it to report refreshed/failed/skipped state without
     /// re-deriving truth from `lastError`, which only holds the last failure.
     @discardableResult
-    func refreshAll() async -> UsageRefreshReport {
+    func refreshAll(
+        trigger: ClaudeTokenRefreshTrigger = .userInitiated
+    ) async -> UsageRefreshReport {
         let startedAt = Date()
         guard !demoMode else {
             return UsageRefreshReport(
@@ -203,7 +219,8 @@ class UsageDataManager: ObservableObject {
         // is what lets the account fetchers keep reading the *previous* cache for
         // their graceful-degradation fallbacks.
         async let claudeFetch = claudeAccountFetch(
-            isEnabled: providerVisibilityStore.isEnabled(.claudeCode) && hasEnabledClaudeAccount
+            isEnabled: providerVisibilityStore.isEnabled(.claudeCode) && hasEnabledClaudeAccount,
+            trigger: trigger
         )
         async let codexFetch = codexAccountFetch(
             isEnabled: providerVisibilityStore.isEnabled(.codexCli) && hasEnabledCodexAccount
@@ -471,7 +488,7 @@ class UsageDataManager: ObservableObject {
     func refreshAfterWakeIfNeeded(now: Date = Date()) async {
         guard !demoMode else { return }
         guard refreshInterval != .manual, await shouldCatchUpAfterWake(now: now) else { return }
-        await refreshAll()
+        await refreshAll(trigger: .background)
     }
 
     /// Installs the post-redemption Codex usage response into the same caches
@@ -492,7 +509,7 @@ class UsageDataManager: ObservableObject {
         // The account fetchers report their first failure instead of writing
         // `lastError` themselves (see `refreshAll`), so this path surfaces it.
         case .claudeCode:
-            let fetch = await fetchClaudeCodeAccountMetrics()
+            let fetch = await fetchClaudeCodeAccountMetrics(trigger: .userInitiated)
             claudeCodeAccountMetrics = fetch.metrics
             claudeCodeAccountStates = fetch.accountStates
             if let failure = fetch.firstFailure { lastError = failure }
@@ -621,7 +638,7 @@ class UsageDataManager: ObservableObject {
         let interval = refreshInterval.seconds
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.refreshAll()
+                await self?.refreshAll(trigger: .background)
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -693,9 +710,12 @@ class UsageDataManager: ObservableObject {
     /// account contributes no metrics, no cached fallback, and no failure.
     private struct CodexAccountUnreachable: Error {}
 
-    private func claudeAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
+    private func claudeAccountFetch(
+        isEnabled: Bool,
+        trigger: ClaudeTokenRefreshTrigger
+    ) async -> AccountFetchResult? {
         guard isEnabled else { return nil }
-        return await fetchClaudeCodeAccountMetrics()
+        return await fetchClaudeCodeAccountMetrics(trigger: trigger)
     }
 
     private func codexAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
@@ -703,7 +723,9 @@ class UsageDataManager: ObservableObject {
         return await fetchCodexAccountMetrics()
     }
 
-    private func fetchClaudeCodeAccountMetrics() async -> AccountFetchResult {
+    private func fetchClaudeCodeAccountMetrics(
+        trigger: ClaudeTokenRefreshTrigger
+    ) async -> AccountFetchResult {
         let enabledAccounts = claudeCodeAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
@@ -711,7 +733,10 @@ class UsageDataManager: ObservableObject {
         var successCount = 0
 
         let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
-            try await self.claudeCodeService.fetchUsageMetrics(account: enabledAccounts[index])
+            try await self.claudeCodeService.fetchUsageMetrics(
+                account: enabledAccounts[index],
+                trigger: trigger
+            )
         }
 
         let serviceStates = claudeCodeService.accountAuthStates

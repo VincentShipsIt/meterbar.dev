@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-17 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-26 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -13,7 +13,7 @@ Providers tracked:
 
 | Provider | `ServiceType` case | Data source |
 |---|---|---|
-| Claude Code | `.claudeCode` | Unscoped default account: calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint with the global `Claude Code-credentials` Keychain OAuth token (primary; on by default via the `ClaudeCodeEnableOAuthFallback` flag). Falls back to shelling out to `claude /usage` and regex-parsing terminal output when no token is available. Any account with an explicit `CLAUDE_CONFIG_DIR`, including the editable default row, uses the CLI so credentials cannot cross-contaminate profiles. |
+| Claude Code | `.claudeCode` | Resolves each profile's scoped Keychain or credential-file OAuth token and calls the authenticated `https://api.anthropic.com/api/oauth/usage` endpoint (primary; on by default via `ClaudeCodeEnableOAuthFallback`). An expired token delegates rotation to `claude /status` with that account's `CLAUDE_CONFIG_DIR`; MeterBar accepts success only when the credential metadata fingerprint changes. Missing credentials retain the `claude /usage` fallback. |
 | OpenAI Codex CLI | `.codexCli` | Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), calls `https://chatgpt.com/backend-api/wham/usage`; exhausted accounts can consume a banked reset credit through the authenticated reset-credit endpoints after explicit confirmation |
 | Cursor | `.cursor` | Reads session JWT from Cursor's `state.vscdb` SQLite, calls `https://cursor.com/api/usage-summary` |
 | OpenRouter | `.openRouter` | User-provided API key in Keychain; calls documented `/api/v1/credits` and `/api/v1/key` endpoints |
@@ -68,7 +68,8 @@ meterbar/
 
 - **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a non-overlapping `Timer` auto-refresh (default 10 min; `RefreshInterval` supports 1/2/5/10/15/30 min + manual). The app forwards system wake events so stale enabled data catches up once without replaying missed ticks.
 - **ClaudeCodeCLIUsageService** — fallback source. Resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. `/usage` no longer renders in a headless spawn (it prints a session cost summary), so the parser detects that shape and throws a legible error. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
-- **ClaudeCodeLocalService** — OAuth-primary wrapper. For the default account it reads `api.anthropic.com/api/oauth/usage` with the Keychain token (`metrics(from:)` maps windows + extra-usage), falling back to the CLI parser only when no token is available; custom accounts use the CLI. The model-scoped third window retains its provider label (`Sonnet` or `Fable`) and remains non-blocking for provider-wide health. `prefersOAuth`/`isOAuthUsageEnabled` are the pure source-selection helpers.
+- **ClaudeCodeLocalService** — OAuth-primary wrapper. Every profile resolves only its own scoped Keychain/file credential before calling `api.anthropic.com/api/oauth/usage`; a missing credential retains the CLI fallback, while an expired credential must pass delegated-refresh verification before it is re-read once. The model-scoped third window retains its provider label (`Sonnet` or `Fable`) and remains non-blocking for provider-wide health. The existing OAuth opt-out remains the source-selection switch.
+- **ClaudeTokenRefresher** — per-account delegated rotation coordinator. It coalesces concurrent attempts, applies persistent per-account outcome cooldowns (manual refresh bypasses a stored cooldown but joins in-flight work), runs `claude /status` with the account environment, captures no process output, and reports success only after the scoped credential's Keychain modification date or file modification date/size changes.
 - **CodexCliLocalService** — Codex auth file + wham/usage endpoint; maps credits/spend to `ExtraUsageStatus` (safety-biased: never false "Off"). It also lists and consumes banked rate-limit resets with an idempotency key, then immediately refreshes usage. The exhausted popover card and `meterbar reset-credit --yes` are the two explicit-confirmation entry points.
 - **CursorLocalService** — SQLite token extraction + usage-summary endpoint; assumed 500-request default quota when API omits totals.
 - **OpenRouterService** — opt-in API-key provider; maps account credits/spend and optional per-key caps into shared metrics.

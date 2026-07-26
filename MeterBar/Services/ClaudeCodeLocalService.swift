@@ -26,6 +26,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
     private let credentialStore = ClaudeCredentialStore.shared
     private let cliUsageService = ClaudeCodeCLIUsageService.shared
+    private let tokenRefresher = ClaudeTokenRefresher.shared
 
     private let urlSession = ServiceSupport.session
 
@@ -54,26 +55,10 @@ class ClaudeCodeLocalService: ObservableObject {
     /// `nonisolated`: a keychain read can raise a blocking approval dialog —
     /// never call synchronously from the main actor.
     nonisolated func getOAuthToken(for account: ClaudeCodeAccount = .defaultAccount) -> String? {
-        guard let credentials = getCredentials(for: account) else {
+        guard case let .valid(token) = oauthCredentialAccessUpdatingSharedState(for: account) else {
             return nil
         }
-
-        guard !OAuthTokenExpiry.isExpired(unixTimestamp: credentials.claudeAiOauth.expiresAt) else {
-            ServiceSupport.applyOnMain {
-                self.subscriptionType = credentials.claudeAiOauth.subscriptionType
-                self.rateLimitTier = credentials.claudeAiOauth.rateLimitTier
-                self.hasAccess = false
-            }
-            return nil
-        }
-
-        ServiceSupport.applyOnMain {
-            self.subscriptionType = credentials.claudeAiOauth.subscriptionType
-            self.rateLimitTier = credentials.claudeAiOauth.rateLimitTier
-            self.hasAccess = true
-        }
-
-        return credentials.claudeAiOauth.accessToken
+        return token
     }
 
     nonisolated private func getCredentials(
@@ -81,6 +66,45 @@ class ClaudeCodeLocalService: ObservableObject {
     ) -> ClaudeCodeCredentials? {
         guard let data = credentialsData(for: account) else { return nil }
         return try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data)
+    }
+
+    nonisolated func oauthCredentialAccess(
+        for account: ClaudeCodeAccount = .defaultAccount
+    ) -> ClaudeOAuthCredentialAccess {
+        Self.oauthCredentialAccess(from: getCredentials(for: account))
+    }
+
+    nonisolated static func oauthCredentialAccess(
+        from credentials: ClaudeCodeCredentials?
+    ) -> ClaudeOAuthCredentialAccess {
+        guard let credentials else {
+            return .missing
+        }
+        guard !OAuthTokenExpiry.isExpired(unixTimestamp: credentials.claudeAiOauth.expiresAt) else {
+            return .expired
+        }
+        return .valid(token: credentials.claudeAiOauth.accessToken)
+    }
+
+    nonisolated private func oauthCredentialAccessUpdatingSharedState(
+        for account: ClaudeCodeAccount
+    ) -> ClaudeOAuthCredentialAccess {
+        guard let credentials = getCredentials(for: account) else {
+            return .missing
+        }
+        let access = Self.oauthCredentialAccess(from: credentials)
+        let hasValidToken: Bool
+        if case .valid = access {
+            hasValidToken = true
+        } else {
+            hasValidToken = false
+        }
+        ServiceSupport.applyOnMain {
+            self.subscriptionType = credentials.claudeAiOauth.subscriptionType
+            self.rateLimitTier = credentials.claudeAiOauth.rateLimitTier
+            self.hasAccess = hasValidToken
+        }
+        return access
     }
 
     /// The raw Claude Code credential blob for `account`, or nil if
@@ -129,6 +153,13 @@ class ClaudeCodeLocalService: ObservableObject {
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics(account: ClaudeCodeAccount = .defaultAccount) async throws -> UsageMetrics {
+        try await fetchUsageMetrics(account: account, trigger: .background)
+    }
+
+    func fetchUsageMetrics(
+        account: ClaudeCodeAccount,
+        trigger: ClaudeTokenRefreshTrigger
+    ) async throws -> UsageMetrics {
         // Primary source: the authenticated `/api/oauth/usage` endpoint — the
         // same data Claude Code's own `/usage` screen reads. `claude /usage` no
         // longer renders in a headless (non-TTY) spawn (it prints a session cost
@@ -138,18 +169,18 @@ class ClaudeCodeLocalService: ObservableObject {
         // reach the unscoped item, so identities cannot cross-contaminate.
         var oauthUnauthenticated = false
         if isOAuthFallbackEnabled {
-            // `nil` ⇒ no usable Keychain token; fall back to the CLI. A thrown
-            // error means a token was in hand but the request/decode failed —
-            // surface it rather than retry the headless-broken CLI.
-            if let metrics = try await fetchUsageViaOAuth(account: account) {
+            // `nil` ⇒ no credential for this profile; fall back to the CLI. A
+            // thrown error means either delegated refresh could not verify a
+            // rotated token or an OAuth request/decode failed — surface it
+            // rather than retry the headless-broken CLI.
+            if let metrics = try await fetchUsageViaOAuth(account: account, trigger: trigger) {
                 return metrics
             }
-            // No usable credential for this profile: Claude Code either never
-            // wrote one or the token expired. Remember that, so a downstream CLI
-            // parse failure reports "Login required" instead of a vague "Needs
-            // attention" — a logged-out profile is by far the common cause, and
-            // `claude /usage` prints a cost summary rather than the usage screen
-            // when the profile is not logged in.
+            // No credential for this profile. Remember that, so a downstream
+            // CLI parse failure reports "Login required" instead of a vague
+            // "Needs attention" — a logged-out profile is by far the common
+            // cause, and `claude /usage` prints a cost summary rather than the
+            // usage screen when the profile is not logged in.
             oauthUnauthenticated = true
         }
 
@@ -158,23 +189,51 @@ class ClaudeCodeLocalService: ObservableObject {
 
     /// Fetches usage from the OAuth `/api/oauth/usage` endpoint for `account`
     /// and, for the default profile only, updates the app's `@Published`
-    /// auth/error state. Returns `nil` when there is no usable token (missing or
-    /// expired) so the caller can fall back to the CLI. The actual
-    /// request/decode is delegated to the pure `fetchOAuthMetrics(token:)`; this
-    /// wrapper adds only the UI side effects.
-    private func fetchUsageViaOAuth(account: ClaudeCodeAccount) async throws -> UsageMetrics? {
+    /// auth/error state. A missing credential retains the CLI fallback. An
+    /// expired credential first delegates refresh to the Claude CLI, accepts
+    /// success only when its metadata fingerprint changes, and re-reads once.
+    private func fetchUsageViaOAuth(
+        account: ClaudeCodeAccount,
+        trigger: ClaudeTokenRefreshTrigger
+    ) async throws -> UsageMetrics? {
         // Keychain read — off the main actor (it can raise a blocking approval
         // dialog, and the app target runs async bodies on the main actor).
-        // `getOAuthToken(for:)` also refreshes `subscriptionType`/`hasAccess`.
+        // The state-updating read also refreshes `subscriptionType`/`hasAccess`.
         let publishesSharedState = Self.publishesSharedConnectionState(for: account)
-        let token = await Task.detached(priority: .userInitiated) { [self] in
-            publishesSharedState ? getOAuthToken(for: account) : nonMutatingOAuthToken(for: account)
+        let initialAccess = await Task.detached(priority: .userInitiated) { [self] in
+            publishesSharedState
+                ? oauthCredentialAccessUpdatingSharedState(for: account)
+                : oauthCredentialAccess(for: account)
         }.value
 
-        guard let token else { return nil }
+        let tokenRefresher = self.tokenRefresher
+        let resolvedAccess = await ClaudeOAuthAccessCoordinator.resolve(
+            initialAccess: initialAccess,
+            account: account,
+            trigger: trigger,
+            refresh: { account, trigger in
+                await tokenRefresher.refresh(account: account, trigger: trigger)
+            },
+            reread: {
+                await Task.detached(priority: .userInitiated) { [self] in
+                    oauthCredentialAccess(for: account)
+                }.value
+            }
+        )
+
+        let resolvedToken: String
+        switch resolvedAccess {
+        case let .token(token):
+            resolvedToken = token
+        case .missing:
+            return nil
+        case .refreshFailed:
+            publishNeedsLogin(account: account, publishesSharedState: publishesSharedState)
+            throw ServiceError.notAuthenticated
+        }
 
         do {
-            let metrics = try await Self.fetchOAuthMetrics(token: token, session: urlSession)
+            let metrics = try await Self.fetchOAuthMetrics(token: resolvedToken, session: urlSession)
             await MainActor.run {
                 // Same rule as the CLI path: this observable service describes
                 // the default Claude connection, so a secondary profile must not
@@ -206,6 +265,17 @@ class ClaudeCodeLocalService: ObservableObject {
             }
             throw serviceError
         }
+    }
+
+    private func publishNeedsLogin(
+        account: ClaudeCodeAccount,
+        publishesSharedState: Bool
+    ) {
+        accountAuthStates[account.id] = .needsLogin
+        guard publishesSharedState else { return }
+        lastError = .notAuthenticated
+        hasAccess = false
+        authState = .needsLogin
     }
 
     /// Builds an authenticated GET against the OAuth usage endpoint.

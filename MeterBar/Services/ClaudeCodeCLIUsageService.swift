@@ -36,7 +36,7 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
         return try ClaudeCodeCLIUsageParser.parseMetrics(from: output)
     }
 
-    private func resolveClaudeBinaryPath() -> String? {
+    func resolveClaudeBinaryPath() -> String? {
         CLIBinaryLocator.resolve(command: "claude", overrideEnvVar: "CLAUDE_CLI_PATH")
     }
 
