@@ -275,9 +275,8 @@ enum ClaudeCostScanner {
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
-            totals.projectModels[projectID, default: [:]][
-                CostScanValues.displayModelName(event.model), default: TokenAccumulator()
-            ].add(
+            let displayModel = CostScanValues.displayModelName(event.model)
+            totals.projectModels[projectID, default: [:]][displayModel, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,
