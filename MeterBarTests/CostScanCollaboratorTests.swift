@@ -273,6 +273,35 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(unbilled, 0.0, accuracy: 0.0001)
     }
 
+    func testProjectBreakdownsNestTheirOwnModelSliceUnderEachRollupRow() {
+        let projectTotals: [String: TokenAccumulator] = [
+            "app-a": totals(input: 100, output: 0, cacheRead: 0, cost: 5),
+            "app-b": totals(input: 10, output: 0, cacheRead: 0, cost: 1)
+        ]
+        let modelsByProject: [String: [String: TokenAccumulator]] = [
+            "app-a": [
+                "opus": totals(input: 80, output: 0, cacheRead: 0, cost: 4),
+                "haiku": totals(input: 20, output: 0, cacheRead: 0, cost: 1)
+            ]
+            // "app-b" deliberately has no entry — must fall back to an empty slice.
+        ]
+
+        let rows = TokenUsageAggregator.makeProjectBreakdowns(
+            from: projectTotals,
+            modelsByProject: modelsByProject,
+            provider: .claudeCode,
+            pricing: ModelPricing.claude(for: nil)
+        )
+
+        XCTAssertEqual(rows.map(\.name), ["app-a", "app-b"])
+        let appA = try! XCTUnwrap(rows.first { $0.name == "app-a" })
+        XCTAssertEqual(Set(appA.modelBreakdowns.map(\.name)), ["opus", "haiku"])
+        XCTAssertEqual(appA.modelBreakdowns.reduce(0) { $0 + $1.inputTokens }, appA.inputTokens)
+
+        let appB = try! XCTUnwrap(rows.first { $0.name == "app-b" })
+        XCTAssertTrue(appB.modelBreakdowns.isEmpty)
+    }
+
     // MARK: - ClaudeCostScanner
 
     func testProjectsURLAppendsProjectsUnlessAlreadyPresent() {
