@@ -70,11 +70,15 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
         let defaultAccount = try XCTUnwrap(reloaded.accounts.first)
         XCTAssertNil(defaultAccount.configDirectory)
-        XCTAssertTrue(ClaudeCodeLocalService.prefersOAuth(
-            account: defaultAccount,
-            oauthEnabled: true,
-            environment: [:]
-        ))
+        // Clearing the override puts the default account back on the canonical
+        // profile, so it can once again read the unscoped Keychain item that the
+        // scoped form is deliberately barred from.
+        let candidates = ClaudeCredentialResolver.candidates(
+            for: defaultAccount,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+        XCTAssertTrue(candidates.contains(.keychain(service: ClaudeCredentialResolver.bareKeychainService)))
     }
 
     func testDefaultConfigDirectoryFallsBackToClaudeUnderRealHome() {
