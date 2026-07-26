@@ -20,6 +20,7 @@ struct MeterBarCLI: AsyncParsableCommand {
             Wake.self,
             WakeAgent.self,
             ResetCredit.self,
+            Serve.self,
         ],
         defaultSubcommand: Usage.self
     )

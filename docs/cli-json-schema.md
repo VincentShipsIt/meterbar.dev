@@ -3,7 +3,8 @@
 `meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`,
 `meterbar guard --json`, and `meterbar fable-sessions --json` emit stable,
 versioned JSON for menu bars, shell prompts, dashboards, and other third-party integrations.
-Human-readable output remains the default when `--json` is absent.
+Human-readable output remains the default when `--json` is absent. `meterbar serve` exposes the
+same versioned usage/cost documents over a local HTTP endpoint instead of standard output.
 
 ## Compatibility contract
 
@@ -456,3 +457,79 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 `overall` is `pass`. The report contains only the fields shown above; credential, token, password,
 authorization, and secret-bearing fields are never emitted. Diagnostic messages may use standard
 error, but standard output remains one JSON document.
+
+## Serve
+
+```sh
+meterbar serve
+meterbar serve --port 8787 --max-requests-per-second 10
+meterbar serve --token "$(openssl rand -hex 32)"
+meterbar serve --allow-remote
+```
+
+`meterbar serve` runs a small, opt-in HTTP endpoint that serves the exact same schema-versioned
+`UsageCLIJSONResponse` and `CostCLIJSONResponse` documents `meterbar usage --json` and
+`meterbar cost --json` print — there is no second serialization to drift from the CLI. It reads
+MeterBar's existing cached app-group snapshot; it never triggers a provider refresh, never spends a
+reset credit, and never accepts a write, mutation, or configuration change. There is no endpoint
+that changes state.
+
+**Bind address.** The server binds to loopback (`127.0.0.1`) only by default, so it is not reachable
+from other devices. Reaching any other interface requires the explicit `--allow-remote` flag, which
+also prints a warning to standard error before the server starts:
+
+```text
+⚠ meterbar serve is bound to all network interfaces (--allow-remote). Usage and cost data will be
+reachable from other devices on this network; anyone with the printed bearer token can read it.
+```
+
+**Authentication.** Every request must carry `Authorization: Bearer <token>`. If `--token` is not
+supplied, a random 256-bit token is generated and printed once, at startup, to standard output; it
+is never logged again and never appears in any response body, including error bodies. Token
+comparison is constant-time. A blank `--token` is rejected before the socket binds, so the server
+can never come up with an auth check that accepts every caller. A missing or incorrect token always
+returns `401` with a generic `unauthorized` error body — before routing even inspects the path or
+method, so an unauthenticated caller cannot use status codes to enumerate endpoints.
+
+**Connection limits.** A request must deliver its complete header block within 5 seconds of
+connecting, measured against the connection as a whole rather than per socket read, so a client that
+trickles bytes cannot hold a handler open indefinitely. Request heads over 8 KiB are rejected.
+
+**Endpoints** (`GET` only; any other method on a known path returns `405`):
+
+| Method & path | Query parameters | Behavior |
+| --- | --- | --- |
+| `GET /usage` | `provider` (optional, same matching as `meterbar usage --provider`) | Returns `UsageCLIJSONResponse` |
+| `GET /cost` | `days` (optional, same matching as `meterbar cost --days`; non-positive or non-numeric values are ignored) | Returns `CostCLIJSONResponse` |
+
+An unknown path returns `404` with the same generic error envelope. If the underlying cache is
+empty (no metrics yet, or no cost scan yet), the endpoint returns `200` with the same
+`usage_cache_missing` / `cost_cache_missing` error document `meterbar usage --json` /
+`meterbar cost --json` already return in that situation — same codes, same messages.
+
+**Headers.** Every response — data and error alike — sets `Cache-Control: no-store` and
+`Content-Type: application/json; charset=utf-8`. Responses are never cached by clients or
+intermediaries.
+
+**Rate limiting.** Requests are bounded to `--max-requests-per-second` (default 5) per server
+instance; requests beyond that return `429` with the standard error envelope (`too_many_requests`).
+A malformed HTTP request returns `400` (`bad_request`).
+
+**Lifecycle.** `meterbar serve` runs until it receives `SIGINT` or `SIGTERM` (for example, Ctrl-C),
+at which point it stops accepting new connections, closes its listening socket, and exits cleanly.
+
+Errors reuse the same `CLIJSONErrorResponse` envelope as the rest of the CLI:
+
+```json
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "unauthorized",
+    "message": "Missing or invalid bearer token."
+  }
+}
+```
+
+Stable version 1 serve error codes are `unauthorized` (401), `not_found` (404),
+`method_not_allowed` (405), `too_many_requests` (429), `bad_request` (400), and the
+pre-existing `usage_cache_missing` / `cost_cache_missing` (200).
