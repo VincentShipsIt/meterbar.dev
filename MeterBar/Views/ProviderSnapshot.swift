@@ -19,6 +19,14 @@ struct ProviderSnapshot: Identifiable {
     let resetCreditsAvailable: Int?
     let accountID: UUID?
     let fableActivity: FableSessionCardActivity?
+    /// Auth/staleness overlay for this card, or `nil` when the account is
+    /// healthy. Deliberately separate from `band`, which stays a pure function
+    /// of the percentages even when those percentages came from a stale cache.
+    /// Defaulted so direct memberwise construction (mostly tests and previews)
+    /// keeps meaning "nothing to overlay" without restating it everywhere. It is
+    /// a `var` only because a defaulted `let` is dropped from the memberwise
+    /// initializer entirely, which would leave the builder unable to set it.
+    var authNotice: ProviderAuthNotice?
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -98,8 +106,11 @@ struct ProviderSnapshot: Identifiable {
     /// a pure computed property (like `DailyUsageDay.chartAccessibilityLabel`)
     /// so the popover and dashboard cards can't drift and the composition is
     /// unit-testable without the network or a rendered view.
+    /// The notice leads when present: reading a stale cache's band aloud as
+    /// "Healthy" is exactly the failure this overlay exists to prevent.
     var accessibilityLabel: String {
-        "\(title), \(band?.shortLabel ?? "No data"), \(updatedText)"
+        let status = authNotice?.shortLabel ?? band?.shortLabel ?? "No data"
+        return "\(title), \(status), \(updatedText)"
     }
 
     /// VoiceOver value for a provider card: each quota window's reading spoken
@@ -202,6 +213,10 @@ enum ProviderSnapshotBuilder {
         var claudeAccountMetrics: [UUID: UsageMetrics]
         var fableSessions: [ClaudeFableSession] = []
         var enabledServices: Set<ServiceType>
+        /// Per-account auth/staleness, keyed by account id. Defaulted so the
+        /// non-Claude call sites (and every existing test) keep compiling; an
+        /// absent entry simply means "nothing to overlay".
+        var claudeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
         var claudeCodeHasAccess: Bool = false
         var codexCliHasAccess: Bool = false
         var cursorHasAccess: Bool = false
@@ -257,7 +272,8 @@ enum ProviderSnapshotBuilder {
                         emptyDetail: emptyDetail,
                         accountID: account.id,
                         fableActivity: fableActivityByAccount[account.id]
-                            ?? FableSessionCardActivity(session: nil)
+                            ?? FableSessionCardActivity(session: nil),
+                        authNotice: ProviderAuthNotice.forState(input.claudeAccountStates[account.id])
                     ))
                 }
             }
@@ -299,7 +315,8 @@ enum ProviderSnapshotBuilder {
         metrics: UsageMetrics?,
         emptyDetail: String,
         accountID: UUID? = nil,
-        fableActivity: FableSessionCardActivity? = nil
+        fableActivity: FableSessionCardActivity? = nil,
+        authNotice: ProviderAuthNotice? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             // Disambiguate by account id so two accounts that share a display
@@ -314,7 +331,8 @@ enum ProviderSnapshotBuilder {
             extraUsage: metrics?.extraUsage,
             resetCreditsAvailable: metrics?.resetCreditsAvailable,
             accountID: accountID,
-            fableActivity: fableActivity
+            fableActivity: fableActivity,
+            authNotice: authNotice
         )
     }
 

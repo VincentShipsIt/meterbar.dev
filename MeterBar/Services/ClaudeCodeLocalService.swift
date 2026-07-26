@@ -35,6 +35,13 @@ class ClaudeCodeLocalService: ObservableObject {
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var authState: ClaudeCodeAuthState = .unavailable
 
+    /// The last observed auth/connection state *per account*. `authState` above
+    /// describes only the default profile, because it backs the provider-wide
+    /// Settings overview; a logged-out secondary profile used to compute its
+    /// state and then discard it, leaving its card to render a green band off a
+    /// stale cache. Every fetch leg records here, gated on nothing.
+    @Published private(set) var accountAuthStates: [UUID: ClaudeCodeAuthState] = [:]
+
     private init() {
         // Defer keychain/filesystem I/O off the init thread, like the other
         // local services (this previously ran synchronously in init).
@@ -129,6 +136,7 @@ class ClaudeCodeLocalService: ObservableObject {
         // may attempt OAuth: `ClaudeCredentialStore` resolves the credential
         // Claude Code wrote for *that* profile, and a scoped profile can never
         // reach the unscoped item, so identities cannot cross-contaminate.
+        var oauthUnauthenticated = false
         if isOAuthFallbackEnabled {
             // `nil` ⇒ no usable Keychain token; fall back to the CLI. A thrown
             // error means a token was in hand but the request/decode failed —
@@ -136,9 +144,16 @@ class ClaudeCodeLocalService: ObservableObject {
             if let metrics = try await fetchUsageViaOAuth(account: account) {
                 return metrics
             }
+            // No usable credential for this profile: Claude Code either never
+            // wrote one or the token expired. Remember that, so a downstream CLI
+            // parse failure reports "Login required" instead of a vague "Needs
+            // attention" — a logged-out profile is by far the common cause, and
+            // `claude /usage` prints a cost summary rather than the usage screen
+            // when the profile is not logged in.
+            oauthUnauthenticated = true
         }
 
-        return try await fetchUsageViaCLI(account: account)
+        return try await fetchUsageViaCLI(account: account, isLoggedOut: oauthUnauthenticated)
     }
 
     /// Fetches usage from the OAuth `/api/oauth/usage` endpoint for `account`
@@ -169,19 +184,25 @@ class ClaudeCodeLocalService: ObservableObject {
                     self.hasAccess = true
                     self.authState = .connected(.oauth)
                 }
+                self.accountAuthStates[account.id] = .connected(.oauth)
             }
             return metrics
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
+            let state: ClaudeCodeAuthState
+            if case .notAuthenticated = serviceError {
+                state = .needsLogin
+            } else {
+                state = .error(serviceError.localizedDescription)
+            }
             await MainActor.run {
+                self.accountAuthStates[account.id] = state
                 guard publishesSharedState else { return }
                 self.lastError = serviceError
-                if case .notAuthenticated = serviceError {
+                if case .needsLogin = state {
                     self.hasAccess = false
-                    self.authState = .needsLogin
-                } else {
-                    self.authState = .error(serviceError.localizedDescription)
                 }
+                self.authState = state
             }
             throw serviceError
         }
@@ -283,7 +304,14 @@ class ClaudeCodeLocalService: ObservableObject {
 
     /// Fallback source: shells out to `claude /usage` and parses the terminal
     /// output. Used for custom accounts and when no OAuth token is available.
-    private func fetchUsageViaCLI(account: ClaudeCodeAccount) async throws -> UsageMetrics {
+    ///
+    /// - Parameter isLoggedOut: the OAuth step already established that this
+    ///   profile has no usable credential. A CLI failure then means "logged
+    ///   out", not "something broke", and must be reported as such.
+    private func fetchUsageViaCLI(
+        account: ClaudeCodeAccount,
+        isLoggedOut: Bool = false
+    ) async throws -> UsageMetrics {
         do {
             let metrics = try await cliUsageService.fetchUsageMetrics(account: account)
             await MainActor.run {
@@ -295,6 +323,9 @@ class ClaudeCodeLocalService: ObservableObject {
                     self.hasAccess = true
                     self.authState = .connected(.cli)
                 }
+                // A CLI-only login is still a login, so this succeeds even when
+                // the OAuth step above found no credential.
+                self.accountAuthStates[account.id] = .connected(.cli)
             }
             // The CLI output does not expose the "extra usage" toggle. Only read
             // Claude's OAuth keychain item when OAuth is enabled; ad-hoc local
@@ -304,11 +335,17 @@ class ClaudeCodeLocalService: ObservableObject {
             return metrics.withExtraUsage(extraUsage)
         } catch {
             let serviceError = serviceError(from: error)
+            // Without the OAuth hint, a logged-out profile surfaces as a parse
+            // failure ("Needs Attention") because `claude /usage` prints a cost
+            // summary instead of the usage screen. That reads as a bug in
+            // MeterBar rather than as the actionable "run claude login".
+            let state = isLoggedOut ? ClaudeCodeAuthState.needsLogin : authState(from: error)
             await MainActor.run {
+                self.accountAuthStates[account.id] = state
                 if Self.publishesSharedConnectionState(for: account) {
                     self.lastError = serviceError
                     self.hasAccess = false
-                    self.authState = authState(from: error)
+                    self.authState = state
                 }
             }
             throw serviceError
@@ -471,6 +508,11 @@ enum ClaudeCodeAuthState: Equatable {
     case connected(ClaudeCodeUsageSource)
     case needsLogin
     case error(String)
+    /// The last refresh failed but an earlier reading survives in cache. The
+    /// numbers on screen are real, just old — distinct from `.error`, which has
+    /// nothing to show, and from `.needsLogin`, which says why refreshing will
+    /// keep failing until the user acts.
+    case stale(since: Date)
 
     var statusText: String {
         switch self {
@@ -484,6 +526,8 @@ enum ClaudeCodeAuthState: Equatable {
             return "Login Required"
         case .error:
             return "Needs Attention"
+        case .stale:
+            return "Stale"
         }
     }
 
@@ -501,6 +545,8 @@ enum ClaudeCodeAuthState: Equatable {
             return "Run 'claude login' again."
         case let .error(message):
             return message
+        case let .stale(since):
+            return "Showing the last reading from \(UsageFormat.relative(since)); the latest refresh failed."
         }
     }
 }

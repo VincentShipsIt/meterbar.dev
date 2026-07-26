@@ -43,6 +43,7 @@ final class UsageDataManagerTests: XCTestCase {
         var hasAccess: Bool
         var result: Result<UsageMetrics, Error>
         var resultsByAccount: [UUID: Result<UsageMetrics, Error>] = [:]
+        var accountAuthStates: [UUID: ClaudeCodeAuthState] = [:]
         var probe: ConcurrencyProbe?
         private(set) var fetchCount = 0
 
@@ -399,6 +400,91 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(
             sharedStore.loadAccountMetrics().first?.metrics.sessionLimit?.used,
             23
+        )
+    }
+
+    /// #292 phase 2 acceptance: a logged-out secondary profile keeps its
+    /// last-known numbers, but its state must say Login required — not the
+    /// green band those cached numbers would otherwise produce — while the
+    /// healthy default profile beside it is left alone.
+    func testLoggedOutSecondaryAccountKeepsCachedNumbersButReportsNeedsLogin() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-auth-state-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/work-claude")
+        let work = try XCTUnwrap(accountStore.enabledAccounts.first { !$0.isDefault })
+
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode(sessionUsedPercent: 41))
+        )
+        claude.resultsByAccount[work.id] = .failure(StubError.fetchFailed)
+        // What the service observed while failing: no usable credential.
+        claude.accountAuthStates = [
+            ClaudeCodeAccount.defaultID: .connected(.oauth),
+            work.id: .needsLogin
+        ]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            preloadClaudeAccountMetrics: [work.id: MetricsFixtures.claudeCode(sessionUsedPercent: 12)]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[work.id]?.sessionLimit?.used,
+            12,
+            "The cached reading must survive so the card can still show numbers"
+        )
+        XCTAssertEqual(manager.claudeCodeAccountStates[work.id], .needsLogin)
+        XCTAssertEqual(manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID], .connected(.oauth))
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            claudeAccounts: accountStore.accounts,
+            claudeAccountMetrics: manager.claudeCodeAccountMetrics,
+            enabledServices: [.claudeCode],
+            claudeAccountStates: manager.claudeCodeAccountStates
+        ))
+        let workCard = try XCTUnwrap(snapshots.first { $0.accountID == work.id })
+        XCTAssertEqual(workCard.band, .healthy, "12% used is genuinely healthy — that is the trap")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: workCard), "Login required")
+    }
+
+    /// A transient failure with a cached reading is a different story: nothing
+    /// is wrong with the login, the numbers are just old.
+    func testTransientFailureOverACachedReadingReportsStaleNotNeedsLogin() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-stale-state-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        let cachedAt = MetricsFixtures.referenceDate
+        let cached = MetricsFixtures.claudeCode(sessionUsedPercent: 23)
+        let claude = StubClaudeProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        claude.accountAuthStates = [ClaudeCodeAccount.defaultID: .connected(.oauth)]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            preloadClaudeAccountMetrics: [ClaudeCodeAccount.defaultID: cached]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(
+            manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID],
+            .stale(since: cachedAt)
         )
     }
 

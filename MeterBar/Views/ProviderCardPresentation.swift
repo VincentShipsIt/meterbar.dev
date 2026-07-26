@@ -8,12 +8,25 @@ import SwiftUI
 /// and inspect the render. Extracting them keeps the card declarative and makes
 /// each rule directly assertable.
 enum ProviderCardPresentation {
+    /// The auth notice outranks the band. A card built from a stale cache still
+    /// has genuinely healthy percentages, so the band alone would paint it green
+    /// and hide the fact that the account is logged out — the exact failure this
+    /// overlay exists to prevent. Login/attention borrow the warning colour;
+    /// stale and not-connected go subdued rather than shouting.
     static func statusColor(for snapshot: ProviderSnapshot) -> Color {
-        snapshot.band?.color ?? .secondary
+        switch snapshot.authNotice {
+        case .loginRequired, .attention:
+            return MeterBarTheme.warning
+        case .stale, .notConnected:
+            return .secondary
+        case .none:
+            return snapshot.band?.color ?? .secondary
+        }
     }
 
     static func statusText(for snapshot: ProviderSnapshot) -> String {
-        snapshot.band?.shortLabel ?? "Offline"
+        if let notice = snapshot.authNotice { return notice.shortLabel }
+        return snapshot.band?.shortLabel ?? "Offline"
     }
 
     /// Cards without usage data and exhausted cards are terminal summaries. A

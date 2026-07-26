@@ -19,6 +19,11 @@ extension GrokCLIUsageService: SimpleUsageProviding {}
 
 protocol ClaudeCodeUsageProviding: AnyObject {
     var hasAccess: Bool { get }
+    /// What the service last observed per account. `hasAccess` above describes
+    /// only the default profile, so it cannot say why a secondary account's
+    /// refresh failed — without this the manager would fall back to that
+    /// account's cache with no way to mark the card as stale or logged out.
+    var accountAuthStates: [UUID: ClaudeCodeAuthState] { get }
     func fetchUsageMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics
 }
 
@@ -37,6 +42,10 @@ class UsageDataManager: ObservableObject {
 
     @Published var metrics: [ServiceType: UsageMetrics] = [:]
     @Published var claudeCodeAccountMetrics: [UUID: UsageMetrics] = [:]
+    /// Per-account auth/staleness, resolved once per refresh cycle. Drives the
+    /// card overlay so a failed leg that falls back to cached numbers cannot
+    /// render a green band as if it had just refreshed.
+    @Published private(set) var claudeCodeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
     @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
@@ -213,6 +222,7 @@ class UsageDataManager: ObservableObject {
         // Claude Code metrics (local files)
         if let claudeResult {
             claudeCodeAccountMetrics = claudeResult.metrics
+            claudeCodeAccountStates = claudeResult.accountStates
 
             if let representativeMetrics = representativeClaudeCodeMetrics(from: claudeResult.metrics) {
                 newMetrics[.claudeCode] = representativeMetrics
@@ -222,6 +232,7 @@ class UsageDataManager: ObservableObject {
             states[.claudeCode] = accountFetchState(claudeResult)
         } else {
             claudeCodeAccountMetrics = [:]
+            claudeCodeAccountStates = [:]
             states[.claudeCode] = (.skipped, claudeCodeSkipReason(hasEnabledAccount: hasEnabledClaudeAccount))
         }
 
@@ -669,6 +680,9 @@ class UsageDataManager: ObservableObject {
         let metrics: [UUID: UsageMetrics]
         let successCount: Int
         let firstFailure: Error?
+        /// Claude-only; defaulted because the Codex path shares this type and
+        /// has no per-account auth state of its own.
+        var accountStates: [UUID: ClaudeCodeAuthState] = [:]
     }
 
     /// Sentinel that lets the `canAccess` probe move inside the concurrent leg
@@ -689,6 +703,7 @@ class UsageDataManager: ObservableObject {
     private func fetchClaudeCodeAccountMetrics() async -> AccountFetchResult {
         let enabledAccounts = claudeCodeAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
+        var accountStates: [UUID: ClaudeCodeAuthState] = [:]
         var firstFailure: Error?
         var successCount = 0
 
@@ -696,19 +711,32 @@ class UsageDataManager: ObservableObject {
             try await self.claudeCodeService.fetchUsageMetrics(account: enabledAccounts[index])
         }
 
+        let serviceStates = claudeCodeService.accountAuthStates
+
         // Fold in account-store order, never completion order, so `firstFailure`
         // (and therefore the surfaced reason) is stable across runs. `zip`
         // rather than subscripting: a count mismatch truncates instead of trapping.
         for (account, leg) in zip(enabledAccounts, legs) {
+            var cachedLastUpdated: Date?
             if let metrics = leg.metrics {
                 refreshedMetrics[account.id] = metrics
                 successCount += 1
             } else if let error = leg.error {
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = claudeCodeAccountMetrics[account.id] {
+                    // Keeping the numbers is deliberate — an empty card is worse
+                    // than an old one — but they are only honest alongside the
+                    // state resolved below, which says how old and why.
                     refreshedMetrics[account.id] = cachedMetrics
+                    cachedLastUpdated = cachedMetrics.lastUpdated
                 }
             }
+            accountStates[account.id] = ClaudeAccountStateResolver.state(
+                serviceState: serviceStates[account.id],
+                didSucceed: leg.metrics != nil,
+                failure: leg.error,
+                cachedLastUpdated: cachedLastUpdated
+            )
         }
 
         // Parse health tracks integration health, not per-account health:
@@ -724,7 +752,8 @@ class UsageDataManager: ObservableObject {
         return AccountFetchResult(
             metrics: refreshedMetrics,
             successCount: successCount,
-            firstFailure: firstFailure
+            firstFailure: firstFailure,
+            accountStates: accountStates
         )
     }
 

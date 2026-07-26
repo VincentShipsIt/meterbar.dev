@@ -76,6 +76,7 @@ struct MenuBarView: View {
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 fableSessions: fableSessionTracker.sessions,
                 enabledServices: providerVisibility.enabledServices,
+                claudeAccountStates: dataManager.claudeCodeAccountStates,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,

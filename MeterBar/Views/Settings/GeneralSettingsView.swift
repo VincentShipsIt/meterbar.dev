@@ -60,6 +60,7 @@ struct GeneralSettingsView: View {
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 enabledServices: providerVisibility.enabledServices,
+                claudeAccountStates: dataManager.claudeCodeAccountStates,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,
                 codexCliHasAccess: codexCliService.hasAccess,
                 cursorHasAccess: cursorService.hasAccess,
