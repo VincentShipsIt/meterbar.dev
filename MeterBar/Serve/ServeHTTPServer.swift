@@ -24,25 +24,35 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
         public let token: String
         public let maxRequestsPerSecond: Int
         public let dataSource: ServeRouter.DataSource
+        public let requestTimeout: TimeInterval
 
         public init(
             host: String,
             port: UInt16,
             token: String,
             maxRequestsPerSecond: Int,
-            dataSource: ServeRouter.DataSource
+            dataSource: ServeRouter.DataSource,
+            requestTimeout: TimeInterval = ServeHTTPServer.defaultRequestTimeout
         ) {
             self.host = host
             self.port = port
             self.token = token
             self.maxRequestsPerSecond = maxRequestsPerSecond
             self.dataSource = dataSource
+            self.requestTimeout = requestTimeout
         }
     }
 
-    /// Per-connection socket read/write bound, defensive against a slow or
-    /// stalled client tying up a handler thread indefinitely.
-    private static let connectionTimeoutSeconds: Int = 5
+    /// Wall-clock bound on how long one connection may take to deliver a
+    /// complete request head. Configurable only so tests can drive it down;
+    /// nothing on the CLI surface exposes it.
+    public static let defaultRequestTimeout: TimeInterval = 5
+
+    /// How long a single `recv`/`write` may block. Deliberately shorter than
+    /// the request deadline: `SO_RCVTIMEO` restarts on every byte received, so
+    /// it can't bound a connection on its own — it only needs to wake the read
+    /// loop often enough to notice the deadline has passed.
+    private static let socketPollSeconds: Int = 1
     private static let maxRequestBytes = 8_192
     private static let listenBacklog: Int32 = 16
 
@@ -139,7 +149,19 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
             guard fd >= 0 else { return }
 
             let clientFD = Darwin.accept(fd, nil, nil)
-            guard clientFD >= 0 else { return } // stop() closed the socket, or an unrecoverable error
+            if clientFD < 0 {
+                guard Self.isTransientAcceptError(errno) else { return }
+                // stop() closing the listening socket lands in the `return`
+                // above (EBADF); everything here is a peer or a signal
+                // misbehaving on one connection, which must not take the
+                // listener down with it.
+                if errno == EMFILE || errno == ENFILE {
+                    // Descriptor exhaustion clears only when an in-flight
+                    // handler closes, so back off instead of spinning hot.
+                    usleep(100_000)
+                }
+                continue
+            }
 
             configureTimeouts(clientFD)
             DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -148,8 +170,16 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
         }
     }
 
+    /// `accept` failures a live listener recovers from: a signal arriving
+    /// mid-call, a peer that disconnected between the SYN and the accept, a
+    /// spurious wakeup, or transient descriptor exhaustion.
+    private static func isTransientAcceptError(_ code: Int32) -> Bool {
+        code == EINTR || code == ECONNABORTED || code == EAGAIN
+            || code == EWOULDBLOCK || code == EMFILE || code == ENFILE
+    }
+
     private func configureTimeouts(_ fd: Int32) {
-        var timeout = timeval(tv_sec: Self.connectionTimeoutSeconds, tv_usec: 0)
+        var timeout = timeval(tv_sec: Self.socketPollSeconds, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     }
@@ -162,7 +192,8 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
             return
         }
 
-        guard let request = Self.readRequest(from: fd) else {
+        let deadline = Date().addingTimeInterval(configuration.requestTimeout)
+        guard let request = Self.readRequest(from: fd, deadline: deadline) else {
             write(response: ServeRouter.malformedRequestResponse(), to: fd)
             return
         }
@@ -187,16 +218,29 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
 
     // MARK: Parsing
 
-    private static func readRequest(from fd: Int32) -> ServeHTTPRequest? {
+    /// Bounded by `deadline` rather than by the socket's own receive timeout:
+    /// `SO_RCVTIMEO` restarts on every byte that arrives, so a client sending
+    /// one byte just inside that window could otherwise hold a handler thread
+    /// open indefinitely.
+    private static func readRequest(from fd: Int32, deadline: Date) -> ServeHTTPRequest? {
         var buffer = [UInt8]()
         var chunk = [UInt8](repeating: 0, count: 1_024)
         while buffer.count < maxRequestBytes {
+            guard Date() < deadline else { return nil }
+
             let bytesRead = chunk.withUnsafeMutableBytes { recv(fd, $0.baseAddress, $0.count, 0) }
-            guard bytesRead > 0 else { break }
-            buffer.append(contentsOf: chunk[0..<bytesRead])
-            if let terminatorIndex = headerTerminatorIndex(in: buffer) {
-                return parse(headerBytes: Array(buffer[..<terminatorIndex]))
+            if bytesRead > 0 {
+                buffer.append(contentsOf: chunk[0..<bytesRead])
+                if let terminatorIndex = headerTerminatorIndex(in: buffer) {
+                    return parse(headerBytes: Array(buffer[..<terminatorIndex]))
+                }
+                continue
             }
+
+            // 0 means the peer closed; there is no more request coming. -1 with
+            // EAGAIN/EWOULDBLOCK is just this recv hitting `socketPollSeconds`,
+            // so loop back and re-check the deadline instead of giving up.
+            guard bytesRead < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR else { return nil }
         }
         return nil
     }

@@ -11,7 +11,10 @@ nonisolated public final class ServeRateLimiter: @unchecked Sendable {
     private var windowStart: Date
     private var countInWindow = 0
 
-    public init(maxPerSecond: Int, clock: @escaping @Sendable () -> Date = Date.init) {
+    // The default is a closure rather than the `Date.init` reference: an
+    // unapplied initializer reference is not itself `@Sendable`, so passing it
+    // directly warns under Swift 6 strict concurrency.
+    public init(maxPerSecond: Int, clock: @escaping @Sendable () -> Date = { Date() }) {
         self.maxPerSecond = max(1, maxPerSecond)
         self.clock = clock
         self.windowStart = clock()

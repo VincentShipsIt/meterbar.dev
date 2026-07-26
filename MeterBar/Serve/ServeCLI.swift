@@ -41,6 +41,12 @@ nonisolated public enum ServeCLI {
         onReady: @Sendable (StartupInfo) -> Void = { _ in },
         shouldCancel: @Sendable () -> Bool
     ) async -> Outcome {
+        // Fail before binding rather than exposing an endpoint whose auth
+        // check can never reject anything.
+        guard ServeToken.isUsable(request.token) else {
+            return .failedToStart(message: "The bearer token must not be blank.")
+        }
+
         let server = ServeHTTPServer(configuration: ServeHTTPServer.Configuration(
             host: request.host,
             port: request.port,

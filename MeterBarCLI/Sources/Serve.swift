@@ -32,6 +32,12 @@ struct Serve: AsyncParsableCommand {
         if maxRequestsPerSecond < 1 {
             throw ValidationError("--max-requests-per-second must be 1 or greater.")
         }
+        // `--token ""` survives the `??` below, so reject it here rather than
+        // starting a server whose auth check can never reject anything. Omit
+        // the flag entirely to get a generated token.
+        if let token, !ServeToken.isUsable(token) {
+            throw ValidationError("--token must not be blank. Omit it to have one generated.")
+        }
     }
 
     func run() async throws {

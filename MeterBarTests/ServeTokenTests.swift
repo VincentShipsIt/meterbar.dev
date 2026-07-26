@@ -40,4 +40,20 @@ final class ServeTokenTests: XCTestCase {
     func testMatchesRejectsEmptyPresentedToken() {
         XCTAssertFalse(ServeToken.matches(presented: "Bearer ", expected: "secret-token"))
     }
+
+    /// An empty configured token must never authenticate anyone. Without this,
+    /// a bare `Authorization: Bearer ` header compares equal to "" and every
+    /// request is authorized — an open endpoint, not a locked one.
+    func testMatchesRejectsEmptyExpectedToken() {
+        XCTAssertFalse(ServeToken.matches(presented: "Bearer ", expected: ""))
+        XCTAssertFalse(ServeToken.matches(presented: "Bearer anything", expected: ""))
+        XCTAssertFalse(ServeToken.matches(presented: nil, expected: ""))
+    }
+
+    func testIsUsableRejectsBlankTokens() {
+        XCTAssertFalse(ServeToken.isUsable(""))
+        XCTAssertFalse(ServeToken.isUsable("   "))
+        XCTAssertFalse(ServeToken.isUsable("\t\n"))
+        XCTAssertTrue(ServeToken.isUsable("secret-token"))
+    }
 }

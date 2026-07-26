@@ -94,8 +94,23 @@ nonisolated public enum ServeRouter {
 
     // MARK: Response construction
 
-    private static func jsonResponse(_ document: some CLIJSONDocument) -> ServeHTTPResponse {
-        let body = (try? document.jsonData()) ?? Data()
+    private static let staticEncodingFailureBody = """
+    {"schemaVersion":1,"error":{"code":"internal_error","message":"Failed to encode the error payload."}}
+    """
+
+    /// An encoding failure must not surface as an empty body labelled
+    /// `200 OK` / `application/json` — a client would read that as success it
+    /// merely failed to parse, rather than as the server-side fault it is.
+    /// Internal rather than private so tests can drive the failure path.
+    static func jsonResponse(_ document: some CLIJSONDocument) -> ServeHTTPResponse {
+        guard let body = try? document.jsonData() else {
+            return errorResponse(
+                status: 500,
+                code: "internal_error",
+                message: "Failed to encode the response payload."
+            )
+        }
+
         return ServeHTTPResponse(
             status: 200,
             headers: [
@@ -118,8 +133,12 @@ nonisolated public enum ServeRouter {
         errorResponse(status: 405, code: "method_not_allowed", message: "Only GET is supported.")
     }
 
+    /// The last stop for every failure path, so its own fallback is a literal
+    /// rather than an empty body: a caller must always get something it can
+    /// parse, even if encoding the real detail failed.
     private static func errorResponse(status: Int = 200, code: String, message: String) -> ServeHTTPResponse {
-        let body = (try? CLIJSONErrorResponse(code: code, message: message).jsonData()) ?? Data()
+        let body = (try? CLIJSONErrorResponse(code: code, message: message).jsonData())
+            ?? Data(Self.staticEncodingFailureBody.utf8)
         return ServeHTTPResponse(
             status: status,
             headers: [

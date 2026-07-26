@@ -111,6 +111,28 @@ final class ServeRouterTests: XCTestCase {
         XCTAssertEqual(response.status, 401)
     }
 
+    /// A blank configured token must lock the endpoint down, not open it: the
+    /// bare `Authorization: Bearer ` header a caller can trivially send would
+    /// otherwise compare equal to "" and authorize everything.
+    func testBlankConfiguredTokenRejectsEveryRequest() {
+        for configured in ["", "   "] {
+            for presented in [nil, "", " ", "anything"] as [String?] {
+                let response = ServeRouter.handle(
+                    request(path: "/usage", token: presented),
+                    token: configured,
+                    dataSource: makeDataSource()
+                )
+
+                XCTAssertEqual(
+                    response.status,
+                    401,
+                    "configured=\(configured.debugDescription) presented=\(presented.debugDescription)"
+                )
+                assertBodyContainsNoUsageData(response)
+            }
+        }
+    }
+
     func testErrorResponseBodyNeverContainsTheToken() throws {
         let response = ServeRouter.handle(
             request(path: "/usage", token: nil),
@@ -272,6 +294,36 @@ final class ServeRouterTests: XCTestCase {
         XCTAssertEqual(response.status, 400)
         assertBodyContainsNoUsageData(response)
         XCTAssertEqual(response.headers["Cache-Control"], "no-store")
+    }
+
+    // MARK: Encoding failures
+
+    /// A document that fails to encode must surface as a 500, never as an
+    /// empty body wearing a `200 OK` / `application/json` label — a caller
+    /// would read that as a successful response it simply can't parse.
+    func testJSONResponseReportsAnEncodingFailureAsFiveHundred() throws {
+        let response = ServeRouter.jsonResponse(FailingDocument())
+
+        XCTAssertEqual(response.status, 500)
+        XCTAssertFalse(response.body.isEmpty, "a 500 must still carry a parseable error body")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        let error = try XCTUnwrap(object["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? String, "internal_error")
+    }
+
+    func testErrorResponseAlwaysCarriesAParseableBody() throws {
+        let response = ServeRouter.malformedRequestResponse()
+
+        XCTAssertFalse(response.body.isEmpty)
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+    }
+
+    private struct FailingDocument: CLIJSONDocument {
+        struct EncodingFailure: Error {}
+
+        func encode(to encoder: Encoder) throws {
+            throw EncodingFailure()
+        }
     }
 
     // MARK: Helpers

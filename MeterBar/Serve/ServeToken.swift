@@ -24,9 +24,21 @@ nonisolated public enum ServeToken {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Whether a token is strong enough to gate anything. A blank token would
+    /// otherwise compare equal to the empty string a caller gets from a bare
+    /// `Authorization: Bearer ` header, turning the auth check into a no-op.
+    public static func isUsable(_ token: String) -> Bool {
+        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// `presented` is the raw `Authorization` header value. Anything other
     /// than an exact `Bearer <token>` shape fails without a byte comparison.
+    ///
+    /// An unusable `expected` fails closed: callers are expected to reject a
+    /// blank token before binding a socket (`ServeCLI.run`), and this is the
+    /// second layer that keeps a missed check from opening the endpoint.
     public static func matches(presented: String?, expected: String) -> Bool {
+        guard isUsable(expected) else { return false }
         guard let presented, presented.hasPrefix(bearerPrefix) else { return false }
         let candidate = String(presented.dropFirst(bearerPrefix.count))
         return constantTimeEquals(candidate, expected)

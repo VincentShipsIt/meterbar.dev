@@ -50,6 +50,29 @@ final class ServeCLITests: XCTestCase {
         XCTAssertNotEqual(info?.port, 0, "an ephemeral bind should resolve to a real port")
     }
 
+    /// Refuses to bind at all rather than starting an endpoint whose auth
+    /// check can never reject anything.
+    func testRunRefusesToStartWithABlankToken() async {
+        for blank in ["", "   "] {
+            let outcome = await ServeCLI.run(
+                ServeCLI.Request(
+                    host: ServeBindConfiguration.loopbackHost,
+                    port: 0,
+                    token: blank,
+                    maxRequestsPerSecond: 10
+                ),
+                dataSource: makeDataSource(),
+                shouldCancel: { true }
+            )
+
+            guard case .failedToStart(let message) = outcome else {
+                XCTFail("expected a blank token to fail startup, got \(outcome)")
+                return
+            }
+            XCTAssertTrue(message.lowercased().contains("token"), "message should name the token: \(message)")
+        }
+    }
+
     func testRunReportsFailureWhenTheHostCannotBeResolved() async {
         let outcome = await ServeCLI.run(
             ServeCLI.Request(host: "not-an-ip-address", port: 0, token: "t", maxRequestsPerSecond: 10),

@@ -478,7 +478,7 @@ that changes state.
 from other devices. Reaching any other interface requires the explicit `--allow-remote` flag, which
 also prints a warning to standard error before the server starts:
 
-```
+```text
 ⚠ meterbar serve is bound to all network interfaces (--allow-remote). Usage and cost data will be
 reachable from other devices on this network; anyone with the printed bearer token can read it.
 ```
@@ -486,9 +486,14 @@ reachable from other devices on this network; anyone with the printed bearer tok
 **Authentication.** Every request must carry `Authorization: Bearer <token>`. If `--token` is not
 supplied, a random 256-bit token is generated and printed once, at startup, to standard output; it
 is never logged again and never appears in any response body, including error bodies. Token
-comparison is constant-time. A missing or incorrect token always returns `401` with a generic
-`unauthorized` error body — before routing even inspects the path or method, so an unauthenticated
-caller cannot use status codes to enumerate endpoints.
+comparison is constant-time. A blank `--token` is rejected before the socket binds, so the server
+can never come up with an auth check that accepts every caller. A missing or incorrect token always
+returns `401` with a generic `unauthorized` error body — before routing even inspects the path or
+method, so an unauthenticated caller cannot use status codes to enumerate endpoints.
+
+**Connection limits.** A request must deliver its complete header block within 5 seconds of
+connecting, measured against the connection as a whole rather than per socket read, so a client that
+trickles bytes cannot hold a handler open indefinitely. Request heads over 8 KiB are rejected.
 
 **Endpoints** (`GET` only; any other method on a known path returns `405`):
 
