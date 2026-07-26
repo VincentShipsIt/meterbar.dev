@@ -164,6 +164,7 @@ final class UsageDataManagerTests: XCTestCase {
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         fableTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
+        providerVisibilityStore: ProviderVisibilityStore? = nil,
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
         preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
@@ -190,7 +191,8 @@ final class UsageDataManagerTests: XCTestCase {
             cacheDefaults.set(savedRefreshInterval.rawValue, forKey: StorageKeys.refreshInterval)
         }
 
-        let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
+        let visibility = providerVisibilityStore
+            ?? ProviderVisibilityStore(userDefaults: visibilityDefaults)
         let hiddenProviders = claude == nil ? hidden.union([.claudeCode]) : hidden
         for service in hiddenProviders {
             visibility.set(service, isEnabled: false)
@@ -456,6 +458,102 @@ final class UsageDataManagerTests: XCTestCase {
         let workCard = try XCTUnwrap(snapshots.first { $0.accountID == work.id })
         XCTAssertEqual(workCard.band, .healthy, "12% used is genuinely healthy — that is the trap")
         XCTAssertEqual(ProviderCardPresentation.statusText(for: workCard), "Login required")
+    }
+
+    func testSingleClaudeRefreshPublishesLoggedOutSecondaryAccountState() async throws {
+        let accountSuite = "UsageDataManagerTests-single-claude-state-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/work-claude")
+        let work = try XCTUnwrap(accountStore.enabledAccounts.first { !$0.isDefault })
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode(sessionUsedPercent: 41))
+        )
+        claude.resultsByAccount[work.id] = .failure(StubError.fetchFailed)
+        claude.accountAuthStates = [
+            ClaudeCodeAccount.defaultID: .connected(.oauth),
+            work.id: .needsLogin
+        ]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            preloadClaudeAccountMetrics: [
+                work.id: MetricsFixtures.claudeCode(sessionUsedPercent: 12)
+            ]
+        )
+
+        await manager.refresh(service: .claudeCode)
+
+        XCTAssertEqual(manager.claudeCodeAccountStates[work.id], .needsLogin)
+        XCTAssertEqual(
+            manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID],
+            .connected(.oauth)
+        )
+    }
+
+    func testSingleClaudeRefreshClearsAccountStateWhenEveryAccountIsDisabled() async throws {
+        let accountSuite = "UsageDataManagerTests-single-claude-disabled-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        claude.accountAuthStates = [ClaudeCodeAccount.defaultID: .connected(.oauth)]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+        await manager.refreshAll()
+        XCTAssertFalse(manager.claudeCodeAccountStates.isEmpty)
+
+        accountStore.setEnabled(false, for: ClaudeCodeAccount.defaultID)
+        await manager.refresh(service: .claudeCode)
+
+        XCTAssertTrue(manager.claudeCodeAccountMetrics.isEmpty)
+        XCTAssertTrue(manager.claudeCodeAccountStates.isEmpty)
+    }
+
+    func testSingleDisabledClaudeProviderClearsAccountState() async throws {
+        let visibilitySuite = "UsageDataManagerTests-single-claude-hidden-\(UUID().uuidString)"
+        createdSuiteNames.append(visibilitySuite)
+        let visibilityDefaults = try XCTUnwrap(UserDefaults(suiteName: visibilitySuite))
+        let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        claude.accountAuthStates = [ClaudeCodeAccount.defaultID: .connected(.oauth)]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            providerVisibilityStore: visibility,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+        await manager.refreshAll()
+        XCTAssertFalse(manager.claudeCodeAccountStates.isEmpty)
+
+        visibility.set(.claudeCode, isEnabled: false)
+        await manager.refresh(service: .claudeCode)
+
+        XCTAssertTrue(manager.claudeCodeAccountMetrics.isEmpty)
+        XCTAssertTrue(manager.claudeCodeAccountStates.isEmpty)
     }
 
     /// A transient failure with a cached reading is a different story: nothing

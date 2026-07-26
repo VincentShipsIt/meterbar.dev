@@ -413,6 +413,7 @@ class UsageDataManager: ObservableObject {
             metrics.removeValue(forKey: service)
             if service == .claudeCode {
                 claudeCodeAccountMetrics = [:]
+                claudeCodeAccountStates = [:]
             } else if service == .codexCli {
                 codexAccountMetrics = [:]
             }
@@ -422,6 +423,7 @@ class UsageDataManager: ObservableObject {
 
         if service == .claudeCode, claudeCodeAccountStore.enabledAccounts.isEmpty {
             claudeCodeAccountMetrics = [:]
+            claudeCodeAccountStates = [:]
             metrics.removeValue(forKey: service)
             publishMetrics()
             return
@@ -492,6 +494,7 @@ class UsageDataManager: ObservableObject {
         case .claudeCode:
             let fetch = await fetchClaudeCodeAccountMetrics()
             claudeCodeAccountMetrics = fetch.metrics
+            claudeCodeAccountStates = fetch.accountStates
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeClaudeCodeMetrics(from: fetch.metrics) { return representative }
         case .codexCli:
