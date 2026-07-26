@@ -56,6 +56,9 @@ nonisolated enum StorageKeys {
     static let claudeCodeDefaultConfigDirectory = "ClaudeCodeDefaultConfigDirectory"
     /// Per-account delegated OAuth-refresh outcome and completion time.
     static let claudeCodeRefreshCooldowns = "ClaudeCodeRefreshCooldowns"
+    /// Per-Keychain-service timestamps used to suppress repeated background
+    /// authorization attempts. Contains no credential material.
+    static let claudeCodeKeychainDenials = "ClaudeCodeKeychainDenials"
     /// Whether the synthesized default Claude Code CLI profile participates in tracking.
     static let claudeCodeDefaultAccountEnabled = "ClaudeCodeDefaultAccountEnabled"
     /// Persisted account display order (array of UUID strings).

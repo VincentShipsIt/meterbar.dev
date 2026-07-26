@@ -1,3 +1,5 @@
+import LocalAuthentication
+import Security
 import XCTest
 @testable import MeterBar
 
@@ -174,11 +176,304 @@ final class ClaudeCredentialResolverTests: XCTestCase {
 
         XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "file")
     }
+
+    // MARK: - Prompt hygiene
+
+    func testBackgroundPayloadQueryFailsWithoutAuthenticationUI() {
+        let backend = RecordingKeychainBackend(
+            status: errSecSuccess,
+            result: Data("payload".utf8) as NSData
+        )
+
+        let outcome = ClaudeCredentialStore.keychainPayload(
+            service: "Claude Code-credentials-c4394a73",
+            mode: .background,
+            backend: backend
+        )
+
+        XCTAssertEqual(outcome, .value(Data("payload".utf8)))
+        XCTAssertEqual(
+            backend.lastQuery[kSecUseAuthenticationUI as String] as? String,
+            kSecUseAuthenticationUIFail as String
+        )
+        let context = backend.lastQuery[kSecUseAuthenticationContext as String] as? LAContext
+        XCTAssertEqual(context?.interactionNotAllowed, true)
+    }
+
+    func testInteractivePayloadQueryAllowsAuthenticationUI() {
+        let backend = RecordingKeychainBackend(
+            status: errSecSuccess,
+            result: Data("payload".utf8) as NSData
+        )
+
+        let outcome = ClaudeCredentialStore.keychainPayload(
+            service: "Claude Code-credentials-c4394a73",
+            mode: .interactive,
+            backend: backend
+        )
+
+        XCTAssertEqual(outcome, .value(Data("payload".utf8)))
+        XCTAssertNil(backend.lastQuery[kSecUseAuthenticationUI as String])
+        XCTAssertNil(backend.lastQuery[kSecUseAuthenticationContext as String])
+    }
+
+    func testPayloadQueryPreservesSecurityStatusClasses() {
+        let cases: [(OSStatus, ClaudeKeychainReadOutcome<Data>)] = [
+            (errSecItemNotFound, .notFound),
+            (errSecInteractionNotAllowed, .interactionRequired),
+            (errSecUserCanceled, .denied),
+            (errSecAuthFailed, .denied),
+            (-9_999, .failure(-9_999))
+        ]
+
+        for (status, expected) in cases {
+            let backend = RecordingKeychainBackend(status: status)
+            XCTAssertEqual(
+                ClaudeCredentialStore.keychainPayload(
+                    service: "Claude Code-credentials-c4394a73",
+                    mode: .interactive,
+                    backend: backend
+                ),
+                expected
+            )
+        }
+    }
+
+    func testCanonicalInteractiveWalkOffersAtMostOnePromptAfterDenial() throws {
+        let fixture = try makeDenialStore()
+        let recorder = KeychainReadRecorder { service, mode in
+            service == "Claude Code-credentials-ee16a9f4"
+                ? .denied
+                : .notFound
+        }
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in Data("file".utf8) },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { Date(timeIntervalSince1970: 10_000) }
+        )
+
+        let data = store.credentialsData(
+            for: .defaultAccount,
+            mode: .interactive,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "file")
+        XCTAssertEqual(recorder.calls, [
+            .init(service: "Claude Code-credentials-ee16a9f4", mode: .interactive),
+            .init(service: ClaudeCredentialResolver.bareKeychainService, mode: .background)
+        ])
+        XCTAssertEqual(
+            fixture.store.deniedAt(for: "Claude Code-credentials-ee16a9f4"),
+            Date(timeIntervalSince1970: 10_000)
+        )
+    }
+
+    func testBackgroundWalkSkipsCoolingServiceAndStillUsesFileFallback() throws {
+        let fixture = try makeDenialStore()
+        let service = "Claude Code-credentials-c4394a73"
+        let now = Date(timeIntervalSince1970: 10_000)
+        fixture.store.recordDenial(for: service, at: now)
+        let recorder = KeychainReadRecorder { _, _ in .value(Data("unexpected".utf8)) }
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in Data("file".utf8) },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { now.addingTimeInterval(1) }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        let data = store.credentialsData(
+            for: account,
+            mode: .background,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertTrue(recorder.calls.isEmpty)
+        XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "file")
+    }
+
+    func testUserInitiatedWalkExplicitlyRetriesCoolingService() throws {
+        let fixture = try makeDenialStore()
+        let service = "Claude Code-credentials-c4394a73"
+        let now = Date(timeIntervalSince1970: 10_000)
+        fixture.store.recordDenial(for: service, at: now)
+        let recorder = KeychainReadRecorder { _, _ in .value(Data("scoped".utf8)) }
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { now.addingTimeInterval(1) }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        let data = store.credentialsData(
+            for: account,
+            mode: .interactive,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertEqual(
+            recorder.calls,
+            [.init(service: service, mode: .interactive)]
+        )
+        XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "scoped")
+        XCTAssertNil(fixture.store.deniedAt(for: service))
+    }
+
+    func testBackgroundInteractionRequirementRecordsCooldownAndFallsBackToFile() throws {
+        let fixture = try makeDenialStore()
+        let now = Date(timeIntervalSince1970: 10_000)
+        let service = "Claude Code-credentials-c4394a73"
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { _, _ in .interactionRequired },
+            readFile: { _ in Data("file".utf8) },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { now }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        let data = store.credentialsData(
+            for: account,
+            mode: .background,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "file")
+        XCTAssertEqual(fixture.store.deniedAt(for: service), now)
+    }
+
+    func testInteractionBarrierRemainsDistinctWhenNoFileFallbackExists() throws {
+        let fixture = try makeDenialStore()
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { _, _ in .interactionRequired },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        XCTAssertEqual(
+            store.credentialsDataResult(
+                for: account,
+                mode: .background,
+                environment: [:],
+                realHomeDirectory: "/Users/tester"
+            ),
+            .interactionRequired
+        )
+    }
+
+    func testCoolingServiceRemainsInteractionBarrierInsteadOfBecomingMissing() throws {
+        let fixture = try makeDenialStore()
+        let now = Date(timeIntervalSince1970: 10_000)
+        let service = "Claude Code-credentials-c4394a73"
+        fixture.store.recordDenial(for: service, at: now)
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { _, _ in .value(Data("unexpected".utf8)) },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { now.addingTimeInterval(1) }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        XCTAssertEqual(
+            store.credentialsDataResult(
+                for: account,
+                mode: .background,
+                environment: [:],
+                realHomeDirectory: "/Users/tester"
+            ),
+            .interactionRequired
+        )
+    }
+
+    func testAbsentCandidatesRemainNotFound() throws {
+        let fixture = try makeDenialStore()
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { _, _ in .notFound },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true }
+        )
+
+        XCTAssertEqual(
+            store.credentialsDataResult(
+                for: .defaultAccount,
+                mode: .background,
+                environment: [:],
+                realHomeDirectory: "/Users/tester"
+            ),
+            .notFound
+        )
+    }
+
+    func testOAuthOptOutSkipsEveryKeychainQueryButLeavesFileFallbackAvailable() throws {
+        let fixture = try makeDenialStore()
+        let recorder = KeychainReadRecorder { _, _ in .value(Data("unexpected".utf8)) }
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in Data("file".utf8) },
+            denialStore: fixture.store,
+            isOAuthEnabled: { false }
+        )
+
+        let data = store.credentialsData(
+            for: .defaultAccount,
+            mode: .interactive,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertTrue(recorder.calls.isEmpty)
+        XCTAssertEqual(data.flatMap { String(bytes: $0, encoding: .utf8) }, "file")
+    }
+
+    private func makeDenialStore() throws -> (
+        store: ClaudeKeychainDenialStore,
+        defaults: UserDefaults
+    ) {
+        let suite = "ClaudeCredentialResolverTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return (ClaudeKeychainDenialStore(userDefaults: defaults), defaults)
+    }
 }
 
 /// Records the paths a store probed. The store's readers are `@Sendable`, so a
 /// captured `var` will not compile — a locked reference type is the substitute.
-private final class PathRecorder: @unchecked Sendable {
+nonisolated private final class PathRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String] = []
 
@@ -192,5 +487,74 @@ private final class PathRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         storage.append(path)
+    }
+}
+
+nonisolated private final class RecordingKeychainBackend: KeychainBackend {
+    private(set) var lastQuery: [String: Any] = [:]
+    let status: OSStatus
+    let result: AnyObject?
+
+    init(status: OSStatus, result: AnyObject? = nil) {
+        self.status = status
+        self.result = result
+    }
+
+    func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        _ = query
+        _ = attributes
+        return errSecUnimplemented
+    }
+
+    func add(query: [String: Any]) -> OSStatus {
+        _ = query
+        return errSecUnimplemented
+    }
+
+    func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
+        lastQuery = query
+        result = self.result
+        return status
+    }
+
+    func delete(query: [String: Any]) -> OSStatus {
+        _ = query
+        return errSecUnimplemented
+    }
+}
+
+nonisolated private final class KeychainReadRecorder: @unchecked Sendable {
+    struct Call: Equatable {
+        let service: String
+        let mode: ClaudeKeychainAccessMode
+    }
+
+    private let lock = NSLock()
+    private let result: @Sendable (String, ClaudeKeychainAccessMode) -> ClaudeKeychainReadOutcome<Data>
+    private var storage: [Call] = []
+
+    init(
+        result: @escaping @Sendable (
+            String,
+            ClaudeKeychainAccessMode
+        ) -> ClaudeKeychainReadOutcome<Data>
+    ) {
+        self.result = result
+    }
+
+    var calls: [Call] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func read(
+        service: String,
+        mode: ClaudeKeychainAccessMode
+    ) -> ClaudeKeychainReadOutcome<Data> {
+        lock.lock()
+        storage.append(Call(service: service, mode: mode))
+        lock.unlock()
+        return result(service, mode)
     }
 }

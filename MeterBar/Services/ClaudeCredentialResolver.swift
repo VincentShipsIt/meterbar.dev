@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 import MeterBarShared
 
 /// Where a Claude Code profile's OAuth credential can live, in the order it is
@@ -97,21 +98,59 @@ nonisolated enum ClaudeCredentialResolver {
 /// `nonisolated`: a Keychain read can raise a blocking approval dialog and a
 /// file read hits disk — neither belongs on the main actor.
 nonisolated struct ClaudeCredentialStore: Sendable {
-    static let shared = ClaudeCredentialStore()
+    private enum KeychainCandidateResult {
+        case value(Data)
+        case continueWalk(
+            outcome: ClaudeKeychainReadOutcome<Data>,
+            consumedInteractivePrompt: Bool
+        )
+    }
 
-    private let readKeychain: @Sendable (String) -> Data?
+    static let shared = ClaudeCredentialStore(
+        readKeychainResult: { service, mode in
+            ClaudeCredentialStore.keychainPayload(service: service, mode: mode)
+        },
+        readFile: { ClaudeCredentialStore.filePayload(path: $0) },
+        denialStore: ClaudeKeychainDenialStore(),
+        isOAuthEnabled: { ClaudeCodeLocalService.isOAuthUsageEnabled() }
+    )
+
+    private let readKeychainResult:
+        @Sendable (String, ClaudeKeychainAccessMode) -> ClaudeKeychainReadOutcome<Data>
     private let readFile: @Sendable (String) -> Data?
+    private let denialStore: ClaudeKeychainDenialStore
+    private let isOAuthEnabled: @Sendable () -> Bool
+    private let now: @Sendable () -> Date
+
+    /// Compatibility initializer for pure candidate-order tests.
+    init(
+        readKeychain: @escaping @Sendable (String) -> Data?,
+        readFile: @escaping @Sendable (String) -> Data?
+    ) {
+        self.readKeychainResult = { service, _ in
+            readKeychain(service).map(ClaudeKeychainReadOutcome.value) ?? .notFound
+        }
+        self.readFile = readFile
+        self.denialStore = ClaudeKeychainDenialStore()
+        self.isOAuthEnabled = { true }
+        self.now = { Date() }
+    }
 
     init(
-        readKeychain: @escaping @Sendable (String) -> Data? = {
-            ClaudeCredentialStore.keychainPayload(service: $0)
-        },
-        readFile: @escaping @Sendable (String) -> Data? = {
-            ClaudeCredentialStore.filePayload(path: $0)
-        }
+        readKeychainResult: @escaping @Sendable (
+            String,
+            ClaudeKeychainAccessMode
+        ) -> ClaudeKeychainReadOutcome<Data>,
+        readFile: @escaping @Sendable (String) -> Data?,
+        denialStore: ClaudeKeychainDenialStore,
+        isOAuthEnabled: @escaping @Sendable () -> Bool,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.readKeychain = readKeychain
+        self.readKeychainResult = readKeychainResult
         self.readFile = readFile
+        self.denialStore = denialStore
+        self.isOAuthEnabled = isOAuthEnabled
+        self.now = now
     }
 
     /// The raw credentials JSON for `account`, or nil when no candidate holds
@@ -119,45 +158,147 @@ nonisolated struct ClaudeCredentialStore: Sendable {
     /// item must not shadow a working file fallback.
     func credentialsData(
         for account: ClaudeCodeAccount,
+        mode: ClaudeKeychainAccessMode = .background,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         realHomeDirectory: String = ServiceSupport.realHomeDirectory()
     ) -> Data? {
+        guard case let .value(data) = credentialsDataResult(
+            for: account,
+            mode: mode,
+            environment: environment,
+            realHomeDirectory: realHomeDirectory
+        ) else {
+            return nil
+        }
+        return data
+    }
+
+    /// Resolves the credential without erasing the difference between an
+    /// absent item and one that exists behind an unavailable authorization
+    /// interaction. Callers use that distinction to avoid false logout state.
+    func credentialsDataResult(
+        for account: ClaudeCodeAccount,
+        mode: ClaudeKeychainAccessMode = .background,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> ClaudeKeychainReadOutcome<Data> {
         let candidates = ClaudeCredentialResolver.candidates(
             for: account,
             environment: environment,
             realHomeDirectory: realHomeDirectory
         )
 
+        var remainingKeychainMode = mode
+        var promptBudgetConsumed = false
+        var deferredOutcome: ClaudeKeychainReadOutcome<Data> = .notFound
+
         for source in candidates {
-            let payload: Data?
             switch source {
             case let .keychain(service):
-                payload = readKeychain(service)
+                guard isOAuthEnabled() else { continue }
+                switch resolveKeychainCandidate(
+                    service: service,
+                    mode: remainingKeychainMode
+                ) {
+                case let .value(payload):
+                    return .value(payload)
+                case let .continueWalk(outcome, consumedInteractivePrompt):
+                    deferredOutcome = Self.mergedOutcome(
+                        existing: deferredOutcome,
+                        candidate: outcome
+                    )
+                    promptBudgetConsumed = promptBudgetConsumed || consumedInteractivePrompt
+                    if mode == .interactive, promptBudgetConsumed {
+                        remainingKeychainMode = .background
+                    }
+                }
             case let .file(path):
-                payload = readFile(path)
-            }
-            if let payload, !payload.isEmpty {
-                return payload
+                if let payload = readFile(path), !payload.isEmpty {
+                    return .value(payload)
+                }
             }
         }
-        return nil
+        return deferredOutcome
     }
 
-    static func keychainPayload(service: String) -> Data? {
-        let query: [String: Any] = [
+    private func resolveKeychainCandidate(
+        service: String,
+        mode: ClaudeKeychainAccessMode
+    ) -> KeychainCandidateResult {
+        let decision = ClaudeKeychainPromptPolicy.decision(
+            requestedMode: mode,
+            deniedAt: denialStore.deniedAt(for: service),
+            now: now()
+        )
+        guard case let .query(queryMode) = decision else {
+            return .continueWalk(
+                outcome: .interactionRequired,
+                consumedInteractivePrompt: false
+            )
+        }
+
+        switch readKeychainResult(service, queryMode) {
+        case let .value(payload):
+            denialStore.clearDenial(for: service)
+            return payload.isEmpty
+                ? .continueWalk(outcome: .notFound, consumedInteractivePrompt: false)
+                : .value(payload)
+        case .notFound:
+            denialStore.clearDenial(for: service)
+            return .continueWalk(outcome: .notFound, consumedInteractivePrompt: false)
+        case .interactionRequired:
+            denialStore.recordDenial(for: service, at: now())
+            return .continueWalk(
+                outcome: .interactionRequired,
+                consumedInteractivePrompt: queryMode == .interactive
+            )
+        case .denied:
+            denialStore.recordDenial(for: service, at: now())
+            return .continueWalk(
+                outcome: .denied,
+                consumedInteractivePrompt: queryMode == .interactive
+            )
+        case let .failure(status):
+            return .continueWalk(
+                outcome: .failure(status),
+                consumedInteractivePrompt: false
+            )
+        }
+    }
+
+    private static func mergedOutcome(
+        existing: ClaudeKeychainReadOutcome<Data>,
+        candidate: ClaudeKeychainReadOutcome<Data>
+    ) -> ClaudeKeychainReadOutcome<Data> {
+        if case .denied = candidate {
+            return .denied
+        }
+        if case .notFound = existing {
+            return candidate
+        }
+        return existing
+    }
+
+    static func keychainPayload(
+        service: String,
+        mode: ClaudeKeychainAccessMode,
+        backend: KeychainBackend = SecItemKeychainBackend()
+    ) -> ClaudeKeychainReadOutcome<Data> {
+        let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        let query = ClaudeKeychainQuery.applyingAccessMode(mode, to: baseQuery)
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess, let data = result as? Data else {
-            return nil
-        }
-        return data
+        let status = backend.copyMatching(query: query, result: &result)
+        return ClaudeKeychainQuery.outcome(
+            status: status,
+            result: result as? Data,
+            mode: mode
+        )
     }
 
     static func filePayload(path: String) -> Data? {

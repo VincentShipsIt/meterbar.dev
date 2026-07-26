@@ -40,6 +40,22 @@ final class ClaudeOAuthAccessCoordinatorTests: XCTestCase {
         XCTAssertEqual(callCount, 0)
     }
 
+    func testUnavailableCredentialDoesNotBecomeMissingOrSpawnRefresh() async {
+        let refresh = RefreshCallRecorder(result: .hardFailure)
+
+        let result = await ClaudeOAuthAccessCoordinator.resolve(
+            initialAccess: .unavailable,
+            account: account,
+            trigger: .background,
+            refresh: { account, trigger in await refresh.run(account: account, trigger: trigger) },
+            reread: { .valid(token: "unexpected") }
+        )
+
+        XCTAssertEqual(result, .unavailable)
+        let callCount = await refresh.callCount
+        XCTAssertEqual(callCount, 0)
+    }
+
     func testExpiredCredentialRefreshesAndRereadsTokenOnce() async {
         let refresh = RefreshCallRecorder(result: .refreshed)
         let reread = AccessSequence([.valid(token: "rotated")])
