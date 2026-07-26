@@ -74,7 +74,12 @@ final class MenuBarSmokeTests: XCTestCase {
         let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: baseSuite))
         let visibilityDefaults = try XCTUnwrap(UserDefaults(suiteName: "\(baseSuite)-vis"))
         let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
+        // Claude Code and Grok are the two providers this smoke test does not
+        // stub, and both read a locally installed CLI. Hide them so the
+        // assertions describe the injected fixtures rather than whichever CLIs
+        // happen to be signed in on the machine running the suite.
         visibility.set(.claudeCode, isEnabled: false)
+        visibility.set(.grok, isEnabled: false)
         let sharedStore = SharedDataStore(directoryOverride: tempDirectory) {}
 
         let manager = UsageDataManager(
