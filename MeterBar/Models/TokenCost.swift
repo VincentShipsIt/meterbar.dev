@@ -17,6 +17,10 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
     public let periodEnd: Date
     public var modelBreakdowns: [TokenUsageBreakdown]
     public var originBreakdowns: [TokenUsageBreakdown]
+    /// Per-project/worktree rollup (issue #270), derived from scanned session
+    /// paths. Defaults to `[]` so existing call sites that don't group by
+    /// project — and the CLI JSON fixture tests — see no shape change.
+    public var projectBreakdowns: [TokenUsageBreakdown]
 
     public init(
         provider: ServiceType,
@@ -29,7 +33,8 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         periodStart: Date,
         periodEnd: Date,
         modelBreakdowns: [TokenUsageBreakdown] = [],
-        originBreakdowns: [TokenUsageBreakdown] = []
+        originBreakdowns: [TokenUsageBreakdown] = [],
+        projectBreakdowns: [TokenUsageBreakdown] = []
     ) {
         self.provider = provider
         self.inputTokens = inputTokens
@@ -42,6 +47,7 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         self.periodEnd = periodEnd
         self.modelBreakdowns = modelBreakdowns
         self.originBreakdowns = originBreakdowns
+        self.projectBreakdowns = projectBreakdowns
     }
 
     public var totalTokens: Int {
@@ -68,6 +74,11 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
     public let sessionCount: Int
+    /// Nested per-model slice of this row's spend (issue #270). Populated
+    /// only for project rollup rows, via `TokenUsageAggregator.makeProjectBreakdowns`;
+    /// every other breakdown (model, origin) defaults to `[]` so existing
+    /// call sites and the CLI JSON fixtures are unaffected.
+    public let modelBreakdowns: [TokenUsageBreakdown]
 
     public init(
         provider: ServiceType,
@@ -77,7 +88,8 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         cacheCreationTokens: Int,
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
-        sessionCount: Int
+        sessionCount: Int,
+        modelBreakdowns: [TokenUsageBreakdown] = []
     ) {
         self.provider = provider
         self.name = name
@@ -87,6 +99,7 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
         self.sessionCount = sessionCount
+        self.modelBreakdowns = modelBreakdowns
     }
 
     public var totalTokens: Int {
@@ -339,6 +352,23 @@ nonisolated public struct CostSummary: Codable, Sendable {
             totalCostUSD: providers.reduce(0) { $0 + $1.estimatedCostUSD },
             totalTokens: providers.reduce(0) { $0 + $1.totalTokens }
         )
+    }
+
+    /// Calendar month-to-date window (issue #270): the 1st of `now`'s local
+    /// month through `now`, inclusive. A month-to-date span is exactly a
+    /// "last N days" window where N is the day-count since the 1st, so this
+    /// delegates straight to `dailyCostWindow` instead of duplicating its
+    /// filtering/aggregation/truncation logic. `now`/`calendar` are read
+    /// fresh on every call — never cached — so the window rolls over at
+    /// midnight on the 1st without a restart or rescan.
+    public func monthToDateCostWindow(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> DailyCostWindow {
+        let today = calendar.startOfDay(for: now)
+        let monthStart = CostWindow.startOfCurrentMonth(now: now, calendar: calendar)
+        let daysElapsed = (calendar.dateComponents([.day], from: monthStart, to: today).day ?? 0) + 1
+        return dailyCostWindow(lastDays: daysElapsed, now: now, calendar: calendar)
     }
 
     public func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {
