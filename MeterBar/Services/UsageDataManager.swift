@@ -168,7 +168,7 @@ class UsageDataManager: ObservableObject {
     /// re-deriving truth from `lastError`, which only holds the last failure.
     @discardableResult
     func refreshAll(
-        trigger: ClaudeTokenRefreshTrigger = .userInitiated
+        trigger: ClaudeTokenRefreshTrigger = .background
     ) async -> UsageRefreshReport {
         let startedAt = Date()
         guard !demoMode else {

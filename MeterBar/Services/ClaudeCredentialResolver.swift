@@ -241,7 +241,10 @@ nonisolated struct ClaudeCredentialStore: Sendable {
         case let .value(payload):
             denialStore.clearDenial(for: service)
             return payload.isEmpty
-                ? .continueWalk(outcome: .notFound, consumedInteractivePrompt: false)
+                ? .continueWalk(
+                    outcome: .notFound,
+                    consumedInteractivePrompt: queryMode == .interactive
+                )
                 : .value(payload)
         case .notFound:
             denialStore.clearDenial(for: service)
@@ -261,7 +264,7 @@ nonisolated struct ClaudeCredentialStore: Sendable {
         case let .failure(status):
             return .continueWalk(
                 outcome: .failure(status),
-                consumedInteractivePrompt: false
+                consumedInteractivePrompt: queryMode == .interactive
             )
         }
     }

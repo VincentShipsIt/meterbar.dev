@@ -272,6 +272,33 @@ final class ClaudeCredentialResolverTests: XCTestCase {
         )
     }
 
+    func testInteractiveFailureConsumesPromptBudgetForRemainingCandidates() throws {
+        let fixture = try makeDenialStore()
+        let recorder = KeychainReadRecorder { service, _ in
+            service == "Claude Code-credentials-ee16a9f4"
+                ? .failure(errSecInternalError)
+                : .notFound
+        }
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true }
+        )
+
+        _ = store.credentialsDataResult(
+            for: .defaultAccount,
+            mode: .interactive,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertEqual(recorder.calls, [
+            .init(service: "Claude Code-credentials-ee16a9f4", mode: .interactive),
+            .init(service: ClaudeCredentialResolver.bareKeychainService, mode: .background)
+        ])
+    }
+
     func testBackgroundWalkSkipsCoolingServiceAndStillUsesFileFallback() throws {
         let fixture = try makeDenialStore()
         let service = "Claude Code-credentials-c4394a73"

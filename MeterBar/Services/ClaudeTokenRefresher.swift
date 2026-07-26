@@ -152,10 +152,14 @@ nonisolated enum ClaudeOAuthAccessCoordinator {
             guard result.didRefresh else {
                 return .refreshFailed(result)
             }
-            guard case let .valid(token) = await reread() else {
+            switch await reread() {
+            case let .valid(token):
+                return .token(token)
+            case .unavailable:
+                return .unavailable
+            case .missing, .expired:
                 return .refreshFailed(result)
             }
-            return .token(token)
         }
     }
 }

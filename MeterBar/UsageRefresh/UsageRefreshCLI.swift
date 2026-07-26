@@ -48,7 +48,7 @@ public enum UsageRefreshCLI {
         let engine = UsageRefreshEngine(
             lock: makeLock(),
             timeout: request.timeout,
-            refresh: { await manager.refreshAll() },
+            refresh: { await manager.refreshAll(trigger: .userInitiated) },
             cacheSnapshot: {
                 sharedStore.flushPendingWrites()
                 return sharedStore.loadMetrics()

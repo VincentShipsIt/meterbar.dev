@@ -518,7 +518,7 @@ struct ProviderSettingsView: View {
                                 service.checkAccess(forceRescan: true)
                             }.value
                             if cursorService.hasAccess {
-                                await dataManager.refreshAll()
+                                await dataManager.refreshAll(trigger: .userInitiated)
                             }
                         }
                     } label: {

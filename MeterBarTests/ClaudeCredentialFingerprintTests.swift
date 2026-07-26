@@ -160,6 +160,45 @@ final class ClaudeCredentialFingerprintTests: XCTestCase {
         XCTAssertTrue(recorder.services.isEmpty)
     }
 
+    func testFingerprintSuccessDoesNotClearPayloadDenialRecord() throws {
+        let suite = "ClaudeCredentialFingerprintDenialTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let denialStore = ClaudeKeychainDenialStore(userDefaults: defaults)
+        let deniedAt = Date(timeIntervalSince1970: 10_000)
+        let service = "Claude Code-credentials-c4394a73"
+        denialStore.recordDenial(for: service, at: deniedAt)
+        let fingerprint = ClaudeCredentialFingerprint.keychain(
+            service: service,
+            modificationDate: deniedAt
+        )
+        let store = ClaudeCredentialFingerprintStore(
+            readKeychainResult: { _ in .value(fingerprint) },
+            readFile: { _ in nil },
+            denialStore: denialStore,
+            isOAuthEnabled: { true },
+            now: {
+                deniedAt.addingTimeInterval(ClaudeKeychainPromptPolicy.denialCooldown + 1)
+            }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        XCTAssertEqual(
+            store.fingerprint(
+                for: account,
+                environment: [:],
+                realHomeDirectory: "/Users/tester"
+            ),
+            fingerprint
+        )
+        XCTAssertEqual(denialStore.deniedAt(for: service), deniedAt)
+    }
+
     func testFingerprintOAuthOptOutPerformsNoKeychainQuery() throws {
         let suite = "ClaudeCredentialFingerprintOptOutTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

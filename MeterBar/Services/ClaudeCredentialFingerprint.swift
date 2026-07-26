@@ -84,10 +84,9 @@ nonisolated struct ClaudeCredentialFingerprintStore: Sendable {
 
                 switch readKeychainResult(service) {
                 case let .value(fingerprint):
-                    denialStore.clearDenial(for: service)
                     return fingerprint
                 case .notFound:
-                    denialStore.clearDenial(for: service)
+                    continue
                 case .interactionRequired, .denied:
                     denialStore.recordDenial(for: service, at: now())
                 case .failure:

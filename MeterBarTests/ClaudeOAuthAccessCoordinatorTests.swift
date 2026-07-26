@@ -91,6 +91,20 @@ final class ClaudeOAuthAccessCoordinatorTests: XCTestCase {
         XCTAssertEqual(result, .refreshFailed(.refreshed))
     }
 
+    func testChangedFingerprintWithUnavailableRereadPreservesAccessBarrier() async {
+        let refresh = RefreshCallRecorder(result: .refreshed)
+
+        let result = await ClaudeOAuthAccessCoordinator.resolve(
+            initialAccess: .expired,
+            account: account,
+            trigger: .background,
+            refresh: { account, trigger in await refresh.run(account: account, trigger: trigger) },
+            reread: { .unavailable }
+        )
+
+        XCTAssertEqual(result, .unavailable)
+    }
+
     func testInconclusiveRefreshDoesNotRereadCredential() async {
         let refresh = RefreshCallRecorder(result: .inconclusive)
         let reread = AccessSequence([.valid(token: "unexpected")])
