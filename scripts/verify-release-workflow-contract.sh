@@ -89,6 +89,21 @@ if len(set(thresholds.values())) != 1:
     details = ", ".join(f"{path.name}={value}" for path, value in thresholds.items())
     raise SystemExit(f"Coverage thresholds must match across broad validation workflows: {details}")
 
+release_publishers = re.findall(
+    r"^\s+uses:\s*softprops/action-gh-release@([0-9a-f]{40})\s+#\s+(v[0-9.]+)\s*$",
+    build_job,
+    re.MULTILINE,
+)
+expected_release_publishers = [
+    ("3d0d9888cb7fd7b750713d6e236d1fcb99157228", "v3.0.2"),
+]
+if release_publishers != expected_release_publishers:
+    raise SystemExit(
+        f"{signed_path}: release publisher must pin Node 24 action "
+        "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2; "
+        f"found {release_publishers}"
+    )
+
 require(
     r"^\s+run:\s*bash scripts/check-coverage\.sh\s*$",
     test_job,
