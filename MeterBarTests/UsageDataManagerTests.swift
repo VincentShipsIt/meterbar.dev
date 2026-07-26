@@ -348,6 +348,30 @@ final class UsageDataManagerTests: XCTestCase {
         )
     }
 
+    func testRefreshAllDefaultsToBackgroundClaudeAccess() async throws {
+        let accountSuite = "UsageDataManagerTests-default-claude-trigger-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(claude.refreshTriggers, [.background])
+    }
+
     func testClaudeRefreshAlsoRefreshesFableSessionsForEnabledProfiles() async throws {
         let accountSuite = "UsageDataManagerTests-fable-accounts-\(UUID().uuidString)"
         createdSuiteNames.append(accountSuite)

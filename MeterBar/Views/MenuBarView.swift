@@ -179,7 +179,7 @@ struct MenuBarView: View {
         .accessibilityLabel("Open Dashboard")
 
         Button {
-          Task { await dataManager.refreshAll() }
+          Task { await dataManager.refreshAll(trigger: .userInitiated) }
         } label: {
           RefreshingIcon(isRefreshing: dataManager.isLoading)
             .font(.system(size: 12, weight: .semibold))

@@ -110,6 +110,7 @@ nonisolated enum ClaudeTokenRefreshResult: Equatable, Sendable {
 
 nonisolated enum ClaudeOAuthCredentialAccess: Equatable, Sendable {
     case missing
+    case unavailable
     case expired
     case valid(token: String)
 }
@@ -117,6 +118,7 @@ nonisolated enum ClaudeOAuthCredentialAccess: Equatable, Sendable {
 nonisolated enum ClaudeOAuthAccessResolution: Equatable, Sendable {
     case token(String)
     case missing
+    case unavailable
     case refreshFailed(ClaudeTokenRefreshResult)
 }
 
@@ -143,15 +145,21 @@ nonisolated enum ClaudeOAuthAccessCoordinator {
             return .token(token)
         case .missing:
             return .missing
+        case .unavailable:
+            return .unavailable
         case .expired:
             let result = await refresh(account, trigger)
             guard result.didRefresh else {
                 return .refreshFailed(result)
             }
-            guard case let .valid(token) = await reread() else {
+            switch await reread() {
+            case let .valid(token):
+                return .token(token)
+            case .unavailable:
+                return .unavailable
+            case .missing, .expired:
                 return .refreshFailed(result)
             }
-            return .token(token)
         }
     }
 }

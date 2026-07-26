@@ -3,6 +3,16 @@ import MeterBarShared
 import AppKit
 import Combine
 
+nonisolated private enum ClaudeStoredCredentials {
+    case value(ClaudeCodeCredentials)
+    case missing
+    case unavailable
+}
+
+nonisolated private enum ClaudeCredentialReadBarrier: Error {
+    case unavailable
+}
+
 class ClaudeCodeLocalService: ObservableObject {
     // nonisolated: lets nonisolated code such as the readiness inspector
     // reference the singleton (methods keep their own isolation).
@@ -52,26 +62,60 @@ class ClaudeCodeLocalService: ObservableObject {
     // MARK: - Keychain Access
 
     /// Get the OAuth token for `account` from Claude Code's credential storage.
-    /// `nonisolated`: a keychain read can raise a blocking approval dialog —
-    /// never call synchronously from the main actor.
-    nonisolated func getOAuthToken(for account: ClaudeCodeAccount = .defaultAccount) -> String? {
-        guard case let .valid(token) = oauthCredentialAccessUpdatingSharedState(for: account) else {
+    /// `nonisolated`: a Keychain read can block. The default is no-UI;
+    /// interactive mode is reserved for explicit user refresh actions.
+    nonisolated func getOAuthToken(
+        for account: ClaudeCodeAccount = .defaultAccount,
+        mode: ClaudeKeychainAccessMode = .background
+    ) -> String? {
+        guard case let .valid(token) = oauthCredentialAccessUpdatingSharedState(
+            for: account,
+            mode: mode
+        ) else {
             return nil
         }
         return token
     }
 
     nonisolated private func getCredentials(
-        for account: ClaudeCodeAccount = .defaultAccount
+        for account: ClaudeCodeAccount = .defaultAccount,
+        mode: ClaudeKeychainAccessMode = .background
     ) -> ClaudeCodeCredentials? {
-        guard let data = credentialsData(for: account) else { return nil }
-        return try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data)
+        guard case let .value(credentials) = storedCredentials(for: account, mode: mode) else {
+            return nil
+        }
+        return credentials
+    }
+
+    nonisolated private func storedCredentials(
+        for account: ClaudeCodeAccount,
+        mode: ClaudeKeychainAccessMode
+    ) -> ClaudeStoredCredentials {
+        switch credentialStore.credentialsDataResult(for: account, mode: mode) {
+        case let .value(data):
+            guard let credentials = try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data) else {
+                return .missing
+            }
+            return .value(credentials)
+        case .notFound:
+            return .missing
+        case .interactionRequired, .denied, .failure:
+            return .unavailable
+        }
     }
 
     nonisolated func oauthCredentialAccess(
-        for account: ClaudeCodeAccount = .defaultAccount
+        for account: ClaudeCodeAccount = .defaultAccount,
+        mode: ClaudeKeychainAccessMode = .background
     ) -> ClaudeOAuthCredentialAccess {
-        Self.oauthCredentialAccess(from: getCredentials(for: account))
+        switch storedCredentials(for: account, mode: mode) {
+        case let .value(credentials):
+            return Self.oauthCredentialAccess(from: credentials)
+        case .missing:
+            return .missing
+        case .unavailable:
+            return .unavailable
+        }
     }
 
     nonisolated static func oauthCredentialAccess(
@@ -87,9 +131,14 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     nonisolated private func oauthCredentialAccessUpdatingSharedState(
-        for account: ClaudeCodeAccount
+        for account: ClaudeCodeAccount,
+        mode: ClaudeKeychainAccessMode = .background
     ) -> ClaudeOAuthCredentialAccess {
-        guard let credentials = getCredentials(for: account) else {
+        let stored = storedCredentials(for: account, mode: mode)
+        guard case let .value(credentials) = stored else {
+            if case .unavailable = stored {
+                return .unavailable
+            }
             return .missing
         }
         let access = Self.oauthCredentialAccess(from: credentials)
@@ -113,13 +162,16 @@ class ClaudeCodeLocalService: ObservableObject {
     /// Exposed for provider-readiness diagnostics, which pass the bytes to the
     /// pure readiness core (it reads only the expiry claim — never surfaces the
     /// token). `ClaudeCredentialStore` owns the per-profile candidate walk.
-    nonisolated func credentialsData(for account: ClaudeCodeAccount = .defaultAccount) -> Data? {
-        credentialStore.credentialsData(for: account)
+    nonisolated func credentialsData(
+        for account: ClaudeCodeAccount = .defaultAccount,
+        mode: ClaudeKeychainAccessMode = .background
+    ) -> Data? {
+        credentialStore.credentialsData(for: account, mode: mode)
     }
 
     /// Check and update access status.
-    /// `nonisolated`: file stats + (with the OAuth fallback) a keychain read —
-    /// call from a detached task.
+    /// `nonisolated`: file stats + (with the OAuth fallback) a no-UI Keychain
+    /// read — call from a detached task.
     nonisolated func checkAccess() {
         let newHasAccess: Bool
         let newAuthState: ClaudeCodeAuthState
@@ -173,8 +225,15 @@ class ClaudeCodeLocalService: ObservableObject {
             // thrown error means either delegated refresh could not verify a
             // rotated token or an OAuth request/decode failed — surface it
             // rather than retry the headless-broken CLI.
-            if let metrics = try await fetchUsageViaOAuth(account: account, trigger: trigger) {
-                return metrics
+            do {
+                if let metrics = try await fetchUsageViaOAuth(account: account, trigger: trigger) {
+                    return metrics
+                }
+            } catch is ClaudeCredentialReadBarrier {
+                // The credential may exist behind an ACL that background
+                // access cannot satisfy. Preserve the CLI fallback without
+                // converting its failure into a false "Login required".
+                return try await fetchUsageViaCLI(account: account, isLoggedOut: false)
             }
             // No credential for this profile. Remember that, so a downstream
             // CLI parse failure reports "Login required" instead of a vague
@@ -200,10 +259,11 @@ class ClaudeCodeLocalService: ObservableObject {
         // dialog, and the app target runs async bodies on the main actor).
         // The state-updating read also refreshes `subscriptionType`/`hasAccess`.
         let publishesSharedState = Self.publishesSharedConnectionState(for: account)
+        let keychainMode = ClaudeKeychainAccessMode(trigger: trigger)
         let initialAccess = await Task.detached(priority: .userInitiated) { [self] in
             publishesSharedState
-                ? oauthCredentialAccessUpdatingSharedState(for: account)
-                : oauthCredentialAccess(for: account)
+                ? oauthCredentialAccessUpdatingSharedState(for: account, mode: keychainMode)
+                : oauthCredentialAccess(for: account, mode: keychainMode)
         }.value
 
         let tokenRefresher = self.tokenRefresher
@@ -215,8 +275,11 @@ class ClaudeCodeLocalService: ObservableObject {
                 await tokenRefresher.refresh(account: account, trigger: trigger)
             },
             reread: {
+                // An explicit refresh gets one interactive candidate walk. The
+                // post-CLI reread is no-UI so a single action cannot prompt
+                // twice for the same account.
                 await Task.detached(priority: .userInitiated) { [self] in
-                    oauthCredentialAccess(for: account)
+                    oauthCredentialAccess(for: account, mode: .background)
                 }.value
             }
         )
@@ -227,6 +290,8 @@ class ClaudeCodeLocalService: ObservableObject {
             resolvedToken = token
         case .missing:
             return nil
+        case .unavailable:
+            throw ClaudeCredentialReadBarrier.unavailable
         case .refreshFailed:
             publishNeedsLogin(account: account, publishesSharedState: publishesSharedState)
             throw ServiceError.notAuthenticated

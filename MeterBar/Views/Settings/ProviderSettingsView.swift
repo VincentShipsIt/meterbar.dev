@@ -303,14 +303,10 @@ struct ProviderSettingsView: View {
                     StatusPill(title: claudeCodeService.authState.statusText, isConnected: claudeCodeService.hasAccess)
 
                     Button {
-                        // checkAccess can hit the keychain (blocking approval
-                        // dialog) — run it off the main actor.
+                        // This is an explicit user action, so it is the one
+                        // Settings path allowed to request Keychain access.
                         Task {
-                            let service = claudeCodeService
-                            await Task.detached(priority: .userInitiated) { service.checkAccess() }.value
-                            if claudeCodeService.hasAccess {
-                                await dataManager.refreshAll()
-                            }
+                            await dataManager.refreshAll(trigger: .userInitiated)
                         }
                     } label: {
                         Label(claudeCodeService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
@@ -522,7 +518,7 @@ struct ProviderSettingsView: View {
                                 service.checkAccess(forceRescan: true)
                             }.value
                             if cursorService.hasAccess {
-                                await dataManager.refreshAll()
+                                await dataManager.refreshAll(trigger: .userInitiated)
                             }
                         }
                     } label: {

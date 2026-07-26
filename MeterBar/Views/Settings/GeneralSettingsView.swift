@@ -93,7 +93,7 @@ struct GeneralSettingsView: View {
             SettingsRowView(title: "Manual refresh") {
                 Button {
                     Task {
-                        await dataManager.refreshAll()
+                        await dataManager.refreshAll(trigger: .userInitiated)
                     }
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")
