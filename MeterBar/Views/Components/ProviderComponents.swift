@@ -54,7 +54,7 @@ enum ProviderLogoKind: Equatable {
         case .openRouter:
             return nil
         case .grok:
-            return nil
+            return "ProviderIcon-grok"
         }
     }
 

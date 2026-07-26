@@ -92,11 +92,16 @@ final class GrokCLIUsageService: ObservableObject {
         let sessionPeriod = periods.first { $0.kind == .session }
         let weeklyPeriod = periods.first { $0.kind == .weekly }
 
-        // `creditUsagePercent` is an account-wide billing-cycle number, so it may
-        // back-fill the long window when no per-period percent is reported — but
-        // never the session one. Synthesizing a session percent from it is
-        // exactly the fabricated reading this mapping exists to avoid.
-        let weeklyPercent = weeklyPeriod?.usagePercent ?? config.creditUsagePercent
+        // The account-wide billing-cycle percent, in descending order of trust:
+        // the number the provider reports, the one its credits pair implies, and
+        // finally proto3's omitted default. It may back-fill the long window when
+        // no per-period percent is reported — but never the session one.
+        // Synthesizing a session percent from it is exactly the fabricated
+        // reading this mapping exists to avoid.
+        let accountPercent = config.creditUsagePercent
+            ?? config.derivedCreditPercent
+            ?? impliedZeroPercent(for: result)
+        let weeklyPercent = weeklyPeriod?.usagePercent ?? accountPercent
         let sessionLimit = limit(percent: sessionPeriod?.usagePercent, window: sessionPeriod)
         let weeklyLimit = limit(percent: weeklyPercent, window: weeklyPeriod ?? config.fallbackPeriod)
 
@@ -111,6 +116,27 @@ final class GrokCLIUsageService: ObservableObject {
             extraUsage: config.extraUsageStatus,
             lastUpdated: now
         )
+    }
+
+    /// `0` when the response is a populated billing config for a dated cycle
+    /// that reports no percent at all, and `nil` otherwise.
+    ///
+    /// The billing payload is a JSON projection of protobuf, and proto3 omits
+    /// scalar defaults: `creditUsagePercent` is missing from a brand-new cycle
+    /// precisely *because* it is `0.0`. Monetary fields still arrive as
+    /// `{"val": 0}` only because they are submessages, not scalars — so their
+    /// presence alongside a dated cycle is what separates "nothing spent yet"
+    /// from a shape MeterBar cannot read, which still has to surface as an
+    /// honest unknown.
+    ///
+    /// Deliberately keyed off the *cycle* window (`fallbackPeriod`), never a
+    /// window from `usagePeriods`: a period the provider listed and left without
+    /// a percent is a per-period omission, not this account-wide default.
+    private static func impliedZeroPercent(for result: GrokBillingResult) -> Double? {
+        let config = result.config
+        guard let cycle = config.fallbackPeriod, cycle.endDate != nil else { return nil }
+        guard result.hasBillingConfigContainer || config.hasBillingSignals else { return nil }
+        return 0
     }
 
     private static func limit(percent: Double?, window: GrokBillingConfig.Period?) -> UsageLimit? {
@@ -254,6 +280,11 @@ nonisolated struct GrokBillingResult: Decodable, Sendable {
     let config: GrokBillingConfig
     let subscriptionTier: String?
 
+    /// Whether the payload carried the config under its own key rather than
+    /// inlined. A named container is the provider stating this *is* a billing
+    /// config, which is what lets an omitted percent be read as zero.
+    let hasBillingConfigContainer: Bool
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: GrokCodingKey.self)
         // If the config moves or is inlined at the top level, decode the outer
@@ -264,8 +295,10 @@ nonisolated struct GrokBillingResult: Decodable, Sendable {
             names: ["config", "billingConfig", "billing"]
         ) {
             config = nested
+            hasBillingConfigContainer = true
         } else {
             config = try GrokBillingConfig(from: decoder)
+            hasBillingConfigContainer = false
         }
         subscriptionTier = GrokDecoding.string(
             container,
@@ -331,9 +364,28 @@ nonisolated struct GrokBillingConfig: Decodable, Sendable {
         }
     }
 
+    /// The credits pair a unified-billing account reports instead of a percent.
+    /// Carried in its own object on some responses and inlined on others, so
+    /// both spellings feed the same three fields.
+    struct Credits: Decodable, Sendable {
+        let monthlyLimit: Double?
+        let totalUsed: Double?
+        let includedUsed: Double?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: GrokCodingKey.self)
+            monthlyLimit = GrokDecoding.number(container, ["monthlyLimit", "limit", "allowance"])
+            totalUsed = GrokDecoding.number(container, ["totalUsed", "used"])
+            includedUsed = GrokDecoding.number(container, ["includedUsed"])
+        }
+    }
+
     let creditUsagePercent: Double?
     let currentPeriod: Period?
     let usagePeriods: [Period]?
+    let monthlyLimit: Double?
+    let totalUsed: Double?
+    let includedUsed: Double?
     let onDemandCap: Double?
     let onDemandUsed: Double?
     let prepaidBalance: Double?
@@ -353,6 +405,15 @@ nonisolated struct GrokBillingConfig: Decodable, Sendable {
             from: container,
             names: ["usagePeriods", "periods", "quotaPeriods", "rateLimits"]
         )
+        let credits = GrokDecoding.value(
+            Credits.self,
+            from: container,
+            names: ["usage", "credits", "latestHistory", "billingCycle"]
+        )
+        let inlineCredits = try? Credits(from: decoder)
+        monthlyLimit = inlineCredits?.monthlyLimit ?? credits?.monthlyLimit
+        totalUsed = inlineCredits?.totalUsed ?? credits?.totalUsed
+        includedUsed = inlineCredits?.includedUsed ?? credits?.includedUsed
         onDemandCap = GrokDecoding.number(container, ["onDemandCap", "onDemandLimit"])
         onDemandUsed = GrokDecoding.number(container, ["onDemandUsed", "onDemandSpend"])
         prepaidBalance = GrokDecoding.number(container, ["prepaidBalance", "creditBalance"])
@@ -367,6 +428,28 @@ nonisolated struct GrokBillingConfig: Decodable, Sendable {
 
     var billingPeriodStartDate: Date? { billingPeriodStart.flatMap(FlexibleISO8601.date(from:)) }
     var billingPeriodEndDate: Date? { billingPeriodEnd.flatMap(FlexibleISO8601.date(from:)) }
+
+    /// The share of the cycle allowance already spent, for accounts that report
+    /// the credits pair instead of a percent. Tried before the omitted-default
+    /// zero, since falling through to `0` here would under-report real usage.
+    var derivedCreditPercent: Double? {
+        guard let monthlyLimit, monthlyLimit > 0 else { return nil }
+        guard let used = totalUsed ?? includedUsed else { return nil }
+        return used / monthlyLimit * 100
+    }
+
+    /// Whether any billing field decoded at all. Distinguishes a populated
+    /// billing config whose percent is an omitted proto3 default from a shape
+    /// that merely happens to carry a period.
+    var hasBillingSignals: Bool {
+        isUnifiedBillingUser != nil
+            || onDemandCap != nil
+            || onDemandUsed != nil
+            || prepaidBalance != nil
+            || monthlyLimit != nil
+            || totalUsed != nil
+            || includedUsed != nil
+    }
 
     /// The billing-cycle window that `creditUsagePercent` is measured against,
     /// for responses that predate (or drop) the per-period list.
