@@ -8,7 +8,7 @@ final class KeyableMenuPanel: NSPanel {
 @MainActor
 final class MeterBarMenuPanelController {
     private static let anchorRetryDelay: TimeInterval = 0.02
-    private static let anchorRetryLimit = 10
+    private static let anchorRetryWindow: TimeInterval = 0.2
 
     private let statusButtonProvider: () -> NSStatusBarButton?
     private let onDismiss: () -> Void
@@ -55,15 +55,15 @@ final class MeterBarMenuPanelController {
         isPresented = true
         presentWhenAnchored(
             token: presentationToken,
-            retriesRemaining: Self.anchorRetryLimit
+            deadline: .now() + Self.anchorRetryWindow
         )
     }
 
-    private func presentWhenAnchored(token: Int, retriesRemaining: Int) {
+    private func presentWhenAnchored(token: Int, deadline: DispatchTime) {
         guard isPresented, presentationToken == token else { return }
         guard let button = statusButtonProvider(),
               let frame = targetFrame(anchoredTo: button, size: contentSize) else {
-            guard retriesRemaining > 0 else {
+            guard DispatchTime.now() < deadline else {
                 // Do not leave togglePopover believing an invisible panel is
                 // open after the bounded anchor-resolution window expires.
                 isPresented = false
@@ -72,7 +72,7 @@ final class MeterBarMenuPanelController {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.anchorRetryDelay) { [weak self] in
                 self?.presentWhenAnchored(
                     token: token,
-                    retriesRemaining: retriesRemaining - 1
+                    deadline: deadline
                 )
             }
             return
