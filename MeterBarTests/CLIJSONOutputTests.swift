@@ -101,6 +101,158 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(provider["totalTokens"] as? Int, 150)
     }
 
+    // MARK: - Month-to-date window and project grouping (issue #270)
+
+    func testMonthToDateCostResponseLabelsThePeriodKindAndUsesElapsedDaysInMonth() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        // referenceDate is 2023-11-14T22:13:20Z, the 14th of the month, so
+        // month-to-date should span 14 days (the 1st through today, inclusive)
+        // regardless of the `--days` value that would otherwise apply.
+        let daily = DailyTokenUsage(
+            date: referenceDate.addingTimeInterval(-86_400),
+            provider: .claudeCode,
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            estimatedCostUSD: 0.5
+        )
+        let cache = CostSummaryCache(
+            summary: CostSummary(
+                costs: [],
+                totalCostUSD: 0.5,
+                totalTokens: 150,
+                periodDays: 30,
+                dailyUsage: [daily]
+            ),
+            lastScanDate: referenceDate
+        )
+
+        let response = CostCLIJSONResponse(
+            cache: cache,
+            monthToDate: true,
+            now: referenceDate,
+            calendar: calendar
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: response.jsonData()) as? [String: Any]
+        )
+        let period = try XCTUnwrap(object["period"] as? [String: Any])
+        XCTAssertEqual(period["requestedDays"] as? Int, 14)
+        XCTAssertEqual(period["kind"] as? String, "monthToDate")
+    }
+
+    func testCostResponseOmitsProjectBreakdownsWhenNoneAreScannedButIncludesThemWhenPresent() throws {
+        let costWithoutProjects = TokenCost(
+            provider: .claudeCode,
+            inputTokens: 10,
+            outputTokens: 2,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 0.1,
+            sessionCount: 1,
+            periodStart: referenceDate,
+            periodEnd: referenceDate
+        )
+        let costWithProjects = TokenCost(
+            provider: .codexCli,
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheCreationTokens: 50,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 1.25,
+            sessionCount: 3,
+            periodStart: referenceDate,
+            periodEnd: referenceDate,
+            projectBreakdowns: [
+                TokenUsageBreakdown(
+                    provider: .codexCli,
+                    name: "www/example/app",
+                    inputTokens: 1_000,
+                    outputTokens: 250,
+                    cacheCreationTokens: 50,
+                    cacheReadTokens: 500,
+                    estimatedCostUSD: 1.25,
+                    sessionCount: 3,
+                    modelBreakdowns: [
+                        TokenUsageBreakdown(
+                            provider: .codexCli,
+                            name: "gpt-5.6",
+                            inputTokens: 1_000,
+                            outputTokens: 250,
+                            cacheCreationTokens: 50,
+                            cacheReadTokens: 500,
+                            estimatedCostUSD: 1.25,
+                            sessionCount: 3
+                        )
+                    ]
+                )
+            ]
+        )
+        let cache = CostSummaryCache(
+            summary: CostSummary(
+                costs: [costWithoutProjects, costWithProjects],
+                totalCostUSD: 1.35,
+                totalTokens: 1_812,
+                periodDays: 30
+            ),
+            lastScanDate: referenceDate
+        )
+
+        let response = CostCLIJSONResponse(cache: cache)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: response.jsonData()) as? [String: Any]
+        )
+        let providers = try XCTUnwrap(object["providers"] as? [[String: Any]])
+
+        let claude = try XCTUnwrap(providers.first { $0["provider"] as? String == "claude" })
+        XCTAssertNil(claude["projectBreakdowns"])
+
+        let codex = try XCTUnwrap(providers.first { $0["provider"] as? String == "codex" })
+        let projects = try XCTUnwrap(codex["projectBreakdowns"] as? [[String: Any]])
+        let project = try XCTUnwrap(projects.first)
+        XCTAssertEqual(project["name"] as? String, "www/example/app")
+        XCTAssertEqual(project["estimatedCostUSD"] as? Double, 1.25)
+        let models = try XCTUnwrap(project["modelBreakdowns"] as? [[String: Any]])
+        XCTAssertEqual(models.first?["name"] as? String, "gpt-5.6")
+    }
+
+    func testCostResponseOmitsDisplayCurrencyByDefaultButIncludesItWhenSupplied() throws {
+        let cost = TokenCost(
+            provider: .codexCli,
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheCreationTokens: 50,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 1.25,
+            sessionCount: 3,
+            periodStart: referenceDate.addingTimeInterval(-86_400),
+            periodEnd: referenceDate
+        )
+        let cache = CostSummaryCache(
+            summary: CostSummary(costs: [cost], totalCostUSD: 1.25, totalTokens: 1_800, periodDays: 30),
+            lastScanDate: referenceDate
+        )
+
+        let withoutCurrency = CostCLIJSONResponse(cache: cache)
+        let plainObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: withoutCurrency.jsonData()) as? [String: Any]
+        )
+        XCTAssertNil(plainObject["displayCurrency"])
+
+        let currency = DisplayCurrency(code: "EUR", unitsPerUSD: 0.92, enteredAt: referenceDate)
+        let withCurrency = CostCLIJSONResponse(cache: cache, displayCurrency: currency)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: withCurrency.jsonData()) as? [String: Any]
+        )
+        let displayCurrency = try XCTUnwrap(object["displayCurrency"] as? [String: Any])
+        XCTAssertEqual(displayCurrency["code"] as? String, "EUR")
+        XCTAssertEqual(displayCurrency["unitsPerUSD"] as? Double, 0.92)
+        XCTAssertEqual(displayCurrency["totalCostConverted"] as? Double, currency.convert(usd: 1.25))
+        XCTAssertNotNil(displayCurrency["enteredAt"])
+        XCTAssertEqual(displayCurrency["source"] as? String, "manual")
+    }
+
     func testErrorResponseIsVersionedAndMachineStable() throws {
         let response = CLIJSONErrorResponse(
             code: "usage_cache_missing",

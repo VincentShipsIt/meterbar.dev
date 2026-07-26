@@ -108,4 +108,17 @@ nonisolated enum StorageKeys {
     static let sessionWakeMaxTurns = "SessionWakeMaxTurns"
     /// JSON-encoded `WakeEventHookConfiguration`; missing means no configured or enabled hooks.
     static let sessionWakeEventHooks = "SessionWakeEventHooks"
+
+    // MARK: - Display Currency (#270)
+
+    /// User-typed currency code/label (e.g. "EUR"). Presentation only — stored
+    /// and exported cost data always stays USD. Missing means "no conversion,
+    /// show USD" — the default.
+    static let displayCurrencyCode = "DisplayCurrencyCode"
+    /// User-supplied units of `displayCurrencyCode` per 1 USD. MeterBar never
+    /// fetches this from a live/network source.
+    static let displayCurrencyRate = "DisplayCurrencyRate"
+    /// When the user entered the rate above. Shown next to every converted
+    /// figure so it can never be mistaken for a live quote.
+    static let displayCurrencyEnteredAt = "DisplayCurrencyEnteredAt"
 }

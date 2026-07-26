@@ -22,4 +22,18 @@ enum CostWindow {
             to: today
         ) ?? today
     }
+
+    /// Midnight on the 1st of `now`'s local calendar month (issue #270). Takes
+    /// `now`/`calendar` as parameters rather than caching a start date, so the
+    /// boundary is recomputed on every call and rolls over at midnight on the
+    /// 1st without a restart or rescan.
+    nonisolated static func startOfCurrentMonth(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date {
+        let today = calendar.startOfDay(for: now)
+        var components = calendar.dateComponents([.year, .month], from: today)
+        components.day = 1
+        return calendar.date(from: components) ?? today
+    }
 }

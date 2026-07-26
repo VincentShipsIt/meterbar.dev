@@ -32,7 +32,11 @@ enum ClaudeCostScanner {
             // period window is already bounded by the per-event timestamp check
             // (an event is never newer than the file that holds it).
             for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                let file = Self.parseSessionWindows(at: url, since: cutoffDate)
+                // Computed once per file, not per event: project identity is a
+                // property of where the transcript lives, unlike `usageOrigin`
+                // which can vary line-to-line within the same file.
+                let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
+                let file = Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID)
                 windows.period.merge(file.period)
                 windows.lifetime.merge(file.lifetime)
             }
@@ -77,6 +81,12 @@ enum ClaudeCostScanner {
             ),
             originBreakdowns: TokenUsageAggregator.makeBreakdowns(
                 from: totals.origins,
+                provider: .claudeCode,
+                pricing: pricing
+            ),
+            projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
+                from: totals.projects,
+                modelsByProject: totals.projectModels,
                 provider: .claudeCode,
                 pricing: pricing
             )
@@ -138,9 +148,16 @@ enum ClaudeCostScanner {
         return url.appendingPathComponent("projects", isDirectory: true)
     }
 
-    /// Convenience wrapper for the reporting window alone.
-    nonisolated static func parseSessionFile(at url: URL, since cutoffDate: Date) -> ClaudeSessionTotals {
-        Self.parseSessionWindows(at: url, since: cutoffDate).period
+    /// Convenience wrapper for the reporting window alone. `projectID` defaults
+    /// to the explicit "unknown" bucket so every pre-#270 call site (including
+    /// the bulk of this file's own test suite) keeps working unchanged instead
+    /// of being forced to name a project it doesn't care about.
+    nonisolated static func parseSessionFile(
+        at url: URL,
+        since cutoffDate: Date,
+        projectID: String = CostProjectAttribution.unknownProjectID
+    ) -> ClaudeSessionTotals {
+        Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID).period
     }
 
     /// Parses one transcript into both windows in a single streaming pass.
@@ -149,9 +166,14 @@ enum ClaudeCostScanner {
     /// `messageID:requestID` key while straddling the cutoff; one shared map
     /// would let the older copy overwrite the in-window one and change the
     /// period total.
+    ///
+    /// `projectID` is a single value for the whole file (issue #270): unlike
+    /// per-event fields such as model or origin, project identity comes from
+    /// where the transcript lives on disk, not from anything inside it.
     nonisolated static func parseSessionWindows(
         at url: URL,
-        since cutoffDate: Date
+        since cutoffDate: Date,
+        projectID: String = CostProjectAttribution.unknownProjectID
     ) -> ScanWindows<ClaudeSessionTotals> {
         var periodKeyed: [String: ClaudeUsageEvent] = [:]
         var periodUnkeyed: [ClaudeUsageEvent] = []
@@ -193,15 +215,16 @@ enum ClaudeCostScanner {
         }
 
         return ScanWindows(
-            period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed),
-            lifetime: Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed),
+            period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID),
+            lifetime: Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed, projectID: projectID),
             cutoff: cutoffDate
         )
     }
 
     nonisolated private static func tally(
         keyed: [String: ClaudeUsageEvent],
-        unkeyed: [ClaudeUsageEvent]
+        unkeyed: [ClaudeUsageEvent],
+        projectID: String
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
@@ -239,6 +262,21 @@ enum ClaudeCostScanner {
                 estimatedCostUSD: eventCost
             )
             totals.origins[event.origin, default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            totals.projects[projectID, default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            let displayModel = CostScanValues.displayModelName(event.model)
+            totals.projectModels[projectID, default: [:]][displayModel, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,

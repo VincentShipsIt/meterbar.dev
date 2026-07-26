@@ -20,6 +20,7 @@ struct MeterBarCLI: AsyncParsableCommand {
             Wake.self,
             WakeAgent.self,
             ResetCredit.self,
+            Serve.self,
         ],
         defaultSubcommand: Usage.self
     )
@@ -198,10 +199,52 @@ struct Cost: ParsableCommand {
     )
     var days: Int?
 
+    @Flag(
+        name: .customLong("month-to-date"),
+        help: ArgumentHelp("Limit to the calendar month-to-date window (1st of this month through now, "
+            + "in the local time zone), using the cached daily breakdown (no rescan).")
+    )
+    var monthToDate: Bool = false
+
+    @Option(
+        name: .customLong("currency"),
+        help: ArgumentHelp("Show cost converted to this currency code (e.g. EUR), alongside the rate and "
+            + "the date it was entered. Requires --rate. Presentation only — stored and "
+            + "exported data always stays USD.")
+    )
+    var currencyCode: String?
+
+    @Option(
+        name: .customLong("rate"),
+        help: ArgumentHelp("Units of --currency per 1 USD, e.g. 0.92. MeterBar never fetches a live "
+            + "exchange rate — you must supply one alongside --currency.")
+    )
+    var currencyRate: Double?
+
     func validate() throws {
         if let days, days < 1 {
             throw ValidationError("--days must be 1 or greater.")
         }
+        if monthToDate, days != nil {
+            throw ValidationError("--month-to-date cannot be combined with --days.")
+        }
+        // Both flags or neither: a code with no rate (or vice versa) can't
+        // produce a meaningful converted figure.
+        if (currencyCode == nil) != (currencyRate == nil) {
+            throw ValidationError("--currency and --rate must be supplied together.")
+        }
+        if let currencyRate, currencyRate <= 0 {
+            throw ValidationError("--rate must be greater than 0.")
+        }
+    }
+
+    /// Built fresh from the flags on every `run()` — the CLI has no
+    /// persisted rate of its own (that's `DisplayCurrencyStore`, used by the
+    /// app). `enteredAt` is "now" because a CLI invocation only ever reflects
+    /// what the caller just typed, never a cached/stale value (issue #270).
+    private var displayCurrency: DisplayCurrency? {
+        guard let currencyCode, let currencyRate else { return nil }
+        return DisplayCurrency(code: currencyCode, unitsPerUSD: currencyRate, enteredAt: Date())
     }
 
     func run() throws {
@@ -222,33 +265,67 @@ struct Cost: ParsableCommand {
             return
         }
 
-        // `--days N` reports a windowed view derived purely from the cached daily
-        // rows — no rescan. Falls through to the full cached summary otherwise.
+        // `--month-to-date` and `--days N` both report a windowed view derived
+        // purely from the cached daily rows — no rescan. `validate()` already
+        // rejects combining them. Falls through to the full cached summary
+        // otherwise.
+        if monthToDate {
+            if json {
+                try emitJSON(CostCLIJSONResponse(cache: cache, monthToDate: true, displayCurrency: displayCurrency))
+            } else {
+                let window = cache.summary.monthToDateCostWindow()
+                printWindow(window, cache: cache, periodLabel: "Month to date", currency: displayCurrency)
+            }
+            return
+        }
+
         if let days {
             if json {
-                try emitJSON(CostCLIJSONResponse(cache: cache, days: days))
+                try emitJSON(CostCLIJSONResponse(cache: cache, days: days, displayCurrency: displayCurrency))
             } else {
                 let window = cache.summary.dailyCostWindow(lastDays: days)
-                printWindow(window, cache: cache)
+                printWindow(
+                    window,
+                    cache: cache,
+                    periodLabel: "Last \(days) days (from cached daily data)",
+                    currency: displayCurrency
+                )
             }
             return
         }
 
         if json {
-            try emitJSON(CostCLIJSONResponse(cache: cache))
+            try emitJSON(CostCLIJSONResponse(cache: cache, displayCurrency: displayCurrency))
         } else {
-            printCosts(cache)
+            printCosts(cache, currency: displayCurrency)
         }
     }
 
-    private func printWindow(_ window: DailyCostWindow, cache: CostSummaryCache) {
+    /// A USD figure, plus its converted equivalent in parentheses when a
+    /// `--currency`/`--rate` pair was supplied — otherwise just the USD text.
+    private func costText(_ usd: Double, currency: DisplayCurrency?) -> String {
+        guard let currency else { return UsageFormat.cost(usd) }
+        return "\(UsageFormat.cost(usd)) (\(currency.formattedConverted(usd: usd)))"
+    }
+
+    private func printWindow(
+        _ window: DailyCostWindow,
+        cache: CostSummaryCache,
+        periodLabel: String,
+        currency: DisplayCurrency?
+    ) {
         print("╭─────────────────────────────────────────╮")
         print("│          MeterBar Cost Tracker          │")
         print("╰─────────────────────────────────────────╯")
         print()
-        print("Period: Last \(window.requestedDays) days (from cached daily data)")
+        print("Period: \(periodLabel)")
         print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
         print("Pricing: \(ModelPricing.revisionLabel)")
+        // Printed once, near every converted figure below, so a converted
+        // total can never be mistaken for a live quote (issue #270).
+        if let currency {
+            print("Currency: \(currency.disclosureText)")
+        }
 
         // The cache holds fewer days than asked for — don't imply full coverage.
         if window.isTruncated {
@@ -260,7 +337,7 @@ struct Cost: ParsableCommand {
 
         if window.providers.isEmpty {
             if cache.summary.costs.isEmpty {
-                print("No usage in the last \(window.requestedDays) days.")
+                print("No usage in the requested window.")
             } else {
                 // Legacy caches carry totals but no per-day rows.
                 print("No cached daily breakdown for this window.")
@@ -274,15 +351,15 @@ struct Cost: ParsableCommand {
             print("  Input:          \(UsageFormat.groupedTokens(provider.inputTokens))")
             print("  Output:         \(UsageFormat.groupedTokens(provider.outputTokens))")
             print("  Cache Read:     \(UsageFormat.groupedTokens(provider.cacheReadTokens))")
-            print("  Estimated Cost: \(provider.formattedCost)")
+            print("  Estimated Cost: \(costText(provider.estimatedCostUSD, currency: currency))")
             print()
         }
 
-        print("Total:          \(window.formattedTotalCost)")
+        print("Total:          \(costText(window.totalCostUSD, currency: currency))")
         print("Tokens:         \(UsageFormat.groupedTokens(window.totalTokens))")
     }
 
-    private func printCosts(_ cache: CostSummaryCache) {
+    private func printCosts(_ cache: CostSummaryCache, currency: DisplayCurrency?) {
         let summary = cache.summary
 
         print("╭─────────────────────────────────────────╮")
@@ -292,6 +369,9 @@ struct Cost: ParsableCommand {
         print("Period: Last \(summary.periodDays) days")
         print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
         print("Pricing: \(ModelPricing.revisionLabel)")
+        if let currency {
+            print("Currency: \(currency.disclosureText)")
+        }
         print()
 
         for cost in summary.costs {
@@ -301,12 +381,23 @@ struct Cost: ParsableCommand {
             print("  Output:         \(UsageFormat.groupedTokens(cost.outputTokens))")
             print("  Cache Creation: \(UsageFormat.groupedTokens(cost.cacheCreationTokens))")
             print("  Cache Read:     \(UsageFormat.groupedTokens(cost.cacheReadTokens))")
-            print("  Estimated Cost: \(cost.formattedCost)")
+            print("  Estimated Cost: \(costText(cost.estimatedCostUSD, currency: currency))")
+
+            // Per-project/worktree rollup (issue #270) — attributed straight
+            // from scanned session paths, never guessed or dropped; unattributable
+            // sessions surface as an explicit "unknown" row rather than vanishing.
+            if !cost.projectBreakdowns.isEmpty {
+                print("  Projects:")
+                for project in cost.projectBreakdowns.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD }) {
+                    print("    - \(project.name): \(costText(project.estimatedCostUSD, currency: currency))"
+                        + " (\(project.sessionCount) session\(project.sessionCount == 1 ? "" : "s"))")
+                }
+            }
             print()
         }
 
-        print("Total:          \(summary.formattedTotalCost)")
-        print("Daily Average:  \(summary.formattedDailyCost)")
+        print("Total:          \(costText(summary.totalCostUSD, currency: currency))")
+        print("Daily Average:  \(costText(summary.averageDailyCost, currency: currency)) / day")
         print("Tokens:         \(UsageFormat.groupedTokens(summary.totalTokens))")
     }
 }

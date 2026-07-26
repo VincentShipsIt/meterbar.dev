@@ -87,6 +87,13 @@ enum CodexCostScanner {
                 from: context.originTotals,
                 provider: .codexCli,
                 pricing: pricing
+            ),
+            projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
+                from: context.projectTotals,
+                modelsByProject: context.projectModelTotals,
+                provider: .codexCli,
+                pricing: pricing,
+                pricingForName: { ModelPricing.codex(for: $0) }
             )
         ), TokenUsageAggregator.makeDailyUsage(from: context.dailyTotals, provider: .codexCli, pricing: pricing))
     }
@@ -182,6 +189,7 @@ enum CodexCostScanner {
             // anyway so pre-turn events get named the day Codex populates it.
             rollout.sessionModel = (payload["model"] as? String) ?? rollout.sessionModel
             rollout.originator = (payload["originator"] as? String) ?? rollout.originator
+            rollout.cwd = (payload["cwd"] as? String) ?? rollout.cwd
         }
     }
 
@@ -212,8 +220,11 @@ enum CodexCostScanner {
             usage,
             timestamp: timestamp,
             sessionID: sessionID,
-            modelName: modelName,
-            originName: rollout.originator ?? "Codex CLI",
+            attribution: CodexUsageAttribution(
+                modelName: modelName,
+                originName: rollout.originator ?? "Codex CLI",
+                projectID: CostProjectAttribution.codexProjectID(cwd: rollout.cwd)
+            ),
             windows: &windows
         )
     }
@@ -273,22 +284,29 @@ enum CodexCostScanner {
                 usage,
                 timestamp: timestamp,
                 sessionID: sessionID,
-                modelName: Self.logValue("model", in: body) ?? Self.logValue("slug", in: body),
-                originName: Self.logValue("originator", in: body) ?? "Codex CLI",
+                attribution: CodexUsageAttribution(
+                    modelName: Self.logValue("model", in: body) ?? Self.logValue("slug", in: body),
+                    originName: Self.logValue("originator", in: body) ?? "Codex CLI",
+                    // The flat SQLite log format carries no cwd/path field at
+                    // all (issue #270) — always the explicit unknown bucket,
+                    // never a guess.
+                    projectID: CostProjectAttribution.unknownProjectID
+                ),
                 windows: &windows
             )
         }
     }
 
-    /// Stays at six parameters — SwiftLint's `function_parameter_count` warns at
-    /// seven and CI lints with `--strict` — because the cutoff travels inside
-    /// `ScanWindows` rather than as its own argument.
+    /// Stays at five named parameters — SwiftLint's `function_parameter_count`
+    /// warns at seven and CI lints with `--strict` — because the cutoff travels
+    /// inside `ScanWindows` rather than as its own argument, and `modelName`/
+    /// `originName`/`projectID` are bundled into one `CodexUsageAttribution`
+    /// value instead of three separate parameters.
     nonisolated private static func addUsage(
         _ usage: [String: Any],
         timestamp: Date,
         sessionID: String,
-        modelName: String?,
-        originName: String?,
+        attribution: CodexUsageAttribution,
         windows: inout ScanWindows<CodexScanContext>
     ) {
         let input = CostScanValues.int(usage["input_tokens"])
@@ -303,8 +321,9 @@ enum CodexCostScanner {
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
         let day = Calendar.current.startOfDay(for: timestamp)
-        let modelKey = CostScanValues.displayModelName(modelName)
-        let originKey = CostScanValues.displayOriginName(originName)
+        let modelKey = CostScanValues.displayModelName(attribution.modelName)
+        let originKey = CostScanValues.displayOriginName(attribution.originName)
+        let projectKey = attribution.projectID
 
         // Each window keeps its own `eventKeys`, so an event that lands in both
         // is deduplicated independently in each — exactly what the two separate
@@ -333,6 +352,18 @@ enum CodexCostScanner {
                 cacheRead: cached
             )
             context.originTotals[originKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.projectTotals[projectKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.projectModelTotals[projectKey, default: [:]][modelKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
@@ -388,4 +419,18 @@ nonisolated struct CodexRolloutContext: Sendable {
     var turnModel: String?
     var sessionModel: String?
     var originator: String?
+    /// Real, unencoded working directory from `session_meta.payload.cwd`
+    /// (issue #270) — the non-prompt-content field project attribution is
+    /// derived from. `nil` until (or unless) a `session_meta` event supplies it.
+    var cwd: String?
+}
+
+/// Bundles the three "who/what/where" labels a single usage event needs so
+/// `addUsage` can stay under SwiftLint's `function_parameter_count` limit
+/// (issue #270 added `projectID` as the third label alongside the pre-existing
+/// model/origin pair).
+nonisolated struct CodexUsageAttribution: Sendable {
+    let modelName: String?
+    let originName: String?
+    let projectID: String
 }

@@ -180,6 +180,141 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         }
     }
 
+    /// Verbatim `_x.ai/billing` config from grok 0.2.112 on an X Premium
+    /// account with nothing spent yet. proto3 omits scalar defaults, so
+    /// `creditUsagePercent` is absent *because* it is `0.0` — the monetary
+    /// submessages survive as `{"val": 0}` only because they are messages.
+    /// Reading that omission as unknown is what left Grok stuck on "Failed to
+    /// parse response" with a fully working CLI behind it.
+    func testCurrentBillingCycleWithoutCreditPercentReadsAsZeroUsage() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "currentPeriod": {
+                  "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                  "start": "2026-07-22T15:05:27.877598+00:00",
+                  "end": "2026-07-29T15:05:27.877598+00:00"
+                },
+                "onDemandCap": { "val": 0 },
+                "onDemandUsed": { "val": 0 },
+                "prepaidBalance": { "val": 0 },
+                "isUnifiedBillingUser": true,
+                "billingPeriodStart": "2026-07-22T15:05:27.877598+00:00",
+                "billingPeriodEnd": "2026-07-29T15:05:27.877598+00:00"
+              },
+              "subscription_tier": "X Premium"
+            }
+            """
+        )
+
+        let now = try XCTUnwrap(FlexibleISO8601.date(from: "2026-07-24T15:05:27Z"))
+        let metrics = try GrokCLIUsageService.map(result, now: now)
+
+        XCTAssertEqual(result.subscriptionTier, "X Premium")
+        XCTAssertNil(metrics.sessionLimit, "Grok reports no session window")
+        let weekly = try XCTUnwrap(metrics.weeklyLimit)
+        XCTAssertEqual(weekly.used, 0)
+        XCTAssertEqual(weekly.total, 100)
+        XCTAssertEqual(weekly.windowSeconds, 7 * 24 * 60 * 60)
+        XCTAssertEqual(
+            weekly.resetTime,
+            FlexibleISO8601.date(from: "2026-07-29T15:05:27.877598+00:00")
+        )
+        XCTAssertEqual(metrics.extraUsage?.state, .off)
+    }
+
+    /// The same omission with no billing cycle to anchor it stays unknown: an
+    /// absent percent only means zero when the response is recognizably a
+    /// populated billing config for a dated cycle.
+    func testMissingCreditPercentWithoutABillingCycleStaysUnknown() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "onDemandCap": { "val": 0 },
+                "isUnifiedBillingUser": true
+              }
+            }
+            """
+        )
+
+        XCTAssertThrowsError(try GrokCLIUsageService.map(result)) { error in
+            XCTAssertEqual(error as? GrokBillingRPC.Error, .invalidResponse)
+        }
+    }
+
+    /// A dated cycle inside something that never identified itself as a billing
+    /// config, and carries no other billing field, is a foreign shape — not a
+    /// zero reading.
+    func testDatedPeriodWithoutAnyBillingSignalStaysUnknown() throws {
+        let result = try decodeResult(
+            """
+            {
+              "currentPeriod": {
+                "start": "2026-07-22T15:05:27Z",
+                "end": "2026-07-29T15:05:27Z"
+              }
+            }
+            """
+        )
+
+        XCTAssertThrowsError(try GrokCLIUsageService.map(result)) { error in
+            XCTAssertEqual(error as? GrokBillingRPC.Error, .invalidResponse)
+        }
+    }
+
+    /// Credit accounts report the allowance and the spend instead of a percent.
+    /// Deriving it matters more than the zero default: falling through to `0`
+    /// here would under-report real usage.
+    func testCreditAccountDerivesPercentFromAllowanceAndSpend() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "currentPeriod": {
+                  "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                  "start": "2026-07-01T00:00:00Z",
+                  "end": "2026-08-01T00:00:00Z"
+                },
+                "monthlyLimit": { "val": 200 },
+                "usage": {
+                  "includedUsed": { "val": 30 },
+                  "totalUsed": { "val": 50 }
+                },
+                "isUnifiedBillingUser": false
+              },
+              "subscription_tier": "SuperGrok"
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result)
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 25, "50 of a 200 allowance is 25%")
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
+    }
+
+    /// A reported percent stays authoritative even when the credits pair could
+    /// also produce one.
+    func testReportedCreditPercentWinsOverTheDerivedOne() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "creditUsagePercent": 61,
+                "billingPeriodStart": "2026-07-01T00:00:00Z",
+                "billingPeriodEnd": "2026-08-01T00:00:00Z",
+                "monthlyLimit": { "val": 200 },
+                "usage": { "totalUsed": { "val": 50 } }
+              }
+            }
+            """
+        )
+
+        XCTAssertEqual(try GrokCLIUsageService.map(result).weeklyLimit?.used, 61)
+    }
+
     func testPercentagesAreClampedIntoRange() throws {
         let result = try decodeResult(
             """
@@ -280,6 +415,29 @@ final class GrokCLIUsageServiceTests: XCTestCase {
 
         XCTAssertEqual(result.subscriptionTier, "SuperGrok")
         XCTAssertEqual(try GrokCLIUsageService.map(result).weeklyLimit?.used, 55)
+    }
+
+    /// End-to-end guard for the failure this provider actually shipped with:
+    /// the real 0.2.112 transcript has to reach a usable reading, not a
+    /// `.parsingError`.
+    func testReplayedZeroUsageTranscriptMapsInsteadOfFailingToParse() throws {
+        // The CLI sends this frame on one line, so it is assembled from segments
+        // rather than wrapped: a newline would split it into two frames and stop
+        // testing the transcript the provider actually receives.
+        let window = #""start":"2026-07-22T15:05:27.877598+00:00","end":"2026-07-29T15:05:27.877598+00:00""#
+        let config = [
+            #""currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY",\#(window)}"#,
+            #""onDemandCap":{"val":0},"onDemandUsed":{"val":0},"prepaidBalance":{"val":0}"#,
+            #""isUnifiedBillingUser":true"#,
+            #""billingPeriodStart":"2026-07-22T15:05:27.877598+00:00""#,
+            #""billingPeriodEnd":"2026-07-29T15:05:27.877598+00:00""#
+        ].joined(separator: ",")
+        let frame = #"{"jsonrpc":"2.0","id":3,"result":{"config":{\#(config)},"subscription_tier":"X Premium"}}"#
+
+        let result = try GrokBillingRPC.result(replaying: transcript(billing: frame))
+
+        XCTAssertEqual(result.subscriptionTier, "X Premium")
+        XCTAssertEqual(try GrokCLIUsageService.map(result).weeklyLimit?.used, 0)
     }
 
     func testNoiseAndUnrelatedFramesBeforeBillingAreIgnored() throws {

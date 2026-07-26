@@ -188,6 +188,79 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(result.input, 5)
     }
 
+    // MARK: - Project attribution (issue #270)
+
+    func testParseSessionFileDefaultsUnattributedEventsToTheUnknownProjectBucket() throws {
+        // No projectID argument supplied: every existing call site (and every
+        // pre-#270 caller) must keep working exactly as before, landing in the
+        // explicit "unknown" bucket rather than silently dropping the totals.
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 10, output: 5)
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.projects[CostProjectAttribution.unknownProjectID]?.input, 10)
+        XCTAssertEqual(result.projectModels[CostProjectAttribution.unknownProjectID]?["claude-sonnet-4-5"]?.input, 10)
+    }
+
+    func testParseSessionFileAttributesEventsToTheSuppliedProjectID() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 10, output: 5),
+            eventLine(
+                timestamp: "2026-07-01T11:00:00.000Z", messageID: "msg_2", requestID: "req_2",
+                model: "claude-opus-4-5", input: 7, output: 3
+            )
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff, projectID: "meterbardev")
+
+        XCTAssertEqual(result.projects["meterbardev"]?.input, 17)
+        XCTAssertEqual(result.projectModels["meterbardev"]?["claude-sonnet-4-5"]?.input, 10)
+        XCTAssertEqual(result.projectModels["meterbardev"]?["claude-opus-4-5"]?.input, 7)
+        // No stray "unknown" bucket once a real projectID is threaded through.
+        XCTAssertNil(result.projects[CostProjectAttribution.unknownProjectID])
+    }
+
+    func testParseSessionWindowsAppliesTheSameProjectIDToBothWindows() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-05-01T10:00:00.000Z", messageID: "old", requestID: "old", input: 4, output: 1),
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "new", requestID: "new", input: 10, output: 5)
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff, projectID: "meterbardev")
+
+        XCTAssertEqual(windows.period.projects["meterbardev"]?.input, 10)
+        XCTAssertEqual(windows.lifetime.projects["meterbardev"]?.input, 14)
+    }
+
+    func testScanSessionsDerivesProjectIDFromTheEncodedSessionDirectory() throws {
+        // Mirrors how Claude Code actually lays transcripts out on disk:
+        // <configDir>/projects/<encoded-cwd>/session.jsonl.
+        let configDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostTrackerTests-account-\(UUID().uuidString)", isDirectory: true)
+        let home = ServiceSupport.realHomeDirectory()
+        let encodedHome = "-" + home.split(separator: "/").joined(separator: "-")
+        let encodedProjectDir = configDir
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("\(encodedHome)-www-demo-project", isDirectory: true)
+        try FileManager.default.createDirectory(at: encodedProjectDir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: configDir) }
+
+        let sessionURL = encodedProjectDir.appendingPathComponent("session.jsonl")
+        try eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 10, output: 5)
+            .write(to: sessionURL, atomically: true, encoding: .utf8)
+
+        let account = ClaudeCodeAccount(id: UUID(), name: "demo", configDirectory: configDir.path)
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let windows = ClaudeCostScanner.scanSessions(since: cutoff, claudeAccounts: [account])
+
+        XCTAssertEqual(windows.period.projects["www/demo/project"]?.input, 10)
+    }
+
     // MARK: - Codex rollout scan
 
     /// Writes a `.jsonl` into an `archived_sessions` directory and returns that
@@ -345,6 +418,71 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(Array(context.originTotals.keys), ["Codex Desktop"])
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 1_000)
     }
+
+    // MARK: - Codex project attribution (issue #270)
+
+    /// `session_meta.payload.cwd` is the real, unencoded working directory —
+    /// legitimate non-prompt-content field, distinct from anything the user
+    /// typed. It's read once per file, same as Claude's directory-derived ID.
+    private func codexSessionMetaLineWithCwd(timestamp: String, cwd: String) -> String {
+        """
+        {"timestamp": "\(timestamp)", "type": "session_meta", "payload": \
+        {"id": "conv-1", "originator": "Codex CLI", "cwd": "\(cwd)", "cli_version": "0.0.0"}}
+        """
+    }
+
+    func testScanCodexRolloutsAttributesUsageToTheSessionMetaCwd() throws {
+        let home = ServiceSupport.realHomeDirectory()
+        let cwd = "\(home)/www/genfeed/apps/admin"
+        let dir = try writeCodexArchive(lines: [
+            codexSessionMetaLineWithCwd(timestamp: "2026-06-15T09:59:00Z", cwd: cwd),
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z")
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.projectTotals["www/genfeed/apps/admin"]?.input, 1_000)
+        XCTAssertNil(context.projectTotals[CostProjectAttribution.unknownProjectID])
+    }
+
+    func testScanCodexRolloutsFallBackToUnknownProjectWithoutSessionMetaCwd() throws {
+        // No session_meta at all: nothing to derive a project from.
+        let dir = try writeCodexArchive(lines: [
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z")
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.projectTotals[CostProjectAttribution.unknownProjectID]?.input, 1_000)
+    }
+
+    func testScanCodexRolloutsNestsPerProjectModelBreakdown() throws {
+        let home = ServiceSupport.realHomeDirectory()
+        let cwd = "\(home)/www/genfeed/apps/admin"
+        let dir = try writeCodexArchive(lines: [
+            codexSessionMetaLineWithCwd(timestamp: "2026-06-15T09:59:00Z", cwd: cwd),
+            codexTurnContextLine(timestamp: "2026-06-15T09:59:30Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z")
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.projectModelTotals["www/genfeed/apps/admin"]?["gpt-5.6-sol"]?.input, 1_000)
+    }
+
+    // Note: `scanSQLiteLogs` (the flat SQLite log format) is `private` with no
+    // existing fixture-injection seam — it always reads the real Codex home's
+    // `logs_2.sqlite` via `scanSessions`. That format carries no cwd/path field
+    // at all, so its call site passes `CostProjectAttribution.unknownProjectID`
+    // directly (verified by code inspection in `CodexCostScanner.swift`); the
+    // "unknown" bucket behavior itself is exercised above via the rollout path,
+    // which shares the same `addUsage` attribution logic.
 
     func testScanCodexRolloutsFollowsMidSessionModelSwitch() throws {
         let dir = try writeCodexArchive(lines: [
