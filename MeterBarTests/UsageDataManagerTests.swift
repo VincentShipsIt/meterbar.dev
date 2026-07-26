@@ -46,6 +46,7 @@ final class UsageDataManagerTests: XCTestCase {
         var accountAuthStates: [UUID: ClaudeCodeAuthState] = [:]
         var probe: ConcurrencyProbe?
         private(set) var fetchCount = 0
+        private(set) var refreshTriggers: [ClaudeTokenRefreshTrigger] = []
 
         init(hasAccess: Bool, result: Result<UsageMetrics, Error>) {
             self.hasAccess = hasAccess
@@ -53,7 +54,15 @@ final class UsageDataManagerTests: XCTestCase {
         }
 
         func fetchUsageMetrics(account: ClaudeCodeAccount) async throws -> UsageMetrics {
+            try await fetchUsageMetrics(account: account, trigger: .background)
+        }
+
+        func fetchUsageMetrics(
+            account: ClaudeCodeAccount,
+            trigger: ClaudeTokenRefreshTrigger
+        ) async throws -> UsageMetrics {
             fetchCount += 1
+            refreshTriggers.append(trigger)
             await probe?.recordFetch()
             return try (resultsByAccount[account.id] ?? result).get()
         }
@@ -308,6 +317,35 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.metrics[.claudeCode]?.sessionLimit?.used, 7)
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadMetrics()[.claudeCode]?.sessionLimit?.used, 7)
+    }
+
+    func testRefreshAllThreadsRefreshTriggerToEveryClaudeAccount() async throws {
+        let accountSuite = "UsageDataManagerTests-claude-trigger-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Secondary", configDirectory: "/tmp/secondary-claude")
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refreshAll(trigger: .background)
+        await manager.refreshAll(trigger: .userInitiated)
+
+        XCTAssertEqual(
+            claude.refreshTriggers,
+            [.background, .background, .userInitiated, .userInitiated]
+        )
     }
 
     func testClaudeRefreshAlsoRefreshesFableSessionsForEnabledProfiles() async throws {
@@ -737,7 +775,7 @@ final class UsageDataManagerTests: XCTestCase {
         }
         guard cursor.fetchCount == 1, manager.isLoading else {
             cursor.resumeFetch()
-            await firstRefresh.value
+            _ = await firstRefresh.value
             return XCTFail("the first refresh should be suspended inside the provider fetch")
         }
 
@@ -745,7 +783,7 @@ final class UsageDataManagerTests: XCTestCase {
 
         XCTAssertEqual(cursor.fetchCount, 1)
         cursor.resumeFetch()
-        await firstRefresh.value
+        _ = await firstRefresh.value
         XCTAssertFalse(manager.isLoading)
     }
 
@@ -780,7 +818,7 @@ final class UsageDataManagerTests: XCTestCase {
         }
         guard cursor.fetchCount == 1, manager.isLoading else {
             cursor.resumeFetch()
-            await firstRefresh.value
+            _ = await firstRefresh.value
             return XCTFail("the first refresh should be suspended inside the provider fetch")
         }
 
@@ -789,7 +827,7 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.refreshGeneration, 0)
 
         cursor.resumeFetch()
-        await firstRefresh.value
+        _ = await firstRefresh.value
         XCTAssertEqual(manager.refreshGeneration, 1)
     }
 

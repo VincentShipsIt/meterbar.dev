@@ -161,6 +161,21 @@ final class ClaudeCodeCLIUsageServiceTests: XCTestCase {
         XCTAssertTrue(recorded.contains("CFG:/tmp/claude-alt"), "recorded=\(recorded)")
     }
 
+    func testStatusRunnerUsesStatusCommandAndScopedEnvironment() async throws {
+        let marker = tempDirectory.appendingPathComponent("status-env.txt")
+        let binary = try makeFakeCLI(named: "status.sh", body: """
+        { echo "ARG:$1"; echo "CFG:${CLAUDE_CONFIG_DIR}"; } > "\(marker.path)"
+        """)
+        let account = ClaudeCodeAccount(id: UUID(), name: "alt", configDirectory: "/tmp/claude-alt")
+
+        let result = await runStatusBlocking(binaryPath: binary, account: account)
+
+        XCTAssertEqual(result, .succeeded)
+        let recorded = try String(contentsOf: marker, encoding: .utf8)
+        XCTAssertTrue(recorded.contains("ARG:/status"), "recorded=\(recorded)")
+        XCTAssertTrue(recorded.contains("CFG:/tmp/claude-alt"), "recorded=\(recorded)")
+    }
+
     // MARK: - Helpers
 
     private func makeFakeCLI(named name: String, body: String) throws -> String {
@@ -186,6 +201,22 @@ final class ClaudeCodeCLIUsageServiceTests: XCTestCase {
                         timeout: timeout
                     )
                 })
+            }
+        }
+    }
+
+    private func runStatusBlocking(
+        binaryPath: String,
+        account: ClaudeCodeAccount,
+        timeout: TimeInterval = 10
+    ) async -> ClaudeStatusRunResult {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: ClaudeStatusRunner.runBlocking(
+                    binaryPath: binaryPath,
+                    account: account,
+                    timeout: timeout
+                ))
             }
         }
     }

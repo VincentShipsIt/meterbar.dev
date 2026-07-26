@@ -82,7 +82,7 @@ final class UsageNotificationCoordinator {
         // and so it isn't an orphaned unstructured Task.
         monitorTask?.cancel()
         monitorTask = Task { @MainActor in
-            await UsageDataManager.shared.refreshAll()
+            await UsageDataManager.shared.refreshAll(trigger: .background)
         }
     }
 
