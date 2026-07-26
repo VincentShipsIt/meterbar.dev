@@ -61,10 +61,35 @@ final class DisplayCurrencyTests: XCTestCase {
         XCTAssertEqual(currency.disclosureText, "1 USD = 0.92 EUR, entered \(enteredAtDayString)")
     }
 
+    func testConvertTreatsANonFiniteRateAsAnIdentityFallback() {
+        // `Double.infinity` and `.nan` both slip past a bare `rate > 0` check
+        // (NaN fails it, infinity passes it), so a corrupted defaults value
+        // must not be able to render every total as "inf".
+        let infinite = DisplayCurrency(code: "EUR", unitsPerUSD: .infinity, enteredAt: enteredAt)
+        let notANumber = DisplayCurrency(code: "EUR", unitsPerUSD: .nan, enteredAt: enteredAt)
+
+        XCTAssertEqual(infinite.convert(usd: 10), 10, accuracy: 0.0001)
+        XCTAssertEqual(notANumber.convert(usd: 10), 10, accuracy: 0.0001)
+    }
+
     func testDisclosureTextTrimsTrailingZerosFromTheRate() {
         let currency = DisplayCurrency(code: "JPY", unitsPerUSD: 150, enteredAt: enteredAt)
 
         XCTAssertEqual(currency.disclosureText, "1 USD = 150 JPY, entered \(enteredAtDayString)")
+    }
+
+    func testDisclosureTextKeepsLargeRatesInPlainDecimalNotation() {
+        // %g would render VND's ~24,000 as "2.4e+04" — unreadable as a rate.
+        let currency = DisplayCurrency(code: "VND", unitsPerUSD: 24_000, enteredAt: enteredAt)
+
+        XCTAssertEqual(currency.disclosureText, "1 USD = 24000 VND, entered \(enteredAtDayString)")
+    }
+
+    func testDisclosureTextKeepsSmallRatesInPlainDecimalNotation() {
+        // …and %g would render 0.00008 as "8e-05" for the same reason.
+        let currency = DisplayCurrency(code: "BTC", unitsPerUSD: 0.0001, enteredAt: enteredAt)
+
+        XCTAssertEqual(currency.disclosureText, "1 USD = 0.0001 BTC, entered \(enteredAtDayString)")
     }
 
     func testFormattedConvertedPairsTheRoundedAmountWithTheCode() {

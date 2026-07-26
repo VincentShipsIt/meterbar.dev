@@ -123,11 +123,25 @@ version 1 fixture above never sets it, so that response is byte-for-byte unchang
     "isTruncated": false,
     "kind": "monthToDate"
   },
-  "providers": [ ],
+  "providers": [
+    {
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "inputTokens": 1000,
+      "outputTokens": 250,
+      "cacheReadTokens": 550,
+      "totalTokens": 1800,
+      "estimatedCostUSD": 1.25
+    }
+  ],
   "totalCostUSD": 1.25,
   "totalTokens": 1800
 }
 ```
+
+Both totals are always derived by summing `providers`, so an empty `providers` array pairs only with
+`"totalCostUSD": 0` / `"totalTokens": 0`. As with `--days`, windowed provider entries omit
+`cacheCreationTokens` and `sessionCount`, which daily rows do not retain.
 
 `requestedDays` for a month-to-date window is however many days have elapsed since the 1st of the
 current month (inclusive), computed in the local time zone at read time — it is never a cached start

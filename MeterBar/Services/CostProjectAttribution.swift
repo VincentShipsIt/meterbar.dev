@@ -7,7 +7,9 @@ import Foundation
 /// bucket rather than being dropped or guessed at.
 enum CostProjectAttribution {
     /// Explicit fallback bucket for sessions with no derivable project.
-    static let unknownProjectID = "unknown"
+    /// `nonisolated` because every caller — both `sanitize` overloads and the
+    /// two scanners — reads it off the main actor while parsing transcripts.
+    nonisolated static let unknownProjectID = "unknown"
 
     /// Claude Code stores each transcript under
     /// `<projects-root>/<encoded-cwd>/<session>.jsonl`, where the encoded
@@ -50,11 +52,16 @@ enum CostProjectAttribution {
     /// Strips the encoded real-home-directory prefix so a displayed
     /// identifier never leaks a full home-directory path, then reads dashes
     /// in the remainder as path separators.
+    ///
+    /// The prefix must be followed by the encoded separator, so a sibling
+    /// directory that merely starts with the same characters (home
+    /// `/Users/alice`, encoded `-Users-alicexyz`) falls into `unknown`
+    /// instead of reporting a fabricated "xyz" project.
     nonisolated private static func sanitize(encodedDirectoryName raw: String) -> String {
-        let homeEncoded = "-" + ServiceSupport.realHomeDirectory()
+        let homeEncoded = "-" + homeDirectory()
             .split(separator: "/")
             .joined(separator: "-")
-        guard raw.hasPrefix(homeEncoded) else { return unknownProjectID }
+        guard raw.hasPrefix(homeEncoded + "-") else { return unknownProjectID }
 
         let remainder = String(raw.dropFirst(homeEncoded.count))
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
@@ -64,13 +71,29 @@ enum CostProjectAttribution {
 
     /// Strips the real home-directory prefix from an absolute path so a
     /// displayed identifier never leaks a full home-directory path.
+    ///
+    /// The prefix must end on a directory boundary, so a sibling path that
+    /// shares the home directory's leading characters (home `/Users/alice`,
+    /// path `/Users/alice-work/app`) resolves to `unknown` rather than the
+    /// fabricated project "-work/app".
     nonisolated private static func sanitize(absolutePath raw: String) -> String {
-        let home = ServiceSupport.realHomeDirectory()
-        guard raw.hasPrefix(home) else { return unknownProjectID }
+        let home = homeDirectory()
+        guard raw.hasPrefix(home + "/") else { return unknownProjectID }
 
         let remainder = String(raw.dropFirst(home.count))
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !remainder.isEmpty else { return unknownProjectID }
         return remainder
+    }
+
+    /// Home directory without a trailing separator. Both `sanitize` overloads
+    /// append their own boundary character, so a `HOME` that happens to end in
+    /// "/" would otherwise never match and send every session to `unknown`.
+    nonisolated private static func homeDirectory() -> String {
+        var home = ServiceSupport.realHomeDirectory()
+        while home.count > 1, home.hasSuffix("/") {
+            home.removeLast()
+        }
+        return home
     }
 }

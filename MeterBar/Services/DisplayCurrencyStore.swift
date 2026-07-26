@@ -29,11 +29,13 @@ final class DisplayCurrencyStore: ObservableObject {
     }
 
     /// Saves a new rate. `code` is trimmed and uppercased for display
-    /// consistency. A non-positive `rate` can never produce a meaningful
-    /// converted figure, so it clears the conversion instead of saving one.
+    /// consistency. A rate that is non-positive, infinite, or NaN can never
+    /// produce a meaningful converted figure, so it clears the conversion
+    /// instead of saving one. (`Double.infinity` passes `> 0`, so the finite
+    /// check has to be explicit or every converted total becomes "inf".)
     func set(code: String, rate: Double) {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !trimmedCode.isEmpty, rate > 0 else {
+        guard !trimmedCode.isEmpty, rate > 0, rate.isFinite else {
             clear()
             return
         }
@@ -66,7 +68,7 @@ final class DisplayCurrencyStore: ObservableObject {
             return
         }
         let rate = userDefaults.double(forKey: StorageKeys.displayCurrencyRate)
-        guard rate > 0 else {
+        guard rate > 0, rate.isFinite else {
             currency = nil
             return
         }

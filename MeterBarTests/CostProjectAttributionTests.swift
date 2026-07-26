@@ -50,6 +50,20 @@ final class CostProjectAttributionTests: XCTestCase {
         XCTAssertEqual(projectID, CostProjectAttribution.unknownProjectID)
     }
 
+    func testClaudeProjectIDFallsBackToUnknownForASiblingThatMerelySharesTheHomePrefix() {
+        let root = URL(fileURLWithPath: "\(home)/.claude/projects")
+        let encodedHome = "-" + home.split(separator: "/").joined(separator: "-")
+        // Home "/Users/alice" encodes to "-Users-alice"; a sibling directory
+        // "/Users/alicexyz/app" starts with those same characters but is NOT
+        // under home, so it must not surface as the project "xyz/app".
+        let encodedDir = "\(encodedHome)xyz-app"
+        let transcript = root.appendingPathComponent(encodedDir).appendingPathComponent("session-1.jsonl")
+
+        let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: transcript, root: root)
+
+        XCTAssertEqual(projectID, CostProjectAttribution.unknownProjectID)
+    }
+
     // MARK: - Codex (real cwd)
 
     func testCodexProjectIDStripsRealHomePrefix() {
@@ -78,5 +92,18 @@ final class CostProjectAttributionTests: XCTestCase {
 
     func testCodexProjectIDFallsBackToUnknownWhenCwdIsExactlyHome() {
         XCTAssertEqual(CostProjectAttribution.codexProjectID(cwd: home), CostProjectAttribution.unknownProjectID)
+    }
+
+    func testCodexProjectIDFallsBackToUnknownForASiblingThatMerelySharesTheHomePrefix() {
+        // With home "/Users/alice", "/Users/alice-work/app" is a different
+        // user's tree — a plain prefix check would report it as "-work/app".
+        XCTAssertEqual(
+            CostProjectAttribution.codexProjectID(cwd: "\(home)-work/app"),
+            CostProjectAttribution.unknownProjectID
+        )
+        XCTAssertEqual(
+            CostProjectAttribution.codexProjectID(cwd: "\(home)-work"),
+            CostProjectAttribution.unknownProjectID
+        )
     }
 }

@@ -30,7 +30,7 @@ nonisolated public struct DisplayCurrency: Equatable, Sendable {
     /// precision `UsageFormat.cost` displays), half-away-from-zero — matching
     /// `Foundation`'s default `rounded()` behavior.
     public func convert(usd amount: Double) -> Double {
-        guard unitsPerUSD > 0 else { return amount }
+        guard unitsPerUSD > 0, unitsPerUSD.isFinite else { return amount }
         return (amount * unitsPerUSD * 100).rounded() / 100
     }
 
@@ -54,8 +54,21 @@ nonisolated public struct DisplayCurrency: Equatable, Sendable {
     /// Trims insignificant trailing zeros (e.g. `150` not `150.0000`,
     /// `0.92` not `0.9200`) while keeping enough precision for rates typed
     /// with more than two decimal places.
+    ///
+    /// Deliberately not `%g`: that switches to scientific notation once the
+    /// exponent reaches the precision, so a legitimate rate like VND's
+    /// ~24,000 would render as "2.4e+04" in the disclosure line. Fixed
+    /// notation with the trailing zeros stripped keeps every rate readable.
     private var formattedRate: String {
-        String(format: "%.4g", unitsPerUSD)
+        var text = String(format: "%.4f", unitsPerUSD)
+        guard text.contains(".") else { return text }
+        while text.hasSuffix("0") {
+            text.removeLast()
+        }
+        if text.hasSuffix(".") {
+            text.removeLast()
+        }
+        return text
     }
 
     /// Converted amount paired with the currency code, e.g. `"9.20 EUR"`.

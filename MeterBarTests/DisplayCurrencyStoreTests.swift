@@ -51,6 +51,30 @@ final class DisplayCurrencyStoreTests: XCTestCase {
         }
     }
 
+    func testSetRejectsANonFiniteRateAndClearsAnyExistingConversion() {
+        withIsolatedDefaults { defaults in
+            let store = DisplayCurrencyStore(userDefaults: defaults)
+            store.set(code: "EUR", rate: 0.92)
+
+            // Infinity satisfies `rate > 0`, so without an explicit finite
+            // check it would persist and turn every converted total into "inf".
+            store.set(code: "EUR", rate: .infinity)
+
+            XCTAssertNil(store.currency)
+            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
+        }
+    }
+
+    func testLoadIgnoresAPersistedNonFiniteRate() {
+        withIsolatedDefaults { defaults in
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
+            defaults.set(Double.infinity, forKey: StorageKeys.displayCurrencyRate)
+            defaults.set(Date(), forKey: StorageKeys.displayCurrencyEnteredAt)
+
+            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
+        }
+    }
+
     func testSetRejectsAnEmptyOrBlankCode() {
         withIsolatedDefaults { defaults in
             let store = DisplayCurrencyStore(userDefaults: defaults)

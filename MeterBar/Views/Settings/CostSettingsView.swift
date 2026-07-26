@@ -79,11 +79,23 @@ struct CostPeriodContentView: View {
         }
     }
 
+    /// Driven by a `TimelineView` tick rather than plain re-render, because
+    /// SwiftUI only recomputes a view when its inputs change: a settings
+    /// window left open across midnight on the 1st would otherwise keep
+    /// showing last month's window until unrelated state moved. Same
+    /// one-minute schedule the other time-driven settings rows already use.
     @ViewBuilder private var monthToDateContent: some View {
-        // Computed fresh on every render (default `now: Date()`) rather than
-        // stored in state, so the boundary rolls over at midnight on the 1st
-        // without a restart or rescan.
-        let window = summary.monthToDateCostWindow()
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 10) {
+                monthToDateRows(now: context.date)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func monthToDateRows(now: Date) -> some View {
+        let window = summary.monthToDateCostWindow(now: now)
 
         SettingsRowView(title: "Total cost") {
             VStack(alignment: .trailing, spacing: 2) {
@@ -321,13 +333,13 @@ struct CostSettingsView: View {
                 Spacer(minLength: 0)
 
                 Button("Save") {
-                    guard let rate = Double(currencyRateInput) else { return }
+                    guard let rate = parsedCurrencyRate else { return }
                     displayCurrencyStore.set(code: currencyCodeInput, rate: rate)
                 }
                 .buttonStyle(.bordered)
                 .disabled(
                     currencyCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || Double(currencyRateInput) == nil
+                        || parsedCurrencyRate == nil
                 )
                 .accessibilityIdentifier("display-currency-save-button")
 
@@ -347,6 +359,14 @@ struct CostSettingsView: View {
             }
         }
         .onAppear(perform: syncCurrencyInputsFromStore)
+    }
+
+    /// `Double("inf")` and `Double("nan")` both parse, so plain
+    /// `Double(_:) != nil` would enable Save for a rate that can only render
+    /// as "inf". The store rejects those too; this keeps the button honest.
+    private var parsedCurrencyRate: Double? {
+        guard let rate = Double(currencyRateInput), rate > 0, rate.isFinite else { return nil }
+        return rate
     }
 
     private func syncCurrencyInputsFromStore() {
