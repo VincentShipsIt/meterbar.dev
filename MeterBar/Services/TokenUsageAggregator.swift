@@ -72,4 +72,33 @@ enum TokenUsageAggregator {
             return lhs.estimatedCostUSD > rhs.estimatedCostUSD
         }
     }
+
+    /// Per-project rollup rows, each carrying its own nested per-model
+    /// breakdown (issue #270's "rollup view plus drill-down to model
+    /// breakdown"). Reuses `makeBreakdowns` twice — once for the top-level
+    /// rollup, once per project for its `modelBreakdowns` slice — rather than
+    /// inventing a second aggregation algorithm.
+    nonisolated static func makeProjectBreakdowns(
+        from projectTotals: [String: TokenAccumulator],
+        modelsByProject: [String: [String: TokenAccumulator]],
+        provider: ServiceType,
+        pricing: TokenPricing,
+        pricingForName: ((String) -> TokenPricing)? = nil
+    ) -> [TokenUsageBreakdown] {
+        makeBreakdowns(from: projectTotals, provider: provider, pricing: pricing).map { row in
+            TokenUsageBreakdown(
+                provider: row.provider,
+                name: row.name,
+                inputTokens: row.inputTokens,
+                outputTokens: row.outputTokens,
+                cacheCreationTokens: row.cacheCreationTokens,
+                cacheReadTokens: row.cacheReadTokens,
+                estimatedCostUSD: row.estimatedCostUSD,
+                sessionCount: row.sessionCount,
+                modelBreakdowns: modelsByProject[row.name].map {
+                    makeBreakdowns(from: $0, provider: provider, pricing: pricing, pricingForName: pricingForName)
+                } ?? []
+            )
+        }
+    }
 }

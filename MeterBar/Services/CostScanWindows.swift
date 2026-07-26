@@ -49,6 +49,14 @@ nonisolated struct ClaudeSessionTotals: Sendable {
     var daily: [Date: TokenAccumulator] = [:]
     var models: [String: TokenAccumulator] = [:]
     var origins: [String: TokenAccumulator] = [:]
+    /// Per-project rollup, keyed by the sanitized identifier `CostProjectAttribution`
+    /// derives from the transcript's file-system path (issue #270). Every file
+    /// attributes to exactly one bucket, including the explicit `unknown` one —
+    /// never dropped, never guessed.
+    var projects: [String: TokenAccumulator] = [:]
+    /// Nested per-project, per-model totals powering the "drill-down to model
+    /// breakdown" view under each project's rollup row.
+    var projectModels: [String: [String: TokenAccumulator]] = [:]
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
@@ -74,6 +82,14 @@ nonisolated struct ClaudeSessionTotals: Sendable {
         }
         for (name, tokens) in other.origins {
             origins[name, default: TokenAccumulator()].merge(tokens)
+        }
+        for (project, tokens) in other.projects {
+            projects[project, default: TokenAccumulator()].merge(tokens)
+        }
+        for (project, modelTotals) in other.projectModels {
+            for (model, tokens) in modelTotals {
+                projectModels[project, default: [:]][model, default: TokenAccumulator()].merge(tokens)
+            }
         }
 
         earliest = Self.earlier(earliest, other.earliest)
@@ -121,6 +137,10 @@ nonisolated struct CodexScanContext: Sendable {
     var dailyTotals: [Date: TokenAccumulator] = [:]
     var modelTotals: [String: TokenAccumulator] = [:]
     var originTotals: [String: TokenAccumulator] = [:]
+    /// Per-project rollup keyed by `CostProjectAttribution.codexProjectID` —
+    /// see the matching fields on `ClaudeSessionTotals` (issue #270).
+    var projectTotals: [String: TokenAccumulator] = [:]
+    var projectModelTotals: [String: [String: TokenAccumulator]] = [:]
     var eventKeys: Set<String> = []
     var sessionIDs: Set<String> = []
     var earliestDate: Date

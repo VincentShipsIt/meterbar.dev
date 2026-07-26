@@ -104,21 +104,47 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     private let providers: [Provider]
     private let totalCostUSD: Double
     private let totalTokens: Int
+    /// Presentation-only conversion of `totalCostUSD` (issue #270). `nil`
+    /// unless the caller explicitly supplies `displayCurrency` — the CLI has
+    /// no persisted rate of its own; `--currency`/`--rate` are stateless,
+    /// per-invocation flags, never a background exchange-rate fetch.
+    private let displayCurrency: DisplayCurrencyJSON?
 
     public init(
         cache: CostSummaryCache,
         days: Int? = nil,
+        monthToDate: Bool = false,
+        displayCurrency: DisplayCurrency? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) {
         lastScannedAt = cache.lastScanDate
 
-        if let days {
+        // `monthToDate` takes precedence over `--days`; the CLI's `validate()`
+        // rejects passing both, so this ordering only matters for direct callers.
+        if monthToDate {
+            // Month-to-date has no project dimension of its own: it's a window
+            // over the cached *daily* rows (`DailyTokenUsage`), which — unlike
+            // the full lifetime scan behind `TokenCost.projectBreakdowns` —
+            // carries no per-project field. Project grouping and calendar
+            // windowing are orthogonal axes in the current data model.
+            let window = cache.summary.monthToDateCostWindow(now: now, calendar: calendar)
+            period = Period(
+                requestedDays: window.requestedDays,
+                coveredDays: window.coveredDays,
+                isTruncated: window.isTruncated,
+                kind: "monthToDate"
+            )
+            providers = window.providers.map(Provider.init(total:))
+            totalCostUSD = window.totalCostUSD
+            totalTokens = window.totalTokens
+        } else if let days {
             let window = cache.summary.dailyCostWindow(lastDays: days, now: now, calendar: calendar)
             period = Period(
                 requestedDays: window.requestedDays,
                 coveredDays: window.coveredDays,
-                isTruncated: window.isTruncated
+                isTruncated: window.isTruncated,
+                kind: "days"
             )
             providers = window.providers.map(Provider.init(total:))
             totalCostUSD = window.totalCostUSD
@@ -127,7 +153,8 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             period = Period(
                 requestedDays: cache.summary.periodDays,
                 coveredDays: cache.summary.periodDays,
-                isTruncated: false
+                isTruncated: false,
+                kind: nil
             )
             providers = cache.summary.costs
                 .sorted { $0.provider.sortOrder < $1.provider.sortOrder }
@@ -135,12 +162,22 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalCostUSD = cache.summary.totalCostUSD
             totalTokens = cache.summary.totalTokens
         }
+
+        // Captured into a local first: referencing `self.totalCostUSD` directly
+        // inside the closure below would require `self` before every stored
+        // property (including `self.displayCurrency` itself) is initialized.
+        let finalTotalCostUSD = totalCostUSD
+        self.displayCurrency = displayCurrency.map { DisplayCurrencyJSON($0, totalCostUSD: finalTotalCostUSD) }
     }
 
     private struct Period: Encodable {
         let requestedDays: Int
         let coveredDays: Int
         let isTruncated: Bool
+        /// `"days"`, `"monthToDate"`, or omitted for the full lifetime summary
+        /// (issue #270). Optional so the unwindowed fixture's JSON shape is
+        /// unchanged — `nil` is simply never emitted.
+        let kind: String?
     }
 
     private struct Provider: Encodable {
@@ -153,6 +190,12 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
         let totalTokens: Int
         let estimatedCostUSD: Double
         let sessionCount: Int?
+        /// Per-project/worktree rollup (issue #270). `nil` — not merely empty —
+        /// whenever the underlying source carries no project dimension at all
+        /// (a `--days`/month-to-date window) or the scan found nothing to
+        /// attribute, so consumers can tell "not available here" apart from
+        /// "everything landed in one project".
+        let projectBreakdowns: [ProjectBreakdown]?
 
         init(cost: TokenCost) {
             provider = cost.provider.cliIdentifier
@@ -164,6 +207,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = cost.totalTokens
             estimatedCostUSD = cost.estimatedCostUSD
             sessionCount = cost.sessionCount
+            projectBreakdowns = cost.projectBreakdowns.isEmpty
+                ? nil
+                : cost.projectBreakdowns.map(ProjectBreakdown.init)
         }
 
         init(total: ProviderDailyTotal) {
@@ -176,6 +222,76 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = total.totalTokens
             estimatedCostUSD = total.estimatedCostUSD
             sessionCount = nil
+            projectBreakdowns = nil
+        }
+    }
+
+    /// Presentation-only currency conversion of `totalCostUSD` (issue #270).
+    /// `source` is always `"manual"`: the CLI never persists or fetches a
+    /// rate, so every emission is a fresh, explicit `--currency`/`--rate` pair
+    /// the caller typed for this one invocation — never a cached snapshot.
+    private struct DisplayCurrencyJSON: Encodable {
+        let code: String
+        let unitsPerUSD: Double
+        let enteredAt: Date
+        let totalCostConverted: Double
+        let source = "manual"
+
+        init(_ currency: DisplayCurrency, totalCostUSD: Double) {
+            code = currency.code
+            unitsPerUSD = currency.unitsPerUSD
+            enteredAt = currency.enteredAt
+            totalCostConverted = currency.convert(usd: totalCostUSD)
+        }
+    }
+
+    /// One project/worktree rollup row, with its own nested per-model slice
+    /// (issue #270). A hand-written mapper — like `Provider` above — rather
+    /// than encoding `TokenUsageBreakdown` directly, so the CLI JSON surface
+    /// stays independent of that type's internal shape.
+    private struct ProjectBreakdown: Encodable {
+        let name: String
+        let inputTokens: Int
+        let outputTokens: Int
+        let cacheCreationTokens: Int
+        let cacheReadTokens: Int
+        let totalTokens: Int
+        let estimatedCostUSD: Double
+        let sessionCount: Int
+        let modelBreakdowns: [ModelBreakdown]
+
+        init(_ breakdown: TokenUsageBreakdown) {
+            name = breakdown.name
+            inputTokens = breakdown.inputTokens
+            outputTokens = breakdown.outputTokens
+            cacheCreationTokens = breakdown.cacheCreationTokens
+            cacheReadTokens = breakdown.cacheReadTokens
+            totalTokens = breakdown.totalTokens
+            estimatedCostUSD = breakdown.estimatedCostUSD
+            sessionCount = breakdown.sessionCount
+            modelBreakdowns = breakdown.modelBreakdowns.map(ModelBreakdown.init)
+        }
+
+        struct ModelBreakdown: Encodable {
+            let name: String
+            let inputTokens: Int
+            let outputTokens: Int
+            let cacheCreationTokens: Int
+            let cacheReadTokens: Int
+            let totalTokens: Int
+            let estimatedCostUSD: Double
+            let sessionCount: Int
+
+            init(_ breakdown: TokenUsageBreakdown) {
+                name = breakdown.name
+                inputTokens = breakdown.inputTokens
+                outputTokens = breakdown.outputTokens
+                cacheCreationTokens = breakdown.cacheCreationTokens
+                cacheReadTokens = breakdown.cacheReadTokens
+                totalTokens = breakdown.totalTokens
+                estimatedCostUSD = breakdown.estimatedCostUSD
+                sessionCount = breakdown.sessionCount
+            }
         }
     }
 }

@@ -169,4 +169,71 @@ final class CostWindowTests: XCTestCase {
         XCTAssertEqual(window.requestedDays, 1)
         XCTAssertEqual(window.providers.first?.inputTokens, 3)
     }
+
+    // MARK: - Month to date (issue #270)
+
+    /// `now` (1_750_000_000) is 2025-06-15T14:13:20Z — the 15th, so a
+    /// month-to-date window should span 15 calendar days (the 1st through
+    /// today, inclusive).
+    func testMonthToDateCoversFirstOfMonthThroughToday() {
+        let summary = summary(
+            dailyUsage: [
+                row(daysAgo: 0, provider: .claudeCode, input: 10, output: 5, cacheRead: 1, cost: 1.0),
+                row(daysAgo: 14, provider: .claudeCode, input: 20, output: 5, cacheRead: 1, cost: 2.0),
+                // The 1st of the prior month — 15 days back is the 31st of May,
+                // one day before June 1st, so this row must fall outside the window.
+                row(daysAgo: 15, provider: .claudeCode, input: 99, output: 99, cacheRead: 99, cost: 9.0)
+            ],
+            periodDays: 30
+        )
+
+        let window = summary.monthToDateCostWindow(now: now, calendar: calendar)
+
+        XCTAssertEqual(window.requestedDays, 15)
+        let claude = window.providers.first { $0.provider == .claudeCode }
+        XCTAssertEqual(claude?.inputTokens, 30)
+        XCTAssertEqual(window.totalCostUSD, 3.0, accuracy: 0.0001)
+    }
+
+    /// The boundary must be computed fresh from `now` on every call — never
+    /// cached — so a caller that re-invokes this after midnight on the 1st
+    /// sees the window reset to a single day, not still show the previous
+    /// month's accumulated span.
+    func testMonthToDateRollsOverOnTheFirstOfTheMonth() {
+        // 2025-07-01T00:00:00Z — the 1st of the following month.
+        var components = DateComponents()
+        components.year = 2025
+        components.month = 7
+        components.day = 1
+        let firstOfNextMonth = calendar.date(from: components) ?? now
+
+        let summary = summary(
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: firstOfNextMonth,
+                    provider: .claudeCode,
+                    inputTokens: 7,
+                    outputTokens: 2,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 0.7
+                ),
+                // Last day of June — must not leak into July's month-to-date window.
+                DailyTokenUsage(
+                    date: calendar.date(byAdding: .day, value: -1, to: firstOfNextMonth) ?? firstOfNextMonth,
+                    provider: .claudeCode,
+                    inputTokens: 999,
+                    outputTokens: 999,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 99.0
+                )
+            ],
+            periodDays: 30
+        )
+
+        let window = summary.monthToDateCostWindow(now: firstOfNextMonth, calendar: calendar)
+
+        XCTAssertEqual(window.requestedDays, 1)
+        XCTAssertEqual(window.providers.first?.inputTokens, 7)
+        XCTAssertEqual(window.totalCostUSD, 0.7, accuracy: 0.0001)
+    }
 }

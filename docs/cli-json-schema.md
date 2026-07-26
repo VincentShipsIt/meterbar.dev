@@ -69,6 +69,8 @@ context. `resetCreditsAvailable` is present only when the provider reports banke
 ```sh
 meterbar cost --json
 meterbar cost --days 7 --json
+meterbar cost --month-to-date --json
+meterbar cost --currency EUR --rate 0.92 --json
 ```
 
 Version 1 shape:
@@ -103,6 +105,107 @@ Version 1 shape:
 With `--days`, MeterBar derives the response from cached daily rows without rescanning logs.
 Daily rows do not retain `cacheCreationTokens` or `sessionCount`, so those fields are omitted in a
 windowed response. `period.isTruncated` is true when the cache covers fewer days than requested.
+
+### Month-to-date window
+
+`--month-to-date` is a second calendar-aware window alongside `--days`, in the same cached-daily-row
+family (no rescan, and mutually exclusive with `--days`). `period.kind` distinguishes the three
+period shapes: `"days"`, `"monthToDate"`, or omitted entirely for the full, unwindowed summary (the
+version 1 fixture above never sets it, so that response is byte-for-byte unchanged).
+
+```json
+{
+  "schemaVersion": 1,
+  "lastScannedAt": "2026-07-14T10:00:00Z",
+  "period": {
+    "requestedDays": 14,
+    "coveredDays": 14,
+    "isTruncated": false,
+    "kind": "monthToDate"
+  },
+  "providers": [ ],
+  "totalCostUSD": 1.25,
+  "totalTokens": 1800
+}
+```
+
+`requestedDays` for a month-to-date window is however many days have elapsed since the 1st of the
+current month (inclusive), computed in the local time zone at read time — it is never a cached start
+date, so the same cache reports a larger window tomorrow without a rescan or restart.
+
+### Project/worktree breakdown
+
+Each provider in the full, unwindowed summary (no `--days`/`--month-to-date`) may carry
+`projectBreakdowns`: a per-project/worktree rollup derived from scanned session paths, with its own
+nested `modelBreakdowns`. The field is omitted entirely when nothing was scanned with a project
+dimension — including every windowed (`--days`/`--month-to-date`) response, since daily rows carry no
+project dimension of their own.
+
+```json
+{
+  "provider": "claude",
+  "displayName": "Claude Code",
+  "inputTokens": 1000,
+  "outputTokens": 250,
+  "cacheCreationTokens": 50,
+  "cacheReadTokens": 500,
+  "totalTokens": 1800,
+  "estimatedCostUSD": 1.25,
+  "sessionCount": 3,
+  "projectBreakdowns": [
+    {
+      "name": "meterbardev",
+      "inputTokens": 800,
+      "outputTokens": 200,
+      "cacheCreationTokens": 40,
+      "cacheReadTokens": 400,
+      "totalTokens": 1440,
+      "estimatedCostUSD": 1.00,
+      "sessionCount": 2,
+      "modelBreakdowns": [ ]
+    },
+    {
+      "name": "unknown",
+      "inputTokens": 200,
+      "outputTokens": 50,
+      "cacheCreationTokens": 10,
+      "cacheReadTokens": 100,
+      "totalTokens": 360,
+      "estimatedCostUSD": 0.25,
+      "sessionCount": 1,
+      "modelBreakdowns": [ ]
+    }
+  ]
+}
+```
+
+Every session attributes to exactly one project row; a session whose path can't be attributed to a
+project lands in an explicit `unknown` row rather than being dropped or guessed. Names are sanitized
+before they ever reach this JSON — no full home-directory paths — and MeterBar never persists branch
+names, remotes, prompt content, or credentials to derive them.
+
+### Display currency
+
+`--currency CODE --rate N` (both required together) adds a top-level `displayCurrency` object
+converting `totalCostUSD` for display. This is presentation-only: stored and exported cost data
+always stays USD, and MeterBar never fetches a live exchange rate — `unitsPerUSD` and `enteredAt` are
+exactly what the caller typed for that one invocation. The field is omitted entirely unless both
+flags are supplied.
+
+```json
+{
+  "displayCurrency": {
+    "code": "EUR",
+    "unitsPerUSD": 0.92,
+    "enteredAt": "2026-07-20T10:00:00Z",
+    "totalCostConverted": 1.15,
+    "source": "manual"
+  }
+}
+```
+
+`source` is always `"manual"` — a marker (not a variant to branch on today) that a future live-rate
+source, if ever added, would need to distinguish itself from.
 
 ## Fable sessions
 
