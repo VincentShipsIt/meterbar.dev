@@ -71,48 +71,52 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
 
     // MARK: - Source-selection policy
 
-    func testPrefersOAuthOnlyForDefaultAccountWhenEnabled() {
-        XCTAssertTrue(ClaudeCodeLocalService.prefersOAuth(
-            account: .defaultAccount,
-            oauthEnabled: true,
-            environment: [:]
-        ))
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
-            account: .defaultAccount,
-            oauthEnabled: false,
-            environment: [:]
-        ))
+    /// OAuth used to be restricted to the unscoped default account, because the
+    /// single global Keychain item could belong to a different Claude identity.
+    /// Credentials are now resolved per profile, so the switch is just the user's
+    /// opt-out — and the anti-contamination guarantee moved into the resolver's
+    /// candidate list, which is what these assertions pin.
+    func testScopedProfilesResolveTheirOwnCredentialInsteadOfTheGlobalOne() {
+        let unscoped = ClaudeCredentialResolver.candidates(
+            for: .defaultAccount,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+        XCTAssertTrue(
+            unscoped.contains(.keychain(service: ClaudeCredentialResolver.bareKeychainService)),
+            "The canonical profile is the one the unscoped item belongs to"
+        )
 
-        let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
-            account: custom,
-            oauthEnabled: true,
-            environment: [:]
-        ))
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
-            account: custom,
-            oauthEnabled: false,
-            environment: [:]
-        ))
-    }
-
-    func testExplicitDefaultConfigDirectoryUsesProfileCLIInsteadOfGlobalOAuth() {
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
-            account: .defaultAccount,
-            oauthEnabled: true,
-            environment: ["CLAUDE_CONFIG_DIR": "/tmp/.claude-genfeedai"]
-        ))
-
+        // A default-ID account that names its own config directory is a scoped
+        // profile, not the canonical one — the case that previously forced the CLI.
         let savedDefault = ClaudeCodeAccount(
             id: ClaudeCodeAccount.defaultID,
             name: "genfeedai",
-            configDirectory: "/tmp/.claude-genfeedai"
+            configDirectory: "/Users/tester/.claude-genfeedai"
         )
-        XCTAssertFalse(ClaudeCodeLocalService.prefersOAuth(
-            account: savedDefault,
-            oauthEnabled: true,
-            environment: [:]
-        ))
+        let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/Users/tester/.claude-work")
+
+        for account in [savedDefault, custom] {
+            let candidates = ClaudeCredentialResolver.candidates(
+                for: account,
+                environment: [:],
+                realHomeDirectory: "/Users/tester"
+            )
+            XCTAssertFalse(
+                candidates.contains(.keychain(service: ClaudeCredentialResolver.bareKeychainService)),
+                "\(account.name) must never read the unscoped identity's credential"
+            )
+            XCTAssertEqual(
+                candidates.first,
+                .keychain(service: ClaudeCredentialResolver.keychainService(
+                    forConfigDirectory: ClaudeCredentialResolver.configDirectory(
+                        for: account,
+                        environment: [:],
+                        realHomeDirectory: "/Users/tester"
+                    )
+                ))
+            )
+        }
     }
 
     func testOnlyDefaultAccountPublishesProviderWideConnectionState() {

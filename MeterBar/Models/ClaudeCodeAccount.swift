@@ -54,6 +54,18 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
             return (realHomeDirectory as NSString).appendingPathComponent(".claude")
         }
 
+        return expandConfigDirectory(rawValue, realHomeDirectory: realHomeDirectory)
+    }
+
+    /// Expands a user- or environment-supplied config-directory value the way a
+    /// shell would. Claude Code derives its per-profile Keychain item from the
+    /// *resolved* path, so the credential resolver and the `CLAUDE_CONFIG_DIR`
+    /// handed to the CLI must agree on one expansion — an unexpanded `~/...`
+    /// would hash to a service name that no Claude Code profile ever wrote.
+    static func expandConfigDirectory(
+        _ rawValue: String,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
         if rawValue == "~" {
             return realHomeDirectory
         }

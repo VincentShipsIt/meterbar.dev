@@ -122,7 +122,10 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
         environment["TERM"] = "dumb"
         if let configDirectory = account.configDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
            !configDirectory.isEmpty {
-            environment["CLAUDE_CONFIG_DIR"] = configDirectory
+            // Expanded, not raw: the CLI gets this as a plain env var with no
+            // shell to resolve `~`, and the credential resolver hashes the same
+            // expanded path to find the profile's Keychain item.
+            environment["CLAUDE_CONFIG_DIR"] = ClaudeCodeAccount.expandConfigDirectory(configDirectory)
         }
         return environment
     }
