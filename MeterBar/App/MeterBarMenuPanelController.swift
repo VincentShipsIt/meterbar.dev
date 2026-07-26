@@ -7,6 +7,9 @@ final class KeyableMenuPanel: NSPanel {
 
 @MainActor
 final class MeterBarMenuPanelController {
+    private static let anchorRetryDelay: TimeInterval = 0.02
+    private static let anchorRetryLimit = 10
+
     private let statusButtonProvider: () -> NSStatusBarButton?
     private let onDismiss: () -> Void
 
@@ -20,9 +23,9 @@ final class MeterBarMenuPanelController {
     /// still in flight (the panel's `isVisible` lags the fade-out completion).
     private var isPresented = false
 
-    /// Bumped on every `show()`/`dismiss()`. A deferred fade-out completion only
-    /// orders the panel out if the token still matches, so a rapid re-show
-    /// cancels the pending hide instead of leaving the panel stuck at alpha 0.
+    /// Bumped on every `show()`/`dismiss()`. Deferred anchor retries and fade-out
+    /// completions only act while the token still matches, so stale work cannot
+    /// resurrect or hide a newer presentation.
     private var presentationToken = 0
 
     /// Whether show/hide/resize animate. Defaults to honoring the system Reduce
@@ -47,14 +50,40 @@ final class MeterBarMenuPanelController {
     }
 
     func show() {
-        guard let button = statusButtonProvider() else { return }
+        guard statusButtonProvider() != nil else { return }
         presentationToken &+= 1
         isPresented = true
-        let panel = ensurePanel()
-        // Position without animating: the panel is (re)appearing, so the frame
-        // should snap into place and only the alpha fades in.
-        position(panel, anchoredTo: button, size: contentSize, animated: false)
+        presentWhenAnchored(
+            token: presentationToken,
+            retriesRemaining: Self.anchorRetryLimit
+        )
+    }
 
+    private func presentWhenAnchored(token: Int, retriesRemaining: Int) {
+        guard isPresented, presentationToken == token else { return }
+        guard let button = statusButtonProvider(),
+              let frame = targetFrame(anchoredTo: button, size: contentSize) else {
+            guard retriesRemaining > 0 else {
+                // Do not leave togglePopover believing an invisible panel is
+                // open after the bounded anchor-resolution window expires.
+                isPresented = false
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.anchorRetryDelay) { [weak self] in
+                self?.presentWhenAnchored(
+                    token: token,
+                    retriesRemaining: retriesRemaining - 1
+                )
+            }
+            return
+        }
+
+        let panel = ensurePanel()
+        // Position before ordering front. A status item can exist for a run-loop
+        // turn before AppKit attaches its window; showing the panel before this
+        // frame resolves exposes its construction origin at the screen's
+        // bottom-left.
+        applyFrame(frame, to: panel, animated: false)
         if motionEnabled {
             // Assigning the model value cancels any in-flight fade-out and
             // restarts the fade from fully transparent.
@@ -76,11 +105,11 @@ final class MeterBarMenuPanelController {
         stopEventMonitoring()
         let wasPresented = isPresented
         isPresented = false
+        presentationToken &+= 1
         guard let panel else {
             onDismiss()
             return
         }
-        presentationToken &+= 1
         let token = presentationToken
 
         if motionEnabled, wasPresented {
@@ -107,8 +136,11 @@ final class MeterBarMenuPanelController {
 
     func resize(to size: NSSize) {
         contentSize = size
-        guard isPresented, let panel, let button = statusButtonProvider() else { return }
-        position(panel, anchoredTo: button, size: size, animated: motionEnabled)
+        guard isPresented,
+              let panel,
+              let button = statusButtonProvider(),
+              let frame = targetFrame(anchoredTo: button, size: size) else { return }
+        applyFrame(frame, to: panel, animated: motionEnabled)
     }
 
     private func ensurePanel() -> NSPanel {
@@ -142,13 +174,11 @@ final class MeterBarMenuPanelController {
         return panel
     }
 
-    private func position(
-        _ panel: NSPanel,
+    private func targetFrame(
         anchoredTo button: NSStatusBarButton,
-        size: NSSize,
-        animated: Bool
-    ) {
-        guard let buttonWindow = button.window else { return }
+        size: NSSize
+    ) -> NSRect? {
+        guard let buttonWindow = button.window else { return nil }
 
         let buttonRectInWindow = button.convert(button.bounds, to: nil)
         let buttonRect = buttonWindow.convertToScreen(buttonRectInWindow)
@@ -161,8 +191,10 @@ final class MeterBarMenuPanelController {
             visibleFrame.maxX - size.width - padding
         )
         let y = max(visibleFrame.minY + padding, buttonRect.minY - size.height - 6)
-        let frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+        return NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
 
+    private func applyFrame(_ frame: NSRect, to panel: NSPanel, animated: Bool) {
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = MeterBarTheme.Motion.panelResize

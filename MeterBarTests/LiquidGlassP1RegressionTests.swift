@@ -176,6 +176,89 @@ final class LiquidGlassP1RegressionTests: XCTestCase {
         XCTAssertEqual(dismissCount, 1)
     }
 
+    func testShowWithUnhostedStatusButtonNeverOrdersPanelFrontAtScreenOrigin() {
+        let button = NSStatusBarButton(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
+        let controller = MeterBarMenuPanelController(
+            statusButtonProvider: { button },
+            onDismiss: {}
+        )
+        controller.motionEnabled = false
+
+        controller.show()
+
+        XCTAssertTrue(controller.isShown, "show intent should be synchronous while the anchor resolves")
+        XCTAssertNil(
+            controller.presentedPanel,
+            "an unanchored panel must remain uncreated instead of flashing at AppKit's (0,0) origin"
+        )
+
+        let retriesExhausted = expectation(description: "bounded anchor retries exhaust")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { retriesExhausted.fulfill() }
+        wait(for: [retriesExhausted], timeout: 1)
+
+        XCTAssertFalse(controller.isShown, "failed anchor resolution must not leave the toggle stuck open")
+        XCTAssertNil(controller.presentedPanel)
+    }
+
+    func testPendingShowPresentsAfterStatusButtonGetsAWindow() throws {
+        let button = NSStatusBarButton(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
+        let controller = MeterBarMenuPanelController(
+            statusButtonProvider: { button },
+            onDismiss: {}
+        )
+        controller.motionEnabled = false
+        controller.show()
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.addSubview(button)
+
+        let anchorResolved = expectation(description: "pending panel resolves its status-item anchor")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { anchorResolved.fulfill() }
+        wait(for: [anchorResolved], timeout: 1)
+
+        let panel = try XCTUnwrap(controller.presentedPanel)
+        XCTAssertTrue(controller.isShown)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertNotEqual(panel.frame.origin, .zero)
+
+        controller.dismiss()
+    }
+
+    func testDismissCancelsPendingUnanchoredShow() {
+        let button = NSStatusBarButton(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
+        let controller = MeterBarMenuPanelController(
+            statusButtonProvider: { button },
+            onDismiss: {}
+        )
+        controller.motionEnabled = false
+        controller.show()
+        controller.dismiss()
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.addSubview(button)
+
+        let staleRetryDrained = expectation(description: "stale anchor retry drains")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { staleRetryDrained.fulfill() }
+        wait(for: [staleRetryDrained], timeout: 1)
+
+        XCTAssertFalse(controller.isShown)
+        XCTAssertNil(controller.presentedPanel, "dismissed anchor retries must never resurrect the panel")
+    }
+
     func testResizeUpdatesTargetFrameWhileShown() throws {
         let (window, button) = makeHostedStatusButton()
         defer { window.close() }
