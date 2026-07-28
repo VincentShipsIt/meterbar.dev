@@ -76,9 +76,9 @@ final class CodexUsageMappingTests: XCTestCase {
         XCTAssertEqual(metrics.extraUsage?.state, .on)
     }
 
-    // MARK: - Missing secondary window
+    // MARK: - Independently reported windows
 
-    func testWeeklyLimitDefaultsWhenSecondaryWindowAbsent() throws {
+    func testSessionOnlyResponseOmitsWeeklyLimit() throws {
         let json = """
         {
             "plan_type": "plus",
@@ -97,11 +97,67 @@ final class CodexUsageMappingTests: XCTestCase {
 
         let metrics = try decode(json).toUsageMetrics()
 
-        // Absent secondary window → weekly reported at 0% with no window length.
-        let weekly = try XCTUnwrap(metrics.weeklyLimit)
-        XCTAssertEqual(weekly.used, 0.0)
-        XCTAssertNil(weekly.windowSeconds)
+        XCTAssertEqual(metrics.sessionLimit?.used, 10.0)
+        XCTAssertNil(metrics.weeklyLimit)
         XCTAssertNil(metrics.codeReviewLimit)
+    }
+
+    func testWeeklyOnlyResponseMapsPrimaryWindowToWeeklyLimit() throws {
+        let json = """
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 36.0,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 540000,
+                    "reset_at": 1785880800
+                }
+            }
+        }
+        """
+
+        let metrics = try decode(json).toUsageMetrics()
+
+        XCTAssertNil(metrics.sessionLimit)
+        let weekly = try XCTUnwrap(metrics.weeklyLimit)
+        XCTAssertEqual(weekly.used, 36.0)
+        XCTAssertEqual(weekly.windowSeconds, 604800)
+        XCTAssertEqual(weekly.resetTime, Date(timeIntervalSince1970: 1_785_880_800))
+        XCTAssertNil(metrics.codeReviewLimit)
+    }
+
+    func testWindowMappingDoesNotDependOnPrimarySecondaryOrder() throws {
+        let json = """
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 36.0,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 540000,
+                    "reset_at": 1785880800
+                },
+                "secondary_window": {
+                    "used_percent": 8.0,
+                    "limit_window_seconds": 18000,
+                    "reset_after_seconds": 12000,
+                    "reset_at": 1785352800
+                }
+            }
+        }
+        """
+
+        let metrics = try decode(json).toUsageMetrics()
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 8.0)
+        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 18000)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 36.0)
+        XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 604800)
     }
 
     // MARK: - Free account: null rate_limit
