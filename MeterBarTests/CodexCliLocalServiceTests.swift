@@ -103,7 +103,7 @@ final class CodexCliLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.extraUsage?.state, .unknown)
     }
 
-    func testMapUsageResponseWithoutSecondaryWindowZeroesWeekly() throws {
+    func testMapUsageResponseWithSessionOnlyOmitsWeekly() throws {
         let json = """
         {
           "plan_type": "plus",
@@ -123,9 +123,31 @@ final class CodexCliLocalServiceTests: XCTestCase {
         let metrics = CodexCliLocalService.mapUsageResponse(response)
 
         XCTAssertEqual(metrics.sessionLimit?.used, 12.0)
-        // No secondary window → weekly usage falls back to 0 with a nil windowSeconds.
-        XCTAssertEqual(metrics.weeklyLimit?.used, 0.0)
-        XCTAssertNil(metrics.weeklyLimit?.windowSeconds)
+        XCTAssertNil(metrics.weeklyLimit)
+    }
+
+    func testMapUsageResponseWithWeeklyOnlyOmitsSession() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 36.0,
+              "limit_window_seconds": 604800,
+              "reset_after_seconds": 540000,
+              "reset_at": 1785880800
+            }
+          }
+        }
+        """
+        let response = try decodeResponse(json)
+        let metrics = CodexCliLocalService.mapUsageResponse(response)
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 36.0)
+        XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 604800)
     }
 
     // MARK: - Auth-file / token-expiry gating

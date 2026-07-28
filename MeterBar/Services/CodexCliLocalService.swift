@@ -10,9 +10,13 @@ import os
 /// Similar to ClaudeCodeLocalService, but for Codex CLI usage tracking.
 ///
 /// The API endpoint returns usage data with:
-/// - Primary window: 5-hour limit (18000 seconds)
-/// - Secondary window: 7-day limit (604800 seconds)
+/// - Short window: normally a 5-hour limit (18000 seconds)
+/// - Long window: normally a 7-day limit (604800 seconds)
 /// - Code review rate limit: 7-day limit for code review features
+///
+/// The short/long windows have historically occupied `primary_window` and
+/// `secondary_window`, respectively. Their positions are not stable when OpenAI
+/// disables one window, so mapping uses each window's reported duration.
 class CodexCliLocalService: ObservableObject {
     static let shared = CodexCliLocalService()
 
@@ -528,9 +532,12 @@ extension CodexCliUsageResponse {
     /// `UsageMetrics`. Extracted from `fetchUsageMetrics()` so the window/limit
     /// derivation is unit-testable with fixture JSON, no network.
     ///
-    /// Windows map as: primary (5h) → session, secondary (7d) → weekly,
-    /// code-review primary (7d) → code-review limit. Free accounts (null
-    /// `rate_limit`) carry no windows, only the extra-usage/reset-credit signals.
+    /// Windows map by reported duration rather than response position: a
+    /// sub-day window is the session limit and a day-or-longer window is the
+    /// weekly limit. This matters when OpenAI temporarily disables the 5-hour
+    /// limit and moves the only remaining weekly window into `primary_window`.
+    /// Free accounts (null `rate_limit`) carry no windows, only the
+    /// extra-usage/reset-credit signals.
     func toUsageMetrics() -> UsageMetrics {
         guard let rateLimit else {
             // Free accounts have a null rate_limit — no quota windows to report.
@@ -544,34 +551,12 @@ extension CodexCliUsageResponse {
             )
         }
 
-        // Primary window (5 hours = 18000 seconds) = session limit
-        let primaryWindow = rateLimit.primaryWindow
-        let sessionLimit = UsageLimit(
-            used: primaryWindow.usedPercent,
-            total: 100.0,
-            resetTime: Date(timeIntervalSince1970: Double(primaryWindow.resetAt)),
-            windowSeconds: TimeInterval(primaryWindow.limitWindowSeconds)
-        )
-
-        // Secondary window (7 days = 604800 seconds) = weekly limit
-        let secondaryWindow = rateLimit.secondaryWindow
-        let weeklyLimit = UsageLimit(
-            used: secondaryWindow?.usedPercent ?? 0.0,
-            total: 100.0,
-            resetTime: secondaryWindow.map { Date(timeIntervalSince1970: Double($0.resetAt)) } ?? Date(),
-            windowSeconds: secondaryWindow.map { TimeInterval($0.limitWindowSeconds) }
-        )
+        let quotaWindows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap { $0 }
+        let sessionLimit = quotaWindows.first(where: { $0.isSessionWindow })?.usageLimit
+        let weeklyLimit = quotaWindows.first(where: { $0.isWeeklyWindow })?.usageLimit
 
         // Code review rate limit (7 days window) = code review limit
-        var codeReviewLimit: UsageLimit?
-        if let codeReviewPrimary = codeReviewRateLimit?.primaryWindow {
-            codeReviewLimit = UsageLimit(
-                used: codeReviewPrimary.usedPercent,
-                total: 100.0,
-                resetTime: Date(timeIntervalSince1970: Double(codeReviewPrimary.resetAt)),
-                windowSeconds: TimeInterval(codeReviewPrimary.limitWindowSeconds)
-            )
-        }
+        let codeReviewLimit = codeReviewRateLimit?.primaryWindow.usageLimit
 
         return UsageMetrics(
             service: .codexCli,
@@ -641,10 +626,29 @@ nonisolated struct RateLimit: Codable {
 typealias CodeReviewRateLimit = RateLimit
 
 nonisolated struct LimitWindow: Codable {
+    private static let longWindowThresholdSeconds = 24 * 60 * 60
+
     let usedPercent: Double
     let limitWindowSeconds: Int
     let resetAfterSeconds: Int
     let resetAt: Int64
+
+    var isSessionWindow: Bool {
+        limitWindowSeconds < Self.longWindowThresholdSeconds
+    }
+
+    var isWeeklyWindow: Bool {
+        !isSessionWindow
+    }
+
+    var usageLimit: UsageLimit {
+        UsageLimit(
+            used: usedPercent,
+            total: 100.0,
+            resetTime: Date(timeIntervalSince1970: Double(resetAt)),
+            windowSeconds: TimeInterval(limitWindowSeconds)
+        )
+    }
 
     enum CodingKeys: String, CodingKey {
         case usedPercent = "used_percent"
