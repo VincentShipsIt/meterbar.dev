@@ -91,7 +91,7 @@ All of these except the two admin APIs are **undocumented/private endpoints** su
 **Data written / persisted:**
 - `UserDefaults.standard`: metrics cache (`cached_usage_metrics`), refresh interval, hidden providers (`HiddenProviderServices`), dock flag (`ShowMeterBarInDock`), custom Claude accounts (`ClaudeCodeCustomAccounts`), OAuth-fallback flag.
 - App group container `group.dev.shipshit.meterbar`: `cached_usage_metrics.json`, atomic writes on a serial queue, triggers `WidgetCenter.reloadTimelines` (`SharedDataStore.swift`). Read by widget and CLI (`MeterBarCLI.swift:95-123`).
-- `~/Library/Application Support/MeterBar/cost-summary-v1.json` cost cache (`CostTracker.swift:175-225`).
+- `~/Library/Application Support/MeterBar/cost-summary-v2.json` cost cache; valid v1 files migrate forward on read (`CostSummaryStore.swift`).
 - Own keychain service `dev.shipshit.meterbar` for the two optional admin keys (`KeychainManager.swift:7`, `AuthenticationManager.swift`).
 
 **No database, no auth provider, no job queue** in the server sense. "Auth" is entirely: two admin keys in keychain + scavenged CLI credentials.

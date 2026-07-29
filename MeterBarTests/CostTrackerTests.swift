@@ -222,6 +222,25 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(result.projectModels["meterbardev"]?["claude-opus-4-5"]?.input, 7)
         // No stray "unknown" bucket once a real projectID is threaded through.
         XCTAssertNil(result.projects[CostProjectAttribution.unknownProjectID])
+
+        let day = Calendar.current.startOfDay(
+            for: try XCTUnwrap(FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
+        )
+        XCTAssertEqual(result.dailyModels[day]?["claude-sonnet-4-5"]?.input, 10)
+        XCTAssertEqual(result.dailyModels[day]?["claude-opus-4-5"]?.input, 7)
+        XCTAssertEqual(result.dailyProjects[day]?["meterbardev"]?.input, 17)
+        XCTAssertEqual(
+            result.dailyProjectModels[day]?["meterbardev"]?["claude-opus-4-5"]?.input,
+            7
+        )
+
+        let (_, dailyRows) = try XCTUnwrap(
+            ClaudeCostScanner.makeCost(from: result, windowStart: cutoff)
+        )
+        let daily = try XCTUnwrap(dailyRows.first)
+        XCTAssertEqual(daily.modelBreakdowns?.count, 2)
+        XCTAssertEqual(daily.projectBreakdowns?.first?.name, "meterbardev")
+        XCTAssertEqual(daily.projectBreakdowns?.first?.modelBreakdowns.count, 2)
     }
 
     func testParseSessionWindowsAppliesTheSameProjectIDToBothWindows() throws {
@@ -474,6 +493,22 @@ final class CostTrackerTests: XCTestCase {
         CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.projectModelTotals["www/genfeed/apps/admin"]?["gpt-5.6-sol"]?.input, 1_000)
+
+        let day = Calendar.current.startOfDay(
+            for: try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-15T10:00:00Z"))
+        )
+        XCTAssertEqual(context.dailyModelTotals[day]?["gpt-5.6-sol"]?.input, 1_000)
+        XCTAssertEqual(context.dailyProjectTotals[day]?["www/genfeed/apps/admin"]?.input, 1_000)
+        XCTAssertEqual(
+            context.dailyProjectModelTotals[day]?["www/genfeed/apps/admin"]?["gpt-5.6-sol"]?.input,
+            1_000
+        )
+
+        let (_, dailyRows) = try XCTUnwrap(CodexCostScanner.makeCost(from: context))
+        let daily = try XCTUnwrap(dailyRows.first)
+        XCTAssertEqual(daily.modelBreakdowns?.first?.name, "gpt-5.6-sol")
+        XCTAssertEqual(daily.projectBreakdowns?.first?.name, "www/genfeed/apps/admin")
+        XCTAssertEqual(daily.projectBreakdowns?.first?.modelBreakdowns.first?.name, "gpt-5.6-sol")
     }
 
     // Note: `scanSQLiteLogs` (the flat SQLite log format) is `private` with no

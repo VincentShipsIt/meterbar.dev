@@ -123,11 +123,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
         // `monthToDate` takes precedence over `--days`; the CLI's `validate()`
         // rejects passing both, so this ordering only matters for direct callers.
         if monthToDate {
-            // Month-to-date has no project dimension of its own: it's a window
-            // over the cached *daily* rows (`DailyTokenUsage`), which — unlike
-            // the full lifetime scan behind `TokenCost.projectBreakdowns` —
-            // carries no per-project field. Project grouping and calendar
-            // windowing are orthogonal axes in the current data model.
+            // Cache v2's daily rows carry model and sanitized project
+            // attribution, so the window and all of its breakdowns share the
+            // same calendar boundary.
             let window = cache.summary.monthToDateCostWindow(now: now, calendar: calendar)
             period = Period(
                 requestedDays: window.requestedDays,
@@ -190,11 +188,13 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
         let totalTokens: Int
         let estimatedCostUSD: Double
         let sessionCount: Int?
+        /// Top-level per-model rollup. `nil` means the selected cache/window
+        /// does not have complete model attribution.
+        let modelBreakdowns: [ModelBreakdown]?
         /// Per-project/worktree rollup (issue #270). `nil` — not merely empty —
-        /// whenever the underlying source carries no project dimension at all
-        /// (a `--days`/month-to-date window) or the scan found nothing to
-        /// attribute, so consumers can tell "not available here" apart from
-        /// "everything landed in one project".
+        /// whenever the selected rows have incomplete project attribution or
+        /// the scan found nothing to attribute, so consumers can tell "not
+        /// available here" apart from "everything landed in one project".
         let projectBreakdowns: [ProjectBreakdown]?
 
         init(cost: TokenCost) {
@@ -207,6 +207,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = cost.totalTokens
             estimatedCostUSD = cost.estimatedCostUSD
             sessionCount = cost.sessionCount
+            modelBreakdowns = cost.modelBreakdowns.isEmpty
+                ? nil
+                : cost.modelBreakdowns.map(ModelBreakdown.init)
             projectBreakdowns = cost.projectBreakdowns.isEmpty
                 ? nil
                 : cost.projectBreakdowns.map(ProjectBreakdown.init)
@@ -222,7 +225,8 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = total.totalTokens
             estimatedCostUSD = total.estimatedCostUSD
             sessionCount = nil
-            projectBreakdowns = nil
+            modelBreakdowns = total.modelBreakdowns?.map(ModelBreakdown.init)
+            projectBreakdowns = total.projectBreakdowns?.map(ProjectBreakdown.init)
         }
     }
 
@@ -271,27 +275,27 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             sessionCount = breakdown.sessionCount
             modelBreakdowns = breakdown.modelBreakdowns.map(ModelBreakdown.init)
         }
+    }
 
-        struct ModelBreakdown: Encodable {
-            let name: String
-            let inputTokens: Int
-            let outputTokens: Int
-            let cacheCreationTokens: Int
-            let cacheReadTokens: Int
-            let totalTokens: Int
-            let estimatedCostUSD: Double
-            let sessionCount: Int
+    private struct ModelBreakdown: Encodable {
+        let name: String
+        let inputTokens: Int
+        let outputTokens: Int
+        let cacheCreationTokens: Int
+        let cacheReadTokens: Int
+        let totalTokens: Int
+        let estimatedCostUSD: Double
+        let sessionCount: Int
 
-            init(_ breakdown: TokenUsageBreakdown) {
-                name = breakdown.name
-                inputTokens = breakdown.inputTokens
-                outputTokens = breakdown.outputTokens
-                cacheCreationTokens = breakdown.cacheCreationTokens
-                cacheReadTokens = breakdown.cacheReadTokens
-                totalTokens = breakdown.totalTokens
-                estimatedCostUSD = breakdown.estimatedCostUSD
-                sessionCount = breakdown.sessionCount
-            }
+        init(_ breakdown: TokenUsageBreakdown) {
+            name = breakdown.name
+            inputTokens = breakdown.inputTokens
+            outputTokens = breakdown.outputTokens
+            cacheCreationTokens = breakdown.cacheCreationTokens
+            cacheReadTokens = breakdown.cacheReadTokens
+            totalTokens = breakdown.totalTokens
+            estimatedCostUSD = breakdown.estimatedCostUSD
+            sessionCount = breakdown.sessionCount
         }
     }
 }

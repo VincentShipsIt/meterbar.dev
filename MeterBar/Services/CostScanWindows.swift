@@ -47,6 +47,9 @@ nonisolated struct ClaudeSessionTotals: Sendable {
     var earliest: Date?
     var latest: Date?
     var daily: [Date: TokenAccumulator] = [:]
+    var dailyModels: [Date: [String: TokenAccumulator]] = [:]
+    var dailyProjects: [Date: [String: TokenAccumulator]] = [:]
+    var dailyProjectModels: [Date: [String: [String: TokenAccumulator]]] = [:]
     var models: [String: TokenAccumulator] = [:]
     var origins: [String: TokenAccumulator] = [:]
     /// Per-project rollup, keyed by the sanitized identifier `CostProjectAttribution`
@@ -76,6 +79,26 @@ nonisolated struct ClaudeSessionTotals: Sendable {
 
         for (day, tokens) in other.daily {
             daily[day, default: TokenAccumulator()].merge(tokens)
+        }
+        for (day, modelTotals) in other.dailyModels {
+            for (model, tokens) in modelTotals {
+                dailyModels[day, default: [:]][model, default: TokenAccumulator()].merge(tokens)
+            }
+        }
+        for (day, projectTotals) in other.dailyProjects {
+            for (project, tokens) in projectTotals {
+                dailyProjects[day, default: [:]][project, default: TokenAccumulator()].merge(tokens)
+            }
+        }
+        for (day, projectTotals) in other.dailyProjectModels {
+            for (project, modelTotals) in projectTotals {
+                for (model, tokens) in modelTotals {
+                    dailyProjectModels[day, default: [:]][project, default: [:]][
+                        model,
+                        default: TokenAccumulator()
+                    ].merge(tokens)
+                }
+            }
         }
         for (name, tokens) in other.models {
             models[name, default: TokenAccumulator()].merge(tokens)
@@ -135,6 +158,9 @@ nonisolated struct CostScanResult {
 nonisolated struct CodexScanContext: Sendable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
+    var dailyModelTotals: [Date: [String: TokenAccumulator]] = [:]
+    var dailyProjectTotals: [Date: [String: TokenAccumulator]] = [:]
+    var dailyProjectModelTotals: [Date: [String: [String: TokenAccumulator]]] = [:]
     var modelTotals: [String: TokenAccumulator] = [:]
     var originTotals: [String: TokenAccumulator] = [:]
     /// Per-project rollup keyed by `CostProjectAttribution.codexProjectID` —

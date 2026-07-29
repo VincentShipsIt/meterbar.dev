@@ -352,6 +352,13 @@ struct Cost: ParsableCommand {
             print("  Output:         \(UsageFormat.groupedTokens(provider.outputTokens))")
             print("  Cache Read:     \(UsageFormat.groupedTokens(provider.cacheReadTokens))")
             print("  Estimated Cost: \(costText(provider.estimatedCostUSD, currency: currency))")
+            if let projects = provider.projectBreakdowns, !projects.isEmpty {
+                print("  Projects:")
+                for project in projects.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD }) {
+                    print("    - \(project.name): \(costText(project.estimatedCostUSD, currency: currency))"
+                        + " (\(project.sessionCount) event\(project.sessionCount == 1 ? "" : "s"))")
+                }
+            }
             print()
         }
 
