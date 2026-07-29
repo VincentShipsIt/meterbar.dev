@@ -46,6 +46,7 @@ final class UsageDataManagerTests: XCTestCase {
         var accountAuthStates: [UUID: ClaudeCodeAuthState] = [:]
         var probe: ConcurrencyProbe?
         private(set) var fetchCount = 0
+        private(set) var fetchedAccountIDs: [UUID] = []
         private(set) var refreshTriggers: [ClaudeTokenRefreshTrigger] = []
 
         init(hasAccess: Bool, result: Result<UsageMetrics, Error>) {
@@ -62,9 +63,16 @@ final class UsageDataManagerTests: XCTestCase {
             trigger: ClaudeTokenRefreshTrigger
         ) async throws -> UsageMetrics {
             fetchCount += 1
+            fetchedAccountIDs.append(account.id)
             refreshTriggers.append(trigger)
             await probe?.recordFetch()
             return try (resultsByAccount[account.id] ?? result).get()
+        }
+
+        func resetFetchLog() {
+            fetchCount = 0
+            fetchedAccountIDs = []
+            refreshTriggers = []
         }
     }
 
@@ -558,6 +566,103 @@ final class UsageDataManagerTests: XCTestCase {
             manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID],
             .connected(.oauth)
         )
+        XCTAssertEqual(
+            Set(claude.fetchedAccountIDs),
+            [ClaudeCodeAccount.defaultID, work.id],
+            "Provider-level refresh must update every enabled Claude account"
+        )
+    }
+
+    func testAccountClaudeRefreshOnlyFetchesSelectedProfileAndPreservesPeers() async throws {
+        let accountSuite = "UsageDataManagerTests-scoped-claude-refresh-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/work-claude")
+        let work = try XCTUnwrap(accountStore.enabledAccounts.first { !$0.isDefault })
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode(sessionUsedPercent: 20))
+        )
+        claude.resultsByAccount[work.id] = .success(MetricsFixtures.claudeCode(sessionUsedPercent: 80))
+        claude.accountAuthStates = [
+            ClaudeCodeAccount.defaultID: .connected(.oauth),
+            work.id: .connected(.oauth)
+        ]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refresh(service: .claudeCode)
+        claude.resetFetchLog()
+        claude.resultsByAccount[work.id] = .success(MetricsFixtures.claudeCode(sessionUsedPercent: 55))
+        claude.accountAuthStates[work.id] = .connected(.cli)
+
+        await manager.refreshClaudeCodeAccount(id: work.id)
+
+        XCTAssertEqual(claude.fetchedAccountIDs, [work.id])
+        XCTAssertEqual(claude.refreshTriggers, [.userInitiated])
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[ClaudeCodeAccount.defaultID]?.sessionLimit?.used,
+            20,
+            "Refreshing Work must not replace or discard the default profile"
+        )
+        XCTAssertEqual(manager.claudeCodeAccountMetrics[work.id]?.sessionLimit?.used, 55)
+        XCTAssertEqual(manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID], .connected(.oauth))
+        XCTAssertEqual(manager.claudeCodeAccountStates[work.id], .connected(.cli))
+    }
+
+    func testAccountClaudeRefreshPublishesSelectedLoginFailureWithoutChangingPeer() async throws {
+        let accountSuite = "UsageDataManagerTests-scoped-claude-login-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", configDirectory: "/tmp/work-claude")
+        let work = try XCTUnwrap(accountStore.enabledAccounts.first { !$0.isDefault })
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode(sessionUsedPercent: 20))
+        )
+        claude.resultsByAccount[work.id] = .success(MetricsFixtures.claudeCode(sessionUsedPercent: 80))
+        claude.accountAuthStates = [
+            ClaudeCodeAccount.defaultID: .connected(.oauth),
+            work.id: .connected(.oauth)
+        ]
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            claudeCodeAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter, .grok]
+        )
+
+        await manager.refresh(service: .claudeCode)
+        claude.resetFetchLog()
+        claude.resultsByAccount[work.id] = .failure(StubError.fetchFailed)
+        claude.accountAuthStates[work.id] = .needsLogin
+
+        await manager.refreshClaudeCodeAccount(id: work.id)
+
+        XCTAssertEqual(claude.fetchedAccountIDs, [work.id])
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[ClaudeCodeAccount.defaultID]?.sessionLimit?.used,
+            20
+        )
+        XCTAssertEqual(
+            manager.claudeCodeAccountMetrics[work.id]?.sessionLimit?.used,
+            80,
+            "A login failure should retain that profile's last-known usage"
+        )
+        XCTAssertEqual(manager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID], .connected(.oauth))
+        XCTAssertEqual(manager.claudeCodeAccountStates[work.id], .needsLogin)
     }
 
     func testSingleClaudeRefreshClearsAccountStateWhenEveryAccountIsDisabled() async throws {
