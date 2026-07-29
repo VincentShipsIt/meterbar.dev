@@ -12,11 +12,25 @@ nonisolated enum UsageRefreshConfigurationStore {
         let hiddenServices: Set<ServiceType>
         let claudeAccounts: [ClaudeCodeAccount]
         let codexAccounts: [CodexAccount]
+        let grokAccounts: [GrokAccount]
+
+        init(
+            hiddenServices: Set<ServiceType>,
+            claudeAccounts: [ClaudeCodeAccount],
+            codexAccounts: [CodexAccount],
+            grokAccounts: [GrokAccount] = [.defaultAccount]
+        ) {
+            self.hiddenServices = hiddenServices
+            self.claudeAccounts = claudeAccounts
+            self.codexAccounts = codexAccounts
+            self.grokAccounts = grokAccounts
+        }
     }
 
     private static let visibilityFileName = "refresh-provider-visibility-v1.json"
     private static let claudeAccountsFileName = "refresh-claude-accounts-v1.json"
     private static let codexAccountsFileName = "refresh-codex-accounts-v1.json"
+    private static let grokAccountsFileName = "refresh-grok-accounts-v1.json"
 
     static func saveVisibility(
         _ hiddenServices: Set<ServiceType>,
@@ -39,8 +53,16 @@ nonisolated enum UsageRefreshConfigurationStore {
         write(accounts, fileName: codexAccountsFileName, directory: directory)
     }
 
-    /// Fail closed unless all three configuration projections exist and decode.
-    /// A partial snapshot could silently re-enable providers or drop accounts.
+    static func saveGrokAccounts(
+        _ accounts: [GrokAccount],
+        directory: URL? = SharedMetricsStore.containerURL
+    ) {
+        write(accounts, fileName: grokAccountsFileName, directory: directory)
+    }
+
+    /// Fail closed unless the original three projections exist and decode.
+    /// Grok's account projection is additive and optional so a CLI bundled with
+    /// this version can still refresh after an older app wrote the v1 files.
     static func load(directory: URL? = SharedMetricsStore.containerURL) -> Snapshot? {
         guard let directory,
               let hiddenRaw: [String] = read(fileName: visibilityFileName, directory: directory),
@@ -59,7 +81,9 @@ nonisolated enum UsageRefreshConfigurationStore {
         return Snapshot(
             hiddenServices: Set(hiddenRaw.compactMap(ServiceType.init(rawValue:))),
             claudeAccounts: claudeAccounts,
-            codexAccounts: codexAccounts
+            codexAccounts: codexAccounts,
+            grokAccounts: read(fileName: grokAccountsFileName, directory: directory)
+                ?? [.defaultAccount]
         )
     }
 

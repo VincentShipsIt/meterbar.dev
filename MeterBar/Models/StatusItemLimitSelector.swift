@@ -121,10 +121,8 @@ nonisolated enum StatusItemAutoSelectionPolicy {
         switch service {
         case .claudeCode, .codexCli:
             return "session"
-        case .cursor, .openRouter:
+        case .cursor, .openRouter, .grok:
             return "weekly"
-        case .grok:
-            return nil
         }
     }
 }

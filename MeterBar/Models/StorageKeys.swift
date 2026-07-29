@@ -87,6 +87,16 @@ nonisolated enum StorageKeys {
     static let codexAccountOrder = "CodexAccountOrder"
     /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
     static let cachedCodexAccountMetrics = "CachedCodexAccountMetrics"
+    /// Extra Grok Build profiles (JSON-encoded [GrokAccount]).
+    static let grokCustomAccounts = "GrokCustomAccounts"
+    /// User-chosen display name for the default Grok Build profile.
+    static let grokDefaultAccountName = "GrokDefaultAccountName"
+    /// Whether the synthesized default Grok profile participates in tracking.
+    static let grokDefaultAccountEnabled = "GrokDefaultAccountEnabled"
+    /// Persisted Grok account display order (array of UUID strings).
+    static let grokAccountOrder = "GrokAccountOrder"
+    /// Cached per-account Grok metrics (JSON-encoded [UUID: UsageMetrics]).
+    static let cachedGrokAccountMetrics = "CachedGrokAccountMetrics"
     /// Global on/off switch for usage notifications.
     static let notificationsEnabled = "NotificationsEnabled"
     /// Raw value of the `NotificationThreshold` at which a warning notifies.

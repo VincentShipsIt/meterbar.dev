@@ -52,6 +52,13 @@ struct ProviderSettingsView: View {
                 Task { await dataManager.refreshAll() }
             }
         }
+        .sheet(isPresented: $isAddingGrokAccount) {
+            AddGrokAccountSheet { name, homeDirectory in
+                grokAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                isAddingGrokAccount = false
+                Task { await dataManager.refreshAll() }
+            }
+        }
         .task(id: codexDefaultAccount) {
             guard service == .codexCli, codexDefaultAccount.isEnabled else { return }
             let codexCliService = codexCliService
@@ -68,6 +75,7 @@ struct ProviderSettingsView: View {
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -80,6 +88,7 @@ struct ProviderSettingsView: View {
 
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
+    @State private var isAddingGrokAccount = false
     @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
     @State private var openRouterKeyDraft = ""
@@ -96,6 +105,8 @@ struct ProviderSettingsView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                grokAccounts: grokAccountStore.accounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 fableSessions: fableSessionTracker.sessions,
@@ -656,7 +667,8 @@ struct ProviderSettingsView: View {
     }
 
     private var grokSection: some View {
-        SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+        let hasAccess = grokAccountStore.enabledAccounts.contains(where: grokService.canAccess(account:))
+        return SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
             SettingsNotice(
                 text: "MeterBar asks the official Grok CLI for billing data over ACP. "
                     + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
@@ -666,8 +678,8 @@ struct ProviderSettingsView: View {
             SettingsRowView(title: "Connection") {
                 HStack(spacing: 8) {
                     StatusPill(
-                        title: grokService.hasAccess ? "Connected" : "Not Connected",
-                        isConnected: grokService.hasAccess
+                        title: hasAccess ? "Connected" : "Not Connected",
+                        isConnected: hasAccess
                     )
 
                     Button {
@@ -676,16 +688,14 @@ struct ProviderSettingsView: View {
                             await Task.detached(priority: .userInitiated) {
                                 service.checkAccess()
                             }.value
-                            if grokService.hasAccess {
-                                await dataManager.refresh(service: .grok)
-                            }
+                            await dataManager.refresh(service: .grok)
                         }
                     } label: {
-                        Label(grokService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                        Label(hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
-                    .help(grokService.hasAccess ? "Refresh" : "Check again")
+                    .help(hasAccess ? "Refresh" : "Check again")
 
                     Button("Install / Sign In") {
                         if let url = URL(string: "https://x.ai/cli") {
@@ -702,15 +712,70 @@ struct ProviderSettingsView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
-            } else if !grokService.hasAccess {
+            } else if !hasAccess {
                 SettingsNotice(
                     text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
                     color: MeterBarTheme.warning
                 )
             }
 
-            if let error = grokService.lastError {
+            if let error = grokService.firstError(for: grokAccountStore.enabledAccounts) {
                 SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
+            }
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Grok Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button {
+                        isAddingGrokAccount = true
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(grokAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 { SettingsDivider() }
+                        GrokAccountProfileRow(
+                            account: account,
+                            isConnected: grokService.canAccess(account: account),
+                            canMoveUp: index > 0,
+                            canMoveDown: index < grokAccountStore.accounts.count - 1,
+                            onEnabledChange: { isEnabled in
+                                grokAccountStore.setEnabled(isEnabled, for: account.id)
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onSave: { name, homeDirectory in
+                                grokAccountStore.updateAccount(
+                                    id: account.id,
+                                    name: name,
+                                    homeDirectory: homeDirectory
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onRemove: {
+                                grokAccountStore.removeAccount(id: account.id)
+                                MenuBarAccountSelectionStore.shared.forget(
+                                    MenuBarAccountKey.make(service: .grok, accountID: account.id)
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onMoveUp: {
+                                moveGrokAccount(at: index, down: false)
+                            },
+                            onMoveDown: {
+                                moveGrokAccount(at: index, down: true)
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -784,6 +849,14 @@ struct ProviderSettingsView: View {
     private func updateClaudeAccount(id: UUID, name: String, configDirectory: String?) {
         claudeAccountStore.updateAccount(id: id, name: name, configDirectory: configDirectory)
         Task { await dataManager.refreshAll() }
+    }
+
+    private func moveGrokAccount(at index: Int, down: Bool) {
+        let destination = down ? index + 2 : index - 1
+        grokAccountStore.moveAccounts(
+            fromOffsets: IndexSet(integer: index),
+            toOffset: destination
+        )
     }
 
     private func reconnectClaudeAccount(_ account: ClaudeCodeAccount) {

@@ -27,6 +27,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         let visibilityDefaults = try makeDefaults()
         let claudeDefaults = try makeDefaults()
         let codexDefaults = try makeDefaults()
+        let grokDefaults = try makeDefaults()
 
         let visibility = ProviderVisibilityStore(
             userDefaults: visibilityDefaults,
@@ -47,6 +48,12 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         )
         codex.addAccount(name: "Personal", homeDirectory: "/tmp/codex-personal")
         codex.setEnabled(false, for: CodexAccount.defaultID)
+        let grok = GrokAccountStore(
+            userDefaults: grokDefaults,
+            refreshConfigurationDirectory: tempDirectory
+        )
+        grok.addAccount(name: "Build", homeDirectory: "/tmp/grok-build")
+        grok.setEnabled(false, for: GrokAccount.defaultID)
 
         let snapshot = try XCTUnwrap(
             UsageRefreshConfigurationStore.load(directory: tempDirectory)
@@ -58,15 +65,30 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.codexAccounts.count, 2)
         XCTAssertEqual(snapshot.codexAccounts.first(where: \.isDefault)?.isEnabled, false)
         XCTAssertEqual(snapshot.codexAccounts.first(where: { !$0.isDefault })?.homeDirectory, "/tmp/codex-personal")
+        XCTAssertEqual(snapshot.grokAccounts.count, 2)
+        XCTAssertEqual(snapshot.grokAccounts.first(where: \.isDefault)?.isEnabled, false)
+        XCTAssertEqual(snapshot.grokAccounts.first(where: { !$0.isDefault })?.homeDirectory, "/tmp/grok-build")
 
         // The CLI projections preserve exact enabled state and account order
         // without reading or writing a process-local preferences domain.
         let projectedVisibility = ProviderVisibilityStore(hiddenServices: snapshot.hiddenServices)
         let projectedClaude = ClaudeCodeAccountStore(accounts: snapshot.claudeAccounts)
         let projectedCodex = CodexAccountStore(accounts: snapshot.codexAccounts)
+        let projectedGrok = GrokAccountStore(accounts: snapshot.grokAccounts)
         XCTAssertFalse(projectedVisibility.isEnabled(.cursor))
         XCTAssertEqual(projectedClaude.enabledAccounts.map(\.name), ["Work"])
         XCTAssertEqual(projectedCodex.enabledAccounts.map(\.name), ["Personal"])
+        XCTAssertEqual(projectedGrok.enabledAccounts.map(\.name), ["Build"])
+    }
+
+    func testLegacyRefreshConfigurationWithoutGrokProjectionUsesDefaultProfile() throws {
+        UsageRefreshConfigurationStore.saveVisibility([], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveClaudeAccounts([.defaultAccount], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveCodexAccounts([.defaultAccount], directory: tempDirectory)
+
+        let snapshot = try XCTUnwrap(UsageRefreshConfigurationStore.load(directory: tempDirectory))
+
+        XCTAssertEqual(snapshot.grokAccounts, [.defaultAccount])
     }
 
     func testLoadFailsClosedWhenAnyProjectionIsMissing() {

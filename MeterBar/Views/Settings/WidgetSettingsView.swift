@@ -13,7 +13,8 @@ enum WidgetSettingsAccountProjection {
     static func options(
         enabledServices: Set<ServiceType>,
         claudeAccounts: [ClaudeCodeAccount],
-        codexAccounts: [CodexAccount]
+        codexAccounts: [CodexAccount],
+        grokAccounts: [GrokAccount] = []
     ) -> [WidgetSettingsAccountOption] {
         ServiceType.allCases.flatMap { service -> [WidgetSettingsAccountOption] in
             guard enabledServices.contains(service) else { return [] }
@@ -35,7 +36,15 @@ enum WidgetSettingsAccountProjection {
                         name: $0.name
                     )
                 }
-            case .cursor, .openRouter, .grok:
+            case .grok:
+                return grokAccounts.filter(\.isEnabled).map {
+                    WidgetSettingsAccountOption(
+                        id: .account(service: service, id: $0.id),
+                        service: service,
+                        name: $0.name
+                    )
+                }
+            case .cursor, .openRouter:
                 return [
                     WidgetSettingsAccountOption(
                         id: .provider(service),
@@ -95,6 +104,7 @@ struct WidgetSettingsPreviewData {
         metrics: [ServiceType: UsageMetrics],
         claudeAccountMetrics: [UUID: UsageMetrics],
         codexAccountMetrics: [UUID: UsageMetrics],
+        grokAccountMetrics: [UUID: UsageMetrics] = [:],
         now: Date = Date()
     ) -> Self {
         let optionIDs = Set(options.map(\.id))
@@ -110,7 +120,9 @@ struct WidgetSettingsPreviewData {
                 accountMetrics = claudeAccountMetrics[accountID]
             case .codexCli:
                 accountMetrics = codexAccountMetrics[accountID]
-            case .cursor, .openRouter, .grok:
+            case .grok:
+                accountMetrics = grokAccountMetrics[accountID]
+            case .cursor, .openRouter:
                 accountMetrics = nil
             }
             guard optionIDs.contains(option.id), let accountMetrics, accountMetrics.hasData else {
@@ -193,6 +205,7 @@ struct WidgetSettingsView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @State private var previewAppearance: WidgetSettingsPreviewAppearance = .light
 
@@ -213,7 +226,8 @@ struct WidgetSettingsView: View {
         WidgetSettingsAccountProjection.options(
             enabledServices: providerVisibility.enabledServices,
             claudeAccounts: claudeAccountStore.accounts,
-            codexAccounts: codexAccountStore.accounts
+            codexAccounts: codexAccountStore.accounts,
+            grokAccounts: grokAccountStore.accounts
         )
     }
 
@@ -394,7 +408,8 @@ struct WidgetSettingsView: View {
             options: accountOptions,
             metrics: dataManager.metrics,
             claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-            codexAccountMetrics: dataManager.codexAccountMetrics
+            codexAccountMetrics: dataManager.codexAccountMetrics,
+            grokAccountMetrics: dataManager.grokAccountMetrics
         )
     }
 

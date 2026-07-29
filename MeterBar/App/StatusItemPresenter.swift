@@ -116,12 +116,13 @@ final class StatusItemPresenter {
             ?? MenuBarAccountSelectionStore.shared.mergedAccountKey
     }
 
-    /// Every tracked Claude and Codex account, already sanitized for display.
+    /// Every tracked account-aware provider profile, sanitized for display.
     @MainActor
     func menuBarAccounts() -> [MenuBarAccountIdentity] {
         MenuBarAccountCatalog.identities(
             claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
             codexAccounts: CodexAccountStore.shared.accounts,
+            grokAccounts: GrokAccountStore.shared.accounts,
             enabledServices: ProviderVisibilityStore.shared.enabledServices
         )
     }

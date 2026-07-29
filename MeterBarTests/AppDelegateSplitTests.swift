@@ -332,6 +332,35 @@ final class AppDelegateSplitTests: XCTestCase {
         ))
     }
 
+    func testGrokMetricsFallsBackOnlyForASoleDefaultAccountWithoutAccountData() {
+        let providerMetrics = UsageMetrics(
+            service: .grok,
+            sessionLimit: UsageLimit(used: 65, total: 100, resetTime: nil)
+        )
+
+        XCTAssertEqual(
+            StatusLimitProbeRequestBuilder.grokMetrics(
+                for: .defaultAccount,
+                enabledAccountCount: 1,
+                accountMetrics: [:],
+                providerMetrics: providerMetrics
+            )?.sessionLimit?.used,
+            65
+        )
+        XCTAssertNil(StatusLimitProbeRequestBuilder.grokMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 2,
+            accountMetrics: [:],
+            providerMetrics: providerMetrics
+        ))
+        XCTAssertNil(StatusLimitProbeRequestBuilder.grokMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 1,
+            accountMetrics: [UUID(): providerMetrics],
+            providerMetrics: providerMetrics
+        ))
+    }
+
     func testCandidatesStampSeedsWithTheProbedActivity() {
         let probed = Self.referenceDate
         let seed = StatusLimitCandidateSeed(

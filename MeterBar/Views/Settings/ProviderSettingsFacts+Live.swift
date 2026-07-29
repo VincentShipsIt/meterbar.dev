@@ -46,12 +46,7 @@ extension ProviderSettingsFacts {
                     OpenRouterService.shared.lastError?.localizedDescription
                 )
             case .grok:
-                (
-                    GrokCLIUsageService.shared.hasAccess,
-                    GrokCLIUsageService.shared.subscriptionType,
-                    nil,
-                    GrokCLIUsageService.shared.lastError?.localizedDescription
-                )
+                grokLiveState()
             }
 
         return ProviderSettingsFacts(
@@ -66,6 +61,23 @@ extension ProviderSettingsFacts {
             codexAuthFileDisplayPath: CodexHomeDirectory.authFileDisplayPath(
                 for: CodexAccountStore.shared.accounts.first(where: \.isDefault) ?? .defaultAccount
             )
+        )
+    }
+
+    @MainActor
+    private static func grokLiveState() -> (
+        hasAccess: Bool,
+        subscription: String?,
+        tier: String?,
+        error: String?
+    ) {
+        let service = GrokCLIUsageService.shared
+        let accounts = GrokAccountStore.shared.enabledAccounts
+        return (
+            accounts.contains(where: service.canAccess(account:)),
+            service.subscriptionType,
+            nil,
+            service.firstError(for: accounts)?.localizedDescription
         )
     }
 }

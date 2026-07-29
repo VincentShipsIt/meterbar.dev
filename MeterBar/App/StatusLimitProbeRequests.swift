@@ -85,6 +85,26 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 ))
             }
         }
+        if visibility.isEnabled(.grok) {
+            let enabledAccounts = GrokAccountStore.shared.enabledAccounts
+            for account in enabledAccounts {
+                guard let accountMetrics = grokMetrics(
+                    for: account,
+                    enabledAccountCount: enabledAccounts.count,
+                    accountMetrics: UsageDataManager.shared.grokAccountMetrics,
+                    providerMetrics: metrics[.grok]
+                ) else { continue }
+                let source = StatusLimitSource(
+                    service: .grok,
+                    accountID: account.id,
+                    accountKey: MenuBarAccountKey.make(service: .grok, accountID: account.id),
+                    autoSelectionKey: "grok:\(account.id.uuidString)",
+                    displayName: "\(account.name) (\(ServiceType.grok.displayName))",
+                    metrics: accountMetrics
+                )
+                requests.append(request(source: source, probe: { nil }))
+            }
+        }
         if visibility.isEnabled(.cursor), let cursorMetrics = metrics[.cursor] {
             let source = StatusLimitSource(
                 service: .cursor,
@@ -173,6 +193,22 @@ nonisolated enum StatusLimitProbeRequestBuilder {
     /// default profile's quota.
     static func codexMetrics(
         for account: CodexAccount,
+        enabledAccountCount: Int,
+        accountMetrics: [UUID: UsageMetrics],
+        providerMetrics: UsageMetrics?
+    ) -> UsageMetrics? {
+        let fallbackMetrics = account.isDefault
+            && enabledAccountCount == 1
+            && accountMetrics.isEmpty
+            ? providerMetrics
+            : nil
+        return accountMetrics[account.id] ?? fallbackMetrics
+    }
+
+    /// Grok follows the same cache-identity rule as Codex: a provider-wide
+    /// compatibility snapshot can represent only the sole default profile.
+    static func grokMetrics(
+        for account: GrokAccount,
         enabledAccountCount: Int,
         accountMetrics: [UUID: UsageMetrics],
         providerMetrics: UsageMetrics?
