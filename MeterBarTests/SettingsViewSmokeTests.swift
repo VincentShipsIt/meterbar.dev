@@ -86,7 +86,7 @@ final class SettingsViewSmokeTests: XCTestCase {
     /// last month (so `monthToDateCostWindow` has something to filter), plus
     /// a project rollup that includes an explicit "unknown" bucket and a
     /// nested model breakdown — the shape `CostPeriodContentView` renders.
-    private func makeSyntheticCostSummary() -> CostSummary {
+    private func makeSyntheticCostSummary(includeDailyAttribution: Bool = true) -> CostSummary {
         let calendar = Calendar(identifier: .gregorian)
         let thisMonthDay = calendar.date(byAdding: .day, value: 2, to: referenceMonthStart)!
         let lastMonthDay = calendar.date(byAdding: .day, value: -3, to: referenceMonthStart)!
@@ -137,6 +137,28 @@ final class SettingsViewSmokeTests: XCTestCase {
             ]
         )
 
+        let dailyModel = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "claude-opus-5",
+            inputTokens: 500,
+            outputTokens: 125,
+            cacheCreationTokens: 25,
+            cacheReadTokens: 250,
+            estimatedCostUSD: 6,
+            sessionCount: 2
+        )
+        let dailyProject = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "www/example/app",
+            inputTokens: 500,
+            outputTokens: 125,
+            cacheCreationTokens: 25,
+            cacheReadTokens: 250,
+            estimatedCostUSD: 6,
+            sessionCount: 2,
+            modelBreakdowns: [dailyModel]
+        )
+
         return CostSummary(
             costs: [cost],
             totalCostUSD: 12.5,
@@ -149,7 +171,9 @@ final class SettingsViewSmokeTests: XCTestCase {
                     inputTokens: 500,
                     outputTokens: 125,
                     cacheReadTokens: 250,
-                    estimatedCostUSD: 6
+                    estimatedCostUSD: 6,
+                    modelBreakdowns: includeDailyAttribution ? [dailyModel] : nil,
+                    projectBreakdowns: includeDailyAttribution ? [dailyProject] : nil
                 ),
                 DailyTokenUsage(
                     date: lastMonthDay,
@@ -172,11 +196,26 @@ final class SettingsViewSmokeTests: XCTestCase {
     }
 
     func testCostPeriodContentRendersMonthToDateWindowFromCachedDailyUsage() {
-        let view = CostPeriodContentView(summary: makeSyntheticCostSummary(), periodMode: .monthToDate, currency: nil)
-        let hostingView = NSHostingView(rootView: view.frame(width: 640))
-        hostingView.layoutSubtreeIfNeeded()
+        let calendar = Calendar(identifier: .gregorian)
+        let stableNow = calendar.date(byAdding: .day, value: 2, to: referenceMonthStart)!
+        let attributed = CostPeriodContentView(
+            summary: makeSyntheticCostSummary(),
+            periodMode: .monthToDate,
+            currency: nil,
+            monthToDateNow: stableNow
+        )
+        let legacy = CostPeriodContentView(
+            summary: makeSyntheticCostSummary(includeDailyAttribution: false),
+            periodMode: .monthToDate,
+            currency: nil,
+            monthToDateNow: stableNow
+        )
+        let attributedView = NSHostingView(rootView: attributed.frame(width: 640))
+        let legacyView = NSHostingView(rootView: legacy.frame(width: 640))
+        attributedView.layoutSubtreeIfNeeded()
+        legacyView.layoutSubtreeIfNeeded()
 
-        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
+        XCTAssertGreaterThan(attributedView.fittingSize.height, legacyView.fittingSize.height)
     }
 
     func testCostPeriodContentRendersConvertedCurrencyCaptionWhenSupplied() {

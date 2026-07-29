@@ -50,6 +50,31 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         self.projectBreakdowns = projectBreakdowns
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try container.decode(Int.self, forKey: .cacheCreationTokens)
+        cacheReadTokens = try container.decode(Int.self, forKey: .cacheReadTokens)
+        estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
+        sessionCount = try container.decode(Int.self, forKey: .sessionCount)
+        periodStart = try container.decode(Date.self, forKey: .periodStart)
+        periodEnd = try container.decode(Date.self, forKey: .periodEnd)
+        modelBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .modelBreakdowns
+        ) ?? []
+        originBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .originBreakdowns
+        ) ?? []
+        projectBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .projectBreakdowns
+        ) ?? []
+    }
+
     public var totalTokens: Int {
         inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
     }
@@ -102,6 +127,22 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         self.modelBreakdowns = modelBreakdowns
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        name = try container.decode(String.self, forKey: .name)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try container.decode(Int.self, forKey: .cacheCreationTokens)
+        cacheReadTokens = try container.decode(Int.self, forKey: .cacheReadTokens)
+        estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
+        sessionCount = try container.decode(Int.self, forKey: .sessionCount)
+        modelBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .modelBreakdowns
+        ) ?? []
+    }
+
     public var totalTokens: Int {
         inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
     }
@@ -124,6 +165,14 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     public let outputTokens: Int
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
+    /// Day × model attribution from the v2 cost cache. `nil` means the row
+    /// came from a v1 cache that predates attribution; an empty array means a
+    /// v2 scan ran but had no model rows.
+    public let modelBreakdowns: [TokenUsageBreakdown]?
+    /// Day × project attribution, including each project's model slice.
+    /// Project names have already passed through `CostProjectAttribution`;
+    /// raw paths are never persisted here.
+    public let projectBreakdowns: [TokenUsageBreakdown]?
 
     public init(
         date: Date,
@@ -131,7 +180,9 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         inputTokens: Int,
         outputTokens: Int,
         cacheReadTokens: Int,
-        estimatedCostUSD: Double
+        estimatedCostUSD: Double,
+        modelBreakdowns: [TokenUsageBreakdown]? = nil,
+        projectBreakdowns: [TokenUsageBreakdown]? = nil
     ) {
         self.date = date
         self.provider = provider
@@ -139,6 +190,8 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.outputTokens = outputTokens
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
+        self.modelBreakdowns = modelBreakdowns
+        self.projectBreakdowns = projectBreakdowns
     }
 
     public var totalTokens: Int {
@@ -273,6 +326,11 @@ nonisolated public struct CostSummary: Codable, Sendable {
     ) -> Bool {
         guard !costs.isEmpty, totalTokens > 0 else { return false }
         guard !dailyUsage.isEmpty else { return true }
+        guard dailyUsage.allSatisfy({
+            $0.modelBreakdowns != nil && $0.projectBreakdowns != nil
+        }) else {
+            return true
+        }
 
         let today = calendar.startOfDay(for: now)
         if let lastScanDate,
@@ -316,19 +374,25 @@ nonisolated public struct CostSummary: Codable, Sendable {
             return day >= startDate && day <= today
         }
 
-        var byProvider: [ServiceType: ProviderDailyTotal] = [:]
-        for row in windowRows {
-            let existing = byProvider[row.provider]
-            byProvider[row.provider] = ProviderDailyTotal(
-                provider: row.provider,
-                inputTokens: (existing?.inputTokens ?? 0) + row.inputTokens,
-                outputTokens: (existing?.outputTokens ?? 0) + row.outputTokens,
-                cacheReadTokens: (existing?.cacheReadTokens ?? 0) + row.cacheReadTokens,
-                estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + row.estimatedCostUSD
-            )
-        }
-
-        let providers = byProvider.values.sorted { $0.provider.rawValue < $1.provider.rawValue }
+        let providers = Dictionary(grouping: windowRows, by: \.provider)
+            .map { provider, rows in
+                let hasCompleteModels = rows.allSatisfy { $0.modelBreakdowns != nil }
+                let hasCompleteProjects = rows.allSatisfy { $0.projectBreakdowns != nil }
+                return ProviderDailyTotal(
+                    provider: provider,
+                    inputTokens: rows.reduce(0) { $0 + $1.inputTokens },
+                    outputTokens: rows.reduce(0) { $0 + $1.outputTokens },
+                    cacheReadTokens: rows.reduce(0) { $0 + $1.cacheReadTokens },
+                    estimatedCostUSD: rows.reduce(0) { $0 + $1.estimatedCostUSD },
+                    modelBreakdowns: hasCompleteModels
+                        ? TokenUsageBreakdownAggregation.merge(rows.flatMap { $0.modelBreakdowns ?? [] })
+                        : nil,
+                    projectBreakdowns: hasCompleteProjects
+                        ? TokenUsageBreakdownAggregation.merge(rows.flatMap { $0.projectBreakdowns ?? [] })
+                        : nil
+                )
+            }
+            .sorted { $0.provider.rawValue < $1.provider.rawValue }
 
         // Days the cache demonstrably spans: earliest daily row through today,
         // inclusive. Zero-usage days inside that span carry no row, so this is
@@ -397,19 +461,29 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
     public let outputTokens: Int
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
+    /// `nil` when any included row predates cache v2; otherwise the model
+    /// rollup over exactly the same days as this provider total.
+    public let modelBreakdowns: [TokenUsageBreakdown]?
+    /// `nil` when any included row predates cache v2; otherwise the project
+    /// rollup (with nested models) over exactly the same days.
+    public let projectBreakdowns: [TokenUsageBreakdown]?
 
     public init(
         provider: ServiceType,
         inputTokens: Int,
         outputTokens: Int,
         cacheReadTokens: Int,
-        estimatedCostUSD: Double
+        estimatedCostUSD: Double,
+        modelBreakdowns: [TokenUsageBreakdown]? = nil,
+        projectBreakdowns: [TokenUsageBreakdown]? = nil
     ) {
         self.provider = provider
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
+        self.modelBreakdowns = modelBreakdowns
+        self.projectBreakdowns = projectBreakdowns
     }
 
     /// Daily rows omit cache-creation tokens, so this is input + output + cache-read.
@@ -458,5 +532,36 @@ nonisolated public struct DailyCostWindow: Codable, Sendable {
 
     public var formattedTotalCost: String {
         UsageFormat.cost(totalCostUSD)
+    }
+}
+
+/// Sums persisted day-level attribution without repricing it. Daily rows
+/// already carry the exact model-aware estimated cost produced by the scan, so
+/// recomputing from provider defaults here could drift from the provider total.
+nonisolated private enum TokenUsageBreakdownAggregation {
+    static func merge(_ rows: [TokenUsageBreakdown]) -> [TokenUsageBreakdown] {
+        var byName: [String: TokenUsageBreakdown] = [:]
+
+        for row in rows {
+            let existing = byName[row.name]
+            byName[row.name] = TokenUsageBreakdown(
+                provider: row.provider,
+                name: row.name,
+                inputTokens: (existing?.inputTokens ?? 0) + row.inputTokens,
+                outputTokens: (existing?.outputTokens ?? 0) + row.outputTokens,
+                cacheCreationTokens: (existing?.cacheCreationTokens ?? 0) + row.cacheCreationTokens,
+                cacheReadTokens: (existing?.cacheReadTokens ?? 0) + row.cacheReadTokens,
+                estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + row.estimatedCostUSD,
+                sessionCount: (existing?.sessionCount ?? 0) + row.sessionCount,
+                modelBreakdowns: merge((existing?.modelBreakdowns ?? []) + row.modelBreakdowns)
+            )
+        }
+
+        return byName.values.sorted { lhs, rhs in
+            if lhs.estimatedCostUSD == rhs.estimatedCostUSD {
+                return lhs.totalTokens > rhs.totalTokens
+            }
+            return lhs.estimatedCostUSD > rhs.estimatedCostUSD
+        }
     }
 }
