@@ -64,8 +64,8 @@ class UsageDataManager: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
     /// Human-readable explanation for the interval currently installed. The
-    /// Diagnostics page observes this value; no activity timestamps are exposed.
-    @Published private(set) var effectiveRefreshReason = "Fixed interval selected."
+    /// Diagnostics page reads this value; no activity timestamps are exposed.
+    private(set) var effectiveRefreshReason = "Fixed interval selected."
 
     /// Advances once per committed metric snapshot. Notification checks subscribe
     /// to this rather than polling on a timer, so a limit crossing is evaluated
@@ -715,7 +715,9 @@ class UsageDataManager: ObservableObject {
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] _ in
-            self?.rescheduleAdaptiveRefreshIfNeeded()
+            guard let self, self.refreshInterval == .adaptive else { return }
+            self.objectWillChange.send()
+            self.rescheduleAdaptiveRefreshIfNeeded()
         }
         .store(in: &cadenceCancellables)
     }
