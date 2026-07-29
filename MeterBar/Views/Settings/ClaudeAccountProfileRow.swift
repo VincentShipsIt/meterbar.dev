@@ -10,24 +10,100 @@ enum AccountProfileRowMetrics {
     static let actionWidth: CGFloat = 28
 }
 
+enum ClaudeAccountRowActionRoute: Equatable {
+    case performRefresh
+    case requestReconnectConfirmation
+}
+
+/// Presentation and routing contract for the two account-auth actions.
+///
+/// `arrow.clockwise` is intentionally exclusive to the non-mutating refresh.
+/// Reconnect is visibly labeled, uses a key symbol, and can only route to a
+/// confirmation request.
+enum ClaudeAccountRowAction: Equatable {
+    case refresh
+    case reconnect
+
+    var title: String {
+        switch self {
+        case .refresh:
+            "Refresh"
+        case .reconnect:
+            "Reconnect"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .refresh:
+            "arrow.clockwise"
+        case .reconnect:
+            "key.horizontal"
+        }
+    }
+
+    var route: ClaudeAccountRowActionRoute {
+        switch self {
+        case .refresh:
+            .performRefresh
+        case .reconnect:
+            .requestReconnectConfirmation
+        }
+    }
+
+    var showsVisibleTitle: Bool {
+        self == .reconnect
+    }
+
+    func accessibilityLabel(accountName: String) -> String {
+        "\(title) \(accountName)"
+    }
+
+    func help(accountName: String) -> String {
+        switch self {
+        case .refresh:
+            "Refresh status and usage for \(accountName)"
+        case .reconnect:
+            "Log out and sign in again for \(accountName)"
+        }
+    }
+}
+
+enum ClaudeReconnectConfirmation {
+    static let confirmButtonTitle = "Reconnect"
+
+    static func title(for account: ClaudeCodeAccount) -> String {
+        "Reconnect \(account.name)?"
+    }
+
+    static func message(for account: ClaudeCodeAccount) -> String {
+        "Terminal will open, log out the \(account.name) Claude profile, then ask you to sign in again."
+    }
+}
+
 // MARK: - AccountProfileRow
 
 /// One editable Claude Code account row (name + config directory + enable /
-/// reconnect / save / delete). Extracted verbatim from the SettingsView
-/// monolith. The default profile cannot be removed.
+/// refresh / reconnect / save / delete). The default profile cannot be removed.
 struct AccountProfileRow: View {
     // MARK: Lifecycle
 
     init(
         account: ClaudeCodeAccount,
+        authState: ClaudeCodeAuthState?,
+        isRefreshing: Bool,
         onEnabledChange: @escaping (Bool) -> Void,
         onSave: @escaping (String, String?) -> Void,
+        onRefresh: @escaping () -> Void,
         onReconnect: @escaping () -> Void,
         onRemove: @escaping () -> Void
     ) {
         self.account = account
+        self.authState = authState
+        self.isRefreshing = isRefreshing
         self.onEnabledChange = onEnabledChange
         self.onSave = onSave
+        self.onRefresh = onRefresh
         self.onReconnect = onReconnect
         self.onRemove = onRemove
         _nameDraft = State(initialValue: account.name)
@@ -37,8 +113,11 @@ struct AccountProfileRow: View {
     // MARK: Internal
 
     let account: ClaudeCodeAccount
+    let authState: ClaudeCodeAuthState?
+    let isRefreshing: Bool
     let onEnabledChange: (Bool) -> Void
     let onSave: (String, String?) -> Void
+    let onRefresh: () -> Void
     let onReconnect: () -> Void
     let onRemove: () -> Void
 
@@ -65,6 +144,11 @@ struct AccountProfileRow: View {
                         tint: account.isDefault ? MeterBarTheme.appAccent : MeterBarTheme.claudeAccent,
                         style: .glass
                     )
+
+                    StatusPill(
+                        presentation: .claude(authState, isEnabled: account.isEnabled)
+                    )
+                    .font(.caption)
                 }
 
                 HStack(spacing: 8) {
@@ -102,13 +186,12 @@ struct AccountProfileRow: View {
                 .controlSize(.small)
                 .help(account.isEnabled ? "Disable account" : "Enable account")
 
-                Button(action: onReconnect) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(width: AccountProfileRowMetrics.actionWidth)
-                .help("Reconnect Claude profile")
+                accountActionButton(.refresh)
+                    .frame(width: AccountProfileRowMetrics.actionWidth)
+                    .disabled(!account.isEnabled || isRefreshing)
+
+                accountActionButton(.reconnect)
+                    .disabled(isRefreshing)
 
                 Button(action: saveChanges) {
                     Image(systemName: "checkmark")
@@ -140,12 +223,23 @@ struct AccountProfileRow: View {
             nameDraft = updatedAccount.name
             configDirectoryDraft = Self.resolvedConfigDirectory(for: updatedAccount)
         }
+        .confirmationDialog(
+            ClaudeReconnectConfirmation.title(for: account),
+            isPresented: $showingReconnectConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(ClaudeReconnectConfirmation.confirmButtonTitle, role: .destructive, action: onReconnect)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(ClaudeReconnectConfirmation.message(for: account))
+        }
     }
 
     // MARK: Private
 
     @State private var nameDraft: String
     @State private var configDirectoryDraft: String
+    @State private var showingReconnectConfirmation = false
 
     private var trimmedName: String {
         nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -188,6 +282,37 @@ struct AccountProfileRow: View {
 
     private static func resolvedConfigDirectory(for account: ClaudeCodeAccount) -> String {
         account.configDirectory ?? (account.isDefault ? ClaudeCodeAccount.defaultConfigDirectory() : "")
+    }
+
+    private func accountActionButton(_ action: ClaudeAccountRowAction) -> some View {
+        Button {
+            route(action)
+        } label: {
+            if isRefreshing, action == .refresh {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(action.accessibilityLabel(accountName: account.name))
+            } else if action.showsVisibleTitle {
+                Label(action.title, systemImage: action.systemImage)
+            } else {
+                Label(action.title, systemImage: action.systemImage)
+                    .labelStyle(.iconOnly)
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .accessibilityLabel(action.accessibilityLabel(accountName: account.name))
+        .accessibilityHint(action.help(accountName: account.name))
+        .help(action.help(accountName: account.name))
+    }
+
+    private func route(_ action: ClaudeAccountRowAction) {
+        switch action.route {
+        case .performRefresh:
+            onRefresh()
+        case .requestReconnectConfirmation:
+            showingReconnectConfirmation = true
+        }
     }
 
     private func chooseConfigDirectory() {

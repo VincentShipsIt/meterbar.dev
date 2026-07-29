@@ -78,6 +78,7 @@ struct ProviderSettingsView: View {
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
     @State private var isAddingGrokAccount = false
+    @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
     @State private var openRouterKeyDraft = ""
 
@@ -156,7 +157,8 @@ struct ProviderSettingsView: View {
                 Button {
                     refreshProvider(service)
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Label("Refresh \(service.displayName)", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
                 .help("Refresh \(service.displayName)")
@@ -311,7 +313,12 @@ struct ProviderSettingsView: View {
         SettingsPanelSection(title: "Claude Code (Pro/Max)", logoKind: .claude, color: MeterBarTheme.claudeAccent) {
             SettingsRowView(title: "CLI status") {
                 HStack(spacing: 8) {
-                    StatusPill(title: claudeCodeService.authState.statusText, isConnected: claudeCodeService.hasAccess)
+                    StatusPill(
+                        presentation: .claude(
+                            defaultClaudeAuthState,
+                            isEnabled: claudeAccountStore.defaultAccountIsEnabled
+                        )
+                    )
 
                     Button {
                         // This is an explicit user action, so it is the one
@@ -397,6 +404,8 @@ struct ProviderSettingsView: View {
                         }
                         AccountProfileRow(
                             account: account,
+                            authState: claudeAuthState(for: account),
+                            isRefreshing: refreshingClaudeAccountIDs.contains(account.id),
                             onEnabledChange: { isEnabled in
                                 claudeAccountStore.setEnabled(isEnabled, for: account.id)
                                 SessionWakeSettingsStore.shared.reconcileAccounts(
@@ -407,6 +416,7 @@ struct ProviderSettingsView: View {
                             onSave: { name, configDirectory in
                                 updateClaudeAccount(id: account.id, name: name, configDirectory: configDirectory)
                             },
+                            onRefresh: { refreshClaudeAccount(account) },
                             onReconnect: { reconnectClaudeAccount(account) },
                             onRemove: {
                                 claudeAccountStore.removeAccount(id: account.id)
@@ -814,6 +824,23 @@ struct ProviderSettingsView: View {
             try ClaudeCodeReconnectService.openReconnectTerminal(for: account)
         } catch {
             claudeReconnectError = error.localizedDescription
+        }
+    }
+
+    private var defaultClaudeAuthState: ClaudeCodeAuthState? {
+        dataManager.claudeCodeAccountStates[ClaudeCodeAccount.defaultID] ?? claudeCodeService.authState
+    }
+
+    private func claudeAuthState(for account: ClaudeCodeAccount) -> ClaudeCodeAuthState? {
+        dataManager.claudeCodeAccountStates[account.id]
+            ?? (account.isDefault ? claudeCodeService.authState : nil)
+    }
+
+    private func refreshClaudeAccount(_ account: ClaudeCodeAccount) {
+        guard refreshingClaudeAccountIDs.insert(account.id).inserted else { return }
+        Task { @MainActor in
+            defer { refreshingClaudeAccountIDs.remove(account.id) }
+            await dataManager.refreshClaudeCodeAccount(id: account.id)
         }
     }
 }
