@@ -3,6 +3,12 @@ import MeterBarShared
 
 /// Owns diagnostics input mapping, readiness inspection, and report formatting.
 enum DiagnosticsRunner {
+    struct RefreshCadence: Equatable {
+        let selection: String
+        let effectiveInterval: String
+        let reason: String
+    }
+
     struct InputKey: Equatable {
         let providers: [ServiceType]
         let defaultClaudeAccountEnabled: Bool
@@ -57,7 +63,33 @@ enum DiagnosticsRunner {
         return ProviderReadinessSummary(reports: reports).displayText
     }
 
-    static func reportText(for reports: [ProviderReadiness]) -> String {
-        DiagnosticsReportText.plainText(reports)
+    static func refreshCadence(
+        selection: RefreshInterval,
+        effectiveInterval: TimeInterval?,
+        reason: String
+    ) -> RefreshCadence {
+        RefreshCadence(
+            selection: selection.displayName,
+            effectiveInterval: effectiveInterval.map(intervalText) ?? "Not scheduled",
+            reason: reason
+        )
+    }
+
+    static func reportText(
+        for reports: [ProviderReadiness],
+        refreshCadence: RefreshCadence? = nil
+    ) -> String {
+        let providerReport = DiagnosticsReportText.plainText(reports)
+        guard let refreshCadence else { return providerReport }
+        let cadenceReport = """
+        Refresh cadence: \(refreshCadence.selection) · \(refreshCadence.effectiveInterval)
+        Reason: \(refreshCadence.reason)
+        """
+        return providerReport.isEmpty ? cadenceReport : "\(cadenceReport)\n\n\(providerReport)"
+    }
+
+    private static func intervalText(_ interval: TimeInterval) -> String {
+        let minutes = Int((interval / 60).rounded())
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
     }
 }

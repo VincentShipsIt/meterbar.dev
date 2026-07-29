@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-26 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-29 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -66,7 +66,7 @@ meterbar/
 
 ## Services (all `.shared` singletons)
 
-- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a non-overlapping `Timer` auto-refresh (default 10 min; `RefreshInterval` supports 1/2/5/10/15/30 min + manual). The app forwards system wake events so stale enabled data catches up once without replaying missed ticks.
+- **UsageDataManager** (`@MainActor`, ObservableObject) — orchestrates refresh across providers, caches to UserDefaults (`cached_usage_metrics`), mirrors to the app group via SharedDataStore, records per-provider refresh outcomes in `ProviderParseHealthStore`, and drives a non-overlapping `Timer` auto-refresh (default 10 min; `RefreshInterval` supports opt-in Adaptive, 1/2/5/10/15/30 min, and manual). Adaptive installs a reschedulable one-shot timer bounded to 1–30 minutes from ephemeral MeterBar interaction/quota-movement and local power/thermal signals; fixed choices retain repeating timers. The app forwards system wake events so stale enabled data catches up once without replaying missed ticks.
 - **ClaudeCodeCLIUsageService** — fallback source. Resolves the `claude` binary (`CLAUDE_CLI_PATH`, `$PATH`, 7 fallback paths), runs `claude /usage` (12 s timeout, dedicated GCD queue bridged to async), parses output with `ClaudeCodeCLIUsageParser`. `/usage` no longer renders in a headless spawn (it prints a session cost summary), so the parser detects that shape and throws a legible error. Multi-account via `CLAUDE_CONFIG_DIR` env injection.
 - **ClaudeCodeLocalService** — OAuth-primary wrapper. Every profile resolves only its own scoped Keychain/file credential before calling `api.anthropic.com/api/oauth/usage`; a missing credential retains the CLI fallback, while an expired credential must pass delegated-refresh verification before it is re-read once. The model-scoped third window retains its provider label (`Sonnet` or `Fable`) and remains non-blocking for provider-wide health. The existing OAuth opt-out remains the source-selection switch.
 - **ClaudeTokenRefresher** — per-account delegated rotation coordinator. It coalesces concurrent attempts, applies persistent per-account outcome cooldowns (manual refresh bypasses a stored cooldown but joins in-flight work), runs `claude /status` with the account environment, captures no process output, and reports success only after the scoped credential's Keychain modification date or file modification date/size changes.

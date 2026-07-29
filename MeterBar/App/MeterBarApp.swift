@@ -255,7 +255,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Opening the popover always pulls fresh data — providers read
             // local files, so this is cheap and the popover never shows a
             // stale snapshot from the last timer tick.
-            Task { await UsageDataManager.shared.refreshAll() }
+            Task {
+                await UsageDataManager.shared.refreshForExplicitAction(.popoverOpened)
+            }
         }
     }
 

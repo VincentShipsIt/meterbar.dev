@@ -181,6 +181,10 @@ final class UsageDataManagerTests: XCTestCase {
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = false,
+        adaptiveNow: @escaping @Sendable () -> Date = { Date() },
+        adaptivePowerState: @escaping @Sendable () -> AdaptiveRefreshPowerState = {
+            .unconstrained
+        },
         demoMode: Bool = false
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
@@ -226,6 +230,8 @@ final class UsageDataManagerTests: XCTestCase {
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
             schedulesAutoRefresh: schedulesAutoRefresh,
+            adaptiveNow: adaptiveNow,
+            adaptivePowerState: adaptivePowerState,
             demoMode: demoMode
         )
         return (manager, sharedStore)
@@ -751,6 +757,7 @@ final class UsageDataManagerTests: XCTestCase {
 
     func testExistingRefreshPreferencesArePreserved() {
         let existingChoices: [RefreshInterval] = [
+            .adaptive,
             .oneMinute,
             .twoMinutes,
             .fiveMinutes,
@@ -785,6 +792,127 @@ final class UsageDataManagerTests: XCTestCase {
 
         manager.refreshInterval = .manual
         XCTAssertNil(manager.scheduledRefreshInterval)
+    }
+
+    func testEveryFixedIntervalKeepsItsRepeatingTimerCadence() throws {
+        let fixedIntervals: [RefreshInterval] = [
+            .oneMinute,
+            .twoMinutes,
+            .fiveMinutes,
+            .tenMinutes,
+            .fifteenMinutes,
+            .thirtyMinutes,
+        ]
+
+        for fixedInterval in fixedIntervals {
+            let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+            let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+            let (manager, _) = makeManager(
+                codex: codex,
+                cursor: cursor,
+                savedRefreshInterval: fixedInterval,
+                schedulesAutoRefresh: true
+            )
+
+            XCTAssertEqual(
+                try XCTUnwrap(manager.scheduledRefreshInterval),
+                fixedInterval.seconds,
+                accuracy: 0.01
+            )
+            XCTAssertTrue(manager.scheduledRefreshRepeats)
+        }
+    }
+
+    func testAdaptiveSchedulerStartsIdleAndReschedulesAfterExplicitInteraction() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 1_800, accuracy: 0.01)
+        XCTAssertFalse(manager.scheduledRefreshRepeats)
+
+        await manager.refreshForExplicitAction(.manualRefresh)
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 120, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentInteraction.displayText)
+    }
+
+    func testAdaptiveSchedulerReschedulesToFastBoundWhenQuotaMoves() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let cached = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+            lastUpdated: now.addingTimeInterval(-60)
+        )
+        let refreshed = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 11, total: 100, resetTime: nil),
+            lastUpdated: now
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(refreshed))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.codexCli],
+            preload: [.cursor: cached],
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
+    }
+
+    func testAdaptiveSchedulerUsesInjectedPowerAndThermalSignals() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptivePowerState: {
+                AdaptiveRefreshPowerState(
+                    isOnBattery: false,
+                    isLowPowerModeEnabled: false,
+                    thermalState: .serious
+                )
+            }
+        )
+
+        XCTAssertEqual(manager.scheduledRefreshInterval, 1_800)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.thermalPressure.displayText)
+    }
+
+    func testExplicitActionsBypassCadenceWithoutMakingPopoverCredentialReadsInteractive() async {
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            savedRefreshInterval: .adaptive
+        )
+
+        await manager.refreshForExplicitAction(.popoverOpened)
+        await manager.refreshForExplicitAction(.manualRefresh)
+
+        XCTAssertEqual(claude.refreshTriggers, [.background, .userInitiated])
     }
 
     func testRefreshAllSkipsOverlappingCycle() async {

@@ -37,6 +37,22 @@ struct DashboardDiagnosticsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             DashboardCard(
+                title: "Refresh Cadence",
+                trailing: refreshCadenceDiagnostic.effectiveInterval
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(refreshCadenceDiagnostic.reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if dataManager.refreshInterval == .adaptive {
+                        Text("Adaptive range: 1–30 minutes. Activity signals stay in memory and are never sent.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            DashboardCard(
                 title: "Provider Diagnostics",
                 trailing: DiagnosticsRunner.summary(for: readinessReports)
             ) {
@@ -91,6 +107,14 @@ struct DashboardDiagnosticsSection: View {
         )
     }
 
+    private var refreshCadenceDiagnostic: DiagnosticsRunner.RefreshCadence {
+        DiagnosticsRunner.refreshCadence(
+            selection: dataManager.refreshInterval,
+            effectiveInterval: dataManager.scheduledRefreshInterval,
+            reason: dataManager.effectiveRefreshReason
+        )
+    }
+
     /// Runs the readiness inspector off the main actor (it does keychain / file /
     /// SQLite I/O) and publishes the reports back on the main actor. The only
     /// caller that can overlap this is the Re-run button, which is disabled while
@@ -129,7 +153,10 @@ struct DashboardDiagnosticsSection: View {
     }
 
     private func copyDiagnosticsToClipboard() {
-        let text = DiagnosticsRunner.reportText(for: readinessReports)
+        let text = DiagnosticsRunner.reportText(
+            for: readinessReports,
+            refreshCadence: refreshCadenceDiagnostic
+        )
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }

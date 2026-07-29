@@ -63,6 +63,9 @@ class UsageDataManager: ObservableObject {
     @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
+    /// Human-readable explanation for the interval currently installed. The
+    /// Diagnostics page observes this value; no activity timestamps are exposed.
+    @Published private(set) var effectiveRefreshReason = "Fixed interval selected."
 
     /// Advances once per committed metric snapshot. Notification checks subscribe
     /// to this rather than polling on a timer, so a limit crossing is evaluated
@@ -101,10 +104,18 @@ class UsageDataManager: ObservableObject {
 
     private var refreshTimer: Timer?
     private(set) var scheduledRefreshInterval: TimeInterval?
+    private(set) var scheduledRefreshRepeats = false
     private let cacheKey = StorageKeys.cachedUsageMetrics
     private let sharedStore: SharedDataStore
     private let preferences: UserDefaults
     private let cacheDefaults: UserDefaults
+    private let adaptiveRefreshEngine: AdaptiveRefreshCadenceEngine
+    private let adaptiveNow: @Sendable () -> Date
+    private let adaptivePowerState: @Sendable () -> AdaptiveRefreshPowerState
+    private var adaptiveQuotaSnapshot = AdaptiveQuotaSnapshot(values: [:])
+    private var lastMeterBarInteractionAt: Date?
+    private var lastQuotaMovementAt: Date?
+    private var cadenceCancellables = Set<AnyCancellable>()
 
     /// Defaults wire the production singletons so `shared` behaves exactly as
     /// before; tests inject stub providers, an isolated `UserDefaults` suite, a
@@ -127,6 +138,10 @@ class UsageDataManager: ObservableObject {
         cacheDefaults: UserDefaults = .standard,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = true,
+        adaptiveNow: @escaping @Sendable () -> Date = { Date() },
+        adaptivePowerState: @escaping @Sendable () -> AdaptiveRefreshPowerState = {
+            .current
+        },
         demoMode: Bool = false
     ) {
         self.demoMode = demoMode
@@ -143,6 +158,9 @@ class UsageDataManager: ObservableObject {
         self.preferences = preferences
         self.cacheDefaults = cacheDefaults
         self.parseHealthStore = parseHealthStore ?? .shared
+        self.adaptiveNow = adaptiveNow
+        self.adaptivePowerState = adaptivePowerState
+        adaptiveRefreshEngine = AdaptiveRefreshCadenceEngine(now: adaptiveNow)
         refreshIntervalRaw = Self.savedRefreshInterval(in: preferences).rawValue
 
         guard !demoMode else {
@@ -155,7 +173,9 @@ class UsageDataManager: ObservableObject {
 
         loadCachedData()
         loadCachedAccountMetrics()
+        adaptiveQuotaSnapshot = makeAdaptiveQuotaSnapshot()
         if schedulesAutoRefresh {
+            observeAdaptivePowerChanges()
             setupAutoRefresh()
         }
     }
@@ -166,6 +186,23 @@ class UsageDataManager: ObservableObject {
     /// Returns a per-provider report. UI call sites can ignore it; `meterbar
     /// refresh` uses it to report refreshed/failed/skipped state without
     /// re-deriving truth from `lastError`, which only holds the last failure.
+    @discardableResult
+    func refreshForExplicitAction(
+        _ action: AdaptiveRefreshTrigger
+    ) async -> UsageRefreshReport {
+        guard action != .scheduled else {
+            return await refreshAll(trigger: .background)
+        }
+        lastMeterBarInteractionAt = adaptiveNow()
+        // Popover open bypasses cadence but retains the background credential
+        // policy: merely viewing MeterBar must not raise a Keychain prompt.
+        // The Refresh buttons carry stronger intent and may request access.
+        let tokenTrigger: ClaudeTokenRefreshTrigger = action == .manualRefresh
+            ? .userInitiated
+            : .background
+        return await refreshAll(trigger: tokenTrigger)
+    }
+
     @discardableResult
     func refreshAll(
         trigger: ClaudeTokenRefreshTrigger = .background
@@ -186,6 +223,7 @@ class UsageDataManager: ObservableObject {
                 }
             )
         }
+        defer { rescheduleAdaptiveRefreshIfNeeded() }
         guard !isLoading else {
             return UsageRefreshReport(
                 startedAt: startedAt,
@@ -421,6 +459,8 @@ class UsageDataManager: ObservableObject {
 
     func refresh(service: ServiceType) async {
         guard !demoMode else { return }
+        lastMeterBarInteractionAt = adaptiveNow()
+        defer { rescheduleAdaptiveRefreshIfNeeded() }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -565,6 +605,7 @@ class UsageDataManager: ObservableObject {
     /// never drift apart and `refreshGeneration` advances exactly once per
     /// committed change — which is what the notification layer subscribes to.
     private func publishMetrics() {
+        recordQuotaMovement()
         saveCachedData()
         saveCachedAccountMetrics()
         saveSharedData(metrics)
@@ -632,11 +673,25 @@ class UsageDataManager: ObservableObject {
         refreshTimer?.invalidate()
         refreshTimer = nil
         scheduledRefreshInterval = nil
+        scheduledRefreshRepeats = false
 
-        guard refreshInterval != .manual else { return }
+        switch refreshInterval {
+        case .manual:
+            effectiveRefreshReason = "Automatic refresh is disabled."
+            return
+        case .adaptive:
+            let decision = adaptiveRefreshEngine.decision(signals: adaptiveSignals())
+            installRefreshTimer(interval: decision.interval, repeats: false)
+            effectiveRefreshReason = decision.reason.displayText
+        default:
+            let interval = refreshInterval.seconds
+            installRefreshTimer(interval: interval, repeats: true)
+            effectiveRefreshReason = "Fixed interval selected."
+        }
+    }
 
-        let interval = refreshInterval.seconds
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+    private func installRefreshTimer(interval: TimeInterval, repeats: Bool) {
+        let timer = Timer(timeInterval: interval, repeats: repeats) { [weak self] _ in
             Task { @MainActor in
                 await self?.refreshAll(trigger: .background)
             }
@@ -644,6 +699,68 @@ class UsageDataManager: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
         scheduledRefreshInterval = interval
+        scheduledRefreshRepeats = repeats
+    }
+
+    private func rescheduleAdaptiveRefreshIfNeeded() {
+        guard refreshInterval == .adaptive else { return }
+        setupAutoRefresh()
+    }
+
+    private func observeAdaptivePowerChanges() {
+        let center = NotificationCenter.default
+        Publishers.Merge(
+            center.publisher(for: .NSProcessInfoPowerStateDidChange),
+            center.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _ in
+            self?.rescheduleAdaptiveRefreshIfNeeded()
+        }
+        .store(in: &cadenceCancellables)
+    }
+
+    private func adaptiveSignals() -> AdaptiveRefreshSignals {
+        AdaptiveRefreshSignals(
+            lastInteractionAt: lastMeterBarInteractionAt,
+            lastQuotaMovementAt: lastQuotaMovementAt,
+            power: adaptivePowerState()
+        )
+    }
+
+    private func recordQuotaMovement() {
+        let latest = makeAdaptiveQuotaSnapshot()
+        if adaptiveQuotaSnapshot.hasMovement(comparedTo: latest) {
+            lastQuotaMovementAt = adaptiveNow()
+        }
+        adaptiveQuotaSnapshot = latest
+    }
+
+    private func makeAdaptiveQuotaSnapshot() -> AdaptiveQuotaSnapshot {
+        var values: [String: Double] = [:]
+
+        func collect(_ metrics: UsageMetrics, prefix: String) {
+            if let limit = metrics.sessionLimit {
+                values["\(prefix).session"] = limit.used
+            }
+            if let limit = metrics.weeklyLimit {
+                values["\(prefix).weekly"] = limit.used
+            }
+            if let limit = metrics.codeReviewLimit {
+                values["\(prefix).model"] = limit.used
+            }
+        }
+
+        for (service, providerMetrics) in metrics {
+            collect(providerMetrics, prefix: service.rawValue)
+        }
+        for (accountID, accountMetrics) in claudeCodeAccountMetrics {
+            collect(accountMetrics, prefix: "claude.\(accountID.uuidString)")
+        }
+        for (accountID, accountMetrics) in codexAccountMetrics {
+            collect(accountMetrics, prefix: "codex.\(accountID.uuidString)")
+        }
+        return AdaptiveQuotaSnapshot(values: values)
     }
 
     private static func savedRefreshInterval(in preferences: UserDefaults) -> RefreshInterval {

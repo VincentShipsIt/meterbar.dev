@@ -3,6 +3,7 @@ import XCTest
 
 final class RefreshIntervalTests: XCTestCase {
     func testRawValues() {
+        XCTAssertEqual(RefreshInterval.adaptive.rawValue, -1)
         XCTAssertEqual(RefreshInterval.oneMinute.rawValue, 60)
         XCTAssertEqual(RefreshInterval.twoMinutes.rawValue, 120)
         XCTAssertEqual(RefreshInterval.fiveMinutes.rawValue, 300)
@@ -13,6 +14,7 @@ final class RefreshIntervalTests: XCTestCase {
     }
 
     func testDisplayNames() {
+        XCTAssertEqual(RefreshInterval.adaptive.displayName, "Adaptive")
         XCTAssertEqual(RefreshInterval.oneMinute.displayName, "1 minute")
         XCTAssertEqual(RefreshInterval.twoMinutes.displayName, "2 minutes")
         XCTAssertEqual(RefreshInterval.fiveMinutes.displayName, "5 minutes")
@@ -23,6 +25,7 @@ final class RefreshIntervalTests: XCTestCase {
     }
 
     func testSecondsProperty() {
+        XCTAssertEqual(RefreshInterval.adaptive.seconds, 0.0, accuracy: 0.01)
         XCTAssertEqual(RefreshInterval.oneMinute.seconds, 60.0, accuracy: 0.01)
         XCTAssertEqual(RefreshInterval.twoMinutes.seconds, 120.0, accuracy: 0.01)
         XCTAssertEqual(RefreshInterval.fiveMinutes.seconds, 300.0, accuracy: 0.01)
@@ -33,16 +36,18 @@ final class RefreshIntervalTests: XCTestCase {
     }
 
     func testIdProperty() {
+        XCTAssertEqual(RefreshInterval.adaptive.id, -1)
         XCTAssertEqual(RefreshInterval.oneMinute.id, 60)
         XCTAssertEqual(RefreshInterval.manual.id, 0)
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(RefreshInterval.allCases.count, 7)
+        XCTAssertEqual(RefreshInterval.allCases.count, 8)
     }
 
     func testAllCasesContainsExpectedValues() {
         let allCases = RefreshInterval.allCases
+        XCTAssertTrue(allCases.contains(.adaptive))
         XCTAssertTrue(allCases.contains(.oneMinute))
         XCTAssertTrue(allCases.contains(.twoMinutes))
         XCTAssertTrue(allCases.contains(.fiveMinutes))

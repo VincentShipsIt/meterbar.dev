@@ -76,7 +76,11 @@ struct GeneralSettingsView: View {
 
     private var refreshSection: some View {
         SettingsPanelSection(title: "Refresh", systemImage: "arrow.clockwise", color: MeterBarTheme.appAccent) {
-            SettingsRowView(title: "Auto-refresh interval") {
+            SettingsRowView(
+                title: "Auto-refresh interval",
+                detail: "Adaptive stays between 1 and 30 minutes using only recent MeterBar interaction, "
+                    + "quota movement, battery/Low Power Mode, and thermal state."
+            ) {
                 Picker("", selection: Binding(
                     get: { dataManager.refreshInterval },
                     set: { dataManager.refreshInterval = $0 }
@@ -93,7 +97,7 @@ struct GeneralSettingsView: View {
             SettingsRowView(title: "Manual refresh") {
                 Button {
                     Task {
-                        await dataManager.refreshAll(trigger: .userInitiated)
+                        await dataManager.refreshForExplicitAction(.manualRefresh)
                     }
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")

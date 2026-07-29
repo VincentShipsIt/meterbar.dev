@@ -306,7 +306,7 @@ struct ProviderSettingsView: View {
                         // This is an explicit user action, so it is the one
                         // Settings path allowed to request Keychain access.
                         Task {
-                            await dataManager.refreshAll(trigger: .userInitiated)
+                            await dataManager.refreshForExplicitAction(.manualRefresh)
                         }
                     } label: {
                         Label(claudeCodeService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
@@ -518,7 +518,7 @@ struct ProviderSettingsView: View {
                                 service.checkAccess(forceRescan: true)
                             }.value
                             if cursorService.hasAccess {
-                                await dataManager.refreshAll(trigger: .userInitiated)
+                                await dataManager.refreshForExplicitAction(.manualRefresh)
                             }
                         }
                     } label: {

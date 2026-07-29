@@ -432,7 +432,7 @@ struct UsageDashboardView: View {
             }
             socialCardGeneratedAt = Date()
         case .usage:
-            await dataManager.refreshAll(trigger: .userInitiated)
+            await dataManager.refreshForExplicitAction(.manualRefresh)
         }
     }
 
