@@ -189,6 +189,14 @@ meterbar cost --json
 the app's Costs tab), so the CLI and the app always show the same numbers.
 The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
+### Event Integrations
+
+Settings → General → Event Integrations can run a literal-argv local command or
+POST quota transitions to a webhook. Both lanes and every event/provider/account
+scope are off until explicitly enabled. The
+[versioned webhook contract](docs/quota-event-webhooks.md) documents the exact
+payload, transition semantics, and outbound security boundary.
+
 The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
 ```
 /Applications/MeterBar.app/Contents/Helpers/meterbar
@@ -221,7 +229,9 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 ## Privacy & Security
 
 - All credentials remain in their original locations (managed by CLI tools)
-- No data sent to external servers (only calls to the providers' own usage endpoints)
+- No data is sent beyond providers' own usage endpoints by default. An explicitly
+  enabled webhook sends only the documented quota event fields to the URL the
+  user configured; credentials and config paths are never included.
 - The main app is **not** sandboxed — it must read other tools' credential/log files
   (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.

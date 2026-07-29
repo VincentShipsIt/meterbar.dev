@@ -42,6 +42,7 @@ final class SessionWakeController: ObservableObject {
     private let codexAccounts: CodexAccountStore
     private let notificationPreferences: NotificationPreferencesStore
     private let providerVisibility: ProviderVisibilityStore
+    private let quotaEventSettings: QuotaEventSettingsStore?
     private let agent: SessionWakeAgentControlling
     private let agentStateStore: SessionWakeAgentStateStore
     private let rescanInterval: TimeInterval
@@ -66,6 +67,7 @@ final class SessionWakeController: ObservableObject {
         codexAccounts: CodexAccountStore? = nil,
         notificationPreferences: NotificationPreferencesStore? = nil,
         providerVisibility: ProviderVisibilityStore? = nil,
+        quotaEventSettings: QuotaEventSettingsStore? = nil,
         agent: SessionWakeAgentControlling? = nil,
         agentStateStore: SessionWakeAgentStateStore? = nil,
         rescanInterval: TimeInterval = 300,
@@ -75,12 +77,15 @@ final class SessionWakeController: ObservableObject {
         makeLifetimeLock: @escaping @Sendable () -> WakeLock = { WakeLock(holderKind: .app) },
         hookDispatcher: WakeEventHookDispatcher? = nil
     ) {
-        self.store = store ?? .shared
+        let resolvedStore = store ?? .shared
+        self.store = resolvedStore
         self.status = status ?? .shared
         self.accounts = accounts ?? .shared
         self.codexAccounts = codexAccounts ?? .shared
         self.notificationPreferences = notificationPreferences ?? .shared
         self.providerVisibility = providerVisibility ?? .shared
+        self.quotaEventSettings = quotaEventSettings
+            ?? (resolvedStore === SessionWakeSettingsStore.shared ? .shared : nil)
         self.agent = agent ?? SMAppServiceSessionWakeAgent()
         self.agentStateStore = agentStateStore ?? SessionWakeAgentStateStore()
         self.rescanInterval = rescanInterval
@@ -99,7 +104,7 @@ final class SessionWakeController: ObservableObject {
         // reconcile: the feature flag, the toggle, the active provider, either
         // provider's selected account, the permission posture, and the run
         // parameters. A removed account disarms via the store's reconcilers below.
-        let triggers: [AnyPublisher<Void, Never>] = [
+        var triggers: [AnyPublisher<Void, Never>] = [
             store.$featureEnabled.map { _ in () }.eraseToAnyPublisher(),
             store.$isOn.map { _ in () }.eraseToAnyPublisher(),
             store.$wakeProvider.map { _ in () }.eraseToAnyPublisher(),
@@ -113,6 +118,11 @@ final class SessionWakeController: ObservableObject {
             store.$maxTurns.map { _ in () }.eraseToAnyPublisher(),
             store.$eventHookConfiguration.map { _ in () }.eraseToAnyPublisher()
         ]
+        if let quotaEventSettings {
+            triggers.append(
+                quotaEventSettings.$configuration.map { _ in () }.eraseToAnyPublisher()
+            )
+        }
         Publishers.MergeMany(triggers)
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.reconcile() }
@@ -166,7 +176,7 @@ final class SessionWakeController: ObservableObject {
     // MARK: - Reconciliation
 
     private func reconcile() {
-        hookDispatcher.update(configuration: store.eventHookConfiguration)
+        hookDispatcher.update(configuration: wakeEventHookConfiguration)
         let account = selectedAccount()
         saveAgentConfiguration(account: account)
 
@@ -326,9 +336,16 @@ final class SessionWakeController: ObservableObject {
                 notifyOnCompletion: notificationsAllowed,
                 maxSessionsPerRun: store.maxSessionsPerRun,
                 maxTurns: store.maxTurns,
-                eventHooks: store.eventHookConfiguration
+                eventHooks: wakeEventHookConfiguration
             )
         )
+    }
+
+    /// Production uses the promoted app-wide store. Isolated controller tests
+    /// without that dependency retain the legacy store seam.
+    private var wakeEventHookConfiguration: WakeEventHookConfiguration {
+        quotaEventSettings?.configuration.wakeEventHookConfiguration
+            ?? store.eventHookConfiguration
     }
 
     private func registerAgentIfNeeded() {
