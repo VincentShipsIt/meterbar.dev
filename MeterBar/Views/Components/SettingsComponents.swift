@@ -173,13 +173,107 @@ struct SettingsDivider: View {
 
 // MARK: - StatusPill
 
+/// The complete semantic state of one Settings status label.
+///
+/// Keeping copy, symbol, and tone together prevents call sites from combining
+/// "Needs Attention" text with a green connected icon because a separate
+/// boolean happened to remain true.
+struct SettingsStatusPresentation: Equatable {
+    enum Tone: Equatable {
+        case success
+        case warning
+        case stale
+        case neutral
+    }
+
+    let text: String
+    let systemImage: String
+    let tone: Tone
+
+    var color: Color {
+        switch tone {
+        case .success:
+            MeterBarTheme.success
+        case .warning:
+            MeterBarTheme.warning
+        case .stale, .neutral:
+            .secondary
+        }
+    }
+
+    static func connection(title: String, isConnected: Bool) -> SettingsStatusPresentation {
+        SettingsStatusPresentation(
+            text: title,
+            systemImage: isConnected ? "checkmark.circle.fill" : "circle",
+            tone: isConnected ? .success : .neutral
+        )
+    }
+
+    static func claude(
+        _ state: ClaudeCodeAuthState?,
+        isEnabled: Bool
+    ) -> SettingsStatusPresentation {
+        guard isEnabled else {
+            return SettingsStatusPresentation(text: "Disabled", systemImage: "pause.circle", tone: .neutral)
+        }
+
+        switch state {
+        case let .connected(source):
+            return SettingsStatusPresentation(
+                text: "Connected (\(source.rawValue))",
+                systemImage: "checkmark.circle.fill",
+                tone: .success
+            )
+        case .cliAvailable:
+            return SettingsStatusPresentation(
+                text: "Ready (Claude CLI)",
+                systemImage: "checkmark.circle.fill",
+                tone: .success
+            )
+        case .needsLogin:
+            return SettingsStatusPresentation(
+                text: "Login Required",
+                systemImage: "person.crop.circle.badge.exclamationmark",
+                tone: .warning
+            )
+        case .error:
+            return SettingsStatusPresentation(
+                text: "Needs Attention",
+                systemImage: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
+        case .stale:
+            return SettingsStatusPresentation(
+                text: "Stale",
+                systemImage: "clock.badge.exclamationmark",
+                tone: .stale
+            )
+        case .unavailable:
+            return SettingsStatusPresentation(text: "Not Connected", systemImage: "circle", tone: .neutral)
+        case .none:
+            return SettingsStatusPresentation(text: "Not Checked", systemImage: "questionmark.circle", tone: .neutral)
+        }
+    }
+}
+
 struct StatusPill: View {
-    let title: String
-    let isConnected: Bool
+    // MARK: Lifecycle
+
+    init(presentation: SettingsStatusPresentation) {
+        self.presentation = presentation
+    }
+
+    init(title: String, isConnected: Bool) {
+        self.presentation = .connection(title: title, isConnected: isConnected)
+    }
+
+    // MARK: Internal
+
+    let presentation: SettingsStatusPresentation
 
     var body: some View {
-        Label(title, systemImage: isConnected ? "checkmark.circle.fill" : "circle")
-            .foregroundStyle(isConnected ? MeterBarTheme.success : Color.secondary)
+        Label(presentation.text, systemImage: presentation.systemImage)
+            .foregroundStyle(presentation.color)
             .font(.subheadline)
     }
 }
