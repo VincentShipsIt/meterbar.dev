@@ -90,7 +90,14 @@ enum ClaudeCostScanner {
                 provider: .claudeCode,
                 pricing: pricing
             )
-        ), TokenUsageAggregator.makeDailyUsage(from: totals.daily, provider: .claudeCode, pricing: pricing))
+        ), TokenUsageAggregator.makeDailyUsage(
+            from: totals.daily,
+            provider: .claudeCode,
+            pricing: pricing,
+            modelsByDay: totals.dailyModels,
+            projectsByDay: totals.dailyProjects,
+            projectModelsByDay: totals.dailyProjectModels
+        ))
     }
 
     nonisolated private static func projectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
@@ -254,7 +261,34 @@ enum ClaudeCostScanner {
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
-            totals.models[CostScanValues.displayModelName(event.model), default: TokenAccumulator()].add(
+            let displayModel = CostScanValues.displayModelName(event.model)
+            totals.dailyModels[day, default: [:]][displayModel, default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            totals.dailyProjects[day, default: [:]][projectID, default: TokenAccumulator()].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            var dailyProjectModels = totals.dailyProjectModels[day] ?? [:]
+            dailyProjectModels[projectID, default: [:]][
+                displayModel,
+                default: TokenAccumulator()
+            ].add(
+                input: event.input,
+                output: event.output,
+                cacheCreation: event.cacheCreation,
+                cacheRead: event.cacheRead,
+                estimatedCostUSD: eventCost
+            )
+            totals.dailyProjectModels[day] = dailyProjectModels
+            totals.models[displayModel, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
                 cacheCreation: event.cacheCreation,
@@ -275,7 +309,6 @@ enum ClaudeCostScanner {
                 cacheRead: event.cacheRead,
                 estimatedCostUSD: eventCost
             )
-            let displayModel = CostScanValues.displayModelName(event.model)
             totals.projectModels[projectID, default: [:]][displayModel, default: TokenAccumulator()].add(
                 input: event.input,
                 output: event.output,
