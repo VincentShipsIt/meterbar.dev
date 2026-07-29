@@ -39,6 +39,11 @@ final class StatusItemPresenter {
     /// logos once keeps that off the hot path.
     private var imageCache: [String: NSImage] = [:]
 
+    /// Exhausted-window countdowns change independently of provider refreshes.
+    /// This timer only re-runs the pure presentation pass; it never repeats the
+    /// directory activity probes or performs network work.
+    private var countdownTimer: Timer?
+
     init(applyDescriptors: @escaping ([MenuBarStatusItemDescriptor]) -> Void) {
         self.applyDescriptors = applyDescriptors
     }
@@ -76,7 +81,11 @@ final class StatusItemPresenter {
             previousKeys: shownKeys,
             pinnedKey: preferences.pinnedCandidateKey,
             metric: preferences.labelMetric,
-            size: preferences.labelSize
+            size: preferences.labelSize,
+            windowMode: preferences.windowMode,
+            fontSize: preferences.fontSize,
+            highContrast: preferences.highContrast,
+            showsExhaustedResetCountdown: preferences.showsExhaustedResetCountdown
         )
 
         // Rebuilt rather than merged, so an item that just left the plan doesn't
@@ -87,6 +96,7 @@ final class StatusItemPresenter {
         }
 
         applyDescriptors(descriptors)
+        updateCountdownTimer(preferences: preferences)
     }
 
     /// Which accounts own an item right now, so the delegate can build the
@@ -133,7 +143,8 @@ final class StatusItemPresenter {
     func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
         button.image = image(for: descriptor.service)
         button.imagePosition = descriptor.title.isEmpty ? .imageOnly : .imageLeft
-        setTitle(button, to: descriptor.title)
+        applyVisualStyle(descriptor.visualStyle, to: button)
+        setTitle(button, to: descriptor.title, style: descriptor.visualStyle)
         button.toolTip = descriptor.tooltip
         button.setAccessibilityLabel(descriptor.accessibilityLabel)
         applyParseHealthAppearance(to: button)
@@ -179,7 +190,11 @@ final class StatusItemPresenter {
     /// can't reach this AppKit `NSStatusBarButton`, so we fade its layer instead.
     /// No-op fade when the title is unchanged or Reduce Motion is on.
     @MainActor
-    private func setTitle(_ button: NSStatusBarButton, to newTitle: String) {
+    private func setTitle(
+        _ button: NSStatusBarButton,
+        to newTitle: String,
+        style: StatusItemVisualStyle
+    ) {
         if button.title != newTitle,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             button.wantsLayer = true
@@ -188,7 +203,66 @@ final class StatusItemPresenter {
             fade.duration = 0.22
             button.layer?.add(fade, forKey: "titleFade")
         }
+        // Assigning `title` after clearing `attributedTitle` restores AppKit's
+        // native menu-bar rendering when high contrast is turned back off.
+        button.attributedTitle = NSAttributedString()
         button.title = newTitle
+        guard style.highContrast else { return }
+        button.attributedTitle = NSAttributedString(
+            string: newTitle,
+            attributes: [
+                .font: button.font ?? NSFont.boldSystemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: Self.highContrastColor
+            ]
+        )
+    }
+
+    @MainActor
+    private func applyVisualStyle(_ style: StatusItemVisualStyle, to button: NSStatusBarButton) {
+        let explicitPointSize = style.fontSize.pointSize.map { CGFloat($0) }
+        if style.highContrast {
+            button.font = .systemFont(
+                ofSize: explicitPointSize ?? NSFont.systemFontSize,
+                weight: .bold
+            )
+        } else if let explicitPointSize {
+            button.font = .systemFont(ofSize: explicitPointSize)
+        } else {
+            // `nil` restores NSStatusBarButton's native typography after an
+            // opt-in font size or contrast mode is turned back off.
+            button.font = nil
+        }
+        button.contentTintColor = style.highContrast ? Self.highContrastColor : nil
+    }
+
+    private static let highContrastColor = NSColor(name: nil) { appearance in
+        let match = appearance.bestMatch(from: [.darkAqua, .aqua])
+        return match == .darkAqua ? .white : .black
+    }
+
+    @MainActor
+    private func updateCountdownTimer(preferences: MenuBarDisplayPreferencesStore) {
+        let now = Date()
+        let needsTimer = preferences.showsExhaustedResetCountdown
+            && latestCandidates.contains {
+                $0.limit.isAtLimit && ($0.limit.resetTime ?? .distantPast) > now
+            }
+        guard needsTimer else {
+            countdownTimer?.invalidate()
+            countdownTimer = nil
+            return
+        }
+        guard countdownTimer == nil else { return }
+
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.apply(candidates: self.latestCandidates)
+            }
+        }
+        timer.tolerance = 2
+        RunLoop.main.add(timer, forMode: .common)
+        countdownTimer = timer
     }
 
     @MainActor

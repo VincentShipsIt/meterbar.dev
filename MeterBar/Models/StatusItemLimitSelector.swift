@@ -2,7 +2,7 @@ import Foundation
 import MeterBarShared
 
 /// One account/provider quota competing for the menu bar percentage slot.
-struct StatusLimitCandidate: Equatable, Sendable {
+nonisolated struct StatusLimitCandidate: Equatable, Sendable {
     // MARK: Lifecycle
 
     init(
@@ -11,8 +11,10 @@ struct StatusLimitCandidate: Equatable, Sendable {
         service: ServiceType,
         accountKey: String? = nil,
         displayName: String,
+        windowID: String? = nil,
         windowName: String,
         limit: UsageLimit,
+        lastUpdated: Date = Date(),
         lastActivity: Date?,
         isAutoSelectable: Bool
     ) {
@@ -21,8 +23,10 @@ struct StatusLimitCandidate: Equatable, Sendable {
         self.service = service
         self.accountKey = accountKey
         self.displayName = displayName
+        self.windowID = windowID ?? Self.inferredWindowID(from: windowName)
         self.windowName = windowName
         self.limit = limit
+        self.lastUpdated = lastUpdated
         self.lastActivity = lastActivity
         self.isAutoSelectable = isAutoSelectable
     }
@@ -43,27 +47,64 @@ struct StatusLimitCandidate: Equatable, Sendable {
     let accountKey: String?
     /// Human-readable label for the status item tooltip.
     let displayName: String
+    /// Stable provider window id (`session`, `weekly`, `codeReview`) used to
+    /// pair combined labels without string-matching localized display copy.
+    let windowID: String
     /// Provider-specific quota-window label (Session, Weekly, Sonnet, etc.).
     let windowName: String
     let limit: UsageLimit
+    /// Provider snapshot timestamp. Formatting re-evaluates this against `now`
+    /// so cached values become an honest unknown state once they age out.
+    let lastUpdated: Date
     /// Most recent on-disk activity for the account, nil when undetectable.
     let lastActivity: Date?
     /// Only the same session/weekly windows used before #142 participate in
     /// Auto. Other windows exist solely so the user can pin them explicitly.
     let isAutoSelectable: Bool
+
+    private static func inferredWindowID(from windowName: String) -> String {
+        windowName.caseInsensitiveCompare("Weekly") == .orderedSame ? "weekly" : "session"
+    }
 }
 
 /// One menu-bar-title candidate whose on-disk activity probe has not run yet.
-struct StatusLimitCandidateSeed: Sendable {
+nonisolated struct StatusLimitCandidateSeed: Sendable {
+    init(
+        key: String,
+        pinKey: String,
+        service: ServiceType,
+        accountKey: String? = nil,
+        displayName: String,
+        windowID: String? = nil,
+        windowName: String,
+        limit: UsageLimit,
+        lastUpdated: Date = Date(),
+        isAutoSelectable: Bool
+    ) {
+        self.key = key
+        self.pinKey = pinKey
+        self.service = service
+        self.accountKey = accountKey
+        self.displayName = displayName
+        self.windowID = windowID
+            ?? (windowName.caseInsensitiveCompare("Weekly") == .orderedSame ? "weekly" : "session")
+        self.windowName = windowName
+        self.limit = limit
+        self.lastUpdated = lastUpdated
+        self.isAutoSelectable = isAutoSelectable
+    }
+
     let key: String
     let pinKey: String
     let service: ServiceType
     /// `var` so the memberwise init defaults it to nil: single-account providers
     /// and the provider-level tests never name it.
-    var accountKey: String?
+    let accountKey: String?
     let displayName: String
+    let windowID: String
     let windowName: String
     let limit: UsageLimit
+    let lastUpdated: Date
     let isAutoSelectable: Bool
 }
 
@@ -95,7 +136,8 @@ enum StatusItemLimitCandidateBuilder {
         accountKey: String? = nil,
         autoSelectionKey: String?,
         displayName: String,
-        limits: [SnapshotLimit]
+        limits: [SnapshotLimit],
+        lastUpdated: Date = Date()
     ) -> [StatusLimitCandidateSeed] {
         let autoWindowID = StatusItemAutoSelectionPolicy.windowID(for: service)
         return limits.map { limit in
@@ -110,8 +152,10 @@ enum StatusItemLimitCandidateBuilder {
                 service: service,
                 accountKey: accountKey,
                 displayName: displayName,
+                windowID: limit.id,
                 windowName: limit.title,
                 limit: limit.usageLimit,
+                lastUpdated: lastUpdated,
                 isAutoSelectable: limit.id == autoWindowID
             )
         }

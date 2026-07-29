@@ -30,6 +30,14 @@ nonisolated enum StorageKeys {
     static let statusItemLabelMetric = "StatusItemLabelMetric"
     /// `StatusItemLabelSize` raw value (compact or regular).
     static let statusItemLabelSize = "StatusItemLabelSize"
+    /// `StatusItemWindowMode` raw value (selected window or combined session + weekly).
+    static let statusItemWindowMode = "StatusItemWindowMode"
+    /// `StatusItemFontSize` raw value. Missing preserves AppKit's native status-item font.
+    static let statusItemFontSize = "StatusItemFontSize"
+    /// Explicit opt-in for maximum black/white status-item contrast.
+    static let statusItemHighContrast = "StatusItemHighContrast"
+    /// Replaces an exhausted quota value with its reset countdown when available.
+    static let statusItemShowsExhaustedResetCountdown = "StatusItemShowsExhaustedResetCountdown"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
