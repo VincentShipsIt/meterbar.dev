@@ -30,6 +30,13 @@ enum StatusItemRefreshTrigger {
             CodexAccountStore.shared.$defaultAccountHomeDirectory.map { _ in () }.eraseToAnyPublisher(),
             CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
         ])
+        // Grok mirrors Claude/Codex: label, enablement, and custom profile set
+        // all reshape account-scoped menu-bar items.
+        let grokAccountChanges = Publishers.MergeMany([
+            GrokAccountStore.shared.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            GrokAccountStore.shared.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
+            GrokAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+        ])
         let displayPreferences = MenuBarDisplayPreferencesStore.shared
         let displayPreferenceChanges = Publishers.MergeMany([
             displayPreferences.$pinnedCandidateKey.map { _ in () }.eraseToAnyPublisher(),
@@ -54,6 +61,7 @@ enum StatusItemRefreshTrigger {
         let metricsChanges = UsageDataManager.shared.$metrics.map { _ in () }
         let claudeMetricsChanges = UsageDataManager.shared.$claudeCodeAccountMetrics.map { _ in () }
         let codexMetricsChanges = UsageDataManager.shared.$codexAccountMetrics.map { _ in () }
+        let grokMetricsChanges = UsageDataManager.shared.$grokAccountMetrics.map { _ in () }
         let visibilityChanges = ProviderVisibilityStore.shared.$hiddenServices.map { _ in () }
         let parseHealthChanges = ProviderParseHealthStore.shared.$records.map { _ in () }
 
@@ -61,8 +69,10 @@ enum StatusItemRefreshTrigger {
             metricsChanges.eraseToAnyPublisher(),
             claudeMetricsChanges.eraseToAnyPublisher(),
             codexMetricsChanges.eraseToAnyPublisher(),
+            grokMetricsChanges.eraseToAnyPublisher(),
             claudeAccountChanges.eraseToAnyPublisher(),
             codexAccountChanges.eraseToAnyPublisher(),
+            grokAccountChanges.eraseToAnyPublisher(),
             accountSelectionChanges.eraseToAnyPublisher(),
             visibilityChanges.eraseToAnyPublisher(),
             parseHealthChanges.eraseToAnyPublisher(),
