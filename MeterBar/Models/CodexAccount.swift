@@ -37,6 +37,12 @@ nonisolated struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
     var isDefault: Bool { id == Self.defaultID }
 }
 
+nonisolated enum CodexAccountMutationOutcome: Equatable, Sendable {
+    case updated
+    case unchanged
+    case rejectedLastEnabledAccount
+}
+
 final class CodexAccountStore: ObservableObject {
     /// In demo mode the store is projected from the default account only, so
     /// provider cards title generically ("Codex") and never surface the owner's
@@ -48,6 +54,7 @@ final class CodexAccountStore: ObservableObject {
 
     @Published private(set) var customAccounts: [CodexAccount] = []
     @Published private(set) var defaultAccountName = CodexAccount.defaultName
+    @Published private(set) var defaultAccountHomeDirectory: String?
     @Published private(set) var defaultAccountIsEnabled = true
     @Published private(set) var accountOrder: [UUID] = []
 
@@ -59,7 +66,7 @@ final class CodexAccountStore: ObservableObject {
             CodexAccount(
                 id: CodexAccount.defaultID,
                 name: defaultAccountName,
-                homeDirectory: nil,
+                homeDirectory: defaultAccountHomeDirectory,
                 isEnabled: defaultAccountIsEnabled
             )
         ] + customAccounts)
@@ -83,6 +90,7 @@ final class CodexAccountStore: ObservableObject {
         refreshConfigurationDirectory = nil
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
+        defaultAccountHomeDirectory = defaultAccount.homeDirectory
         defaultAccountIsEnabled = defaultAccount.isEnabled
         customAccounts = accounts.filter { !$0.isDefault }
         accountOrder = accounts.map(\.id)
@@ -111,19 +119,39 @@ final class CodexAccountStore: ObservableObject {
         guard !trimmedName.isEmpty else { return }
 
         if id == CodexAccount.defaultID {
-            guard trimmedName != defaultAccountName else { return }
-            defaultAccountName = trimmedName
-            saveDefaultAccountName()
+            if trimmedName != defaultAccountName {
+                defaultAccountName = trimmedName
+                saveDefaultAccountName()
+            }
+            if let homeDirectory {
+                let trimmedDirectory = homeDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                let updatedDirectory = trimmedDirectory.isEmpty
+                    ? nil
+                    : (trimmedDirectory as NSString).standardizingPath
+                if updatedDirectory != defaultAccountHomeDirectory {
+                    defaultAccountHomeDirectory = updatedDirectory
+                    saveDefaultAccountHomeDirectory()
+                }
+            }
             return
         }
 
-        guard let index = customAccounts.firstIndex(where: { $0.id == id }), let homeDirectory else { return }
-        let trimmedDirectory = homeDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDirectory.isEmpty else { return }
+        let standardizedDirectory: String?
+        if let homeDirectory {
+            let trimmedDirectory = homeDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedDirectory.isEmpty else { return }
+            standardizedDirectory = (trimmedDirectory as NSString).standardizingPath
+        } else {
+            standardizedDirectory = nil
+        }
+
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
 
         var updated = customAccounts[index]
         updated.name = trimmedName
-        updated.homeDirectory = (trimmedDirectory as NSString).standardizingPath
+        if let standardizedDirectory {
+            updated.homeDirectory = standardizedDirectory
+        }
         guard updated != customAccounts[index] else { return }
         var updatedAccounts = customAccounts
         updatedAccounts[index] = updated
@@ -131,30 +159,59 @@ final class CodexAccountStore: ObservableObject {
         saveCustomAccounts()
     }
 
-    func removeAccount(id: UUID) {
-        guard id != CodexAccount.defaultID else { return }
+    func canDisableAccount(id: UUID) -> Bool {
+        guard let account = accounts.first(where: { $0.id == id }) else { return false }
+        return !account.isEnabled || enabledAccounts.count > 1
+    }
+
+    func canRemoveAccount(id: UUID) -> Bool {
+        guard id != CodexAccount.defaultID,
+              let account = customAccounts.first(where: { $0.id == id }) else {
+            return false
+        }
+        return !account.isEnabled || enabledAccounts.count > 1
+    }
+
+    @discardableResult
+    func removeAccount(id: UUID) -> CodexAccountMutationOutcome {
+        guard id != CodexAccount.defaultID,
+              let account = customAccounts.first(where: { $0.id == id }) else {
+            return .unchanged
+        }
+        guard !account.isEnabled || enabledAccounts.count > 1 else {
+            return .rejectedLastEnabledAccount
+        }
         customAccounts.removeAll { $0.id == id }
         accountOrder.removeAll { $0 == id }
         saveAccountOrder()
         saveCustomAccounts()
+        return .updated
     }
 
-    func setEnabled(_ enabled: Bool, for id: UUID) {
+    @discardableResult
+    func setEnabled(_ enabled: Bool, for id: UUID) -> CodexAccountMutationOutcome {
         if id == CodexAccount.defaultID {
-            guard enabled != defaultAccountIsEnabled else { return }
+            guard enabled != defaultAccountIsEnabled else { return .unchanged }
+            guard enabled || enabledAccounts.count > 1 else {
+                return .rejectedLastEnabledAccount
+            }
             defaultAccountIsEnabled = enabled
             saveDefaultAccountEnabled()
-            return
+            return .updated
         }
 
         guard let index = customAccounts.firstIndex(where: { $0.id == id }),
               customAccounts[index].isEnabled != enabled else {
-            return
+            return .unchanged
+        }
+        guard enabled || enabledAccounts.count > 1 else {
+            return .rejectedLastEnabledAccount
         }
         var updatedAccounts = customAccounts
         updatedAccounts[index].isEnabled = enabled
         customAccounts = updatedAccounts
         saveCustomAccounts()
+        return .updated
     }
 
     func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
@@ -176,6 +233,10 @@ final class CodexAccountStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             defaultAccountName = name
         }
+        if let homeDirectory = userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !homeDirectory.isEmpty {
+            defaultAccountHomeDirectory = (homeDirectory as NSString).standardizingPath
+        }
         if userDefaults.object(forKey: StorageKeys.codexDefaultAccountEnabled) != nil {
             defaultAccountIsEnabled = userDefaults.bool(forKey: StorageKeys.codexDefaultAccountEnabled)
         }
@@ -185,6 +246,7 @@ final class CodexAccountStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([CodexAccount].self, from: data) {
             customAccounts = decoded.filter { !$0.isDefault }
         }
+        restoreDefaultAccountIfNeeded()
         pruneAccountOrder()
     }
 
@@ -199,6 +261,15 @@ final class CodexAccountStore: ObservableObject {
             userDefaults.removeObject(forKey: StorageKeys.codexDefaultAccountName)
         } else {
             userDefaults.set(defaultAccountName, forKey: StorageKeys.codexDefaultAccountName)
+        }
+        persistRefreshConfiguration()
+    }
+
+    private func saveDefaultAccountHomeDirectory() {
+        if let defaultAccountHomeDirectory {
+            userDefaults.set(defaultAccountHomeDirectory, forKey: StorageKeys.codexDefaultHomeDirectory)
+        } else {
+            userDefaults.removeObject(forKey: StorageKeys.codexDefaultHomeDirectory)
         }
         persistRefreshConfiguration()
     }
@@ -244,5 +315,14 @@ final class CodexAccountStore: ObservableObject {
         guard pruned != accountOrder else { return }
         accountOrder = pruned
         saveAccountOrder()
+    }
+
+    /// Profiles persisted by older builds could leave every account disabled.
+    /// Keep the sentinel internally and restore only that zero-config profile so
+    /// refresh, widgets, and automation never wake up with an ambiguous empty set.
+    private func restoreDefaultAccountIfNeeded() {
+        guard !defaultAccountIsEnabled, !customAccounts.contains(where: \.isEnabled) else { return }
+        defaultAccountIsEnabled = true
+        saveDefaultAccountEnabled()
     }
 }

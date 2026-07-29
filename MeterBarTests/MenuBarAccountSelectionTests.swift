@@ -233,6 +233,20 @@ final class MenuBarAccountSelectionTests: XCTestCase {
         XCTAssertEqual(store.mergedAccountKey, "claudeCode:a")
     }
 
+    func testReconcilePrunesDisabledSelectionsAndSwitcherBinding() throws {
+        let defaults = try XCTUnwrap(defaults)
+        let store = MenuBarAccountSelectionStore(userDefaults: defaults)
+        store.select("codexCli:enabled")
+        store.select("codexCli:disabled")
+        store.setMergedAccountKey("codexCli:disabled")
+
+        store.reconcile(availableKeys: ["codexCli:enabled"])
+
+        XCTAssertEqual(store.selectedAccountKeys, ["codexCli:enabled"])
+        XCTAssertNil(store.mergedAccountKey)
+        XCTAssertEqual(defaults.stringArray(forKey: StorageKeys.menuBarSelectedAccountKeys), ["codexCli:enabled"])
+    }
+
     func testBlankMergedKeyClearsThePreference() throws {
         let defaults = try XCTUnwrap(defaults)
         let store = MenuBarAccountSelectionStore(userDefaults: defaults)

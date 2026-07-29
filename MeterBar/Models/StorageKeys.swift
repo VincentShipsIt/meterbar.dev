@@ -71,6 +71,8 @@ nonisolated enum StorageKeys {
     static let codexCustomAccounts = "CodexCustomAccounts"
     /// User-chosen display name for the default Codex CLI profile.
     static let codexDefaultAccountName = "CodexDefaultAccountName"
+    /// User-chosen CODEX_HOME override for the default Codex CLI profile.
+    static let codexDefaultHomeDirectory = "CodexDefaultHomeDirectory"
     /// Whether the synthesized default Codex CLI profile participates in tracking.
     static let codexDefaultAccountEnabled = "CodexDefaultAccountEnabled"
     /// Persisted Codex account display order (array of UUID strings).

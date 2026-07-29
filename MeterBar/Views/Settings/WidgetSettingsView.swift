@@ -482,11 +482,7 @@ struct WidgetSettingsView: View {
     }
 
     private func reconcileExplicitSelection() {
-        let selection = preferencesStore.preferences.accountSelection
-        guard selection.mode == .explicit else { return }
-        let reconciled = selection.explicitIdentifiers.intersection(availableIdentifiers)
-        guard reconciled != selection.explicitIdentifiers else { return }
-        preferencesStore.setSelectedAccounts(reconciled)
+        preferencesStore.reconcileAvailableAccounts(availableIdentifiers)
     }
 }
 
