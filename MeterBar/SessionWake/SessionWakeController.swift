@@ -139,10 +139,11 @@ final class SessionWakeController: ObservableObject {
             }
             .store(in: &cancellables)
 
-        Publishers.Merge(
-            codexAccounts.$customAccounts.map { _ in () },
-            codexAccounts.$defaultAccountIsEnabled.map { _ in () }
-        )
+        Publishers.MergeMany([
+            codexAccounts.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            codexAccounts.$defaultAccountHomeDirectory.map { _ in () }.eraseToAnyPublisher(),
+            codexAccounts.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+        ])
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }

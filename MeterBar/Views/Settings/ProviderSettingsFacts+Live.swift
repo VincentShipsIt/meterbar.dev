@@ -63,7 +63,9 @@ extension ProviderSettingsFacts {
             errorText: live.error,
             updatedText: matching.filter(\.hasMetrics).map(\.updatedText).first ?? "No data",
             worstBand: matching.compactMap(\.band).max(by: { $0.severity < $1.severity }),
-            codexAuthFileDisplayPath: CodexHomeDirectory.authFileDisplayPath()
+            codexAuthFileDisplayPath: CodexHomeDirectory.authFileDisplayPath(
+                for: CodexAccountStore.shared.accounts.first(where: \.isDefault) ?? .defaultAccount
+            )
         )
     }
 }

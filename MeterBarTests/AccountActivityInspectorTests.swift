@@ -168,4 +168,29 @@ final class AccountActivityInspectorTests: XCTestCase {
             "/custom/codex/auth.json"
         )
     }
+
+    func testConfiguredDefaultCodexAccountOverridesEnvironmentHome() {
+        let account = CodexAccount(
+            id: CodexAccount.defaultID,
+            name: "Work",
+            homeDirectory: "~/profiles/codex-work"
+        )
+
+        XCTAssertEqual(
+            CodexHomeDirectory.path(
+                for: account,
+                environment: ["CODEX_HOME": "/ignored"],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "/Users/tester/profiles/codex-work"
+        )
+        XCTAssertEqual(
+            CodexHomeDirectory.authFileDisplayPath(
+                for: account,
+                environment: ["CODEX_HOME": "/ignored"],
+                realHomeDirectory: "/Users/tester"
+            ),
+            "~/profiles/codex-work/auth.json"
+        )
+    }
 }

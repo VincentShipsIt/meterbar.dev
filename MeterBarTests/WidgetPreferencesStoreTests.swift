@@ -168,6 +168,29 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(makeStore().preferences.preservesLegacyOpenRouterBalance)
     }
 
+    func testReconcileAvailableAccountsPrunesExplicitDisabledSelection() {
+        var reloadCount = 0
+        let store = WidgetPreferencesStore(userDefaults: defaults) {
+            reloadCount += 1
+        }
+        let enabled = WidgetAccountIdentifier.account(service: .codexCli, id: UUID())
+        let disabled = WidgetAccountIdentifier.account(service: .codexCli, id: UUID())
+        store.setSelectedAccounts([enabled, disabled])
+
+        store.reconcileAvailableAccounts([enabled])
+
+        XCTAssertEqual(store.preferences.accountSelection.explicitIdentifiers, [enabled])
+        XCTAssertEqual(reloadCount, 2)
+    }
+
+    func testReconcileAvailableAccountsLeavesDynamicAllSelectionUntouched() {
+        let store = makeStore()
+
+        store.reconcileAvailableAccounts([])
+
+        XCTAssertEqual(store.preferences.accountSelection, .all)
+    }
+
     func testStableIdentifiersIncludeProviderAndAccountIdentity() {
         let accountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9))
 

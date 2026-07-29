@@ -33,16 +33,41 @@ nonisolated enum CodexHomeDirectory {
             .appendingPathComponent("auth.json")
     }
 
-    static func path(for account: CodexAccount) -> String {
+    static func path(
+        for account: CodexAccount,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
         guard let homeDirectory = account.homeDirectory?
             .trimmingCharacters(in: .whitespacesAndNewlines), !homeDirectory.isEmpty else {
-            return path()
+            return path(environment: environment, realHomeDirectory: realHomeDirectory)
+        }
+        if homeDirectory == "~" {
+            return realHomeDirectory
+        }
+        if homeDirectory.hasPrefix("~/") {
+            return (realHomeDirectory as NSString).appendingPathComponent(String(homeDirectory.dropFirst(2)))
         }
         return (homeDirectory as NSString).standardizingPath
     }
 
     static func authFilePath(for account: CodexAccount) -> String {
         (path(for: account) as NSString).appendingPathComponent("auth.json")
+    }
+
+    static func authFileDisplayPath(
+        for account: CodexAccount,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        realHomeDirectory: String = ServiceSupport.realHomeDirectory()
+    ) -> String {
+        compactForDisplay(
+            (path(
+                for: account,
+                environment: environment,
+                realHomeDirectory: realHomeDirectory
+            ) as NSString).appendingPathComponent("auth.json"),
+            realHomeDirectory: realHomeDirectory
+        )
     }
 
     /// The resolved auth-file path for user-facing copy, compacting paths under
@@ -52,10 +77,17 @@ nonisolated enum CodexHomeDirectory {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         realHomeDirectory: String = ServiceSupport.realHomeDirectory()
     ) -> String {
-        let resolvedPath = (authFilePath(
+        compactForDisplay(
+            authFilePath(
             environment: environment,
             realHomeDirectory: realHomeDirectory
-        ) as NSString).standardizingPath
+            ),
+            realHomeDirectory: realHomeDirectory
+        )
+    }
+
+    private static func compactForDisplay(_ path: String, realHomeDirectory: String) -> String {
+        let resolvedPath = (path as NSString).standardizingPath
         let standardizedHome = (realHomeDirectory as NSString).standardizingPath
         let homePrefix = standardizedHome.hasSuffix("/") ? standardizedHome : "\(standardizedHome)/"
 

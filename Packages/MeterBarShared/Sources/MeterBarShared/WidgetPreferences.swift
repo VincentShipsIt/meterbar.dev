@@ -271,6 +271,15 @@ public final class WidgetPreferencesStore: ObservableObject {
         update { $0.accountSelection = .all }
     }
 
+    /// Prunes explicit selections when an account is disabled or deleted.
+    /// `.all` remains dynamic by design and therefore needs no stored rewrite.
+    public func reconcileAvailableAccounts(_ availableIdentifiers: Set<WidgetAccountIdentifier>) {
+        guard preferences.accountSelection.mode == .explicit else { return }
+        let reconciled = preferences.accountSelection.explicitIdentifiers.intersection(availableIdentifiers)
+        guard reconciled != preferences.accountSelection.explicitIdentifiers else { return }
+        setSelectedAccounts(reconciled)
+    }
+
     public func setSelectedAccounts(_ identifiers: Set<WidgetAccountIdentifier>) {
         update { $0.accountSelection = .explicit(identifiers) }
     }
