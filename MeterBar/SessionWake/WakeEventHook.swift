@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import MeterBarShared
 
 /// The three Session Wake transitions that may invoke a user-configured local command.
 nonisolated enum WakeEventHookEvent: String, Codable, CaseIterable, Sendable {
@@ -43,12 +44,51 @@ nonisolated struct WakeEventHookConfiguration: Codable, Equatable, Sendable {
 nonisolated struct WakeEventHookContext: Equatable, Sendable {
     let eventName: String
     let provider: WakeProvider?
+    let environment: [String: String]
+    let diagnosticProvider: String
 
     static func automatic(_ event: WakeEventHookEvent, provider: WakeProvider) -> Self {
-        Self(eventName: event.rawValue, provider: provider)
+        Self(
+            eventName: event.rawValue,
+            provider: provider,
+            environment: [
+                "METERBAR_WAKE_EVENT": event.rawValue,
+                "METERBAR_WAKE_PROVIDER": provider.rawValue,
+            ],
+            diagnosticProvider: provider.rawValue
+        )
     }
 
-    static let test = Self(eventName: "test", provider: nil)
+    static let test = Self(
+        eventName: "test",
+        provider: nil,
+        environment: [
+            "METERBAR_WAKE_EVENT": "test",
+            "METERBAR_WAKE_PROVIDER": "test",
+        ],
+        diagnosticProvider: "test"
+    )
+
+    static func quota(_ payload: QuotaEventPayload) -> Self {
+        let percentage = payload.percentage.rounded() == payload.percentage
+            ? String(Int(payload.percentage))
+            : String(format: "%.2f", payload.percentage)
+        return Self(
+            eventName: payload.event.rawValue,
+            provider: nil,
+            environment: [
+                "METERBAR_EVENT": payload.event.rawValue,
+                "METERBAR_PROVIDER": payload.provider.rawValue,
+                "METERBAR_ACCOUNT_ID": payload.account.id,
+                "METERBAR_ACCOUNT_NAME": payload.account.name,
+                "METERBAR_WINDOW": payload.window.rawValue,
+                "METERBAR_PERCENTAGE": percentage,
+                "METERBAR_BAND": payload.band.rawValue,
+                "METERBAR_TIMESTAMP": ISO8601DateFormatter().string(from: payload.timestamp),
+            ],
+            diagnosticProvider: payload.provider.rawValue
+        )
+    }
 }
 
 /// Pure transition tracker shared by the app and launch-agent dispatchers.
@@ -187,8 +227,9 @@ nonisolated struct WakeEventHookRunner: Sendable {
             "LANG": parentEnvironment["LANG"] ?? "en_US.UTF-8",
             "NO_COLOR": "1"
         ]
-        environment["METERBAR_WAKE_EVENT"] = context.eventName
-        environment["METERBAR_WAKE_PROVIDER"] = context.provider?.rawValue ?? "test"
+        for (key, value) in context.environment {
+            environment[key] = value
+        }
         process.environment = environment
 
         let stdoutPipe = Pipe()
@@ -259,7 +300,7 @@ nonisolated struct WakeEventHookRunner: Sendable {
         logger.append(WakeRunLogger.Record(
             timestamp: start,
             event: "hook",
-            sessionID: context.provider?.rawValue ?? "test",
+            sessionID: context.diagnosticProvider,
             reason: context.eventName,
             outcome: outcome,
             exitCode: exitCode,

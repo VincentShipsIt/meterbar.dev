@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-26 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-29 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -86,10 +86,11 @@ meterbar/
 - **AppLog** — `os.Logger` categories: app, usage, cost, network, storage. This is the only observability; there is no crash reporting or analytics.
 - **SoftwareUpdateController** — owns Sparkle 2's standard updater. The General settings pane binds directly to Sparkle's automatic-check preference (default off until consent) and exposes a manual check action. Release builds embed the GitHub Releases appcast URL and an Actions-provided EdDSA public key.
 - **SessionWakeController + managed agent** — signed release bundles register `Contents/Helpers/meterbar wake-agent` through `SMAppService.agent`. The launch agent owns the shared wake lock for its lifetime, reads versioned configuration/status through the app group, and keeps the native coordinator alive after the GUI quits. Debug builds without the injected CLI retain the in-process fallback.
+- **QuotaEventService + QuotaEventCoordinator** — serializes app-wide quota-band transitions for every enabled provider/account/window and sends explicitly selected warning, critical, exhausted, and recovered events to an optional direct-process local hook and/or webhook. Both delivery lanes and every event/provider/account scope default off. Local hooks inherit Session Wake's literal-argv/no-shell runner; webhooks use the public version 1 contract in `docs/quota-event-webhooks.md`, reject non-public destinations and redirects, and isolate nonfatal failures in bounded in-memory diagnostics. Existing Session Wake hook settings migrate once into the versioned app-wide store without changing their environment contract.
 
 ## App lifecycle
 
-`@main` SwiftUI `App` with `Settings` scene + `NSApplicationDelegateAdaptor`. The delegate creates a manual `NSStatusItem` (not `MenuBarExtra`) with an `NSPopover` hosting `MenuBarView`; right-click opens a native status menu (Dock toggle / dashboard / quit). `LSUIElement = true`; Dock icon toggled at runtime via activation policy. A 5-minute `Task.sleep` loop checks limits and posts local notifications at 90%/100% with stable identifiers and re-arm-on-drop semantics.
+`@main` SwiftUI `App` with `Settings` scene + `NSApplicationDelegateAdaptor`. The delegate creates a manual `NSStatusItem` (not `MenuBarExtra`) with an `NSPopover` hosting `MenuBarView`; right-click opens a native status menu (Dock toggle / dashboard / quit). `LSUIElement = true`; Dock icon toggled at runtime via activation policy. Usage refresh commits drive local notification and opt-in quota-event evaluation through Combine; both use stable transition state and re-arm-on-drop semantics.
 
 On the first launch, `FirstRunOnboardingStore` auto-opens the menu panel and shows a one-time launch-at-login choice. Enablement remains explicit through `SMAppService`; choosing either option or dismissing the panel persists `HasCompletedFirstRun` so onboarding does not reappear.
 

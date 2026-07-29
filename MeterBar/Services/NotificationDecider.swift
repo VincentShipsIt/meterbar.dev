@@ -112,8 +112,8 @@ struct NotificationDecider {
         var keys = alreadyNotified
         var fired: [FiredNotification] = []
 
-        let warningRank = Self.severityRank(preferences.warningThreshold.band)
-        let criticalRank = Self.severityRank(preferences.criticalThreshold.band)
+        let warningRank = preferences.warningThreshold.band.severityRank
+        let criticalRank = preferences.criticalThreshold.band.severityRank
 
         for (limit, quotaKind) in limits {
             let baseKey = Self.notificationBaseKey(
@@ -140,7 +140,7 @@ struct NotificationDecider {
             }
 
             let band = QuotaBand.forLimit(limit)
-            let bandRank = Self.severityRank(band)
+            let bandRank = band.severityRank
             let quotaDisplayName = quotaKind.displayName(
                 for: metrics.service,
                 modelLimitLabel: metrics.modelLimitLabel
@@ -215,18 +215,6 @@ struct NotificationDecider {
         [service.rawValue, accountKey, quotaKind.rawValue]
             .compactMap { $0 }
             .joined(separator: "-")
-    }
-
-    /// Orders the shared quota bands by severity so a user-selected threshold
-    /// band can be compared against a limit's current band. This only ranks the
-    /// existing `QuotaBand` cases — it is not a second threshold scheme.
-    private static func severityRank(_ band: QuotaBand) -> Int {
-        switch band {
-        case .healthy: return 0
-        case .tight: return 1
-        case .critical: return 2
-        case .exhausted: return 3
-        }
     }
 
     /// Stable quota key plus provider-specific display copy. `codeReviewLimit`

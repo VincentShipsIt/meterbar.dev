@@ -533,3 +533,31 @@ Errors reuse the same `CLIJSONErrorResponse` envelope as the rest of the CLI:
 Stable version 1 serve error codes are `unauthorized` (401), `not_found` (404),
 `method_not_allowed` (405), `too_many_requests` (429), `bad_request` (400), and the
 pre-existing `usage_cache_missing` / `cost_cache_missing` (200).
+
+## Quota event webhooks
+
+The app's explicitly enabled webhook integration uses a separate public
+version 1 event document. It is included here so every public MeterBar JSON
+contract has one compatibility index, even though this body is sent by the app
+rather than printed by the CLI:
+
+```json
+{
+  "schema_version": 1,
+  "provider": "Codex CLI",
+  "account": {
+    "id": "AB45485C-7C78-4E71-A238-A2EED2C97DC5",
+    "name": "Work"
+  },
+  "event": "exhausted",
+  "window": "weekly",
+  "percentage": 100,
+  "band": "exhausted",
+  "timestamp": "2027-01-15T08:00:00Z"
+}
+```
+
+Version 1 fields will not be removed, renamed, or change type; additive fields
+may appear. The complete field definitions, transition semantics, local-command
+environment, privacy guarantees, and webhook URL boundary are documented in
+[Quota event webhook contract](quota-event-webhooks.md).

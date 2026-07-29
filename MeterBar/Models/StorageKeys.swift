@@ -113,6 +113,9 @@ nonisolated enum StorageKeys {
     static let sessionWakeMaxTurns = "SessionWakeMaxTurns"
     /// JSON-encoded `WakeEventHookConfiguration`; missing means no configured or enabled hooks.
     static let sessionWakeEventHooks = "SessionWakeEventHooks"
+    /// Versioned app-wide quota event integration configuration. The migration
+    /// reads `sessionWakeEventHooks` once, then this key becomes authoritative.
+    static let quotaEventIntegrations = "QuotaEventIntegrationsV1"
 
     // MARK: - Display Currency (#270)
 

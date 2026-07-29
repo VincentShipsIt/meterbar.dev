@@ -77,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notifications = UsageNotificationCoordinator()
+    private let quotaEvents = QuotaEventCoordinator.shared
     private var cancellables = Set<AnyCancellable>()
 
     /// Decides what each menu bar item shows and styles its button. Item
@@ -151,6 +152,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 notifications.observeSessionWakeCompletion()
             }
         }
+
+        // Prime and observe app-wide quota transitions before the notification
+        // coordinator performs its launch refresh.
+        quotaEvents.start()
 
         // Setup notifications (also handles initial data refresh)
         notifications.start()

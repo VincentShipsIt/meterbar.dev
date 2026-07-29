@@ -18,7 +18,8 @@ final class SessionWakeControllerTests: XCTestCase {
     override func tearDownWithError() throws {
         defaults.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(
-            at: FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName ?? "")-watcher.lock")
+            at: FileManager.default.temporaryDirectory
+                .appendingPathComponent(suiteName ?? "", isDirectory: true)
         )
     }
 
@@ -43,8 +44,9 @@ final class SessionWakeControllerTests: XCTestCase {
     }
 
     private func lifetimeLockFactory() -> @Sendable () -> WakeLock {
-        let lockURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(suiteName ?? UUID().uuidString)-watcher.lock")
+        let lockDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName ?? UUID().uuidString, isDirectory: true)
+        let lockURL = lockDirectory.appendingPathComponent("watcher.lock")
         return { WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app) }
     }
 

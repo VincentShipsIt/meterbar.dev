@@ -14,6 +14,7 @@ struct GeneralSettingsView: View {
             menuBarDisplaySection
             menuBarAccountsSection
             notificationsSection
+            QuotaEventSettingsView()
             generalSection
         }
     }
