@@ -39,6 +39,7 @@ struct ProviderCatalogSettingsView: View {
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -52,6 +53,8 @@ struct ProviderCatalogSettingsView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                grokAccounts: grokAccountStore.accounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 fableSessions: fableSessionTracker.sessions,

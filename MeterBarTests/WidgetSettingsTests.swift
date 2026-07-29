@@ -31,14 +31,20 @@ final class WidgetSettingsTests: XCTestCase {
             name: "Codex Work",
             homeDirectory: nil
         )
+        let enabledGrok = GrokAccount(
+            id: UUID(),
+            name: "Grok Work",
+            homeDirectory: "/tmp/grok-work"
+        )
         let options = WidgetSettingsAccountProjection.options(
-            enabledServices: [.claudeCode, .codexCli, .cursor],
+            enabledServices: [.claudeCode, .codexCli, .cursor, .grok],
             claudeAccounts: [enabledClaude, disabledClaude],
-            codexAccounts: [enabledCodex]
+            codexAccounts: [enabledCodex],
+            grokAccounts: [enabledGrok]
         )
 
-        XCTAssertEqual(options.map(\.name), ["Claude Work", "Codex Work", "Cursor"])
-        XCTAssertEqual(options.map(\.service), [.claudeCode, .codexCli, .cursor])
+        XCTAssertEqual(options.map(\.name), ["Claude Work", "Codex Work", "Cursor", "Grok Work"])
+        XCTAssertEqual(options.map(\.service), [.claudeCode, .codexCli, .cursor, .grok])
         XCTAssertFalse(options.contains { $0.name == disabledClaude.name })
     }
 
@@ -46,7 +52,8 @@ final class WidgetSettingsTests: XCTestCase {
         let options = WidgetSettingsAccountProjection.options(
             enabledServices: [.claudeCode, .codexCli],
             claudeAccounts: [],
-            codexAccounts: []
+            codexAccounts: [],
+            grokAccounts: []
         )
 
         XCTAssertTrue(options.isEmpty)
@@ -90,6 +97,7 @@ final class WidgetSettingsTests: XCTestCase {
             metrics: [:],
             claudeAccountMetrics: [:],
             codexAccountMetrics: [:],
+            grokAccountMetrics: [:],
             now: Date(timeIntervalSinceReferenceDate: 1_000_000)
         )
         var preferences = WidgetPreferences.defaults
@@ -124,7 +132,8 @@ final class WidgetSettingsTests: XCTestCase {
             ],
             metrics: [:],
             claudeAccountMetrics: [:],
-            codexAccountMetrics: [:]
+            codexAccountMetrics: [:],
+            grokAccountMetrics: [:]
         )
         for appearance in WidgetSettingsPreviewAppearance.allCases {
             let gallery = NSHostingView(

@@ -74,20 +74,23 @@ final class MenuBarAccountSelectionTests: XCTestCase {
     func testCatalogBuildsStableKeysAcrossProviders() {
         let claude = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
         let codex = CodexAccount(id: UUID(), name: "Personal", homeDirectory: "/tmp/personal")
+        let grok = GrokAccount(id: UUID(), name: "Build", homeDirectory: "/tmp/grok-build")
 
         let identities = MenuBarAccountCatalog.identities(
             claudeAccounts: [claude],
             codexAccounts: [codex],
-            enabledServices: [.claudeCode, .codexCli]
+            grokAccounts: [grok],
+            enabledServices: [.claudeCode, .codexCli, .grok]
         )
 
         XCTAssertEqual(identities.map(\.key), [
             "\(ServiceType.claudeCode.rawValue):\(claude.id.uuidString)",
-            "\(ServiceType.codexCli.rawValue):\(codex.id.uuidString)"
+            "\(ServiceType.codexCli.rawValue):\(codex.id.uuidString)",
+            "\(ServiceType.grok.rawValue):\(grok.id.uuidString)"
         ])
-        XCTAssertEqual(identities.map(\.displayName), ["Work", "Personal"])
-        XCTAssertEqual(identities.map(\.badge), ["W", "P"])
-        XCTAssertEqual(identities.map(\.isEnabled), [true, true])
+        XCTAssertEqual(identities.map(\.displayName), ["Work", "Personal", "Build"])
+        XCTAssertEqual(identities.map(\.badge), ["W", "P", "B"])
+        XCTAssertEqual(identities.map(\.isEnabled), [true, true, true])
     }
 
     /// A disabled account and an account whose provider is untracked are both
@@ -102,6 +105,7 @@ final class MenuBarAccountSelectionTests: XCTestCase {
         let identities = MenuBarAccountCatalog.identities(
             claudeAccounts: [disabledAccount, enabledAccount],
             codexAccounts: [codex],
+            grokAccounts: [],
             enabledServices: [.claudeCode]
         )
 
@@ -118,7 +122,10 @@ final class MenuBarAccountSelectionTests: XCTestCase {
         )
 
         let identity = MenuBarAccountCatalog.identities(
-            claudeAccounts: [account], codexAccounts: [], enabledServices: [.claudeCode]
+            claudeAccounts: [account],
+            codexAccounts: [],
+            grokAccounts: [],
+            enabledServices: [.claudeCode]
         ).first
 
         XCTAssertEqual(identity?.displayName, ".claude-team")

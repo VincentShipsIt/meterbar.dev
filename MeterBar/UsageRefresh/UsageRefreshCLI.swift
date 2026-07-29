@@ -80,6 +80,7 @@ public enum UsageRefreshCLI {
             claudeCodeAccountStore: ClaudeCodeAccountStore(accounts: configuration.claudeAccounts),
             claudeFableSessionTracker: NoopFableSessionTracker(),
             codexAccountStore: CodexAccountStore(accounts: configuration.codexAccounts),
+            grokAccountStore: GrokAccountStore(accounts: configuration.grokAccounts),
             providerVisibilityStore: ProviderVisibilityStore(hiddenServices: configuration.hiddenServices),
             sharedStore: sharedStore,
             cacheDefaults: UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier) ?? .standard,

@@ -33,6 +33,7 @@ struct DashboardDiagnosticsSection: View {
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -87,7 +88,8 @@ struct DashboardDiagnosticsSection: View {
             defaultClaudeAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
             enabledClaudeCustomAccountIDs: claudeAccountStore.enabledAccounts
                 .filter { !$0.isDefault }
-                .map(\.id)
+                .map(\.id),
+            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id)
         )
     }
 
@@ -113,7 +115,7 @@ struct DashboardDiagnosticsSection: View {
             codexError: codexCliService.lastError,
             cursorError: cursorService.lastError,
             openRouterError: openRouterService.lastError,
-            grokError: grokService.lastError
+            grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
         )
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
         let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
@@ -124,7 +126,8 @@ struct DashboardDiagnosticsSection: View {
             enabledProviders: enabledProviders,
             refreshErrors: errors,
             claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-            claudeEnabledAccountMetrics: claudeMetrics
+            claudeEnabledAccountMetrics: claudeMetrics,
+            grokAccounts: grokAccountStore.accounts
         )
     }
 

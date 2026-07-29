@@ -140,6 +140,27 @@ final class UsageDataManagerTests: XCTestCase {
         }
     }
 
+    private final class MultiAccountGrokProvider: GrokUsageProviding {
+        var metricsByAccount: [UUID: UsageMetrics]
+        var failingAccountIDs: Set<UUID> = []
+        var probe: ConcurrencyProbe?
+
+        init(metricsByAccount: [UUID: UsageMetrics]) {
+            self.metricsByAccount = metricsByAccount
+        }
+
+        func canAccess(account: GrokAccount) -> Bool {
+            metricsByAccount[account.id] != nil
+        }
+
+        func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
+            await probe?.recordFetch()
+            if failingAccountIDs.contains(account.id) { throw StubError.fetchFailed }
+            guard let metrics = metricsByAccount[account.id] else { throw StubError.fetchFailed }
+            return metrics
+        }
+    }
+
     private var tempDirectory: URL!
     private var createdSuiteNames: [String] = []
 
@@ -169,14 +190,17 @@ final class UsageDataManagerTests: XCTestCase {
     private func makeManager(
         codex: CodexUsageProviding,
         cursor: StubProvider,
+        grok: GrokUsageProviding? = nil,
         claude: ClaudeCodeUsageProviding? = nil,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         fableTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
+        grokAccountStore: GrokAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
         preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        preloadGrokAccountMetrics: [UUID: UsageMetrics] = [:],
         preloadSharedAccountMetrics: [AccountUsageSnapshot] = [],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
@@ -195,6 +219,10 @@ final class UsageDataManagerTests: XCTestCase {
         if !preloadClaudeAccountMetrics.isEmpty,
            let data = try? JSONEncoder().encode(preloadClaudeAccountMetrics) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedClaudeCodeAccountMetrics)
+        }
+        if !preloadGrokAccountMetrics.isEmpty,
+           let data = try? JSONEncoder().encode(preloadGrokAccountMetrics) {
+            cacheDefaults.set(data, forKey: StorageKeys.cachedGrokAccountMetrics)
         }
         if let savedRefreshInterval {
             cacheDefaults.set(savedRefreshInterval.rawValue, forKey: StorageKeys.refreshInterval)
@@ -216,10 +244,12 @@ final class UsageDataManagerTests: XCTestCase {
         let manager = UsageDataManager(
             codexCliService: codex,
             cursorService: cursor,
+            grokService: grok ?? MultiAccountGrokProvider(metricsByAccount: [:]),
             claudeCodeService: claude ?? ClaudeCodeLocalService.shared,
             claudeCodeAccountStore: claudeCodeAccountStore,
             claudeFableSessionTracker: fableTracker ?? StubFableTracker(),
             codexAccountStore: codexAccountStore,
+            grokAccountStore: grokAccountStore,
             providerVisibilityStore: visibility,
             sharedStore: sharedStore,
             preferences: cacheDefaults,
@@ -1059,6 +1089,41 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.name), [CodexAccount.defaultName, "Work"])
     }
 
+    func testRefreshAllFansOutGrokAccountsAndIsolatesOneProfileFailure() async throws {
+        let accountSuite = "UsageDataManagerTests-grok-accounts-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/grok-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountGrokProvider(metricsByAccount: [
+            GrokAccount.defaultID: MetricsFixtures.grok(weeklyUsedPercent: 18),
+            work.id: MetricsFixtures.grok(weeklyUsedPercent: 88)
+        ])
+        provider.failingAccountIDs = [work.id]
+        let cachedWork = MetricsFixtures.grok(weeklyUsedPercent: 67)
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: provider,
+            grokAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter],
+            preloadGrokAccountMetrics: [work.id: cachedWork]
+        )
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(manager.grokAccountMetrics[work.id]?.weeklyLimit?.used, 67)
+        XCTAssertEqual(manager.metrics[.grok]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(report.outcome(for: .grok)?.state, .refreshed)
+        sharedStore.flushPendingWrites()
+        let grokSnapshots = sharedStore.loadAccountMetrics().filter { $0.metrics.service == .grok }
+        XCTAssertEqual(grokSnapshots.map(\.name), [GrokAccount.defaultName, "Work"])
+    }
+
     // MARK: - Concurrency
 
     /// A refresh used to walk every account and provider strictly serially, so
@@ -1114,6 +1179,34 @@ final class UsageDataManagerTests: XCTestCase {
         await manager.refreshAll()
 
         XCTAssertEqual(probe.maxInFlight, 2, "both Codex accounts must be in flight at once")
+    }
+
+    func testRefreshAllFetchesEveryEnabledGrokAccountConcurrently() async throws {
+        let accountSuite = "UsageDataManagerTests-grok-concurrency-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/grok-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountGrokProvider(metricsByAccount: [
+            GrokAccount.defaultID: MetricsFixtures.grok(weeklyUsedPercent: 12),
+            work.id: MetricsFixtures.grok(weeklyUsedPercent: 34)
+        ])
+        let probe = ConcurrencyProbe(expected: 2)
+        provider.probe = probe
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: provider,
+            grokAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(probe.maxInFlight, 2, "both Grok homes must be in flight at once")
     }
 
     /// The three phases of `refreshAll` — Claude accounts, Codex accounts, the

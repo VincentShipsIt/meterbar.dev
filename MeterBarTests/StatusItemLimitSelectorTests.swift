@@ -56,7 +56,28 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .codexCli), "session")
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .cursor), "weekly")
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .openRouter), "weekly")
-        XCTAssertNil(StatusItemAutoSelectionPolicy.windowID(for: .grok))
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .grok), "weekly")
+    }
+
+    func testGrokWeeklyQuotaProducesAnAutomaticAccountCandidate() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: UsageMetrics(
+                service: .grok,
+                weeklyLimit: UsageLimit(used: 35, total: 100, resetTime: now.addingTimeInterval(3_600))
+            ),
+            service: .grok
+        )
+
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: .grok,
+            accountID: UUID(),
+            autoSelectionKey: "grok:profile",
+            displayName: "Work (Grok)",
+            limits: limits
+        )
+
+        XCTAssertEqual(seeds.first(where: \.isAutoSelectable)?.key, "grok:profile")
+        XCTAssertEqual(seeds.first(where: \.isAutoSelectable)?.windowName, "Weekly")
     }
 
     func testOpenRouterAccountCreditsParticipateInAutoSelection() {

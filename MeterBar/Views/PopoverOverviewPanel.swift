@@ -17,6 +17,7 @@ struct PopoverOverviewPanel: View {
     let claudeDefaultAccountEnabled: Bool
     let claudeEnabledCustomAccountIDs: [UUID]
     let claudeEnabledAccountMetrics: [UsageMetrics]
+    let grokAccounts: [GrokAccount]
 
     @State private var setupReports: [ProviderReadiness] = []
     @StateObject private var onboarding = FirstRunOnboardingStore.shared
@@ -34,7 +35,8 @@ struct PopoverOverviewPanel: View {
         hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)? = nil,
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledCustomAccountIDs: [UUID] = [],
-        claudeEnabledAccountMetrics: [UsageMetrics] = []
+        claudeEnabledAccountMetrics: [UsageMetrics] = [],
+        grokAccounts: [GrokAccount] = [.defaultAccount]
     ) {
         self.snapshots = snapshots
         self.openDashboard = openDashboard
@@ -44,6 +46,7 @@ struct PopoverOverviewPanel: View {
         self.claudeDefaultAccountEnabled = claudeDefaultAccountEnabled
         self.claudeEnabledCustomAccountIDs = claudeEnabledCustomAccountIDs
         self.claudeEnabledAccountMetrics = claudeEnabledAccountMetrics
+        self.grokAccounts = grokAccounts
     }
 
     /// The enabled providers currently shown in the popover.
@@ -78,6 +81,7 @@ struct PopoverOverviewPanel: View {
         let defaultClaudeAccountEnabled: Bool
         let enabledClaudeCustomAccountIDs: [UUID]
         let claudeMetricFreshness: [Bool]
+        let enabledGrokAccountIDs: [UUID]
     }
 
     private var structuralKey: StructuralKey {
@@ -97,7 +101,8 @@ struct PopoverOverviewPanel: View {
             enabledClaudeCustomAccountIDs: claudeEnabledCustomAccountIDs,
             claudeMetricFreshness: claudeEnabledAccountMetrics.map {
                 ProviderReadinessInspector.hasRecentClaudeUsageFetch(metrics: $0, now: now)
-            }
+            },
+            enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id)
         )
     }
 
@@ -223,11 +228,13 @@ struct PopoverOverviewPanel: View {
         let requestedProviders = enabledProviders
         let defaultAccountEnabled = claudeDefaultAccountEnabled
         let accountMetrics = claudeEnabledAccountMetrics
+        let grokProfiles = grokAccounts
         let reports = await Task.detached(priority: .utility) {
             ProviderReadinessInspector.reports(
                 providers: requestedProviders,
                 claudeDefaultAccountEnabled: defaultAccountEnabled,
-                claudeEnabledAccountMetrics: accountMetrics
+                claudeEnabledAccountMetrics: accountMetrics,
+                grokAccounts: grokProfiles
             )
         }.value
         guard !Task.isCancelled else { return }

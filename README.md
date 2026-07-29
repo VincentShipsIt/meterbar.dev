@@ -129,6 +129,19 @@ open MeterBar.xcodeproj
 3. Enable Grok under **Settings → General → Tracked Providers**
 4. MeterBar asks the official CLI for billing data over ACP; it does not read or store the cached token
 
+To track more than one Grok Build account, give each CLI login a distinct
+`GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
+
+```bash
+GROK_HOME=~/.grok-work grok login
+GROK_HOME=~/.grok-personal grok login
+```
+
+The existing unscoped login remains the zero-configuration default profile
+(`$GROK_HOME` when already exported, otherwise `~/.grok`). Each enabled profile
+gets its own card, menu-bar account, widget entry, cache snapshot, refresh
+result, and diagnostics check. A failed profile does not block the others.
+
 ## Usage
 
 1. **Launch the app** - It appears in your menu bar with the tightest quota's percent left
@@ -190,13 +203,13 @@ claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
 ~/Library/Application Support/Cursor/  # Cursor local DB
-~/.grok/auth.json        # Grok CLI login presence only; token contents stay inside the CLI
+$GROK_HOME/auth.json     # Grok CLI login presence only; defaults to ~/.grok
 ```
 
 It then uses the respective local source or API to fetch current usage data:
 - Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
-- Grok: official `grok agent --no-leader stdio` ACP billing response
+- Grok: official `grok agent --no-leader stdio` ACP billing response, scoped per profile with `GROK_HOME`
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
 - Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).

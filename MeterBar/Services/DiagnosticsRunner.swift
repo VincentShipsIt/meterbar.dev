@@ -7,6 +7,7 @@ enum DiagnosticsRunner {
         let providers: [ServiceType]
         let defaultClaudeAccountEnabled: Bool
         let enabledClaudeCustomAccountIDs: [UUID]
+        var enabledGrokAccountIDs: [UUID] = []
     }
 
     static func refreshErrors(
@@ -40,14 +41,16 @@ enum DiagnosticsRunner {
         enabledProviders: Set<ServiceType>,
         refreshErrors: [ServiceType: ServiceError],
         claudeDefaultAccountEnabled: Bool,
-        claudeEnabledAccountMetrics: [UsageMetrics]
+        claudeEnabledAccountMetrics: [UsageMetrics],
+        grokAccounts: [GrokAccount] = [.defaultAccount]
     ) async -> [ProviderReadiness] {
         await Task.detached(priority: .userInitiated) {
             ProviderReadinessInspector.reports(
                 providers: enabledProviders,
                 refreshErrors: refreshErrors,
                 claudeDefaultAccountEnabled: claudeDefaultAccountEnabled,
-                claudeEnabledAccountMetrics: claudeEnabledAccountMetrics
+                claudeEnabledAccountMetrics: claudeEnabledAccountMetrics,
+                grokAccounts: grokAccounts
             )
         }.value
     }

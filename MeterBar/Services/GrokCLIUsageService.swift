@@ -5,29 +5,30 @@ import os
 
 /// Reads Grok Build subscription usage through the CLI's official ACP stdio
 /// extension. MeterBar asks the CLI to authenticate with its cached login and
-/// never opens, decodes, logs, or persists `~/.grok/auth.json`.
+/// never opens, decodes, logs, or persists `$GROK_HOME/auth.json`.
 final class GrokCLIUsageService: ObservableObject {
     nonisolated static let shared = GrokCLIUsageService()
 
     @Published private(set) var hasAccess = false
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
+    @Published private(set) var accountErrors: [UUID: ServiceError] = [:]
 
     nonisolated private let binaryPathProvider: @Sendable () -> String?
-    nonisolated private let authAvailableProvider: @Sendable () -> Bool
-    nonisolated private let billingResultProvider: @Sendable (String) async throws -> GrokBillingResult
+    nonisolated private let authAvailableProvider: @Sendable (GrokAccount) -> Bool
+    nonisolated private let billingResultProvider: @Sendable (String, String) async throws -> GrokBillingResult
 
     init(
         binaryPathProvider: @escaping @Sendable () -> String? = {
             CLIBinaryLocator.resolve(command: "grok", overrideEnvVar: "GROK_CLI_PATH")
         },
-        authAvailableProvider: @escaping @Sendable () -> Bool = {
-            let path = GrokCLIUsageService.authFilePath()
+        authAvailableProvider: @escaping @Sendable (GrokAccount) -> Bool = { account in
+            let path = GrokHomeDirectory.authFilePath(for: account)
             return FileManager.default.fileExists(atPath: path)
                 && FileManager.default.isReadableFile(atPath: path)
         },
-        billingResultProvider: @escaping @Sendable (String) async throws -> GrokBillingResult = {
-            try await GrokBillingRPC.fetch(binaryPath: $0)
+        billingResultProvider: @escaping @Sendable (String, String) async throws -> GrokBillingResult = {
+            try await GrokBillingRPC.fetch(binaryPath: $0, grokHome: $1)
         }
     ) {
         self.binaryPathProvider = binaryPathProvider
@@ -38,12 +39,8 @@ final class GrokCLIUsageService: ObservableObject {
         }
     }
 
-    nonisolated static func authFilePath(home: String = ServiceSupport.realHomeDirectory()) -> String {
-        "\(home)/.grok/auth.json"
-    }
-
     nonisolated func checkAccess() {
-        let available = binaryPathProvider() != nil && authAvailableProvider()
+        let available = canAccess(account: .defaultAccount)
         ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
             self.hasAccess = available
@@ -53,31 +50,52 @@ final class GrokCLIUsageService: ObservableObject {
         }
     }
 
+    nonisolated func canAccess(account: GrokAccount) -> Bool {
+        binaryPathProvider() != nil && authAvailableProvider(account)
+    }
+
     func fetchUsageMetrics() async throws -> UsageMetrics {
-        guard let binaryPath = binaryPathProvider(), authAvailableProvider() else {
+        try await fetchUsageMetrics(account: .defaultAccount)
+    }
+
+    func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
+        guard let binaryPath = binaryPathProvider(), authAvailableProvider(account) else {
             let error = ServiceError.notAuthenticated
-            hasAccess = false
+            accountErrors[account.id] = error
+            if account.isDefault {
+                hasAccess = false
+            }
             lastError = error
             throw error
         }
 
         do {
-            let result = try await billingResultProvider(binaryPath)
+            let result = try await billingResultProvider(binaryPath, GrokHomeDirectory.path(for: account))
             let metrics = try Self.map(result)
-            hasAccess = true
-            subscriptionType = result.subscriptionTier
-            lastError = nil
+            accountErrors.removeValue(forKey: account.id)
+            if account.isDefault {
+                hasAccess = true
+                subscriptionType = result.subscriptionTier
+            }
+            lastError = accountErrors.values.first
             return metrics
         } catch {
             let serviceError = Self.serviceError(from: error)
+            accountErrors[account.id] = serviceError
             lastError = serviceError
-            if case .notAuthenticated = serviceError {
+            if account.isDefault, case .notAuthenticated = serviceError {
                 hasAccess = false
                 subscriptionType = nil
             }
-            AppLog.usage.error("Grok usage fetch failed: \(serviceError.localizedDescription, privacy: .public)")
+            AppLog.usage.error(
+                "Grok profile usage fetch failed: \(serviceError.localizedDescription, privacy: .public)"
+            )
             throw serviceError
         }
+    }
+
+    func firstError(for accounts: [GrokAccount]) -> ServiceError? {
+        accounts.lazy.compactMap { self.accountErrors[$0.id] }.first
     }
 
     /// Projects Grok's quota windows onto the shared session/weekly model.
@@ -565,11 +583,11 @@ nonisolated enum GrokBillingRPC {
         ]
     }
 
-    static func fetch(binaryPath: String) async throws -> GrokBillingResult {
+    static func fetch(binaryPath: String, grokHome: String) async throws -> GrokBillingResult {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do {
-                    continuation.resume(returning: try fetchBlocking(binaryPath: binaryPath))
+                    continuation.resume(returning: try fetchBlocking(binaryPath: binaryPath, grokHome: grokHome))
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -596,13 +614,21 @@ nonisolated enum GrokBillingRPC {
         return try decodeBillingResult(from: reader.response(id: 3, deadline: deadline))
     }
 
-    private static func fetchBlocking(binaryPath: String) throws -> GrokBillingResult {
-        var environment = ProcessInfo.processInfo.environment
+    static func processEnvironment(
+        grokHome: String,
+        base: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = base
         environment["PATH"] = CLIBinaryLocator.augmentedPATH(environment: environment)
+        environment["GROK_HOME"] = GrokHomeDirectory.expand(grokHome)
         environment["NO_COLOR"] = "1"
         environment["FORCE_COLOR"] = "0"
         environment["TERM"] = "dumb"
+        return environment
+    }
 
+    private static func fetchBlocking(binaryPath: String, grokHome: String) throws -> GrokBillingResult {
+        let environment = processEnvironment(grokHome: grokHome)
         let agent: GrokAgentProcess
         do {
             agent = try GrokAgentProcess(

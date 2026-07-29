@@ -28,7 +28,32 @@ nonisolated public enum ProviderReadinessInspector {
         parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil,
         cachedMetrics: [ServiceType: UsageMetrics]? = nil
     ) -> [ProviderReadiness] {
+        reports(
+            providers: providers,
+            refreshErrors: refreshErrors,
+            now: now,
+            claudeDefaultAccountEnabled: claudeDefaultAccountEnabled,
+            claudeEnabledAccountMetrics: claudeEnabledAccountMetrics,
+            grokAccounts: nil,
+            parseHealth: parseHealth,
+            cachedMetrics: cachedMetrics
+        )
+    }
+
+    static func reports(
+        providers: Set<ServiceType> = Set(ServiceType.allCases),
+        refreshErrors: [ServiceType: ServiceError] = [:],
+        now: Date = Date(),
+        claudeDefaultAccountEnabled: Bool = true,
+        claudeEnabledAccountMetrics: [UsageMetrics] = [],
+        grokAccounts: [GrokAccount]?,
+        parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil,
+        cachedMetrics: [ServiceType: UsageMetrics]? = nil
+    ) -> [ProviderReadiness] {
         let metrics = cachedMetrics ?? SharedDataStore.shared.loadMetrics()
+        let configuredGrokAccounts = grokAccounts
+            ?? UsageRefreshConfigurationStore.load()?.grokAccounts
+            ?? [.defaultAccount]
         let baseReports = reports(
             providers: providers,
             refreshErrors: refreshErrors,
@@ -45,7 +70,9 @@ nonisolated public enum ProviderReadinessInspector {
             codexReport: { codexReport(refreshError: $0, now: $1) },
             cursorReport: { cursorReport(refreshError: $0, now: $1) },
             openRouterReport: { error, _ in openRouterReport(refreshError: error) },
-            grokReport: { error, _ in grokReport(refreshError: error) }
+            grokReport: { error, _ in
+                grokReport(accounts: configuredGrokAccounts, refreshError: error)
+            }
         )
         let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
         return baseReports.map { report in
@@ -201,14 +228,27 @@ nonisolated public enum ProviderReadinessInspector {
     }
 
     static func grokReport(refreshError: ServiceError? = nil) -> ProviderReadiness {
+        grokReport(accounts: [.defaultAccount], refreshError: refreshError)
+    }
+
+    static func grokReport(
+        accounts: [GrokAccount],
+        refreshError: ServiceError? = nil,
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(
+            command: "grok",
+            overrideEnvVar: "GROK_CLI_PATH"
+        )
+    ) -> ProviderReadiness {
         let fileManager = FileManager.default
-        let authPath = GrokCLIUsageService.authFilePath()
-        let authExists = fileManager.fileExists(atPath: authPath)
+        let enabledAccounts = accounts.filter(\.isEnabled)
+        let authPaths = enabledAccounts.map(GrokHomeDirectory.authFilePath(for:))
+        let authExists = !authPaths.isEmpty && authPaths.allSatisfy(fileManager.fileExists(atPath:))
+        let authReadable = authExists && authPaths.allSatisfy(fileManager.isReadableFile(atPath:))
         return ProviderReadinessEvaluator.grok(
             GrokReadinessInput(
-                isCLIInstalled: CLIBinaryLocator.isAvailable(command: "grok", overrideEnvVar: "GROK_CLI_PATH"),
+                isCLIInstalled: isCLIInstalled,
                 authFileExists: authExists,
-                authFileReadable: authExists && fileManager.isReadableFile(atPath: authPath),
+                authFileReadable: authReadable,
                 refreshError: sanitize(refreshError)
             )
         )
