@@ -1279,14 +1279,14 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.id), [CodexAccount.defaultID])
     }
 
-    func testRefreshAllClearsStaleCodexMetricsWhenEveryAccountIsDisabled() async throws {
-        let accountSuite = "UsageDataManagerTests-all-disabled-\(UUID().uuidString)"
+    func testRefreshAllRetainsAndRefreshesTheOnlyEnabledCodexAccount() async throws {
+        let accountSuite = "UsageDataManagerTests-last-enabled-\(UUID().uuidString)"
         createdSuiteNames.append(accountSuite)
         let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
         let accountStore = CodexAccountStore(userDefaults: accountDefaults)
-        accountStore.setEnabled(false, for: CodexAccount.defaultID)
         let staleMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 80)
-        let provider = MultiAccountCodexProvider(metricsByAccount: [CodexAccount.defaultID: staleMetrics])
+        let freshMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 20)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [CodexAccount.defaultID: freshMetrics])
         let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
         let (manager, sharedStore) = makeManager(
             codex: provider,
@@ -1295,13 +1295,17 @@ final class UsageDataManagerTests: XCTestCase {
             preload: [.codexCli: staleMetrics]
         )
 
+        XCTAssertEqual(
+            accountStore.setEnabled(false, for: CodexAccount.defaultID),
+            .rejectedLastEnabledAccount
+        )
         await manager.refreshAll()
 
-        XCTAssertNil(manager.metrics[.codexCli])
-        XCTAssertTrue(manager.codexAccountMetrics.isEmpty)
+        XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 20)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
         sharedStore.flushPendingWrites()
-        XCTAssertNil(sharedStore.loadMetrics()[.codexCli])
-        XCTAssertTrue(sharedStore.loadAccountMetrics().isEmpty)
+        XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.sessionLimit?.used, 20)
+        XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.id), [CodexAccount.defaultID])
     }
 
     func testRefreshAllDoesNotMoveAggregateMetricsBetweenCodexProfiles() async throws {
