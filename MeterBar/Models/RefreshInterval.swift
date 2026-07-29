@@ -1,6 +1,7 @@
 import Foundation
 
 enum RefreshInterval: Int, CaseIterable, Identifiable {
+    case adaptive = -1
     case oneMinute = 60
     case twoMinutes = 120
     case fiveMinutes = 300
@@ -15,6 +16,8 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .adaptive:
+            return "Adaptive"
         case .oneMinute:
             return "1 minute"
         case .twoMinutes:
@@ -33,6 +36,11 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
     }
 
     var seconds: TimeInterval {
-        TimeInterval(rawValue)
+        switch self {
+        case .adaptive, .manual:
+            return 0
+        default:
+            return TimeInterval(rawValue)
+        }
     }
 }

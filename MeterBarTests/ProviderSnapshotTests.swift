@@ -25,6 +25,8 @@ final class ProviderSnapshotTests: XCTestCase {
         metrics: [ServiceType: UsageMetrics] = [:],
         codexAccounts: [CodexAccount] = [.defaultAccount],
         codexAccountMetrics: [UUID: UsageMetrics] = [:],
+        grokAccounts: [GrokAccount] = [.defaultAccount],
+        grokAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         fableSessions: [ClaudeFableSession] = [],
@@ -34,6 +36,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: metrics,
             codexAccounts: codexAccounts,
             codexAccountMetrics: codexAccountMetrics,
+            grokAccounts: grokAccounts,
+            grokAccountMetrics: grokAccountMetrics,
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
             fableSessions: fableSessions,
@@ -271,6 +275,24 @@ final class ProviderSnapshotTests: XCTestCase {
         ))
 
         XCTAssertTrue(snapshots.isEmpty)
+    }
+
+    func testMultipleGrokAccountsUseIndependentMetricsAndAccountNames() {
+        let work = GrokAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/grok-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            grokAccounts: [.defaultAccount, work],
+            grokAccountMetrics: [
+                GrokAccount.defaultID: makeMetrics(service: .grok, weekly: 14),
+                work.id: makeMetrics(service: .grok, weekly: 79)
+            ],
+            enabledServices: [.grok]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), [GrokAccount.defaultName, "Work"])
+        XCTAssertEqual(snapshots.map(\.accountID), [GrokAccount.defaultID, work.id])
+        XCTAssertEqual(snapshots[0].primaryLimit?.usedPercent ?? 0, 14, accuracy: 0.001)
+        XCTAssertEqual(snapshots[1].primaryLimit?.usedPercent ?? 0, 79, accuracy: 0.001)
+        XCTAssertEqual(Set(snapshots.map(\.id)).count, 2)
     }
 
     func testStatusItemPinOptionsUseStableProviderAccountWindowKeys() {

@@ -148,6 +148,27 @@ final class UsageDataManagerTests: XCTestCase {
         }
     }
 
+    private final class MultiAccountGrokProvider: GrokUsageProviding {
+        var metricsByAccount: [UUID: UsageMetrics]
+        var failingAccountIDs: Set<UUID> = []
+        var probe: ConcurrencyProbe?
+
+        init(metricsByAccount: [UUID: UsageMetrics]) {
+            self.metricsByAccount = metricsByAccount
+        }
+
+        func canAccess(account: GrokAccount) -> Bool {
+            metricsByAccount[account.id] != nil
+        }
+
+        func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
+            await probe?.recordFetch()
+            if failingAccountIDs.contains(account.id) { throw StubError.fetchFailed }
+            guard let metrics = metricsByAccount[account.id] else { throw StubError.fetchFailed }
+            return metrics
+        }
+    }
+
     private var tempDirectory: URL!
     private var createdSuiteNames: [String] = []
 
@@ -177,18 +198,25 @@ final class UsageDataManagerTests: XCTestCase {
     private func makeManager(
         codex: CodexUsageProviding,
         cursor: StubProvider,
+        grok: GrokUsageProviding? = nil,
         claude: ClaudeCodeUsageProviding? = nil,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         fableTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
+        grokAccountStore: GrokAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
         hidden: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
         preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        preloadGrokAccountMetrics: [UUID: UsageMetrics] = [:],
         preloadSharedAccountMetrics: [AccountUsageSnapshot] = [],
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = false,
+        adaptiveNow: @escaping @Sendable () -> Date = { Date() },
+        adaptivePowerState: @escaping @Sendable () -> AdaptiveRefreshPowerState = {
+            .unconstrained
+        },
         demoMode: Bool = false
     ) -> (manager: UsageDataManager, sharedStore: SharedDataStore) {
         let suiteName = "UsageDataManagerTests-\(UUID().uuidString)"
@@ -203,6 +231,10 @@ final class UsageDataManagerTests: XCTestCase {
         if !preloadClaudeAccountMetrics.isEmpty,
            let data = try? JSONEncoder().encode(preloadClaudeAccountMetrics) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedClaudeCodeAccountMetrics)
+        }
+        if !preloadGrokAccountMetrics.isEmpty,
+           let data = try? JSONEncoder().encode(preloadGrokAccountMetrics) {
+            cacheDefaults.set(data, forKey: StorageKeys.cachedGrokAccountMetrics)
         }
         if let savedRefreshInterval {
             cacheDefaults.set(savedRefreshInterval.rawValue, forKey: StorageKeys.refreshInterval)
@@ -224,16 +256,20 @@ final class UsageDataManagerTests: XCTestCase {
         let manager = UsageDataManager(
             codexCliService: codex,
             cursorService: cursor,
+            grokService: grok ?? MultiAccountGrokProvider(metricsByAccount: [:]),
             claudeCodeService: claude ?? ClaudeCodeLocalService.shared,
             claudeCodeAccountStore: claudeCodeAccountStore,
             claudeFableSessionTracker: fableTracker ?? StubFableTracker(),
             codexAccountStore: codexAccountStore,
+            grokAccountStore: grokAccountStore,
             providerVisibilityStore: visibility,
             sharedStore: sharedStore,
             preferences: cacheDefaults,
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
             schedulesAutoRefresh: schedulesAutoRefresh,
+            adaptiveNow: adaptiveNow,
+            adaptivePowerState: adaptivePowerState,
             demoMode: demoMode
         )
         return (manager, sharedStore)
@@ -856,6 +892,7 @@ final class UsageDataManagerTests: XCTestCase {
 
     func testExistingRefreshPreferencesArePreserved() {
         let existingChoices: [RefreshInterval] = [
+            .adaptive,
             .oneMinute,
             .twoMinutes,
             .fiveMinutes,
@@ -890,6 +927,153 @@ final class UsageDataManagerTests: XCTestCase {
 
         manager.refreshInterval = .manual
         XCTAssertNil(manager.scheduledRefreshInterval)
+    }
+
+    func testEveryFixedIntervalKeepsItsRepeatingTimerCadence() throws {
+        let fixedIntervals: [RefreshInterval] = [
+            .oneMinute,
+            .twoMinutes,
+            .fiveMinutes,
+            .tenMinutes,
+            .fifteenMinutes,
+            .thirtyMinutes,
+        ]
+
+        for fixedInterval in fixedIntervals {
+            let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+            let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+            let (manager, _) = makeManager(
+                codex: codex,
+                cursor: cursor,
+                savedRefreshInterval: fixedInterval,
+                schedulesAutoRefresh: true
+            )
+
+            XCTAssertEqual(
+                try XCTUnwrap(manager.scheduledRefreshInterval),
+                fixedInterval.seconds,
+                accuracy: 0.01
+            )
+            XCTAssertTrue(manager.scheduledRefreshRepeats)
+        }
+    }
+
+    func testAdaptiveSchedulerStartsIdleAndReschedulesAfterExplicitInteraction() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 1_800, accuracy: 0.01)
+        XCTAssertFalse(manager.scheduledRefreshRepeats)
+
+        await manager.refreshForExplicitAction(.manualRefresh)
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 120, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentInteraction.displayText)
+    }
+
+    func testAdaptiveSchedulerReschedulesToFastBoundWhenQuotaMoves() async {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let cached = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+            lastUpdated: now.addingTimeInterval(-60)
+        )
+        let refreshed = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 11, total: 100, resetTime: nil),
+            lastUpdated: now
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(refreshed))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            hidden: [.codexCli],
+            preload: [.cursor: cached],
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
+    }
+
+    /// Reset-credit publish skips refresh methods; movement must still reschedule Adaptive.
+    func testAdaptiveSchedulerReschedulesWhenResetCreditPublishMovesQuota() {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let cached = MetricsFixtures.codexCli(sessionUsedPercent: 40)
+        let codex = StubProvider(hasAccess: true, result: .success(cached))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            preload: [.codexCli: cached],
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 1_800, accuracy: 0.01)
+
+        manager.applyCodexResetCreditRefresh(
+            MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 0),
+            accountID: CodexAccount.defaultID
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
+    }
+
+    func testAdaptiveSchedulerUsesInjectedPowerAndThermalSignals() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptivePowerState: {
+                AdaptiveRefreshPowerState(
+                    isOnBattery: false,
+                    isLowPowerModeEnabled: false,
+                    thermalState: .serious
+                )
+            }
+        )
+
+        XCTAssertEqual(manager.scheduledRefreshInterval, 1_800)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.thermalPressure.displayText)
+    }
+
+    func testExplicitActionsBypassCadenceWithoutMakingPopoverCredentialReadsInteractive() async {
+        let claude = StubClaudeProvider(
+            hasAccess: true,
+            result: .success(MetricsFixtures.claudeCode())
+        )
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            claude: claude,
+            savedRefreshInterval: .adaptive
+        )
+
+        await manager.refreshForExplicitAction(.popoverOpened)
+        await manager.refreshForExplicitAction(.manualRefresh)
+
+        XCTAssertEqual(claude.refreshTriggers, [.background, .userInitiated])
     }
 
     func testRefreshAllSkipsOverlappingCycle() async {
@@ -1164,6 +1348,41 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.name), [CodexAccount.defaultName, "Work"])
     }
 
+    func testRefreshAllFansOutGrokAccountsAndIsolatesOneProfileFailure() async throws {
+        let accountSuite = "UsageDataManagerTests-grok-accounts-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/grok-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountGrokProvider(metricsByAccount: [
+            GrokAccount.defaultID: MetricsFixtures.grok(weeklyUsedPercent: 18),
+            work.id: MetricsFixtures.grok(weeklyUsedPercent: 88)
+        ])
+        provider.failingAccountIDs = [work.id]
+        let cachedWork = MetricsFixtures.grok(weeklyUsedPercent: 67)
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: provider,
+            grokAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter],
+            preloadGrokAccountMetrics: [work.id: cachedWork]
+        )
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(manager.grokAccountMetrics[work.id]?.weeklyLimit?.used, 67)
+        XCTAssertEqual(manager.metrics[.grok]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(report.outcome(for: .grok)?.state, .refreshed)
+        sharedStore.flushPendingWrites()
+        let grokSnapshots = sharedStore.loadAccountMetrics().filter { $0.metrics.service == .grok }
+        XCTAssertEqual(grokSnapshots.map(\.name), [GrokAccount.defaultName, "Work"])
+    }
+
     // MARK: - Concurrency
 
     /// A refresh used to walk every account and provider strictly serially, so
@@ -1219,6 +1438,34 @@ final class UsageDataManagerTests: XCTestCase {
         await manager.refreshAll()
 
         XCTAssertEqual(probe.maxInFlight, 2, "both Codex accounts must be in flight at once")
+    }
+
+    func testRefreshAllFetchesEveryEnabledGrokAccountConcurrently() async throws {
+        let accountSuite = "UsageDataManagerTests-grok-concurrency-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/grok-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let provider = MultiAccountGrokProvider(metricsByAccount: [
+            GrokAccount.defaultID: MetricsFixtures.grok(weeklyUsedPercent: 12),
+            work.id: MetricsFixtures.grok(weeklyUsedPercent: 34)
+        ])
+        let probe = ConcurrencyProbe(expected: 2)
+        provider.probe = probe
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: provider,
+            grokAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter]
+        )
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(probe.maxInFlight, 2, "both Grok homes must be in flight at once")
     }
 
     /// The three phases of `refreshAll` — Claude accounts, Codex accounts, the
@@ -1384,14 +1631,14 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.id), [CodexAccount.defaultID])
     }
 
-    func testRefreshAllClearsStaleCodexMetricsWhenEveryAccountIsDisabled() async throws {
-        let accountSuite = "UsageDataManagerTests-all-disabled-\(UUID().uuidString)"
+    func testRefreshAllRetainsAndRefreshesTheOnlyEnabledCodexAccount() async throws {
+        let accountSuite = "UsageDataManagerTests-last-enabled-\(UUID().uuidString)"
         createdSuiteNames.append(accountSuite)
         let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
         let accountStore = CodexAccountStore(userDefaults: accountDefaults)
-        accountStore.setEnabled(false, for: CodexAccount.defaultID)
         let staleMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 80)
-        let provider = MultiAccountCodexProvider(metricsByAccount: [CodexAccount.defaultID: staleMetrics])
+        let freshMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 20)
+        let provider = MultiAccountCodexProvider(metricsByAccount: [CodexAccount.defaultID: freshMetrics])
         let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
         let (manager, sharedStore) = makeManager(
             codex: provider,
@@ -1400,13 +1647,17 @@ final class UsageDataManagerTests: XCTestCase {
             preload: [.codexCli: staleMetrics]
         )
 
+        XCTAssertEqual(
+            accountStore.setEnabled(false, for: CodexAccount.defaultID),
+            .rejectedLastEnabledAccount
+        )
         await manager.refreshAll()
 
-        XCTAssertNil(manager.metrics[.codexCli])
-        XCTAssertTrue(manager.codexAccountMetrics.isEmpty)
+        XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 20)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
         sharedStore.flushPendingWrites()
-        XCTAssertNil(sharedStore.loadMetrics()[.codexCli])
-        XCTAssertTrue(sharedStore.loadAccountMetrics().isEmpty)
+        XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.sessionLimit?.used, 20)
+        XCTAssertEqual(sharedStore.loadAccountMetrics().map(\.id), [CodexAccount.defaultID])
     }
 
     func testRefreshAllDoesNotMoveAggregateMetricsBetweenCodexProfiles() async throws {

@@ -96,14 +96,12 @@ nonisolated struct MenuBarAccountIdentity: Equatable, Identifiable, Sendable {
 
 // MARK: - MenuBarAccountCatalog
 
-/// Builds the menu bar's view of every tracked Claude and Codex account.
-///
-/// Only these two providers support multiple accounts today; Cursor, OpenRouter,
-/// and Grok remain single-account and are served by the aggregate status item.
+/// Builds the menu bar's view of every tracked account-aware provider.
 nonisolated enum MenuBarAccountCatalog {
     static func identities(
         claudeAccounts: [ClaudeCodeAccount],
         codexAccounts: [CodexAccount],
+        grokAccounts: [GrokAccount] = [],
         enabledServices: Set<ServiceType>
     ) -> [MenuBarAccountIdentity] {
         let claude = claudeAccounts.map { account in
@@ -122,7 +120,15 @@ nonisolated enum MenuBarAccountCatalog {
                 isEnabled: account.isEnabled && enabledServices.contains(.codexCli)
             )
         }
-        return claude + codex
+        let grok = grokAccounts.map { account in
+            identity(
+                service: .grok,
+                accountID: account.id,
+                rawName: account.name,
+                isEnabled: account.isEnabled && enabledServices.contains(.grok)
+            )
+        }
+        return claude + codex + grok
     }
 
     // MARK: Private

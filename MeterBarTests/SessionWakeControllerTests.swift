@@ -17,9 +17,7 @@ final class SessionWakeControllerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         defaults.removePersistentDomain(forName: suiteName)
-        try? FileManager.default.removeItem(
-            at: FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName ?? "")-watcher.lock")
-        )
+        try? FileManager.default.removeItem(at: testLockURL())
     }
 
     private func pump(_ seconds: TimeInterval = 0.1) {
@@ -43,9 +41,14 @@ final class SessionWakeControllerTests: XCTestCase {
     }
 
     private func lifetimeLockFactory() -> @Sendable () -> WakeLock {
-        let lockURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(suiteName ?? UUID().uuidString)-watcher.lock")
+        let lockURL = testLockURL()
         return { WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app) }
+    }
+
+    private func testLockURL() -> URL {
+        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".build/session-wake-tests", isDirectory: true)
+            .appendingPathComponent("\(suiteName ?? UUID().uuidString)-watcher.lock")
     }
 
     func testWatcherReArmsOnLaunchWhenToggleWasLeftOn() {
@@ -213,6 +216,41 @@ final class SessionWakeControllerTests: XCTestCase {
         XCTAssertTrue(controller.isWatching)
         poll { recorder.startCount >= 1 }
         XCTAssertEqual(recorder.startedProviders.first, .codex)
+    }
+
+    func testDisablingSelectedCodexAccountStopsWatcherAndClearsSelection() {
+        let codexAccounts = CodexAccountStore(userDefaults: defaults)
+        codexAccounts.addAccount(name: "Work", homeDirectory: "/tmp/session-wake-codex")
+        guard let selectedID = codexAccounts.customAccounts.first?.id else {
+            return XCTFail("adding a Codex account should yield a resolvable id")
+        }
+
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        store.setWakeProvider(.codex)
+        store.setWakeCodexAccountID(selectedID)
+        store.acknowledgeFirstRunAndTurnOn()
+
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: codexAccounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+
+        XCTAssertEqual(codexAccounts.setEnabled(false, for: selectedID), .updated)
+
+        poll { !controller.isWatching }
+        XCTAssertFalse(controller.isWatching)
+        XCTAssertFalse(store.isOn)
+        XCTAssertNil(store.wakeCodexAccountID)
+        poll { recorder.stopCount >= 1 }
+        XCTAssertGreaterThanOrEqual(recorder.stopCount, 1)
     }
 
     func testSwitchingProviderWhileArmedStopsTheWatcher() {

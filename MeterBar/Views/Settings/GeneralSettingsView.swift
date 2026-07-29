@@ -14,6 +14,7 @@ struct GeneralSettingsView: View {
             menuBarDisplaySection
             menuBarAccountsSection
             notificationsSection
+            QuotaEventSettingsView()
             generalSection
         }
     }
@@ -24,6 +25,7 @@ struct GeneralSettingsView: View {
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -44,6 +46,7 @@ struct GeneralSettingsView: View {
         MenuBarAccountCatalog.identities(
             claudeAccounts: claudeAccountStore.accounts,
             codexAccounts: codexAccountStore.accounts,
+            grokAccounts: grokAccountStore.accounts,
             enabledServices: providerVisibility.enabledServices
         )
     }
@@ -57,6 +60,8 @@ struct GeneralSettingsView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                grokAccounts: grokAccountStore.accounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 enabledServices: providerVisibility.enabledServices,
@@ -76,7 +81,11 @@ struct GeneralSettingsView: View {
 
     private var refreshSection: some View {
         SettingsPanelSection(title: "Refresh", systemImage: "arrow.clockwise", color: MeterBarTheme.appAccent) {
-            SettingsRowView(title: "Auto-refresh interval") {
+            SettingsRowView(
+                title: "Auto-refresh interval",
+                detail: "Adaptive stays between 1 and 30 minutes using only recent MeterBar interaction, "
+                    + "quota movement, battery/Low Power Mode, and thermal state."
+            ) {
                 Picker("", selection: Binding(
                     get: { dataManager.refreshInterval },
                     set: { dataManager.refreshInterval = $0 }
@@ -93,7 +102,7 @@ struct GeneralSettingsView: View {
             SettingsRowView(title: "Manual refresh") {
                 Button {
                     Task {
-                        await dataManager.refreshAll(trigger: .userInitiated)
+                        await dataManager.refreshForExplicitAction(.manualRefresh)
                     }
                 } label: {
                     Label("Refresh Now", systemImage: "arrow.clockwise")
@@ -162,7 +171,7 @@ struct GeneralSettingsView: View {
 
             SettingsRowView(
                 title: "Label metric",
-                detail: "Icon Only keeps the status item minimal while preserving details in its tooltip."
+                detail: "Pace shows reserve or deficit. Icon Only keeps the status item minimal."
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.labelMetric },
@@ -178,8 +187,26 @@ struct GeneralSettingsView: View {
             }
 
             SettingsRowView(
+                title: "Quota windows",
+                detail: "Session + Weekly uses bounded S/W labels in one item; unavailable values stay visible as —."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.windowMode },
+                    set: { menuBarDisplayPreferences.setWindowMode($0) }
+                )) {
+                    ForEach(StatusItemWindowMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
                 title: "Label width",
-                detail: "Regular adds “left” or “used”; Compact keeps today’s number-only label."
+                detail: "Regular adds descriptive words; Compact uses bounded abbreviations."
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.labelSize },
@@ -193,6 +220,49 @@ struct GeneralSettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
                 .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Label font size",
+                detail: "Changes only MeterBar’s status-item text; Default preserves the native menu-bar font."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.fontSize },
+                    set: { menuBarDisplayPreferences.setFontSize($0) }
+                )) {
+                    ForEach(StatusItemFontSize.allCases) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Exhausted reset countdown",
+                detail: "Replace an exhausted value with its bounded reset countdown when the provider reports one."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.showsExhaustedResetCountdown },
+                    set: { menuBarDisplayPreferences.setShowsExhaustedResetCountdown($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "High contrast",
+                detail: "Use bold black or white text and icon tint for maximum light/dark menu-bar contrast."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.highContrast },
+                    set: { menuBarDisplayPreferences.setHighContrast($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
             }
 
             SettingsRowView(

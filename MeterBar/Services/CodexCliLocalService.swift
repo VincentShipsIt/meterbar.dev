@@ -106,8 +106,8 @@ class CodexCliLocalService: ObservableObject {
     }
 
     /// Check and update access status
-    nonisolated func checkAccess() {
-        let hasToken = getAuthToken() != nil
+    nonisolated func checkAccess(account: CodexAccount = .defaultAccount) {
+        let hasToken = getAuthToken(account: account) != nil
         ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
             self.hasAccess = hasToken

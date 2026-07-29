@@ -52,6 +52,21 @@ struct ProviderSettingsView: View {
                 Task { await dataManager.refreshAll() }
             }
         }
+        .sheet(isPresented: $isAddingGrokAccount) {
+            AddGrokAccountSheet { name, homeDirectory in
+                grokAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                isAddingGrokAccount = false
+                Task { await dataManager.refreshAll() }
+            }
+        }
+        .task(id: codexDefaultAccount) {
+            guard service == .codexCli, codexDefaultAccount.isEnabled else { return }
+            let codexCliService = codexCliService
+            let account = codexDefaultAccount
+            await Task.detached(priority: .userInitiated) {
+                codexCliService.checkAccess(account: account)
+            }.value
+        }
     }
 
     // MARK: Private
@@ -60,15 +75,20 @@ struct ProviderSettingsView: View {
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
+    @StateObject private var menuBarAccountSelection = MenuBarAccountSelectionStore.shared
+    @StateObject private var widgetPreferences = WidgetPreferencesStore.shared
+    @StateObject private var sessionWakeSettings = SessionWakeSettingsStore.shared
 
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
+    @State private var isAddingGrokAccount = false
     @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
     @State private var openRouterKeyDraft = ""
@@ -85,6 +105,8 @@ struct ProviderSettingsView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                grokAccounts: grokAccountStore.accounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
                 fableSessions: fableSessionTracker.sessions,
@@ -107,7 +129,16 @@ struct ProviderSettingsView: View {
     }
 
     private var codexAuthFileDisplayPath: String {
-        CodexHomeDirectory.authFileDisplayPath()
+        CodexHomeDirectory.authFileDisplayPath(for: codexDefaultAccount)
+    }
+
+    private var codexDefaultAccount: CodexAccount {
+        codexAccountStore.accounts.first(where: \.isDefault) ?? .defaultAccount
+    }
+
+    private var codexDefaultAuthenticationState: CodexAccountAuthenticationState {
+        guard codexDefaultAccount.isEnabled else { return .disabled }
+        return codexCliService.hasAccess ? .authenticated : .loginRequired
     }
 
     // MARK: - Provider pane
@@ -313,7 +344,7 @@ struct ProviderSettingsView: View {
                         // This is an explicit user action, so it is the one
                         // Settings path allowed to request Keychain access.
                         Task {
-                            await dataManager.refreshAll(trigger: .userInitiated)
+                            await dataManager.refreshForExplicitAction(.manualRefresh)
                         }
                     } label: {
                         Label(claudeCodeService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
@@ -428,17 +459,25 @@ struct ProviderSettingsView: View {
                 detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
             ) {
                 HStack(spacing: 8) {
-                    StatusPill(
-                        title: codexCliService.hasAccess ? "Connected" : "Not Connected",
-                        isConnected: codexCliService.hasAccess
+                    MeterBarChip(
+                        codexDefaultAuthenticationState.title,
+                        tint: codexDefaultAuthenticationState == .authenticated
+                            ? MeterBarTheme.success
+                            : .secondary,
+                        style: .glass
                     )
+                    .accessibilityLabel("Default Codex authentication status")
+                    .accessibilityValue(codexDefaultAuthenticationState.accessibilityValue)
 
                     Button {
                         // checkAccess does disk I/O — run it off the main actor
                         // (a plain Task would inherit MainActor and block the UI).
                         Task {
                             let service = codexCliService
-                            await Task.detached(priority: .userInitiated) { service.checkAccess() }.value
+                            let account = codexDefaultAccount
+                            await Task.detached(priority: .userInitiated) {
+                                service.checkAccess(account: account)
+                            }.value
                             await dataManager.refresh(service: .codexCli)
                         }
                     } label: {
@@ -446,6 +485,8 @@ struct ProviderSettingsView: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!codexDefaultAccount.isEnabled)
+                    .accessibilityLabel("Check default Codex authentication")
                     .help(codexCliService.hasAccess ? "Refresh" : "Check again")
                 }
             }
@@ -456,7 +497,7 @@ struct ProviderSettingsView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
-            } else if !codexCliService.hasAccess {
+            } else if codexDefaultAccount.isEnabled, !codexCliService.hasAccess {
                 EmptyStateCard(
                     systemImage: "person.crop.circle.badge.exclamationmark",
                     title: "Not connected",
@@ -487,7 +528,15 @@ struct ProviderSettingsView: View {
                         if index > 0 { SettingsDivider() }
                         CodexAccountProfileRow(
                             account: account,
-                            isConnected: dataManager.codexAccountMetrics[account.id] != nil,
+                            canDisable: codexAccountStore.canDisableAccount(id: account.id),
+                            canRemove: codexAccountStore.canRemoveAccount(id: account.id),
+                            onEnabledChange: { isEnabled in
+                                guard codexAccountStore.setEnabled(isEnabled, for: account.id) == .updated else {
+                                    return
+                                }
+                                reconcileCodexAccountSelections()
+                                Task { await dataManager.refreshAll() }
+                            },
                             onSave: { name, homeDirectory in
                                 codexAccountStore.updateAccount(
                                     id: account.id,
@@ -497,10 +546,8 @@ struct ProviderSettingsView: View {
                                 Task { await dataManager.refreshAll() }
                             },
                             onRemove: {
-                                codexAccountStore.removeAccount(id: account.id)
-                                MenuBarAccountSelectionStore.shared.forget(
-                                    MenuBarAccountKey.make(service: .codexCli, accountID: account.id)
-                                )
+                                guard codexAccountStore.removeAccount(id: account.id) == .updated else { return }
+                                reconcileCodexAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             }
                         )
@@ -528,7 +575,7 @@ struct ProviderSettingsView: View {
                                 service.checkAccess(forceRescan: true)
                             }.value
                             if cursorService.hasAccess {
-                                await dataManager.refreshAll(trigger: .userInitiated)
+                                await dataManager.refreshForExplicitAction(.manualRefresh)
                             }
                         }
                     } label: {
@@ -620,7 +667,8 @@ struct ProviderSettingsView: View {
     }
 
     private var grokSection: some View {
-        SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+        let hasAccess = grokAccountStore.enabledAccounts.contains(where: grokService.canAccess(account:))
+        return SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
             SettingsNotice(
                 text: "MeterBar asks the official Grok CLI for billing data over ACP. "
                     + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
@@ -630,8 +678,8 @@ struct ProviderSettingsView: View {
             SettingsRowView(title: "Connection") {
                 HStack(spacing: 8) {
                     StatusPill(
-                        title: grokService.hasAccess ? "Connected" : "Not Connected",
-                        isConnected: grokService.hasAccess
+                        title: hasAccess ? "Connected" : "Not Connected",
+                        isConnected: hasAccess
                     )
 
                     Button {
@@ -640,16 +688,14 @@ struct ProviderSettingsView: View {
                             await Task.detached(priority: .userInitiated) {
                                 service.checkAccess()
                             }.value
-                            if grokService.hasAccess {
-                                await dataManager.refresh(service: .grok)
-                            }
+                            await dataManager.refresh(service: .grok)
                         }
                     } label: {
-                        Label(grokService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                        Label(hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
-                    .help(grokService.hasAccess ? "Refresh" : "Check again")
+                    .help(hasAccess ? "Refresh" : "Check again")
 
                     Button("Install / Sign In") {
                         if let url = URL(string: "https://x.ai/cli") {
@@ -666,15 +712,70 @@ struct ProviderSettingsView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
-            } else if !grokService.hasAccess {
+            } else if !hasAccess {
                 SettingsNotice(
                     text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
                     color: MeterBarTheme.warning
                 )
             }
 
-            if let error = grokService.lastError {
+            if let error = grokService.firstError(for: grokAccountStore.enabledAccounts) {
                 SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
+            }
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Grok Accounts")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button {
+                        isAddingGrokAccount = true
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(grokAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 { SettingsDivider() }
+                        GrokAccountProfileRow(
+                            account: account,
+                            isConnected: grokService.canAccess(account: account),
+                            canMoveUp: index > 0,
+                            canMoveDown: index < grokAccountStore.accounts.count - 1,
+                            onEnabledChange: { isEnabled in
+                                grokAccountStore.setEnabled(isEnabled, for: account.id)
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onSave: { name, homeDirectory in
+                                grokAccountStore.updateAccount(
+                                    id: account.id,
+                                    name: name,
+                                    homeDirectory: homeDirectory
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onRemove: {
+                                grokAccountStore.removeAccount(id: account.id)
+                                MenuBarAccountSelectionStore.shared.forget(
+                                    MenuBarAccountKey.make(service: .grok, accountID: account.id)
+                                )
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onMoveUp: {
+                                moveGrokAccount(at: index, down: false)
+                            },
+                            onMoveDown: {
+                                moveGrokAccount(at: index, down: true)
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -696,6 +797,9 @@ struct ProviderSettingsView: View {
             get: { providerVisibility.isEnabled(service) },
             set: { isEnabled in
                 providerVisibility.set(service, isEnabled: isEnabled)
+                if service == .codexCli {
+                    reconcileCodexAccountSelections()
+                }
                 Task {
                     await dataManager.refreshAll()
                 }
@@ -709,6 +813,7 @@ struct ProviderSettingsView: View {
             // main actor here, so hop to a detached task for the check itself.
             let claudeCode = claudeCodeService
             let codexCli = codexCliService
+            let codexDefaultAccount = codexDefaultAccount
             let cursor = cursorService
             let grok = grokService
             await Task.detached(priority: .userInitiated) {
@@ -716,7 +821,7 @@ struct ProviderSettingsView: View {
                 case .claudeCode:
                     claudeCode.checkAccess()
                 case .codexCli:
-                    codexCli.checkAccess()
+                    codexCli.checkAccess(account: codexDefaultAccount)
                 case .cursor:
                     cursor.checkAccess(forceRescan: true)
                 case .openRouter:
@@ -746,12 +851,47 @@ struct ProviderSettingsView: View {
         Task { await dataManager.refreshAll() }
     }
 
+    private func moveGrokAccount(at index: Int, down: Bool) {
+        let destination = down ? index + 2 : index - 1
+        grokAccountStore.moveAccounts(
+            fromOffsets: IndexSet(integer: index),
+            toOffset: destination
+        )
+    }
+
     private func reconnectClaudeAccount(_ account: ClaudeCodeAccount) {
         do {
             try ClaudeCodeReconnectService.openReconnectTerminal(for: account)
         } catch {
             claudeReconnectError = error.localizedDescription
         }
+    }
+
+    /// Keep every account-scoped consumer on the same enabled identity set after
+    /// a Codex disable or delete. Session Wake clears and disarms rather than
+    /// silently retargeting; menu-bar and widget preferences prune stale keys.
+    private func reconcileCodexAccountSelections() {
+        let menuBarKeys = Set(
+            MenuBarAccountCatalog.identities(
+                claudeAccounts: claudeAccountStore.accounts,
+                codexAccounts: codexAccountStore.accounts,
+                enabledServices: providerVisibility.enabledServices
+            )
+            .filter(\.isEnabled)
+            .map(\.key)
+        )
+        menuBarAccountSelection.reconcile(availableKeys: menuBarKeys)
+
+        let widgetIdentifiers = Set(
+            WidgetSettingsAccountProjection.options(
+                enabledServices: providerVisibility.enabledServices,
+                claudeAccounts: claudeAccountStore.accounts,
+                codexAccounts: codexAccountStore.accounts
+            )
+            .map(\.id)
+        )
+        widgetPreferences.reconcileAvailableAccounts(widgetIdentifiers)
+        sessionWakeSettings.reconcileCodexAccounts(available: codexAccountStore.enabledAccounts.map(\.id))
     }
 
     private var defaultClaudeAuthState: ClaudeCodeAuthState? {

@@ -404,6 +404,41 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertEqual(requests[0].nestedStringParameter("clientInfo", key: "version"), "1.2.3")
     }
 
+    func testACPProcessEnvironmentScopesTheOfficialCLIToOneGrokHome() {
+        let environment = GrokBillingRPC.processEnvironment(
+            grokHome: "/tmp/grok-work",
+            base: ["PATH": "/usr/bin", "GROK_HOME": "/tmp/wrong"]
+        )
+
+        XCTAssertEqual(environment["GROK_HOME"], "/tmp/grok-work")
+        XCTAssertEqual(environment["NO_COLOR"], "1")
+        XCTAssertEqual(environment["FORCE_COLOR"], "0")
+        XCTAssertEqual(environment["TERM"], "dumb")
+    }
+
+    func testAccountFetchUsesOnlyThatProfilesGrokHome() async throws {
+        let work = GrokAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/grok-work")
+        let defaultResult = try decodeResult(
+            #"{"config":{"creditUsagePercent":11},"subscription_tier":"Default"}"#
+        )
+        let workResult = try decodeResult(
+            #"{"config":{"creditUsagePercent":73},"subscription_tier":"Work"}"#
+        )
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in true },
+            billingResultProvider: { _, grokHome in
+                grokHome == "/tmp/grok-work" ? workResult : defaultResult
+            }
+        )
+
+        let defaultMetrics = try await service.fetchUsageMetrics(account: .defaultAccount)
+        let workMetrics = try await service.fetchUsageMetrics(account: work)
+
+        XCTAssertEqual(defaultMetrics.weeklyLimit?.used, 11)
+        XCTAssertEqual(workMetrics.weeklyLimit?.used, 73)
+    }
+
     func testReplayedTranscriptDecodesBillingResult() throws {
         let result = try GrokBillingRPC.result(
             replaying: transcript(

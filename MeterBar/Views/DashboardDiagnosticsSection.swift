@@ -33,9 +33,29 @@ struct DashboardDiagnosticsSection: View {
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
+    @StateObject private var grokAccountStore = GrokAccountStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            DashboardCard(
+                title: "Refresh Cadence",
+                trailing: refreshCadenceDiagnostic.effectiveInterval
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Selected: \(refreshCadenceDiagnostic.selection)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(refreshCadenceDiagnostic.reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if dataManager.refreshInterval == .adaptive {
+                        Text("Adaptive range: 1–30 minutes. Activity signals stay in memory and are never sent.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
             DashboardCard(
                 title: "Provider Diagnostics",
                 trailing: DiagnosticsRunner.summary(for: readinessReports)
@@ -87,7 +107,16 @@ struct DashboardDiagnosticsSection: View {
             defaultClaudeAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
             enabledClaudeCustomAccountIDs: claudeAccountStore.enabledAccounts
                 .filter { !$0.isDefault }
-                .map(\.id)
+                .map(\.id),
+            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id)
+        )
+    }
+
+    private var refreshCadenceDiagnostic: DiagnosticsRunner.RefreshCadence {
+        DiagnosticsRunner.refreshCadence(
+            selection: dataManager.refreshInterval,
+            effectiveInterval: dataManager.scheduledRefreshInterval,
+            reason: dataManager.effectiveRefreshReason
         )
     }
 
@@ -113,7 +142,7 @@ struct DashboardDiagnosticsSection: View {
             codexError: codexCliService.lastError,
             cursorError: cursorService.lastError,
             openRouterError: openRouterService.lastError,
-            grokError: grokService.lastError
+            grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
         )
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
         let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
@@ -124,12 +153,16 @@ struct DashboardDiagnosticsSection: View {
             enabledProviders: enabledProviders,
             refreshErrors: errors,
             claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-            claudeEnabledAccountMetrics: claudeMetrics
+            claudeEnabledAccountMetrics: claudeMetrics,
+            grokAccounts: grokAccountStore.accounts
         )
     }
 
     private func copyDiagnosticsToClipboard() {
-        let text = DiagnosticsRunner.reportText(for: readinessReports)
+        let text = DiagnosticsRunner.reportText(
+            for: readinessReports,
+            refreshCadence: refreshCadenceDiagnostic
+        )
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }

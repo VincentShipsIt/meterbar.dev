@@ -103,10 +103,11 @@ final class UsageNotificationCoordinator {
             ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
             ClaudeCodeAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
         )
-        let codexAccountChanges = Publishers.Merge(
-            CodexAccountStore.shared.$customAccounts.map { _ in () },
-            CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
-        )
+        let codexAccountChanges = Publishers.MergeMany([
+            CodexAccountStore.shared.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            CodexAccountStore.shared.$defaultAccountHomeDirectory.map { _ in () }.eraseToAnyPublisher(),
+            CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+        ])
         let thresholdChanges = Publishers.Merge3(
             notificationPreferences.$isEnabled.map { _ in () },
             notificationPreferences.$warningThreshold.map { _ in () },

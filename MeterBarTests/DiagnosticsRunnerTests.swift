@@ -81,6 +81,31 @@ final class DiagnosticsRunnerTests: XCTestCase {
         )
     }
 
+    func testAdaptiveRefreshCadenceReportsEffectiveIntervalAndReason() {
+        let cadence = DiagnosticsRunner.refreshCadence(
+            selection: .adaptive,
+            effectiveInterval: 60,
+            reason: AdaptiveRefreshReason.recentQuotaMovement.displayText
+        )
+
+        XCTAssertEqual(cadence.selection, "Adaptive")
+        XCTAssertEqual(cadence.effectiveInterval, "1 minute")
+        XCTAssertEqual(cadence.reason, "Recent quota movement.")
+    }
+
+    func testDiagnosticsReportIncludesRefreshCadence() {
+        let cadence = DiagnosticsRunner.refreshCadence(
+            selection: .adaptive,
+            effectiveInterval: 900,
+            reason: AdaptiveRefreshReason.lowPowerMode.displayText
+        )
+
+        let text = DiagnosticsRunner.reportText(for: [report()], refreshCadence: cadence)
+
+        XCTAssertTrue(text.contains("Refresh cadence: Adaptive · 15 minutes"))
+        XCTAssertTrue(text.contains("Reason: Low Power Mode is enabled."))
+    }
+
     private func report() -> ProviderReadiness {
         ProviderReadiness(
             provider: .codexCli,

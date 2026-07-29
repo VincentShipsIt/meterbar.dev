@@ -31,6 +31,18 @@ public enum QuotaBand: Equatable, Sendable {
         forPercentLeft(QuotaMath.percentLeft(for: limit))
     }
 
+    /// Shared ordering for transition and threshold comparisons. Consumers must
+    /// derive their bands above, then compare this rank instead of inventing a
+    /// second percentage threshold scheme.
+    public var severityRank: Int {
+        switch self {
+        case .healthy: return 0
+        case .tight: return 1
+        case .critical: return 2
+        case .exhausted: return 3
+        }
+    }
+
     /// Short status label shown on provider cards ("Out" / "Critical" / …).
     public var shortLabel: String {
         switch self {

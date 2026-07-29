@@ -42,7 +42,8 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor, O
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, and Grok
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
-- **Real-time Updates**: Background refresh every 10 minutes, including prompt catch-up after wake
+- **Real-time Updates**: Background refresh defaults to 10 minutes, with an opt-in 1–30 minute
+  adaptive cadence and prompt catch-up after wake
 - **Pace-aware Bars**: Usage bars show quota left with an expected-pace marker and burn-rate projection
 - **Color-coded Status**: Green (healthy), Orange (tight), Red (critical/exhausted)
 
@@ -129,6 +130,19 @@ open MeterBar.xcodeproj
 3. Enable Grok under **Settings → General → Tracked Providers**
 4. MeterBar asks the official CLI for billing data over ACP; it does not read or store the cached token
 
+To track more than one Grok Build account, give each CLI login a distinct
+`GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
+
+```bash
+GROK_HOME=~/.grok-work grok login
+GROK_HOME=~/.grok-personal grok login
+```
+
+The existing unscoped login remains the zero-configuration default profile
+(`$GROK_HOME` when already exported, otherwise `~/.grok`). Each enabled profile
+gets its own card, menu-bar account, widget entry, cache snapshot, refresh
+result, and diagnostics check. A failed profile does not block the others.
+
 ## Usage
 
 1. **Launch the app** - It appears in your menu bar with the tightest quota's percent left
@@ -175,6 +189,14 @@ meterbar cost --json
 the app's Costs tab), so the CLI and the app always show the same numbers.
 The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
+### Event Integrations
+
+Settings → General → Event Integrations can run a literal-argv local command or
+POST quota transitions to a webhook. Both lanes and every event/provider/account
+scope are off until explicitly enabled. The
+[versioned webhook contract](docs/quota-event-webhooks.md) documents the exact
+payload, transition semantics, and outbound security boundary.
+
 The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
 ```
 /Applications/MeterBar.app/Contents/Helpers/meterbar
@@ -190,13 +212,13 @@ claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
 ~/Library/Application Support/Cursor/  # Cursor local DB
-~/.grok/auth.json        # Grok CLI login presence only; token contents stay inside the CLI
+$GROK_HOME/auth.json     # Grok CLI login presence only; defaults to ~/.grok
 ```
 
 It then uses the respective local source or API to fetch current usage data:
 - Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
-- Grok: official `grok agent --no-leader stdio` ACP billing response
+- Grok: official `grok agent --no-leader stdio` ACP billing response, scoped per profile with `GROK_HOME`
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
 - Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).
@@ -207,7 +229,9 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 ## Privacy & Security
 
 - All credentials remain in their original locations (managed by CLI tools)
-- No data sent to external servers (only calls to the providers' own usage endpoints)
+- No data is sent beyond providers' own usage endpoints by default. An explicitly
+  enabled webhook sends only the documented quota event fields to the URL the
+  user configured; credentials and config paths are never included.
 - The main app is **not** sandboxed — it must read other tools' credential/log files
   (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.

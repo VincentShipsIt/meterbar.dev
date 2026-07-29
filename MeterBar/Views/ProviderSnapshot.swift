@@ -209,6 +209,8 @@ enum ProviderSnapshotBuilder {
         var metrics: [ServiceType: UsageMetrics]
         var codexAccounts: [CodexAccount] = [.defaultAccount]
         var codexAccountMetrics: [UUID: UsageMetrics] = [:]
+        var grokAccounts: [GrokAccount] = [.defaultAccount]
+        var grokAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
         var fableSessions: [ClaudeFableSession] = []
@@ -298,12 +300,24 @@ enum ProviderSnapshotBuilder {
         }
 
         if input.enabledServices.contains(.grok) {
-            result.append(snapshot(
-                title: "Grok",
-                service: .grok,
-                metrics: input.metrics[.grok],
-                emptyDetail: input.grokHasAccess ? "Waiting for refresh" : "Run grok login"
-            ))
+            let enabledAccounts = input.grokAccounts.filter(\.isEnabled)
+            for account in enabledAccounts {
+                let title = account.isDefault && enabledAccounts.count == 1 ? "Grok" : account.name
+                let fallbackMetrics = account.isDefault
+                    && enabledAccounts.count == 1
+                    && input.grokAccountMetrics.isEmpty
+                    ? input.metrics[.grok]
+                    : nil
+                result.append(snapshot(
+                    title: title,
+                    service: .grok,
+                    metrics: input.grokAccountMetrics[account.id] ?? fallbackMetrics,
+                    emptyDetail: account.isDefault && input.grokHasAccess
+                        ? "Waiting for refresh"
+                        : "Run grok login",
+                    accountID: account.id
+                ))
+            }
         }
 
         return result

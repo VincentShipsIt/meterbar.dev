@@ -247,10 +247,10 @@ final class AppDelegateSplitTests: XCTestCase {
 
     func testRefreshTriggerFansInEverySource() {
         // One publisher per input that can change the menu-bar title: metrics,
-        // the two account-metric maps, Claude accounts, Codex accounts, the
+        // the three account-metric maps, Claude/Codex/Grok accounts, the
         // menu-bar account selection, provider visibility, parse health, and the
         // label preferences.
-        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 9)
+        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 11)
     }
 
     func testRefreshTriggerPublisherEmitsOnSubscribe() {
@@ -328,6 +328,35 @@ final class AppDelegateSplitTests: XCTestCase {
             for: .defaultAccount,
             enabledAccountCount: 1,
             accountMetrics: [other: MetricsFixtures.codexCli()],
+            providerMetrics: providerMetrics
+        ))
+    }
+
+    func testGrokMetricsFallsBackOnlyForASoleDefaultAccountWithoutAccountData() {
+        let providerMetrics = UsageMetrics(
+            service: .grok,
+            sessionLimit: UsageLimit(used: 65, total: 100, resetTime: nil)
+        )
+
+        XCTAssertEqual(
+            StatusLimitProbeRequestBuilder.grokMetrics(
+                for: .defaultAccount,
+                enabledAccountCount: 1,
+                accountMetrics: [:],
+                providerMetrics: providerMetrics
+            )?.sessionLimit?.used,
+            65
+        )
+        XCTAssertNil(StatusLimitProbeRequestBuilder.grokMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 2,
+            accountMetrics: [:],
+            providerMetrics: providerMetrics
+        ))
+        XCTAssertNil(StatusLimitProbeRequestBuilder.grokMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 1,
+            accountMetrics: [UUID(): providerMetrics],
             providerMetrics: providerMetrics
         ))
     }

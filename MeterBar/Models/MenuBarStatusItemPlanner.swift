@@ -22,6 +22,7 @@ struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
     let title: String
     let tooltip: String
     let accessibilityLabel: String
+    let visualStyle: StatusItemVisualStyle
 }
 
 /// Turns the current quota candidates into the menu bar's status item layout.
@@ -49,6 +50,10 @@ enum MenuBarStatusItemPlanner {
         pinnedKey: String?,
         metric: StatusItemLabelMetric,
         size: StatusItemLabelSize,
+        windowMode: StatusItemWindowMode = .selected,
+        fontSize: StatusItemFontSize = .standard,
+        highContrast: Bool = false,
+        showsExhaustedResetCountdown: Bool = false,
         now: Date = Date()
     ) -> [MenuBarStatusItemDescriptor] {
         let context = SelectionContext(
@@ -57,6 +62,9 @@ enum MenuBarStatusItemPlanner {
             pinnedKey: pinnedKey,
             metric: metric,
             size: size,
+            windowMode: windowMode,
+            visualStyle: StatusItemVisualStyle(fontSize: fontSize, highContrast: highContrast),
+            showsExhaustedResetCountdown: showsExhaustedResetCountdown,
             now: now
         )
 
@@ -64,17 +72,17 @@ enum MenuBarStatusItemPlanner {
         case .merged:
             return [mergedDescriptor(candidates: candidates, context: context)]
         case .perProvider:
-            let descriptors = perProviderDescriptors(candidates: candidates, metric: metric, size: size)
+            let descriptors = perProviderDescriptors(candidates: candidates, context: context)
             // Never return an empty plan: with no status item left the popover,
             // settings, and Quit all become unreachable.
-            return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
+            return descriptors.isEmpty ? [placeholderDescriptor(context: context)] : descriptors
         case .perAccount, .accountSwitcher:
             let descriptors = accountDescriptors(
                 entries: (accountPlan ?? .aggregate(mode: mode)).entries,
                 candidates: candidates,
                 context: context
             )
-            return descriptors.isEmpty ? [placeholderDescriptor] : descriptors
+            return descriptors.isEmpty ? [placeholderDescriptor(context: context)] : descriptors
         }
     }
 
@@ -96,14 +104,31 @@ enum MenuBarStatusItemPlanner {
             }
     }
 
-    private static var placeholderDescriptor: MenuBarStatusItemDescriptor {
-        MenuBarStatusItemDescriptor(
+    private static func placeholderDescriptor(context: SelectionContext) -> MenuBarStatusItemDescriptor {
+        let content: DescriptorContent
+        switch (context.windowMode, context.metric) {
+        case (_, .iconOnly):
+            content = DescriptorContent(visible: nil, spoken: nil)
+        case (.selected, _):
+            // Preserve the existing cold-launch icon-only placeholder unless
+            // the user opted into one of the new content modes.
+            content = context.metric == .pace
+                ? DescriptorContent(visible: "—", spoken: "Pace unavailable")
+                : DescriptorContent(visible: nil, spoken: nil)
+        case (.combined, _):
+            content = DescriptorContent(
+                visible: "S— · W—",
+                spoken: "Session usage unavailable; Weekly usage unavailable"
+            )
+        }
+        return MenuBarStatusItemDescriptor(
             id: mergedItemID,
             service: nil,
             selectionKey: nil,
-            title: "",
-            tooltip: "MeterBar",
-            accessibilityLabel: "MeterBar"
+            title: content.visible.map { " \($0)" } ?? "",
+            tooltip: content.spoken.map { "MeterBar: \($0)" } ?? "MeterBar",
+            accessibilityLabel: content.spoken.map { "MeterBar \($0)" } ?? "MeterBar",
+            visualStyle: context.visualStyle
         )
     }
 
@@ -116,6 +141,9 @@ enum MenuBarStatusItemPlanner {
         let pinnedKey: String?
         let metric: StatusItemLabelMetric
         let size: StatusItemLabelSize
+        let windowMode: StatusItemWindowMode
+        let visualStyle: StatusItemVisualStyle
+        let showsExhaustedResetCountdown: Bool
         let now: Date
 
         /// What the item with this id showed last refresh. The merged slot
@@ -136,7 +164,7 @@ enum MenuBarStatusItemPlanner {
             pinnedKey: context.pinnedKey,
             now: context.now
         ) else {
-            return placeholderDescriptor
+            return placeholderDescriptor(context: context)
         }
 
         // Auto already implies "whichever window matters", so the window name is
@@ -146,16 +174,15 @@ enum MenuBarStatusItemPlanner {
             id: mergedItemID,
             selectionKey: selection.key,
             candidate: selection,
+            candidates: candidates,
             qualifiedName: isPinned,
-            metric: context.metric,
-            size: context.size
+            context: context
         )
     }
 
     private static func perProviderDescriptors(
         candidates: [StatusLimitCandidate],
-        metric: StatusItemLabelMetric,
-        size: StatusItemLabelSize
+        context: SelectionContext
     ) -> [MenuBarStatusItemDescriptor] {
         candidates
             .filter(\.isAutoSelectable)
@@ -169,9 +196,9 @@ enum MenuBarStatusItemPlanner {
                     id: candidate.pinKey,
                     selectionKey: nil,
                     candidate: candidate,
+                    candidates: candidates,
                     qualifiedName: true,
-                    metric: metric,
-                    size: size
+                    context: context
                 )
             }
     }
@@ -207,9 +234,9 @@ enum MenuBarStatusItemPlanner {
                 id: entry.id,
                 selectionKey: selection.key,
                 candidate: selection,
+                candidates: scoped,
                 qualifiedName: isPinned,
-                metric: context.metric,
-                size: context.size,
+                context: context,
                 badge: entry.badge,
                 accountName: entry.displayName
             )
@@ -220,24 +247,24 @@ enum MenuBarStatusItemPlanner {
         id: String,
         selectionKey: String?,
         candidate: StatusLimitCandidate,
+        candidates: [StatusLimitCandidate],
         qualifiedName: Bool,
-        metric: StatusItemLabelMetric,
-        size: StatusItemLabelSize,
+        context: SelectionContext,
         badge: String = "",
         accountName: String = ""
     ) -> MenuBarStatusItemDescriptor {
-        let windowName = qualifiedName
+        let qualifiesSelectedWindow = qualifiedName && context.windowMode == .selected
+        let windowName = qualifiesSelectedWindow
             ? "\(candidate.displayName) · \(candidate.windowName)"
             : candidate.displayName
         // Two items for the same provider wear the same logo, so the account
         // name is what tells them apart in the tooltip.
         let name = accountName.isEmpty ? windowName : "\(accountName) · \(windowName)"
-        let value = StatusItemLabelFormatter.title(for: candidate.limit, metric: metric, size: size)
-        let spokenValue = StatusItemLabelFormatter.spokenValue(for: candidate.limit, metric: metric)
-        let suffix = spokenValue.map { "\($0) on \(name)" } ?? name
+        let content = descriptorContent(candidate: candidate, candidates: candidates, context: context)
+        let suffix = content.spoken.map { "\($0) on \(name)" } ?? name
         // Icon-only still shows the badge: without it, per-account items are
         // indistinguishable from each other in the menu bar.
-        let segments = [badge, value ?? ""].filter { !$0.isEmpty }
+        let segments = [badge, content.visible ?? ""].filter { !$0.isEmpty }
 
         return MenuBarStatusItemDescriptor(
             id: id,
@@ -245,7 +272,106 @@ enum MenuBarStatusItemPlanner {
             selectionKey: selectionKey,
             title: segments.isEmpty ? "" : " " + segments.joined(separator: " "),
             tooltip: "MeterBar: \(suffix)",
-            accessibilityLabel: "MeterBar \(suffix)"
+            accessibilityLabel: "MeterBar \(suffix)",
+            visualStyle: context.visualStyle
         )
+    }
+
+    private struct DescriptorContent {
+        let visible: String?
+        let spoken: String?
+    }
+
+    private static func descriptorContent(
+        candidate: StatusLimitCandidate,
+        candidates: [StatusLimitCandidate],
+        context: SelectionContext
+    ) -> DescriptorContent {
+        switch context.windowMode {
+        case .selected:
+            let value = formattedValue(for: candidate, context: context)
+            return DescriptorContent(
+                visible: value.visible,
+                spoken: selectedSpokenValue(value.spoken, windowName: candidate.windowName)
+            )
+        case .combined:
+            return combinedContent(anchor: candidate, candidates: candidates, context: context)
+        }
+    }
+
+    private static func combinedContent(
+        anchor: StatusLimitCandidate,
+        candidates: [StatusLimitCandidate],
+        context: SelectionContext
+    ) -> DescriptorContent {
+        guard context.metric != .iconOnly else {
+            return DescriptorContent(visible: nil, spoken: nil)
+        }
+
+        let scoped = candidates.filter {
+            $0.service == anchor.service && $0.accountKey == anchor.accountKey
+        }
+        let session = scoped.first { $0.windowID == "session" }
+        let weekly = scoped.first { $0.windowID == "weekly" }
+        let sessionValue = session.map { formattedValue(for: $0, context: context) }
+            ?? unavailableValue(metric: context.metric)
+        let weeklyValue = weekly.map { formattedValue(for: $0, context: context) }
+            ?? unavailableValue(metric: context.metric)
+
+        let visible = [
+            StatusItemLabelFormatter.combinedToken(prefix: "S", value: sessionValue, size: context.size),
+            StatusItemLabelFormatter.combinedToken(prefix: "W", value: weeklyValue, size: context.size)
+        ].joined(separator: " · ")
+        let spoken = [
+            qualifiedSpokenValue(sessionValue.spoken, windowName: "Session"),
+            qualifiedSpokenValue(weeklyValue.spoken, windowName: "Weekly")
+        ].joined(separator: "; ")
+
+        return DescriptorContent(visible: visible, spoken: spoken)
+    }
+
+    private static func formattedValue(
+        for candidate: StatusLimitCandidate,
+        context: SelectionContext
+    ) -> StatusItemFormattedValue {
+        StatusItemLabelFormatter.formatted(
+            limit: candidate.limit,
+            metric: context.metric,
+            size: context.size,
+            state: dataState(for: candidate, now: context.now),
+            showsExhaustedResetCountdown: context.showsExhaustedResetCountdown,
+            now: context.now
+        )
+    }
+
+    private static func unavailableValue(metric: StatusItemLabelMetric) -> StatusItemFormattedValue {
+        StatusItemLabelFormatter.formatted(
+            limit: nil,
+            metric: metric,
+            size: .compact,
+            state: .unavailable,
+            showsExhaustedResetCountdown: false,
+            now: .distantPast
+        )
+    }
+
+    private static func dataState(for candidate: StatusLimitCandidate, now: Date) -> StatusItemDataState {
+        let age = now.timeIntervalSince(candidate.lastUpdated)
+        return age <= ProviderParseHealthRecord.staleAfter ? .fresh : .stale
+    }
+
+    private static func selectedSpokenValue(_ spoken: String?, windowName: String) -> String? {
+        guard let spoken else { return nil }
+        if spoken == "data stale"
+            || spoken.contains("unavailable")
+            || spoken.hasPrefix("reset")
+            || spoken.hasPrefix("resets") {
+            return qualifiedSpokenValue(spoken, windowName: windowName)
+        }
+        return spoken
+    }
+
+    private static func qualifiedSpokenValue(_ spoken: String?, windowName: String) -> String {
+        "\(windowName) \(spoken ?? "usage unavailable")"
     }
 }

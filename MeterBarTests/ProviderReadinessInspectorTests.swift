@@ -5,6 +5,34 @@ import MeterBarShared
 /// Redaction tests for the inspector's error sanitizer — the layer that keeps
 /// `meterbar doctor` / Diagnostics output safe to paste into a public issue.
 final class ProviderReadinessInspectorTests: XCTestCase {
+    func testGrokReadinessChecksEveryEnabledProfileWithoutReadingTokens() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProviderReadinessInspectorTests-\(UUID().uuidString)", isDirectory: true)
+        let healthyHome = root.appendingPathComponent("healthy", isDirectory: true)
+        try FileManager.default.createDirectory(at: healthyHome, withIntermediateDirectories: true)
+        try Data().write(to: healthyHome.appendingPathComponent("auth.json"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let healthy = GrokAccount(id: UUID(), name: "Healthy", homeDirectory: healthyHome.path)
+        let missing = GrokAccount(
+            id: UUID(),
+            name: "Missing",
+            homeDirectory: root.appendingPathComponent("missing").path
+        )
+
+        let healthyReport = ProviderReadinessInspector.grokReport(
+            accounts: [healthy],
+            isCLIInstalled: true
+        )
+        let mixedReport = ProviderReadinessInspector.grokReport(
+            accounts: [healthy, missing],
+            isCLIInstalled: true
+        )
+
+        XCTAssertEqual(healthyReport.check(ReadinessCheckID.auth)?.level, .pass)
+        XCTAssertEqual(mixedReport.check(ReadinessCheckID.auth)?.level, .fail)
+    }
+
     func testReportsGatherOnlyRequestedProvidersInStableOrder() {
         var gathered: [ServiceType] = []
         let reports = ProviderReadinessInspector.reports(
@@ -241,7 +269,8 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.codexCli],
             now: now,
-            parseHealth: [.codexCli: record]
+            parseHealth: [.codexCli: record],
+            cachedMetrics: [:]
         )
         let check = reports.first?.check(ReadinessCheckID.parseHealth)
 

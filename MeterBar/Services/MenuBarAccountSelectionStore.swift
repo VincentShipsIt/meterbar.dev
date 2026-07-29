@@ -84,6 +84,20 @@ final class MenuBarAccountSelectionStore: ObservableObject {
         }
     }
 
+    /// Removes selections that no longer identify enabled, tracked accounts.
+    /// Disabled keys must not invisibly consume one of the finite status-item
+    /// slots, and a switcher must never remain bound to an unavailable account.
+    func reconcile(availableKeys: Set<String>) {
+        let normalizedAvailable = Set(availableKeys.compactMap(Self.normalizedKey))
+        let reconciledSelection = selectedAccountKeys.filter(normalizedAvailable.contains)
+        if reconciledSelection != selectedAccountKeys {
+            persistSelection(reconciledSelection)
+        }
+        if let mergedAccountKey, !normalizedAvailable.contains(mergedAccountKey) {
+            setMergedAccountKey(nil)
+        }
+    }
+
     func setMergedAccountKey(_ key: String?) {
         let normalized = key.flatMap(Self.normalizedKey)
         guard normalized != mergedAccountKey else { return }

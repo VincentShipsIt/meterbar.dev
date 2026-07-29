@@ -30,6 +30,14 @@ nonisolated enum StorageKeys {
     static let statusItemLabelMetric = "StatusItemLabelMetric"
     /// `StatusItemLabelSize` raw value (compact or regular).
     static let statusItemLabelSize = "StatusItemLabelSize"
+    /// `StatusItemWindowMode` raw value (selected window or combined session + weekly).
+    static let statusItemWindowMode = "StatusItemWindowMode"
+    /// `StatusItemFontSize` raw value. Missing preserves AppKit's native status-item font.
+    static let statusItemFontSize = "StatusItemFontSize"
+    /// Explicit opt-in for maximum black/white status-item contrast.
+    static let statusItemHighContrast = "StatusItemHighContrast"
+    /// Replaces an exhausted quota value with its reset countdown when available.
+    static let statusItemShowsExhaustedResetCountdown = "StatusItemShowsExhaustedResetCountdown"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
@@ -71,12 +79,24 @@ nonisolated enum StorageKeys {
     static let codexCustomAccounts = "CodexCustomAccounts"
     /// User-chosen display name for the default Codex CLI profile.
     static let codexDefaultAccountName = "CodexDefaultAccountName"
+    /// User-chosen CODEX_HOME override for the default Codex CLI profile.
+    static let codexDefaultHomeDirectory = "CodexDefaultHomeDirectory"
     /// Whether the synthesized default Codex CLI profile participates in tracking.
     static let codexDefaultAccountEnabled = "CodexDefaultAccountEnabled"
     /// Persisted Codex account display order (array of UUID strings).
     static let codexAccountOrder = "CodexAccountOrder"
     /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
     static let cachedCodexAccountMetrics = "CachedCodexAccountMetrics"
+    /// Extra Grok Build profiles (JSON-encoded [GrokAccount]).
+    static let grokCustomAccounts = "GrokCustomAccounts"
+    /// User-chosen display name for the default Grok Build profile.
+    static let grokDefaultAccountName = "GrokDefaultAccountName"
+    /// Whether the synthesized default Grok profile participates in tracking.
+    static let grokDefaultAccountEnabled = "GrokDefaultAccountEnabled"
+    /// Persisted Grok account display order (array of UUID strings).
+    static let grokAccountOrder = "GrokAccountOrder"
+    /// Cached per-account Grok metrics (JSON-encoded [UUID: UsageMetrics]).
+    static let cachedGrokAccountMetrics = "CachedGrokAccountMetrics"
     /// Global on/off switch for usage notifications.
     static let notificationsEnabled = "NotificationsEnabled"
     /// Raw value of the `NotificationThreshold` at which a warning notifies.
@@ -113,6 +133,9 @@ nonisolated enum StorageKeys {
     static let sessionWakeMaxTurns = "SessionWakeMaxTurns"
     /// JSON-encoded `WakeEventHookConfiguration`; missing means no configured or enabled hooks.
     static let sessionWakeEventHooks = "SessionWakeEventHooks"
+    /// Versioned app-wide quota event integration configuration. The migration
+    /// reads `sessionWakeEventHooks` once, then this key becomes authoritative.
+    static let quotaEventIntegrations = "QuotaEventIntegrationsV1"
 
     // MARK: - Display Currency (#270)
 
