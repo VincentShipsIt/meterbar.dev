@@ -481,6 +481,48 @@ class UsageDataManager: ObservableObject {
         }
     }
 
+    /// Refreshes one Claude profile without touching its peers.
+    ///
+    /// Settings uses this for the per-account arrow action. The provider-level
+    /// refresh continues to fan out across every enabled profile.
+    func refreshClaudeCodeAccount(id: UUID) async {
+        guard !demoMode, !isLoading else { return }
+        guard providerVisibilityStore.isEnabled(.claudeCode),
+              let account = claudeCodeAccountStore.enabledAccounts.first(where: { $0.id == id }) else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+        lastError = nil
+
+        let fetch = await fetchClaudeCodeAccountMetrics(
+            accounts: [account],
+            trigger: .userInitiated,
+            recordsProviderHealth: false
+        )
+
+        if let refreshed = fetch.metrics[id] {
+            claudeCodeAccountMetrics[id] = refreshed
+        } else {
+            claudeCodeAccountMetrics.removeValue(forKey: id)
+        }
+
+        if let state = fetch.accountStates[id] {
+            claudeCodeAccountStates[id] = state
+        } else {
+            claudeCodeAccountStates.removeValue(forKey: id)
+        }
+
+        lastError = fetch.firstFailure
+        if let representative = representativeClaudeCodeMetrics(from: claudeCodeAccountMetrics) {
+            metrics[.claudeCode] = representative
+        } else {
+            metrics.removeValue(forKey: .claudeCode)
+        }
+        publishMetrics()
+    }
+
     /// A delayed repeating timer does not replay missed ticks after sleep. The
     /// workspace wake hook calls this method once; it catches up only when an
     /// enabled source has no data or its oldest successful snapshot is at least
@@ -724,9 +766,11 @@ class UsageDataManager: ObservableObject {
     }
 
     private func fetchClaudeCodeAccountMetrics(
-        trigger: ClaudeTokenRefreshTrigger
+        accounts: [ClaudeCodeAccount]? = nil,
+        trigger: ClaudeTokenRefreshTrigger,
+        recordsProviderHealth: Bool = true
     ) async -> AccountFetchResult {
-        let enabledAccounts = claudeCodeAccountStore.enabledAccounts
+        let enabledAccounts = accounts ?? claudeCodeAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
         var firstFailure: Error?
@@ -770,10 +814,12 @@ class UsageDataManager: ObservableObject {
         // Parse health tracks integration health, not per-account health:
         // if any account parses, the format contract still holds, so one
         // failing account must not dim the whole provider.
-        if successCount > 0 {
-            parseHealthStore.recordSuccess(.claudeCode)
-        } else if let firstFailure {
-            parseHealthStore.recordFailure(.claudeCode, error: firstFailure)
+        if recordsProviderHealth {
+            if successCount > 0 {
+                parseHealthStore.recordSuccess(.claudeCode)
+            } else if let firstFailure {
+                parseHealthStore.recordFailure(.claudeCode, error: firstFailure)
+            }
         }
 
         claudeFableSessionTracker.scheduleRefresh(accounts: enabledAccounts)
