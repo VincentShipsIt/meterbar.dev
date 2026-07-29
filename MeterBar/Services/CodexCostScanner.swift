@@ -95,7 +95,15 @@ enum CodexCostScanner {
                 pricing: pricing,
                 pricingForName: { ModelPricing.codex(for: $0) }
             )
-        ), TokenUsageAggregator.makeDailyUsage(from: context.dailyTotals, provider: .codexCli, pricing: pricing))
+        ), TokenUsageAggregator.makeDailyUsage(
+            from: context.dailyTotals,
+            provider: .codexCli,
+            pricing: pricing,
+            modelsByDay: context.dailyModelTotals,
+            projectsByDay: context.dailyProjectTotals,
+            projectModelsByDay: context.dailyProjectModelTotals,
+            pricingForName: { ModelPricing.codex(for: $0) }
+        ))
     }
 
     /// Directories holding Codex rollout `.jsonl` files. Codex only moves a
@@ -345,6 +353,29 @@ enum CodexCostScanner {
                 cacheCreation: 0,
                 cacheRead: cached
             )
+            context.dailyModelTotals[day, default: [:]][modelKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.dailyProjectTotals[day, default: [:]][projectKey, default: TokenAccumulator()].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            var dailyProjectModels = context.dailyProjectModelTotals[day] ?? [:]
+            dailyProjectModels[projectKey, default: [:]][
+                modelKey,
+                default: TokenAccumulator()
+            ].add(
+                input: input,
+                output: output + reasoning,
+                cacheCreation: 0,
+                cacheRead: cached
+            )
+            context.dailyProjectModelTotals[day] = dailyProjectModels
             context.modelTotals[modelKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,

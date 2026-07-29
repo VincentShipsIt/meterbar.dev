@@ -8,7 +8,11 @@ enum TokenUsageAggregator {
     nonisolated static func makeDailyUsage(
         from dailyTotals: [Date: TokenAccumulator],
         provider: ServiceType,
-        pricing: TokenPricing
+        pricing: TokenPricing,
+        modelsByDay: [Date: [String: TokenAccumulator]] = [:],
+        projectsByDay: [Date: [String: TokenAccumulator]] = [:],
+        projectModelsByDay: [Date: [String: [String: TokenAccumulator]]] = [:],
+        pricingForName: ((String) -> TokenPricing)? = nil
     ) -> [DailyTokenUsage] {
         dailyTotals.map { day, tokens in
             let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
@@ -27,7 +31,24 @@ enum TokenUsageAggregator {
                 inputTokens: billableInput,
                 outputTokens: tokens.output + tokens.reasoning,
                 cacheReadTokens: tokens.cacheRead,
-                estimatedCostUSD: cost
+                estimatedCostUSD: cost,
+                modelBreakdowns: modelsByDay[day].map {
+                    makeBreakdowns(
+                        from: $0,
+                        provider: provider,
+                        pricing: pricing,
+                        pricingForName: pricingForName
+                    )
+                },
+                projectBreakdowns: projectsByDay[day].map {
+                    makeProjectBreakdowns(
+                        from: $0,
+                        modelsByProject: projectModelsByDay[day] ?? [:],
+                        provider: provider,
+                        pricing: pricing,
+                        pricingForName: pricingForName
+                    )
+                }
             )
         }
     }
