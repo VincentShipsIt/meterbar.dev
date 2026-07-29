@@ -162,7 +162,7 @@ struct GeneralSettingsView: View {
 
             SettingsRowView(
                 title: "Label metric",
-                detail: "Icon Only keeps the status item minimal while preserving details in its tooltip."
+                detail: "Pace shows reserve or deficit. Icon Only keeps the status item minimal."
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.labelMetric },
@@ -178,8 +178,26 @@ struct GeneralSettingsView: View {
             }
 
             SettingsRowView(
+                title: "Quota windows",
+                detail: "Session + Weekly uses bounded S/W labels in one item; unavailable values stay visible as —."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.windowMode },
+                    set: { menuBarDisplayPreferences.setWindowMode($0) }
+                )) {
+                    ForEach(StatusItemWindowMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
                 title: "Label width",
-                detail: "Regular adds “left” or “used”; Compact keeps today’s number-only label."
+                detail: "Regular adds descriptive words; Compact uses bounded abbreviations."
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.labelSize },
@@ -193,6 +211,49 @@ struct GeneralSettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
                 .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Label font size",
+                detail: "Changes only MeterBar’s status-item text; Default preserves the native menu-bar font."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.fontSize },
+                    set: { menuBarDisplayPreferences.setFontSize($0) }
+                )) {
+                    ForEach(StatusItemFontSize.allCases) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "Exhausted reset countdown",
+                detail: "Replace an exhausted value with its bounded reset countdown when the provider reports one."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.showsExhaustedResetCountdown },
+                    set: { menuBarDisplayPreferences.setShowsExhaustedResetCountdown($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
+            }
+
+            SettingsRowView(
+                title: "High contrast",
+                detail: "Use bold black or white text and icon tint for maximum light/dark menu-bar contrast."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.highContrast },
+                    set: { menuBarDisplayPreferences.setHighContrast($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
             }
 
             SettingsRowView(

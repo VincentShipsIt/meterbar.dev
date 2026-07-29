@@ -1,7 +1,7 @@
 # Architecture - MeterBar
 
 **Purpose:** Document what IS implemented (not what WILL BE).
-**Last Updated:** 2026-07-26 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
+**Last Updated:** 2026-07-29 (rewritten from a full-repo audit; see `docs/audits/00-repo-map.md`)
 
 ---
 
@@ -81,6 +81,10 @@ meterbar/
 - **SharedDataStore** — app-group JSON file (`cached_usage_metrics.json`), atomic writes on a serial queue, `WidgetCenter.reloadTimelines` after save.
 - **ProviderParseHealthStore** — app-group `UserDefaults` records of each provider's last successful parse, last attempt, consecutive failures, and format-mismatch state. Diagnostics and `meterbar doctor` share the same records; successful data warns after 2 hours, while format mismatches or 3 consecutive failures need attention and dim the menu bar item.
 - **ProviderVisibilityStore / DockVisibilityStore / ClaudeCodeAccountStore** — UserDefaults-backed preference stores.
+- **MenuBarDisplayPreferencesStore** — UserDefaults-backed status-item presentation choices. Legacy defaults remain a
+  compact percent-left label for one selected window; opt-in choices add combined bounded `S`/`W` labels, pace
+  reserve/deficit, 12/14/16-point text, adaptive maximum contrast, and exhausted-window reset countdowns. The pure
+  planner substitutes `—` plus explicit VoiceOver stale/unavailable copy rather than rendering cached values as current.
 - **OAuthTokenExpiry** — JWT/unix-timestamp expiry checks (60 s grace; unparseable ⇒ not-expired by design).
 - **ServiceSupport** — shared URLSession config, secret-safe HTTP/URLError mapping, real (non-container) home dir via `getpwuid`.
 - **AppLog** — `os.Logger` categories: app, usage, cost, network, storage. This is the only observability; there is no crash reporting or analytics.

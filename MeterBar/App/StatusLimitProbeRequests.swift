@@ -128,7 +128,8 @@ nonisolated enum StatusLimitProbeRequestBuilder {
             accountKey: source.accountKey,
             autoSelectionKey: source.autoSelectionKey,
             displayName: source.displayName,
-            limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service)
+            limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service),
+            lastUpdated: source.metrics.lastUpdated
         )
         return StatusLimitProbeRequest(seeds: seeds, probe: probe)
     }
@@ -145,8 +146,10 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                     service: seed.service,
                     accountKey: seed.accountKey,
                     displayName: seed.displayName,
+                    windowID: seed.windowID,
                     windowName: seed.windowName,
                     limit: seed.limit,
+                    lastUpdated: seed.lastUpdated,
                     lastActivity: lastActivity,
                     isAutoSelectable: seed.isAutoSelectable
                 )
