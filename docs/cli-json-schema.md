@@ -104,8 +104,10 @@ Version 1 shape:
 ```
 
 With `--days`, MeterBar derives the response from cached daily rows without rescanning logs.
-Daily rows do not retain `cacheCreationTokens` or `sessionCount`, so those fields are omitted in a
-windowed response. `period.isTruncated` is true when the cache covers fewer days than requested.
+Provider-level daily rows do not retain `cacheCreationTokens` or `sessionCount`, so those fields are
+omitted in a windowed response. Cost-cache schema v2 does retain day × model and day × project
+attribution; when every included row is v2, windowed providers may include `modelBreakdowns` and
+`projectBreakdowns`. `period.isTruncated` is true when the cache covers fewer days than requested.
 
 ### Month-to-date window
 
@@ -132,7 +134,43 @@ version 1 fixture above never sets it, so that response is byte-for-byte unchang
       "outputTokens": 250,
       "cacheReadTokens": 550,
       "totalTokens": 1800,
-      "estimatedCostUSD": 1.25
+      "estimatedCostUSD": 1.25,
+      "modelBreakdowns": [
+        {
+          "name": "claude-opus-5",
+          "inputTokens": 1000,
+          "outputTokens": 250,
+          "cacheCreationTokens": 50,
+          "cacheReadTokens": 550,
+          "totalTokens": 1850,
+          "estimatedCostUSD": 1.25,
+          "sessionCount": 3
+        }
+      ],
+      "projectBreakdowns": [
+        {
+          "name": "meterbardev",
+          "inputTokens": 1000,
+          "outputTokens": 250,
+          "cacheCreationTokens": 50,
+          "cacheReadTokens": 550,
+          "totalTokens": 1850,
+          "estimatedCostUSD": 1.25,
+          "sessionCount": 3,
+          "modelBreakdowns": [
+            {
+              "name": "claude-opus-5",
+              "inputTokens": 1000,
+              "outputTokens": 250,
+              "cacheCreationTokens": 50,
+              "cacheReadTokens": 550,
+              "totalTokens": 1850,
+              "estimatedCostUSD": 1.25,
+              "sessionCount": 3
+            }
+          ]
+        }
+      ]
     }
   ],
   "totalCostUSD": 1.25,
@@ -142,19 +180,25 @@ version 1 fixture above never sets it, so that response is byte-for-byte unchang
 
 Both totals are always derived by summing `providers`, so an empty `providers` array pairs only with
 `"totalCostUSD": 0` / `"totalTokens": 0`. As with `--days`, windowed provider entries omit
-`cacheCreationTokens` and `sessionCount`, which daily rows do not retain.
+provider-level `cacheCreationTokens` and `sessionCount`. Breakdown rows retain those fields as part
+of their attribution record, so their token total can include cache creation even though the
+provider's windowed `totalTokens` does not.
 
 `requestedDays` for a month-to-date window is however many days have elapsed since the 1st of the
 current month (inclusive), computed in the local time zone at read time — it is never a cached start
 date, so the same cache reports a larger window tomorrow without a rescan or restart.
 
-### Project/worktree breakdown
+### Model and project/worktree breakdown
 
-Each provider in the full, unwindowed summary (no `--days`/`--month-to-date`) may carry
-`projectBreakdowns`: a per-project/worktree rollup derived from scanned session paths, with its own
-nested `modelBreakdowns`. The field is omitted entirely when nothing was scanned with a project
-dimension — including every windowed (`--days`/`--month-to-date`) response, since daily rows carry no
-project dimension of their own.
+Each provider may carry `modelBreakdowns` plus `projectBreakdowns`: a per-project/worktree rollup
+derived from scanned session paths, with its own nested `modelBreakdowns`. Full unwindowed responses
+derive them from the scan totals. `--days` and `--month-to-date` derive them from cost-cache v2's
+daily attribution and restrict every row to the selected calendar days.
+
+Both fields are omitted when attribution is incomplete. In particular, a migrated v1 cache keeps
+its provider totals readable but cannot reconstruct historical model/project rows; MeterBar queues
+a normal background rescan, and the CLI omits the incomplete breakdowns until that v2 scan lands.
+It never substitutes the full 30-day breakdown into a shorter month window.
 
 ```json
 {
@@ -167,6 +211,18 @@ project dimension of their own.
   "totalTokens": 1800,
   "estimatedCostUSD": 1.25,
   "sessionCount": 3,
+  "modelBreakdowns": [
+    {
+      "name": "claude-opus-5",
+      "inputTokens": 1000,
+      "outputTokens": 250,
+      "cacheCreationTokens": 50,
+      "cacheReadTokens": 500,
+      "totalTokens": 1800,
+      "estimatedCostUSD": 1.25,
+      "sessionCount": 3
+    }
+  ],
   "projectBreakdowns": [
     {
       "name": "meterbardev",
@@ -194,10 +250,10 @@ project dimension of their own.
 }
 ```
 
-Every session attributes to exactly one project row; a session whose path can't be attributed to a
-project lands in an explicit `unknown` row rather than being dropped or guessed. Names are sanitized
-before they ever reach this JSON — no full home-directory paths — and MeterBar never persists branch
-names, remotes, prompt content, or credentials to derive them.
+Every usage event attributes to exactly one project row; an event whose path can't be attributed to
+a project lands in an explicit `unknown` row rather than being dropped or guessed. Names are
+sanitized before they ever reach the cache or this JSON — no full home-directory paths — and
+MeterBar never persists branch names, remotes, prompt content, or credentials to derive them.
 
 ### Display currency
 

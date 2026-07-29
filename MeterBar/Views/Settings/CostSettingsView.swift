@@ -29,6 +29,21 @@ struct CostPeriodContentView: View {
     let summary: CostSummary
     let periodMode: CostPeriodMode
     let currency: DisplayCurrency?
+    /// Stable clock injection for presentation tests. Production leaves this
+    /// nil and keeps the minute-based TimelineView rollover behavior.
+    var monthToDateNow: Date?
+
+    init(
+        summary: CostSummary,
+        periodMode: CostPeriodMode,
+        currency: DisplayCurrency?,
+        monthToDateNow: Date? = nil
+    ) {
+        self.summary = summary
+        self.periodMode = periodMode
+        self.currency = currency
+        self.monthToDateNow = monthToDateNow
+    }
 
     var body: some View {
         switch periodMode {
@@ -85,11 +100,18 @@ struct CostPeriodContentView: View {
     /// showing last month's window until unrelated state moved. Same
     /// one-minute schedule the other time-driven settings rows already use.
     @ViewBuilder private var monthToDateContent: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
+        if let monthToDateNow {
             VStack(alignment: .leading, spacing: 10) {
-                monthToDateRows(now: context.date)
+                monthToDateRows(now: monthToDateNow)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                VStack(alignment: .leading, spacing: 10) {
+                    monthToDateRows(now: context.date)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -134,6 +156,10 @@ struct CostPeriodContentView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
+                }
+
+                if let projects = provider.projectBreakdowns, !projects.isEmpty {
+                    projectBreakdownRows(projects)
                 }
             }
         }
