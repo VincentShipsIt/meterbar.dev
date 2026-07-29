@@ -21,7 +21,9 @@ final class CostWindowTests: XCTestCase {
         input: Int,
         output: Int,
         cacheRead: Int,
-        cost: Double
+        cost: Double,
+        modelBreakdowns: [TokenUsageBreakdown]? = nil,
+        projectBreakdowns: [TokenUsageBreakdown]? = nil
     ) -> DailyTokenUsage {
         let today = calendar.startOfDay(for: now)
         let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
@@ -31,7 +33,29 @@ final class CostWindowTests: XCTestCase {
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: cacheRead,
-            estimatedCostUSD: cost
+            estimatedCostUSD: cost,
+            modelBreakdowns: modelBreakdowns,
+            projectBreakdowns: projectBreakdowns
+        )
+    }
+
+    private func breakdown(
+        name: String,
+        provider: ServiceType = .claudeCode,
+        input: Int,
+        cost: Double,
+        models: [TokenUsageBreakdown] = []
+    ) -> TokenUsageBreakdown {
+        TokenUsageBreakdown(
+            provider: provider,
+            name: name,
+            inputTokens: input,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: cost,
+            sessionCount: 1,
+            modelBreakdowns: models
         )
     }
 
@@ -235,5 +259,103 @@ final class CostWindowTests: XCTestCase {
         XCTAssertEqual(window.requestedDays, 1)
         XCTAssertEqual(window.providers.first?.inputTokens, 7)
         XCTAssertEqual(window.totalCostUSD, 0.7, accuracy: 0.0001)
+    }
+
+    func testMonthToDateAggregatesProjectAndModelBreakdownsFromPartiallyCachedMonth() throws {
+        let opusDay = breakdown(name: "claude-opus-5", input: 20, cost: 2)
+        let fableDay = breakdown(name: "claude-fable-5", input: 10, cost: 1)
+        let summary = summary(
+            dailyUsage: [
+                // June 10: the scan itself covers only seven days through
+                // `now` (June 15 in the fixed fixture), so the month window is
+                // explicitly partial even though an older fixture row exists.
+                row(
+                    daysAgo: 5,
+                    provider: .claudeCode,
+                    input: 20,
+                    output: 0,
+                    cacheRead: 0,
+                    cost: 2,
+                    modelBreakdowns: [opusDay],
+                    projectBreakdowns: [
+                        breakdown(name: "meterbardev", input: 20, cost: 2, models: [opusDay])
+                    ]
+                ),
+                row(
+                    daysAgo: 0,
+                    provider: .claudeCode,
+                    input: 10,
+                    output: 0,
+                    cacheRead: 0,
+                    cost: 1,
+                    modelBreakdowns: [fableDay],
+                    projectBreakdowns: [
+                        breakdown(name: "meterbardev", input: 10, cost: 1, models: [fableDay])
+                    ]
+                ),
+                // May 31: cached, but outside the current month and therefore
+                // excluded from both the provider total and its attribution.
+                row(
+                    daysAgo: 15,
+                    provider: .claudeCode,
+                    input: 999,
+                    output: 0,
+                    cacheRead: 0,
+                    cost: 99,
+                    modelBreakdowns: [breakdown(name: "legacy-model", input: 999, cost: 99)],
+                    projectBreakdowns: [breakdown(name: "other-project", input: 999, cost: 99)]
+                )
+            ],
+            periodDays: 7
+        )
+
+        let window = summary.monthToDateCostWindow(now: now, calendar: calendar)
+        let provider = try XCTUnwrap(window.providers.first)
+        let project = try XCTUnwrap(provider.projectBreakdowns?.first)
+
+        XCTAssertTrue(window.isTruncated)
+        XCTAssertEqual(window.requestedDays, 15)
+        XCTAssertEqual(window.coveredDays, 7)
+        XCTAssertEqual(provider.modelBreakdowns?.map(\.name), ["claude-opus-5", "claude-fable-5"])
+        XCTAssertEqual(project.name, "meterbardev")
+        XCTAssertEqual(project.inputTokens, 30)
+        XCTAssertEqual(project.estimatedCostUSD, 3, accuracy: 0.0001)
+        XCTAssertEqual(Set(project.modelBreakdowns.map(\.name)), ["claude-opus-5", "claude-fable-5"])
+    }
+
+    func testMonthToDateOmitsAttributionWhenAnyIncludedLegacyRowLacksIt() throws {
+        let model = breakdown(name: "claude-opus-5", input: 10, cost: 1)
+        let summary = summary(
+            dailyUsage: [
+                row(
+                    daysAgo: 0,
+                    provider: .claudeCode,
+                    input: 10,
+                    output: 0,
+                    cacheRead: 0,
+                    cost: 1,
+                    modelBreakdowns: [model],
+                    projectBreakdowns: [
+                        breakdown(name: "meterbardev", input: 10, cost: 1, models: [model])
+                    ]
+                ),
+                row(
+                    daysAgo: 1,
+                    provider: .claudeCode,
+                    input: 5,
+                    output: 0,
+                    cacheRead: 0,
+                    cost: 0.5
+                )
+            ],
+            periodDays: 30
+        )
+
+        let provider = try XCTUnwrap(
+            summary.monthToDateCostWindow(now: now, calendar: calendar).providers.first
+        )
+
+        XCTAssertNil(provider.modelBreakdowns)
+        XCTAssertNil(provider.projectBreakdowns)
     }
 }

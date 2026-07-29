@@ -142,6 +142,72 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(period["kind"] as? String, "monthToDate")
     }
 
+    func testMonthToDateCostResponseIncludesModelAndProjectBreakdowns() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let model = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "claude-opus-5",
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheCreationTokens: 5,
+            cacheReadTokens: 30,
+            estimatedCostUSD: 0.5,
+            sessionCount: 1
+        )
+        let project = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "www/meterbardev",
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheCreationTokens: 5,
+            cacheReadTokens: 30,
+            estimatedCostUSD: 0.5,
+            sessionCount: 1,
+            modelBreakdowns: [model]
+        )
+        let cache = CostSummaryCache(
+            summary: CostSummary(
+                costs: [],
+                totalCostUSD: 0.5,
+                totalTokens: 150,
+                periodDays: 30,
+                dailyUsage: [
+                    DailyTokenUsage(
+                        date: referenceDate.addingTimeInterval(-86_400),
+                        provider: .claudeCode,
+                        inputTokens: 100,
+                        outputTokens: 20,
+                        cacheReadTokens: 30,
+                        estimatedCostUSD: 0.5,
+                        modelBreakdowns: [model],
+                        projectBreakdowns: [project]
+                    )
+                ]
+            ),
+            lastScanDate: referenceDate
+        )
+
+        let response = CostCLIJSONResponse(
+            cache: cache,
+            monthToDate: true,
+            now: referenceDate,
+            calendar: calendar
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: response.jsonData()) as? [String: Any]
+        )
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        let provider = try XCTUnwrap((object["providers"] as? [[String: Any]])?.first)
+        let models = try XCTUnwrap(provider["modelBreakdowns"] as? [[String: Any]])
+        let projects = try XCTUnwrap(provider["projectBreakdowns"] as? [[String: Any]])
+        let nestedModels = try XCTUnwrap(projects.first?["modelBreakdowns"] as? [[String: Any]])
+
+        XCTAssertEqual(models.first?["name"] as? String, "claude-opus-5")
+        XCTAssertEqual(projects.first?["name"] as? String, "www/meterbardev")
+        XCTAssertEqual(nestedModels.first?["name"] as? String, "claude-opus-5")
+    }
+
     func testCostResponseOmitsProjectBreakdownsWhenNoneAreScannedButIncludesThemWhenPresent() throws {
         let costWithoutProjects = TokenCost(
             provider: .claudeCode,
