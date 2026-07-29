@@ -874,6 +874,32 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
     }
 
+    /// Reset-credit publish skips refresh methods; movement must still reschedule Adaptive.
+    func testAdaptiveSchedulerReschedulesWhenResetCreditPublishMovesQuota() {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let cached = MetricsFixtures.codexCli(sessionUsedPercent: 40)
+        let codex = StubProvider(hasAccess: true, result: .success(cached))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            preload: [.codexCli: cached],
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 1_800, accuracy: 0.01)
+
+        manager.applyCodexResetCreditRefresh(
+            MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 0),
+            accountID: CodexAccount.defaultID
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
+    }
+
     func testAdaptiveSchedulerUsesInjectedPowerAndThermalSignals() {
         let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))

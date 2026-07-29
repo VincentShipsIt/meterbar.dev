@@ -605,11 +605,16 @@ class UsageDataManager: ObservableObject {
     /// never drift apart and `refreshGeneration` advances exactly once per
     /// committed change — which is what the notification layer subscribes to.
     private func publishMetrics() {
-        recordQuotaMovement()
+        let quotaMoved = recordQuotaMovement()
         saveCachedData()
         saveCachedAccountMetrics()
         saveSharedData(metrics)
         refreshGeneration &+= 1
+        // Codex reset-credit and other publish-only paths skip the refresh
+        // methods' adaptive defer, so reschedule here when movement is real.
+        if quotaMoved {
+            rescheduleAdaptiveRefreshIfNeeded()
+        }
     }
 
     private func saveCachedData() {
@@ -730,12 +735,15 @@ class UsageDataManager: ObservableObject {
         )
     }
 
-    private func recordQuotaMovement() {
+    @discardableResult
+    private func recordQuotaMovement() -> Bool {
         let latest = makeAdaptiveQuotaSnapshot()
-        if adaptiveQuotaSnapshot.hasMovement(comparedTo: latest) {
+        let moved = adaptiveQuotaSnapshot.hasMovement(comparedTo: latest)
+        if moved {
             lastQuotaMovementAt = adaptiveNow()
         }
         adaptiveQuotaSnapshot = latest
+        return moved
     }
 
     private func makeAdaptiveQuotaSnapshot() -> AdaptiveQuotaSnapshot {

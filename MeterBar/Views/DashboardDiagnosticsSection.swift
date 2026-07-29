@@ -41,6 +41,9 @@ struct DashboardDiagnosticsSection: View {
                 trailing: refreshCadenceDiagnostic.effectiveInterval
             ) {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Selected: \(refreshCadenceDiagnostic.selection)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     Text(refreshCadenceDiagnostic.reason)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
