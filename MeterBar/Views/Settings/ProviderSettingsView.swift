@@ -257,11 +257,10 @@ struct ProviderSettingsView: View {
             } else {
                 ForEach(snapshots) { snapshot in
                     VStack(alignment: .leading, spacing: 10) {
-                        // Match the popover: when a blocking window is exhausted,
-                        // lead with status + reset countdown rather than only a
-                        // red "Out of quota" bar that omits when service resumes.
+                        // Blocking exhaustion matches the popover card: status +
+                        // reset countdown only. A full red bar that reads
+                        // "100% / Out of quota" just repeats the same fact.
                         if snapshot.hasExhaustedLimit {
-                            // Same collapsed status + reset line as the popover card.
                             ProviderBlockedUsageSummary(
                                 snapshot: snapshot,
                                 density: .settings,
@@ -277,19 +276,21 @@ struct ProviderSettingsView: View {
                             )
                         }
 
-                        if snapshot.detailLimits.isEmpty {
-                            EmptyStateCard(
-                                systemImage: "clock.badge.questionmark",
-                                title: "No quota windows",
-                                message: "This provider didn't report any limit windows."
-                            )
-                        } else {
-                            ForEach(snapshot.detailLimits) { limit in
-                                LimitRow(
-                                    limit: limit,
-                                    accentColor: snapshot.accentColor,
-                                    density: .regular
+                        if !snapshot.hasExhaustedLimit {
+                            if snapshot.detailLimits.isEmpty {
+                                EmptyStateCard(
+                                    systemImage: "clock.badge.questionmark",
+                                    title: "No quota windows",
+                                    message: "This provider didn't report any limit windows."
                                 )
+                            } else {
+                                ForEach(snapshot.detailLimits) { limit in
+                                    LimitRow(
+                                        limit: limit,
+                                        accentColor: snapshot.accentColor,
+                                        density: .regular
+                                    )
+                                }
                             }
                         }
 
