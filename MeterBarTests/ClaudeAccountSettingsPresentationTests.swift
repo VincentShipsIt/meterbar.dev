@@ -32,6 +32,7 @@ final class ClaudeAccountSettingsPresentationTests: XCTestCase {
         XCTAssertTrue(ClaudeReconnectConfirmation.title(for: account).contains("Work"))
         XCTAssertTrue(ClaudeReconnectConfirmation.message(for: account).contains("log out"))
         XCTAssertTrue(ClaudeReconnectConfirmation.message(for: account).contains("sign in"))
+        XCTAssertTrue(ClaudeReconnectConfirmation.message(for: account).contains("Claude"))
     }
 
     func testClaudeStatusPresentationKeepsTextIconAndToneSemantic() {
