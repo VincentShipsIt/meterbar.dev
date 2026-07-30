@@ -80,6 +80,48 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(seeds.first(where: \.isAutoSelectable)?.windowName, "Weekly")
     }
 
+    /// When OpenAI temporarily disables the 5-hour window, Codex still reports a
+    /// weekly window. Auto must fall back to weekly so the menu bar is not left
+    /// without a Codex candidate.
+    func testCodexWeeklyOnlyQuotaFallsBackToWeeklyForAutoSelection() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 19, total: 100, resetTime: now.addingTimeInterval(3_600))
+            ),
+            service: .codexCli
+        )
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: .codexCli,
+            accountID: CodexAccount.defaultID,
+            autoSelectionKey: "codex:\(CodexAccount.defaultID.uuidString)",
+            displayName: "Codex",
+            limits: limits
+        )
+
+        XCTAssertEqual(seeds.map(\.windowName), ["Weekly"])
+        XCTAssertEqual(seeds.filter(\.isAutoSelectable).map(\.windowName), ["Weekly"])
+    }
+
+    /// Grok never auto-won while its activity probe was hard-coded to `nil`
+    /// and Claude still had recent on-disk activity. Active Grok must win.
+    func testActiveGrokBeatsIdleClaudeInAutoSelection() {
+        let idleClaude = candidate(
+            key: "claude:default",
+            percentUsed: 66,
+            activeMinutesAgo: nil,
+            service: .claudeCode
+        )
+        let activeGrok = candidate(
+            key: "grok:default",
+            percentUsed: 19,
+            activeMinutesAgo: 1,
+            windowName: "Weekly",
+            service: .grok
+        )
+        XCTAssertEqual(select([idleClaude, activeGrok])?.key, "grok:default")
+    }
+
     func testOpenRouterAccountCreditsParticipateInAutoSelection() {
         let metrics = UsageMetrics(
             service: .openRouter,

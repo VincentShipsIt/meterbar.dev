@@ -40,12 +40,6 @@ nonisolated enum GrokHomeDirectory {
         _ rawValue: String,
         realHomeDirectory: String = ServiceSupport.realHomeDirectory()
     ) -> String {
-        if rawValue == "~" {
-            return realHomeDirectory
-        }
-        if rawValue.hasPrefix("~/") {
-            return (realHomeDirectory as NSString).appendingPathComponent(String(rawValue.dropFirst(2)))
-        }
-        return (rawValue as NSString).standardizingPath
+        ServiceSupport.expandUserPath(rawValue, realHomeDirectory: realHomeDirectory)
     }
 }

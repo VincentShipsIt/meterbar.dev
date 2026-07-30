@@ -142,7 +142,14 @@ final class StatusItemPresenter {
 
     @MainActor
     func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
-        button.image = image(for: descriptor.service)
+        let resolvedImage = image(for: descriptor.service)
+        // Never publish a zero-size template — AppKit collapses the status item
+        // to an invisible slot when both image and title are empty-width.
+        if resolvedImage.size.width < 1 || resolvedImage.size.height < 1 {
+            button.image = fallbackImage()
+        } else {
+            button.image = resolvedImage
+        }
         button.imagePosition = descriptor.title.isEmpty ? .imageOnly : .imageLeft
         applyVisualStyle(descriptor.visualStyle, to: button)
         setTitle(button, to: descriptor.title, style: descriptor.visualStyle)

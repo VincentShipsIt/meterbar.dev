@@ -94,6 +94,7 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                     accountMetrics: UsageDataManager.shared.grokAccountMetrics,
                     providerMetrics: metrics[.grok]
                 ) else { continue }
+                let homeDirectory = account.homeDirectory
                 let source = StatusLimitSource(
                     service: .grok,
                     accountID: account.id,
@@ -102,7 +103,10 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                     displayName: "\(account.name) (\(ServiceType.grok.displayName))",
                     metrics: accountMetrics
                 )
-                requests.append(request(source: source, probe: { nil }))
+                requests.append(request(
+                    source: source,
+                    probe: { AccountActivityInspector.grokActivity(homeDirectory: homeDirectory) }
+                ))
             }
         }
         if visibility.isEnabled(.cursor), let cursorMetrics = metrics[.cursor] {

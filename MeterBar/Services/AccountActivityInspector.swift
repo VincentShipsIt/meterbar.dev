@@ -70,6 +70,19 @@ nonisolated enum AccountActivityInspector {
         return lastActivity(inDirectory: CodexHomeDirectory.path(for: account))
     }
 
+    /// Grok Build keeps session transcripts, locks, and caches under
+    /// `GROK_HOME` (default `~/.grok`). Depth-1 covers `sessions/`,
+    /// `active_sessions.json`, and other top-level files the CLI rewrites while
+    /// a run is live — without opening credential bytes.
+    static func grokActivity(homeDirectory: String?) -> Date? {
+        let account = GrokAccount(
+            id: GrokAccount.defaultID,
+            name: GrokAccount.defaultName,
+            homeDirectory: homeDirectory
+        )
+        return lastActivity(inDirectory: GrokHomeDirectory.path(for: account))
+    }
+
     /// Cursor continuously checkpoints its state database while running; the
     /// WAL sibling is the hottest file. Mirrors the candidate paths used by
     /// `CursorLocalService.getCursorDatabasePath`.

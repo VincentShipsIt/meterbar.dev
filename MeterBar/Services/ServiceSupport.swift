@@ -216,4 +216,37 @@ nonisolated enum ServiceSupport {
         }
         return FileManager.default.homeDirectoryForCurrentUser.path
     }
+
+    /// Expand `~` / `~/…` against the real home directory, and standardize every
+    /// other path. Shared by account homes, config dirs, and CLI state roots so
+    /// providers cannot diverge on `~/`-expansion edge cases.
+    static func expandUserPath(
+        _ rawValue: String,
+        realHomeDirectory: String = realHomeDirectory()
+    ) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "~" {
+            return realHomeDirectory
+        }
+        if trimmed.hasPrefix("~/") {
+            return (realHomeDirectory as NSString).appendingPathComponent(String(trimmed.dropFirst(2)))
+        }
+        return (trimmed as NSString).standardizingPath
+    }
+
+    /// Compact an absolute path under the real home directory back to `~/…` for
+    /// user-facing copy. Paths outside the home stay absolute.
+    static func compactPathForDisplay(
+        _ path: String,
+        realHomeDirectory: String = realHomeDirectory()
+    ) -> String {
+        let resolvedPath = (path as NSString).standardizingPath
+        let standardizedHome = (realHomeDirectory as NSString).standardizingPath
+        let homePrefix = standardizedHome.hasSuffix("/") ? standardizedHome : "\(standardizedHome)/"
+
+        guard resolvedPath.hasPrefix(homePrefix) else {
+            return resolvedPath
+        }
+        return "~/\(resolvedPath.dropFirst(homePrefix.count))"
+    }
 }
