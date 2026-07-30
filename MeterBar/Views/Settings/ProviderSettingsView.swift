@@ -40,20 +40,41 @@ struct ProviderSettingsView: View {
             Text(claudeReconnectError ?? "Could not open the Claude reconnect flow.")
         }
         .sheet(isPresented: $isAddingClaudeAccount) {
-            AddClaudeAccountSheet { name, configDirectory in
+            AddProviderAccountSheet(
+                providerName: "Claude",
+                logoKind: .claude,
+                accent: MeterBarTheme.claudeAccent,
+                subtitle: "Use a separate CLAUDE_CONFIG_DIR for this profile.",
+                pathFieldLabel: "Config directory",
+                pathPlaceholder: "Path"
+            ) { name, configDirectory in
                 addClaudeAccount(name: name, configDirectory: configDirectory)
                 isAddingClaudeAccount = false
             }
         }
         .sheet(isPresented: $isAddingCodexAccount) {
-            AddCodexAccountSheet { name, homeDirectory in
+            AddProviderAccountSheet(
+                providerName: "Codex",
+                logoKind: .codex,
+                accent: MeterBarTheme.codexAccent,
+                subtitle: "Use a separate CODEX_HOME containing its own auth.json.",
+                pathFieldLabel: "CODEX_HOME",
+                pathPlaceholder: "Codex home directory"
+            ) { name, homeDirectory in
                 codexAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
                 isAddingCodexAccount = false
                 Task { await dataManager.refreshAll() }
             }
         }
         .sheet(isPresented: $isAddingGrokAccount) {
-            AddGrokAccountSheet { name, homeDirectory in
+            AddProviderAccountSheet(
+                providerName: "Grok",
+                logoKind: .grok,
+                accent: MeterBarTheme.grokAccent,
+                subtitle: "Use a separate GROK_HOME containing its CLI-managed auth.json.",
+                pathFieldLabel: "GROK_HOME",
+                pathPlaceholder: "Grok home directory"
+            ) { name, homeDirectory in
                 grokAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
                 isAddingGrokAccount = false
                 Task { await dataManager.refreshAll() }
@@ -422,10 +443,27 @@ struct ProviderSettingsView: View {
                         if index > 0 {
                             SettingsDivider()
                         }
-                        AccountProfileRow(
-                            account: account,
-                            authState: claudeAuthState(for: account),
+                        ProviderAccountProfileRow(
+                            accountName: account.name,
+                            isDefault: account.isDefault,
+                            isEnabled: account.isEnabled,
+                            accent: MeterBarTheme.claudeAccent,
+                            pathLabel: "Config directory",
+                            pathPlaceholder: "Config directory",
+                            resolvedPath: account.configDirectory
+                                ?? ClaudeCodeAccount.defaultConfigDirectory(),
+                            defaultPathHelp: "Defaults to ~/.claude or $CLAUDE_CONFIG_DIR; clear the field to restore that default.",
+                            statusPresentation: .claude(
+                                claudeAuthState(for: account),
+                                isEnabled: account.isEnabled
+                            ),
+                            canMoveUp: index > 0,
+                            canMoveDown: index < claudeAccountStore.accounts.count - 1,
                             isRefreshing: refreshingClaudeAccountIDs.contains(account.id),
+                            showsRefresh: true,
+                            showsReconnect: true,
+                            reconnectProviderName: "Claude",
+                            deleteMessage: "MeterBar will stop tracking this CLAUDE_CONFIG_DIR. Files and Claude login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 claudeAccountStore.setEnabled(isEnabled, for: account.id)
                                 SessionWakeSettingsStore.shared.reconcileAccounts(
@@ -436,15 +474,17 @@ struct ProviderSettingsView: View {
                             onSave: { name, configDirectory in
                                 updateClaudeAccount(id: account.id, name: name, configDirectory: configDirectory)
                             },
-                            onRefresh: { refreshClaudeAccount(account) },
-                            onReconnect: { reconnectClaudeAccount(account) },
                             onRemove: {
                                 claudeAccountStore.removeAccount(id: account.id)
                                 MenuBarAccountSelectionStore.shared.forget(
                                     MenuBarAccountKey.make(service: .claudeCode, accountID: account.id)
                                 )
                                 Task { await dataManager.refreshAll() }
-                            }
+                            },
+                            onRefresh: { refreshClaudeAccount(account) },
+                            onReconnect: { reconnectClaudeAccount(account) },
+                            onMoveUp: { moveClaudeAccount(at: index, down: false) },
+                            onMoveDown: { moveClaudeAccount(at: index, down: true) }
                         )
                     }
                 }
@@ -526,10 +566,12 @@ struct ProviderSettingsView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(codexAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
                         if index > 0 { SettingsDivider() }
-                        CodexAccountProfileRow(
+                        CodexAccountSettingsRow(
                             account: account,
                             canDisable: codexAccountStore.canDisableAccount(id: account.id),
                             canRemove: codexAccountStore.canRemoveAccount(id: account.id),
+                            canMoveUp: index > 0,
+                            canMoveDown: index < codexAccountStore.accounts.count - 1,
                             onEnabledChange: { isEnabled in
                                 guard codexAccountStore.setEnabled(isEnabled, for: account.id) == .updated else {
                                     return
@@ -549,7 +591,9 @@ struct ProviderSettingsView: View {
                                 guard codexAccountStore.removeAccount(id: account.id) == .updated else { return }
                                 reconcileCodexAccountSelections()
                                 Task { await dataManager.refreshAll() }
-                            }
+                            },
+                            onMoveUp: { moveCodexAccount(at: index, down: false) },
+                            onMoveDown: { moveCodexAccount(at: index, down: true) }
                         )
                     }
                 }
@@ -743,11 +787,21 @@ struct ProviderSettingsView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(grokAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
                         if index > 0 { SettingsDivider() }
-                        GrokAccountProfileRow(
-                            account: account,
-                            isConnected: grokService.canAccess(account: account),
+                        ProviderAccountProfileRow(
+                            accountName: account.name,
+                            isDefault: account.isDefault,
+                            isEnabled: account.isEnabled,
+                            accent: MeterBarTheme.grokAccent,
+                            pathLabel: "GROK_HOME",
+                            pathPlaceholder: "Grok home directory",
+                            resolvedPath: GrokHomeDirectory.path(for: account),
+                            defaultPathHelp: "Defaults to ~/.grok or $GROK_HOME; clear the field to restore that default.",
+                            statusPresentation: ProviderAccountConnectionState
+                                .from(isEnabled: account.isEnabled, isConnected: grokService.canAccess(account: account))
+                                .statusPresentation,
                             canMoveUp: index > 0,
                             canMoveDown: index < grokAccountStore.accounts.count - 1,
+                            deleteMessage: "MeterBar will stop tracking this GROK_HOME. Files and Grok login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 grokAccountStore.setEnabled(isEnabled, for: account.id)
                                 Task { await dataManager.refreshAll() }
@@ -767,12 +821,8 @@ struct ProviderSettingsView: View {
                                 )
                                 Task { await dataManager.refreshAll() }
                             },
-                            onMoveUp: {
-                                moveGrokAccount(at: index, down: false)
-                            },
-                            onMoveDown: {
-                                moveGrokAccount(at: index, down: true)
-                            }
+                            onMoveUp: { moveGrokAccount(at: index, down: false) },
+                            onMoveDown: { moveGrokAccount(at: index, down: true) }
                         )
                     }
                 }
@@ -851,12 +901,33 @@ struct ProviderSettingsView: View {
         Task { await dataManager.refreshAll() }
     }
 
+    private func moveClaudeAccount(at index: Int, down: Bool) {
+        moveAccount(at: index, down: down, count: claudeAccountStore.accounts.count) {
+            claudeAccountStore.moveAccounts(fromOffsets: $0, toOffset: $1)
+        }
+    }
+
+    private func moveCodexAccount(at index: Int, down: Bool) {
+        moveAccount(at: index, down: down, count: codexAccountStore.accounts.count) {
+            codexAccountStore.moveAccounts(fromOffsets: $0, toOffset: $1)
+        }
+    }
+
     private func moveGrokAccount(at index: Int, down: Bool) {
+        moveAccount(at: index, down: down, count: grokAccountStore.accounts.count) {
+            grokAccountStore.moveAccounts(fromOffsets: $0, toOffset: $1)
+        }
+    }
+
+    private func moveAccount(
+        at index: Int,
+        down: Bool,
+        count: Int,
+        perform: (IndexSet, Int) -> Void
+    ) {
         let destination = down ? index + 2 : index - 1
-        grokAccountStore.moveAccounts(
-            fromOffsets: IndexSet(integer: index),
-            toOffset: destination
-        )
+        guard index >= 0, index < count, destination >= 0, destination <= count else { return }
+        perform(IndexSet(integer: index), destination)
     }
 
     private func reconnectClaudeAccount(_ account: ClaudeCodeAccount) {

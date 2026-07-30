@@ -2,24 +2,25 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-// MARK: - AddClaudeAccountSheet
-
-/// Modal sheet for adding a Claude Code profile backed by its own
-/// CLAUDE_CONFIG_DIR. Extracted verbatim from the SettingsView monolith; it is
-/// presented from the Providers tab's Claude Accounts section.
-struct AddClaudeAccountSheet: View {
-    // MARK: Internal
-
+/// Modal sheet for adding one multi-account CLI profile. Shared by Claude,
+/// Codex, and Grok — only branding and path copy differ.
+struct AddProviderAccountSheet: View {
+    let providerName: String
+    let logoKind: ProviderLogoKind
+    let accent: Color
+    let subtitle: String
+    let pathFieldLabel: String
+    let pathPlaceholder: String
     let onAdd: (String, String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
-                ProviderLogoView(kind: .claude, size: 18, foregroundColor: MeterBarTheme.claudeAccent)
+                ProviderLogoView(kind: logoKind, size: 18, foregroundColor: accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Add Claude Account")
+                    Text("Add \(providerName) Account")
                         .font(.headline)
-                    Text("Use a separate CLAUDE_CONFIG_DIR for this profile.")
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -35,32 +36,24 @@ struct AddClaudeAccountSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Config directory")
+                    Text(pathFieldLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        TextField("Path", text: $configDirectory)
+                        TextField(pathPlaceholder, text: $path)
                             .settingsInput()
-                        Button("Choose") {
-                            chooseConfigDirectory()
-                        }
-                        .buttonStyle(.bordered)
+                        Button("Choose", action: chooseDirectory)
+                            .buttonStyle(.bordered)
                     }
                 }
             }
 
             HStack {
                 Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("Add Account") {
-                    guard canAdd else {
-                        return
-                    }
-                    onAdd(trimmedName, trimmedConfigDirectory)
+                    onAdd(trimmedName, trimmedPath)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -72,35 +65,31 @@ struct AddClaudeAccountSheet: View {
         .frame(width: 520)
     }
 
-    // MARK: Private
-
     @Environment(\.dismiss)
     private var dismiss
-
     @State private var accountName = ""
-    @State private var configDirectory = ""
+    @State private var path = ""
 
     private var trimmedName: String {
         accountName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedConfigDirectory: String {
-        configDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var trimmedPath: String {
+        path.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var canAdd: Bool {
-        !trimmedName.isEmpty && !trimmedConfigDirectory.isEmpty
+        !trimmedName.isEmpty && !trimmedPath.isEmpty
     }
 
-    private func chooseConfigDirectory() {
+    private func chooseDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Use"
-
         if panel.runModal() == .OK, let url = panel.url {
-            configDirectory = url.path
+            path = url.path
             if trimmedName.isEmpty {
                 accountName = url.lastPathComponent
             }

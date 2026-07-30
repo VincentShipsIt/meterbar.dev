@@ -41,7 +41,7 @@ final class CodexAccountProfileRowTests: XCTestCase {
 
         XCTAssertEqual(
             draft.savePayload(for: account, resolvedHomeDirectory: "/Users/tester/.codex"),
-            CodexAccountProfileSave(name: "Personal", homeDirectory: nil)
+            CodexAccountProfileSave(name: "Personal", path: nil)
         )
     }
 
@@ -56,10 +56,10 @@ final class CodexAccountProfileRowTests: XCTestCase {
 
         XCTAssertEqual(
             draft.savePayload(for: account, resolvedHomeDirectory: "/tmp/codex"),
-            CodexAccountProfileSave(name: "Personal", homeDirectory: "")
+            CodexAccountProfileSave(name: "Personal", path: "")
         )
 
-        let save = CodexAccountProfileSave(name: "Personal", homeDirectory: "")
+        let save = CodexAccountProfileSave(name: "Personal", path: "")
         draft.commit(save, committedResolvedHomeDirectory: "/Users/tester/.codex")
 
         XCTAssertNil(draft.savePayload(for: CodexAccount(
@@ -77,27 +77,37 @@ final class CodexAccountProfileRowTests: XCTestCase {
 
         XCTAssertEqual(
             draft.savePayload(for: account, resolvedHomeDirectory: "/tmp/codex-work"),
-            CodexAccountProfileSave(name: "Team", homeDirectory: nil)
+            CodexAccountProfileSave(name: "Team", path: nil)
         )
     }
 
     func testAuthenticationPresentationUsesHonestTokenStates() {
         XCTAssertEqual(CodexAccountAuthenticationState.checking.title, "Checking…")
-        XCTAssertEqual(CodexAccountAuthenticationState.authenticated.title, "Authenticated")
+        XCTAssertEqual(CodexAccountAuthenticationState.authenticated.title, "Connected")
         XCTAssertEqual(CodexAccountAuthenticationState.loginRequired.title, "Login required")
         XCTAssertEqual(CodexAccountAuthenticationState.disabled.title, "Disabled")
-        XCTAssertTrue(CodexAccountAuthenticationState.authenticated.accessibilityValue.contains("access token"))
+        XCTAssertTrue(
+            CodexAccountAuthenticationState.authenticated.accessibilityValue.contains("usable login")
+        )
+        XCTAssertEqual(
+            CodexAccountAuthenticationState.authenticated.statusPresentation.tone,
+            .success
+        )
     }
 
     func testAccountRowRendersWithEveryControl() {
         let account = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
-        let view = CodexAccountProfileRow(
+        let view = CodexAccountSettingsRow(
             account: account,
             canDisable: true,
             canRemove: true,
+            canMoveUp: false,
+            canMoveDown: false,
             onEnabledChange: { _ in },
             onSave: { _, _ in },
             onRemove: {},
+            onMoveUp: {},
+            onMoveDown: {},
             connectionCheck: { _ in false }
         )
         let hostingView = NSHostingView(rootView: view.frame(width: 720))
@@ -105,5 +115,11 @@ final class CodexAccountProfileRowTests: XCTestCase {
         hostingView.layoutSubtreeIfNeeded()
 
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
+    }
+
+    func testSavePayloadHomeDirectoryAliasMatchesPath() {
+        let save = ProviderAccountProfileSave(name: "Work", path: "/tmp/home")
+        XCTAssertEqual(save.homeDirectory, "/tmp/home")
+        XCTAssertEqual(save.path, "/tmp/home")
     }
 }
