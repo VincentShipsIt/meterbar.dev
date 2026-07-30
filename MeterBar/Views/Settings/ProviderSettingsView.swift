@@ -452,7 +452,8 @@ struct ProviderSettingsView: View {
                             pathPlaceholder: "Config directory",
                             resolvedPath: account.configDirectory
                                 ?? ClaudeCodeAccount.defaultConfigDirectory(),
-                            defaultPathHelp: "Defaults to ~/.claude or $CLAUDE_CONFIG_DIR; clear the field to restore that default.",
+                            defaultPathHelp:
+                                "Defaults to ~/.claude or $CLAUDE_CONFIG_DIR; clear the field to restore that default.",
                             statusPresentation: .claude(
                                 claudeAuthState(for: account),
                                 isEnabled: account.isEnabled
@@ -463,7 +464,9 @@ struct ProviderSettingsView: View {
                             showsRefresh: true,
                             showsReconnect: true,
                             reconnectProviderName: "Claude",
-                            deleteMessage: "MeterBar will stop tracking this CLAUDE_CONFIG_DIR. Files and Claude login data are not deleted.",
+                            deleteMessage:
+                                "MeterBar will stop tracking this CLAUDE_CONFIG_DIR. "
+                                + "Files and Claude login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 claudeAccountStore.setEnabled(isEnabled, for: account.id)
                                 SessionWakeSettingsStore.shared.reconcileAccounts(
@@ -472,7 +475,11 @@ struct ProviderSettingsView: View {
                                 Task { await dataManager.refreshAll() }
                             },
                             onSave: { name, configDirectory in
-                                updateClaudeAccount(id: account.id, name: name, configDirectory: configDirectory)
+                                updateClaudeAccount(
+                                    id: account.id,
+                                    name: name,
+                                    configDirectory: configDirectory
+                                )
                             },
                             onRemove: {
                                 claudeAccountStore.removeAccount(id: account.id)
@@ -795,13 +802,19 @@ struct ProviderSettingsView: View {
                             pathLabel: "GROK_HOME",
                             pathPlaceholder: "Grok home directory",
                             resolvedPath: GrokHomeDirectory.path(for: account),
-                            defaultPathHelp: "Defaults to ~/.grok or $GROK_HOME; clear the field to restore that default.",
+                            defaultPathHelp:
+                                "Defaults to ~/.grok or $GROK_HOME; clear the field to restore that default.",
                             statusPresentation: ProviderAccountConnectionState
-                                .from(isEnabled: account.isEnabled, isConnected: grokService.canAccess(account: account))
+                                .from(
+                                    isEnabled: account.isEnabled,
+                                    isConnected: grokService.canAccess(account: account)
+                                )
                                 .statusPresentation,
                             canMoveUp: index > 0,
                             canMoveDown: index < grokAccountStore.accounts.count - 1,
-                            deleteMessage: "MeterBar will stop tracking this GROK_HOME. Files and Grok login data are not deleted.",
+                            deleteMessage:
+                                "MeterBar will stop tracking this GROK_HOME. "
+                                + "Files and Grok login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 grokAccountStore.setEnabled(isEnabled, for: account.id)
                                 Task { await dataManager.refreshAll() }
