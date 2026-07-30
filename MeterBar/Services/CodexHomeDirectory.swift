@@ -15,14 +15,7 @@ nonisolated enum CodexHomeDirectory {
             !rawValue.isEmpty else {
             return (realHomeDirectory as NSString).appendingPathComponent(".codex")
         }
-
-        if rawValue == "~" {
-            return realHomeDirectory
-        }
-        if rawValue.hasPrefix("~/") {
-            return (realHomeDirectory as NSString).appendingPathComponent(String(rawValue.dropFirst(2)))
-        }
-        return (rawValue as NSString).standardizingPath
+        return ServiceSupport.expandUserPath(rawValue, realHomeDirectory: realHomeDirectory)
     }
 
     static func authFilePath(
@@ -42,13 +35,7 @@ nonisolated enum CodexHomeDirectory {
             .trimmingCharacters(in: .whitespacesAndNewlines), !homeDirectory.isEmpty else {
             return path(environment: environment, realHomeDirectory: realHomeDirectory)
         }
-        if homeDirectory == "~" {
-            return realHomeDirectory
-        }
-        if homeDirectory.hasPrefix("~/") {
-            return (realHomeDirectory as NSString).appendingPathComponent(String(homeDirectory.dropFirst(2)))
-        }
-        return (homeDirectory as NSString).standardizingPath
+        return ServiceSupport.expandUserPath(homeDirectory, realHomeDirectory: realHomeDirectory)
     }
 
     static func authFilePath(for account: CodexAccount) -> String {
@@ -87,13 +74,6 @@ nonisolated enum CodexHomeDirectory {
     }
 
     private static func compactForDisplay(_ path: String, realHomeDirectory: String) -> String {
-        let resolvedPath = (path as NSString).standardizingPath
-        let standardizedHome = (realHomeDirectory as NSString).standardizingPath
-        let homePrefix = standardizedHome.hasSuffix("/") ? standardizedHome : "\(standardizedHome)/"
-
-        guard resolvedPath.hasPrefix(homePrefix) else {
-            return resolvedPath
-        }
-        return "~/\(resolvedPath.dropFirst(homePrefix.count))"
+        ServiceSupport.compactPathForDisplay(path, realHomeDirectory: realHomeDirectory)
     }
 }

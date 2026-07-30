@@ -117,13 +117,30 @@ nonisolated enum StatusItemPinKey {
 /// Identifies the quota window each provider contributes to automatic menu-bar
 /// selection. Other windows remain available for explicit pinning only.
 nonisolated enum StatusItemAutoSelectionPolicy {
-    static func windowID(for service: ServiceType) -> String? {
+    /// Preferred Auto windows in priority order. The first window actually
+    /// present in the provider response becomes the Auto candidate — so a
+    /// weekly-only Codex profile still participates when session is absent.
+    static func preferredWindowIDs(for service: ServiceType) -> [String] {
         switch service {
         case .claudeCode, .codexCli:
-            return "session"
+            return ["session", "weekly"]
         case .cursor, .openRouter, .grok:
-            return "weekly"
+            return ["weekly", "session"]
         }
+    }
+
+    /// Default preferred window when no availability set is provided (tests and
+    /// documentation). Prefer the live `autoWindowID(for:availableWindowIDs:)`
+    /// path when seeds are built from real limits.
+    static func windowID(for service: ServiceType) -> String? {
+        preferredWindowIDs(for: service).first
+    }
+
+    static func autoWindowID(
+        for service: ServiceType,
+        availableWindowIDs: Set<String>
+    ) -> String? {
+        preferredWindowIDs(for: service).first { availableWindowIDs.contains($0) }
     }
 }
 
@@ -137,7 +154,11 @@ enum StatusItemLimitCandidateBuilder {
         limits: [SnapshotLimit],
         lastUpdated: Date = Date()
     ) -> [StatusLimitCandidateSeed] {
-        let autoWindowID = StatusItemAutoSelectionPolicy.windowID(for: service)
+        let availableWindowIDs = Set(limits.map(\.id))
+        let autoWindowID = StatusItemAutoSelectionPolicy.autoWindowID(
+            for: service,
+            availableWindowIDs: availableWindowIDs
+        )
         return limits.map { limit in
             let pinKey = StatusItemPinKey.make(
                 service: service,

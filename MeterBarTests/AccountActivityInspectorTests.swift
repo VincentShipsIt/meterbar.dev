@@ -103,6 +103,41 @@ final class AccountActivityInspectorTests: XCTestCase {
         XCTAssertEqual(activity.timeIntervalSince1970, newest.timeIntervalSince1970, accuracy: 2)
     }
 
+    func testGrokActivityHonorsExplicitHomeDirectory() throws {
+        let grokHome = tempDir.appendingPathComponent("custom-grok", isDirectory: true)
+        try FileManager.default.createDirectory(at: grokHome, withIntermediateDirectories: true)
+        let newest = Date(timeIntervalSinceNow: -45)
+        let sessions = grokHome.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.modificationDate: newest], ofItemAtPath: sessions.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -3_600)],
+            ofItemAtPath: grokHome.path
+        )
+
+        let activity = try XCTUnwrap(
+            AccountActivityInspector.grokActivity(homeDirectory: grokHome.path)
+        )
+        XCTAssertEqual(activity.timeIntervalSince1970, newest.timeIntervalSince1970, accuracy: 2)
+    }
+
+    func testExpandUserPathHandlesTildeAndAbsolutePaths() {
+        let home = tempDir.path
+        XCTAssertEqual(ServiceSupport.expandUserPath("~", realHomeDirectory: home), home)
+        XCTAssertEqual(
+            ServiceSupport.expandUserPath("~/Library/State", realHomeDirectory: home),
+            "\(home)/Library/State"
+        )
+        XCTAssertEqual(
+            ServiceSupport.expandUserPath("/opt/tools", realHomeDirectory: home),
+            "/opt/tools"
+        )
+        XCTAssertEqual(
+            ServiceSupport.compactPathForDisplay("\(home)/.grok/auth.json", realHomeDirectory: home),
+            "~/.grok/auth.json"
+        )
+    }
+
     func testCodexHomeResolverDefaultsBlankValuesAndBuildsAuthPath() {
         let home = tempDir.path
 

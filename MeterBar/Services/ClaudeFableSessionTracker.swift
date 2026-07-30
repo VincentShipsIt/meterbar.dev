@@ -406,14 +406,7 @@ actor ClaudeFableSessionScanner {
         _ rawPath: String,
         realHomeDirectory: String
     ) -> String {
-        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "~" {
-            return realHomeDirectory
-        }
-        if trimmed.hasPrefix("~/") {
-            return (realHomeDirectory as NSString).appendingPathComponent(String(trimmed.dropFirst(2)))
-        }
-        return (trimmed as NSString).standardizingPath
+        ServiceSupport.expandUserPath(rawPath, realHomeDirectory: realHomeDirectory)
     }
 
     nonisolated private static func isNewer(

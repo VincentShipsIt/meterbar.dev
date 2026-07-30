@@ -199,7 +199,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// the delegate's half of the split — deciding *what* each item says is the
     /// presenter's, and it calls back in here to have the plan realized.
     private func applyStatusItemDescriptors(_ descriptors: [MenuBarStatusItemDescriptor]) {
-        let liveIDs = Set(descriptors.map(\.id))
+        // A plan is allowed to be empty only as a bug. Keep the merged
+        // placeholder alive so Quit / Settings stay reachable from the menu bar.
+        let plan = descriptors.isEmpty
+            ? [
+                MenuBarStatusItemDescriptor(
+                    id: MenuBarStatusItemPlanner.mergedItemID,
+                    service: nil,
+                    selectionKey: nil,
+                    title: "",
+                    tooltip: "MeterBar",
+                    accessibilityLabel: "MeterBar",
+                    visualStyle: StatusItemVisualStyle(fontSize: .standard, highContrast: false)
+                )
+            ]
+            : descriptors
+        let liveIDs = Set(plan.map(\.id))
 
         // Snapshot the keys: the loop mutates the dictionary it reads from.
         for id in Array(statusItems.keys) where !liveIDs.contains(id) {
@@ -212,11 +227,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.activeStatusItemID = nil
         }
 
-        statusItemIDs = descriptors.map(\.id)
+        statusItemIDs = plan.map(\.id)
 
-        for descriptor in descriptors {
+        for descriptor in plan {
             let item = statusItems[descriptor.id] ?? makeStatusItem(id: descriptor.id)
-            guard let button = item?.button else { continue }
+            guard let item, let button = item.button else { continue }
+            // macOS can hide an autosaved item after a mode change; force it
+            // back so Auto never leaves the user with a blank menu bar slot.
+            item.isVisible = true
+            if item.length <= 0 {
+                item.length = NSStatusItem.variableLength
+            }
             statusItemPresenter.apply(descriptor, to: button)
         }
     }
