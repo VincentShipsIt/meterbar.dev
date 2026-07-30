@@ -272,9 +272,14 @@ struct StatusPill: View {
     let presentation: SettingsStatusPresentation
 
     var body: some View {
+        // Never allow a flexible parent HStack to crush this into vertical
+        // single-character wrapping — that was the multi-account Settings bug.
         Label(presentation.text, systemImage: presentation.systemImage)
             .foregroundStyle(presentation.color)
             .font(.subheadline)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
     }
 }
 

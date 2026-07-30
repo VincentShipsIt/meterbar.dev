@@ -59,6 +59,10 @@ struct MeterBarChip: View {
     var body: some View {
         content
             .modifier(ChipSurface(tint: tint, style: style))
+            // Chips are status badges, not flexible filler — keep them from
+            // collapsing to "…" or wrapping when a parent HStack is squeezed.
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
     }
 
     private var content: some View {

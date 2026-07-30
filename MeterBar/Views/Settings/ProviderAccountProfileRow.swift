@@ -4,9 +4,11 @@ import SwiftUI
 
 /// One multi-account provider profile row shared by Claude, Codex, and Grok.
 ///
-/// Layout, chips, path field, enable/save/delete/reorder, and optional
-/// refresh/reconnect actions are identical; call sites only supply provider
-/// accent, path copy, status presentation, and capability flags.
+/// Layout contract (left → right, top → bottom):
+/// 1. Identity column: avatar + labeled name/path fields (fields flex).
+/// 2. Trailing column: status (never wraps) + controls (fixed size).
+/// Chips and status live outside the flexible field HStack so they cannot be
+/// crushed into vertical single-character text.
 struct ProviderAccountProfileRow: View {
     // MARK: Lifecycle
 
@@ -76,21 +78,59 @@ struct ProviderAccountProfileRow: View {
     // MARK: Internal
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: isDefault ? "person.crop.circle" : "person.crop.circle.badge.plus")
                 .foregroundStyle(accent)
-                .frame(width: 18)
+                .frame(width: 18, height: 22)
+                .padding(.top, 4)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    fieldLabel("Account name")
-
+            VStack(alignment: .leading, spacing: 10) {
+                fieldRow(label: "Account name") {
                     TextField("Account label", text: $draft.name)
-                        .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                         .accessibilityLabel("Account name for \(accountName)")
                         .onSubmit(saveChanges)
+                }
 
+                fieldRow(label: pathLabel) {
+                    HStack(spacing: 8) {
+                        TextField(pathPlaceholder, text: $draft.path)
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                            .accessibilityLabel("\(pathLabel) for \(accountName)")
+                            .onSubmit(saveChanges)
+
+                        Button {
+                            chooseDirectory()
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .accessibilityLabel("Choose \(pathLabel) for \(accountName)")
+                        .help("Choose \(pathLabel)")
+                    }
+                }
+
+                if let defaultPathHelp, isDefault {
+                    Text(defaultPathHelp)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, AccountProfileRowMetrics.labelWidth + 8)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 8) {
                     MeterBarChip(
                         isDefault ? "Default" : "Profile",
                         tint: isDefault ? MeterBarTheme.appAccent : accent,
@@ -101,99 +141,11 @@ struct ProviderAccountProfileRow: View {
                         .font(.caption)
                         .accessibilityLabel("Status for \(accountName)")
                 }
+                .fixedSize(horizontal: true, vertical: false)
 
-                HStack(spacing: 8) {
-                    fieldLabel(pathLabel)
-
-                    TextField(pathPlaceholder, text: $draft.path)
-                        .settingsInput(width: AccountProfileRowMetrics.fieldWidth)
-                        .accessibilityLabel("\(pathLabel) for \(accountName)")
-                        .onSubmit(saveChanges)
-
-                    Button {
-                        chooseDirectory()
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Choose \(pathLabel) for \(accountName)")
-                    .help("Choose \(pathLabel)")
-                }
-
-                if let defaultPathHelp, isDefault {
-                    Text(defaultPathHelp)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, AccountProfileRowMetrics.labelWidth + 8)
-                }
+                controls
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 8) {
-                Toggle("Enabled", isOn: Binding(
-                    get: { isEnabled },
-                    set: onEnabledChange
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(isEnabled && !canDisable)
-                .accessibilityLabel("Track \(accountName)")
-                .help(enablementHelp)
-
-                if showsRefresh {
-                    authActionButton(.refresh)
-                        .frame(width: AccountProfileRowMetrics.actionWidth)
-                        .disabled(!isEnabled || isRefreshing)
-                }
-
-                if showsReconnect {
-                    authActionButton(.reconnect)
-                        .disabled(isRefreshing)
-                }
-
-                if onMoveUp != nil || onMoveDown != nil {
-                    Button { onMoveUp?() } label: { Image(systemName: "arrow.up") }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(!canMoveUp)
-                        .help("Move account up")
-                    Button { onMoveDown?() } label: { Image(systemName: "arrow.down") }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(!canMoveDown)
-                        .help("Move account down")
-                }
-
-                Button(action: saveChanges) {
-                    Image(systemName: "checkmark")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(width: AccountProfileRowMetrics.actionWidth)
-                .disabled(savePayload == nil)
-                .accessibilityLabel("Save changes for \(accountName)")
-                .help("Save account changes")
-
-                if !isDefault {
-                    Button(role: .destructive) {
-                        showingDeleteConfirmation = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(width: AccountProfileRowMetrics.actionWidth)
-                    .disabled(!canRemove)
-                    .accessibilityLabel("Delete \(accountName)")
-                    .help(deleteHelp)
-                } else {
-                    Color.clear
-                        .frame(width: AccountProfileRowMetrics.actionWidth, height: 1)
-                        .accessibilityHidden(true)
-                }
-            }
-            .fixedSize()
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, MeterBarTheme.Spacing.md)
         .onChange(of: accountName) { _, _ in reconcileDraftFromProps() }
@@ -288,12 +240,85 @@ struct ProviderAccountProfileRow: View {
         canRemove ? "Delete account" : "Enable another account before deleting this one"
     }
 
-    private func fieldLabel(_ title: String) -> some View {
-        Text(title)
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .foregroundStyle(.secondary)
-            .frame(width: AccountProfileRowMetrics.labelWidth, alignment: .leading)
+    private var controls: some View {
+        HStack(spacing: 8) {
+            Toggle("Enabled", isOn: Binding(
+                get: { isEnabled },
+                set: onEnabledChange
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .disabled(isEnabled && !canDisable)
+            .accessibilityLabel("Track \(accountName)")
+            .help(enablementHelp)
+
+            if showsRefresh {
+                authActionButton(.refresh)
+                    .frame(width: AccountProfileRowMetrics.actionWidth)
+                    .disabled(!isEnabled || isRefreshing)
+            }
+
+            if showsReconnect {
+                authActionButton(.reconnect)
+                    .disabled(isRefreshing)
+            }
+
+            if onMoveUp != nil || onMoveDown != nil {
+                Button { onMoveUp?() } label: { Image(systemName: "arrow.up") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!canMoveUp)
+                    .help("Move account up")
+                Button { onMoveDown?() } label: { Image(systemName: "arrow.down") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!canMoveDown)
+                    .help("Move account down")
+            }
+
+            Button(action: saveChanges) {
+                Image(systemName: "checkmark")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: AccountProfileRowMetrics.actionWidth)
+            .disabled(savePayload == nil)
+            .accessibilityLabel("Save changes for \(accountName)")
+            .help("Save account changes")
+
+            if !isDefault {
+                Button(role: .destructive) {
+                    showingDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(width: AccountProfileRowMetrics.actionWidth)
+                .disabled(!canRemove)
+                .accessibilityLabel("Delete \(accountName)")
+                .help(deleteHelp)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func fieldRow<Content: View>(
+        label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(label)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .frame(width: AccountProfileRowMetrics.labelWidth, alignment: .leading)
+                .lineLimit(1)
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func reconcileDraftFromProps() {
@@ -314,10 +339,6 @@ struct ProviderAccountProfileRow: View {
     private func saveChanges() {
         guard let savePayload else { return }
         onSave(savePayload.name, savePayload.path)
-        // Parent store republication drives `reconcileDraftFromProps`. Commit
-        // only the name immediately so a second save click is a no-op before
-        // the store publishes; path resolution (especially clear-to-default)
-        // must come from the parent.
         draft.name = savePayload.name
         identity = AccountIdentity(
             name: savePayload.name,
@@ -359,6 +380,7 @@ struct ProviderAccountProfileRow: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+        .fixedSize()
         .accessibilityLabel(action.accessibilityLabel(accountName: accountName))
         .accessibilityHint(action.help(accountName: accountName))
         .help(action.help(accountName: accountName))

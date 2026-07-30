@@ -141,55 +141,25 @@ struct ProviderStatusCard: View {
     /// Keep the shared card surface, but collapse its content to the provider and
     /// the one reset that can restore service.
     private var weeklyExhaustedRow: some View {
-        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
-            let blockingWindow = BlockingLimitResetCounter.selectBlockingWindow(
-                snapshot.resetWindows,
-                now: timeline.date
-            )
-            let title = BlockingLimitResetCounter.titleText(for: blockingWindow, in: snapshot.resetWindows)
-            let counter = BlockingLimitResetCounter.counterText(
-                for: blockingWindow,
-                now: timeline.date,
-                format: menuBarDisplayPreferences.resetTimeFormat
+        VStack(alignment: .leading, spacing: 9) {
+            ProviderBlockedUsageSummary(
+                snapshot: snapshot,
+                density: .popoverCard,
+                showsTitle: true,
+                resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
             )
 
-            VStack(alignment: .leading, spacing: 9) {
+            // Blocked is exactly when a banked reset is worth spending, so the
+            // collapsed row states how many are left instead of hiding the count
+            // behind an icon-only button. The count stands on its own when the
+            // action isn't usable — a visible control that would fail is worse.
+            if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
+                Divider()
                 HStack(spacing: 7) {
-                    ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-                    Text(snapshot.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-
+                    resetCreditsCountLabel(resetCount)
                     Spacer(minLength: 8)
-
-                    Text(statusText)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(statusColor)
-
-                    Label("\(title) \(counter)", systemImage: "hourglass")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(snapshot.accentColor)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .numericRefreshTransition(value: counter, reduceMotion: reduceMotion)
-                }
-
-                // Blocked is exactly when a banked reset is worth spending, so the
-                // collapsed row states how many are left instead of hiding the count
-                // behind an icon-only button. The count stands on its own when the
-                // action isn't usable — a visible control that would fail is worse.
-                if let resetCount = snapshot.resetCreditsAvailable, resetCount > 0 {
-                    Divider()
-                    HStack(spacing: 7) {
-                        resetCreditsCountLabel(resetCount)
-                        Spacer(minLength: 8)
-                        if showsResetCreditAction {
-                            resetCreditButton(isCompact: true)
-                        }
+                    if showsResetCreditAction {
+                        resetCreditButton(isCompact: true)
                     }
                 }
             }

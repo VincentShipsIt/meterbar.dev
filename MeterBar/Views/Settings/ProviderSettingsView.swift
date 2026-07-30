@@ -257,7 +257,18 @@ struct ProviderSettingsView: View {
             } else {
                 ForEach(snapshots) { snapshot in
                     VStack(alignment: .leading, spacing: 10) {
-                        if snapshots.count > 1 {
+                        // Match the popover: when a blocking window is exhausted,
+                        // lead with status + reset countdown rather than only a
+                        // red "Out of quota" bar that omits when service resumes.
+                        if snapshot.hasExhaustedLimit {
+                            // Same collapsed status + reset line as the popover card.
+                            ProviderBlockedUsageSummary(
+                                snapshot: snapshot,
+                                density: .settings,
+                                showsTitle: true,
+                                resetTimeFormat: .countdown
+                            )
+                        } else if snapshots.count > 1 {
                             ProviderTitle(
                                 title: snapshot.title,
                                 logoKind: snapshot.logoKind,
@@ -274,7 +285,11 @@ struct ProviderSettingsView: View {
                             )
                         } else {
                             ForEach(snapshot.detailLimits) { limit in
-                                LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .regular)
+                                LimitRow(
+                                    limit: limit,
+                                    accentColor: snapshot.accentColor,
+                                    density: .regular
+                                )
                             }
                         }
 
