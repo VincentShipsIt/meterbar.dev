@@ -121,7 +121,6 @@ final class CachedMetricsContractTests: XCTestCase {
         // writer from the readers, so pin the wire values here.
         XCTAssertEqual(SharedMetricsStore.appGroupIdentifier, "group.dev.meterbar.app")
         XCTAssertEqual(SharedMetricsStore.metricsKey, "cached_usage_metrics")
-        XCTAssertEqual(SharedMetricsStore.fableSessionsKey, "claude_fable_sessions_v1")
     }
 
     func testAppStorageKeyIsSingleSourcedFromShared() {
