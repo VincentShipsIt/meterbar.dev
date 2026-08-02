@@ -126,6 +126,7 @@ struct ProviderSettingsView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                codexAccountAccess: codexCliService.accountAccess,
                 grokAccounts: grokAccountStore.accounts,
                 grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
@@ -971,27 +972,17 @@ struct ProviderSettingsView: View {
     /// a Codex disable or delete. Session Wake clears and disarms rather than
     /// silently retargeting; menu-bar and widget preferences prune stale keys.
     private func reconcileCodexAccountSelections() {
-        let menuBarKeys = Set(
-            MenuBarAccountCatalog.identities(
+        ProviderAccountSelectionReconciler.apply(
+            ProviderAccountSelectionAvailability(
                 claudeAccounts: claudeAccountStore.accounts,
                 codexAccounts: codexAccountStore.accounts,
+                grokAccounts: grokAccountStore.accounts,
                 enabledServices: providerVisibility.enabledServices
-            )
-            .filter(\.isEnabled)
-            .map(\.key)
+            ),
+            menuBarSelection: menuBarAccountSelection,
+            widgetPreferences: widgetPreferences,
+            sessionWakeSettings: sessionWakeSettings
         )
-        menuBarAccountSelection.reconcile(availableKeys: menuBarKeys)
-
-        let widgetIdentifiers = Set(
-            WidgetSettingsAccountProjection.options(
-                enabledServices: providerVisibility.enabledServices,
-                claudeAccounts: claudeAccountStore.accounts,
-                codexAccounts: codexAccountStore.accounts
-            )
-            .map(\.id)
-        )
-        widgetPreferences.reconcileAvailableAccounts(widgetIdentifiers)
-        sessionWakeSettings.reconcileCodexAccounts(available: codexAccountStore.enabledAccounts.map(\.id))
     }
 
     private var defaultClaudeAuthState: ClaudeCodeAuthState? {

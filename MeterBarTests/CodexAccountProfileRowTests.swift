@@ -117,6 +117,36 @@ final class CodexAccountProfileRowTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 
+    // MARK: - Status accessibility (issue #304)
+
+    /// The status pill announced a label with no value, so VoiceOver read
+    /// "Status for Work" and stopped — the state itself never reached the user.
+    func testStatusAccessibilityAnnouncesTheConnectionStateAsItsValue() {
+        XCTAssertEqual(
+            ProviderAccountStatusAccessibility.label(accountName: "Work"),
+            "Status for Work"
+        )
+        XCTAssertEqual(
+            ProviderAccountStatusAccessibility.value(
+                CodexAccountAuthenticationState.loginRequired.statusPresentation,
+                detail: CodexAccountAuthenticationState.loginRequired.accessibilityValue
+            ),
+            "No usable login is available for this profile"
+        )
+    }
+
+    /// Claude and Grok rows pass no richer sentence; the pill's own text is
+    /// still a better value than nothing.
+    func testStatusAccessibilityFallsBackToThePillTextWhenNoDetailIsSupplied() {
+        XCTAssertEqual(
+            ProviderAccountStatusAccessibility.value(
+                CodexAccountAuthenticationState.authenticated.statusPresentation,
+                detail: nil
+            ),
+            "Connected"
+        )
+    }
+
     func testSavePayloadHomeDirectoryAliasMatchesPath() {
         let save = ProviderAccountProfileSave(name: "Work", path: "/tmp/home")
         XCTAssertEqual(save.homeDirectory, "/tmp/home")

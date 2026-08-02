@@ -134,6 +134,24 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
     }
 }
 
+// MARK: - Status pill accessibility
+
+/// VoiceOver text for a profile row's status pill.
+///
+/// The label names the account and the value carries the state, so the pill
+/// reads as "Status for Work — No usable login is available for this profile"
+/// instead of stopping at the account name. Rows without a richer sentence fall
+/// back to the pill's own text, which still beats announcing no value at all.
+nonisolated enum ProviderAccountStatusAccessibility {
+    static func label(accountName: String) -> String {
+        "Status for \(accountName)"
+    }
+
+    static func value(_ presentation: SettingsStatusPresentation, detail: String?) -> String {
+        detail ?? presentation.text
+    }
+}
+
 // MARK: - Claude auth actions (only Claude reconnects via Terminal)
 
 enum ProviderAccountAuthActionRoute: Equatable {

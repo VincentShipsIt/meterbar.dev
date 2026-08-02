@@ -209,6 +209,9 @@ enum ProviderSnapshotBuilder {
         var metrics: [ServiceType: UsageMetrics]
         var codexAccounts: [CodexAccount] = [.defaultAccount]
         var codexAccountMetrics: [UUID: UsageMetrics] = [:]
+        /// Last observed Codex auth result per account id. Empty means "nothing
+        /// probed yet", which leaves the default sentinel on `codexCliHasAccess`.
+        var codexAccountAccess: [UUID: Bool] = [:]
         var grokAccounts: [GrokAccount] = [.defaultAccount]
         var grokAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
@@ -238,7 +241,14 @@ enum ProviderSnapshotBuilder {
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
                     let title = account.isDefault && enabledAccounts.count == 1 ? "Codex" : account.name
-                    let emptyDetail = account.isDefault && input.codexCliHasAccess
+                    // A signed-in custom `CODEX_HOME` profile is waiting for a
+                    // refresh, not for a login — only ask for one when this
+                    // account's own probe says it has no usable token.
+                    let emptyDetail = CodexAccountAccessProjection.isAuthenticated(
+                        account: account,
+                        accountAccess: input.codexAccountAccess,
+                        defaultHasAccess: input.codexCliHasAccess
+                    )
                         ? "Waiting for refresh"
                         : "Run codex login"
                     let fallbackMetrics = account.isDefault

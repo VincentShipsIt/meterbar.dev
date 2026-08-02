@@ -30,19 +30,51 @@ final class ProviderSnapshotTests: XCTestCase {
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         fableSessions: [ClaudeFableSession] = [],
-        enabledServices: Set<ServiceType> = Set(ServiceType.allCases)
+        enabledServices: Set<ServiceType> = Set(ServiceType.allCases),
+        codexAccountAccess: [UUID: Bool] = [:],
+        codexCliHasAccess: Bool = false
     ) -> ProviderSnapshotBuilder.Input {
         ProviderSnapshotBuilder.Input(
             metrics: metrics,
             codexAccounts: codexAccounts,
             codexAccountMetrics: codexAccountMetrics,
+            codexAccountAccess: codexAccountAccess,
             grokAccounts: grokAccounts,
             grokAccountMetrics: grokAccountMetrics,
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
             fableSessions: fableSessions,
-            enabledServices: enabledServices
+            enabledServices: enabledServices,
+            codexCliHasAccess: codexCliHasAccess
         )
+    }
+
+    // MARK: - Codex empty-state honesty (issue #304)
+
+    /// A signed-in custom `CODEX_HOME` profile with no metrics yet is waiting on
+    /// a refresh, not logged out — the card used to tell every custom profile to
+    /// "Run codex login" because the check was gated on the default sentinel.
+    func testConnectedCustomCodexProfileWaitsForRefreshInsteadOfAskingForLogin() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [work],
+            enabledServices: [.codexCli],
+            codexAccountAccess: [work.id: true]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.emptyDetail), ["Waiting for refresh"])
+    }
+
+    func testLoggedOutCodexProfilesStillAskForLoginPerAccount() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [.defaultAccount, work],
+            enabledServices: [.codexCli],
+            codexAccountAccess: [CodexAccount.defaultID: true, work.id: false],
+            codexCliHasAccess: true
+        ))
+
+        XCTAssertEqual(snapshots.map(\.emptyDetail), ["Waiting for refresh", "Run codex login"])
     }
 
     // MARK: - Ordering and inclusion
