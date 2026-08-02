@@ -86,6 +86,36 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
     }
 
+    func testMapSummaryIgnoresNonPositiveBreakdownParts() throws {
+        // A negative or zeroed part is an absent grant, not a debit: summing it
+        // would shrink the denominator below what the server actually granted.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 500, "bonus": -100 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryTreatsAllNonPositiveBreakdownPartsAsAbsent() throws {
+        // Nothing positive left to sum, so the estimate stands in rather than a
+        // zero or negative denominator.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 0, "bonus": -100 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
+    }
+
     func testMapSummaryHonorsLegacyFlatPlanTotal() throws {
         // Older payloads exposed the grant as flat `included`/`bonus`/`total`.
         let json = """

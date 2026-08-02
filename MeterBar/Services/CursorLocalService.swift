@@ -410,7 +410,9 @@ nonisolated struct CursorPlanBreakdown: Decodable {
     /// only itemizes the grant still carries a real server quota.
     var grantTotal: Int? {
         if let total, total > 0 { return total }
-        let parts = [included, bonus].compactMap { $0 }
+        // Non-positive parts are absent grants, not debits — summing them would
+        // shrink the denominator below what the server actually granted.
+        let parts = [included, bonus].compactMap { $0 }.filter { $0 > 0 }
         guard !parts.isEmpty else { return nil }
         return parts.reduce(0, +)
     }
