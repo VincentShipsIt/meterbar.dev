@@ -229,7 +229,10 @@ struct NotificationDecider {
             case .session:
                 return service == .openRouter ? "Key Limit" : "Session"
             case .weekly:
-                return service == .openRouter ? "Account Credits" : "Weekly"
+                // Notification copy is Title Case, so OpenRouter keeps its own
+                // spelling; every other provider (including Cursor's monthly
+                // billing cycle) reads from the shared window title.
+                return service == .openRouter ? "Account Credits" : service.weeklyQuotaTitle
             case .codeReview:
                 return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
             }

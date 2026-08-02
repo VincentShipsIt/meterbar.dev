@@ -67,4 +67,18 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public func codeReviewQuotaTitle(modelLimitLabel: String?) -> String {
         self == .claudeCode ? (modelLimitLabel ?? "Model") : "Code Review"
     }
+
+    /// Display title for the long ("weekly") quota window. The shared window id
+    /// stays `weekly` across providers, but its real cadence does not: Cursor's
+    /// resets with `billingCycleEnd` (monthly), and OpenRouter's is a credit
+    /// balance rather than a window at all. Centralized here for the same reason
+    /// as `codeReviewQuotaTitle` — the popover, widget, and CLI each used to
+    /// spell out the OpenRouter exception inline.
+    public var weeklyQuotaTitle: String {
+        switch self {
+        case .openRouter: return "Account credits"
+        case .cursor: return "Monthly"
+        case .claudeCode, .codexCli, .grok: return "Weekly"
+        }
+    }
 }

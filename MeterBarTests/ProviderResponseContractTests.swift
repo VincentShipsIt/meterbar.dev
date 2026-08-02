@@ -113,6 +113,39 @@ final class ProviderResponseContractTests: XCTestCase {
         XCTAssertEqual(onDemand.used, 3)
     }
 
+    func testCursorNestedBreakdownResponseDecodes() throws {
+        // Current shape: the grant moved from flat `included`/`bonus`/`total`
+        // into a nested `breakdown` object alongside `plan.limit`.
+        let json = #"""
+        {
+          "billingCycleStart": "2026-07-15T00:00:00.000Z",
+          "billingCycleEnd": "2026-08-15T00:00:00.000Z",
+          "membershipType": "pro",
+          "limitType": "requests",
+          "individualUsage": {
+            "plan": {
+              "used": 210,
+              "limit": 750,
+              "remaining": 540,
+              "breakdown": {"included": 500, "bonus": 250, "total": 750}
+            },
+            "onDemand": {"used": 0, "limit": 0, "remaining": 0, "enabled": false}
+          }
+        }
+        """#
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
+
+        let plan = try XCTUnwrap(response.individualUsage?.plan)
+        XCTAssertEqual(plan.used, 210)
+        XCTAssertEqual(plan.limit, 750)
+        XCTAssertNil(plan.total, "The flat grant fields are gone from this shape")
+        let breakdown = try XCTUnwrap(plan.breakdown)
+        XCTAssertEqual(breakdown.included, 500)
+        XCTAssertEqual(breakdown.bonus, 250)
+        XCTAssertEqual(breakdown.total, 750)
+    }
+
     func testCursorSparseResponseDecodes() throws {
         // Every field is optional; an empty object must not throw.
         let data = try XCTUnwrap("{}".data(using: .utf8))

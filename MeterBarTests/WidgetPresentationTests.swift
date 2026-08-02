@@ -178,6 +178,10 @@ final class WidgetPresentationTests: XCTestCase {
             ]
         )
         XCTAssertEqual(result.rows[2].quotaTitle, "Fable")
+        // The shared window id stays `weekly`; only Cursor's display copy
+        // follows its billing-cycle reset.
+        XCTAssertEqual(result.rows[1].quotaTitle, "Weekly")
+        XCTAssertEqual(result.rows[3].quotaTitle, "Monthly")
     }
 
     func testResetAndFreshnessMetadataObeyIndependentToggles() throws {

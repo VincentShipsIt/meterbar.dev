@@ -138,7 +138,7 @@ struct Usage: ParsableCommand {
             }
             if let weekly = metric.weeklyLimit {
                 printLimit(
-                    service == .openRouter ? "  Account credits" : "  Weekly",
+                    "  \(service.weeklyQuotaTitle)",
                     weekly,
                     currency: service == .openRouter
                 )

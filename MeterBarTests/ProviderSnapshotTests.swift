@@ -358,6 +358,18 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
     }
 
+    // Cursor's long window resets with `billingCycleEnd`, so it is labelled by
+    // its real cadence instead of borrowing the shared "Weekly" copy.
+    func testCursorLongWindowUsesMonthlyLabel() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .cursor, session: 10, weekly: 20),
+            service: .cursor
+        )
+
+        XCTAssertEqual(limits.map(\.title), ["Session", "Monthly"])
+        XCTAssertEqual(limits.map(\.id), ["session", "weekly"])
+    }
+
     func testPaceContextComesFromKindNotTitle() {
         let limits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, session: 10, weekly: 20, codeReview: 30),
