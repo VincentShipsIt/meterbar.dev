@@ -47,14 +47,12 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         switch (service, quotaWindow) {
         case (.openRouter, .session):
             return "Key limit"
-        case (.openRouter, .weekly):
-            return "Account credits"
         case (_, .codeReview):
             return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
         case (_, .session):
             return "Session"
         case (_, .weekly):
-            return "Weekly"
+            return service.weeklyQuotaTitle
         }
     }
 

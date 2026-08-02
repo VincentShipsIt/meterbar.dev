@@ -370,7 +370,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "weekly",
                 kind: .weekly,
-                title: service == .openRouter ? "Account credits" : "Weekly",
+                title: service.weeklyQuotaTitle,
                 usageLimit: weekly,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))

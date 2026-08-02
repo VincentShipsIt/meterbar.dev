@@ -76,4 +76,15 @@ final class ServiceTypeTests: XCTestCase {
             XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: nil), "Code Review")
         }
     }
+
+    // The long quota window is not weekly for every provider: OpenRouter's is a
+    // credit balance and Cursor's resets with the monthly billing cycle, so the
+    // shared title must not call either one "Weekly".
+    func testWeeklyQuotaTitle() {
+        XCTAssertEqual(ServiceType.openRouter.weeklyQuotaTitle, "Account credits")
+        XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle, "Monthly")
+        for service in ServiceType.allCases where service != .openRouter && service != .cursor {
+            XCTAssertEqual(service.weeklyQuotaTitle, "Weekly")
+        }
+    }
 }

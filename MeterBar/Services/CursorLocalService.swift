@@ -20,7 +20,8 @@ class CursorLocalService: ObservableObject {
     // Shared URLSession with the standard usage-request timeouts
     private let urlSession = ServiceSupport.session
 
-    // Assumed default monthly request quota when the API omits a plan total.
+    // Last-resort monthly request quota, used only when the API returns no
+    // usable plan quota at all; the resulting limit is marked `isEstimated`.
     // Static so the pure `mapSummary` mapping can share the same constant.
     private static let defaultPlanTotal: Double = 500
 
@@ -261,10 +262,12 @@ class CursorLocalService: ObservableObject {
 
     /// Maps a decoded Cursor usage-summary response onto the shared
     /// `UsageMetrics` shape. Pure and side-effect-free so it can be fixture-tested
-    /// without the network or Cursor's SQLite DB: individual plan → weekly limit,
-    /// enabled on-demand usage → session limit. When the API omits a plan total
-    /// the assumed monthly quota is substituted; when on-demand has no explicit
-    /// limit a headroom estimate is used.
+    /// without the network or Cursor's SQLite DB: individual plan → billing-cycle
+    /// (long-window) limit, enabled on-demand usage → session limit. The plan
+    /// denominator comes from the server (`plan.limit`, else `plan.breakdown`,
+    /// else the legacy flat `plan.total`); only when the payload carries none of
+    /// those is the assumed quota substituted and flagged `isEstimated`. When
+    /// on-demand has no explicit limit a headroom estimate is used.
     static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
         // Parse billing cycle end date for reset time
         var resetTime: Date?
@@ -275,10 +278,13 @@ class CursorLocalService: ObservableObject {
         // Extract usage from individual plan
         let plan = summaryData.individualUsage?.plan
         let planUsed = Double(plan?.used ?? 0)
-        let planTotalIsEstimated = plan?.total == nil
-        let planTotal = Double(plan?.total ?? Int(defaultPlanTotal))
+        let serverQuota = plan?.serverQuota
+        let planTotalIsEstimated = serverQuota == nil
+        let planTotal = Double(serverQuota ?? Int(defaultPlanTotal))
 
-        // Create usage metrics using plan data
+        // Billing-cycle window. Named `weeklyLimit` after the shared long-window
+        // slot, not its cadence: it resets at `billingCycleEnd`, which is why
+        // `ServiceType.cursor` titles this window "Monthly".
         let weeklyLimit = UsageLimit(
             used: planUsed,
             total: planTotal,
@@ -373,9 +379,43 @@ nonisolated struct CursorPlanUsage: Decodable {
     let used: Int?
     let limit: Int?
     let remaining: Int?
+    /// Current shape: the grant is nested under `breakdown`.
+    let breakdown: CursorPlanBreakdown?
+    /// Legacy shape: `included`/`bonus`/`total` were flat plan properties.
+    /// Kept so older payloads (and cached responses) still yield a quota.
     let included: Int?
     let bonus: Int?
     let total: Int?
+
+    /// Quota the dashboard divides by, in precedence order: the enforced
+    /// `limit`, then the nested grant, then the legacy flat `total`. Returns
+    /// nil when the server sends no usable denominator (absent or zeroed), so
+    /// callers can flag the substituted value as estimated instead of silently
+    /// presenting a guess as fact.
+    var serverQuota: Int? {
+        [limit, breakdown?.grantTotal, total]
+            .compactMap { $0 }
+            .first { $0 > 0 }
+    }
+}
+
+/// Nested plan grant: `included` is the subscription allowance and `bonus` any
+/// promotional top-up, with `total` their sum.
+nonisolated struct CursorPlanBreakdown: Decodable {
+    let included: Int?
+    let bonus: Int?
+    let total: Int?
+
+    /// `total` when present, otherwise the sum of its parts — a payload that
+    /// only itemizes the grant still carries a real server quota.
+    var grantTotal: Int? {
+        if let total, total > 0 { return total }
+        // Non-positive parts are absent grants, not debits — summing them would
+        // shrink the denominator below what the server actually granted.
+        let parts = [included, bonus].compactMap { $0 }.filter { $0 > 0 }
+        guard !parts.isEmpty else { return nil }
+        return parts.reduce(0, +)
+    }
 }
 
 nonisolated struct CursorOnDemandUsage: Decodable {

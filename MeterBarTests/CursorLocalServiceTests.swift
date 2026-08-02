@@ -27,14 +27,21 @@ final class CursorLocalServiceTests: XCTestCase {
 
     // MARK: - Summary mapping
 
-    func testMapSummaryUsesPlanUsageForWeeklyLimit() throws {
+    func testMapSummaryUsesPlanUsageForBillingCycleLimit() throws {
+        // Current /api/usage-summary shape: the quota lives in `plan.limit`
+        // with the grant broken out under `plan.breakdown`.
         let json = """
         {
           "billingCycleStart": "2026-07-01T00:00:00Z",
           "billingCycleEnd": "2026-08-01T00:00:00Z",
           "membershipType": "pro",
           "individualUsage": {
-            "plan": { "used": 137, "total": 500 },
+            "plan": {
+              "used": 137,
+              "limit": 750,
+              "remaining": 613,
+              "breakdown": { "included": 500, "bonus": 250, "total": 750 }
+            },
             "onDemand": { "used": 4, "limit": 20, "enabled": true }
           }
         }
@@ -43,7 +50,7 @@ final class CursorLocalServiceTests: XCTestCase {
 
         XCTAssertEqual(metrics.service, .cursor)
         XCTAssertEqual(metrics.weeklyLimit?.used, 137)
-        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 750)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
         XCTAssertEqual(metrics.sessionLimit?.used, 4)
@@ -51,13 +58,98 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
     }
 
+    func testMapSummaryFallsBackToBreakdownTotalWhenPlanLimitAbsent() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 500, "bonus": 250, "total": 750 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 750)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryDerivesBreakdownTotalFromIncludedAndBonus() throws {
+        // `breakdown.total` omitted: included + bonus is still a server-provided
+        // quota, so it must not fall through to the estimated default.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 500, "bonus": 100 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 600)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryIgnoresNonPositiveBreakdownParts() throws {
+        // A negative or zeroed part is an absent grant, not a debit: summing it
+        // would shrink the denominator below what the server actually granted.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 500, "bonus": -100 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryTreatsAllNonPositiveBreakdownPartsAsAbsent() throws {
+        // Nothing positive left to sum, so the estimate stands in rather than a
+        // zero or negative denominator.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 60, "breakdown": { "included": 0, "bonus": -100 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
+    }
+
+    func testMapSummaryHonorsLegacyFlatPlanTotal() throws {
+        // Older payloads exposed the grant as flat `included`/`bonus`/`total`.
+        let json = """
+        { "individualUsage": { "plan": { "used": 137, "included": 500, "bonus": 0, "total": 500 } } }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertEqual(metrics.weeklyLimit?.used, 137)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
     func testMapSummarySubstitutesDefaultPlanTotalWhenMissing() throws {
-        // When the API omits the plan total, the assumed monthly quota (500) is used.
+        // When the API omits every quota field, the assumed monthly quota (500)
+        // is used and flagged as estimated.
         let json = """
         { "individualUsage": { "plan": { "used": 50 } } }
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.used, 50)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
+    }
+
+    func testMapSummaryTreatsZeroQuotaFieldsAsAbsent() throws {
+        // A zeroed plan block carries no usable denominator; substituting the
+        // estimate beats dividing by zero.
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 0, "limit": 0, "breakdown": { "included": 0, "bonus": 0, "total": 0 } }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
     }
