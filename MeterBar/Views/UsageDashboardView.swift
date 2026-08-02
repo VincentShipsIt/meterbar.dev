@@ -357,6 +357,7 @@ struct UsageDashboardView: View {
             metrics: dataManager.metrics,
             codexAccounts: codexAccountStore.accounts,
             codexAccountMetrics: dataManager.codexAccountMetrics,
+            codexAccountAccess: codexCliService.accountAccess,
             grokAccounts: grokAccountStore.accounts,
             grokAccountMetrics: dataManager.grokAccountMetrics,
             claudeAccounts: claudeAccountStore.accounts,

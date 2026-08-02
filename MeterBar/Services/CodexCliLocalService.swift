@@ -35,9 +35,20 @@ class CodexCliLocalService: ObservableObject {
     /// read is disk I/O and must be callable off the main actor.
     nonisolated private let authFileDataProvider: @Sendable (CodexAccount) -> Data?
 
+    /// Auth state of the *default* profile only. Kept for the default sentinel's
+    /// own presentation and for callers that predate multi-account Codex; every
+    /// per-account question goes through `accountAccess` instead.
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
+
+    /// Last observed auth result per Codex profile, keyed by account id.
+    ///
+    /// Each profile points at its own `CODEX_HOME`, so a signed-in custom
+    /// profile is connected even when the default sentinel is logged out or
+    /// disabled. Probing is a file read plus a JSON/JWT decode, so results are
+    /// cached here rather than recomputed on every render.
+    @Published private(set) var accountAccess: [UUID: Bool] = [:]
 
     /// Defaults reproduce the production singleton; tests inject a fixture
     /// auth-file provider.
@@ -100,19 +111,49 @@ class CodexCliLocalService: ObservableObject {
     }
 
     func canAccess(account: CodexAccount) async -> Bool {
-        await Task.detached(priority: .userInitiated) { [self] in
+        let isAuthenticated = await Task.detached(priority: .userInitiated) { [self] in
             hasAccess(account: account)
         }.value
+        record(isAuthenticated, for: account)
+        return isAuthenticated
     }
 
     /// Check and update access status
     nonisolated func checkAccess(account: CodexAccount = .defaultAccount) {
         let hasToken = getAuthToken(account: account) != nil
         ServiceSupport.applyOnMain { [weak self] in
-            guard let self else { return }
-            self.hasAccess = hasToken
-            if !hasToken { self.subscriptionType = nil }
+            self?.record(hasToken, for: account)
         }
+    }
+
+    /// Single writer for auth state. The shared `hasAccess`/`subscriptionType`
+    /// pair still describes the default sentinel, so a custom profile records
+    /// only its own entry and never publishes over the default's.
+    private func record(_ isAuthenticated: Bool, for account: CodexAccount) {
+        accountAccess[account.id] = isAuthenticated
+        guard account.isDefault else { return }
+        hasAccess = isAuthenticated
+        if !isAuthenticated { subscriptionType = nil }
+    }
+
+    /// Cached auth state for one profile, falling back to the shared flag for
+    /// the default sentinel until its first per-account probe lands.
+    func isAuthenticated(account: CodexAccount) -> Bool {
+        CodexAccountAccessProjection.isAuthenticated(
+            account: account,
+            accountAccess: accountAccess,
+            defaultHasAccess: hasAccess
+        )
+    }
+
+    /// Provider-level connection state across the supplied profiles — normally
+    /// `CodexAccountStore.shared.enabledAccounts`.
+    func hasAccess(in accounts: [CodexAccount]) -> Bool {
+        CodexAccountAccessProjection.hasAnyAccess(
+            accounts: accounts,
+            accountAccess: accountAccess,
+            defaultHasAccess: hasAccess
+        )
     }
 
     // MARK: - Usage Fetching
@@ -128,7 +169,7 @@ class CodexCliLocalService: ObservableObject {
             let error = ServiceError.notAuthenticated
             await MainActor.run {
                 self.lastError = error
-                if account.isDefault { self.hasAccess = false }
+                self.record(false, for: account)
             }
             throw error
         }
@@ -155,8 +196,8 @@ class CodexCliLocalService: ObservableObject {
 
             await MainActor.run {
                 self.lastError = nil
+                self.record(true, for: account)
                 if account.isDefault {
-                    self.hasAccess = true
                     self.subscriptionType = usageResponse.planType
                 }
             }
@@ -170,8 +211,8 @@ class CodexCliLocalService: ObservableObject {
             AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
             await MainActor.run {
                 self.lastError = serviceError
-                if account.isDefault, case .notAuthenticated = serviceError {
-                    self.hasAccess = false
+                if case .notAuthenticated = serviceError {
+                    self.record(false, for: account)
                 }
             }
             throw serviceError
