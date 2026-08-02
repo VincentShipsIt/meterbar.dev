@@ -29,20 +29,50 @@ final class ProviderSnapshotTests: XCTestCase {
         grokAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
-        fableSessions: [ClaudeFableSession] = [],
-        enabledServices: Set<ServiceType> = Set(ServiceType.allCases)
+        enabledServices: Set<ServiceType> = Set(ServiceType.allCases),
+        codexAccountAccess: [UUID: Bool] = [:],
+        codexCliHasAccess: Bool = false
     ) -> ProviderSnapshotBuilder.Input {
         ProviderSnapshotBuilder.Input(
             metrics: metrics,
             codexAccounts: codexAccounts,
             codexAccountMetrics: codexAccountMetrics,
+            codexAccountAccess: codexAccountAccess,
             grokAccounts: grokAccounts,
             grokAccountMetrics: grokAccountMetrics,
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
-            fableSessions: fableSessions,
-            enabledServices: enabledServices
+            enabledServices: enabledServices,
+            codexCliHasAccess: codexCliHasAccess
         )
+    }
+
+    // MARK: - Codex empty-state honesty (issue #304)
+
+    /// A signed-in custom `CODEX_HOME` profile with no metrics yet is waiting on
+    /// a refresh, not logged out — the card used to tell every custom profile to
+    /// "Run codex login" because the check was gated on the default sentinel.
+    func testConnectedCustomCodexProfileWaitsForRefreshInsteadOfAskingForLogin() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [work],
+            enabledServices: [.codexCli],
+            codexAccountAccess: [work.id: true]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.emptyDetail), ["Waiting for refresh"])
+    }
+
+    func testLoggedOutCodexProfilesStillAskForLoginPerAccount() {
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [.defaultAccount, work],
+            enabledServices: [.codexCli],
+            codexAccountAccess: [CodexAccount.defaultID: true, work.id: false],
+            codexCliHasAccess: true
+        ))
+
+        XCTAssertEqual(snapshots.map(\.emptyDetail), ["Waiting for refresh", "Run codex login"])
     }
 
     // MARK: - Ordering and inclusion
@@ -112,43 +142,6 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshots.map(\.title), [ClaudeCodeAccount.defaultAccount.name, "Work"])
         // Two accounts sharing a name must still produce distinct card ids.
         XCTAssertEqual(Set(snapshots.map(\.id)).count, snapshots.count)
-    }
-
-    func testClaudeSnapshotsCarryOnlyTheirAccountFableActivity() {
-        let now = Date()
-        let work = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            claudeAccounts: [.defaultAccount, work],
-            claudeAccountMetrics: [
-                ClaudeCodeAccount.defaultID: makeMetrics(service: .claudeCode, weekly: 40),
-                work.id: makeMetrics(service: .claudeCode, weekly: 60)
-            ],
-            fableSessions: [
-                ClaudeFableSession(
-                    sourceSessionID: "default-session",
-                    accountID: ClaudeCodeAccount.defaultID,
-                    accountName: ClaudeCodeAccount.defaultName,
-                    model: "claude-fable-5",
-                    firstObservedAt: now.addingTimeInterval(-180),
-                    lastObservedAt: now.addingTimeInterval(-60),
-                    state: .completed
-                ),
-                ClaudeFableSession(
-                    sourceSessionID: "work-session",
-                    accountID: work.id,
-                    accountName: work.name,
-                    model: "claude-fable-5",
-                    firstObservedAt: now.addingTimeInterval(-120),
-                    lastObservedAt: now,
-                    state: .active
-                )
-            ],
-            enabledServices: [.claudeCode]
-        ))
-
-        XCTAssertEqual(snapshots.count, 2)
-        XCTAssertEqual(snapshots[0].fableActivity?.session?.sourceSessionID, "default-session")
-        XCTAssertEqual(snapshots[1].fableActivity?.session?.sourceSessionID, "work-session")
     }
 
     func testDisabledClaudeAccountsAreExcludedEvenWithCachedMetrics() {

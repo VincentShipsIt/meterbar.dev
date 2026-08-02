@@ -99,7 +99,6 @@ class UsageDataManager: ObservableObject {
     private let openRouterService: SimpleUsageProviding
     private let grokService: GrokUsageProviding
     private let claudeCodeAccountStore: ClaudeCodeAccountStore
-    private let claudeFableSessionTracker: ClaudeFableSessionTracking
     private let codexAccountStore: CodexAccountStore
     private let grokAccountStore: GrokAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
@@ -138,7 +137,6 @@ class UsageDataManager: ObservableObject {
         grokService: GrokUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeUsageProviding = ClaudeCodeLocalService.shared,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
-        claudeFableSessionTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
         grokAccountStore: GrokAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
@@ -160,7 +158,6 @@ class UsageDataManager: ObservableObject {
         self.grokService = grokService
         self.claudeCodeService = claudeCodeService
         self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
-        self.claudeFableSessionTracker = claudeFableSessionTracker ?? ClaudeFableSessionTracker.shared
         self.codexAccountStore = codexAccountStore ?? .shared
         self.grokAccountStore = grokAccountStore ?? .shared
         self.providerVisibilityStore = providerVisibilityStore ?? .shared
@@ -1031,7 +1028,6 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        claudeFableSessionTracker.scheduleRefresh(accounts: enabledAccounts)
         return AccountFetchResult(
             metrics: refreshedMetrics,
             successCount: successCount,

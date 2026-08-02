@@ -25,12 +25,7 @@ extension ProviderSettingsFacts {
                     ClaudeCodeLocalService.shared.lastError?.localizedDescription
                 )
             case .codexCli:
-                (
-                    CodexCliLocalService.shared.hasAccess,
-                    CodexCliLocalService.shared.subscriptionType,
-                    nil,
-                    CodexCliLocalService.shared.lastError?.localizedDescription
-                )
+                codexLiveState()
             case .cursor:
                 (
                     CursorLocalService.shared.hasAccess,
@@ -61,6 +56,26 @@ extension ProviderSettingsFacts {
             codexAuthFileDisplayPath: CodexHomeDirectory.authFileDisplayPath(
                 for: CodexAccountStore.shared.accounts.first(where: \.isDefault) ?? .defaultAccount
             )
+        )
+    }
+
+    /// Codex is connected when *any* enabled profile has a usable login: each
+    /// profile owns a `CODEX_HOME`, so a signed-in custom profile keeps the
+    /// Status row and the sidebar health dot honest even with the default
+    /// sentinel logged out or disabled.
+    @MainActor
+    private static func codexLiveState() -> (
+        hasAccess: Bool,
+        subscription: String?,
+        tier: String?,
+        error: String?
+    ) {
+        let service = CodexCliLocalService.shared
+        return (
+            service.hasAccess(in: CodexAccountStore.shared.enabledAccounts),
+            service.subscriptionType,
+            nil,
+            service.lastError?.localizedDescription
         )
     }
 

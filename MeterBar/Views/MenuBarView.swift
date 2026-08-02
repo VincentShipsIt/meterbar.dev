@@ -18,7 +18,6 @@ struct MenuBarView: View {
   @StateObject private var openRouterService = OpenRouterService.shared
   @StateObject private var grokService = GrokCLIUsageService.shared
   @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
-  @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
   @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
 
@@ -73,11 +72,11 @@ struct MenuBarView: View {
                 metrics: dataManager.metrics,
                 codexAccounts: codexAccountStore.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
+                codexAccountAccess: codexCliService.accountAccess,
                 grokAccounts: grokAccountStore.accounts,
                 grokAccountMetrics: dataManager.grokAccountMetrics,
                 claudeAccounts: claudeAccountStore.accounts,
                 claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-                fableSessions: fableSessionTracker.sessions,
                 enabledServices: providerVisibility.enabledServices,
                 claudeAccountStates: dataManager.claudeCodeAccountStates,
                 claudeCodeHasAccess: claudeCodeService.hasAccess,

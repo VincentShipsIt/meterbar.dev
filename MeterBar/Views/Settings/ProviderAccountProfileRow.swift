@@ -22,6 +22,7 @@ struct ProviderAccountProfileRow: View {
         resolvedPath: String,
         defaultPathHelp: String?,
         statusPresentation: SettingsStatusPresentation,
+        statusAccessibilityValue: String? = nil,
         canDisable: Bool = true,
         canRemove: Bool = true,
         canMoveUp: Bool = false,
@@ -48,6 +49,7 @@ struct ProviderAccountProfileRow: View {
         self.resolvedPath = resolvedPath
         self.defaultPathHelp = defaultPathHelp
         self.statusPresentation = statusPresentation
+        self.statusAccessibilityValue = statusAccessibilityValue
         self.canDisable = canDisable
         self.canRemove = canRemove
         self.canMoveUp = canMoveUp
@@ -139,7 +141,15 @@ struct ProviderAccountProfileRow: View {
 
                     StatusPill(presentation: statusPresentation)
                         .font(.caption)
-                        .accessibilityLabel("Status for \(accountName)")
+                        .accessibilityLabel(
+                            ProviderAccountStatusAccessibility.label(accountName: accountName)
+                        )
+                        .accessibilityValue(
+                            ProviderAccountStatusAccessibility.value(
+                                statusPresentation,
+                                detail: statusAccessibilityValue
+                            )
+                        )
                 }
                 .fixedSize(horizontal: true, vertical: false)
 
@@ -199,6 +209,9 @@ struct ProviderAccountProfileRow: View {
     private let resolvedPath: String
     private let defaultPathHelp: String?
     private let statusPresentation: SettingsStatusPresentation
+    /// Richer VoiceOver sentence for the status pill; `nil` falls back to the
+    /// pill's own text.
+    private let statusAccessibilityValue: String?
     private let canDisable: Bool
     private let canRemove: Bool
     private let canMoveUp: Bool

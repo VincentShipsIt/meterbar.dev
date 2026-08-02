@@ -47,6 +47,7 @@ struct CodexAccountSettingsRow: View {
             resolvedPath: CodexHomeDirectory.path(for: account),
             defaultPathHelp: "Defaults to ~/.codex or $CODEX_HOME; clear the field to restore that default.",
             statusPresentation: connectionState.statusPresentation,
+            statusAccessibilityValue: connectionState.accessibilityValue,
             canDisable: canDisable,
             canRemove: canRemove,
             canMoveUp: canMoveUp,
