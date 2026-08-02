@@ -296,8 +296,7 @@ final class DashboardSectionSplitTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
     }
 

@@ -113,8 +113,7 @@ final class ProviderCardPresentationTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: resetCreditsAvailable,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
     }
 
@@ -211,40 +210,6 @@ final class ProviderCardPresentationTests: XCTestCase {
             "redemption targets a specific CODEX_HOME, so an unresolved account cannot be spent"
         )
     }
-
-    func testFableAccessibilityLabelCoversEveryStatus() {
-        let observedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let session = ClaudeFableSession(
-            sourceSessionID: "s1",
-            accountID: UUID(),
-            accountName: "work",
-            model: "fable-5",
-            firstObservedAt: observedAt,
-            lastObservedAt: observedAt,
-            state: .active
-        )
-        let withSession = FableSessionCardActivity(session: session)
-        let withoutSession = FableSessionCardActivity(session: nil)
-
-        XCTAssertEqual(
-            ProviderCardPresentation.fableActivityAccessibilityLabel(withSession, status: .active),
-            "Fable 5, active"
-        )
-        XCTAssertEqual(
-            ProviderCardPresentation.fableActivityAccessibilityLabel(withoutSession, status: .noActivity),
-            "Fable 5, no activity"
-        )
-        XCTAssertEqual(
-            ProviderCardPresentation.fableActivityAccessibilityLabel(withoutSession, status: .recent),
-            "Fable 5, recent activity",
-            "a recent status with no session must not render an empty timestamp"
-        )
-        XCTAssertTrue(
-            ProviderCardPresentation
-                .fableActivityAccessibilityLabel(withSession, status: .recent)
-                .hasPrefix("Fable 5, last seen ")
-        )
-    }
 }
 
 @MainActor
@@ -323,8 +288,7 @@ final class MenuBarViewSplitSmokeTests: XCTestCase {
             emptyDetail: "",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
         XCTAssertEqual(dated.updatedText, "Updated \(UsageFormat.relative(updatedAt))")
     }

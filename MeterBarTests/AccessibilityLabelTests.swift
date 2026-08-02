@@ -91,8 +91,7 @@ final class AccessibilityLabelTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
         // 10% used -> healthy band, no updatedAt -> "No data" freshness.
         XCTAssertEqual(snapshot.accessibilityLabel, "Codex, Healthy, No data")
@@ -108,8 +107,7 @@ final class AccessibilityLabelTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
         XCTAssertTrue(snapshot.accessibilityLabel.contains("Out"), snapshot.accessibilityLabel)
     }
@@ -129,8 +127,7 @@ final class AccessibilityLabelTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
         let value = snapshot.accessibilityValue
         XCTAssertTrue(value.contains("Session"), value)
@@ -149,8 +146,7 @@ final class AccessibilityLabelTests: XCTestCase {
             emptyDetail: "Log in to Cursor",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil,
-            fableActivity: nil
+            accountID: nil
         )
         XCTAssertEqual(snapshot.accessibilityValue, "Log in to Cursor")
     }

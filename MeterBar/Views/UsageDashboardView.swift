@@ -11,7 +11,6 @@ struct UsageDashboardView: View {
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
-    @StateObject private var fableSessionTracker = ClaudeFableSessionTracker.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var grokAccountStore = GrokAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
@@ -363,7 +362,6 @@ struct UsageDashboardView: View {
             grokAccountMetrics: dataManager.grokAccountMetrics,
             claudeAccounts: claudeAccountStore.accounts,
             claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-            fableSessions: fableSessionTracker.sessions,
             enabledServices: providerVisibility.enabledServices,
             claudeAccountStates: dataManager.claudeCodeAccountStates,
             claudeCodeHasAccess: claudeCodeService.hasAccess,

@@ -18,7 +18,6 @@ struct ProviderSnapshot: Identifiable {
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
     let accountID: UUID?
-    let fableActivity: FableSessionCardActivity?
     /// Auth/staleness overlay for this card, or `nil` when the account is
     /// healthy. Deliberately separate from `band`, which stays a pure function
     /// of the percentages even when those percentages came from a stale cache.
@@ -216,7 +215,6 @@ enum ProviderSnapshotBuilder {
         var grokAccountMetrics: [UUID: UsageMetrics] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
-        var fableSessions: [ClaudeFableSession] = []
         var enabledServices: Set<ServiceType>
         /// Per-account auth/staleness, keyed by account id. Defaulted so the
         /// non-Claude call sites (and every existing test) keep compiling; an
@@ -270,7 +268,6 @@ enum ProviderSnapshotBuilder {
         if input.enabledServices.contains(.claudeCode) {
             let enabledAccounts = input.claudeAccounts.filter(\.isEnabled)
             let accountMetrics = input.claudeAccountMetrics
-            let fableActivityByAccount = FableSessionCardActivity.byAccount(sessions: input.fableSessions)
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
                     let title = account.isDefault && enabledAccounts.count == 1 ? "Claude" : account.name
@@ -283,8 +280,6 @@ enum ProviderSnapshotBuilder {
                         metrics: accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil),
                         emptyDetail: emptyDetail,
                         accountID: account.id,
-                        fableActivity: fableActivityByAccount[account.id]
-                            ?? FableSessionCardActivity(session: nil),
                         authNotice: ProviderAuthNotice.forState(input.claudeAccountStates[account.id])
                     ))
                 }
@@ -339,7 +334,6 @@ enum ProviderSnapshotBuilder {
         metrics: UsageMetrics?,
         emptyDetail: String,
         accountID: UUID? = nil,
-        fableActivity: FableSessionCardActivity? = nil,
         authNotice: ProviderAuthNotice? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
@@ -355,7 +349,6 @@ enum ProviderSnapshotBuilder {
             extraUsage: metrics?.extraUsage,
             resetCreditsAvailable: metrics?.resetCreditsAvailable,
             accountID: accountID,
-            fableActivity: fableActivity,
             authNotice: authNotice
         )
     }

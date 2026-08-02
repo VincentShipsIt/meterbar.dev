@@ -76,14 +76,6 @@ final class UsageDataManagerTests: XCTestCase {
         }
     }
 
-    private final class StubFableTracker: ClaudeFableSessionTracking {
-        private(set) var refreshedAccountIDs: [[UUID]] = []
-
-        func scheduleRefresh(accounts: [ClaudeCodeAccount]) {
-            refreshedAccountIDs.append(accounts.map(\.id))
-        }
-    }
-
     /// Stub provider whose access flag and fetch result are fully controlled.
     private final class StubProvider: SimpleUsageProviding, CodexUsageProviding {
         var hasAccess: Bool
@@ -201,7 +193,6 @@ final class UsageDataManagerTests: XCTestCase {
         grok: GrokUsageProviding? = nil,
         claude: ClaudeCodeUsageProviding? = nil,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
-        fableTracker: ClaudeFableSessionTracking? = nil,
         codexAccountStore: CodexAccountStore? = nil,
         grokAccountStore: GrokAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
@@ -259,7 +250,6 @@ final class UsageDataManagerTests: XCTestCase {
             grokService: grok ?? MultiAccountGrokProvider(metricsByAccount: [:]),
             claudeCodeService: claude ?? ClaudeCodeLocalService.shared,
             claudeCodeAccountStore: claudeCodeAccountStore,
-            claudeFableSessionTracker: fableTracker ?? StubFableTracker(),
             codexAccountStore: codexAccountStore,
             grokAccountStore: grokAccountStore,
             providerVisibilityStore: visibility,
@@ -414,37 +404,6 @@ final class UsageDataManagerTests: XCTestCase {
         await manager.refreshAll()
 
         XCTAssertEqual(claude.refreshTriggers, [.background])
-    }
-
-    func testClaudeRefreshAlsoRefreshesFableSessionsForEnabledProfiles() async throws {
-        let accountSuite = "UsageDataManagerTests-fable-accounts-\(UUID().uuidString)"
-        createdSuiteNames.append(accountSuite)
-        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
-        let accountStore = ClaudeCodeAccountStore(userDefaults: accountDefaults)
-        accountStore.addAccount(name: "Secondary", configDirectory: "/tmp/secondary-claude")
-        let fableTracker = StubFableTracker()
-        let claude = StubClaudeProvider(
-            hasAccess: true,
-            result: .success(MetricsFixtures.claudeCode(sessionUsedPercent: 7))
-        )
-        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
-        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
-        let (manager, _) = makeManager(
-            codex: codex,
-            cursor: cursor,
-            claude: claude,
-            claudeCodeAccountStore: accountStore,
-            fableTracker: fableTracker,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
-        )
-
-        await manager.refreshAll()
-
-        XCTAssertEqual(fableTracker.refreshedAccountIDs.count, 1)
-        XCTAssertEqual(
-            Set(try XCTUnwrap(fableTracker.refreshedAccountIDs.first)),
-            Set(accountStore.enabledAccounts.map(\.id))
-        )
     }
 
     func testRefreshAllBridgesEveryEnabledClaudeAccountToWidgetData() async throws {
