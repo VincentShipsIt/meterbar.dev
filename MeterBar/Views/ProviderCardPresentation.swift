@@ -54,21 +54,4 @@ enum ProviderCardPresentation {
             hasResolvedAccount: hasResolvedAccount
         )
     }
-
-    static func fableActivityAccessibilityLabel(
-        _ activity: FableSessionCardActivity,
-        status: FableSessionCardActivity.Status
-    ) -> String {
-        switch status {
-        case .active:
-            return "Fable 5, active"
-        case .recent:
-            guard let lastObservedAt = activity.session?.lastObservedAt else {
-                return "Fable 5, recent activity"
-            }
-            return "Fable 5, last seen \(lastObservedAt.formatted(date: .abbreviated, time: .shortened))"
-        case .noActivity:
-            return "Fable 5, no activity"
-        }
-    }
 }

@@ -184,8 +184,7 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
             resetCreditsAvailable: resetCreditsAvailable,
-            accountID: accountID,
-            fableActivity: nil
+            accountID: accountID
         )
     }
 

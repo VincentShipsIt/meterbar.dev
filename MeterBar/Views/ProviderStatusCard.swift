@@ -214,8 +214,6 @@ struct ProviderStatusCard: View {
                 }
             }
 
-            fableActivitySection
-
             let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
             if badges.hasContent {
                 badges
@@ -225,13 +223,6 @@ struct ProviderStatusCard: View {
                 Divider()
                 resetCreditButton(isCompact: false)
             }
-        }
-    }
-
-    @ViewBuilder private var fableActivitySection: some View {
-        if let fableActivity = snapshot.fableActivity {
-            Divider()
-            ProviderCardFableActivityRow(activity: fableActivity)
         }
     }
 
