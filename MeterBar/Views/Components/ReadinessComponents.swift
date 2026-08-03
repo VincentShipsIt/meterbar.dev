@@ -95,7 +95,7 @@ struct ReadinessProviderCard: View {
   }
 
   var body: some View {
-    DashboardTile(padding: compact ? 11 : 14) {
+    DashboardTile(padding: compact ? .popover : .standard) {
       VStack(alignment: .leading, spacing: compact ? 8 : 10) {
         HStack(spacing: 8) {
           ProviderLogoView(

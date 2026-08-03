@@ -73,6 +73,16 @@ struct ProviderSettingsFacts {
         }
     }
 
+    /// The Overview error notice. When the failure is one MeterBar authored, it
+    /// also knows the step that clears it — and the notice is the only surface
+    /// with room to say it, so the recovery rides along instead of leaving the
+    /// user with a diagnosis and no action.
+    var noticeText: String? {
+        guard let errorText else { return nil }
+        guard let failure = ClaudeCodeParseFailure(message: errorText) else { return errorText }
+        return "\(failure.message). \(failure.recovery)"
+    }
+
     /// One-word connection/health status shown in the Overview "Status" row.
     var statusText: String {
         guard isEnabled else {

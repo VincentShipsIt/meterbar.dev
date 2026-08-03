@@ -4,16 +4,19 @@ import SwiftUI
 
 // Shared dashboard chrome extracted from UsageDashboardView.swift (R8 split). Pure move.
 
+/// The one card shell in the app. `padding` takes a named surface rather than a
+/// number so two cards on the same surface cannot drift apart — see
+/// `MeterBarTheme.CardPadding`.
 struct DashboardTile<Content: View>: View {
   let cornerRadius: CGFloat
-  let padding: CGFloat
+  let padding: MeterBarTheme.CardPadding
   let minHeight: CGFloat?
   let alignment: Alignment
   @ViewBuilder let content: Content
 
   init(
     cornerRadius: CGFloat = MeterBarTheme.Radius.card,
-    padding: CGFloat = MeterBarTheme.Spacing.lg,
+    padding: MeterBarTheme.CardPadding = .standard,
     minHeight: CGFloat? = nil,
     alignment: Alignment = .topLeading,
     @ViewBuilder content: () -> Content
@@ -27,7 +30,7 @@ struct DashboardTile<Content: View>: View {
 
   var body: some View {
     content
-      .padding(padding)
+      .padding(padding.value)
       .frame(maxWidth: .infinity, minHeight: minHeight, alignment: alignment)
       .meterBarCardSurface(cornerRadius: cornerRadius)
   }

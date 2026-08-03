@@ -48,7 +48,10 @@ enum MeterBarTheme {
 
   /// 4pt spacing grid for padding. Raw padding values snap to the nearest step;
   /// exact ties round up. Replaces the ~15 ad-hoc padding literals in the views.
-  enum Spacing {
+  ///
+  /// `nonisolated` because the scale is plain geometry — `CardPadding` and other
+  /// pure helpers derive from it outside the main actor.
+  nonisolated enum Spacing {
     static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -56,6 +59,36 @@ enum MeterBarTheme {
     static let lg: CGFloat = 16
     static let xl: CGFloat = 20
     static let xxl: CGFloat = 24
+  }
+
+  /// Card padding named by the surface the card sits on, not by number.
+  ///
+  /// Every card in the app is a `DashboardTile`, and its inset used to be a bare
+  /// `CGFloat` — so call sites reached for whatever looked right and the popover
+  /// ended up with cards at 8, 11, 12, 14, and 16. Naming the surface instead of
+  /// the number is what makes "is it all the same?" answerable: two cards on the
+  /// same surface are padded identically by construction, and an off-grid value
+  /// is no longer expressible.
+  ///
+  /// `nonisolated` so the token is readable from tests and from any non-MainActor
+  /// layout math, matching `ServiceSupport` and the other pure helpers.
+  nonisolated enum CardPadding: CaseIterable {
+    /// A tile drawn inside another card (readiness rows, API-usage sub-tiles).
+    /// Tighter so the two insets don't stack into a visible gutter.
+    case nested
+    /// Cards in the menu-bar popover and the settings/detail panes, where width
+    /// is scarce and the shell already contributes its own inset.
+    case popover
+    /// Top-level dashboard cards, which sit directly on the window background.
+    case standard
+
+    var value: CGFloat {
+      switch self {
+      case .nested: return Spacing.sm
+      case .popover: return Spacing.md
+      case .standard: return Spacing.lg
+      }
+    }
   }
 
   // MARK: - Fill / stroke opacity
@@ -292,6 +325,20 @@ extension QuotaBand {
   }
 }
 
+extension UsageStatus {
+  /// The same map as `QuotaBand.color`, reached from the shared widget vocabulary
+  /// rather than from a band. The widget preview used to carry its own private
+  /// `.green`/`.orange`/`.red` switch, so a theme change moved every card and
+  /// left the preview behind.
+  var color: Color {
+    switch self {
+    case .good: return MeterBarTheme.success
+    case .warning: return MeterBarTheme.warning
+    case .critical: return MeterBarTheme.danger
+    }
+  }
+}
+
 struct MeterBarDetailBackground: View {
   @Environment(\.accessibilityReduceTransparency)
   private var reduceTransparency
@@ -338,6 +385,15 @@ extension NSPanel {
 extension View {
   func meterBarCardSurface(cornerRadius: CGFloat = MeterBarTheme.Radius.card) -> some View {
     modifier(MeterBarCardSurfaceModifier(cornerRadius: cornerRadius))
+  }
+
+  /// The MeterBar switch. AppKit's default switch is noticeably taller than the
+  /// segmented controls, steppers, and popup buttons it sits beside in Settings,
+  /// so every switch here is `.small`. Three call sites already did this by hand
+  /// while the rest kept the oversized default — one modifier so they cannot
+  /// drift apart again.
+  func meterBarSwitch() -> some View {
+    toggleStyle(.switch).controlSize(.small)
   }
 
   /// Micro-motion for a numeric `Text` that changes on refresh: the digits roll

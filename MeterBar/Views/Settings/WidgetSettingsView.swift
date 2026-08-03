@@ -254,7 +254,7 @@ struct WidgetSettingsView: View {
             ) {
                 Toggle("Show all enabled", isOn: selectAllBinding)
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
                     .disabled(accountOptions.isEmpty)
             }
 
@@ -279,7 +279,7 @@ struct WidgetSettingsView: View {
                                 isOn: accountSelectionBinding(for: option.id)
                             )
                             .labelsHidden()
-                            .toggleStyle(.switch)
+                            .meterBarSwitch()
                         }
                     }
                 }
@@ -319,7 +319,7 @@ struct WidgetSettingsView: View {
                         isOn: quotaWindowBinding(for: window)
                     )
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
                 }
             }
 
@@ -327,13 +327,13 @@ struct WidgetSettingsView: View {
             SettingsRowView(title: "Reset times") {
                 Toggle("Reset times", isOn: showsResetTimeBinding)
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
             }
 
             SettingsRowView(title: "Data freshness") {
                 Toggle("Data freshness", isOn: showsFreshnessBinding)
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
             }
 
             SettingsRowView(title: "Account order") {
@@ -575,13 +575,27 @@ struct WidgetSettingsPreviewGallery: View {
     }
 }
 
+/// A scale drawing of the widget, not a second design of it.
+///
+/// This preview used to be a third hand-rolled copy of the widget row, drawn at
+/// its own 7/9pt sizes with an SF Symbol where the widget ships a logo — so it
+/// showed the user a layout the widget did not draw. Every number and every
+/// arrangement decision now comes from `WidgetGlance`, the same vocabulary the
+/// extension reads.
 struct WidgetSettingsPreviewSurface: View {
     let family: WidgetPresentationFamily
     let presentation: WidgetPresentation
     let appearance: WidgetSettingsPreviewAppearance
 
+    /// The sizes the widget draws this family at.
+    var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
+
+    /// The arrangement the widget picks for this family — hero on small, stacked
+    /// rows everywhere else.
+    var layout: WidgetGlanceLayout { WidgetGlance.layout(for: presentation, family: family) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: family.isLarge ? 8 : 5) {
+        VStack(alignment: .leading, spacing: metrics.stackSpacing) {
             if let emptyState = presentation.emptyState {
                 Spacer()
                 Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
@@ -593,21 +607,29 @@ struct WidgetSettingsPreviewSurface: View {
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
-                ForEach(presentation.rows) { row in
-                    WidgetSettingsPreviewRow(row: row, compact: family.isSmall)
+                switch layout {
+                case let .hero(headline, supporting):
+                    WidgetSettingsPreviewRow(row: headline, family: family)
+                    ForEach(supporting) { row in
+                        WidgetSettingsPreviewRailRow(row: row, metrics: metrics)
+                    }
+                case let .rows(rows):
+                    ForEach(rows) { row in
+                        WidgetSettingsPreviewRow(row: row, family: family)
+                    }
                 }
                 if presentation.hiddenRowCount > 0 {
                     Label(
                         "+\(presentation.hiddenRowCount) more",
                         systemImage: "ellipsis.circle"
                     )
-                    .font(.caption2)
+                    .font(.system(size: metrics.captionSize))
                     .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
         }
-        .padding(family.isSmall ? 10 : 12)
+        .padding(metrics.contentPadding)
         .frame(
             width: family.previewSize.width,
             height: family.previewSize.height,
@@ -626,91 +648,148 @@ struct WidgetSettingsPreviewSurface: View {
     }
 }
 
+/// One provider row. Small stacks the number under the identity line so it can
+/// take the tile; the wider families keep it on the same line as the name.
 struct WidgetSettingsPreviewRow: View {
     let row: WidgetPresentationRow
-    let compact: Bool
+    let family: WidgetPresentationFamily
+
+    var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
+
+    private var isHero: Bool { family == .small }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Image(systemName: row.service.iconName)
-                    .frame(width: compact ? 11 : 14)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(row.accountName)
-                        .font(compact ? .caption2 : .caption)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    Text(row.quotaTitle)
-                        .font(.system(size: compact ? 7 : 9))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 3)
-                Text(compact ? row.compactSummaryText : row.summaryText)
-                    .font(.system(size: compact ? 7 : 9))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            HStack(spacing: metrics.rowSpacing * 2) {
+                ProviderLogoView(
+                    kind: .forService(row.service),
+                    size: metrics.iconSize,
+                    foregroundColor: .primary
+                )
+                Text(row.accountName)
+                    .font(.system(size: metrics.titleSize, weight: .medium))
                     .lineLimit(1)
-            }
-
-            if let value = row.progressValue, let total = row.progressTotal {
-                ProgressView(value: value, total: total)
-                    .tint(row.usageStatus.previewColor)
-            }
-
-            if row.resetTime != nil || row.freshnessDate != nil {
-                HStack(spacing: 5) {
-                    if let resetTime = row.resetTime {
-                        Label {
-                            Text(resetTime, style: .relative)
-                        } icon: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    if let freshnessDate = row.freshnessDate {
-                        Label {
-                            Text(freshnessDate, style: .relative)
-                        } icon: {
-                            Image(systemName: "clock")
-                        }
-                    }
+                Spacer(minLength: metrics.rowSpacing)
+                healthIndicator
+                if !isHero {
+                    summary
                 }
-                .font(.system(size: 7))
-                .foregroundStyle(.secondary)
             }
+
+            if isHero {
+                summary
+            }
+
+            usageBar
+            caption
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.accountName)
+        .accessibilityValue("\(row.quotaTitle), \(row.summaryText)")
+    }
+
+    private var summary: some View {
+        Text(row.summaryText)
+            .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(isHero ? 0.6 : 0.7)
+    }
+
+    /// Only what the bar's tint cannot say. A healthy row draws nothing here.
+    @ViewBuilder private var healthIndicator: some View {
+        switch row.health {
+        case .healthy:
+            EmptyView()
+        case .stale:
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: metrics.captionSize))
+                .foregroundStyle(MeterBarTheme.warning)
+        case .unavailable:
+            Image(systemName: "xmark.circle")
+                .font(.system(size: metrics.captionSize))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A capsule with weight, tinted by status — the widget's bar, not the
+    /// card's hairline `ProgressView`.
+    private var usageBar: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(.quaternary)
+                let filled = proxy.size.width * fraction
+                if filled > 0 {
+                    Capsule(style: .continuous)
+                        .fill(row.usageStatus?.color ?? Color.secondary)
+                        .frame(width: max(metrics.barHeight, filled))
+                }
+            }
+        }
+        .frame(height: metrics.barHeight)
+        .accessibilityHidden(true)
+    }
+
+    private var fraction: Double {
+        guard let value = row.progressValue, let total = row.progressTotal, total > 0 else { return 0 }
+        return min(max(value / total, 0), 1)
+    }
+
+    private var caption: some View {
+        HStack(spacing: metrics.captionSize / 2) {
+            Text(row.quotaTitle)
+            if let resetTime = row.resetTime {
+                Label {
+                    Text(resetTime, style: .relative)
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            if let freshnessDate = row.freshnessDate {
+                Label {
+                    Text(freshnessDate, style: .relative)
+                } icon: {
+                    Image(systemName: "clock")
+                }
+            }
+        }
+        .font(.system(size: metrics.captionSize))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 }
 
-private extension Optional where Wrapped == UsageStatus {
-    var previewColor: Color {
-        switch self {
-        case .some(.good):
-            return .green
-        case .some(.warning):
-            return .orange
-        case .some(.critical):
-            return .red
-        case .none:
-            return .secondary
+/// What the hero displaced on the small family: one line per account, enough to
+/// know they are fine without competing with the number above.
+struct WidgetSettingsPreviewRailRow: View {
+    let row: WidgetPresentationRow
+    let metrics: WidgetGlanceMetrics
+
+    var body: some View {
+        HStack(spacing: metrics.rowSpacing) {
+            ProviderLogoView(
+                kind: .forService(row.service),
+                size: metrics.captionSize,
+                foregroundColor: .secondary
+            )
+            Text(row.accountName)
+                .font(.system(size: metrics.captionSize))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: metrics.rowSpacing)
+            Text(row.compactSummaryText)
+                .font(.system(size: metrics.captionSize, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(row.usageStatus?.color ?? .secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.accountName)
+        .accessibilityValue(row.compactSummaryText)
     }
 }
 
 private extension WidgetPresentationFamily {
-    var isLarge: Bool {
-        if case .large = self {
-            return true
-        }
-        return false
-    }
-
-    var isSmall: Bool {
-        if case .small = self {
-            return true
-        }
-        return false
-    }
-
     var settingsTitle: String {
         switch self {
         case .small: return "Small"

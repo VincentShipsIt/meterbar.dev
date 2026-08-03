@@ -32,6 +32,23 @@ final class ProviderSettingsFactsTests: XCTestCase {
         )
     }
 
+    // MARK: - noticeText
+
+    /// An authored parse failure knows the single step that fixes it, and the
+    /// Overview notice is the only multi-line surface that can say it.
+    func testNoticeAppendsRecoveryForAuthoredParseFailures() {
+        let failure = ClaudeCodeParseFailure.headlessUsageUnavailable
+        XCTAssertEqual(
+            facts(service: .claudeCode, errorText: failure.message).noticeText,
+            "\(failure.message). \(failure.recovery)"
+        )
+    }
+
+    func testNoticeLeavesOtherErrorsUntouched() {
+        XCTAssertEqual(facts(service: .grok, errorText: "HTTP 500").noticeText, "HTTP 500")
+        XCTAssertNil(facts(service: .grok).noticeText)
+    }
+
     // MARK: - sourceText (one branch per service, including Grok)
 
     func testSourceTextCoversEveryService() {

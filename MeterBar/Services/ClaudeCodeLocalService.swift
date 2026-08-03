@@ -594,41 +594,11 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     private func serviceError(from error: Error) -> ServiceError {
-        if let serviceError = error as? ServiceError {
-            return serviceError
-        }
-
-        if let cliError = error as? ClaudeCodeCLIUsageError {
-            switch cliError {
-            case .cliNotFound:
-                return .notAuthenticated
-            case .parsingFailed:
-                return .parsingError
-            case .timedOut, .launchFailed, .commandFailed:
-                return .apiError(cliError.localizedDescription)
-            }
-        }
-
-        return .apiError(error.localizedDescription)
+        ClaudeCodeCLIFailureMapping.serviceError(from: error)
     }
 
     private func authState(from error: Error) -> ClaudeCodeAuthState {
-        guard let cliError = error as? ClaudeCodeCLIUsageError else {
-            return .error(error.localizedDescription)
-        }
-
-        switch cliError {
-        case .cliNotFound:
-            return .unavailable
-        case let .commandFailed(message):
-            let lowercased = message.lowercased()
-            if lowercased.contains("login") || lowercased.contains("auth") || lowercased.contains("unauthorized") {
-                return .needsLogin
-            }
-            return .error(cliError.localizedDescription)
-        case .timedOut, .launchFailed, .parsingFailed:
-            return .error(cliError.localizedDescription)
-        }
+        ClaudeCodeCLIFailureMapping.authState(from: error)
     }
 }
 

@@ -300,7 +300,7 @@ final class UsageDataManagerTests: XCTestCase {
         }
         let health = ProviderParseHealthStore(userDefaults: healthDefaults)
         let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
-        let cursor = StubProvider(hasAccess: true, result: .failure(ServiceError.parsingError))
+        let cursor = StubProvider(hasAccess: true, result: .failure(ServiceError.parsingError(nil)))
         let (manager, _) = makeManager(codex: codex, cursor: cursor, parseHealthStore: health)
 
         let report = await manager.refreshAll()
@@ -1462,7 +1462,7 @@ final class UsageDataManagerTests: XCTestCase {
     /// first, so the surfaced reason is stable across runs.
     func testRefreshAllAttributesClaudeFailuresInAccountOrderDespiteConcurrency() async throws {
         XCTAssertNotEqual(
-            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError),
+            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError(nil)),
             ServiceSupport.safeErrorMessage(for: StubError.fetchFailed),
             "fixture guard: the two failures must be distinguishable"
         )
@@ -1474,7 +1474,7 @@ final class UsageDataManagerTests: XCTestCase {
         let work = try XCTUnwrap(accountStore.customAccounts.first)
         let claude = StubClaudeProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
         claude.resultsByAccount = [
-            ClaudeCodeAccount.defaultID: .failure(ServiceError.parsingError),
+            ClaudeCodeAccount.defaultID: .failure(ServiceError.parsingError(nil)),
             work.id: .failure(StubError.fetchFailed)
         ]
         claude.probe = ConcurrencyProbe(expected: 2)
@@ -1493,7 +1493,7 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(report.outcome(for: .claudeCode)?.state, .failed)
         XCTAssertEqual(
             report.outcome(for: .claudeCode)?.reason,
-            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError),
+            ServiceSupport.safeErrorMessage(for: ServiceError.parsingError(nil)),
             "the first enabled account's failure must win regardless of completion order"
         )
     }

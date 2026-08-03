@@ -111,8 +111,7 @@ struct ProviderCatalogSettingsView: View {
 
             Toggle("", isOn: trackedBinding(for: service))
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
+                .meterBarSwitch()
                 .accessibilityLabel("Track \(service.displayName)")
 
             // Only tracked providers have a sidebar row, so only they can be

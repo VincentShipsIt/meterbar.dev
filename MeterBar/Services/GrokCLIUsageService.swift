@@ -173,7 +173,7 @@ final class GrokCLIUsageService: ObservableObject {
     static func serviceError(from error: Error) -> ServiceError {
         guard let error = error as? GrokBillingRPC.Error else {
             if error is DecodingError {
-                return .parsingError
+                return .parsingError(nil)
             }
             return ServiceSupport.serviceError(from: error)
         }
@@ -181,7 +181,7 @@ final class GrokCLIUsageService: ObservableObject {
         case .notAuthenticated:
             return .notAuthenticated
         case .invalidResponse:
-            return .parsingError
+            return .parsingError(nil)
         case .timedOut:
             return .apiError(GrokRefreshFailure.agentTimedOut.message)
         case .launchFailed:

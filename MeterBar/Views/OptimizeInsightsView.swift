@@ -100,6 +100,29 @@ struct OptimizeInsightsView: View {
     )
   }
 
+  /// Copy for the "Last 7 days" tile.
+  ///
+  /// A quiet week formatted straight through renders as a bare `0` sitting next
+  /// to a caption boasting billions over 30 days, which reads as a broken
+  /// counter rather than as no usage. An empty window says so in words instead,
+  /// and only quotes the 30-day total when that total is the thing making the
+  /// empty week legible.
+  ///
+  /// Internal (not private) so the wording can be asserted without hosting the
+  /// page, matching `DashboardStatusSection.refreshButtonTitle(isRefreshing:)`.
+  static func recentWindowTile(tokens7Day: Int, tokens30Day: Int) -> (value: String, caption: String) {
+    guard tokens7Day > 0 else {
+      guard tokens30Day > 0 else {
+        return (value: "None", caption: "no tokens recorded in the last 30 days")
+      }
+      return (value: "None", caption: "nothing this week — \(UsageFormat.tokens(tokens30Day)) over 30 days")
+    }
+    return (
+      value: UsageFormat.tokens(tokens7Day),
+      caption: "\(UsageFormat.tokens(tokens30Day)) over 30 days"
+    )
+  }
+
   private func kpiGrid(for insights: OptimizationInsights) -> some View {
     LazyVGrid(columns: Self.kpiColumns, alignment: .leading, spacing: 12) {
       DashboardMetricTile(
@@ -122,10 +145,14 @@ struct OptimizeInsightsView: View {
         caption: "context sent vs generated",
         systemImage: "text.append"
       )
+      let recentWindow = Self.recentWindowTile(
+        tokens7Day: insights.tokens7Day,
+        tokens30Day: insights.tokens30Day
+      )
       DashboardMetricTile(
         title: "Last 7 days",
-        value: UsageFormat.tokens(insights.tokens7Day),
-        caption: "\(UsageFormat.tokens(insights.tokens30Day)) over 30 days",
+        value: recentWindow.value,
+        caption: recentWindow.caption,
         systemImage: "calendar"
       )
     }
@@ -256,9 +283,16 @@ struct OptimizeInsightsView: View {
 
   // MARK: - Layout + color helpers
 
-  private static let kpiColumns = Array(
-    repeating: GridItem(.flexible(minimum: 200), spacing: 12, alignment: .top),
-    count: 2
+  /// One row of four. The tiles are headline numbers meant to be read at a
+  /// glance; a 2×2 block doubled the band's height and pushed the token-burn
+  /// chart below the fold. The minimum drops accordingly — four tiles have to
+  /// fit the same width two used to.
+  ///
+  /// Internal (not private) so the single-row requirement can be pinned by a
+  /// test rather than re-litigated the next time a tile is added.
+  static let kpiColumns = Array(
+    repeating: GridItem(.flexible(minimum: 96), spacing: 12, alignment: .top),
+    count: 4
   )
 
   private static func gradeColor(_ score: Int) -> Color {

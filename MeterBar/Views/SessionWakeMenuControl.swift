@@ -32,7 +32,7 @@ struct SessionWakeMenuControl: View {
             // text above is folded in as the accessibility value.
             Toggle("Session Wake", isOn: watcherBinding)
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
                 .accessibilityValue(label.title)
                 // The one-time first-run confirmation happens in Settings, so
                 // the menu toggle is a quick kill-switch once enabled there.

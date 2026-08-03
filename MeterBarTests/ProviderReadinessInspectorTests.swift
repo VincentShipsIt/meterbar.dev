@@ -252,7 +252,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
 
     func testKnownCasesMapToStableStrings() {
         XCTAssertEqual(ProviderReadinessInspector.sanitize(.notAuthenticated), "Not authenticated")
-        XCTAssertEqual(ProviderReadinessInspector.sanitize(.parsingError), "Could not parse the provider response")
+        XCTAssertEqual(ProviderReadinessInspector.sanitize(.parsingError(nil)), "Could not parse the provider response")
         XCTAssertNil(ProviderReadinessInspector.sanitize(nil))
     }
 

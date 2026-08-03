@@ -56,7 +56,7 @@ struct ProviderStatusTable: View {
     private var reduceMotion
 
     var body: some View {
-        DashboardTile(padding: 8) {
+        DashboardTile(padding: .nested) {
             VStack(spacing: 0) {
                 ForEach(Array(ServiceType.allCases.enumerated()), id: \.element) { index, service in
                     if index > 0 {

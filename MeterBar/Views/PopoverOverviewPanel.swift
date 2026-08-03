@@ -145,7 +145,7 @@ struct PopoverOverviewPanel: View {
     }
 
     private var emptyState: some View {
-        DashboardTile(padding: 12) {
+        DashboardTile(padding: .popover) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .center, spacing: 10) {
                     Image(systemName: "clock.fill")
@@ -195,7 +195,7 @@ struct PopoverOverviewPanel: View {
     }
 
     private var firstRunCallout: some View {
-        DashboardTile(padding: 12) {
+        DashboardTile(padding: .popover) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")

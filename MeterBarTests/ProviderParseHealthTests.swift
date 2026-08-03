@@ -28,7 +28,7 @@ final class ProviderParseHealthTests: XCTestCase {
 
         // One decode failure can be a truncated body from a flaky connection;
         // it must not one-shot the provider into "needs attention".
-        store.recordFailure(.claudeCode, error: ServiceError.parsingError, at: now)
+        store.recordFailure(.claudeCode, error: ServiceError.parsingError(nil), at: now)
         var record = store.records[.claudeCode]
         XCTAssertEqual(record?.consecutiveFailures, 1)
         XCTAssertTrue(record?.lastFailureWasShapeMismatch ?? false)
@@ -36,7 +36,7 @@ final class ProviderParseHealthTests: XCTestCase {
 
         // Genuine schema drift fails every refresh; the second consecutive
         // mismatch is the earliest reliable drift signal.
-        store.recordFailure(.claudeCode, error: ServiceError.parsingError, at: now + 1)
+        store.recordFailure(.claudeCode, error: ServiceError.parsingError(nil), at: now + 1)
         record = store.records[.claudeCode]
         XCTAssertTrue(record?.needsAttention(now: now + 1) ?? false)
         XCTAssertEqual(ProviderParseHealthStore.persistedRecords(from: defaults)[.claudeCode], record)
@@ -64,9 +64,9 @@ final class ProviderParseHealthTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 17_000)
         let store = ProviderParseHealthStore(userDefaults: defaults)
 
-        store.recordFailure(.cursor, error: ServiceError.parsingError, at: now)
+        store.recordFailure(.cursor, error: ServiceError.parsingError(nil), at: now)
         store.recordFailure(.cursor, error: ServiceError.apiError("Request timed out"), at: now + 1)
-        store.recordFailure(.cursor, error: ServiceError.parsingError, at: now + 2)
+        store.recordFailure(.cursor, error: ServiceError.parsingError(nil), at: now + 2)
 
         // parse, api, parse: never two consecutive mismatches, and only
         // three total failures reach the ordinary sustained threshold.

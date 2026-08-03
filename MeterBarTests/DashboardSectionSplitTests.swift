@@ -165,6 +165,100 @@ final class DashboardSectionSplitTests: XCTestCase {
         )
     }
 
+    /// The refresh control used to be a flat glass label that only greyed out
+    /// while a sweep ran, so the button itself never acknowledged the press.
+    /// The title now carries that state next to the spinner.
+    func testRefreshButtonTitleReportsTheInFlightSweep() {
+        XCTAssertEqual(DashboardStatusSection.refreshButtonTitle(isRefreshing: false), "Refresh")
+        XCTAssertEqual(DashboardStatusSection.refreshButtonTitle(isRefreshing: true), "Refreshing...")
+    }
+
+    /// The card's trailing summary already says "Refreshing..."; the button must
+    /// not be the only thing that changes, but it also must not be silent.
+    func testRefreshButtonHelpTextMatchesTheButtonState() {
+        XCTAssertEqual(
+            DashboardStatusSection.refreshButtonHelp(isRefreshing: false),
+            "Refresh every provider status page"
+        )
+        XCTAssertEqual(
+            DashboardStatusSection.refreshButtonHelp(isRefreshing: true),
+            "Refreshing provider status pages"
+        )
+    }
+
+    // MARK: - Overview masonry
+
+    /// Round-robin keeps left-to-right reading order across a row while the
+    /// columns themselves pack independently, which is the point of the
+    /// masonry: a short card no longer pads itself out to a tall neighbour.
+    func testMasonryColumnsDealCardsAcrossColumnsInReadingOrder() {
+        let columns = DashboardOverviewSection.masonryColumns(Array(0..<5), columnCount: 2)
+
+        XCTAssertEqual(columns, [[0, 2, 4], [1, 3]])
+    }
+
+    /// Column counts never differ by more than one, so no column runs long
+    /// enough to reintroduce the ragged bottom edge.
+    func testMasonryColumnsStayBalancedWithinOneCard() {
+        let columns = DashboardOverviewSection.masonryColumns(Array(0..<7), columnCount: 3)
+
+        let counts = columns.map(\.count)
+        XCTAssertEqual(counts, [3, 2, 2])
+        XCTAssertEqual(counts.reduce(0, +), 7)
+    }
+
+    /// A single provider must still occupy one column's width rather than
+    /// stretching across the page, so empty trailing columns are preserved.
+    func testMasonryColumnsKeepEmptyTrailingColumnsForWidth() {
+        let columns = DashboardOverviewSection.masonryColumns([0], columnCount: 2)
+
+        XCTAssertEqual(columns.count, 2)
+        XCTAssertEqual(columns[0], [0])
+        XCTAssertTrue(columns[1].isEmpty)
+    }
+
+    func testMasonryColumnsClampsNonPositiveColumnCounts() {
+        XCTAssertEqual(DashboardOverviewSection.masonryColumns([1, 2], columnCount: 0), [[1, 2]])
+    }
+
+    // MARK: - Optimize KPI tiles
+
+    /// The four KPI tiles are one glanceable band of headline numbers, not a
+    /// 2×2 block that pushes the token-burn chart below the fold.
+    func testOptimizeKpiTilesSitOnASingleRow() {
+        XCTAssertEqual(OptimizeInsightsView.kpiColumns.count, 4)
+    }
+
+    /// A quiet week rendered as a bare `0` next to a caption boasting billions
+    /// over 30 days reads as a broken counter. An empty window has to say so.
+    func testRecentWindowTileNamesAnEmptyWeekInsteadOfShowingZero() {
+        let empty = OptimizeInsightsView.recentWindowTile(tokens7Day: 0, tokens30Day: 32_400_000_000)
+
+        XCTAssertEqual(empty.value, "None")
+        XCTAssertTrue(
+            empty.caption.contains("over 30 days"),
+            "the 30-day total is the context that makes an empty week legible"
+        )
+        XCTAssertNotEqual(empty.value, UsageFormat.tokens(0))
+    }
+
+    func testRecentWindowTileReportsNoUsageAtAllWhenBothWindowsAreEmpty() {
+        let blank = OptimizeInsightsView.recentWindowTile(tokens7Day: 0, tokens30Day: 0)
+
+        XCTAssertEqual(blank.value, "None")
+        XCTAssertFalse(
+            blank.caption.contains("over 30 days"),
+            "quoting an empty 30-day total explains nothing"
+        )
+    }
+
+    func testRecentWindowTileKeepsTheNormalReadoutWhenThereIsUsage() {
+        let busy = OptimizeInsightsView.recentWindowTile(tokens7Day: 1_200_000, tokens30Day: 9_000_000)
+
+        XCTAssertEqual(busy.value, UsageFormat.tokens(1_200_000))
+        XCTAssertEqual(busy.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
+    }
+
     // MARK: - Share card sources
 
     func testEnabledSourceLabelsCoverOnlyTheLogBackedProviders() {
