@@ -4,7 +4,18 @@ import Combine
 import os
 import SwiftUI
 
+/// Real entry point, so the release gate's `--launch-smoke` probe can answer
+/// before SwiftUI (and therefore AppKit, the window server, and every shared
+/// singleton) starts. `MeterBarApp.main()` never returns, so this stays the only
+/// place either path is chosen.
 @main
+enum MeterBarMain {
+    static func main() {
+        LaunchSmokeProbe.exitIfRequested()
+        MeterBarApp.main()
+    }
+}
+
 struct MeterBarApp: App {
     @StateObject private var dataManager = UsageDataManager.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self)
