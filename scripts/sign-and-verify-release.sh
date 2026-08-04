@@ -149,11 +149,16 @@ sign_code() {
       "$@" \
       "$target"
   else
+    # Ad-hoc: deliberately NO `--options runtime`. Hardened runtime turns on
+    # library validation, which requires the process and every library it maps
+    # to share a Team ID. Ad-hoc signatures carry no Team ID, so an ad-hoc app
+    # signed this way verifies perfectly and then dies in dyld the moment it
+    # tries to map Sparkle.framework. Hardened runtime is a Developer ID and
+    # notarization requirement; it belongs on the branch that can satisfy it.
     codesign \
       --force \
       --sign - \
       --timestamp=none \
-      --options runtime \
       --generate-entitlement-der \
       "$@" \
       "$target"
@@ -283,10 +288,19 @@ assert data["outcome"] == "success", data
 fi
 echo "Embedded CLI Session Wake dry-run verified from the signed bundle."
 
+# --- Launch smoke: every check above reads signatures at rest, and none of them
+# notice a bundle dyld will refuse to load. Start the app for real and make it
+# answer before AppKit does. This is what catches a signing option that verifies
+# clean and then fails library validation at map time.
+"$script_dir/verify-app-launch.sh" "$app_path" "$expected_short" "$expected_build"
+
 if [ -n "$signing_identity" ]; then
   echo "Developer ID nested signature integrity verified (identity: $signing_identity)."
   echo "Notarization and stapling run as separate release steps."
 else
-  echo "Ad-hoc nested signature integrity verified."
-  echo "Developer ID, notarization, and authorized app-group access remain separate release prerequisites."
+  echo "Ad-hoc signing verified: nested signature integrity, entitlement parity, and launch."
+  echo "This is NOT release-grade: ad-hoc bundles carry no Team ID and are signed"
+  echo "without hardened runtime, so library validation is not exercised here."
+  echo "Developer ID, hardened runtime, notarization, and authorized app-group access"
+  echo "remain separate release prerequisites verified only on the signed path."
 fi

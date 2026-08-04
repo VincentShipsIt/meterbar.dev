@@ -64,6 +64,9 @@ jobs:
       - name: Test CLI JSON smoke validator
         run: scripts/test-cli-json-smoke.sh
 
+      - name: Test app launch smoke validator
+        run: scripts/test-app-launch-smoke.sh
+
       - name: Verify canonical repository URLs
         run: scripts/verify-canonical-repository-urls.sh
 
