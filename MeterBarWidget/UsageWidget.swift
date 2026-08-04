@@ -215,7 +215,7 @@ struct WidgetGlanceRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue("\(row.quotaTitle), \(row.summaryText)")
+        .accessibilityValue(row.accessibilityValueText)
     }
 }
 
@@ -247,7 +247,7 @@ struct WidgetGlanceHero: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue("\(row.quotaTitle), \(row.summaryText)")
+        .accessibilityValue(row.accessibilityValueText)
     }
 }
 
@@ -275,7 +275,7 @@ struct WidgetGlanceRail: View {
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(row.accountName)
-                    .accessibilityValue(row.compactSummaryText)
+                    .accessibilityValue(row.compactAccessibilityValueText)
                 }
             }
         }
@@ -356,13 +356,20 @@ struct WidgetHealthIndicator: View {
             Image(systemName: "clock.badge.exclamationmark")
                 .font(.system(size: size))
                 .foregroundStyle(.orange)
-                .accessibilityLabel("Stale usage data")
+                .accessibilityLabel(label)
         case .unavailable:
             Image(systemName: "xmark.circle")
                 .font(.system(size: size))
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Usage unavailable")
+                .accessibilityLabel(label)
         }
+    }
+
+    /// The badge and the row's spoken value read the same phrase out of
+    /// `WidgetDataHealth`, so they cannot end up describing one state two ways.
+    /// A healthy row draws no glyph, so it never reaches this.
+    private var label: String {
+        health.accessibilityDescription ?? ""
     }
 }
 

@@ -17,7 +17,11 @@ enum ProviderBlockedSummaryPresentation {
         /// Countdown line, or `nil` when there is no countdown worth showing.
         var resetText: String?
 
-        func accessibilityLabel(title: String) -> String {
+        /// - Parameter title: the account title *as drawn*, or `nil` when the row
+        ///   suppresses it because an enclosing card already names the account.
+        ///   Passing it unconditionally made VoiceOver say the name twice where
+        ///   sighted users saw it once.
+        func accessibilityLabel(title: String?) -> String {
             [title, statusText, resetText].compactMap { $0 }.joined(separator: ", ")
         }
     }
@@ -150,7 +154,7 @@ struct ProviderBlockedUsageSummary: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(content.accessibilityLabel(title: snapshot.title))
+            .accessibilityLabel(content.accessibilityLabel(title: showsTitle ? snapshot.title : nil))
         }
     }
 }

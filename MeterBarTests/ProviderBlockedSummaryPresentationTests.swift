@@ -110,4 +110,21 @@ final class ProviderBlockedSummaryPresentationTests: XCTestCase {
         )
         XCTAssertEqual(loggedOut.accessibilityLabel(title: "shipshitdev"), "shipshitdev, Login required")
     }
+
+    /// The dashboard renders this row underneath a card that already names the
+    /// account, so it suppresses the title. The label was still announcing it,
+    /// making VoiceOver say the account name twice in a row while sighted users
+    /// saw it once.
+    func testHiddenTitleIsLeftOutOfTheLabel() {
+        let content = ProviderBlockedSummaryPresentation.content(
+            statusText: "Exhausted",
+            window: window("Weekly", resetIn: 3_660),
+            now: epoch
+        )
+
+        XCTAssertEqual(
+            content.accessibilityLabel(title: nil),
+            "Exhausted, Weekly reset in 1h 1m"
+        )
+    }
 }

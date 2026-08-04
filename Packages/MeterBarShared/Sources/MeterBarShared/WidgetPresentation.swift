@@ -4,6 +4,23 @@ public enum WidgetDataHealth: Equatable, Sendable {
     case healthy
     case stale
     case unavailable
+
+    /// What the health glyph says out loud, or `nil` when there is no glyph.
+    ///
+    /// `WidgetHealthIndicator` labels its images from here so the spoken row
+    /// value and the drawn badge cannot describe the same row differently. A
+    /// healthy row draws nothing — its status is already the bar's tint — so it
+    /// contributes no phrase.
+    public var accessibilityDescription: String? {
+        switch self {
+        case .healthy:
+            return nil
+        case .stale:
+            return "Stale usage data"
+        case .unavailable:
+            return "Usage unavailable"
+        }
+    }
 }
 
 public enum WidgetPresentationEmptyState: Equatable, Sendable {
@@ -106,6 +123,29 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public var usageStatus: UsageStatus? {
         guard health == .healthy else { return nil }
         return limit?.statusColor
+    }
+
+    /// The spoken value for a full glance row or hero.
+    ///
+    /// Those views combine their children into one accessibility element and
+    /// then set this explicitly, which discards the labels `.combine` gathered
+    /// from the children — including the health glyph's. Appending the health
+    /// phrase here is what puts "Stale usage data" back into VoiceOver's
+    /// reading of a row that visibly carries the badge.
+    public var accessibilityValueText: String {
+        joinedAccessibilityValue(leading: [quotaTitle, summaryText])
+    }
+
+    /// The spoken value for a rail entry, which omits the quota title to stay
+    /// on one line — and omits the health glyph too, making this the only place
+    /// a stale or unavailable rail row can announce itself at all.
+    public var compactAccessibilityValueText: String {
+        joinedAccessibilityValue(leading: [compactSummaryText])
+    }
+
+    private func joinedAccessibilityValue(leading: [String]) -> String {
+        (leading + [health.accessibilityDescription].compactMap { $0 })
+            .joined(separator: ", ")
     }
 }
 
