@@ -250,7 +250,7 @@ struct GeneralSettingsView: View {
                     set: { menuBarDisplayPreferences.setShowsExhaustedResetCountdown($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
                 .disabled(menuBarDisplayPreferences.labelMetric == .iconOnly)
             }
 
@@ -263,7 +263,7 @@ struct GeneralSettingsView: View {
                     set: { menuBarDisplayPreferences.setHighContrast($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
 
             SettingsRowView(
@@ -333,7 +333,7 @@ struct GeneralSettingsView: View {
                         }
                     ))
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
                     // A disabled account can still be turned *off*: it may have
                     // been selected while enabled, and locking the toggle would
                     // strand it holding one of the four slots forever.
@@ -386,7 +386,7 @@ struct GeneralSettingsView: View {
                     set: { notificationPreferences.setEnabled($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
 
             if notificationPreferences.isEnabled {
@@ -438,7 +438,7 @@ struct GeneralSettingsView: View {
                     set: { launchAtLogin.setEnabled($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
 
             if let error = launchAtLogin.lastError {
@@ -454,7 +454,7 @@ struct GeneralSettingsView: View {
                     set: { dockVisibility.setShowInDock($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
 
             SettingsDivider()
@@ -487,7 +487,7 @@ struct GeneralSettingsView: View {
                     set: { softwareUpdates.setAutomaticallyChecksForUpdates($0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
                 .disabled(softwareUpdates.configurationError != nil)
             }
 

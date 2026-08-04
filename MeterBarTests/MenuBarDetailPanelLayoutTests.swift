@@ -1,3 +1,6 @@
+import AppKit
+import MeterBarShared
+import SwiftUI
 import XCTest
 @testable import MeterBar
 
@@ -106,5 +109,100 @@ final class MenuBarDetailPanelLayoutTests: XCTestCase {
         )
 
         XCTAssertEqual(frame.maxY, visibleFrame.maxY - MeterBarMenuDetailPanelLayout.screenPadding)
+    }
+}
+
+/// Guards the hover detail panel against drifting from the popover card it opens
+/// from. The two surfaces hand-rolled separate headers and the panel grew a
+/// divider, a section heading and per-row card surfaces the card never had, so
+/// hovering a card swapped in something that read like a different provider.
+@MainActor
+final class MenuBarProviderDetailParityTests: XCTestCase {
+    private func snapshot(hoursSinceRefresh: Double = 0) -> ProviderSnapshot {
+        let weekly = UsageLimit(
+            used: 40,
+            total: 100,
+            resetTime: Date().addingTimeInterval(3600),
+            windowSeconds: 604_800
+        )
+        return ProviderSnapshot(
+            id: "codex",
+            title: "Codex",
+            service: .codexCli,
+            updatedAt: Date().addingTimeInterval(-hoursSinceRefresh * 3600),
+            limits: [
+                SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
+            ],
+            emptyDetail: "Waiting for refresh",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+    }
+
+    /// The parity that matters: both surfaces derive their identity row from the
+    /// same component, so neither can quietly start showing a different field.
+    func testDetailPanelHeaderMatchesTheCardHeader() {
+        let snapshot = snapshot()
+
+        XCTAssertEqual(
+            MenuBarProviderDetailContent(snapshot: snapshot).headerContent,
+            ProviderStatusCard(snapshot: snapshot).headerContent
+        )
+    }
+
+    /// The panel used to label itself with the service name, which the card
+    /// already shows as its title. The refresh time is the field that adds
+    /// something.
+    func testHeaderShowsRefreshTimeRatherThanServiceName() {
+        let snapshot = snapshot(hoursSinceRefresh: 2)
+        let content = ProviderCardHeader.Content(snapshot: snapshot)
+
+        XCTAssertEqual(content.title, snapshot.title)
+        XCTAssertEqual(content.subtitle, snapshot.updatedText)
+        XCTAssertNotEqual(content.subtitle, snapshot.service.displayName)
+    }
+
+    /// The panel dropped the status word entirely, so a stale or logged-out
+    /// provider looked healthy the moment the pointer landed on it.
+    func testHeaderCarriesTheSameStatusWordAsTheCard() {
+        let healthy = snapshot()
+        XCTAssertEqual(
+            ProviderCardHeader.Content(snapshot: healthy).statusText,
+            ProviderCardPresentation.statusText(for: healthy)
+        )
+
+        let loginRequired = ProviderSnapshotBuilder.snapshot(
+            title: "shipshitdev",
+            service: .claudeCode,
+            metrics: nil,
+            emptyDetail: "Run claude login"
+        )
+        XCTAssertEqual(
+            ProviderCardHeader.Content(snapshot: loginRequired).statusText,
+            ProviderCardPresentation.statusText(for: loginRequired)
+        )
+    }
+
+    func testDetailPanelRendersAtPanelWidth() {
+        let content = MenuBarProviderDetailContent(snapshot: snapshot())
+        let host = NSHostingView(
+            rootView: content.frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
+    }
+
+    func testHeaderRendersWithAndWithoutTheDisclosureChevron() {
+        for showsChevron in [true, false] {
+            let header = ProviderCardHeader(snapshot: snapshot(), showsDisclosureChevron: showsChevron)
+            let host = NSHostingView(rootView: header.frame(width: 320))
+            host.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(
+                host.fittingSize.height,
+                0,
+                "ProviderCardHeader(showsDisclosureChevron: \(showsChevron)) should lay out"
+            )
+        }
     }
 }

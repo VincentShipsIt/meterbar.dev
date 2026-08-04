@@ -311,7 +311,7 @@ struct ProviderStatusClient {
         let (data, response) = try await session.data(from: url)
         try ServiceSupport.validate(response, data: data)
         guard let html = String(data: data, encoding: .utf8) else {
-            throw ServiceError.parsingError
+            throw ServiceError.parsingError(nil)
         }
         let operational = html.localizedCaseInsensitiveContains("All Systems Operational")
         return ProviderStatusReport(

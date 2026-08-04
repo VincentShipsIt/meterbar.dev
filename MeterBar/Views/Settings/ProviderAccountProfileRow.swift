@@ -260,8 +260,7 @@ struct ProviderAccountProfileRow: View {
                 set: onEnabledChange
             ))
             .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            .meterBarSwitch()
             .disabled(isEnabled && !canDisable)
             .accessibilityLabel("Track \(accountName)")
             .help(enablementHelp)

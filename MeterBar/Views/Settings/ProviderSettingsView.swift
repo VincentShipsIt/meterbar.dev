@@ -174,7 +174,7 @@ struct ProviderSettingsView: View {
     }
 
     private func providerHeader(for service: ServiceType, facts: ProviderSettingsFacts) -> some View {
-        DashboardTile(padding: 12) {
+        DashboardTile(padding: .popover) {
             HStack(alignment: .center, spacing: 12) {
                 ProviderLogoView(
                     kind: .forService(service),
@@ -206,8 +206,7 @@ struct ProviderSettingsView: View {
 
                 Toggle("", isOn: providerEnabledBinding(for: service))
                     .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+                    .meterBarSwitch()
             }
         }
     }
@@ -226,8 +225,8 @@ struct ProviderSettingsView: View {
                 SettingsInfoRow(label: "Plan", value: plan)
             }
 
-            if let error = facts.errorText {
-                SettingsNotice(text: error, color: MeterBarTheme.warning)
+            if let notice = facts.noticeText {
+                SettingsNotice(text: notice, color: MeterBarTheme.warning)
             }
         }
     }
@@ -427,7 +426,7 @@ struct ProviderSettingsView: View {
                     }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
 
             SettingsDivider()

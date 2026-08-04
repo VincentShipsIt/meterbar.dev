@@ -110,61 +110,33 @@ struct UsageWidgetEntryView: View {
     }
 }
 
+/// Small is one number. The three stacked mini-cards it used to draw were the
+/// popover's list shrunk past the point of being readable inside 150×150.
 struct SmallWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
         let presentation = entry.presentation(for: .small)
-        VStack(alignment: .leading, spacing: 6) {
+        let metrics = WidgetGlance.metrics(for: .small)
+        VStack(alignment: .leading, spacing: metrics.stackSpacing) {
             if let emptyState = presentation.emptyState {
                 WidgetEmptyStateView(state: emptyState, compact: true)
             } else {
-                ForEach(presentation.rows) { row in
-                    ServiceMiniView(row: row)
+                switch WidgetGlance.layout(for: presentation, family: .small) {
+                case let .hero(headline, supporting):
+                    WidgetGlanceHero(row: headline, metrics: metrics)
+                    WidgetGlanceRail(rows: supporting, metrics: metrics)
+                case let .rows(rows):
+                    ForEach(rows) { row in
+                        WidgetGlanceRow(row: row, metrics: metrics)
+                    }
                 }
-                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
+                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount, metrics: metrics)
             }
         }
-        .padding()
+        .padding(metrics.contentPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.fill.tertiary, for: .widget)
-    }
-}
-
-struct ServiceMiniView: View {
-    let row: WidgetPresentationRow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                WidgetProviderIcon(service: row.service, size: 13)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(row.accountName)
-                        .font(.caption2)
-                        .lineLimit(1)
-                    Text(row.quotaTitle)
-                        .font(.system(size: 8))
-                        .foregroundStyle(.secondary)
-                }
-
-                if let progressValue = row.progressValue,
-                   let progressTotal = row.progressTotal {
-                    ProgressView(value: progressValue, total: progressTotal)
-                        .tint(row.usageStatus?.color ?? .secondary)
-                }
-
-                Text(row.compactSummaryText)
-                    .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                WidgetHealthIndicator(row: row)
-            }
-
-            WidgetRowDetails(row: row)
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -172,20 +144,7 @@ struct MediumWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        let presentation = entry.presentation(for: .medium)
-        VStack(alignment: .leading, spacing: 8) {
-            if let emptyState = presentation.emptyState {
-                WidgetEmptyStateView(state: emptyState)
-            } else {
-                ForEach(presentation.rows) { row in
-                    ServiceCompactView(row: row)
-                }
-                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .containerBackground(.fill.tertiary, for: .widget)
+        WidgetGlanceStack(entry: entry, family: .medium)
     }
 }
 
@@ -193,120 +152,235 @@ struct LargeWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        let presentation = entry.presentation(for: .large)
-        VStack(alignment: .leading, spacing: 0) {
+        WidgetGlanceStack(entry: entry, family: .large)
+    }
+}
+
+/// Medium and large are the same surface with a different row budget, so they
+/// share one body rather than two copies that drift.
+struct WidgetGlanceStack: View {
+    let entry: UsageWidgetEntry
+    let family: WidgetPresentationFamily
+
+    var body: some View {
+        let presentation = entry.presentation(for: family)
+        let metrics = WidgetGlance.metrics(for: family)
+        VStack(alignment: .leading, spacing: metrics.stackSpacing) {
             if let emptyState = presentation.emptyState {
                 WidgetEmptyStateView(state: emptyState)
             } else {
-                ForEach(Array(presentation.rows.enumerated()), id: \.element.id) { index, row in
-                    ServiceCompactView(row: row)
-                    if index < presentation.rows.count - 1 {
-                        Spacer()
+                if case let .rows(rows) = WidgetGlance.layout(for: presentation, family: family) {
+                    ForEach(rows) { row in
+                        WidgetGlanceRow(row: row, metrics: metrics)
                     }
                 }
-                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount)
+                WidgetOverflowView(hiddenRowCount: presentation.hiddenRowCount, metrics: metrics)
+                // Rows hug the top and keep an even rhythm instead of being
+                // spread apart to fill whatever height the family happens to be.
+                Spacer(minLength: 0)
             }
         }
-        .padding()
+        .padding(metrics.contentPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
 
-struct ServiceCompactView: View {
+// MARK: - Glance rows
+
+/// One provider, read at arm's length: the number leads, the account name
+/// supports it, and the bar's tint carries status so no separate dot is needed.
+struct WidgetGlanceRow: View {
     let row: WidgetPresentationRow
+    let metrics: WidgetGlanceMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                WidgetProviderIcon(service: row.service, size: 18)
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            HStack(spacing: metrics.rowSpacing * 2) {
+                WidgetProviderIcon(service: row.service, size: metrics.iconSize)
                 Text(row.accountName)
-                    .font(.subheadline)
-                    .bold()
+                    .font(.system(size: metrics.titleSize, weight: .medium))
                     .lineLimit(1)
-                Text(row.quotaTitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                WidgetHealthIndicator(row: row)
-            }
-
-            if let progressValue = row.progressValue,
-               let progressTotal = row.progressTotal {
-                HStack {
-                    ProgressView(value: progressValue, total: progressTotal)
-                        .tint(row.usageStatus?.color ?? .secondary)
-                    Text(row.summaryText)
-                        .font(.caption)
-                }
-            } else {
+                Spacer(minLength: metrics.rowSpacing)
+                WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
                 Text(row.summaryText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
 
-            WidgetRowDetails(row: row)
+            WidgetGlanceBar(row: row, height: metrics.barHeight)
+            WidgetGlanceCaption(row: row, size: metrics.captionSize)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.accountName)
+        .accessibilityValue(row.accessibilityValueText)
     }
 }
 
-struct WidgetRowDetails: View {
+/// The small family's single row: the number takes the tile, everything else
+/// sits under it.
+struct WidgetGlanceHero: View {
     let row: WidgetPresentationRow
+    let metrics: WidgetGlanceMetrics
 
     var body: some View {
-        if row.resetTime != nil || row.freshnessDate != nil {
-            HStack(spacing: 6) {
-                if let resetTime = row.resetTime {
-                    Label {
-                        Text(resetTime, style: .relative)
-                    } icon: {
-                        Image(systemName: "arrow.clockwise")
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            HStack(spacing: metrics.rowSpacing * 2) {
+                WidgetProviderIcon(service: row.service, size: metrics.iconSize)
+                Text(row.accountName)
+                    .font(.system(size: metrics.titleSize, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: metrics.rowSpacing)
+                WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
+            }
+
+            Text(row.summaryText)
+                .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+
+            WidgetGlanceBar(row: row, height: metrics.barHeight)
+            WidgetGlanceCaption(row: row, size: metrics.captionSize)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.accountName)
+        .accessibilityValue(row.accessibilityValueText)
+    }
+}
+
+/// Everything the hero displaced, reduced to one line each: enough to know the
+/// other accounts are fine, not enough to compete with the number above.
+struct WidgetGlanceRail: View {
+    let rows: [WidgetPresentationRow]
+    let metrics: WidgetGlanceMetrics
+
+    var body: some View {
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                ForEach(rows) { row in
+                    HStack(spacing: metrics.rowSpacing) {
+                        WidgetProviderIcon(service: row.service, size: metrics.captionSize)
+                        Text(row.accountName)
+                            .font(.system(size: metrics.captionSize))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: metrics.rowSpacing)
+                        Text(row.compactSummaryText)
+                            .font(.system(size: metrics.captionSize, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(row.usageStatus?.color ?? .secondary)
                     }
-                }
-                if let freshnessDate = row.freshnessDate {
-                    Label {
-                        Text(freshnessDate, style: .relative)
-                    } icon: {
-                        Image(systemName: "clock")
-                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(row.accountName)
+                    .accessibilityValue(row.compactAccessibilityValueText)
                 }
             }
-            .font(.system(size: 8))
-            .foregroundStyle(.secondary)
         }
     }
 }
 
-struct WidgetHealthIndicator: View {
+/// A capsule with weight rather than a `ProgressView` hairline, tinted by the
+/// quota band so status needs no second glyph.
+struct WidgetGlanceBar: View {
     let row: WidgetPresentationRow
+    let height: CGFloat
+
+    private var fraction: Double {
+        guard let value = row.progressValue, let total = row.progressTotal, total > 0 else { return 0 }
+        return min(max(value / total, 0), 1)
+    }
 
     var body: some View {
-        switch row.health {
-        case .healthy:
-            if let status = row.usageStatus {
-                WidgetStatusIndicator(status: status)
-                    .accessibilityLabel("Current usage")
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(.quaternary)
+                let filled = proxy.size.width * fraction
+                if filled > 0 {
+                    Capsule(style: .continuous)
+                        .fill(row.usageStatus?.color ?? Color.secondary)
+                        // A sliver still has to read as a capsule, not a dot.
+                        .frame(width: max(height, filled))
+                }
             }
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Quota window, reset and freshness on one line — the metadata the card stacked
+/// under the account name, moved out of the headline's way.
+struct WidgetGlanceCaption: View {
+    let row: WidgetPresentationRow
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: size / 2) {
+            Text(row.quotaTitle)
+            if let resetTime = row.resetTime {
+                Label {
+                    Text(resetTime, style: .relative)
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            if let freshnessDate = row.freshnessDate {
+                Label {
+                    Text(freshnessDate, style: .relative)
+                } icon: {
+                    Image(systemName: "clock")
+                }
+            }
+        }
+        .font(.system(size: size))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+}
+
+/// Only the states the bar cannot express. A healthy row's status is already the
+/// bar's tint, so it draws nothing here.
+struct WidgetHealthIndicator: View {
+    let health: WidgetDataHealth
+    let size: CGFloat
+
+    var body: some View {
+        switch health {
+        case .healthy:
+            EmptyView()
         case .stale:
             Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: size))
                 .foregroundStyle(.orange)
-                .accessibilityLabel("Stale usage data")
+                .accessibilityLabel(label)
         case .unavailable:
             Image(systemName: "xmark.circle")
+                .font(.system(size: size))
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Usage unavailable")
+                .accessibilityLabel(label)
         }
+    }
+
+    /// The badge and the row's spoken value read the same phrase out of
+    /// `WidgetDataHealth`, so they cannot end up describing one state two ways.
+    /// A healthy row draws no glyph, so it never reaches this.
+    private var label: String {
+        health.accessibilityDescription ?? ""
     }
 }
 
 struct WidgetOverflowView: View {
     let hiddenRowCount: Int
+    let metrics: WidgetGlanceMetrics
 
     var body: some View {
         if hiddenRowCount > 0 {
             Label("+\(hiddenRowCount) more", systemImage: "ellipsis.circle")
-                .font(.caption2)
+                .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("\(hiddenRowCount) more usage rows")
         }
@@ -355,14 +429,5 @@ struct WidgetProviderIcon: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
         }
-    }
-}
-struct WidgetStatusIndicator: View {
-    let status: UsageStatus
-
-    var body: some View {
-        Circle()
-            .fill(status.color)
-            .frame(width: 8, height: 8)
     }
 }

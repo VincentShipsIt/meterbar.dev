@@ -34,17 +34,26 @@ struct DashboardCostsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            CostOverviewStatusCard(
-                summary: summary,
-                isScanning: costTracker.isScanning,
-                isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
-                formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0)
-            )
+            // The two headline figures answer the same question over different
+            // windows, so they read as a pair. `maxHeight: .infinity` on both,
+            // with the row fixed to its intrinsic height, stretches the shorter
+            // card to the taller one instead of leaving it ending mid-air.
+            HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
+                CostOverviewStatusCard(
+                    summary: summary,
+                    isScanning: costTracker.isScanning,
+                    isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
+                    formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            LifetimeCostSummaryCard(
-                summary: summary?.lifetime,
-                isScanning: costTracker.isRefreshInProgress
-            )
+                LifetimeCostSummaryCard(
+                    summary: summary?.lifetime,
+                    isScanning: costTracker.isRefreshInProgress
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
 
             costTrendCard
 

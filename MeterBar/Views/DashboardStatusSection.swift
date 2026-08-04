@@ -27,6 +27,19 @@ struct DashboardStatusSection: View {
         return nil
     }
 
+    /// Title for the refresh control. A sweep takes seconds, so the button says
+    /// what it is doing rather than leaving a greyed-out label as the only sign
+    /// the press registered.
+    static func refreshButtonTitle(isRefreshing: Bool) -> String {
+        isRefreshing ? "Refreshing..." : "Refresh"
+    }
+
+    /// Tooltip for the same control, matching `UsageDashboardView`'s toolbar
+    /// refresh, which already swaps its help text with the spinner.
+    static func refreshButtonHelp(isRefreshing: Bool) -> String {
+        isRefreshing ? "Refreshing provider status pages" : "Refresh every provider status page"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             DashboardCard(title: "Provider Status Pages", trailing: statusPagesSummary) {
@@ -40,10 +53,20 @@ struct DashboardStatusSection: View {
                     Button {
                         Task { await providerStatusMonitor.refreshAll() }
                     } label: {
-                        Label("Refresh Status", systemImage: "arrow.clockwise")
+                        HStack(spacing: MeterBarTheme.Spacing.xs) {
+                            // The shared spinner/glyph swap the dashboard toolbar
+                            // already uses, so the button reports the sweep
+                            // itself instead of only greying out.
+                            RefreshingIcon(isRefreshing: providerStatusMonitor.isRefreshing)
+                            Text(Self.refreshButtonTitle(isRefreshing: providerStatusMonitor.isRefreshing))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
                     }
-                    .buttonStyle(.glass)
+                    // `.bordered` matches the neighbouring Diagnostics actions;
+                    // `.glass` read as plain text rather than a control.
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .help(Self.refreshButtonHelp(isRefreshing: providerStatusMonitor.isRefreshing))
                     .disabled(providerStatusMonitor.isRefreshing)
                 }
             }

@@ -12,11 +12,25 @@ struct DashboardOverviewSection: View {
     let costSummary: CostSummary?
     let onSelectProvider: (ProviderSnapshot.ID) -> Void
 
-    private var gridColumns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(minimum: 320), spacing: 12, alignment: .top),
-            count: 2
-        )
+    private static let masonryColumnCount = 2
+
+    /// Deals items round-robin across `columnCount` independent columns.
+    ///
+    /// `LazyVGrid` locks every card in a row to the tallest card in that row, so
+    /// a provider with two quota windows left a block of dead space beside a
+    /// provider with four. Columns that flow on their own pack tight instead.
+    /// Round-robin keeps reading order running left-to-right across each row
+    /// and keeps the columns balanced to within one card.
+    ///
+    /// Internal (not private) so the ordering and balance can be unit-tested
+    /// without hosting the page.
+    nonisolated static func masonryColumns<Element>(_ items: [Element], columnCount: Int) -> [[Element]] {
+        let count = max(1, columnCount)
+        var columns = [[Element]](repeating: [], count: count)
+        for (index, item) in items.enumerated() {
+            columns[index % count].append(item)
+        }
+        return columns
     }
 
     var body: some View {
@@ -29,14 +43,21 @@ struct DashboardOverviewSection: View {
                 formattedTokens: UsageFormat.tokens(costSummary?.totalTokens ?? 0)
             )
 
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 12) {
-                ForEach(snapshots) { snapshot in
-                    // Same shared provider card as the popover and the Limits
-                    // page; tapping it jumps to that provider in Limits.
-                    ProviderStatusCard(
-                        snapshot: snapshot,
-                        onSelect: { onSelectProvider(snapshot.id) }
-                    )
+            HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
+                let columns = Self.masonryColumns(snapshots, columnCount: Self.masonryColumnCount)
+                ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                    VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+                        ForEach(column) { snapshot in
+                            // Same shared provider card as the popover and the
+                            // Limits page; tapping it jumps to that provider in
+                            // Limits.
+                            ProviderStatusCard(
+                                snapshot: snapshot,
+                                onSelect: { onSelectProvider(snapshot.id) }
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -51,14 +72,15 @@ private struct OverviewSummaryStrip: View {
     let estimatedCost: String?
     let formattedTokens: String
 
-    private let columns = [
-        GridItem(.flexible(minimum: 180), spacing: 12),
-        GridItem(.flexible(minimum: 180), spacing: 12),
-        GridItem(.flexible(minimum: 180), spacing: 12)
-    ]
+    // Same gutter as the provider masonry below it, so the page reads as one
+    // grid rather than two with different spacing.
+    private let columns = Array(
+        repeating: GridItem(.flexible(minimum: 180), spacing: MeterBarTheme.Spacing.sm),
+        count: 3
+    )
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
             TimelineView(
                 .periodic(
                     from: ResetCountdownSchedule.anchor,

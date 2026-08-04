@@ -71,7 +71,7 @@ struct SessionWakeSettingsView: View {
             ) {
                 Toggle("Session Wake", isOn: onBinding)
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
                     .disabled(!store.canTurnOn && !store.isOn)
             }
 
@@ -225,7 +225,7 @@ struct SessionWakeSettingsView: View {
                 ) {
                     Toggle("Acknowledge risk", isOn: binding(store.bypassAcknowledged, store.setBypassAcknowledged))
                         .labelsHidden()
-                        .toggleStyle(.switch)
+                        .meterBarSwitch()
                 }
             }
         }
@@ -239,7 +239,7 @@ struct SessionWakeSettingsView: View {
             ) {
                 Toggle("Notify when a run completes", isOn: $store.notifyOnCompletion)
                     .labelsHidden()
-                    .toggleStyle(.switch)
+                    .meterBarSwitch()
             }
         }
     }

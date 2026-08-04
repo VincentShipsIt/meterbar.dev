@@ -33,12 +33,10 @@ struct ProviderStatusCard: View {
         self.onSelect = onSelect
     }
 
-    private var statusColor: Color {
-        ProviderCardPresentation.statusColor(for: snapshot)
-    }
-
-    private var statusText: String {
-        ProviderCardPresentation.statusText(for: snapshot)
+    /// The identity row this card shows, exposed so the hover detail panel's
+    /// header can be asserted equal to it.
+    var headerContent: ProviderCardHeader.Content {
+        ProviderCardHeader.Content(snapshot: snapshot)
     }
 
     /// Cards without usage data and exhausted cards are terminal summaries. A
@@ -95,16 +93,8 @@ struct ProviderStatusCard: View {
         }
     }
 
-    /// Chevron shown only when the card opens a detail panel, so "clickable" is
-    /// visible instead of relying on an accessibilityHint alone.
-    @ViewBuilder private var disclosureChevron: some View {
-        if allowsDetailNavigation {
-            CardDisclosureChevron()
-        }
-    }
-
     private var cardContent: some View {
-        DashboardTile(padding: 11) {
+        DashboardTile(padding: .popover) {
             cardBody
         }
         .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
@@ -179,26 +169,10 @@ struct ProviderStatusCard: View {
 
     private var expandedCardBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(snapshot.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    Text(snapshot.updatedText)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Text(statusText)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(statusColor)
-
-                disclosureChevron
-            }
+            // The chevron rides along only when the card opens a detail panel,
+            // so "clickable" is visible instead of relying on the
+            // accessibilityHint alone.
+            ProviderCardHeader(snapshot: snapshot, showsDisclosureChevron: allowsDetailNavigation)
 
             if snapshot.hasExhaustedLimit {
                 BlockingLimitResetCounter(

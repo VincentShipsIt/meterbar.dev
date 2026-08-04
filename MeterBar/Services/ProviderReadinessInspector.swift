@@ -400,7 +400,14 @@ nonisolated public enum ProviderReadinessInspector {
             return "Not authenticated"
         case .invalidURL:
             return "Invalid request URL"
-        case .parsingError:
+        case let .parsingError(detail):
+            // Same rule as the API messages below: only interpolation-free
+            // strings MeterBar authored survive, because a parse detail is the
+            // one place raw provider output could otherwise leak into a
+            // pasteable diagnostics report.
+            if let detail, ClaudeCodeParseFailure.messages.contains(detail) {
+                return detail
+            }
             return "Could not parse the provider response"
         case let .apiError(message):
             if safeNetworkMessages.contains(message) {

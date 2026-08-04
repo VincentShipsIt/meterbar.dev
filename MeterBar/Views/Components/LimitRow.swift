@@ -11,9 +11,10 @@ import MeterBarShared
 /// can't diverge again. All display logic lives in the pure `Content` value
 /// type so it can be unit-tested without hosting the view.
 struct LimitRow: View {
-    /// Per-surface sizing. `.compact` = popover provider card (terse, reset-only
-    /// footer), `.detail` = menu-bar detail panel (self-carded rows), `.regular`
-    /// = dashboard & settings (largest type).
+    /// Per-surface sizing only — no surface chrome, since every caller already
+    /// draws the card the row sits in. `.compact` = popover provider card (terse,
+    /// reset-only footer), `.detail` = menu-bar detail panel (same chrome as the
+    /// card, fuller footer), `.regular` = dashboard & settings (largest type).
     enum Density {
         case compact
         case detail
@@ -37,12 +38,10 @@ struct LimitRow: View {
     var accessibilityLabelText: String { limit.accessibilityLabel }
     var accessibilityValueText: String { limit.accessibilityValue }
 
+    // Every surface that draws a `LimitRow` already sits inside a card, so the
+    // row never draws one of its own. The detail panel used to, which is exactly
+    // what made hovering a provider card look like a different design.
     var body: some View {
-        core
-            .modifier(CardSurface(enabled: density.hasCardSurface))
-    }
-
-    private var core: some View {
         VStack(alignment: .leading, spacing: density.rowSpacing) {
             header
             UsageBar(
@@ -202,25 +201,6 @@ extension LimitRow {
     }
 }
 
-private extension LimitRow {
-    /// Optionally wraps the detail-panel row in its own card surface. The
-    /// popover and dashboard rows sit inside a parent tile, so only `.detail`
-    /// carries its own surface.
-    struct CardSurface: ViewModifier {
-        let enabled: Bool
-
-        func body(content: Content) -> some View {
-            if enabled {
-                content
-                    .padding(10)
-                    .meterBarCardSurface(cornerRadius: 10)
-            } else {
-                content
-            }
-        }
-    }
-}
-
 // MARK: - Density metrics
 
 private extension LimitRow.Density {
@@ -324,9 +304,5 @@ private extension LimitRow.Density {
         case .compact, .detail: return 9
         case .regular: return 10
         }
-    }
-
-    var hasCardSurface: Bool {
-        self == .detail
     }
 }

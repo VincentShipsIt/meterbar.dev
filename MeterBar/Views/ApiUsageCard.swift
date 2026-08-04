@@ -164,7 +164,7 @@ struct ApiUsageCard: View {
   var body: some View {
     DashboardTile(
       cornerRadius: MeterBarTheme.apiCardRadius,
-      padding: compact ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md
+      padding: compact ? .nested : .popover
     ) {
       VStack(alignment: .leading, spacing: compact ? 8 : 10) {
         HStack(spacing: 7) {

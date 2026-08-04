@@ -157,13 +157,34 @@ enum CodexCostScanner {
             // Reset per file: attribution carried across rollouts would label
             // one session's spend with another's model.
             var rollout = CodexRolloutContext()
+            // Codex emits a session's opening `token_count` events *before* its
+            // first `turn_context`, so forward-only attribution orphaned them
+            // even though the same file names the model seconds later. Park
+            // them here instead and back-fill once the file declares a model.
+            // Per file, like the rollout context: a sibling rollout's model
+            // must never name events this file left unexplained.
+            var deferred: [CodexDeferredUsage] = []
             FileLineReader.forEachLine(in: fileURL) { line in
                 guard line.contains(Self.tokenCountMarker) else {
                     Self.updateRolloutContext(&rollout, from: line)
+                    // Reaches back only as far as the *first* model the file
+                    // declares — a later mid-session switch must not relabel
+                    // the events that preceded it.
+                    if let model = rollout.turnModel ?? rollout.sessionModel {
+                        Self.flushDeferred(&deferred, modelName: model, windows: &windows)
+                    }
                     return
                 }
-                Self.addTokenCountLine(line, fileURL: fileURL, rollout: rollout, windows: &windows)
+                Self.addTokenCountLine(
+                    line,
+                    fileURL: fileURL,
+                    rollout: rollout,
+                    deferred: &deferred,
+                    windows: &windows
+                )
             }
+            // Whatever the file never explained is genuinely unattributed.
+            Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
         }
     }
 
@@ -201,10 +222,36 @@ enum CodexCostScanner {
         }
     }
 
+    /// Replays the events parked before the file named a model. Each keeps its
+    /// own timestamp, so `ScanWindows.update` still places it on its own day.
+    nonisolated private static func flushDeferred(
+        _ deferred: inout [CodexDeferredUsage],
+        modelName: String?,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        guard !deferred.isEmpty else { return }
+
+        for pending in deferred {
+            Self.addUsage(
+                pending.usage,
+                timestamp: pending.timestamp,
+                sessionID: pending.sessionID,
+                attribution: CodexUsageAttribution(
+                    modelName: modelName,
+                    originName: pending.originName,
+                    projectID: pending.projectID
+                ),
+                windows: &windows
+            )
+        }
+        deferred.removeAll()
+    }
+
     nonisolated private static func addTokenCountLine(
         _ line: Data,
         fileURL: URL,
         rollout: CodexRolloutContext,
+        deferred: inout [CodexDeferredUsage],
         windows: inout ScanWindows<CodexScanContext>
     ) {
         guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
@@ -224,14 +271,31 @@ enum CodexCostScanner {
         let modelName = Self.modelName(from: info, payload: payload)
             ?? rollout.turnModel
             ?? rollout.sessionModel
+        // Origin and project are read now rather than at flush time: they come
+        // from `session_meta`, which a rollout always opens with, so the values
+        // in hand are already the final ones. Only the model is back-filled.
+        let originName = rollout.originator ?? "Codex CLI"
+        let projectID = CostProjectAttribution.codexProjectID(cwd: rollout.cwd)
+
+        guard let modelName else {
+            deferred.append(CodexDeferredUsage(
+                usage: usage,
+                timestamp: timestamp,
+                sessionID: sessionID,
+                originName: originName,
+                projectID: projectID
+            ))
+            return
+        }
+
         Self.addUsage(
             usage,
             timestamp: timestamp,
             sessionID: sessionID,
             attribution: CodexUsageAttribution(
                 modelName: modelName,
-                originName: rollout.originator ?? "Codex CLI",
-                projectID: CostProjectAttribution.codexProjectID(cwd: rollout.cwd)
+                originName: originName,
+                projectID: projectID
             ),
             windows: &windows
         )
@@ -460,6 +524,19 @@ nonisolated struct CodexRolloutContext: Sendable {
 /// `addUsage` can stay under SwiftLint's `function_parameter_count` limit
 /// (issue #270 added `projectID` as the third label alongside the pre-existing
 /// model/origin pair).
+/// A `token_count` event parked because its rollout has not named a model yet.
+///
+/// Deliberately not `Sendable`: it carries the raw `[String: Any]` usage
+/// payload. It never outlives the single-threaded scan of the file that made
+/// it, so it does not need to be.
+nonisolated struct CodexDeferredUsage {
+    let usage: [String: Any]
+    let timestamp: Date
+    let sessionID: String
+    let originName: String
+    let projectID: String
+}
+
 nonisolated struct CodexUsageAttribution: Sendable {
     let modelName: String?
     let originName: String?

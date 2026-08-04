@@ -94,7 +94,7 @@ struct SettingsPanelSection<Content: View>: View {
             .font(.subheadline)
             .fontWeight(.semibold)
 
-            DashboardTile(padding: 12) {
+            DashboardTile(padding: .popover) {
                 VStack(alignment: .leading, spacing: 10) {
                     content
                 }

@@ -50,7 +50,7 @@ struct QuotaEventSettingsView: View {
                     set: { store.setQuotaEventEnabled($0, for: event) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
         }
     }
@@ -66,7 +66,7 @@ struct QuotaEventSettingsView: View {
                     set: { store.setProviderEnabled($0, for: provider) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
         }
     }
@@ -82,7 +82,7 @@ struct QuotaEventSettingsView: View {
                     set: { store.setAccountEnabled($0, for: account.selection) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
             }
         }
     }
@@ -97,7 +97,7 @@ struct QuotaEventSettingsView: View {
                 set: { store.setLocalDeliveryEnabled($0) }
             ))
             .labelsHidden()
-            .toggleStyle(.switch)
+            .meterBarSwitch()
             .disabled(!store.configuration.localIsConfigured)
         }
 
@@ -169,7 +169,7 @@ struct QuotaEventSettingsView: View {
                 set: { store.setWebhookDeliveryEnabled($0) }
             ))
             .labelsHidden()
-            .toggleStyle(.switch)
+            .meterBarSwitch()
             .disabled(store.configuration.validatedWebhookURL == nil)
         }
 
@@ -208,7 +208,7 @@ struct QuotaEventSettingsView: View {
                     set: { store.setWakeEventEnabled($0, for: event) }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .meterBarSwitch()
                 .disabled(!store.configuration.localIsConfigured)
             }
         }

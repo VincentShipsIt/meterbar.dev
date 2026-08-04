@@ -238,16 +238,17 @@ struct MenuBarProviderDetailContent: View {
     snapshot.detailLimits
   }
 
-  private var quotaWindowHeading: String {
-    detailLimits.count == 1 ? "Quota Window" : "Quota Windows"
+  /// The identity row this panel shows, exposed so it can be asserted equal to
+  /// the card's.
+  var headerContent: ProviderCardHeader.Content {
+    ProviderCardHeader.Content(snapshot: snapshot)
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      header
-        .padding(.bottom, MeterBarTheme.Spacing.md)
-
-      Divider()
+    // Spacing, not a divider: the panel is the same card the pointer is resting
+    // on, only wider, so it must not sprout chrome the card never had.
+    VStack(alignment: .leading, spacing: 10) {
+      ProviderCardHeader(snapshot: snapshot)
 
       ViewThatFits(in: .vertical) {
         detailRows
@@ -259,7 +260,9 @@ struct MenuBarProviderDetailContent: View {
         .scrollContentBackground(.hidden)
       }
     }
-    .padding(MeterBarTheme.Spacing.lg)
+    // The same inset as the card this panel expands, so the header and rows sit
+    // at the same distance from the edge in both — a wider card, not a new one.
+    .padding(MeterBarTheme.CardPadding.popover.value)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(MeterBarTheme.Surface.chrome(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
     .clipShape(
@@ -270,31 +273,26 @@ struct MenuBarProviderDetailContent: View {
     )
   }
 
+  // Same order and same spacings as `ProviderStatusCard.expandedCardBody`: the
+  // reset counter and the limit rows are drawn flat inside this one surface, not
+  // wrapped in cards of their own. The only thing the extra width buys is the
+  // fuller `.detail` row footer.
   private var detailRows: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 10) {
       if detailLimits.isEmpty {
         Text(snapshot.emptyDetail)
           .font(.caption)
           .foregroundColor(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.vertical, MeterBarTheme.Spacing.md)
+      } else if snapshot.hasExhaustedLimit {
+        BlockingLimitResetCounter(
+          windows: snapshot.resetWindows,
+          accentColor: snapshot.accentColor,
+          format: menuBarDisplayPreferences.resetTimeFormat
+        )
       } else {
-        if snapshot.hasExhaustedLimit {
-          BlockingLimitResetCounter(
-            windows: snapshot.resetWindows,
-            accentColor: snapshot.accentColor,
-            format: menuBarDisplayPreferences.resetTimeFormat
-          )
-          .padding(MeterBarTheme.Spacing.md)
-          .meterBarCardSurface(cornerRadius: MeterBarTheme.detailCardRadius)
-        }
-
-        VStack(alignment: .leading, spacing: 10) {
-          Text(quotaWindowHeading)
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-
+        VStack(alignment: .leading, spacing: 9) {
           ForEach(detailLimits) { limit in
             LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .detail)
           }
@@ -304,33 +302,12 @@ struct MenuBarProviderDetailContent: View {
       let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
       if badges.hasContent {
         badges
-          .padding(.top, MeterBarTheme.Spacing.xxs)
       }
     }
-    .padding(.top, MeterBarTheme.Spacing.md)
     .frame(maxWidth: .infinity, alignment: .topLeading)
-  }
-
-  private var header: some View {
-    HStack(alignment: .center, spacing: 10) {
-      ProviderLogoView(kind: snapshot.logoKind, size: 20, foregroundColor: snapshot.accentColor)
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(snapshot.title)
-          .font(.headline)
-          .fontWeight(.semibold)
-          .lineLimit(1)
-        Text(snapshot.service.displayName)
-          .font(.caption)
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-      }
-
-      Spacer(minLength: 0)
-    }
   }
 }
 
 // The detail-panel limit row is now `LimitRow(density: .detail)` — see
-// MeterBar/Views/Components/LimitRow.swift. It keeps the per-row card surface
-// that this bespoke `MenuBarProviderLimitDetailRow` used to draw inline.
+// MeterBar/Views/Components/LimitRow.swift, which selects the fuller footer
+// without changing the row's chrome.

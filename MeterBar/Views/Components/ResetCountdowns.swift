@@ -264,6 +264,11 @@ struct BlockingLimitResetCounter: View {
         return exhaustedCount > 1 ? "Limits exhausted" : "Limit exhausted"
     }
 
+    /// Returned whenever no reset instant is known. Callers that can omit the
+    /// countdown entirely compare against this rather than re-deriving the
+    /// "is there anything to count down to?" test from the window.
+    static let unavailableCounterText = "Reset time unavailable"
+
     static func counterText(
         for window: ResetCountdownWindow?,
         now: Date,
@@ -273,7 +278,7 @@ struct BlockingLimitResetCounter: View {
     ) -> String {
         guard let window,
               let countdown = window.limit.resetCountdownText(now: now) else {
-            return "Reset time unavailable"
+            return unavailableCounterText
         }
 
         if countdown == "now" {
@@ -284,7 +289,7 @@ struct BlockingLimitResetCounter: View {
         case .countdown:
             return "in \(countdown)"
         case .clock:
-            guard let resetTime = window.limit.resetTime else { return "Reset time unavailable" }
+            guard let resetTime = window.limit.resetTime else { return unavailableCounterText }
             return "at \(ResetCountdownLabel.formattedClockTime(resetTime, locale: locale, timeZone: timeZone))"
         }
     }

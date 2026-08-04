@@ -590,6 +590,91 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(context.originTotals["Codex CLI"]?.input, 7)
     }
 
+    /// Codex emits the first `token_count` events of a session *before* the
+    /// first `turn_context`, so forward-only attribution orphaned them even
+    /// though the same file names the model seconds later. Measured against the
+    /// 400 most recent live rollouts, that was 100% of the "Unknown model" row.
+    func testScanCodexRolloutsBackfillsUsageEmittedBeforeTheFirstTurnContext() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexSessionMetaLine(timestamp: "2026-06-15T09:00:00Z"),
+            codexUsageLine(timestamp: "2026-06-15T09:00:30Z", input: 100),
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", input: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 107)
+        XCTAssertNil(context.modelTotals["Unknown model"], "the file names the model — nothing is unknown")
+    }
+
+    /// Back-fill reaches backwards only as far as the *first* model the file
+    /// declares. A later switch must not relabel the events that preceded it.
+    func testScanCodexRolloutsBackfillStopsAtTheFirstModel() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexSessionMetaLine(timestamp: "2026-06-15T09:00:00Z"),
+            codexUsageLine(timestamp: "2026-06-15T09:00:30Z", input: 100),
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", input: 7),
+            codexTurnContextLine(timestamp: "2026-06-15T09:03:00Z", model: "gpt-5.6-luna"),
+            codexUsageLine(timestamp: "2026-06-15T09:04:00Z", input: 3)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 107)
+        XCTAssertEqual(context.modelTotals["gpt-5.6-luna"]?.input, 3)
+    }
+
+    /// The pending buffer is per file, like the rollout context itself: a
+    /// sibling's model must not name events the truncated file never explained.
+    func testScanCodexRolloutsDoesNotBackfillAcrossFiles() throws {
+        let root = try makeCodexHome()
+        let dir = root.appendingPathComponent("archived_sessions", isDirectory: true)
+        try writeCodexRollout(in: dir, path: "a.jsonl", lines: [
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-a", input: 100)
+        ])
+        try writeCodexRollout(in: dir, path: "b.jsonl", lines: [
+            codexTurnContextLine(timestamp: "2026-06-15T09:04:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:05:00Z", conversationID: "conv-b", input: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.modelTotals["Unknown model"]?.input, 100)
+        XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 7)
+    }
+
+    /// Back-filled events keep their own timestamps, so the daily rollups the
+    /// charts read must land on each event's day rather than the flush's.
+    func testScanCodexRolloutsBackfillKeepsPerEventDayPlacement() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageLine(timestamp: "2026-06-14T12:00:00Z", input: 100),
+            codexTurnContextLine(timestamp: "2026-06-16T11:00:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-16T12:00:00Z", input: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        let firstDay = Calendar.current.startOfDay(
+            for: try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-14T12:00:00Z"))
+        )
+        let secondDay = Calendar.current.startOfDay(
+            for: try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-16T12:00:00Z"))
+        )
+        XCTAssertNotEqual(firstDay, secondDay)
+        XCTAssertEqual(context.dailyModelTotals[firstDay]?["gpt-5.6-sol"]?.input, 100)
+        XCTAssertEqual(context.dailyModelTotals[secondDay]?["gpt-5.6-sol"]?.input, 7)
+    }
+
     // MARK: - Codex rollout directories
 
     func testCodexRolloutDirectoriesCoverArchivedAndLiveSessions() {

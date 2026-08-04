@@ -76,4 +76,54 @@ final class MeterBarThemeTests: XCTestCase {
         XCTAssertEqual(MeterBarTheme.Fill.hairline, 0.18)
         XCTAssertGreaterThan(MeterBarTheme.Fill.hairline, MeterBarTheme.Fill.subtle)
     }
+
+    /// Card padding is picked by surface, not by number. Every step has to land on
+    /// the spacing grid — cards were being built at 11 and 14, a pixel off both
+    /// the grid and each other, which is what made the popover padding look
+    /// inconsistent from card to card.
+    func testCardPaddingStepsSitOnTheSpacingGrid() {
+        XCTAssertEqual(MeterBarTheme.CardPadding.nested.value, MeterBarTheme.Spacing.sm)
+        XCTAssertEqual(MeterBarTheme.CardPadding.popover.value, MeterBarTheme.Spacing.md)
+        XCTAssertEqual(MeterBarTheme.CardPadding.standard.value, MeterBarTheme.Spacing.lg)
+
+        let grid: Set<CGFloat> = [2, 4, 8, 12, 16, 20, 24]
+        for padding in MeterBarTheme.CardPadding.allCases {
+            XCTAssertTrue(grid.contains(padding.value), "\(padding) is off the 4pt spacing grid")
+        }
+    }
+
+    /// A tile nested inside another surface must be tighter than the surface it
+    /// sits in, otherwise the two paddings stack into a visible gutter.
+    func testCardPaddingTightensAsTilesNest() {
+        XCTAssertLessThan(MeterBarTheme.CardPadding.nested.value, MeterBarTheme.CardPadding.popover.value)
+        XCTAssertLessThan(MeterBarTheme.CardPadding.popover.value, MeterBarTheme.CardPadding.standard.value)
+    }
+}
+
+/// `DashboardTile` is the single card shell, so its padding is the one place the
+/// popover and the dashboard can disagree. It takes a named surface rather than a
+/// number specifically so they can't.
+@MainActor
+final class DashboardTilePaddingTests: XCTestCase {
+    func testTileDefaultsToStandardCardPadding() {
+        let tile = DashboardTile { EmptyView() }
+
+        XCTAssertEqual(tile.padding, .standard)
+        XCTAssertEqual(tile.padding.value, MeterBarTheme.Spacing.lg)
+    }
+
+    func testTileRendersAtEverySurfacePadding() {
+        for padding in MeterBarTheme.CardPadding.allCases {
+            let tile = DashboardTile(padding: padding) {
+                Text("Provider")
+            }
+            let host = NSHostingView(rootView: tile.frame(width: 320))
+            host.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(
+                host.fittingSize.height,
+                padding.value * 2,
+                "DashboardTile(padding: \(padding)) should lay out taller than its own insets"
+            )
+        }
+    }
 }

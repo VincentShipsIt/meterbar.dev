@@ -124,7 +124,7 @@ nonisolated enum ServiceSupport {
         case let urlError as URLError:
             return sanitize(.apiError(message(for: urlError)))
         case is DecodingError:
-            return .parsingError
+            return .parsingError(nil)
         default:
             return .apiError("Request failed")
         }
@@ -162,6 +162,16 @@ nonisolated enum ServiceSupport {
     }
 
     private static func sanitize(_ error: ServiceError) -> ServiceError {
+        // A parse detail is only ever displayable when MeterBar wrote it. Any
+        // other text may be provider output, so it collapses to the generic
+        // message rather than reaching a view.
+        if case let .parsingError(detail) = error {
+            guard let detail, ClaudeCodeParseFailure.messages.contains(detail) else {
+                return .parsingError(nil)
+            }
+            return error
+        }
+
         guard case let .apiError(message) = error else { return error }
 
         let knownSafeMessages: Set<String> = [
