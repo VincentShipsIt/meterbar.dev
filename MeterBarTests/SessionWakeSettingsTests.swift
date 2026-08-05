@@ -1,3 +1,4 @@
+import MeterBarShared
 import XCTest
 @testable import MeterBar
 
@@ -204,6 +205,18 @@ final class SessionWakeSettingsTests: XCTestCase {
     }
 
     // MARK: - Provider dimension
+
+    /// Session Wake's own two-case provider enum names itself out of
+    /// `ServiceType` rather than carrying its own copies, so renaming a provider
+    /// is one edit. The two cases pick different name concepts on purpose: this
+    /// string lands mid-sentence ("Resumed 2 of 3 … sessions"), where Codex's
+    /// full product name reads as boilerplate.
+    func testWakeProviderNamesComeFromServiceType() {
+        XCTAssertEqual(WakeProvider.claude.displayName, ServiceType.claudeCode.displayName)
+        XCTAssertEqual(WakeProvider.codex.displayName, ServiceType.codexCli.shortName)
+        XCTAssertEqual(WakeProvider.claude.displayName, "Claude Code")
+        XCTAssertEqual(WakeProvider.codex.displayName, "Codex")
+    }
 
     func testDefaultProviderIsClaude() {
         let store = makeStore()

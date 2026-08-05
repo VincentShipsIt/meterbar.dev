@@ -41,7 +41,7 @@ struct ProviderSettingsView: View {
         }
         .sheet(isPresented: $isAddingClaudeAccount) {
             AddProviderAccountSheet(
-                providerName: "Claude",
+                providerName: ServiceType.claudeCode.shortName,
                 logoKind: .claude,
                 accent: MeterBarTheme.claudeAccent,
                 subtitle: "Use a separate CLAUDE_CONFIG_DIR for this profile.",
@@ -54,7 +54,7 @@ struct ProviderSettingsView: View {
         }
         .sheet(isPresented: $isAddingCodexAccount) {
             AddProviderAccountSheet(
-                providerName: "Codex",
+                providerName: ServiceType.codexCli.shortName,
                 logoKind: .codex,
                 accent: MeterBarTheme.codexAccent,
                 subtitle: "Use a separate CODEX_HOME containing its own auth.json.",
@@ -68,7 +68,7 @@ struct ProviderSettingsView: View {
         }
         .sheet(isPresented: $isAddingGrokAccount) {
             AddProviderAccountSheet(
-                providerName: "Grok",
+                providerName: ServiceType.grok.shortName,
                 logoKind: .grok,
                 accent: MeterBarTheme.grokAccent,
                 subtitle: "Use a separate GROK_HOME containing its CLI-managed auth.json.",
@@ -329,7 +329,7 @@ struct ProviderSettingsView: View {
             if let claudeExtraUsageStatus {
                 SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
                     ExtraUsageRow(
-                        title: "Claude Code",
+                        title: ServiceType.claudeCode.displayName,
                         status: claudeExtraUsageStatus,
                         manageURL: "https://claude.ai/settings"
                     )
@@ -338,7 +338,7 @@ struct ProviderSettingsView: View {
         case .codexCli:
             SettingsPanelSection(title: "Credits", systemImage: "creditcard", color: MeterBarTheme.warning) {
                 ExtraUsageRow(
-                    title: "OpenAI Codex",
+                    title: ServiceType.codexCli.displayName,
                     status: dataManager.metrics[.codexCli]?.extraUsage,
                     manageURL: "https://chatgpt.com"
                 )
@@ -350,7 +350,7 @@ struct ProviderSettingsView: View {
         case .grok:
             SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
                 ExtraUsageRow(
-                    title: "Grok",
+                    title: ServiceType.grok.displayName,
                     status: dataManager.metrics[.grok]?.extraUsage,
                     manageURL: "https://grok.com/?_s=usage"
                 )
@@ -473,7 +473,7 @@ struct ProviderSettingsView: View {
                             isRefreshing: refreshingClaudeAccountIDs.contains(account.id),
                             showsRefresh: true,
                             showsReconnect: true,
-                            reconnectProviderName: "Claude",
+                            reconnectProviderName: ServiceType.claudeCode.shortName,
                             deleteMessage:
                                 "MeterBar will stop tracking this CLAUDE_CONFIG_DIR. "
                                 + "Files and Claude login data are not deleted.",
@@ -510,7 +510,11 @@ struct ProviderSettingsView: View {
     }
 
     private var codexCliSection: some View {
-        SettingsPanelSection(title: "OpenAI Codex", logoKind: .codex, color: MeterBarTheme.codexAccent) {
+        SettingsPanelSection(
+            title: ServiceType.codexCli.displayName,
+            logoKind: .codex,
+            color: MeterBarTheme.codexAccent
+        ) {
             SettingsRowView(
                 title: "Default connection",
                 detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
@@ -619,7 +623,11 @@ struct ProviderSettingsView: View {
     }
 
     private var cursorSection: some View {
-        SettingsPanelSection(title: "Cursor", logoKind: .cursor, color: MeterBarTheme.cursorAccent) {
+        SettingsPanelSection(
+            title: ServiceType.cursor.displayName,
+            logoKind: .cursor,
+            color: MeterBarTheme.cursorAccent
+        ) {
             SettingsRowView(title: "Connection") {
                 HStack(spacing: 8) {
                     StatusPill(
@@ -666,7 +674,11 @@ struct ProviderSettingsView: View {
     }
 
     private var openRouterSection: some View {
-        SettingsPanelSection(title: "OpenRouter", logoKind: .openRouter, color: MeterBarTheme.openRouterAccent) {
+        SettingsPanelSection(
+            title: ServiceType.openRouter.displayName,
+            logoKind: .openRouter,
+            color: MeterBarTheme.openRouterAccent
+        ) {
             SettingsNotice(
                 text: "The key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs.",
                 color: .secondary
