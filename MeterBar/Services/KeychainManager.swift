@@ -13,48 +13,47 @@ nonisolated protocol KeychainBackend {
     func delete(query: [String: Any]) -> OSStatus
 }
 
-/// Production backend: forwards straight to the Security framework.
-///
-/// Every call funnels through `assertTestProcessAllowsRealKeychain` first: a
-/// unit-test process that reaches the real login keychain without the
-/// live-integration opt-in is the silent-hang class of issue #319, and a loud
-/// debug-build failure here is the guard that keeps that class extinct.
+/// Production backend: forwards straight to the Security framework — except
+/// in a unit-test process without the live-integration opt-in, where
+/// `RealKeychainTestGuard` hermetically seals the real login keychain off:
+/// reads behave as if it were empty (a decrypting read can hang a headless
+/// run behind a securityd ACL dialog — issue #319 — and its outcome is
+/// machine-dependent either way), and writes trap loudly because they would
+/// pollute the developer's real keychain.
 nonisolated struct SecItemKeychainBackend: KeychainBackend {
     func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
-        assertTestProcessAllowsRealKeychain(.write)
+        trapIfTestProcessWrites()
         return SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     }
 
     func add(query: [String: Any]) -> OSStatus {
-        assertTestProcessAllowsRealKeychain(.write)
+        trapIfTestProcessWrites()
         return SecItemAdd(query as CFDictionary, nil)
     }
 
     func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
-        assertTestProcessAllowsRealKeychain(
-            .read(requestsSecretData: (query[kSecReturnData as String] as? Bool) == true)
-        )
+        #if DEBUG
+        if RealKeychainTestGuard.isBlocked(.read) {
+            return errSecItemNotFound
+        }
+        #endif
         return SecItemCopyMatching(query as CFDictionary, &result)
     }
 
     func delete(query: [String: Any]) -> OSStatus {
-        assertTestProcessAllowsRealKeychain(.write)
+        trapIfTestProcessWrites()
         return SecItemDelete(query as CFDictionary)
     }
 
-    private func assertTestProcessAllowsRealKeychain(
-        _ operation: RealKeychainTestGuard.Operation
-    ) {
+    private func trapIfTestProcessWrites() {
         #if DEBUG
         precondition(
-            !RealKeychainTestGuard.isBlocked(operation),
+            !RealKeychainTestGuard.isBlocked(.write),
             """
-            Real login-keychain access from a unit-test run without the \
-            live-integration opt-in. This is the hang class of issue #319: \
-            securityd can raise an ACL approval dialog no headless run can \
-            answer, and `swift test` parks forever at 0% CPU. Either gate the \
-            test behind LiveIntegrationTestGate.skipUnlessEnabled() or opt in \
-            deliberately with \(RealKeychainTestGuard.environmentKey)=1.
+            Real login-keychain write from a unit-test run without the \
+            live-integration opt-in — this would pollute the developer's real \
+            keychain. Point the test at an in-memory KeychainBackend, or opt \
+            in deliberately with \(RealKeychainTestGuard.environmentKey)=1.
             """
         )
         #endif

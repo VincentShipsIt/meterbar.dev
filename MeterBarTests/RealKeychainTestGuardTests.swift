@@ -1,33 +1,22 @@
 import Foundation
+import Security
 import XCTest
 @testable import MeterBar
 
-/// The debug-build guard that turns issue #319's silent keychain hang into a
-/// loud failure: a unit-test process may never ask the real login keychain to
-/// decrypt an item, or write to it, unless the live-integration opt-in is set.
-/// The decision is pure and injectable; these tests pin the whole matrix.
+/// The debug-build seal that keeps issue #319's silent keychain hang extinct:
+/// a unit-test process without the live-integration opt-in sees an empty real
+/// login keychain (reads short-circuit to not-found — deterministic and
+/// prompt-free on every machine) and may never write to it. The decision is
+/// pure and injectable; these tests pin the whole matrix.
 final class RealKeychainTestGuardTests: XCTestCase {
     // MARK: - Test process, no opt-in
 
-    func testSecretDataReadsAreBlockedInATestProcessWithoutTheOptIn() {
+    /// A decrypting read can park a headless run behind a securityd ACL
+    /// dialog, and even a harmless one makes test outcomes depend on the
+    /// machine's login state — both blocked, simulated as absent.
+    func testReadsAreBlockedInATestProcessWithoutTheOptIn() {
         XCTAssertTrue(
-            RealKeychainTestGuard.isBlocked(
-                .read(requestsSecretData: true),
-                isTestProcess: true,
-                environment: [:]
-            )
-        )
-    }
-
-    /// Attribute reads never decrypt and never prompt; existence probes such
-    /// as `KeychainManager.hasKey` depend on them staying allowed.
-    func testAttributeOnlyReadsStayAllowedSoExistenceProbesKeepWorking() {
-        XCTAssertFalse(
-            RealKeychainTestGuard.isBlocked(
-                .read(requestsSecretData: false),
-                isTestProcess: true,
-                environment: [:]
-            )
+            RealKeychainTestGuard.isBlocked(.read, isTestProcess: true, environment: [:])
         )
     }
 
@@ -41,16 +30,16 @@ final class RealKeychainTestGuardTests: XCTestCase {
 
     // MARK: - Opt-in
 
-    func testTruthyOptInDisarmsTheGuard() {
+    func testTruthyOptInUnsealsTheRealKeychain() {
         for raw in ["1", "true", "yes", "on", "TRUE", "  yes  "] {
             let environment = [RealKeychainTestGuard.environmentKey: raw]
             XCTAssertFalse(
                 RealKeychainTestGuard.isBlocked(
-                    .read(requestsSecretData: true),
+                    .read,
                     isTestProcess: true,
                     environment: environment
                 ),
-                "\(raw.debugDescription) should disarm the guard"
+                "\(raw.debugDescription) should unseal the keychain"
             )
             XCTAssertFalse(
                 RealKeychainTestGuard.isBlocked(
@@ -58,20 +47,20 @@ final class RealKeychainTestGuardTests: XCTestCase {
                     isTestProcess: true,
                     environment: environment
                 ),
-                "\(raw.debugDescription) should disarm the guard"
+                "\(raw.debugDescription) should unseal the keychain"
             )
         }
     }
 
-    func testFalsyOptInValuesKeepTheGuardArmed() {
+    func testFalsyOptInValuesKeepTheSealInPlace() {
         for raw in ["0", "false", "no", "off", "", "banana"] {
             XCTAssertTrue(
                 RealKeychainTestGuard.isBlocked(
-                    .read(requestsSecretData: true),
+                    .read,
                     isTestProcess: true,
                     environment: [RealKeychainTestGuard.environmentKey: raw]
                 ),
-                "\(raw.debugDescription) should keep the guard armed"
+                "\(raw.debugDescription) should keep the seal in place"
             )
         }
     }
@@ -80,11 +69,7 @@ final class RealKeychainTestGuardTests: XCTestCase {
 
     func testNonTestProcessesAreNeverBlocked() {
         XCTAssertFalse(
-            RealKeychainTestGuard.isBlocked(
-                .read(requestsSecretData: true),
-                isTestProcess: false,
-                environment: [:]
-            )
+            RealKeychainTestGuard.isBlocked(.read, isTestProcess: false, environment: [:])
         )
         XCTAssertFalse(
             RealKeychainTestGuard.isBlocked(.write, isTestProcess: false, environment: [:])
@@ -94,8 +79,33 @@ final class RealKeychainTestGuardTests: XCTestCase {
     // MARK: - Process detection
 
     /// This suite runs under XCTest, so the runtime probe must say so — this
-    /// is what arms the guard for the whole default `swift test` run.
+    /// is what arms the seal for the whole default `swift test` run.
     func testThisTestProcessIsDetectedAsHostingXCTest() {
         XCTAssertTrue(RealKeychainTestGuard.processHostsXCTest)
+    }
+
+    // MARK: - The seal itself
+
+    /// End-to-end through the production backend: in this very (un-opted-in)
+    /// test process, a real read must come back not-found without ever
+    /// touching the Security framework, whatever this machine's keychain
+    /// actually holds.
+    func testProductionBackendSimulatesAnEmptyKeychainInThisProcess() throws {
+        guard !RealKeychainTestGuard.isOptedIn() else {
+            throw XCTSkip("run is opted into live keychain access")
+        }
+        let backend = SecItemKeychainBackend()
+        var result: AnyObject?
+        let status = backend.copyMatching(
+            query: [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: "dev.meterbar.app",
+                kSecReturnAttributes as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ],
+            result: &result
+        )
+        XCTAssertEqual(status, errSecItemNotFound)
+        XCTAssertNil(result)
     }
 }
