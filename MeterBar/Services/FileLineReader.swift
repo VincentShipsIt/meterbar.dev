@@ -37,21 +37,38 @@ nonisolated enum FileLineReader {
         // Guards against a caller passing 0 and spinning forever on empty reads.
         let size = max(1, chunkSize)
         var pending = Data()
+        // How much of `pending` has already been searched and proven to hold no
+        // newline. Every byte left in `pending` at the end of an iteration is
+        // part of an unterminated line, so the next chunk resumes from here
+        // instead of rescanning from byte 0. Without it a line spanning N
+        // chunks costs N rescans of a buffer that grows to the line's full
+        // length — O(L^2 / chunkSize). Real Codex rollout transcripts carry
+        // single lines in the tens of megabytes, which turned a one-second scan
+        // into over a minute.
+        var scanned = 0
 
         while let chunk = try? handle.read(upToCount: size), !chunk.isEmpty {
             pending.append(chunk)
-            var searchStart = pending.startIndex
 
-            while let newlineIndex = pending[searchStart...].firstIndex(of: newline) {
-                body(Self.line(pending[searchStart..<newlineIndex]))
-                searchStart = pending.index(after: newlineIndex)
+            // `lineStart` and `searchFrom` are distinct: the line still begins
+            // at the front of the buffer even when the search resumes deeper
+            // in. Conflating them would emit an empty line and drop the real
+            // one whenever a newline landed on the first byte of a chunk.
+            var lineStart = pending.startIndex
+            var searchFrom = pending.index(pending.startIndex, offsetBy: scanned)
+
+            while let newlineIndex = pending[searchFrom...].firstIndex(of: newline) {
+                body(Self.line(pending[lineStart..<newlineIndex]))
+                lineStart = pending.index(after: newlineIndex)
+                searchFrom = lineStart
             }
 
-            if searchStart > pending.startIndex {
+            if lineStart > pending.startIndex {
                 // Re-base rather than `removeSubrange` so the next slice search
                 // starts from index 0 again.
-                pending = Data(pending[searchStart...])
+                pending = Data(pending[lineStart...])
             }
+            scanned = pending.count
         }
 
         if !pending.isEmpty {
