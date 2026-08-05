@@ -159,6 +159,15 @@ final class ClaudeTokenRefresherTests: XCTestCase {
         let second = Task {
             await refresher.refresh(account: account, trigger: .userInitiated)
         }
+        // The second refresh must have *joined* the in-flight attempt before
+        // the gate opens. Releasing on a mere `Task` handle raced the
+        // scheduler: when the first attempt finished before the second task's
+        // `refresh` ran, the user-initiated call bypassed cooldown, spawned a
+        // second run, and parked forever on the already-spent gate — the
+        // silent `swift test` hang behind issue #319's CI cancellation.
+        while await refresher.coalescedJoins == 0 {
+            await Task.yield()
+        }
         await gate.release()
 
         let firstResult = await first.value
@@ -269,12 +278,12 @@ private actor SpawnGate {
         }
     }
 
+    /// Latches open. Any `run()` that arrives after release — the misuse that
+    /// previously parked the suite forever — returns immediately instead of
+    /// storing a continuation nothing will ever resume.
     func release() {
-        if let continuation {
-            continuation.resume()
-            self.continuation = nil
-        } else {
-            released = true
-        }
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
