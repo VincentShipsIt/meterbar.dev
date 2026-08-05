@@ -50,12 +50,10 @@ class CostTracker: ObservableObject {
         }
         guard shouldStart else { return }
 
-        let summary = await makeCostSummary(days: days)
+        let scan = await makeCostSummary(days: days)
 
         await MainActor.run {
-            if let summary { costSummary = summary }
-            lastScanDate = Date()
-            saveCachedSummary()
+            apply(scan)
             isScanning = false
         }
     }
@@ -77,14 +75,35 @@ class CostTracker: ObservableObject {
         }
         guard shouldStart else { return }
 
-        let summary = await makeCostSummary(days: days)
+        let scan = await makeCostSummary(days: days)
 
         await MainActor.run {
-            if let summary { costSummary = summary }
-            lastScanDate = Date()
-            saveCachedSummary()
+            apply(scan)
             isRefreshingMissingDays = false
         }
+    }
+
+    /// Publishes one refresh's result, and records it as authoritative only when
+    /// it saw the whole corpus.
+    ///
+    /// An incomplete scan still publishes its partial total — the number on
+    /// screen should improve as slices land — but must not touch `lastScanDate`
+    /// or the cache. Both are read elsewhere as "a full scan finished":
+    /// `saveCachedSummary` makes the partial survive relaunch, and
+    /// `needsMissingDailyUsageRefresh` returns `false` for the rest of the
+    /// calendar day once `lastScanDate` is today. Stamping a budget-truncated
+    /// slice would therefore freeze an undercount on screen until tomorrow —
+    /// exactly the failure the resumable offsets exist to avoid.
+    ///
+    /// `nil` means no slice completed at all, so there is nothing to publish and
+    /// nothing has been learned.
+    @MainActor
+    func apply(_ scan: CostSummaryBuilder.CostSummaryScan?) {
+        guard let scan else { return }
+        costSummary = scan.summary
+        guard scan.isComplete else { return }
+        lastScanDate = Date()
+        saveCachedSummary()
     }
 
     /// Backstop against a refresh that never reports completion.
@@ -106,15 +125,17 @@ class CostTracker: ObservableObject {
     /// menu, or a second scan starting — stops at the next file boundary
     /// instead of after the whole corpus.
     ///
-    /// - Returns: the last summary produced, or `nil` when the refresh was
-    ///   cancelled before a single slice completed.
-    private func makeCostSummary(days: Int) async -> CostSummary? {
+    /// - Returns: the last slice's result, or `nil` when the refresh was
+    ///   cancelled before a single slice finished. The `isComplete` flag rides
+    ///   along because the caller must not record a budget-truncated total as a
+    ///   finished scan — see `apply(_:)`.
+    private func makeCostSummary(days: Int) async -> CostSummaryBuilder.CostSummaryScan? {
         let includeClaudeCode = providerVisibilityStore.isEnabled(.claudeCode)
         let includeCodexCli = providerVisibilityStore.isEnabled(.codexCli)
         let claudeAccounts = ClaudeCodeAccountStore.shared.accounts
         let cutoff = CostWindow.start(days: days)
         let store = CostScanCacheStore.applicationSupport
-        var latest: CostSummary?
+        var latest: CostSummaryBuilder.CostSummaryScan?
 
         for _ in 0..<Self.maxScanSlices {
             let scan = try? await CostScanExecutor.run { token in
@@ -141,7 +162,7 @@ class CostTracker: ObservableObject {
             // offsets they committed are already on disk.
             guard let scan else { break }
 
-            latest = scan.summary
+            latest = scan
             if scan.isComplete { break }
             // Publish the partial total so the number on screen improves with
             // every slice instead of only when the last one lands.

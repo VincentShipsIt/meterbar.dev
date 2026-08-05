@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// What one transcript contributed, and where to pick its reading back up.
 ///
@@ -29,7 +30,12 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
 
 /// Every transcript's record, keyed by standardized path.
 nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Sendable {
-    static var currentSchemaVersion: Int { 1 }
+    /// Bumped to 2 when the date strategy was pinned to `.secondsSince1970`: a
+    /// v1 file's dates were written against `.deferredToDate`'s 2001 epoch, and
+    /// decoding those numbers as Unix seconds succeeds while landing every daily
+    /// row 31 years early. Dropping the file costs one slow refresh; reading it
+    /// would be silently wrong.
+    static var currentSchemaVersion: Int { 2 }
 
     var schemaVersion = CostScanFileCache.currentSchemaVersion
     var records: [String: CostScanFileRecord<Payload>] = [:]
@@ -42,6 +48,9 @@ nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Send
 /// its own migration story, while these are a private, disposable read-through
 /// cache. Losing them costs one slow refresh, not a wrong number.
 nonisolated struct CostScanCacheStore: Sendable {
+    /// The `v1` in the file names is the *path* generation, not the schema —
+    /// `schemaVersion` inside the file is what gates a read. Bumping the name
+    /// too would strand the old file on disk forever with nothing to delete it.
     static let claudeFileName = "cost-scan-claude-v1.json"
     static let codexFileName = "cost-scan-codex-v1.json"
 
@@ -76,9 +85,29 @@ nonisolated struct CostScanCacheStore: Sendable {
         Self.save(cache, to: directory.appendingPathComponent(Self.codexFileName))
     }
 
+    /// Both payloads roll usage up in `[Date: TokenAccumulator]` dictionaries,
+    /// and a mismatched date strategy across these two would not throw — every
+    /// strategy but `.iso8601` writes a bare number, so the decode succeeds and
+    /// lands each daily row in a bucket decades from the right one. Pinned
+    /// explicitly rather than left to two independently-defaulted instances that
+    /// only happen to agree today.
+    private static var encoder: JSONEncoder {
+        // Not `.prettyPrinted`: ~10k entries, and this file is machine-only.
+        // Pretty printing roughly doubles it for nobody's benefit.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return encoder
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return decoder
+    }
+
     private static func load<Payload>(from url: URL) -> CostScanFileCache<Payload> {
         guard let data = try? Data(contentsOf: url),
-              let cache = try? JSONDecoder().decode(CostScanFileCache<Payload>.self, from: data),
+              let cache = try? decoder.decode(CostScanFileCache<Payload>.self, from: data),
               cache.schemaVersion == CostScanFileCache<Payload>.currentSchemaVersion else {
             // A cache from a future or unreadable build is dropped, not
             // migrated: a full re-scan is slow, but a mis-decoded offset would
@@ -88,13 +117,27 @@ nonisolated struct CostScanCacheStore: Sendable {
         return cache
     }
 
+    /// Failures are logged, not propagated. This cache is an optimisation — the
+    /// next refresh re-reads from offset 0 and produces the same number, just
+    /// slowly — so there is nothing for a caller to do about a failed write and
+    /// no reason to fail a scan that otherwise succeeded. The log line is what
+    /// distinguishes "cold corpus" from "this write has been failing for weeks",
+    /// which is otherwise invisible: both look like a permanently slow refresh.
     private static func save<Payload>(_ cache: CostScanFileCache<Payload>, to url: URL) {
-        // Not `.prettyPrinted`: ~10k entries, and this file is machine-only.
-        // Pretty printing roughly doubles it for nobody's benefit.
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        let directory = url.deletingLastPathComponent()
-        try? SecureFileWriter.ensurePrivateDirectory(directory)
-        try? SecureFileWriter.write(data, to: url)
+        do {
+            let data = try encoder.encode(cache)
+            try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
+            try SecureFileWriter.write(data, to: url)
+        } catch {
+            // The file name is one of two compile-time constants, so it carries
+            // nothing about the user's projects.
+            AppLog.cost.error(
+                """
+                Failed to save scan cache \(url.lastPathComponent, privacy: .public): \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+        }
     }
 }
 

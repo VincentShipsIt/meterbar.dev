@@ -1047,6 +1047,106 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(windows.period.sessions, fileCount)
     }
 
+    // MARK: - Applying a slice's result
+
+    /// Demo mode is the vehicle rather than the subject: it stubs out the cache
+    /// write, so these assert the publish/stamp decision without touching the
+    /// real `~/Library/Application Support` summary.
+    @MainActor
+    private func makeApplyTracker(lastScan: Date) -> CostTracker {
+        let tracker = CostTracker(demoMode: true)
+        tracker.lastScanDate = lastScan
+        return tracker
+    }
+
+    @MainActor
+    func testIncompleteScanPublishesItsPartialTotalWithoutStampingTheScanClock() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let partial = CostSummary(
+            costs: [],
+            totalCostUSD: 4,
+            totalTokens: 40,
+            periodDays: 30,
+            dailyUsage: [],
+            lifetime: nil
+        )
+
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: partial, isComplete: false))
+
+        // The number on screen improves with every slice...
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, 4)
+        // ...but an undercount must not be recorded as a finished scan: a
+        // `lastScanDate` of today suppresses the background backfill for the
+        // rest of the calendar day.
+        XCTAssertEqual(tracker.lastScanDate, previous)
+    }
+
+    @MainActor
+    func testCompleteScanStampsTheScanClock() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let whole = CostSummary(
+            costs: [],
+            totalCostUSD: 9,
+            totalTokens: 90,
+            periodDays: 30,
+            dailyUsage: [],
+            lifetime: nil
+        )
+
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: whole, isComplete: true))
+
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, 9)
+        XCTAssertNotEqual(tracker.lastScanDate, previous)
+    }
+
+    @MainActor
+    func testCancelledScanLeavesBothTheSummaryAndTheScanClockAlone() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let before = tracker.costSummary?.totalCostUSD
+
+        // No slice completed, so there is nothing to publish and nothing learned.
+        tracker.apply(nil)
+
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, before)
+        XCTAssertEqual(tracker.lastScanDate, previous)
+    }
+
+    // MARK: - Cache round-trip
+
+    /// The persisted payloads roll usage up in `[Date: TokenAccumulator]`
+    /// dictionaries, and a `Date` key survives a round trip only while the
+    /// encoder and decoder agree on a date strategy. They fail *silently* when
+    /// they drift: every strategy but `.iso8601` writes a bare number, so a
+    /// mismatched pair still decodes — into the wrong day. Every daily row would
+    /// land in a bucket decades away with nothing thrown, so pin the invariant
+    /// here rather than trusting two defaults to stay matched.
+    func testDateKeyedDailyRollupsSurviveACacheRoundTrip() throws {
+        let store = try makeScanCacheStore()
+        let day = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_780_000_000))
+        var totals = ClaudeFileTotals()
+        totals.period.daily[day] = TokenAccumulator(input: 11, output: 22)
+
+        var cache = CostScanFileCache<ClaudeFileTotals>()
+        cache.records["/transcripts/a.jsonl"] = CostScanFileRecord(
+            offset: 512,
+            size: 4_096,
+            cutoff: day,
+            isComplete: false,
+            payload: totals
+        )
+        store.saveClaude(cache)
+
+        let loaded = store.loadClaude()
+        let record = try XCTUnwrap(loaded.records["/transcripts/a.jsonl"])
+        XCTAssertEqual(record.cutoff, day)
+        XCTAssertEqual(record.offset, 512)
+        XCTAssertEqual(record.payload.period.daily[day]?.input, 11)
+        XCTAssertEqual(record.payload.period.daily[day]?.output, 22)
+    }
+
     // MARK: - Corpus fixtures
 
     private func makeTranscriptRoot() throws -> URL {
