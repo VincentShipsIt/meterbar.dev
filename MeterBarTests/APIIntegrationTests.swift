@@ -4,12 +4,32 @@ import MeterBarShared
 
 /// Integration tests to verify API access for Claude Code, Codex CLI, and Cursor services.
 /// These tests make real API calls and require valid credentials to be set up.
+///
+/// **Opt-in only.** Reading those credentials means a real login-keychain read,
+/// and the xctest bundle is not in the keychain items' trusted-application ACL —
+/// so on a developer machine that is genuinely logged in, securityd raises an
+/// approval dialog with no foreground app to answer it and `swift test` parks
+/// forever at 0% CPU (issue #319). The per-test `hasAccess` guards did not help:
+/// on such a machine they return `true`, which is exactly how the run reached
+/// the keychain. Run these deliberately, from a shell that can surface the
+/// dialog:
+///
+/// ```
+/// METERBAR_INTEGRATION_TESTS=1 swift test --filter APIIntegrationTests
+/// ```
 final class APIIntegrationTests: XCTestCase {
 
     // MARK: - Test Configuration
 
     /// Timeout for API calls (30 seconds)
     let apiTimeout: TimeInterval = 30.0
+
+    /// Gate every test in the class, including ones added later and the
+    /// non-throwing async summary test that carries no `XCTSkip` of its own.
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try LiveIntegrationTestGate.skipUnlessEnabled()
+    }
 
     // MARK: - Claude Code (OAuth) Tests
 
