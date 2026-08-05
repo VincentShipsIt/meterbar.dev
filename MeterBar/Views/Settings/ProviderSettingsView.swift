@@ -510,7 +510,11 @@ struct ProviderSettingsView: View {
     }
 
     private var codexCliSection: some View {
-        SettingsPanelSection(title: ServiceType.codexCli.displayName, logoKind: .codex, color: MeterBarTheme.codexAccent) {
+        SettingsPanelSection(
+            title: ServiceType.codexCli.displayName,
+            logoKind: .codex,
+            color: MeterBarTheme.codexAccent
+        ) {
             SettingsRowView(
                 title: "Default connection",
                 detail: "Reads the OAuth session from \(codexAuthFileDisplayPath)."
@@ -619,7 +623,11 @@ struct ProviderSettingsView: View {
     }
 
     private var cursorSection: some View {
-        SettingsPanelSection(title: ServiceType.cursor.displayName, logoKind: .cursor, color: MeterBarTheme.cursorAccent) {
+        SettingsPanelSection(
+            title: ServiceType.cursor.displayName,
+            logoKind: .cursor,
+            color: MeterBarTheme.cursorAccent
+        ) {
             SettingsRowView(title: "Connection") {
                 HStack(spacing: 8) {
                     StatusPill(
@@ -666,7 +674,11 @@ struct ProviderSettingsView: View {
     }
 
     private var openRouterSection: some View {
-        SettingsPanelSection(title: ServiceType.openRouter.displayName, logoKind: .openRouter, color: MeterBarTheme.openRouterAccent) {
+        SettingsPanelSection(
+            title: ServiceType.openRouter.displayName,
+            logoKind: .openRouter,
+            color: MeterBarTheme.openRouterAccent
+        ) {
             SettingsNotice(
                 text: "The key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs.",
                 color: .secondary
