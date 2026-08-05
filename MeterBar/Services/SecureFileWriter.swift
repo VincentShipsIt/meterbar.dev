@@ -37,10 +37,22 @@ nonisolated enum SecureFileWriter {
     static func ensurePrivateDirectory(_ directory: URL) throws -> URL {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: directory.path) {
-            try fileManager.setAttributes(
-                [.posixPermissions: privateDirectory],
-                ofItemAtPath: directory.path
-            )
+            // Only chmod a directory that actually needs it. `chmod(2)` can be
+            // refused on a directory that already satisfies the policy —
+            // `$TMPDIR` is owned by the user and already 0700 but carries the
+            // `sunlnk` system flag, so an unconditional tighten returned EPERM
+            // and every caller reported failure for a directory that was
+            // private to begin with. Reading the mode first keeps the tighten
+            // guarantee intact: anything looser still gets chmod'd, and a
+            // genuine refusal there still propagates.
+            let attributes = try fileManager.attributesOfItem(atPath: directory.path)
+            let current = (attributes[.posixPermissions] as? NSNumber)?.intValue
+            if current != privateDirectory {
+                try fileManager.setAttributes(
+                    [.posixPermissions: privateDirectory],
+                    ofItemAtPath: directory.path
+                )
+            }
         } else {
             try fileManager.createDirectory(
                 at: directory,

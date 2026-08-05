@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import MeterBar
 
@@ -141,6 +142,54 @@ final class SecureFileWriterTests: XCTestCase {
         XCTAssertEqual(try permissions(of: directory), 0o700)
     }
 
+    /// A directory can already satisfy the policy and still refuse `chmod`.
+    /// `$TMPDIR` is the case that bit us: owned by the user and already 0700,
+    /// but carrying the `sunlnk` system flag, so the unconditional tighten came
+    /// back EPERM and every caller reported failure for a directory that was
+    /// private to begin with — `WakeLock.acquire()` returned `.unavailable`
+    /// purely because it tried to re-tighten a parent it did not create.
+    ///
+    /// `uchg` reproduces that refusal deterministically: `chmod(2)` returns
+    /// EPERM for an immutable file even to its owner.
+    func testEnsurePrivateDirectoryAcceptsAnExistingPrivateDirectoryItCannotChmod() throws {
+        let directory = tempDirectory.appendingPathComponent("immutable-private", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try setImmutable(true, at: directory)
+        defer { try? setImmutable(false, at: directory) }
+
+        XCTAssertThrowsError(
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            ),
+            "precondition: chmod must be refused for this directory"
+        )
+
+        XCTAssertNoThrow(try SecureFileWriter.ensurePrivateDirectory(directory))
+        XCTAssertEqual(try permissions(of: directory), 0o700)
+    }
+
+    /// The skip above is narrow on purpose. A directory that is *not* already
+    /// private must still fail loudly when it cannot be tightened — silently
+    /// accepting a world-readable directory would turn the S1 guard into a
+    /// no-op on exactly the systems that refuse the fix.
+    func testEnsurePrivateDirectoryStillThrowsWhenALooseDirectoryCannotBeTightened() throws {
+        let directory = tempDirectory.appendingPathComponent("immutable-loose", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        try setImmutable(true, at: directory)
+        defer { try? setImmutable(false, at: directory) }
+
+        XCTAssertThrowsError(try SecureFileWriter.ensurePrivateDirectory(directory))
+    }
+
     // MARK: - Append-only files
 
     func testEnsurePrivateFileCreatesAnEmptyOwnerOnlyFile() throws {
@@ -173,5 +222,19 @@ final class SecureFileWriterTests: XCTestCase {
     private func permissions(of url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return try XCTUnwrap(attributes[.posixPermissions] as? Int)
+    }
+
+    /// Toggles `UF_IMMUTABLE` (`uchg`). A user flag, so the owner can both set
+    /// and clear it — unlike the `sunlnk` system flag on `$TMPDIR` that produced
+    /// the original failure — while producing the same EPERM from `chmod(2)`.
+    private func setImmutable(_ immutable: Bool, at url: URL) throws {
+        let flags: UInt32 = immutable ? UInt32(UF_IMMUTABLE) : 0
+        guard chflags(url.path, flags) == 0 else {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))]
+            )
+        }
     }
 }
