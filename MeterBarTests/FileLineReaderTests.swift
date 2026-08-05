@@ -173,6 +173,97 @@ final class FileLineReaderTests: XCTestCase {
         XCTAssertLessThan(elapsed, 5, "32 MiB single line took \(elapsed)s — the scan is not linear")
     }
 
+    /// Splits the whole file in the most obvious way possible. Deliberately
+    /// naive — it is the oracle the chunked reader has to agree with, so it
+    /// must be readable at a glance rather than fast.
+    private func referenceLines(of data: Data) -> [Data] {
+        var out: [Data] = []
+        var current = Data()
+        for byte in data {
+            guard byte == UInt8(ascii: "\n") else {
+                current.append(byte)
+                continue
+            }
+            if current.last == UInt8(ascii: "\r") { current.removeLast() }
+            out.append(current)
+            current = Data()
+        }
+        if !current.isEmpty {
+            if current.last == UInt8(ascii: "\r") { current.removeLast() }
+            out.append(current)
+        }
+        return out
+    }
+
+    private func readerLines(of url: URL, chunkSize: Int) -> [Data] {
+        var collected: [Data] = []
+        FileLineReader.forEachLine(in: url, chunkSize: chunkSize) { collected.append($0) }
+        return collected
+    }
+
+    func testMatchesReferenceSplitterOnPseudoRandomFiles() throws {
+        // Seeded LCG, not `random()`: a differential failure has to be
+        // reproducible from the test name alone.
+        var seed: UInt64 = 0x2545_F491_4F6C_DD1D
+        func nextByte() -> UInt8 {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return UInt8((seed >> 33) & 0xFF)
+        }
+
+        for iteration in 0..<40 {
+            var payload = Data()
+            for _ in 0..<(200 + iteration * 13) {
+                let roll = nextByte()
+                // Heavily biased toward \n and \r so boundaries, blank lines and
+                // stray carriage returns actually occur instead of being a
+                // 1-in-256 accident.
+                switch roll % 8 {
+                case 0, 1: payload.append(UInt8(ascii: "\n"))
+                case 2: payload.append(UInt8(ascii: "\r"))
+                default: payload.append(roll)
+                }
+            }
+            let url = try writeData(payload)
+            let expected = referenceLines(of: payload)
+
+            for chunkSize in [1, 2, 3, 4, 5, 7, 8, 13, 16, 31, 64, 255, 1_024] {
+                XCTAssertEqual(
+                    readerLines(of: url, chunkSize: chunkSize),
+                    expected,
+                    "iteration \(iteration), chunkSize \(chunkSize)"
+                )
+            }
+        }
+    }
+
+    func testCarriageReturnSplitAcrossChunkBoundary() throws {
+        // The \r ends one chunk and its \n opens the next, so the trim has to
+        // happen against the reassembled line rather than the current chunk.
+        let chunkSize = 8
+        let url = try writeFile(String(repeating: "x", count: chunkSize - 1) + "\r\n" + "tail")
+
+        XCTAssertEqual(
+            lines(of: url, chunkSize: chunkSize),
+            [String(repeating: "x", count: chunkSize - 1), "tail"]
+        )
+    }
+
+    func testCarriageReturnEndingAnOversizedLine() throws {
+        // Same trim, but the line spans many chunks so it arrives via the
+        // accumulation path rather than straight out of one chunk.
+        let chunkSize = 16
+        let long = String(repeating: "y", count: chunkSize * 6)
+        let url = try writeFile(long + "\r\n" + "tail")
+
+        XCTAssertEqual(lines(of: url, chunkSize: chunkSize), [long, "tail"])
+    }
+
+    func testTrailingCarriageReturnWithoutNewline() throws {
+        let url = try writeFile("a\nbb\r")
+
+        XCTAssertEqual(lines(of: url, chunkSize: 2), ["a", "bb"])
+    }
+
     func testEmptyFileYieldsNothing() throws {
         let url = try writeFile("")
         var count = 0
