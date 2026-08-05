@@ -361,7 +361,7 @@ final class CostScanCacheTests: XCTestCase {
     // MARK: - Corruption and versioning
 
     func testCorruptCacheFileFallsBackToFullScanAndStaysCorrect() throws {
-        let cacheURL = tempDirectory.appendingPathComponent("cost-scan-cache-v1.json")
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
         try Data("{ this is not json at all".utf8).write(to: cacheURL)
 
         let root = try makeClaudeRoot()
@@ -388,7 +388,7 @@ final class CostScanCacheTests: XCTestCase {
         ])
 
         let cutoff = dayStart(-7)
-        let cacheURL = tempDirectory.appendingPathComponent("cost-scan-cache-v1.json")
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
         let seeded = CostScanCache()
         _ = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
         seeded.persist(to: cacheURL)
@@ -491,7 +491,7 @@ final class CostScanCacheTests: XCTestCase {
         ])
 
         let cutoff = dayStart(-7)
-        let cacheURL = tempDirectory.appendingPathComponent("cost-scan-cache-v1.json")
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
         let seeded = CostScanCache()
         let coldClaude = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
         var coldCodex = CodexCostScanner.scanWindows(cutoff: cutoff)
@@ -568,6 +568,240 @@ final class CostScanCacheTests: XCTestCase {
         let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: warmCache)
         XCTAssertEqual(warmCache.hits, 0)
         assertSameClaudeCost(cold, warm, cutoff: cutoff)
+    }
+
+    // MARK: - Stamp identity
+
+    /// Both Claude Code and Codex write transcripts by rename-over-temp. That
+    /// lands a *different* file behind the same path, and it can carry the same
+    /// byte count and — on a coarse modification clock, or when the writer
+    /// preserves timestamps — the same mtime. Size plus mtime would then serve
+    /// the previous parse forever. The file number is what breaks the tie.
+    func testAtomicReplaceWithIdenticalSizeAndModificationTimeIsNotServedFromCache() throws {
+        let root = try makeClaudeRoot()
+        let url = try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        // A whole second, so it survives the `Date` → timespec → `Date` round
+        // trip bit-exactly. Both the original and the replacement are pinned to
+        // it, which is what leaves the file number as the only difference.
+        let pinnedModification = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: pinnedModification], ofItemAtPath: url.path)
+
+        let cutoff = dayStart(-7)
+        let seeded = CostScanCache()
+        _ = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+        XCTAssertEqual(seeded.misses, 1)
+
+        let before = try XCTUnwrap(CostScanFileStamp.read(at: url))
+        try XCTSkipIf(before.fileID == nil, "volume reports no file number; the identity check cannot apply here")
+
+        // Widening `input` by one digit and narrowing `output` by one keeps the
+        // line byte-for-byte the same length while changing what it says.
+        let replacement = claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                                     input: 1_000, output: 2, cacheCreation: 0, cacheRead: 0)
+        let staging = tempDirectory.appendingPathComponent("staging-\(UUID().uuidString).jsonl")
+        try replacement.write(to: staging, atomically: false, encoding: .utf8)
+        // Remove-then-move rather than `replaceItemAt`: this is exactly the
+        // rename a CLI performs, and it deterministically lands a new inode.
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.moveItem(at: staging, to: url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: pinnedModification],
+            ofItemAtPath: url.path
+        )
+
+        let after = try XCTUnwrap(CostScanFileStamp.read(at: url))
+        XCTAssertEqual(after.size, before.size, "fixture must keep the byte count identical")
+        XCTAssertEqual(after.modified, before.modified, "fixture must restore the modification time")
+        XCTAssertNotEqual(after.fileID, before.fileID, "rename-over-temp must land a new file number")
+
+        let warmCache = CostScanCache(previous: seeded.snapshot())
+        let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: warmCache)
+
+        XCTAssertEqual(warmCache.hits, 0, "a replaced file must never be served from cache")
+        XCTAssertEqual(warmCache.misses, 1)
+        XCTAssertEqual(warm.lifetime.input, 1_000, "the rescan must report the replacement's numbers")
+        assertSameClaudeCost(ClaudeCostScanner.scanProjectRoot(root, since: cutoff), warm, cutoff: cutoff)
+    }
+
+    /// The whole point of the cache: a file nobody touched is never opened
+    /// again. Proved by making the read physically impossible rather than by
+    /// counting bytes — a hit that opened the file would fail outright.
+    func testUnchangedFileIsServedWithoutReadingASingleByte() throws {
+        let root = try makeClaudeRoot()
+        let url = try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        let cutoff = dayStart(-7)
+        let seeded = CostScanCache()
+        let cold = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+
+        // `chmod 000` moves ctime only — size, mtime, and inode are untouched,
+        // so the stamp still matches and the entry stays eligible.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        try XCTSkipIf(
+            (try? FileHandle(forReadingFrom: url)) != nil,
+            "file is still readable (running as root?); the no-read claim cannot be proved here"
+        )
+
+        let warmCache = CostScanCache(previous: seeded.snapshot())
+        let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: warmCache)
+
+        XCTAssertEqual(warmCache.hits, 1, "an unchanged file must be served from cache")
+        XCTAssertEqual(warmCache.misses, 0)
+        assertSameClaudeCost(cold, warm, cutoff: cutoff)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+    }
+
+    // MARK: - Whole-artifact invalidation
+
+    /// A digest only means anything under the parsing and pricing rules that
+    /// produced it. On a producer mismatch the artifact is discarded whole —
+    /// partially trusting it would mix numbers computed under two rule sets.
+    func testParserVersionMismatchDiscardsTheWholeCache() throws {
+        let root = try makeClaudeRoot()
+        try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+        try writeClaudeTranscript(root: root, project: "-Users-me-beta", name: "b.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m2", request: "r2", model: "claude-opus-4-6",
+                       input: 200, output: 40, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        let cutoff = dayStart(-7)
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
+        let seeded = CostScanCache()
+        _ = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+        seeded.persist(to: cacheURL)
+        XCTAssertNotNil(CostScanCacheStore.load(from: cacheURL), "seeded artifact must load before it is edited")
+
+        var raw = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: cacheURL)) as? [String: Any]
+        )
+        raw["parserVersion"] = CostScanValues.costCacheParserVersion + 1
+        try JSONSerialization.data(withJSONObject: raw).write(to: cacheURL)
+
+        XCTAssertNil(CostScanCacheStore.load(from: cacheURL), "a foreign producer must not be decoded into a cache")
+
+        let cache = CostScanCache.load(from: cacheURL)
+        let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: cache)
+        XCTAssertEqual(cache.hits, 0, "no entry may survive a producer mismatch")
+        XCTAssertEqual(cache.misses, 2, "every file must be re-parsed")
+        assertSameClaudeCost(ClaudeCostScanner.scanProjectRoot(root, since: cutoff), warm, cutoff: cutoff)
+    }
+
+    /// An artifact written under a different producer must also be unable to
+    /// collide with this build's file in the first place.
+    func testCacheFileNameCarriesTheSchemaVersion() {
+        XCTAssertTrue(
+            CostScanCacheStore.cacheFileName.contains("v\(CostScanCacheFile.currentSchemaVersion)"),
+            "an old and a new binary must never write to the same path"
+        )
+    }
+
+    /// Claude digests are pre-bucketed into *local* days, so a machine that
+    /// moved time zone cannot reuse them. Covered in memory elsewhere; this
+    /// pins the behaviour across the disk round trip, where the identifier has
+    /// to survive encode and decode to have any effect.
+    func testTimeZoneIdentifierMismatchOnDiskDiscardsCachedClaudeEntries() throws {
+        let root = try makeClaudeRoot()
+        try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        let cutoff = dayStart(-7)
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
+        let seeded = CostScanCache()
+        let cold = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+        seeded.persist(to: cacheURL)
+
+        var raw = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: cacheURL)) as? [String: Any]
+        )
+        let travelled = TimeZone.current.identifier == "UTC" ? "Asia/Tokyo" : "UTC"
+        raw["timeZoneIdentifier"] = travelled
+        try JSONSerialization.data(withJSONObject: raw).write(to: cacheURL)
+
+        let cache = CostScanCache.load(from: cacheURL)
+        let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: cache)
+
+        XCTAssertEqual(cache.hits, 0, "day buckets built in another zone must not be reused")
+        XCTAssertEqual(cache.misses, 1)
+        assertSameClaudeCost(cold, warm, cutoff: cutoff)
+    }
+
+    // MARK: - Artifact size guard
+
+    /// `JSONDecoder` materialises roughly ten times the artifact's size in live
+    /// objects, so an oversized file has to be refused on the stat, before a
+    /// single byte is decoded. The artifact here is perfectly valid JSON: the
+    /// only reason it must not load is its size.
+    func testOversizedCacheArtifactIsRefusedBeforeDecodingAndRebuilds() throws {
+        let root = try makeClaudeRoot()
+        try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        let cutoff = dayStart(-7)
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
+        let seeded = CostScanCache()
+        let cold = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+        seeded.persist(to: cacheURL)
+
+        let size = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: cacheURL.path)[.size] as? NSNumber)?.intValue
+        )
+        XCTAssertNotNil(
+            CostScanCacheStore.load(from: cacheURL, maximumBytes: size),
+            "an artifact exactly at the cap is still valid"
+        )
+        XCTAssertNil(
+            CostScanCacheStore.load(from: cacheURL, maximumBytes: size - 1),
+            "a valid artifact past the cap must still be refused"
+        )
+
+        let cache = CostScanCache.load(from: cacheURL, maximumBytes: size - 1)
+        let warm = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: cache)
+        XCTAssertEqual(cache.hits, 0, "a refused artifact must rebuild, not half-load")
+        assertSameClaudeCost(cold, warm, cutoff: cutoff)
+    }
+
+    /// Writing an artifact the next launch would refuse buys nothing and costs
+    /// disk, so the cap applies on the way out too.
+    func testOversizedSnapshotIsNotWritten() throws {
+        let root = try makeClaudeRoot()
+        try writeClaudeTranscript(root: root, project: "-Users-me-alpha", name: "a.jsonl", lines: [
+            claudeLine(at: day(-2), id: "m1", request: "r1", model: "claude-opus-4-6",
+                       input: 100, output: 20, cacheCreation: 0, cacheRead: 0)
+        ])
+
+        let cutoff = dayStart(-7)
+        let cacheURL = tempDirectory.appendingPathComponent(CostScanCacheStore.cacheFileName)
+        let seeded = CostScanCache()
+        _ = ClaudeCostScanner.scanProjectRoot(root, since: cutoff, cache: seeded)
+
+        XCTAssertThrowsError(
+            try CostScanCacheStore.save(seeded.snapshot(), to: cacheURL, maximumBytes: 8)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: cacheURL.path),
+            "an over-cap artifact must not reach disk"
+        )
+    }
+
+    /// Pins the documented budget. CodexBar hit multi-GiB decode spikes without
+    /// one; 64 MB comfortably holds a ten-gigabyte corpus reduced to buckets.
+    func testArtifactCapIsSixtyFourMegabytes() {
+        XCTAssertEqual(CostScanCacheStore.maximumArtifactBytes, 64 * 1024 * 1024)
     }
 
     // MARK: - Comparison helpers

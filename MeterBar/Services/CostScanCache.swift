@@ -55,10 +55,16 @@ nonisolated final class CostScanCache: @unchecked Sendable {
         previousCodex = Dictionary(previous.codex.map { ($0.path, $0) }, uniquingKeysWith: { _, last in last })
     }
 
-    /// Never throws and never returns `nil`: an unreadable, corrupt, or
-    /// version-mismatched file is indistinguishable from a cold start.
-    static func load(from url: URL) -> CostScanCache {
-        guard let file = CostScanCacheStore.load(from: url) else { return CostScanCache() }
+    /// Never throws and never returns `nil`: an unreadable, corrupt,
+    /// version-mismatched, or oversized file is indistinguishable from a cold
+    /// start.
+    static func load(
+        from url: URL,
+        maximumBytes: Int = CostScanCacheStore.maximumArtifactBytes
+    ) -> CostScanCache {
+        guard let file = CostScanCacheStore.load(from: url, maximumBytes: maximumBytes) else {
+            return CostScanCache()
+        }
         return CostScanCache(previous: file)
     }
 

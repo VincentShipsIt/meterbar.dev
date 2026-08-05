@@ -352,6 +352,10 @@ nonisolated struct CostScanCacheFile: Codable, Sendable {
     static let currentSchemaVersion = 1
 
     let schemaVersion: Int
+    /// The parsing and pricing rules these digests were produced under. Separate
+    /// from `schemaVersion`, which describes the *container*: the layout can stay
+    /// identical while the numbers inside it come to mean something different.
+    let parserVersion: Int
     /// Claude entries are bucketed into *local* days, so a machine that changed
     /// time zone must re-derive them. Recorded at file level because the whole
     /// Claude half shares the fate.
@@ -361,6 +365,7 @@ nonisolated struct CostScanCacheFile: Codable, Sendable {
 
     init(timeZoneIdentifier: String, claude: [ClaudeCacheEntry], codex: [CodexCacheEntry]) {
         schemaVersion = Self.currentSchemaVersion
+        parserVersion = CostScanValues.costCacheParserVersion
         self.timeZoneIdentifier = timeZoneIdentifier
         self.claude = claude
         self.codex = codex
@@ -369,6 +374,11 @@ nonisolated struct CostScanCacheFile: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        // Required, unlike the entry lists below: those tolerate a truncated
+        // write because a partial cache is still a correct cache. A payload with
+        // no producer stamp is one this build cannot vouch for at all, so it must
+        // fail to decode rather than default to "probably mine".
+        parserVersion = try container.decode(Int.self, forKey: .parserVersion)
         timeZoneIdentifier = try container.decode(String.self, forKey: .timeZoneIdentifier)
         claude = try container.decodeIfPresent([ClaudeCacheEntry].self, forKey: .claude) ?? []
         codex = try container.decodeIfPresent([CodexCacheEntry].self, forKey: .codex) ?? []
