@@ -57,13 +57,27 @@ final class ApiUsageStore: ObservableObject {
     init(
         authenticatedProviders: (() -> [ApiProvider])? = nil,
         adminKey: ((ApiProvider) -> String?)? = nil,
-        fetchUsage: UsageFetcher? = nil
+        fetchUsage: UsageFetcher? = nil,
+        hasStoredKey: @escaping @MainActor (ApiProvider) -> Bool = {
+            KeychainManager.shared.hasKey(key: $0.keychainKey)
+        },
+        authManager: @escaping @MainActor () -> AuthenticationManager = { .shared }
     ) {
-        let authManager = AuthenticationManager.shared
+        // Two separate keychain postures, on purpose:
+        //
+        // - Which providers have a key (drives card visibility, evaluated on
+        //   every dashboard render) only needs *existence*, so the default
+        //   goes through the attributes-only `hasKey` probe that can never
+        //   raise a securityd ACL prompt.
+        // - The key *value* is needed only when a fetch actually runs, so
+        //   `AuthenticationManager.shared` — whose init decrypts both admin
+        //   keys from the real login keychain, the issue #319 hang class — is
+        //   resolved lazily inside the default closure, never at construction
+        //   and never from a render.
         authenticatedProvidersSource = authenticatedProviders ?? {
-            ApiProvider.allCases.filter { authManager.isAuthenticated($0) }
+            ApiProvider.allCases.filter { hasStoredKey($0) }
         }
-        adminKeySource = adminKey ?? { authManager.adminKey(for: $0) }
+        adminKeySource = adminKey ?? { authManager().adminKey(for: $0) }
         self.fetchUsage = fetchUsage ?? { provider, adminKey, window in
             try await ApiUsageService.fetch(provider: provider, adminKey: adminKey, window: window)
         }

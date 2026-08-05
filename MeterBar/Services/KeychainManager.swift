@@ -14,21 +14,50 @@ nonisolated protocol KeychainBackend {
 }
 
 /// Production backend: forwards straight to the Security framework.
+///
+/// Every call funnels through `assertTestProcessAllowsRealKeychain` first: a
+/// unit-test process that reaches the real login keychain without the
+/// live-integration opt-in is the silent-hang class of issue #319, and a loud
+/// debug-build failure here is the guard that keeps that class extinct.
 nonisolated struct SecItemKeychainBackend: KeychainBackend {
     func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
-        SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        assertTestProcessAllowsRealKeychain(.write)
+        return SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     }
 
     func add(query: [String: Any]) -> OSStatus {
-        SecItemAdd(query as CFDictionary, nil)
+        assertTestProcessAllowsRealKeychain(.write)
+        return SecItemAdd(query as CFDictionary, nil)
     }
 
     func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
-        SecItemCopyMatching(query as CFDictionary, &result)
+        assertTestProcessAllowsRealKeychain(
+            .read(requestsSecretData: (query[kSecReturnData as String] as? Bool) == true)
+        )
+        return SecItemCopyMatching(query as CFDictionary, &result)
     }
 
     func delete(query: [String: Any]) -> OSStatus {
-        SecItemDelete(query as CFDictionary)
+        assertTestProcessAllowsRealKeychain(.write)
+        return SecItemDelete(query as CFDictionary)
+    }
+
+    private func assertTestProcessAllowsRealKeychain(
+        _ operation: RealKeychainTestGuard.Operation
+    ) {
+        #if DEBUG
+        precondition(
+            !RealKeychainTestGuard.isBlocked(operation),
+            """
+            Real login-keychain access from a unit-test run without the \
+            live-integration opt-in. This is the hang class of issue #319: \
+            securityd can raise an ACL approval dialog no headless run can \
+            answer, and `swift test` parks forever at 0% CPU. Either gate the \
+            test behind LiveIntegrationTestGate.skipUnlessEnabled() or opt in \
+            deliberately with \(RealKeychainTestGuard.environmentKey)=1.
+            """
+        )
+        #endif
     }
 }
 
@@ -110,8 +139,25 @@ nonisolated final class KeychainManager {
         return allDeleted
     }
 
+    /// Existence probe only. Deliberately requests attributes, never
+    /// `kSecReturnData`: decrypting the secret is what triggers securityd's
+    /// ACL approval dialog when the calling process is not in the item's
+    /// trusted-application list, and every `hasKey` caller only needs a
+    /// boolean. Attribute reads are always prompt-free. This also means
+    /// `hasKey` does not perform the legacy-service migration `get` does —
+    /// migration still happens on the first real read of the value.
     func hasKey(key: String) -> Bool {
-        get(key: key) != nil
+        for service in [currentService] + legacyServices {
+            var query = baseQuery(key: key, service: service)
+            query[kSecReturnAttributes as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+            var result: AnyObject?
+            if backend.copyMatching(query: query, result: &result) == errSecSuccess {
+                return true
+            }
+        }
+        return false
     }
 
     private enum ReadResult {

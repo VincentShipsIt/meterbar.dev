@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import MeterBar
 
 /// Opt-in gate for tests that talk to the **real** credential stores and the
 /// **real** provider APIs.
@@ -28,13 +29,14 @@ import XCTest
 /// without touching the process environment, mirroring `DemoMode`.
 nonisolated enum LiveIntegrationTestGate {
     /// Launch environment variable that opts into live-credential tests.
-    static let environmentKey = "METERBAR_INTEGRATION_TESTS"
+    /// Owned by `RealKeychainTestGuard` so the skip decision here and the
+    /// real-keychain debug guard in the app target can never drift.
+    static let environmentKey = RealKeychainTestGuard.environmentKey
 
     static func isEnabled(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
-        guard let raw = environment[environmentKey] else { return false }
-        return isTruthy(raw)
+        RealKeychainTestGuard.isOptedIn(environment: environment)
     }
 
     /// Throws `XCTSkip` unless the opt-in is present. Call from `setUpWithError`
@@ -49,14 +51,5 @@ nonisolated enum LiveIntegrationTestGate {
             the real provider APIs. Re-run with \(environmentKey)=1 to include them.
             """
         )
-    }
-
-    private static func isTruthy(_ value: String) -> Bool {
-        switch value.trimmingCharacters(in: .whitespaces).lowercased() {
-        case "1", "true", "yes", "on":
-            return true
-        default:
-            return false
-        }
     }
 }
