@@ -35,6 +35,32 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.grok.id, "Grok")
     }
 
+    /// The compact brand form, for places where the full product name would
+    /// crowd the layout: chart legends, popover provider cards, "Add account"
+    /// sheets. It is a second *name*, not a second source of truth — the views
+    /// that used to spell these out inline (three separate switches over the
+    /// same five cases) now read them from here.
+    func testShortNames() {
+        XCTAssertEqual(ServiceType.claudeCode.shortName, "Claude")
+        XCTAssertEqual(ServiceType.codexCli.shortName, "Codex")
+        XCTAssertEqual(ServiceType.cursor.shortName, "Cursor")
+        XCTAssertEqual(ServiceType.openRouter.shortName, "OpenRouter")
+        XCTAssertEqual(ServiceType.grok.shortName, "Grok")
+    }
+
+    /// Both names must exist and be usable for every case, including any added
+    /// later — an empty label renders as a blank row rather than failing loudly.
+    func testEveryServiceHasBothNames() {
+        for service in ServiceType.allCases {
+            XCTAssertFalse(service.displayName.isEmpty, "\(service) has no display name")
+            XCTAssertFalse(service.shortName.isEmpty, "\(service) has no short name")
+            XCTAssertFalse(
+                service.shortName.count > service.displayName.count,
+                "\(service): the short name must not be longer than the full one"
+            )
+        }
+    }
+
     func testAllCasesCount() {
         XCTAssertEqual(ServiceType.allCases.count, 5)
     }

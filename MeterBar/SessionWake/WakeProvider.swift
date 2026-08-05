@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// The AI coding assistant a Session Wake run targets.
 ///
@@ -10,11 +11,17 @@ nonisolated enum WakeProvider: String, Codable, Equatable, Sendable, CaseIterabl
     case claude
     case codex
 
-    /// User-facing name for menus, notifications, and status copy.
+    /// User-facing name for menus, notifications, and status copy, sourced from
+    /// `ServiceType` so a provider rename is a single edit there rather than a
+    /// hunt through every enum that names the same five products.
+    ///
+    /// The two cases deliberately pick different name concepts: this string
+    /// lands mid-sentence ("Resumed 2 of 3 … sessions"), where Codex's full
+    /// product name ("OpenAI Codex") reads as boilerplate.
     var displayName: String {
         switch self {
-        case .claude: return "Claude Code"
-        case .codex: return "Codex"
+        case .claude: return ServiceType.claudeCode.displayName
+        case .codex: return ServiceType.codexCli.shortName
         }
     }
 

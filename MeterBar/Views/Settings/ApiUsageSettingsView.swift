@@ -51,7 +51,7 @@ struct ApiUsageSettingsView: View {
             if providerVisibility.isEnabled(.claudeCode) {
                 if let claudeExtraUsageStatus {
                     ExtraUsageRow(
-                        title: "Claude Code",
+                        title: ServiceType.claudeCode.displayName,
                         status: claudeExtraUsageStatus,
                         manageURL: "https://claude.ai/settings"
                     )
@@ -60,7 +60,7 @@ struct ApiUsageSettingsView: View {
 
             if providerVisibility.isEnabled(.codexCli) {
                 ExtraUsageRow(
-                    title: "OpenAI Codex",
+                    title: ServiceType.codexCli.displayName,
                     status: dataManager.metrics[.codexCli]?.extraUsage,
                     manageURL: "https://chatgpt.com"
                 )
@@ -68,7 +68,7 @@ struct ApiUsageSettingsView: View {
 
             if providerVisibility.isEnabled(.grok) {
                 ExtraUsageRow(
-                    title: "Grok",
+                    title: ServiceType.grok.displayName,
                     status: dataManager.metrics[.grok]?.extraUsage,
                     manageURL: "https://grok.com/?_s=usage"
                 )

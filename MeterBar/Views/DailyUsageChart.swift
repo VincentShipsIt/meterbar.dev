@@ -580,20 +580,7 @@ struct DailyProviderUsageSummaryRow: View {
     .padding(.vertical, MeterBarTheme.Spacing.xs)
   }
 
-  private var providerShortName: String {
-    switch provider.provider {
-    case .claudeCode:
-      return "Claude"
-    case .codexCli:
-      return "Codex"
-    case .cursor:
-      return "Cursor"
-    case .openRouter:
-      return "OpenRouter"
-    case .grok:
-      return "Grok"
-    }
-  }
+  private var providerShortName: String { provider.provider.shortName }
 }
 
 private struct DailyUsageMetricCell: View {

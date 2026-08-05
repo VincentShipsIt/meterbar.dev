@@ -242,7 +242,7 @@ enum ClaudeReconnectConfirmation {
     static func message(for account: ClaudeCodeAccount) -> String {
         ProviderAccountReconnectConfirmation.message(
             accountName: account.name,
-            providerDisplayName: "Claude"
+            providerDisplayName: ServiceType.claudeCode.shortName
         )
     }
 }

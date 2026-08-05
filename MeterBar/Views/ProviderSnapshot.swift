@@ -238,7 +238,9 @@ enum ProviderSnapshotBuilder {
             let enabledAccounts = input.codexAccounts.filter(\.isEnabled)
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
-                    let title = account.isDefault && enabledAccounts.count == 1 ? "Codex" : account.name
+                    let title = account.isDefault && enabledAccounts.count == 1
+                        ? ServiceType.codexCli.shortName
+                        : account.name
                     // A signed-in custom `CODEX_HOME` profile is waiting for a
                     // refresh, not for a login — only ask for one when this
                     // account's own probe says it has no usable token.
@@ -270,7 +272,9 @@ enum ProviderSnapshotBuilder {
             let accountMetrics = input.claudeAccountMetrics
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
-                    let title = account.isDefault && enabledAccounts.count == 1 ? "Claude" : account.name
+                    let title = account.isDefault && enabledAccounts.count == 1
+                        ? ServiceType.claudeCode.shortName
+                        : account.name
                     let emptyDetail = account.isDefault && input.claudeCodeHasAccess
                         ? "Waiting for refresh"
                         : "Run claude login"
@@ -288,7 +292,7 @@ enum ProviderSnapshotBuilder {
 
         if input.enabledServices.contains(.cursor) {
             result.append(snapshot(
-                title: "Cursor",
+                title: ServiceType.cursor.shortName,
                 service: .cursor,
                 metrics: input.metrics[.cursor],
                 emptyDetail: input.cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor"
@@ -297,7 +301,7 @@ enum ProviderSnapshotBuilder {
 
         if input.enabledServices.contains(.openRouter) {
             result.append(snapshot(
-                title: "OpenRouter",
+                title: ServiceType.openRouter.shortName,
                 service: .openRouter,
                 metrics: input.metrics[.openRouter],
                 emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key"
@@ -307,7 +311,9 @@ enum ProviderSnapshotBuilder {
         if input.enabledServices.contains(.grok) {
             let enabledAccounts = input.grokAccounts.filter(\.isEnabled)
             for account in enabledAccounts {
-                let title = account.isDefault && enabledAccounts.count == 1 ? "Grok" : account.name
+                let title = account.isDefault && enabledAccounts.count == 1
+                    ? ServiceType.grok.shortName
+                    : account.name
                 let fallbackMetrics = account.isDefault
                     && enabledAccounts.count == 1
                     && input.grokAccountMetrics.isEmpty

@@ -12,10 +12,33 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    /// The full product name. Use it wherever a provider is being *named*:
+    /// settings section headers, sidebar rows, notification titles, CLI JSON,
+    /// share cards.
     public var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
         case .codexCli: return "OpenAI Codex"
+        case .cursor: return "Cursor"
+        case .openRouter: return "OpenRouter"
+        case .grok: return "Grok"
+        }
+    }
+
+    /// The compact brand form, for places where the full product name would
+    /// crowd the layout: chart legends, popover provider cards, "Add account"
+    /// sheet copy.
+    ///
+    /// Centralized here for the same reason as `codeReviewQuotaTitle`: the
+    /// dashboard chart, the popover snapshot builder, and the settings sheets
+    /// each used to switch over these five cases inline, so renaming a provider
+    /// meant finding every copy. Note this is *not* the status-page operator
+    /// name — Codex's status page belongs to "OpenAI", which is why
+    /// `statusPageDisplayName` stays separate.
+    public var shortName: String {
+        switch self {
+        case .claudeCode: return "Claude"
+        case .codexCli: return "Codex"
         case .cursor: return "Cursor"
         case .openRouter: return "OpenRouter"
         case .grok: return "Grok"
