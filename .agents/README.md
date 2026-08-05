@@ -27,7 +27,7 @@ This is the `.agents/` folder containing AI agent documentation, session trackin
 ├── PRDs/
 │   ├── README.md                # PRD format guide
 │   └── *.md                     # Product Requirements Documents
-├── SESSIONS/
+├── sessions/
 │   ├── README.md                # Session format guide
 │   └── TEMPLATE.md              # Session file template
 ├── SOP/                         # Standard operating procedures
@@ -41,7 +41,7 @@ This is the `.agents/` folder containing AI agent documentation, session trackin
 
 1. Read `SYSTEM/ai/SESSION-QUICK-START.md`
 2. Check `SYSTEM/critical/CRITICAL-NEVER-DO.md`
-3. Read today's session file (if exists): `SESSIONS/2025-12-29.md`
+3. Read today's session file (if exists): `sessions/2025-12-29.md`
 
 ### During Work
 
@@ -52,15 +52,19 @@ This is the `.agents/` folder containing AI agent documentation, session trackin
 
 ### After Work
 
-- Update session file in `SESSIONS/`
+- Update session file in `sessions/`
 - Mark completed tasks
 - Note next steps
 
 ## Session Files
 
-**ONE FILE PER DAY:** `SESSIONS/YYYY-MM-DD.md`
+**ONE FILE PER DAY:** `sessions/YYYY-MM-DD.md`
 
 Multiple sessions on the same day go in the same file as Session 1, Session 2, etc.
+
+**Local-only.** `sessions/` is gitignored and never committed — this repo is
+public and session logs carry internal QA and unreleased design detail. The
+directory will not exist in a fresh clone; create it on first use.
 
 ## Tech Stack
 

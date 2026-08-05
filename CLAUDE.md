@@ -9,7 +9,12 @@ Architecture reality-check: `.agents/SYSTEM/ARCHITECTURE.md` and `docs/audits/00
 
 ## Sessions
 
-Document all work in `.agents/SESSIONS/YYYY-MM-DD.md` (one file per day).
+Document all work in `.agents/sessions/YYYY-MM-DD.md` (one file per day).
+
+`.agents/sessions/` is **local-only working notes** — gitignored, never committed.
+This repo is public; session logs carry internal QA and unreleased design detail.
+Durable decisions belong in `.agents/SYSTEM/architecture/DECISIONS.md`, delivery
+state on the GitHub issue or PR. Never `git add -f` a session file.
 
 ## Testing Policy
 - Write tests FIRST before implementation (TDD)

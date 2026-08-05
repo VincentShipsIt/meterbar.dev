@@ -115,3 +115,8 @@ Temporary Items
 .apdisk
 
 node_modules
+
+# Session logs are local-only working notes, never committed.
+# Both spellings: macOS is case-insensitive, Linux CI is not.
+.agents/sessions/
+.agents/SESSIONS/
