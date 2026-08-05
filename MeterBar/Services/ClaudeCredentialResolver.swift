@@ -285,7 +285,8 @@ nonisolated struct ClaudeCredentialStore: Sendable {
     static func keychainPayload(
         service: String,
         mode: ClaudeKeychainAccessMode,
-        backend: KeychainBackend = SecItemKeychainBackend()
+        backend: KeychainBackend = SecItemKeychainBackend(),
+        interaction: KeychainInteractionGate = LegacyKeychainInteractionGate()
     ) -> ClaudeKeychainReadOutcome<Data> {
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -295,8 +296,16 @@ nonisolated struct ClaudeCredentialStore: Sendable {
         ]
         let query = ClaudeKeychainQuery.applyingAccessMode(mode, to: baseQuery)
 
+        // The query flags above cover LocalAuthentication only. The gate is what
+        // keeps securityd's login-keychain ACL dialog off the screen for a
+        // background probe — see `KeychainInteractionGate`. Gated here rather
+        // than inside `SecItemKeychainBackend` so it applies to Claude's
+        // externally-owned items alone; `KeychainManager` reads items MeterBar
+        // wrote itself and is always inside their ACL.
         var result: AnyObject?
-        let status = backend.copyMatching(query: query, result: &result)
+        let status = interaction.withUserInteraction(allowed: mode == .interactive) {
+            backend.copyMatching(query: query, result: &result)
+        }
         return ClaudeKeychainQuery.outcome(
             status: status,
             result: result as? Data,
