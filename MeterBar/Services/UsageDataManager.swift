@@ -43,7 +43,11 @@ extension ClaudeCodeUsageProviding {
 extension ClaudeCodeLocalService: ClaudeCodeUsageProviding {}
 
 protocol CodexUsageProviding: AnyObject {
-    func canAccess(account: CodexAccount) async -> Bool
+    /// `nonisolated` so the witness thunk forwards `account` without a main-actor
+    /// entry hop — see the lifetime note on `CodexCliLocalService.canAccess`.
+    /// The refresh legs call this off the main actor, which is exactly where a
+    /// hopping thunk would strand the indirect argument.
+    nonisolated func canAccess(account: CodexAccount) async -> Bool
     func fetchUsageMetrics(account: CodexAccount) async throws -> UsageMetrics
 }
 

@@ -87,6 +87,11 @@ struct CodexAccountSettingsRow: View {
     }
 
     private func refreshConnectionState() async {
+        // Snapshot into frame-owned storage before probing: `connectionCheck` is
+        // a stored async closure, so the account travels through a reabstraction
+        // thunk as an indirect (`@in_guaranteed`) argument. Passing a copy this
+        // frame owns keeps that address valid for the callee's whole lifetime.
+        let account = self.account
         guard account.isEnabled else {
             connectionState = .disabled
             return

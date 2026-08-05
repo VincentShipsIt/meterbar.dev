@@ -140,6 +140,26 @@ final class CodexAccountAccessTests: XCTestCase {
         XCTAssertFalse(service.hasAccess)
     }
 
+    /// `canAccess` must stay `nonisolated`. A main-actor-isolated `async` probe
+    /// hops to the main actor *before its body runs*, and the caller-owned
+    /// `@in_guaranteed` account address does not survive that entry hop — that
+    /// is the codegen that segfaulted in both 1.8.3 and 1.8.31. Probing from a
+    /// detached task pins the requirement: this only completes without a
+    /// deadlock-free main hop if the callee starts on the caller's executor and
+    /// re-enters the main actor explicitly to record.
+    func testProbeFromOffTheMainActorThroughStoredClosureStillRecords() async {
+        let work = custom()
+        let service = makeService(authenticatedAccountIDs: [work.id])
+        let connectionCheck: @Sendable (CodexAccount) async -> Bool = {
+            await service.canAccess(account: $0)
+        }
+
+        let connected = await Task.detached { await connectionCheck(work) }.value
+
+        XCTAssertTrue(connected)
+        XCTAssertEqual(service.accountAccess[work.id], .some(true))
+    }
+
     func testProviderAccessSpansEveryEnabledProfile() {
         let work = custom()
         let service = makeService(authenticatedAccountIDs: [work.id])
