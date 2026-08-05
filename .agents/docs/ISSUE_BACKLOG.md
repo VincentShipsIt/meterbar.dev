@@ -171,7 +171,7 @@ Nothing exists: no XCUITest target, no app scheme even checked in (only
 - **Optional DRY:** `SocialShareTokenChart` hand-rolls a second bar chart next to the existing
   `DailyUsageChart` (`UsageDashboardView.swift:307`). Compose/theme the existing one, or keep the
   branded variant deliberately — decide, don't drift.
-- Trivial conflict in `.agents/SESSIONS/2026-07-02.md` (both sides added it) — merge both entries.
+- Trivial conflict in `.agents/sessions/2026-07-02.md` (both sides added it) — merge both entries.
 - Estimated 1–2 h rebase/rework, not a rewrite.
 
 ### 4b. Token optimization insights page (#72)

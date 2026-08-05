@@ -35,7 +35,7 @@ Add your personal preferences and instructions here. AI agents should read this 
 
 <!-- How you like to work -->
 
-- Document sessions in `SESSIONS/`
+- Document sessions in `sessions/`
 - Track tasks in `TASKS/`
 - Use three-part SemVer for future MeterBar releases. `v1.5` is accepted as the already-published release, but follow-up bugfixes should be `1.5.1`, `1.5.2`, etc. instead of bumping to `1.6`.
 - Do not rewrite or delete an already-published release tag unless explicitly requested.

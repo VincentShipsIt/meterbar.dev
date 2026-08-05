@@ -2,7 +2,7 @@
 
 Items intentionally **not** done in the 2026-06-26 cleanup pass, with enough
 detail to pick up later (e.g. on a machine with full Xcode). See
-`.agents/SESSIONS/2026-06-26.md` for the broader context.
+`.agents/sessions/2026-06-26.md` for the broader context.
 
 ---
 
@@ -13,7 +13,7 @@ the app, widget, and CLI targets; the three forked copies were deleted and the
 Xcode project links the local package. Local verification: `swift build` on the
 package/root/CLI + widget typecheck + live CLI smoke test; the xcodebuild
 app+widget build is exercised by CI (no full Xcode on the dev machine). See
-`.agents/SESSIONS/2026-07-02.md`. Original problem statement kept below for
+`.agents/sessions/2026-07-02.md`. Original problem statement kept below for
 context.
 
 ### Problem

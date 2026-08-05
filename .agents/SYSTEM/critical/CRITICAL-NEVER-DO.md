@@ -34,13 +34,13 @@ Everything else goes in `.agents/`.
 
 **Correct:**
 ```
-.agents/SESSIONS/2025-01-15.md
+.agents/sessions/2025-01-15.md
 ```
 
 **Wrong:**
 ```
-.agents/SESSIONS/2025-01-15-feature.md  ❌
-.agents/SESSIONS/FEATURE-2025-01-15.md  ❌
+.agents/sessions/2025-01-15-feature.md  ❌
+.agents/sessions/FEATURE-2025-01-15.md  ❌
 ```
 
 Multiple sessions same day → Same file, Session 1, Session 2, etc.

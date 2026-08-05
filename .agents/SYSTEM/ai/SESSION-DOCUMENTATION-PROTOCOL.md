@@ -15,7 +15,7 @@
 
 ### Location
 
-`../../SESSIONS/YYYY-MM-DD.md`
+`../../sessions/YYYY-MM-DD.md`
 
 ### Structure
 
@@ -90,16 +90,16 @@
 ### Correct
 
 ```
-SESSIONS/2025-01-15.md
-SESSIONS/2025-01-16.md
+sessions/2025-01-15.md
+sessions/2025-01-16.md
 ```
 
 ### Wrong
 
 ```
-SESSIONS/2025-01-15-feature-name.md  ❌
-SESSIONS/FEATURE-IMPLEMENTATION.md   ❌
-SESSIONS/2025-01-15-session-1.md     ❌
+sessions/2025-01-15-feature-name.md  ❌
+sessions/FEATURE-IMPLEMENTATION.md   ❌
+sessions/2025-01-15-session-1.md     ❌
 ```
 
 ---

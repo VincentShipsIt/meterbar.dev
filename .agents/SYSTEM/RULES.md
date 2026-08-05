@@ -61,7 +61,8 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 - Keep `README.md` claims true to the code (the sandbox/minimum-OS claims drifted once already)
 - Architectural decisions go in `SYSTEM/architecture/DECISIONS.md`
-- Session logs: `.agents/SESSIONS/YYYY-MM-DD.md`, one file per day
+- Session logs: `.agents/sessions/YYYY-MM-DD.md`, one file per day — gitignored,
+  local-only. This repo is public; never commit them, never `git add -f` one.
 
 ---
 
