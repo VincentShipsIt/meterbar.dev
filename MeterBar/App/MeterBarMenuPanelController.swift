@@ -93,12 +93,37 @@ final class MeterBarMenuPanelController {
                 context.duration = MeterBarTheme.Motion.panelFadeIn
                 panel.animator().alphaValue = 1
             }
+            settleFadeIn(panel, token: token)
         } else {
             panel.alphaValue = 1
             panel.makeKeyAndOrderFront(nil)
         }
 
         startEventMonitoring()
+    }
+
+    /// Guarantees the fade-in reaches full opacity even when it never runs.
+    ///
+    /// `panel.animator().alphaValue = 1` publishes the model value only once the
+    /// fade actually ticks, and a fade scheduled on a panel the window server is
+    /// not compositing never ticks at all — its animation group never completes,
+    /// so a completion handler cannot recover it either. The panel is then left
+    /// at the 0 assigned just before it was ordered front: on screen and taking
+    /// clicks, but invisible. A wall-clock settle is the only thing that can
+    /// close that hole, so schedule one past the fade and assign the end state
+    /// directly. When the fade does run this is a redundant write of a value the
+    /// animator already published.
+    ///
+    /// The token guard is what makes it safe: a `dismiss()` or newer `show()`
+    /// bumps `presentationToken`, so a settle left over from a superseded
+    /// presentation cannot force a panel back to opaque.
+    private func settleFadeIn(_ panel: NSPanel, token: Int) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + MeterBarTheme.Motion.panelFadeIn
+        ) { [weak self] in
+            guard let self, presentationToken == token, isPresented else { return }
+            panel.alphaValue = 1
+        }
     }
 
     func dismiss() {

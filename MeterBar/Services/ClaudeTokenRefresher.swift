@@ -224,6 +224,12 @@ actor ClaudeTokenRefresher {
     private let now: Clock
     private var inFlight: [UUID: Task<ClaudeTokenRefreshOutcome, Never>] = [:]
 
+    /// How many callers joined an already-running attempt instead of spawning
+    /// their own. Observability for the coalescing contract: the concurrency
+    /// test must know the second caller has actually joined before it lets the
+    /// first attempt finish, otherwise the assertion races the scheduler.
+    private(set) var coalescedJoins = 0
+
     init(
         cooldownStore: ClaudeRefreshCooldownStore = ClaudeRefreshCooldownStore(),
         fingerprint: @escaping FingerprintReader = {
@@ -253,6 +259,7 @@ actor ClaudeTokenRefresher {
         // stored cooldown, but it must not create a second process beside an
         // already-running background attempt.
         if let active = inFlight[account.id] {
+            coalescedJoins += 1
             return result(for: await active.value)
         }
 

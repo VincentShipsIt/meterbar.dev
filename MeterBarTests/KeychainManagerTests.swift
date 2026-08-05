@@ -79,12 +79,23 @@ final class KeychainManagerTests: XCTestCase {
             return errSecSuccess
         }
 
+        // Every copy query, in order, so tests can assert on the shape of a
+        // whole walk (e.g. that `hasKey` never asks for secret data).
+        private(set) var copyMatchingQueries: [[String: Any]] = []
+
         func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
             lastCopyMatchingQuery = query
+            copyMatchingQueries.append(query)
             guard let itemKey = itemKey(in: query), let data = storage[itemKey] else {
                 return errSecItemNotFound
             }
-            result = data as AnyObject
+            // Mirror the real API: secret data comes back only when asked for.
+            // An attributes-only probe still resolves the item and succeeds.
+            if (query[kSecReturnData as String] as? Bool) == true {
+                result = data as AnyObject
+            } else if (query[kSecReturnAttributes as String] as? Bool) == true {
+                result = [kSecAttrService as String: itemKey.service] as AnyObject
+            }
             return errSecSuccess
         }
 
@@ -139,6 +150,47 @@ final class KeychainManagerTests: XCTestCase {
         XCTAssertFalse(manager.hasKey(key: "cursor"))
         XCTAssertTrue(manager.save(key: "cursor", value: "token"))
         XCTAssertTrue(manager.hasKey(key: "cursor"))
+    }
+
+    /// Decrypting an item is what triggers securityd's ACL approval dialog for
+    /// a process outside the item's trusted-application list — the issue #319
+    /// hang class. An existence probe never needs the secret, so `hasKey` must
+    /// stay attributes-only and therefore prompt-free by construction.
+    func testHasKeyNeverRequestsSecretDataSoItCannotRaiseAnACLPrompt() {
+        let (manager, backend) = makeManager()
+        XCTAssertTrue(manager.save(key: "openRouterAPIKey", value: "sk-or-secret"))
+
+        XCTAssertTrue(manager.hasKey(key: "openRouterAPIKey"))
+        XCTAssertFalse(manager.hasKey(key: "absent"))
+
+        XCTAssertFalse(backend.copyMatchingQueries.isEmpty)
+        for query in backend.copyMatchingQueries {
+            XCTAssertNotEqual(
+                query[kSecReturnData as String] as? Bool,
+                true,
+                "hasKey must never ask the keychain to decrypt the item"
+            )
+            XCTAssertEqual(
+                query[kSecReturnAttributes as String] as? Bool,
+                true,
+                "hasKey probes existence via attributes"
+            )
+        }
+    }
+
+    /// `get` migrates legacy items as a side effect; a boolean probe must not.
+    /// The legacy item stays where it is until the first real read of the
+    /// value, and `hasKey` still reports it as present.
+    func testHasKeyFindsLegacyItemsWithoutMigratingOrDeletingThem() {
+        let (manager, backend) = makeManager()
+        backend.seed(service: Self.oldestLegacyService, account: "cursor", value: "token")
+
+        XCTAssertTrue(manager.hasKey(key: "cursor"))
+
+        XCTAssertEqual(backend.value(service: Self.oldestLegacyService, account: "cursor"), "token")
+        XCTAssertNil(backend.value(service: Self.currentService, account: "cursor"))
+        XCTAssertEqual(backend.addCallCount, 0)
+        XCTAssertEqual(backend.updateCallCount, 0)
     }
 
     func testDeleteRemovesKeyAndIsIdempotent() {

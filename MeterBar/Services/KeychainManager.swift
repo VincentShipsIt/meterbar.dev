@@ -13,22 +13,50 @@ nonisolated protocol KeychainBackend {
     func delete(query: [String: Any]) -> OSStatus
 }
 
-/// Production backend: forwards straight to the Security framework.
+/// Production backend: forwards straight to the Security framework — except
+/// in a unit-test process without the live-integration opt-in, where
+/// `RealKeychainTestGuard` hermetically seals the real login keychain off:
+/// reads behave as if it were empty (a decrypting read can hang a headless
+/// run behind a securityd ACL dialog — issue #319 — and its outcome is
+/// machine-dependent either way), and writes trap loudly because they would
+/// pollute the developer's real keychain.
 nonisolated struct SecItemKeychainBackend: KeychainBackend {
     func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
-        SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        trapIfTestProcessWrites()
+        return SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     }
 
     func add(query: [String: Any]) -> OSStatus {
-        SecItemAdd(query as CFDictionary, nil)
+        trapIfTestProcessWrites()
+        return SecItemAdd(query as CFDictionary, nil)
     }
 
     func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
-        SecItemCopyMatching(query as CFDictionary, &result)
+        #if DEBUG
+        if RealKeychainTestGuard.isBlocked(.read) {
+            return errSecItemNotFound
+        }
+        #endif
+        return SecItemCopyMatching(query as CFDictionary, &result)
     }
 
     func delete(query: [String: Any]) -> OSStatus {
-        SecItemDelete(query as CFDictionary)
+        trapIfTestProcessWrites()
+        return SecItemDelete(query as CFDictionary)
+    }
+
+    private func trapIfTestProcessWrites() {
+        #if DEBUG
+        precondition(
+            !RealKeychainTestGuard.isBlocked(.write),
+            """
+            Real login-keychain write from a unit-test run without the \
+            live-integration opt-in — this would pollute the developer's real \
+            keychain. Point the test at an in-memory KeychainBackend, or opt \
+            in deliberately with \(RealKeychainTestGuard.environmentKey)=1.
+            """
+        )
+        #endif
     }
 }
 
@@ -110,8 +138,25 @@ nonisolated final class KeychainManager {
         return allDeleted
     }
 
+    /// Existence probe only. Deliberately requests attributes, never
+    /// `kSecReturnData`: decrypting the secret is what triggers securityd's
+    /// ACL approval dialog when the calling process is not in the item's
+    /// trusted-application list, and every `hasKey` caller only needs a
+    /// boolean. Attribute reads are always prompt-free. This also means
+    /// `hasKey` does not perform the legacy-service migration `get` does —
+    /// migration still happens on the first real read of the value.
     func hasKey(key: String) -> Bool {
-        get(key: key) != nil
+        for service in [currentService] + legacyServices {
+            var query = baseQuery(key: key, service: service)
+            query[kSecReturnAttributes as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+            var result: AnyObject?
+            if backend.copyMatching(query: query, result: &result) == errSecSuccess {
+                return true
+            }
+        }
+        return false
     }
 
     private enum ReadResult {

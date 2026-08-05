@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import MeterBar
 
@@ -310,6 +311,77 @@ final class ApiUsageStoreTests: XCTestCase {
         )
     }
 
+    // MARK: - AuthenticationManager reachability
+
+    /// Constructing a store with both sources injected — what every unit test
+    /// does — must never resolve `AuthenticationManager`. Its init decrypts
+    /// the admin keys from the real login keychain, which can raise a
+    /// securityd ACL prompt and park a headless `swift test` forever (issue
+    /// #319's hang class).
+    func testInjectedSourcesNeverResolveTheAuthenticationManager() {
+        _ = ApiUsageStore(
+            authenticatedProviders: { [] },
+            adminKey: { _ in nil },
+            fetchUsage: { _, _, _ in throw URLError(.badURL) },
+            authManager: {
+                XCTFail("injected sources must not touch AuthenticationManager")
+                return Self.isolatedAuthManager()
+            }
+        )
+    }
+
+    /// Provider visibility only needs *existence* (the prompt-free probe);
+    /// the decrypting `AuthenticationManager` is resolved lazily and only
+    /// when a fetch actually needs the key value — never at construction,
+    /// never from the render-driven `authenticatedProviders` path.
+    func testDefaultSourcesProbeExistenceAndDecryptOnlyWhenFetching() async {
+        let manager = Self.isolatedAuthManager()
+        XCTAssertTrue(manager.setAdminKey("sk-ant-admin", for: .anthropic))
+        var resolutions = 0
+        let usedKeys = KeyRecorder()
+
+        let store = ApiUsageStore(
+            fetchUsage: { provider, adminKey, window in
+                await usedKeys.record(adminKey)
+                return Self.usage(provider: provider, window: window, inputTokens: 1)
+            },
+            hasStoredKey: { $0 == .anthropic },
+            authManager: {
+                resolutions += 1
+                return manager
+            }
+        )
+        XCTAssertEqual(resolutions, 0, "construction must not resolve the auth manager")
+
+        XCTAssertEqual(store.authenticatedProviders, [.anthropic])
+        XCTAssertEqual(resolutions, 0, "existence probing must not decrypt")
+
+        await store.refresh()
+        let keys = await usedKeys.keys
+        XCTAssertEqual(keys, ["sk-ant-admin"])
+        XCTAssertGreaterThan(resolutions, 0, "fetching resolves the key value lazily")
+    }
+
+    private actor KeyRecorder {
+        private(set) var keys: [String] = []
+
+        func record(_ key: String) {
+            keys.append(key)
+        }
+    }
+
+    /// An `AuthenticationManager` backed entirely by in-memory storage, so
+    /// these tests exercise the real init/read paths without any keychain.
+    private static func isolatedAuthManager() -> AuthenticationManager {
+        AuthenticationManager(
+            keychain: KeychainManager(
+                backend: DictionaryKeychainBackend(),
+                currentService: "test.\(UUID().uuidString)",
+                legacyServices: []
+            )
+        )
+    }
+
     private func makeCredentialStore(
         authenticatedProviders: @escaping () -> [ApiProvider],
         adminKey: @escaping (ApiProvider) -> String?,
@@ -337,5 +409,62 @@ final class ApiUsageStoreTests: XCTestCase {
             estimatedCostUSD: 0,
             models: []
         )
+    }
+}
+
+/// Minimal in-memory `KeychainBackend` so `AuthenticationManager` can be
+/// exercised without the real login keychain. Just enough semantics for
+/// save/get: update on a missing item reports not-found so the manager falls
+/// through to add.
+nonisolated private final class DictionaryKeychainBackend: KeychainBackend {
+    private struct ItemKey: Hashable {
+        let service: String
+        let account: String
+    }
+
+    private var storage: [ItemKey: Data] = [:]
+
+    private func itemKey(in query: [String: Any]) -> ItemKey? {
+        guard let service = query[kSecAttrService as String] as? String,
+              let account = query[kSecAttrAccount as String] as? String else {
+            return nil
+        }
+        return ItemKey(service: service, account: account)
+    }
+
+    func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query), storage[itemKey] != nil,
+              let data = attributes[kSecValueData as String] as? Data else {
+            return errSecItemNotFound
+        }
+        storage[itemKey] = data
+        return errSecSuccess
+    }
+
+    func add(query: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query),
+              let data = query[kSecValueData as String] as? Data else {
+            return errSecParam
+        }
+        storage[itemKey] = data
+        return errSecSuccess
+    }
+
+    func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
+        guard let itemKey = itemKey(in: query), let data = storage[itemKey] else {
+            return errSecItemNotFound
+        }
+        if (query[kSecReturnData as String] as? Bool) == true {
+            result = data as AnyObject
+        }
+        return errSecSuccess
+    }
+
+    func delete(query: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query),
+              storage.removeValue(forKey: itemKey) != nil else {
+            return errSecItemNotFound
+        }
+        return errSecSuccess
     }
 }
