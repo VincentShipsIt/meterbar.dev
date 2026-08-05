@@ -113,24 +113,27 @@ class CodexCliLocalService: ObservableObject {
     /// `nonisolated` is load-bearing — see the lifetime note below. Do not
     /// re-isolate this to the main actor.
     nonisolated func canAccess(account: CodexAccount) async -> Bool {
-        // The settings row probes through a stored `(CodexAccount) async -> Bool`
-        // closure, so `account` arrives @in_guaranteed: an address the *caller*
-        // owns, not storage this frame owns. A main-actor-isolated `async`
-        // callee hops to the main actor before its body runs, and that address
-        // does not survive the hop — both 1.8.3 and 1.8.31 faulted in
-        // `swift_retain` while the outlined copy retained the parameter's
-        // `String` fields on the far side of that entry hop. (1.8.31 only moved
-        // the *later* `record` read, which was never the faulting one.)
+        // Callers must not reach this through a stored `(CodexAccount) async ->
+        // Bool` closure. Such a closure is an abstract function type, so the
+        // account is passed indirectly (`@in_guaranteed`) through a
+        // reabstraction thunk and this frame receives an address it does not
+        // own; the copy below then retained a dead `String` and faulted in
+        // `swift_retain` at `0x8`. That was the 1.8.3/1.8.31/1.8.32 crash, and
+        // the fix lives at the call site — `CodexAccountSettingsRow` now binds
+        // the account into a `() async -> Bool` closure so no thunk exists.
         //
-        // Two rules keep this safe, and both are required:
+        // What this function still owes its callers:
         //   1. `nonisolated` — under `SWIFT_APPROACHABLE_CONCURRENCY` that means
         //      `nonisolated(nonsending)`, so the body starts on the caller's
-        //      executor with no entry hop and `account` is still live.
+        //      executor with no entry hop.
         //   2. Copy into frame-owned storage first, then never read `account`
         //      again — every later use goes through `snapshot`.
-        // Verify after any change: in the Release binary, the call to
-        // `outlined init with copy of CodexAccount` inside `canAccess` must come
-        // *before* the first `swift_task_switch`.
+        //
+        // Do *not* re-verify a change here by checking instruction ordering
+        // inside this function: that criterion passed on 1.8.32 and the app
+        // still crashed, because the incoming address was already dead. The
+        // criterion that matters is at the call site (see the note in
+        // `CodexAccountSettingsRow.init`).
         let snapshot = account
         let accountID = snapshot.id
         let isDefault = snapshot.isDefault
