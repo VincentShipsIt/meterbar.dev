@@ -7,7 +7,8 @@ import MeterBarShared
 enum ClaudeCostScanner {
     nonisolated static func scanSessions(
         since cutoffDate: Date,
-        claudeAccounts: [ClaudeCodeAccount]
+        claudeAccounts: [ClaudeCodeAccount],
+        cache: CostScanCache? = nil
     ) -> ScanWindows<ClaudeSessionTotals> {
         var windows = ScanWindows(
             period: ClaudeSessionTotals(),
@@ -18,31 +19,95 @@ enum ClaudeCostScanner {
         guard !projectRoots.isEmpty else { return windows }
 
         for root in projectRoots {
-            guard CostScanFileSystem.isLocalDirectory(root) else { continue }
-
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else {
-                continue
-            }
-
-            // No mtime prefilter: the lifetime window needs every file, and the
-            // period window is already bounded by the per-event timestamp check
-            // (an event is never newer than the file that holds it).
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                // Computed once per file, not per event: project identity is a
-                // property of where the transcript lives, unlike `usageOrigin`
-                // which can vary line-to-line within the same file.
-                let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
-                let file = Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID)
-                windows.period.merge(file.period)
-                windows.lifetime.merge(file.lifetime)
-            }
+            let scanned = Self.scanProjectRoot(root, since: cutoffDate, cache: cache)
+            windows.period.merge(scanned.period)
+            windows.lifetime.merge(scanned.lifetime)
         }
 
         return windows
+    }
+
+    /// Walks one `projects` root. Split out of `scanSessions` so a single root
+    /// can be driven from a fixture directory, and so the cache has one seam to
+    /// hook rather than one per account.
+    nonisolated static func scanProjectRoot(
+        _ root: URL,
+        since cutoffDate: Date,
+        cache: CostScanCache? = nil
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        var windows = ScanWindows(
+            period: ClaudeSessionTotals(),
+            lifetime: ClaudeSessionTotals(),
+            cutoff: cutoffDate
+        )
+        guard CostScanFileSystem.isLocalDirectory(root) else { return windows }
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return windows
+        }
+
+        // Cached day buckets can only answer a cutoff that lands on a day
+        // boundary — which is what `CostWindow.start(days:)` always produces.
+        // Anything else (a hand-rolled cutoff in a test, or a future
+        // hour-granular window) falls back to a full parse rather than
+        // splitting a bucket it cannot split.
+        let reusable = Calendar.current.startOfDay(for: cutoffDate) == cutoffDate
+
+        // No mtime prefilter: the lifetime window needs every file, and the
+        // period window is already bounded by the per-event timestamp check
+        // (an event is never newer than the file that holds it). The cache below
+        // is the answer to the re-parse cost, not a prefilter — an unchanged
+        // archive still contributes its full lifetime totals, just without
+        // being read again.
+        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            // Computed once per file, not per event: project identity is a
+            // property of where the transcript lives, unlike `usageOrigin`
+            // which can vary line-to-line within the same file.
+            let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
+            let file = Self.sessionWindows(
+                at: url,
+                since: cutoffDate,
+                projectID: projectID,
+                cache: reusable ? cache : nil,
+                recordingInto: cache
+            )
+            windows.period.merge(file.period)
+            windows.lifetime.merge(file.lifetime)
+        }
+
+        return windows
+    }
+
+    /// One transcript, served from `cache` when its stamp still matches and its
+    /// digest reconstructs cleanly, parsed from disk otherwise.
+    nonisolated private static func sessionWindows(
+        at url: URL,
+        since cutoffDate: Date,
+        projectID: String,
+        cache: CostScanCache?,
+        recordingInto recorder: CostScanCache?
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        let stamp = CostScanFileStamp.read(at: url)
+
+        if let cache, let stamp,
+           let entry = cache.claudeEntry(forPath: url.path, stamp: stamp),
+           entry.digest.projectID == projectID,
+           let period = entry.digest.totals(since: cutoffDate),
+           let lifetime = entry.digest.totals(since: .distantPast) {
+            cache.noteHit(carrying: entry)
+            return ScanWindows(period: period, lifetime: lifetime, cutoff: cutoffDate)
+        }
+
+        recorder?.noteMiss()
+        let parsed = Self.parseTranscript(at: url, since: cutoffDate, projectID: projectID)
+        if let recorder, let stamp, let digest = parsed.digest {
+            recorder.store(ClaudeCacheEntry(path: url.path, stamp: stamp, digest: digest))
+        }
+        return parsed.windows
     }
 
     /// `windowStart` is the floor the old code seeded `latestDate` with — the
@@ -182,10 +247,29 @@ enum ClaudeCostScanner {
         since cutoffDate: Date,
         projectID: String = CostProjectAttribution.unknownProjectID
     ) -> ScanWindows<ClaudeSessionTotals> {
+        Self.parseTranscript(at: url, since: cutoffDate, projectID: projectID).windows
+    }
+
+    /// The streaming parse, plus the day-bucketed digest the cache stores.
+    ///
+    /// `digest` is `nil` when the transcript cannot be summarized without risking
+    /// a wrong number — see `makeDigest` for the two cases. A `nil` digest costs
+    /// a re-parse next time; a wrong one would cost the dashboard's credibility.
+    nonisolated static func parseTranscript(
+        at url: URL,
+        since cutoffDate: Date,
+        projectID: String = CostProjectAttribution.unknownProjectID
+    ) -> (windows: ScanWindows<ClaudeSessionTotals>, digest: ClaudeTranscriptDigest?) {
         var periodKeyed: [String: ClaudeUsageEvent] = [:]
         var periodUnkeyed: [ClaudeUsageEvent] = []
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
+        // A key that resolves to two *different* events makes the file
+        // uncacheable: last-wins is applied per window, so which copy survives
+        // depends on where the cutoff falls — something a cutoff-independent
+        // digest cannot represent.
+        var ambiguous = false
+        var negativeTokens = false
 
         FileLineReader.forEachLine(in: url) { lineData in
             guard !lineData.isEmpty,
@@ -210,9 +294,11 @@ enum ClaudeCostScanner {
                 origin: Self.usageOrigin(json: json, message: message, url: url)
             )
             guard event.hasUsage else { return }
+            if event.hasNegativeTokens { negativeTokens = true }
 
             let inPeriod = timestamp >= cutoffDate
             if let key = event.deduplicationKey {
+                if let existing = lifetimeKeyed[key], existing != event { ambiguous = true }
                 lifetimeKeyed[key] = event
                 if inPeriod { periodKeyed[key] = event }
             } else {
@@ -221,20 +307,109 @@ enum ClaudeCostScanner {
             }
         }
 
-        return ScanWindows(
-            period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID),
-            lifetime: Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed, projectID: projectID),
+        let lifetimeEvents = Self.orderedEvents(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed)
+        let windows = ScanWindows(
+            period: Self.tally(events: Self.orderedEvents(keyed: periodKeyed, unkeyed: periodUnkeyed),
+                               projectID: projectID),
+            lifetime: Self.tally(events: lifetimeEvents, projectID: projectID),
             cutoff: cutoffDate
+        )
+        let digest = (ambiguous || negativeTokens)
+            ? nil
+            : Self.makeDigest(from: lifetimeEvents, projectID: projectID)
+        return (windows, digest)
+    }
+
+    /// Keyed events first, in key order, then the unkeyed ones in file order —
+    /// the traversal order the totals have always been accumulated in.
+    nonisolated private static func orderedEvents(
+        keyed: [String: ClaudeUsageEvent],
+        unkeyed: [ClaudeUsageEvent]
+    ) -> [ClaudeUsageEvent] {
+        keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
+    }
+
+    /// Collapses one transcript's deduplicated events into per-day,
+    /// per-(model, origin) token sums.
+    ///
+    /// Costs are deliberately *not* stored: `calculateClaudeCost` is linear in
+    /// each non-negative token count, so recomputing from the sums reproduces
+    /// the per-event total, and a pricing-table change then lands on cached
+    /// files as well as fresh ones.
+    nonisolated private static func makeDigest(
+        from events: [ClaudeUsageEvent],
+        projectID: String
+    ) -> ClaudeTranscriptDigest {
+        var models = CostScanStringTable()
+        var origins = CostScanStringTable()
+        // Keyed by day, then by (model index, origin index), holding the running
+        // token sums in `bucketStride` order.
+        var byDay: [Date: [BucketKey: [Int]]] = [:]
+        var extremes: [Date: (earliest: Date, latest: Date)] = [:]
+        var dayOrder: [Date] = []
+        var bucketOrder: [Date: [BucketKey]] = [:]
+
+        for event in events {
+            let day = Calendar.current.startOfDay(for: event.timestamp)
+            let key = BucketKey(
+                model: event.model.map { models.index(of: $0) } ?? ClaudeTranscriptDigest.nilModelIndex,
+                origin: origins.index(of: event.origin)
+            )
+
+            if byDay[day] == nil {
+                byDay[day] = [:]
+                bucketOrder[day] = []
+                dayOrder.append(day)
+                extremes[day] = (event.timestamp, event.timestamp)
+            } else if let current = extremes[day] {
+                extremes[day] = (
+                    min(current.earliest, event.timestamp),
+                    max(current.latest, event.timestamp)
+                )
+            }
+
+            if byDay[day]?[key] == nil {
+                byDay[day]?[key] = [key.model, key.origin, 0, 0, 0, 0, 0, 0]
+                bucketOrder[day]?.append(key)
+            }
+            byDay[day]?[key]?[2] += event.input
+            byDay[day]?[key]?[3] += event.output
+            byDay[day]?[key]?[4] += event.cacheCreation
+            byDay[day]?[key]?[5] += event.cacheCreationOneHour
+            byDay[day]?[key]?[6] += event.cacheRead
+            byDay[day]?[key]?[7] += 1
+        }
+
+        let days = dayOrder.compactMap { day -> ClaudeTranscriptDigest.Day? in
+            guard let buckets = byDay[day], let order = bucketOrder[day], let span = extremes[day] else {
+                return nil
+            }
+            return ClaudeTranscriptDigest.Day(
+                day: day.timeIntervalSinceReferenceDate,
+                earliest: span.earliest.timeIntervalSinceReferenceDate,
+                latest: span.latest.timeIntervalSinceReferenceDate,
+                buckets: order.flatMap { buckets[$0] ?? [] }
+            )
+        }
+
+        return ClaudeTranscriptDigest(
+            projectID: projectID,
+            models: models.values,
+            origins: origins.values,
+            days: days
         )
     }
 
+    nonisolated private struct BucketKey: Hashable {
+        let model: Int
+        let origin: Int
+    }
+
     nonisolated private static func tally(
-        keyed: [String: ClaudeUsageEvent],
-        unkeyed: [ClaudeUsageEvent],
+        events: [ClaudeUsageEvent],
         projectID: String
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
-        let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
 
         for event in events {
             let pricing = Self.pricing(for: event.model)
@@ -376,7 +551,7 @@ enum ClaudeCostScanner {
     }
 }
 
-nonisolated private struct ClaudeUsageEvent: Sendable {
+nonisolated private struct ClaudeUsageEvent: Sendable, Equatable {
     let timestamp: Date
     let model: String?
     let messageID: String?
@@ -390,6 +565,14 @@ nonisolated private struct ClaudeUsageEvent: Sendable {
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
+    }
+
+    /// `CostScanValues.int` passes negatives through, and the cost math clamps
+    /// each field to zero *per event*. Summing first would let a negative field
+    /// cancel a positive one from another event and change the total, so a
+    /// transcript containing one is never summarized.
+    var hasNegativeTokens: Bool {
+        input < 0 || output < 0 || cacheCreation < 0 || cacheCreationOneHour < 0 || cacheRead < 0
     }
 
     var deduplicationKey: String? {

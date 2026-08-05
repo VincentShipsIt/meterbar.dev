@@ -25,13 +25,16 @@ enum CodexCostScanner {
         return result
     }()
 
-    nonisolated static func scanSessions(since cutoffDate: Date) -> ScanWindows<CodexScanContext> {
+    nonisolated static func scanSessions(
+        since cutoffDate: Date,
+        cache: CostScanCache? = nil
+    ) -> ScanWindows<CodexScanContext> {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
         let logsDatabase = codexDir.appendingPathComponent("logs_2.sqlite")
         var windows = Self.scanWindows(cutoff: cutoffDate)
 
         for directory in Self.rolloutDirectories(in: codexDir) {
-            Self.scanRollouts(directory: directory, windows: &windows)
+            Self.scanRollouts(directory: directory, windows: &windows, cache: cache)
         }
         Self.scanSQLiteLogs(database: logsDatabase, windows: &windows)
 
@@ -137,7 +140,8 @@ enum CodexCostScanner {
     /// per file: state resets on every rollout.
     nonisolated static func scanRollouts(
         directory: URL,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CodexScanContext>,
+        cache: CostScanCache? = nil
     ) {
         guard CostScanFileSystem.isLocalDirectory(directory) else { return }
 
@@ -152,40 +156,87 @@ enum CodexCostScanner {
         // The per-file mtime prefilter is gone on purpose: the lifetime window
         // needs every file, and the period window is still bounded by the
         // per-event timestamp check inside `ScanWindows.update` (an event is
-        // never newer than the file holding it).
+        // never newer than the file holding it). `cache` removes the re-parse
+        // cost without reintroducing that prefilter's blind spot.
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            // Reset per file: attribution carried across rollouts would label
-            // one session's spend with another's model.
-            var rollout = CodexRolloutContext()
-            // Codex emits a session's opening `token_count` events *before* its
-            // first `turn_context`, so forward-only attribution orphaned them
-            // even though the same file names the model seconds later. Park
-            // them here instead and back-fill once the file declares a model.
-            // Per file, like the rollout context: a sibling rollout's model
-            // must never name events this file left unexplained.
-            var deferred: [CodexDeferredUsage] = []
-            FileLineReader.forEachLine(in: fileURL) { line in
-                guard line.contains(Self.tokenCountMarker) else {
-                    Self.updateRolloutContext(&rollout, from: line)
-                    // Reaches back only as far as the *first* model the file
-                    // declares — a later mid-session switch must not relabel
-                    // the events that preceded it.
-                    if let model = rollout.turnModel ?? rollout.sessionModel {
-                        Self.flushDeferred(&deferred, modelName: model, windows: &windows)
-                    }
-                    return
-                }
-                Self.addTokenCountLine(
-                    line,
-                    fileURL: fileURL,
-                    rollout: rollout,
-                    deferred: &deferred,
-                    windows: &windows
-                )
+            for record in Self.rolloutRecords(at: fileURL, cache: cache) {
+                Self.apply(record, windows: &windows)
             }
-            // Whatever the file never explained is genuinely unattributed.
-            Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
         }
+    }
+
+    /// One rollout's deduplicated-input records, from cache when its stamp still
+    /// matches and the payload rebuilds cleanly, from disk otherwise.
+    ///
+    /// Unlike the Claude side there is no cutoff-alignment condition: records
+    /// carry their own timestamps and are replayed through the same `apply` a
+    /// cold scan uses, so any cutoff is served exactly.
+    nonisolated private static func rolloutRecords(
+        at fileURL: URL,
+        cache: CostScanCache?
+    ) -> [CodexUsageRecord] {
+        let stamp = CostScanFileStamp.read(at: fileURL)
+
+        if let cache, let stamp,
+           let entry = cache.codexEntry(forPath: fileURL.path, stamp: stamp),
+           let records = entry.digest.records() {
+            cache.noteHit(carrying: entry)
+            return records
+        }
+
+        cache?.noteMiss()
+        let records = Self.parseRollout(at: fileURL)
+        if let cache, let stamp {
+            cache.store(
+                CodexCacheEntry(
+                    path: fileURL.path,
+                    stamp: stamp,
+                    digest: CodexRolloutDigest(records: records)
+                )
+            )
+        }
+        return records
+    }
+
+    /// Streams one rollout into usage records. Internal (not private) so rollout
+    /// parsing — the Codex counterpart to `parseSessionFile`, and where
+    /// CLI-vs-app cost divergence hides — stays fixture-testable on its own.
+    nonisolated static func parseRollout(at fileURL: URL) -> [CodexUsageRecord] {
+        var records: [CodexUsageRecord] = []
+        // Reset per file: attribution carried across rollouts would label
+        // one session's spend with another's model.
+        var rollout = CodexRolloutContext()
+        // Codex emits a session's opening `token_count` events *before* its
+        // first `turn_context`, so forward-only attribution orphaned them
+        // even though the same file names the model seconds later. Park
+        // them here instead and back-fill once the file declares a model.
+        // Per file, like the rollout context: a sibling rollout's model
+        // must never name events this file left unexplained.
+        var deferred: [CodexDeferredUsage] = []
+
+        FileLineReader.forEachLine(in: fileURL) { line in
+            guard line.contains(Self.tokenCountMarker) else {
+                Self.updateRolloutContext(&rollout, from: line)
+                // Reaches back only as far as the *first* model the file
+                // declares — a later mid-session switch must not relabel
+                // the events that preceded it.
+                if let model = rollout.turnModel ?? rollout.sessionModel {
+                    Self.flushDeferred(&deferred, modelName: model, into: &records)
+                }
+                return
+            }
+            Self.addTokenCountLine(
+                line,
+                fileURL: fileURL,
+                rollout: rollout,
+                deferred: &deferred,
+                records: &records
+            )
+        }
+        // Whatever the file never explained is genuinely unattributed.
+        Self.flushDeferred(&deferred, modelName: nil, into: &records)
+
+        return records
     }
 
     /// Single-window entry point kept for callers that only care about one
@@ -227,12 +278,12 @@ enum CodexCostScanner {
     nonisolated private static func flushDeferred(
         _ deferred: inout [CodexDeferredUsage],
         modelName: String?,
-        windows: inout ScanWindows<CodexScanContext>
+        into records: inout [CodexUsageRecord]
     ) {
         guard !deferred.isEmpty else { return }
 
         for pending in deferred {
-            Self.addUsage(
+            guard let record = Self.makeRecord(
                 pending.usage,
                 timestamp: pending.timestamp,
                 sessionID: pending.sessionID,
@@ -240,9 +291,11 @@ enum CodexCostScanner {
                     modelName: modelName,
                     originName: pending.originName,
                     projectID: pending.projectID
-                ),
-                windows: &windows
-            )
+                )
+            ) else {
+                continue
+            }
+            records.append(record)
         }
         deferred.removeAll()
     }
@@ -252,7 +305,7 @@ enum CodexCostScanner {
         fileURL: URL,
         rollout: CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
-        windows: inout ScanWindows<CodexScanContext>
+        records: inout [CodexUsageRecord]
     ) {
         guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let timestampText = json["timestamp"] as? String,
@@ -288,7 +341,7 @@ enum CodexCostScanner {
             return
         }
 
-        Self.addUsage(
+        guard let record = Self.makeRecord(
             usage,
             timestamp: timestamp,
             sessionID: sessionID,
@@ -296,9 +349,11 @@ enum CodexCostScanner {
                 modelName: modelName,
                 originName: originName,
                 projectID: projectID
-            ),
-            windows: &windows
-        )
+            )
+        ) else {
+            return
+        }
+        records.append(record)
     }
 
     nonisolated private static func eventPayload(
@@ -374,6 +429,9 @@ enum CodexCostScanner {
     /// inside `ScanWindows` rather than as its own argument, and `modelName`/
     /// `originName`/`projectID` are bundled into one `CodexUsageAttribution`
     /// value instead of three separate parameters.
+    ///
+    /// Only the SQLite path calls this now; the rollout path splits the same two
+    /// steps apart so the record between them can be cached.
     nonisolated private static func addUsage(
         _ usage: [String: Any],
         timestamp: Date,
@@ -381,11 +439,58 @@ enum CodexCostScanner {
         attribution: CodexUsageAttribution,
         windows: inout ScanWindows<CodexScanContext>
     ) {
+        guard let record = Self.makeRecord(
+            usage,
+            timestamp: timestamp,
+            sessionID: sessionID,
+            attribution: attribution
+        ) else {
+            return
+        }
+        Self.apply(record, windows: &windows)
+    }
+
+    /// Extracts the four token counts and drops the empty events, producing the
+    /// value the cache stores. Nothing here depends on the cutoff or on any
+    /// other event, which is what makes the record safe to persist and replay.
+    nonisolated private static func makeRecord(
+        _ usage: [String: Any],
+        timestamp: Date,
+        sessionID: String,
+        attribution: CodexUsageAttribution
+    ) -> CodexUsageRecord? {
         let input = CostScanValues.int(usage["input_tokens"])
         let cached = CostScanValues.int(usage["cached_input_tokens"])
         let output = CostScanValues.int(usage["output_tokens"])
         let reasoning = CostScanValues.int(usage["reasoning_output_tokens"])
-        guard input > 0 || output > 0 || cached > 0 || reasoning > 0 else { return }
+        guard input > 0 || output > 0 || cached > 0 || reasoning > 0 else { return nil }
+
+        return CodexUsageRecord(
+            timestamp: timestamp,
+            sessionID: sessionID,
+            model: attribution.modelName,
+            origin: attribution.originName,
+            projectID: attribution.projectID,
+            input: input,
+            cached: cached,
+            output: output,
+            reasoning: reasoning
+        )
+    }
+
+    /// Folds one record into both windows. The single tally path a cold and a
+    /// warm scan share — a cached scan is exact because it runs this code, not
+    /// because a second implementation was argued to agree with it.
+    nonisolated private static func apply(
+        _ record: CodexUsageRecord,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        let timestamp = record.timestamp
+        let sessionID = record.sessionID
+        let input = record.input
+        let cached = record.cached
+        let output = record.output
+        let reasoning = record.reasoning
 
         // Use whole-millisecond precision for the dedup key so equivalent events
         // produce a stable, collision-resistant string (raw Double formatting can
@@ -393,9 +498,9 @@ enum CodexCostScanner {
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
         let day = Calendar.current.startOfDay(for: timestamp)
-        let modelKey = CostScanValues.displayModelName(attribution.modelName)
-        let originKey = CostScanValues.displayOriginName(attribution.originName)
-        let projectKey = attribution.projectID
+        let modelKey = CostScanValues.displayModelName(record.model)
+        let originKey = CostScanValues.displayOriginName(record.origin)
+        let projectKey = record.projectID
 
         // Each window keeps its own `eventKeys`, so an event that lands in both
         // is deduplicated independently in each — exactly what the two separate
