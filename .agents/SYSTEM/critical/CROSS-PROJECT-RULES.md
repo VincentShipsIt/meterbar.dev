@@ -30,7 +30,7 @@ Every project follows:
     ├── README.md
     ├── SYSTEM/
     ├── TASKS/
-    └── SESSIONS/
+    └── sessions/
 ```
 
 ---
@@ -38,7 +38,7 @@ Every project follows:
 ## Session Files
 
 - **One file per day:** `YYYY-MM-DD.md`
-- **Location:** `.agents/SESSIONS/`
+- **Location:** `.agents/sessions/`
 - Multiple sessions = Session 1, Session 2 in SAME file
 
 ---

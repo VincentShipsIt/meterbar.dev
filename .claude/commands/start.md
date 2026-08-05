@@ -31,7 +31,7 @@ This file contains:
 Read today's session to understand what was already done before `/clear`:
 ```bash
 TODAY=$(date +%Y-%m-%d)
-cat .agents/SESSIONS/$TODAY.md 2>/dev/null || echo "No session file for today yet"
+cat .agents/sessions/$TODAY.md 2>/dev/null || echo "No session file for today yet"
 ```
 
 If the file exists, this shows:
@@ -51,7 +51,7 @@ The `session-documenter` skill will automatically activate and track:
 - Patterns established
 - Mistakes and fixes
 
-Documentation is written to `.agents/SESSIONS/YYYY-MM-DD.md` after each task completion.
+Documentation is written to `.agents/sessions/YYYY-MM-DD.md` after each task completion.
 
 **No manual action required** - this happens automatically.
 
@@ -106,11 +106,11 @@ This command ensures consistent behavior across sessions by:
    - No background processes (foreground only)
    - No local builds/tests (CI/CD only)
    - Document before /clear (session-documenter skill)
-   - Check `.agents/SESSIONS/` before implementing
+   - Check `.agents/sessions/` before implementing
    - Find and follow real codebase examples (not generic patterns)
    - Quality over speed
    - Session memory is critical
-3. **Today's session file** (`.agents/SESSIONS/YYYY-MM-DD.md`):
+3. **Today's session file** (`.agents/sessions/YYYY-MM-DD.md`):
    - What was done earlier today (before /clear)
    - Context continuity across /clear boundaries
 

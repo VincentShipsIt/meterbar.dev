@@ -25,7 +25,7 @@ Workspace level:
 - .agents/README.md
 - .agents/SYSTEM/ directory
 - .agents/TASKS/ directory
-- .agents/SESSIONS/ directory
+- .agents/sessions/ directory
 
 Project level:
 - <project>/.agents/README.md

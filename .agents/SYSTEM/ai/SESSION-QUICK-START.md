@@ -10,7 +10,7 @@
    - `../critical/CRITICAL-NEVER-DO.md`
 
 2. **Check today's session file:**
-   - `../../SESSIONS/2025-12-29.md` (if exists, read it first)
+   - `../../sessions/2025-12-29.md` (if exists, read it first)
 
 3. **Review recent context:**
    - Last 2-3 session files for context
@@ -44,7 +44,7 @@
 
 ### Document in Session File
 
-Add entry to `../../SESSIONS/YYYY-MM-DD.md`:
+Add entry to `../../sessions/YYYY-MM-DD.md`:
 
 ```markdown
 ## Session N: Brief Description
@@ -88,7 +88,7 @@ Mark completed tasks in `../../TASKS/`
 | Critical violations | `../critical/CRITICAL-NEVER-DO.md` |
 | Architecture | `../ARCHITECTURE.md` |
 | Tasks | `../../TASKS/` |
-| Session template | `../../SESSIONS/TEMPLATE.md` |
+| Session template | `SESSION-DOCUMENTATION-PROTOCOL.md` (§ Structure) |
 
 ---
 

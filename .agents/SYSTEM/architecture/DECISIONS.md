@@ -44,7 +44,7 @@ Need a structured way to organize AI agent documentation, session tracking, and 
 Use a `.agents/` folder at the project root with standardized subdirectories:
 - `SYSTEM/` for rules and architecture
 - `TASKS/` for task tracking
-- `SESSIONS/` for daily session documentation
+- `sessions/` for daily session documentation
 - `SOP/` for standard procedures
 
 #### Consequences
