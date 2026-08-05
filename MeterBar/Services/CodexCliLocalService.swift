@@ -111,10 +111,18 @@ class CodexCliLocalService: ObservableObject {
     }
 
     func canAccess(account: CodexAccount) async -> Bool {
+        // `account` can arrive @in_guaranteed through the settings row's stored
+        // `(CodexAccount) async -> Bool` closure (a nonisolated(nonsending)
+        // reabstraction thunk), and that indirect argument is not reliably
+        // alive after a suspension point — 1.8.3 crashed in swift_retain
+        // copying it on resume. Copy out everything needed after the await
+        // before suspending, and never touch `account` past this point.
+        let accountID = account.id
+        let isDefault = account.isDefault
         let isAuthenticated = await Task.detached(priority: .userInitiated) { [self] in
             hasAccess(account: account)
         }.value
-        record(isAuthenticated, for: account)
+        record(isAuthenticated, accountID: accountID, isDefault: isDefault)
         return isAuthenticated
     }
 
@@ -130,8 +138,12 @@ class CodexCliLocalService: ObservableObject {
     /// pair still describes the default sentinel, so a custom profile records
     /// only its own entry and never publishes over the default's.
     private func record(_ isAuthenticated: Bool, for account: CodexAccount) {
-        accountAccess[account.id] = isAuthenticated
-        guard account.isDefault else { return }
+        record(isAuthenticated, accountID: account.id, isDefault: account.isDefault)
+    }
+
+    private func record(_ isAuthenticated: Bool, accountID: UUID, isDefault: Bool) {
+        accountAccess[accountID] = isAuthenticated
+        guard isDefault else { return }
         hasAccess = isAuthenticated
         if !isAuthenticated { subscriptionType = nil }
     }

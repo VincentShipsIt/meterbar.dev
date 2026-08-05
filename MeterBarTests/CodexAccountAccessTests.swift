@@ -117,6 +117,29 @@ final class CodexAccountAccessTests: XCTestCase {
         XCTAssertEqual(service.accountAccess[work.id], .some(true))
     }
 
+    /// Regression for the 1.8.3 Settings → Codex crash: the settings row probes
+    /// through a stored `(CodexAccount) async -> Bool` closure, so the account
+    /// reaches `canAccess` @in_guaranteed via a nonisolated(nonsending)
+    /// reabstraction thunk, and that indirect argument did not survive the
+    /// probe's suspension point. This drives the exact same thunked path; the
+    /// service must record the result without touching the argument after resume.
+    func testProbeThroughStoredRowClosureRecordsPerAccountResult() async {
+        let work = custom()
+        let service = makeService(authenticatedAccountIDs: [work.id])
+        let connectionCheck: (CodexAccount) async -> Bool = {
+            await service.canAccess(account: $0)
+        }
+
+        let workConnected = await connectionCheck(work)
+        let defaultConnected = await connectionCheck(.defaultAccount)
+
+        XCTAssertTrue(workConnected)
+        XCTAssertFalse(defaultConnected)
+        XCTAssertEqual(service.accountAccess[work.id], .some(true))
+        XCTAssertEqual(service.accountAccess[CodexAccount.defaultID], .some(false))
+        XCTAssertFalse(service.hasAccess)
+    }
+
     func testProviderAccessSpansEveryEnabledProfile() {
         let work = custom()
         let service = makeService(authenticatedAccountIDs: [work.id])
