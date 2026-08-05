@@ -110,19 +110,38 @@ class CodexCliLocalService: ObservableObject {
         getAuthToken(account: account) != nil
     }
 
-    func canAccess(account: CodexAccount) async -> Bool {
-        // `account` can arrive @in_guaranteed through the settings row's stored
-        // `(CodexAccount) async -> Bool` closure (a nonisolated(nonsending)
-        // reabstraction thunk), and that indirect argument is not reliably
-        // alive after a suspension point — 1.8.3 crashed in swift_retain
-        // copying it on resume. Copy out everything needed after the await
-        // before suspending, and never touch `account` past this point.
-        let accountID = account.id
-        let isDefault = account.isDefault
+    /// `nonisolated` is load-bearing — see the lifetime note below. Do not
+    /// re-isolate this to the main actor.
+    nonisolated func canAccess(account: CodexAccount) async -> Bool {
+        // The settings row probes through a stored `(CodexAccount) async -> Bool`
+        // closure, so `account` arrives @in_guaranteed: an address the *caller*
+        // owns, not storage this frame owns. A main-actor-isolated `async`
+        // callee hops to the main actor before its body runs, and that address
+        // does not survive the hop — both 1.8.3 and 1.8.31 faulted in
+        // `swift_retain` while the outlined copy retained the parameter's
+        // `String` fields on the far side of that entry hop. (1.8.31 only moved
+        // the *later* `record` read, which was never the faulting one.)
+        //
+        // Two rules keep this safe, and both are required:
+        //   1. `nonisolated` — under `SWIFT_APPROACHABLE_CONCURRENCY` that means
+        //      `nonisolated(nonsending)`, so the body starts on the caller's
+        //      executor with no entry hop and `account` is still live.
+        //   2. Copy into frame-owned storage first, then never read `account`
+        //      again — every later use goes through `snapshot`.
+        // Verify after any change: in the Release binary, the call to
+        // `outlined init with copy of CodexAccount` inside `canAccess` must come
+        // *before* the first `swift_task_switch`.
+        let snapshot = account
+        let accountID = snapshot.id
+        let isDefault = snapshot.isDefault
+
         let isAuthenticated = await Task.detached(priority: .userInitiated) { [self] in
-            hasAccess(account: account)
+            hasAccess(account: snapshot)
         }.value
-        record(isAuthenticated, accountID: accountID, isDefault: isDefault)
+
+        await MainActor.run {
+            record(isAuthenticated, accountID: accountID, isDefault: isDefault)
+        }
         return isAuthenticated
     }
 
