@@ -217,6 +217,63 @@ final class ClaudeCredentialResolverTests: XCTestCase {
         XCTAssertNil(backend.lastQuery[kSecUseAuthenticationContext as String])
     }
 
+    /// `kSecUseAuthenticationUIFail` and `LAContext.interactionNotAllowed` gate
+    /// LocalAuthentication only — they say nothing about the legacy login-keychain
+    /// ACL dialog securityd raises for a generic password whose trusted-application
+    /// list omits MeterBar. That dialog is the password prompt on every launch.
+    /// Only the process-level interaction flag suppresses it.
+    func testBackgroundPayloadReadSuppressesTheSecuritydACLDialog() {
+        let backend = RecordingKeychainBackend(
+            status: errSecSuccess,
+            result: Data("payload".utf8) as NSData
+        )
+        let gate = RecordingInteractionGate()
+
+        _ = ClaudeCredentialStore.keychainPayload(
+            service: "Claude Code-credentials-c4394a73",
+            mode: .background,
+            backend: backend,
+            interaction: gate
+        )
+
+        XCTAssertEqual(gate.allowedValues, [false])
+    }
+
+    func testInteractivePayloadReadPermitsTheSecuritydACLDialog() {
+        let backend = RecordingKeychainBackend(
+            status: errSecSuccess,
+            result: Data("payload".utf8) as NSData
+        )
+        let gate = RecordingInteractionGate()
+
+        _ = ClaudeCredentialStore.keychainPayload(
+            service: "Claude Code-credentials-c4394a73",
+            mode: .interactive,
+            backend: backend,
+            interaction: gate
+        )
+
+        XCTAssertEqual(gate.allowedValues, [true])
+    }
+
+    /// Suppressed interaction turns an ungranted ACL into an immediate
+    /// `errSecAuthFailed` instead of a dialog. That is not a denial by the user
+    /// — nobody was asked — so it must read as "interaction required", which is
+    /// what makes the walk fall through to the file fallback and start a cooldown.
+    func testBackgroundAuthFailureIsSurfacedAsInteractionRequired() {
+        let backend = RecordingKeychainBackend(status: errSecAuthFailed)
+
+        XCTAssertEqual(
+            ClaudeCredentialStore.keychainPayload(
+                service: "Claude Code-credentials-c4394a73",
+                mode: .background,
+                backend: backend,
+                interaction: RecordingInteractionGate()
+            ),
+            .interactionRequired
+        )
+    }
+
     func testPayloadQueryPreservesSecurityStatusClasses() {
         let cases: [(OSStatus, ClaudeKeychainReadOutcome<Data>)] = [
             (errSecItemNotFound, .notFound),
@@ -297,6 +354,50 @@ final class ClaudeCredentialResolverTests: XCTestCase {
             .init(service: "Claude Code-credentials-ee16a9f4", mode: .interactive),
             .init(service: ClaudeCredentialResolver.bareKeychainService, mode: .background)
         ])
+    }
+
+    /// The user-visible bug: MeterBar asked for the login password at *every*
+    /// launch, and "Always Allow" never ended it. With interaction suppressed a
+    /// launch-time read fails fast, records a denial, and the next launch inside
+    /// the cooldown never touches the keychain again — so at most one prompt can
+    /// reach the screen, and only from an explicitly user-initiated refresh.
+    func testConsecutiveLaunchReadsTouchTheKeychainOnlyOnce() throws {
+        let fixture = try makeDenialStore()
+        let recorder = KeychainReadRecorder { _, _ in .interactionRequired }
+        let now = Date(timeIntervalSince1970: 10_000)
+        let clock = MutableClock(now)
+        let store = ClaudeCredentialStore(
+            readKeychainResult: { service, mode in recorder.read(service: service, mode: mode) },
+            readFile: { _ in nil },
+            denialStore: fixture.store,
+            isOAuthEnabled: { true },
+            now: { clock.now }
+        )
+        let account = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/Users/tester/.claude-work"
+        )
+
+        _ = store.credentialsDataResult(
+            for: account,
+            mode: .background,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+        let callsAfterFirstLaunch = recorder.calls
+
+        // A later launch, still well inside the six-hour cooldown.
+        clock.now = now.addingTimeInterval(60)
+        let outcome = store.credentialsDataResult(
+            for: account,
+            mode: .background,
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+
+        XCTAssertEqual(recorder.calls, callsAfterFirstLaunch)
+        XCTAssertEqual(outcome, .interactionRequired)
     }
 
     func testBackgroundWalkSkipsCoolingServiceAndStillUsesFileFallback() throws {
@@ -514,6 +615,48 @@ nonisolated private final class PathRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         storage.append(path)
+    }
+}
+
+/// Advanceable clock for tests that need two reads at different times against
+/// one shared denial store.
+nonisolated private final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: Date
+
+    init(_ now: Date) {
+        self.storage = now
+    }
+
+    var now: Date {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            storage = newValue
+        }
+    }
+}
+
+nonisolated private final class RecordingInteractionGate: KeychainInteractionGate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Bool] = []
+
+    var allowedValues: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func withUserInteraction(allowed: Bool, perform: () -> OSStatus) -> OSStatus {
+        lock.lock()
+        storage.append(allowed)
+        lock.unlock()
+        return perform()
     }
 }
 
