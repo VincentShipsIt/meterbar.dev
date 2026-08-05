@@ -108,7 +108,9 @@ final class CodexAccountProfileRowTests: XCTestCase {
             onRemove: {},
             onMoveUp: {},
             onMoveDown: {},
-            connectionCheck: { _ in false }
+            // Zero-argument seam on purpose: the row must never store a
+            // `(CodexAccount) async -> Bool`. See `CodexAccountSettingsRow.init`.
+            connectionCheck: { false }
         )
         let hostingView = NSHostingView(rootView: view.frame(width: 720))
 
