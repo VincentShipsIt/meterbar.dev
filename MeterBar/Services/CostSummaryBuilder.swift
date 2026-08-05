@@ -57,4 +57,64 @@ enum CostSummaryBuilder {
 
         return scan
     }
+
+    // MARK: - Budgeted, resumable scan
+
+    /// A summary plus whether the refresh that produced it saw the whole corpus.
+    nonisolated struct CostSummaryScan: Sendable {
+        let summary: CostSummary
+
+        /// `false` when the budget ran out (or the refresh was cancelled) with
+        /// files still unread. The summary is correct as far as it goes — every
+        /// number in it comes from bytes actually accounted for — but it is not
+        /// yet the whole corpus, so the caller should run another slice.
+        let isComplete: Bool
+    }
+
+    /// One budgeted slice of the corpus scan.
+    ///
+    /// Unlike `makeSummary`, this reads only what `session`'s budget allows,
+    /// resuming each transcript from the byte offset the last slice committed.
+    /// Files it does not reach still contribute their cached totals, so the
+    /// summary is complete-as-of-what-has-been-read from the very first slice
+    /// rather than only after the last one.
+    nonisolated static func makeScan(
+        days: Int,
+        includeClaudeCode: Bool,
+        includeCodexCli: Bool,
+        claudeAccounts: [ClaudeCodeAccount],
+        session: CostScanSession
+    ) -> CostSummaryScan {
+        var scan = ScanWindows(
+            period: CostScanResult(),
+            lifetime: CostScanResult(),
+            cutoff: session.cutoff
+        )
+
+        if includeClaudeCode {
+            let roots = ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
+            let claude = ClaudeCostScanner.scanRoots(roots, session: session)
+            scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: session.cutoff))
+            scan.lifetime.append(ClaudeCostScanner.makeCost(from: claude.lifetime, windowStart: .distantPast))
+        }
+
+        if includeCodexCli {
+            let codex = CodexCostScanner.scanSessions(session: session)
+            scan.period.append(CodexCostScanner.makeCost(from: codex.period))
+            scan.lifetime.append(CodexCostScanner.makeCost(from: codex.lifetime))
+        }
+
+        let costs = scan.period.costs
+        return CostSummaryScan(
+            summary: CostSummary(
+                costs: costs,
+                totalCostUSD: costs.reduce(0) { $0 + $1.estimatedCostUSD },
+                totalTokens: costs.reduce(0) { $0 + $1.totalTokens },
+                periodDays: days,
+                dailyUsage: scan.period.dailyUsage.sorted { $0.date < $1.date },
+                lifetime: LifetimeCostSummary(costs: scan.lifetime.costs)
+            ),
+            isComplete: session.isComplete
+        )
+    }
 }

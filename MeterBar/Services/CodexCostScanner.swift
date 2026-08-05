@@ -154,38 +154,47 @@ enum CodexCostScanner {
         // per-event timestamp check inside `ScanWindows.update` (an event is
         // never newer than the file holding it).
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            // Reset per file: attribution carried across rollouts would label
-            // one session's spend with another's model.
-            var rollout = CodexRolloutContext()
-            // Codex emits a session's opening `token_count` events *before* its
-            // first `turn_context`, so forward-only attribution orphaned them
-            // even though the same file names the model seconds later. Park
-            // them here instead and back-fill once the file declares a model.
-            // Per file, like the rollout context: a sibling rollout's model
-            // must never name events this file left unexplained.
-            var deferred: [CodexDeferredUsage] = []
-            FileLineReader.forEachLine(in: fileURL) { line in
-                guard line.contains(Self.tokenCountMarker) else {
-                    Self.updateRolloutContext(&rollout, from: line)
-                    // Reaches back only as far as the *first* model the file
-                    // declares — a later mid-session switch must not relabel
-                    // the events that preceded it.
-                    if let model = rollout.turnModel ?? rollout.sessionModel {
-                        Self.flushDeferred(&deferred, modelName: model, windows: &windows)
-                    }
-                    return
-                }
-                Self.addTokenCountLine(
-                    line,
-                    fileURL: fileURL,
-                    rollout: rollout,
-                    deferred: &deferred,
-                    windows: &windows
-                )
-            }
-            // Whatever the file never explained is genuinely unattributed.
-            Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
+            Self.parseRollout(at: fileURL, windows: &windows)
         }
+    }
+
+    /// Streams one rollout end to end into `windows`.
+    ///
+    /// Attribution state is created here and dies here: carried across rollouts
+    /// it would label one session's spend with another's model.
+    nonisolated private static func parseRollout(
+        at fileURL: URL,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        var rollout = CodexRolloutContext()
+        // Codex emits a session's opening `token_count` events *before* its
+        // first `turn_context`, so forward-only attribution orphaned them
+        // even though the same file names the model seconds later. Park
+        // them here instead and back-fill once the file declares a model.
+        // Per file, like the rollout context: a sibling rollout's model
+        // must never name events this file left unexplained.
+        var deferred: [CodexDeferredUsage] = []
+        FileLineReader.forEachLine(in: fileURL) { line in
+            guard line.contains(Self.tokenCountMarker) else {
+                Self.updateRolloutContext(&rollout, from: line)
+                // Reaches back only as far as the *first* model the file
+                // declares — a later mid-session switch must not relabel
+                // the events that preceded it.
+                if let model = rollout.turnModel ?? rollout.sessionModel {
+                    Self.flushDeferred(&deferred, modelName: model, windows: &windows)
+                }
+                return
+            }
+            Self.addTokenCountLine(
+                line,
+                fileURL: fileURL,
+                rollout: rollout,
+                deferred: &deferred,
+                windows: &windows
+            )
+        }
+        // Whatever the file never explained is genuinely unattributed.
+        Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
     }
 
     /// Single-window entry point kept for callers that only care about one
@@ -202,6 +211,209 @@ enum CodexCostScanner {
         )
         Self.scanRollouts(directory: directory, windows: &windows)
         context = windows.period
+    }
+
+    // MARK: - Budgeted, resumable scan
+
+    /// Rollouts and the flat SQLite log, read under `session`'s budget.
+    nonisolated static func scanSessions(session: CostScanSession) -> ScanWindows<CodexScanContext> {
+        let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
+        var windows = Self.scanRollouts(
+            directories: Self.rolloutDirectories(in: codexDir),
+            session: session
+        )
+        // The SQLite log is a single file with no append-only guarantee and no
+        // line structure to resume from, so it is re-read whole every refresh.
+        // It is orders of magnitude smaller than the rollout corpus, so it is
+        // not what the budget exists to bound.
+        Self.scanSQLiteLogs(
+            database: codexDir.appendingPathComponent("logs_2.sqlite"),
+            windows: &windows
+        )
+        return windows
+    }
+
+    /// Walks `directories` newest rollout first, reading only bytes appended
+    /// since the last refresh and stopping when the budget runs out.
+    nonisolated static func scanRollouts(
+        directories: [URL],
+        session: CostScanSession
+    ) -> ScanWindows<CodexScanContext> {
+        var windows = Self.scanWindows(cutoff: session.cutoff)
+        var live: Set<String> = []
+
+        for directory in directories {
+            guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
+
+            for file in CostScanCorpus.transcripts(in: directory) {
+                guard live.insert(file.cacheKey).inserted else { continue }
+                guard let totals = Self.totals(for: file, session: session) else { continue }
+                guard Self.fold(totals, into: &windows) else {
+                    // This rollout shares events with one already folded in —
+                    // in practice a session that exists in both `sessions/` and
+                    // `archived_sessions/` at once. Aggregates cannot be
+                    // de-overlapped after the fact, so this one file goes back
+                    // through the live path, where `addUsage` drops the
+                    // duplicates event by event.
+                    Self.parseRollout(at: file.url, windows: &windows)
+                    continue
+                }
+            }
+        }
+
+        session.retainCodex(keys: live)
+        return windows
+    }
+
+    /// One rollout's isolated tally: cached, resumed, or skipped.
+    ///
+    /// Parsing into the file's *own* windows rather than straight into the
+    /// shared ones is what makes the result cacheable — a per-file tally stays
+    /// valid no matter which other files a later refresh happens to read.
+    ///
+    /// - Returns: `nil` when the file has never been read and there was no
+    ///   budget left to start it.
+    nonisolated private static func totals(
+        for file: CostScanFile,
+        session: CostScanSession
+    ) -> CodexFileTotals? {
+        let record = Self.resumableRecord(for: file, session: session)
+
+        // Nothing appended since the last pass.
+        if let record, record.isComplete, record.size == file.size {
+            return record.payload
+        }
+
+        let allowance = session.budget.allowance
+        guard allowance > 0 else {
+            session.noteDeferred()
+            return record?.payload
+        }
+
+        var payload = record?.payload ?? CodexFileTotals(cutoff: session.cutoff)
+        var windows = ScanWindows(
+            period: payload.period,
+            lifetime: payload.lifetime,
+            cutoff: session.cutoff
+        )
+        var rollout = payload.rollout
+        var deferred: [CodexDeferredUsage] = []
+        var deferredOffset: UInt64?
+
+        var request = FileLineReadRequest()
+        request.startOffset = record?.offset ?? 0
+        request.maxBytes = allowance
+
+        let read = FileLineReader.readLines(in: file.url, request: request) { line, offset in
+            guard line.contains(Self.tokenCountMarker) else {
+                Self.updateRolloutContext(&rollout, from: line)
+                if let model = rollout.turnModel ?? rollout.sessionModel {
+                    Self.flushDeferred(&deferred, modelName: model, windows: &windows)
+                    deferredOffset = nil
+                }
+                return
+            }
+            let parked = deferred.count
+            Self.addTokenCountLine(
+                line,
+                fileURL: file.url,
+                rollout: rollout,
+                deferred: &deferred,
+                windows: &windows
+            )
+            if deferred.count > parked, deferredOffset == nil {
+                deferredOffset = offset
+            }
+        }
+
+        guard let read else { return record?.payload }
+        session.budget.consume(read.bytesRead)
+
+        var committed = read.committedOffset
+        if read.reachedEndOfFile {
+            Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
+        } else {
+            session.noteDeferred()
+            if let deferredOffset {
+                // Events still waiting on a model the *next* slice may yet
+                // declare. Rolling the offset back re-reads them rather than
+                // stranding them as unattributed; every event already counted
+                // is re-read too, and `eventKeys` discards it as the duplicate
+                // it is.
+                committed = deferredOffset
+            }
+        }
+
+        payload.period = windows.period
+        payload.lifetime = windows.lifetime
+        payload.rollout = rollout
+
+        session.setCodexRecord(
+            CostScanFileRecord(
+                offset: committed,
+                size: file.size,
+                cutoff: session.cutoff,
+                isComplete: read.reachedEndOfFile,
+                payload: payload
+            ),
+            for: file.cacheKey
+        )
+        return payload
+    }
+
+    /// Adds one rollout's tally to the shared windows.
+    ///
+    /// - Returns: `false` when the file's events partly overlap what is already
+    ///   counted, which no aggregate merge can resolve — the caller has to
+    ///   re-read that file event by event.
+    nonisolated private static func fold(
+        _ totals: CodexFileTotals,
+        into windows: inout ScanWindows<CodexScanContext>
+    ) -> Bool {
+        // Period keys are a subset of lifetime keys by construction (every
+        // in-window event is also a lifetime event), so the lifetime test
+        // answers for both windows.
+        let keys = totals.lifetime.eventKeys
+        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
+            windows.period.merge(totals.period)
+            windows.lifetime.merge(totals.lifetime)
+            return true
+        }
+        // Every event is already counted: a duplicated rollout with nothing new.
+        return keys.isSubset(of: windows.lifetime.eventKeys)
+    }
+
+    /// The cached entry to resume from, rebased onto this refresh's cutoff.
+    ///
+    /// - Returns: `nil` when the rollout has to be re-read from byte zero.
+    nonisolated private static func resumableRecord(
+        for file: CostScanFile,
+        session: CostScanSession
+    ) -> CostScanFileRecord<CodexFileTotals>? {
+        guard var record = session.codexRecord(for: file.cacheKey) else { return nil }
+        // A file that shrank was rotated or replaced, so the cached tally
+        // describes bytes that no longer exist.
+        guard record.offset <= UInt64(file.size) else { return nil }
+        guard record.cutoff != session.cutoff else { return record }
+
+        let lifetime = record.payload.lifetime
+        if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
+            // Every event predates the new window.
+            record.payload.period = CodexScanContext(
+                earliestDate: Date(),
+                latestDate: session.cutoff
+            )
+        } else if lifetime.earliestDate >= session.cutoff {
+            // Every event falls inside it.
+            record.payload.period = lifetime
+        } else {
+            // The rollout straddles the cutoff and only its individual events
+            // know where. Only files that actually straddle pay for the window
+            // moving.
+            return nil
+        }
+        record.cutoff = session.cutoff
+        return record
     }
 
     /// Picks up the model/originator carried by the non-usage rollout events.
@@ -510,7 +722,10 @@ enum CodexCostScanner {
 /// `token_count` events name neither the model nor the front end: the model is
 /// declared once per turn in `turn_context`, the front end once per session in
 /// `session_meta`. Reset per file so one rollout never labels another's spend.
-nonisolated struct CodexRolloutContext: Sendable {
+/// `Codable` because `CodexFileTotals` persists it: a slice that resumes past a
+/// rollout's opening `session_meta`/`turn_context` would attribute every
+/// remaining event to "unknown" without the labels the previous slice read.
+nonisolated struct CodexRolloutContext: Sendable, Codable {
     var turnModel: String?
     var sessionModel: String?
     var originator: String?
