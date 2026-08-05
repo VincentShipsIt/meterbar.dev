@@ -155,7 +155,9 @@ final class ClaudeTokenRefresherTests: XCTestCase {
         let first = Task {
             await refresher.refresh(account: account, trigger: .background)
         }
-        await gate.waitUntilStarted()
+        await poll(until: "the first attempt reaches the gate") {
+            await gate.callCount > 0
+        }
         let second = Task {
             await refresher.refresh(account: account, trigger: .userInitiated)
         }
@@ -165,9 +167,12 @@ final class ClaudeTokenRefresherTests: XCTestCase {
         // `refresh` ran, the user-initiated call bypassed cooldown, spawned a
         // second run, and parked forever on the already-spent gate — the
         // silent `swift test` hang behind issue #319's CI cancellation.
-        while await refresher.coalescedJoins == 0 {
-            await Task.yield()
+        await poll(until: "the second refresh joins the in-flight attempt") {
+            await refresher.coalescedJoins > 0
         }
+        // Unconditional, including after a poll timeout: the gate latches open,
+        // so releasing it is what lets both awaits below complete instead of
+        // parking a failed run forever.
         await gate.release()
 
         let firstResult = await first.value
@@ -176,6 +181,46 @@ final class ClaudeTokenRefresherTests: XCTestCase {
         XCTAssertEqual(secondResult, .inconclusive)
         let callCount = await gate.callCount
         XCTAssertEqual(callCount, 1)
+    }
+
+    /// The guarantee `poll` exists to provide: a condition that never holds
+    /// ends the wait with a named failure, not a spin that outlives the job.
+    func testPollTimesOutInsteadOfSpinningForever() async {
+        XCTExpectFailure("poll must report the timeout it is being asked for")
+        let started = Date()
+        await poll(0.2, until: "a condition that never holds") { false }
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started),
+            5,
+            "poll must return at its deadline rather than spin"
+        )
+    }
+
+    /// Deadline-bounded wait on actor-observable state, mirroring the
+    /// `poll(_:until:)` idiom in `SessionWakeControllerTests`.
+    ///
+    /// Never spin unbounded here. `while !condition { await Task.yield() }`
+    /// is the same defect this suite exists to pin: if the state never
+    /// arrives, the loop burns a core until the CI job's 20-minute timeout
+    /// kills the whole run, naming no test — precisely how issue #319 hid.
+    /// A deadline turns that silent park into a named failure in seconds.
+    private func poll(
+        _ timeout: TimeInterval = 5,
+        until description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        condition: () async -> Bool
+    ) async {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while Date() < deadline {
+            if await condition() { return }
+            await Task.yield()
+        }
+        XCTFail(
+            "timed out after \(timeout)s waiting for \(description)",
+            file: file,
+            line: line
+        )
     }
 
     private func makeRefresher(
@@ -270,12 +315,6 @@ private actor SpawnGate {
             self.continuation = continuation
         }
         return .succeeded
-    }
-
-    func waitUntilStarted() async {
-        while callCount == 0 {
-            await Task.yield()
-        }
     }
 
     /// Latches open. Any `run()` that arrives after release — the misuse that
