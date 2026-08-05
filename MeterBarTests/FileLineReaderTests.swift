@@ -18,9 +18,23 @@ final class FileLineReaderTests: XCTestCase {
     }
 
     private func lines(of url: URL, chunkSize: Int = FileLineReader.defaultChunkSize) -> [String] {
-        var collected: [String] = []
-        FileLineReader.forEachLine(in: url, chunkSize: chunkSize) { line in
-            collected.append(String(decoding: line, as: UTF8.self))
+        records(of: url, chunkSize: chunkSize).map { String(decoding: $0.bytes, as: UTF8.self) }
+    }
+
+    private func records(
+        of url: URL,
+        chunkSize: Int = FileLineReader.defaultChunkSize,
+        maxLineBytes: Int = FileLineReader.defaultMaxLineBytes,
+        prefixBytes: Int = FileLineReader.defaultPrefixBytes
+    ) -> [FileLineReader.Line] {
+        var collected: [FileLineReader.Line] = []
+        FileLineReader.forEachLine(
+            in: url,
+            chunkSize: chunkSize,
+            maxLineBytes: maxLineBytes,
+            prefixBytes: prefixBytes
+        ) { line in
+            collected.append(line)
         }
         return collected
     }
@@ -81,6 +95,90 @@ final class FileLineReaderTests: XCTestCase {
 
         XCTAssertTrue(opened)
         XCTAssertEqual(count, 0)
+    }
+
+    // MARK: - Oversized lines
+
+    func testOversizedLineIsRetainedAsAPrefixAndFlagged() throws {
+        // A Codex rollout can hold a single 56 MB JSONL line. Dropping it would
+        // discard a real usage record, so the reader keeps a bounded prefix and
+        // reports that the rest was cut.
+        let url = try writeFile(String(repeating: "x", count: 10_000))
+
+        let collected = records(of: url, chunkSize: 64, maxLineBytes: 128, prefixBytes: 128)
+
+        XCTAssertEqual(collected.count, 1)
+        XCTAssertTrue(collected[0].wasTruncated)
+        XCTAssertEqual(collected[0].bytes.count, 128)
+        // The line's real length is still reported even though it was not kept.
+        XCTAssertEqual(collected[0].byteCount, 10_000)
+        XCTAssertEqual(String(decoding: collected[0].bytes, as: UTF8.self), String(repeating: "x", count: 128))
+    }
+
+    func testLinesWithinTheCapAreUntouched() throws {
+        let url = try writeFile("alpha\nbeta\n")
+
+        let collected = records(of: url, maxLineBytes: 128, prefixBytes: 128)
+
+        XCTAssertEqual(collected.map(\.wasTruncated), [false, false])
+        XCTAssertEqual(collected.map(\.byteCount), [5, 4])
+        XCTAssertEqual(collected.map { String(decoding: $0.bytes, as: UTF8.self) }, ["alpha", "beta"])
+    }
+
+    func testRetainedBytesDoNotGrowWithLineLength() throws {
+        // The point of the prefix cap: peak retention is flat no matter how long
+        // the line is. Asserted on the emitted byte count rather than on
+        // allocations, which XCTest cannot observe.
+        for length in [1_000, 10_000, 1_000_000] {
+            let url = try writeFile(String(repeating: "y", count: length))
+
+            let collected = records(of: url, chunkSize: 4_096, maxLineBytes: 256, prefixBytes: 256)
+
+            XCTAssertEqual(collected.count, 1, "length \(length)")
+            XCTAssertEqual(collected[0].bytes.count, 256, "length \(length)")
+            XCTAssertEqual(collected[0].byteCount, length, "length \(length)")
+        }
+    }
+
+    func testOversizedFinalLineWithoutTrailingNewlineIsStillEmitted() throws {
+        // Rollouts are appended to live, so the last line frequently has no
+        // terminator. That line must not be swallowed by the cap.
+        let url = try writeFile("head\n" + String(repeating: "z", count: 5_000))
+
+        let collected = records(of: url, chunkSize: 64, maxLineBytes: 100, prefixBytes: 100)
+
+        XCTAssertEqual(collected.count, 2)
+        XCTAssertFalse(collected[0].wasTruncated)
+        XCTAssertEqual(String(decoding: collected[0].bytes, as: UTF8.self), "head")
+        XCTAssertTrue(collected[1].wasTruncated)
+        XCTAssertEqual(collected[1].bytes.count, 100)
+        XCTAssertEqual(collected[1].byteCount, 5_000)
+    }
+
+    func testTruncationDoesNotDisturbNeighbouringLines() throws {
+        let url = try writeFile("first\n" + String(repeating: "q", count: 2_000) + "\nlast\n")
+
+        let collected = records(of: url, chunkSize: 128, maxLineBytes: 32, prefixBytes: 32)
+
+        XCTAssertEqual(collected.map(\.wasTruncated), [false, true, false])
+        XCTAssertEqual(
+            collected.map { String(decoding: $0.bytes, as: UTF8.self) },
+            ["first", String(repeating: "q", count: 32), "last"]
+        )
+    }
+
+    func testPrefixSmallerThanTheCapKeepsOnlyThePrefix() throws {
+        // `maxLineBytes` bounds what is buffered; `prefixBytes` is the salvage
+        // slice handed to the parser. A line under the cap is kept whole.
+        let url = try writeFile(String(repeating: "a", count: 200) + "\n" + String(repeating: "b", count: 5_000))
+
+        let collected = records(of: url, chunkSize: 64, maxLineBytes: 512, prefixBytes: 64)
+
+        XCTAssertEqual(collected.count, 2)
+        XCTAssertFalse(collected[0].wasTruncated)
+        XCTAssertEqual(collected[0].bytes.count, 200)
+        XCTAssertTrue(collected[1].wasTruncated)
+        XCTAssertEqual(collected[1].bytes.count, 64)
     }
 
     func testMissingFileReturnsFalseAndYieldsNothing() {
