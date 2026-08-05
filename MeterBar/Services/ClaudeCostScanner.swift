@@ -186,8 +186,15 @@ enum ClaudeCostScanner {
         var periodUnkeyed: [ClaudeUsageEvent] = []
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
+        var oversizedLines = 0
 
         FileLineReader.forEachLine(in: url) { lineData in
+            // Size first: a pasted file or base64 blob is never a usage record,
+            // and parsing one would cost more than the whole rest of the file.
+            guard CostScanFileSystem.isScannableLine(lineData) else {
+                oversizedLines += 1
+                return
+            }
             guard !lineData.isEmpty,
                   let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let timestampStr = json["timestamp"] as? String,
@@ -219,6 +226,14 @@ enum ClaudeCostScanner {
                 lifetimeUnkeyed.append(event)
                 if inPeriod { periodUnkeyed.append(event) }
             }
+        }
+
+        // One line per file, not per skipped line: a corpus with thousands of
+        // giants must not turn the log into the thing that costs the CPU.
+        if oversizedLines > 0 {
+            AppLog.cost.debug(
+                "Skipped \(oversizedLines, privacy: .public) oversized line(s) in \(url.lastPathComponent)"
+            )
         }
 
         return ScanWindows(

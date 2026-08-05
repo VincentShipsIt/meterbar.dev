@@ -164,7 +164,15 @@ enum CodexCostScanner {
             // Per file, like the rollout context: a sibling rollout's model
             // must never name events this file left unexplained.
             var deferred: [CodexDeferredUsage] = []
+            var oversizedLines = 0
             FileLineReader.forEachLine(in: fileURL) { line in
+                // Ahead of even the marker scan: rollouts embed pasted files and
+                // raw tool output, so the biggest lines here are also the ones
+                // guaranteed not to be usage records.
+                guard CostScanFileSystem.isScannableLine(line) else {
+                    oversizedLines += 1
+                    return
+                }
                 guard line.contains(Self.tokenCountMarker) else {
                     Self.updateRolloutContext(&rollout, from: line)
                     // Reaches back only as far as the *first* model the file
@@ -185,6 +193,13 @@ enum CodexCostScanner {
             }
             // Whatever the file never explained is genuinely unattributed.
             Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
+            // One line per file, not per skipped line: rollouts hold hundreds of
+            // oversized records and the log must stay cheaper than the scan.
+            if oversizedLines > 0 {
+                AppLog.cost.debug(
+                    "Skipped \(oversizedLines, privacy: .public) oversized line(s) in \(fileURL.lastPathComponent)"
+                )
+            }
         }
     }
 
