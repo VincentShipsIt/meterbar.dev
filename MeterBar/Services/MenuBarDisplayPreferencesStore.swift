@@ -147,6 +147,22 @@ nonisolated enum ResetTimeFormat: String, CaseIterable, Identifiable {
     }
 }
 
+/// How long each provider keeps the merged status item when rotation is on.
+/// Raw value is the interval in seconds, so the persisted number stays readable
+/// in `defaults read` and survives renaming a case.
+nonisolated enum StatusItemRotationInterval: Int, CaseIterable, Identifiable, Sendable {
+    case fiveSeconds = 5
+    case fifteenSeconds = 15
+    case thirtySeconds = 30
+    case sixtySeconds = 60
+
+    var id: Int { rawValue }
+
+    var seconds: TimeInterval { TimeInterval(rawValue) }
+
+    var displayName: String { "\(rawValue)s" }
+}
+
 /// Persists the status-item and popover-label choices introduced by issue #142.
 /// Defaults preserve the exact pre-feature presentation: Auto selection, a
 /// compact percentage-left label, and reset countdowns.
@@ -163,6 +179,14 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     @Published private(set) var showsExhaustedResetCountdown: Bool
     @Published private(set) var resetTimeFormat: ResetTimeFormat
     @Published private(set) var showsRecommendationHint: Bool
+    /// Opt-in merged-mode focus following (#341). Off by default, and mutually
+    /// exclusive with pinning.
+    @Published private(set) var followsFocusedApp: Bool
+    /// App bundle identifier → provider, the only link between a focused app and
+    /// a quota. MeterBar never infers this from window contents.
+    @Published private(set) var focusAppMapping: [String: ServiceType]
+    @Published private(set) var rotatesProviders: Bool
+    @Published private(set) var rotationInterval: StatusItemRotationInterval
 
     private let userDefaults: UserDefaults
 
@@ -189,6 +213,19 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         // Off unless asked for: the popover's layout stays exactly as it was
         // before the recommendation shipped.
         showsRecommendationHint = userDefaults.bool(forKey: StorageKeys.popoverShowsRecommendationHint)
+        followsFocusedApp = userDefaults.bool(forKey: StorageKeys.statusItemFollowsFocusedApp)
+        focusAppMapping = Self.loadFocusMapping(from: userDefaults)
+        rotatesProviders = userDefaults.bool(forKey: StorageKeys.statusItemRotatesProviders)
+        rotationInterval = StatusItemRotationInterval(
+            rawValue: userDefaults.integer(forKey: StorageKeys.statusItemRotationInterval)
+        ) ?? .fifteenSeconds
+        // Both features independently predated their integration. If a local
+        // development build persisted both, focus wins and rotation is repaired
+        // once so an unmapped focused app still falls back to Auto.
+        if followsFocusedApp, rotatesProviders {
+            rotatesProviders = false
+            userDefaults.set(false, forKey: StorageKeys.statusItemRotatesProviders)
+        }
     }
 
     func setPinnedCandidateKey(_ key: String?) {
@@ -197,8 +234,37 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         pinnedCandidateKey = normalized
         if let normalized {
             userDefaults.set(normalized, forKey: StorageKeys.statusItemPinnedCandidate)
+            // A pin is a deliberate "show exactly this", so it wins over focus
+            // following rather than fighting it on every app switch. Clearing
+            // the pin later does not re-enable the opt-in.
+            setFollowsFocusedApp(false)
         } else {
             userDefaults.removeObject(forKey: StorageKeys.statusItemPinnedCandidate)
+        }
+    }
+
+    func setFollowsFocusedApp(_ enabled: Bool) {
+        if enabled {
+            setPinnedCandidateKey(nil)
+            setRotatesProviders(false)
+        }
+        guard enabled != followsFocusedApp else { return }
+        followsFocusedApp = enabled
+        userDefaults.set(enabled, forKey: StorageKeys.statusItemFollowsFocusedApp)
+    }
+
+    /// Maps one app to a provider, or removes its mapping when `service` is nil.
+    func setFocusMapping(_ service: ServiceType?, forBundleID bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var updated = focusAppMapping
+        updated[trimmed] = service
+        guard updated != focusAppMapping else { return }
+        focusAppMapping = updated
+        // Always written, even when empty: "the user cleared every mapping" must
+        // survive relaunch instead of being read back as "never edited".
+        if let data = try? JSONEncoder().encode(updated) {
+            userDefaults.set(data, forKey: StorageKeys.statusItemFocusAppMapping)
         }
     }
 
@@ -256,9 +322,34 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         userDefaults.set(enabled, forKey: StorageKeys.popoverShowsRecommendationHint)
     }
 
+    func setRotatesProviders(_ enabled: Bool) {
+        if enabled {
+            setFollowsFocusedApp(false)
+        }
+        guard enabled != rotatesProviders else { return }
+        rotatesProviders = enabled
+        userDefaults.set(enabled, forKey: StorageKeys.statusItemRotatesProviders)
+    }
+
+    func setRotationInterval(_ interval: StatusItemRotationInterval) {
+        guard interval != rotationInterval else { return }
+        rotationInterval = interval
+        userDefaults.set(interval.rawValue, forKey: StorageKeys.statusItemRotationInterval)
+    }
+
     nonisolated private static func normalizedPin(_ key: String) -> String? {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Unreadable payloads fall back to the shipped defaults rather than to an
+    /// empty mapping, so a corrupt value leaves the feature usable.
+    nonisolated private static func loadFocusMapping(from userDefaults: UserDefaults) -> [String: ServiceType] {
+        guard let data = userDefaults.data(forKey: StorageKeys.statusItemFocusAppMapping),
+              let decoded = try? JSONDecoder().decode([String: ServiceType].self, from: data) else {
+            return MenuBarFocusAppCatalog.defaultMapping
+        }
+        return decoded
     }
 }
 
