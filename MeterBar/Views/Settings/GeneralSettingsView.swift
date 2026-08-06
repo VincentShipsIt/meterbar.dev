@@ -83,7 +83,8 @@ struct GeneralSettingsView: View {
     /// Same predicate the presenter uses to decide whether a rotation timer may
     /// exist, so the controls can never claim rotation is running when it isn't.
     private var canRotateProviders: Bool {
-        MenuBarRotationSequencer.rotates(
+        guard !menuBarDisplayPreferences.followsFocusedApp else { return false }
+        return MenuBarRotationSequencer.rotates(
             mode: menuBarDisplayPreferences.presentationMode,
             isEnabled: true,
             pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
@@ -96,6 +97,9 @@ struct GeneralSettingsView: View {
         guard !canRotateProviders else { return nil }
         guard menuBarDisplayPreferences.presentationMode == .merged else {
             return "Rotation applies to the single menu bar item only."
+        }
+        if menuBarDisplayPreferences.followsFocusedApp {
+            return "Focus following and rotation are mutually exclusive. Turn off focus following to rotate."
         }
         return "Pinning and rotation are mutually exclusive. Set “Menu bar shows” back to Auto to rotate."
     }
@@ -189,6 +193,8 @@ struct GeneralSettingsView: View {
                 // nothing left for a pin to choose between.
                 .disabled(menuBarDisplayPreferences.presentationMode == .perProvider)
             }
+
+            followFocusedAppRows
 
             SettingsRowView(
                 title: "Rotate providers",
@@ -340,6 +346,99 @@ struct GeneralSettingsView: View {
                 .frame(width: 180)
             }
         }
+    }
+
+    /// Opt-in merged-mode focus following and its per-app mapping (issue #341).
+    ///
+    /// Off by default, and mutually exclusive with pinning and rotation. The
+    /// privacy posture is stated in the row copy because it is the whole reason
+    /// this can be a plain toggle rather than a permission prompt.
+    @ViewBuilder private var followFocusedAppRows: some View {
+        SettingsRowView(
+            title: "Follow focused app",
+            detail: "Show the provider mapped to whichever app you are working in. "
+                + "MeterBar reads only the frontmost app’s bundle identifier — no accessibility "
+                + "permission is requested, and no window titles or contents are read. "
+                + "Turning this on clears the pin and rotation; either one turns focus following off."
+        ) {
+            Toggle("", isOn: Binding(
+                get: { menuBarDisplayPreferences.followsFocusedApp },
+                set: { menuBarDisplayPreferences.setFollowsFocusedApp($0) }
+            ))
+            .labelsHidden()
+            .meterBarSwitch()
+            // Focus following only decides the single merged item; the other
+            // layouts already show every provider or account.
+            .disabled(
+                menuBarDisplayPreferences.presentationMode != .merged
+                    || menuBarDisplayPreferences.rotatesProviders
+            )
+        }
+
+        if menuBarDisplayPreferences.presentationMode != .merged {
+            SettingsNotice(
+                text: "Switch the menu bar layout to Single Item to follow the focused app.",
+                color: .secondary
+            )
+        } else if menuBarDisplayPreferences.rotatesProviders {
+            SettingsNotice(
+                text: "Focus following and rotation are mutually exclusive. "
+                    + "Turn off rotation to follow the focused app.",
+                color: .secondary
+            )
+        } else if menuBarDisplayPreferences.followsFocusedApp {
+            if focusMappableServices.isEmpty {
+                SettingsNotice(text: "No tracked providers to map yet.", color: .secondary)
+            } else {
+                SettingsNotice(
+                    text: "Unmapped apps keep Auto. A provider that is hidden, has no data, "
+                        + "or is out of quota is treated as unmapped, and a critical or exhausted "
+                        + "quota anywhere still takes over the menu bar.",
+                    color: .secondary
+                )
+                focusMappingRows
+            }
+        }
+    }
+
+    private var focusMappingRows: some View {
+        ForEach(MenuBarFocusAppCatalog.rows(for: menuBarDisplayPreferences.focusAppMapping)) { app in
+            SettingsRowView(
+                title: app.displayName,
+                detail: focusMappingDetail(for: app)
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.focusAppMapping[app.bundleID] },
+                    set: { menuBarDisplayPreferences.setFocusMapping($0, forBundleID: app.bundleID) }
+                )) {
+                    Text("None").tag(ServiceType?.none)
+                    ForEach(focusMappableServices) { service in
+                        Text(service.displayName).tag(ServiceType?.some(service))
+                    }
+                    // A mapping to a provider the user has since hidden stays
+                    // selectable so it can be changed rather than stranded.
+                    if let mapped = menuBarDisplayPreferences.focusAppMapping[app.bundleID],
+                       !focusMappableServices.contains(mapped) {
+                        Text("\(mapped.displayName) — hidden").tag(ServiceType?.some(mapped))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+    }
+
+    /// Providers a mapping can point at: the tracked ones, in their usual order.
+    private var focusMappableServices: [ServiceType] {
+        ServiceType.allCases.filter { providerVisibility.isEnabled($0) }
+    }
+
+    private func focusMappingDetail(for app: MenuBarFocusApp) -> String? {
+        guard MenuBarFocusAppCatalog.terminalBundleIDs.contains(app.bundleID) else { return nil }
+        // Deliberately unmapped by default: MeterBar never inspects what runs
+        // inside a terminal, so only the user knows which CLI this one means.
+        return "MeterBar does not detect which CLI runs in a terminal — pick the one you use here."
     }
 
     /// Which Claude/Codex accounts own a menu-bar status item (issue #266).

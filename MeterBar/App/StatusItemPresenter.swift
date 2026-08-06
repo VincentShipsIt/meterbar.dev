@@ -100,7 +100,7 @@ final class StatusItemPresenter {
         accountItemPlan = plan
         let rotates = MenuBarRotationSequencer.rotates(
             mode: preferences.presentationMode,
-            isEnabled: preferences.rotatesProviders,
+            isEnabled: preferences.rotatesProviders && !preferences.followsFocusedApp,
             pinnedKey: preferences.pinnedCandidateKey
         )
         let descriptors = MenuBarStatusItemPlanner.plan(
@@ -116,6 +116,7 @@ final class StatusItemPresenter {
             fontSize: preferences.fontSize,
             highContrast: preferences.highContrast,
             showsExhaustedResetCountdown: preferences.showsExhaustedResetCountdown,
+            focus: focusContext(preferences: preferences),
             rotationTick: rotates ? rotationTick : nil
         )
 
@@ -129,6 +130,19 @@ final class StatusItemPresenter {
         applyDescriptors(descriptors)
         updateCountdownTimer(preferences: preferences)
         updateRotationTimer(preferences: preferences, rotates: rotates)
+    }
+
+    /// The frontmost-app input to the merged selection, or nil when the user has
+    /// not opted into focus following — in which case the planner behaves
+    /// exactly as it did before the feature existed.
+    @MainActor
+    private func focusContext(preferences: MenuBarDisplayPreferencesStore) -> MenuBarFocusContext? {
+        guard preferences.followsFocusedApp else { return nil }
+        return MenuBarFocusContext(
+            bundleID: FrontmostAppMonitor.shared.bundleIdentifier,
+            mapping: preferences.focusAppMapping,
+            visibleServices: ProviderVisibilityStore.shared.enabledServices
+        )
     }
 
     /// Which accounts own an item right now, so the delegate can build the

@@ -30,8 +30,129 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.highContrast)
         XCTAssertFalse(store.showsExhaustedResetCountdown)
         XCTAssertEqual(store.resetTimeFormat, .countdown)
+        XCTAssertFalse(store.followsFocusedApp)
         XCTAssertFalse(store.rotatesProviders)
         XCTAssertEqual(store.rotationInterval, .fifteenSeconds)
+    }
+
+    // MARK: - Follow focused app (#341)
+
+    func testFocusMappingStartsWithTheEditableDefaultAppList() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        // Only unambiguous editors ship mapped. Terminals stay unmapped because
+        // MeterBar never guesses which CLI is running inside one.
+        XCTAssertEqual(store.focusAppMapping, MenuBarFocusAppCatalog.defaultMapping)
+        XCTAssertEqual(store.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .cursor)
+        XCTAssertNil(store.focusAppMapping["com.apple.Terminal"])
+    }
+
+    func testFocusPreferencesPersistAcrossRelaunch() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setFollowsFocusedApp(true)
+        store.setFocusMapping(.claudeCode, forBundleID: "com.apple.Terminal")
+
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertTrue(reloaded.followsFocusedApp)
+        XCTAssertEqual(reloaded.focusAppMapping["com.apple.Terminal"], .claudeCode)
+        XCTAssertEqual(reloaded.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .cursor)
+    }
+
+    func testClearingEveryMappingSurvivesRelaunchInsteadOfRestoringDefaults() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        for bundleID in store.focusAppMapping.keys {
+            store.setFocusMapping(nil, forBundleID: bundleID)
+        }
+
+        XCTAssertTrue(store.focusAppMapping.isEmpty)
+        XCTAssertTrue(MenuBarDisplayPreferencesStore(userDefaults: defaults).focusAppMapping.isEmpty)
+    }
+
+    func testCorruptPersistedMappingFallsBackToTheDefaultMapping() {
+        defaults.set(Data("not json".utf8), forKey: StorageKeys.statusItemFocusAppMapping)
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.focusAppMapping, MenuBarFocusAppCatalog.defaultMapping)
+    }
+
+    func testBlankBundleIdentifiersAreNotMapped() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        store.setFocusMapping(.grok, forBundleID: "   ")
+
+        XCTAssertNil(store.focusAppMapping["   "])
+        XCTAssertNil(store.focusAppMapping[""])
+    }
+
+    func testEnablingFollowFocusedAppClearsThePin() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        store.setFollowsFocusedApp(true)
+
+        XCTAssertNil(store.pinnedCandidateKey)
+        XCTAssertNil(defaults.string(forKey: StorageKeys.statusItemPinnedCandidate))
+    }
+
+    func testPinningTurnsFollowFocusedAppOff() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setFollowsFocusedApp(true)
+
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertEqual(store.pinnedCandidateKey, "Claude Code:gen:weekly")
+        XCTAssertFalse(MenuBarDisplayPreferencesStore(userDefaults: defaults).followsFocusedApp)
+    }
+
+    func testClearingThePinLeavesFollowFocusedAppOff() {
+        // Returning the menu bar to Auto must not silently re-enable an opt-in.
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setFollowsFocusedApp(true)
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        store.setPinnedCandidateKey(nil)
+
+        XCTAssertFalse(store.followsFocusedApp)
+    }
+
+    func testEnablingFocusFollowingDisablesRotationAndPersistsBothStates() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setRotatesProviders(true)
+
+        store.setFollowsFocusedApp(true)
+
+        XCTAssertTrue(store.followsFocusedApp)
+        XCTAssertFalse(store.rotatesProviders)
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        XCTAssertTrue(reloaded.followsFocusedApp)
+        XCTAssertFalse(reloaded.rotatesProviders)
+    }
+
+    func testEnablingRotationDisablesFocusFollowingAndPersistsBothStates() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setFollowsFocusedApp(true)
+
+        store.setRotatesProviders(true)
+
+        XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertTrue(store.rotatesProviders)
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        XCTAssertFalse(reloaded.followsFocusedApp)
+        XCTAssertTrue(reloaded.rotatesProviders)
+    }
+
+    func testPersistedFocusFollowingRepairsAnOldConflictingRotationValue() {
+        defaults.set(true, forKey: StorageKeys.statusItemFollowsFocusedApp)
+        defaults.set(true, forKey: StorageKeys.statusItemRotatesProviders)
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.followsFocusedApp)
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.statusItemRotatesProviders))
     }
 
     func testPreferencesPersistAcrossRelaunch() {
