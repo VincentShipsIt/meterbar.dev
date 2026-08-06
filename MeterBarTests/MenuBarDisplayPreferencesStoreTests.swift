@@ -30,6 +30,8 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.highContrast)
         XCTAssertFalse(store.showsExhaustedResetCountdown)
         XCTAssertEqual(store.resetTimeFormat, .countdown)
+        // The popover keeps its pre-feature layout until the hint is asked for.
+        XCTAssertFalse(store.showsRecommendationHint)
         XCTAssertFalse(store.followsFocusedApp)
         XCTAssertFalse(store.rotatesProviders)
         XCTAssertEqual(store.rotationInterval, .fifteenSeconds)
@@ -165,6 +167,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         store.setHighContrast(true)
         store.setShowsExhaustedResetCountdown(true)
         store.setResetTimeFormat(.clock)
+        store.setShowsRecommendationHint(true)
         store.setRotatesProviders(true)
         store.setRotationInterval(.sixtySeconds)
 
@@ -178,6 +181,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.highContrast)
         XCTAssertTrue(reloaded.showsExhaustedResetCountdown)
         XCTAssertEqual(reloaded.resetTimeFormat, .clock)
+        XCTAssertTrue(reloaded.showsRecommendationHint)
         XCTAssertTrue(reloaded.rotatesProviders)
         XCTAssertEqual(reloaded.rotationInterval, .sixtySeconds)
     }

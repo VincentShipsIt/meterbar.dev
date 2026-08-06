@@ -11,6 +11,18 @@ import SwiftUI
 /// nothing uploaded. Lives in its own file (never inside `UsageDashboardView`)
 /// per the dashboard view-split convention.
 struct OptimizeInsightsView: View {
+  /// Every enabled provider/account, *unfiltered* — the recommendation card
+  /// needs the ones without cached usage so it can list them as "no data"
+  /// instead of quietly dropping them.
+  let providerSnapshots: [ProviderSnapshot]
+
+  /// Explicit initializer: the private `@StateObject` storage would lower the
+  /// synthesized memberwise initializer to file-private, so this keeps the page
+  /// constructible from `UsageDashboardView` (and from the test target).
+  init(providerSnapshots: [ProviderSnapshot] = []) {
+    self.providerSnapshots = providerSnapshots
+  }
+
   @StateObject private var costTracker = CostTracker.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
 
@@ -40,12 +52,78 @@ struct OptimizeInsightsView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
+      recommendationCard
       phaseContent
         .animation(
           MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
           value: phase
         )
     }
+  }
+
+  // MARK: - What to use next
+
+  /// The ranked "what should I use next?" card.
+  ///
+  /// Sits outside the page's loading/loaded/empty phase on purpose: it reads the
+  /// quota snapshots the app already refreshes, so it answers the question
+  /// before a single token log has been scanned — and keeps answering it while a
+  /// scan runs. Ticks on the shared reset-countdown schedule so the countdowns,
+  /// and the ranking that weighs them, stay current without a clock of its own.
+  @ViewBuilder private var recommendationCard: some View {
+    TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
+      let recommendation = providerSnapshots.headroomRecommendation(now: timeline.date)
+      if !recommendation.rows.isEmpty || !recommendation.unavailable.isEmpty {
+        DashboardCard(title: "What To Use Next", trailing: Self.recommendationCaption(for: recommendation)) {
+          VStack(alignment: .leading, spacing: 12) {
+            if let headline = recommendation.headline {
+              Text(headline)
+                .font(.callout)
+                .fontWeight(.semibold)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(Array(recommendation.rows.enumerated()), id: \.element.id) { index, row in
+              HeadroomRecommendationRow(rank: index + 1, row: row)
+            }
+
+            if !recommendation.unavailable.isEmpty {
+              Divider()
+              // Named, not hidden: a provider MeterBar cannot read is a fact the
+              // user needs, and guessing a rank for it would be worse than
+              // saying nothing.
+              Text("No data")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+              ForEach(recommendation.unavailable) { entry in
+                HeadroomUnavailableRow(entry: entry)
+              }
+            }
+
+            Divider()
+
+            Label(
+              "Ranked on your Mac from quota data MeterBar already caches — no extra requests, "
+                + "and nothing switches tools for you.",
+              systemImage: "lock.shield"
+            )
+            .font(.caption2)
+            .foregroundColor(.secondary)
+          }
+        }
+      }
+    }
+  }
+
+  /// Card caption. Names the state instead of restating the headline.
+  ///
+  /// Internal (not private) so the wording can be asserted without hosting the
+  /// page, matching `recentWindowTile(tokens7Day:tokens30Day:)`.
+  static func recommendationCaption(for recommendation: ProviderRecommendation) -> String {
+    if recommendation.isEmpty { return "No usable data" }
+    if recommendation.isFullyExhausted { return "Every window spent" }
+    return "Ranked by remaining headroom"
   }
 
   /// The swapping page body. Each branch is `.id`-tagged and carries the shared
@@ -320,6 +398,100 @@ struct OptimizeInsightsView: View {
     case 0.3..<0.7: return .secondary
     default: return MeterBarTheme.warning
     }
+  }
+}
+
+// MARK: - Headroom recommendation rows
+
+/// One row of the "what to use next" ranking.
+///
+/// Every value on the row is an input to its score — binding window, percent
+/// left, reset countdown, pace — so the ordering can be read off the row rather
+/// than taken on faith. Deliberately plain: this is arithmetic over cached
+/// quota numbers, not a prediction.
+private struct HeadroomRecommendationRow: View {
+  let rank: Int
+  let row: ProviderRecommendationRow
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        Text("\(rank)")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .monospacedDigit()
+          .foregroundColor(.secondary)
+          .frame(width: 14, alignment: .trailing)
+
+        Circle()
+          .fill(MeterBarTheme.accent(for: row.service))
+          .frame(width: 8, height: 8)
+
+        Text(row.name)
+          .font(.callout)
+          .fontWeight(.medium)
+          .lineLimit(1)
+          .truncationMode(.middle)
+
+        MeterBarChip(row.windowTitle, tint: row.band.color, style: .flat)
+
+        Spacer(minLength: 8)
+
+        Text(row.isExhausted ? "Spent" : row.headroomText)
+          .font(.callout)
+          .monospacedDigit()
+          .foregroundColor(row.band.color)
+      }
+
+      ShareBar(fraction: Double(row.percentLeft) / 100, tint: row.band.color)
+
+      if !detailParts.isEmpty {
+        Text(detailParts.joined(separator: " · "))
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+      }
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("Rank \(rank)")
+    .accessibilityValue(row.summary)
+  }
+
+  /// The score inputs that don't fit the headline row, in weighting order: when
+  /// the window refills, then how the burn compares to the clock.
+  private var detailParts: [String] {
+    if row.isExhausted {
+      return [row.availabilityText].compactMap { $0 }
+    }
+    return [row.resetText, row.paceText].compactMap { $0 }
+  }
+}
+
+/// A provider left out of the ranking, with the reason in place of a rank.
+private struct HeadroomUnavailableRow: View {
+  let entry: ProviderRecommendationUnavailableRow
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Circle()
+        .fill(MeterBarTheme.accent(for: entry.service))
+        .frame(width: 8, height: 8)
+
+      Text(entry.name)
+        .font(.callout)
+        .lineLimit(1)
+        .truncationMode(.middle)
+
+      Spacer(minLength: 8)
+
+      Text(entry.detail)
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .lineLimit(1)
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(entry.name)
+    .accessibilityValue(entry.detail)
   }
 }
 

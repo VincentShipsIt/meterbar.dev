@@ -283,7 +283,10 @@ struct UsageDashboardView: View {
                 quotaSnapshot: providerSnapshot(for:)
             )
         case .optimize:
-            OptimizeInsightsView()
+            // Unfiltered on purpose: the recommendation card lists the enabled
+            // providers with no cached usage under its own "no data" state, so
+            // filtering them out here would hide them instead.
+            OptimizeInsightsView(providerSnapshots: allProviderSnapshots)
         case .diagnostics:
             DashboardDiagnosticsSection(
                 reports: $readinessReports,
@@ -351,8 +354,15 @@ struct UsageDashboardView: View {
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
-        // Same builder the popover uses; the dashboard only renders providers
-        // that have reported metrics.
+        // Same builder the popover uses; most dashboard sections only render
+        // providers that have reported metrics.
+        allProviderSnapshots.filter(\.hasMetrics)
+    }
+
+    /// Every enabled provider/account, including the ones with no cached usage.
+    /// Sections that must *name* a silent provider — the Optimize page's
+    /// recommendation card — read this instead of the filtered list.
+    private var allProviderSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
             metrics: dataManager.metrics,
             codexAccounts: codexAccountStore.accounts,
@@ -370,7 +380,6 @@ struct UsageDashboardView: View {
             openRouterHasAccess: openRouterService.hasAccess,
             grokHasAccess: grokService.hasAccess
         ))
-        .filter(\.hasMetrics)
     }
 
     private var orderedProviderSnapshotsForLimits: [ProviderSnapshot] {

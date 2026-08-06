@@ -52,6 +52,10 @@ nonisolated enum StorageKeys {
     static let statusItemFocusAppMapping = "StatusItemFocusAppMapping"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
+    /// Opt-in for the one-line "what to use next" hint at the top of the popover.
+    /// Absent means off: the full ranking already lives in the dashboard's
+    /// Optimize tab, so the popover keeps its pre-feature layout by default.
+    static let popoverShowsRecommendationHint = "PopoverShowsRecommendationHint"
     /// Opt-in timed rotation of the merged status item through visible providers.
     static let statusItemRotatesProviders = "StatusItemRotatesProviders"
     /// `StatusItemRotationInterval` raw value: seconds between rotation steps.

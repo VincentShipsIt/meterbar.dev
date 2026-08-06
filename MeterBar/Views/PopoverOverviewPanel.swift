@@ -18,6 +18,9 @@ struct PopoverOverviewPanel: View {
     let claudeEnabledCustomAccountIDs: [UUID]
     let claudeEnabledAccountMetrics: [UsageMetrics]
     let grokAccounts: [GrokAccount]
+    /// Opt-in one-line "what to use next" hint. Defaults to off so the popover
+    /// keeps its pre-feature layout; the full ranking lives in the dashboard.
+    let showsRecommendationHint: Bool
 
     @State private var setupReports: [ProviderReadiness] = []
     @StateObject private var onboarding = FirstRunOnboardingStore.shared
@@ -36,7 +39,8 @@ struct PopoverOverviewPanel: View {
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledCustomAccountIDs: [UUID] = [],
         claudeEnabledAccountMetrics: [UsageMetrics] = [],
-        grokAccounts: [GrokAccount] = [.defaultAccount]
+        grokAccounts: [GrokAccount] = [.defaultAccount],
+        showsRecommendationHint: Bool = false
     ) {
         self.snapshots = snapshots
         self.openDashboard = openDashboard
@@ -47,6 +51,7 @@ struct PopoverOverviewPanel: View {
         self.claudeEnabledCustomAccountIDs = claudeEnabledCustomAccountIDs
         self.claudeEnabledAccountMetrics = claudeEnabledAccountMetrics
         self.grokAccounts = grokAccounts
+        self.showsRecommendationHint = showsRecommendationHint
     }
 
     /// The enabled providers currently shown in the popover.
@@ -71,6 +76,7 @@ struct PopoverOverviewPanel: View {
     /// separately via the cards' own `.numericText()` content transitions.
     private struct StructuralKey: Equatable {
         let showsFirstRun: Bool
+        let showsRecommendationHint: Bool
         let isEmpty: Bool
         let setupProviders: [ServiceType]
         let snapshotIDs: [String]
@@ -87,6 +93,7 @@ struct PopoverOverviewPanel: View {
     private var structuralKey: StructuralKey {
         StructuralKey(
             showsFirstRun: onboarding.shouldPresent,
+            showsRecommendationHint: showsRecommendationHint,
             isEmpty: snapshots.isEmpty,
             setupProviders: providersNeedingSetup.map(\.provider),
             snapshotIDs: snapshots.map(\.id)
@@ -118,6 +125,11 @@ struct PopoverOverviewPanel: View {
                     .transition(MeterBarTheme.Motion.popoverTile)
             }
 
+            if showsRecommendationHint {
+                recommendationHint
+                    .transition(MeterBarTheme.Motion.popoverTile)
+            }
+
             if !providersNeedingSetup.isEmpty {
                 setupChecklist
                     .transition(MeterBarTheme.Motion.popoverTile)
@@ -141,6 +153,41 @@ struct PopoverOverviewPanel: View {
         )
         .task(id: readinessInputKey) {
             await loadSetupReports()
+        }
+    }
+
+    /// The opt-in one-line "what to use next" row.
+    ///
+    /// Deliberately the same sentence the dashboard card leads with — the popover
+    /// is the glanceable copy of that ranking, not a second opinion. Ticks on the
+    /// shared reset-countdown schedule so its countdown, and the ranking that
+    /// weighs it, stay current without a clock of its own. Renders nothing when
+    /// nothing is rankable rather than guessing a pick.
+    @ViewBuilder private var recommendationHint: some View {
+        TimelineView(
+            .periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)
+        ) { timeline in
+            let recommendation = snapshots.headroomRecommendation(now: timeline.date)
+            if let headline = recommendation.headline, let top = recommendation.top {
+                DashboardTile(padding: .popover) {
+                    HStack(alignment: .center, spacing: 9) {
+                        Image(systemName: "arrow.forward.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MeterBarTheme.accent(for: top.service))
+                            .accessibilityHidden(true)
+
+                        Text(headline)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Recommended next")
+                    .accessibilityValue(top.summary)
+                }
+            }
         }
     }
 
