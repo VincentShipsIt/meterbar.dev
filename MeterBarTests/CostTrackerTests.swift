@@ -188,6 +188,43 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(result.input, 5)
     }
 
+    // MARK: - Oversized transcript lines
+
+    /// A line past `FileLineReader.defaultMaxLineBytes` reaches the scanner as a
+    /// bounded prefix rather than being dropped. Length alone must never
+    /// suppress a record: this one's usage block survives inside the prefix, so
+    /// its spend still counts.
+    func testParseSessionFileCountsTruncatedRecordsWhoseUsageSurvived() throws {
+        let padding = String(repeating: " ", count: FileLineReader.defaultPrefixBytes)
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 120, output: 30) + padding
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 120)
+        XCTAssertEqual(result.output, 30)
+    }
+
+    /// The other half of the contract: a prefix that does not parse is skipped
+    /// like any other malformed line, without stalling the rest of the file.
+    /// Before the streaming cap this shape is what put a whole transcript's
+    /// worth of spend at risk.
+    func testParseSessionFileKeepsScanningPastAnOversizedUnparseableLine() throws {
+        let blob = String(repeating: "x", count: FileLineReader.defaultMaxLineBytes + 2_048)
+        let url = try writeSessionFile(lines: [
+            "{\"timestamp\": \"2026-07-01T10:00:00.000Z\", \"toolUseResult\": \"\(blob)\"}",
+            eventLine(timestamp: "2026-07-02T10:00:00.000Z", input: 5, output: 5)
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 5)
+        XCTAssertEqual(result.output, 5)
+    }
+
     // MARK: - Project attribution (issue #270)
 
     func testParseSessionFileDefaultsUnattributedEventsToTheUnknownProjectBucket() throws {
@@ -415,6 +452,46 @@ final class CostTrackerTests: XCTestCase {
         // Only the post-cutoff line is counted.
         XCTAssertEqual(context.totals.input, 100)
         XCTAssertEqual(context.sessionIDs, ["new"])
+    }
+
+    /// Rollouts in `~/.codex/sessions` reach 56 MB on a single line. The reader
+    /// keeps a bounded prefix of one instead of dropping it, and `token_count`
+    /// sits near the front of the record — so the tokens still land. Dropping
+    /// the line would silently under-report the session's spend.
+    func testScanCodexRolloutsCountsTruncatedTokenCountLines() throws {
+        let padding = String(repeating: " ", count: FileLineReader.defaultPrefixBytes)
+        let dir = try writeCodexArchive(lines: [
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z") + padding
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 1_000)
+        XCTAssertEqual(context.totals.output, 500)
+        XCTAssertEqual(context.sessionIDs, ["conv-1"])
+    }
+
+    /// An oversized line the prefix cannot explain is skipped, but the rollout
+    /// keeps streaming: the usage recorded after it is still counted.
+    func testScanCodexRolloutsKeepsScanningPastAnOversizedUnparseableLine() throws {
+        let blob = String(repeating: "x", count: FileLineReader.defaultMaxLineBytes + 2_048)
+        let oversized = """
+        {"timestamp": "2026-06-15T09:00:00Z", "type": "response_item", "payload": \
+        {"type": "message", "content": "\(blob)"}}
+        """
+        let dir = try writeCodexArchive(lines: [
+            oversized,
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z", input: 42, output: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 42)
+        XCTAssertEqual(context.totals.output, 7)
     }
 
     // MARK: - Codex model + origin attribution

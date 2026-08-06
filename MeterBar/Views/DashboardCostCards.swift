@@ -46,6 +46,13 @@ struct CostOverviewStatusCard: View {
     return .needsScan
   }
 
+  /// Verification dates of the rate entries this scan actually priced with, not
+  /// a global table revision (issue #339). Summaries cached before dated
+  /// pricing carry none, so those fall back to the shipped table's own dates.
+  private var pricingProvenance: PricingProvenance {
+    summary?.pricing.flatMap { $0.isEmpty ? nil : $0 } ?? ModelPricing.tableProvenance
+  }
+
   var body: some View {
     DashboardTile {
       VStack(alignment: .leading, spacing: 12) {
@@ -102,9 +109,10 @@ struct CostOverviewStatusCard: View {
               .font(.caption)
               .foregroundColor(.secondary)
             Spacer()
-            Text(ModelPricing.revisionLabel)
+            Text(pricingProvenance.label)
               .font(.caption)
               .fontWeight(.semibold)
+              .help(pricingProvenance.diagnosticNote ?? pricingProvenance.label)
           }
         }
       }
