@@ -535,12 +535,20 @@ final class CostScanCacheTests: XCTestCase {
         let cache = CostScanCache()
         for entry in entries { cache.store(entry) }
 
-        let bounded = cache.snapshot(maximumValues: 33, maximumEntries: 3)
-        XCTAssertEqual(bounded.claude.count, 3)
+        let entryBounded = cache.snapshot(maximumValues: .max, maximumEntries: 3)
+        XCTAssertEqual(entryBounded.claude.count, 3)
         XCTAssertEqual(
-            Set(bounded.claude.map(\.path)),
+            Set(entryBounded.claude.map(\.path)),
             ["/tmp/file-7.jsonl", "/tmp/file-6.jsonl", "/tmp/file-5.jsonl"],
             "the biggest files save the most re-parsing per stored value"
+        )
+
+        let valueBounded = cache.snapshot(maximumValues: 33, maximumEntries: entries.count)
+        XCTAssertEqual(valueBounded.claude.count, 3)
+        XCTAssertEqual(
+            Set(valueBounded.claude.map(\.path)),
+            ["/tmp/file-7.jsonl", "/tmp/file-6.jsonl", "/tmp/file-5.jsonl"],
+            "the value budget must bind independently of the entry budget"
         )
     }
 

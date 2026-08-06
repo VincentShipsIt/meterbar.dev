@@ -157,6 +157,11 @@ final class CostScanCacheBenchmarkTests: XCTestCase {
         report.cold = cold.pass
         try Self.publish(report, label: "live")
 
+        try XCTSkipUnless(
+            cold.pass.seconds > 0.05,
+            "Cold scan took \(cold.pass.seconds)s; this corpus is too small to benchmark reliably."
+        )
+
         // Not compared against: this is the run that pays for the cache the warm
         // run reads. Recorded because "what does the first cached scan cost" is
         // a question anyone reading these numbers will ask.
