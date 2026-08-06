@@ -80,6 +80,26 @@ struct GeneralSettingsView: View {
         providerSnapshots.statusItemPinOptions
     }
 
+    /// Same predicate the presenter uses to decide whether a rotation timer may
+    /// exist, so the controls can never claim rotation is running when it isn't.
+    private var canRotateProviders: Bool {
+        MenuBarRotationSequencer.rotates(
+            mode: menuBarDisplayPreferences.presentationMode,
+            isEnabled: true,
+            pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
+        )
+    }
+
+    /// Explains a disabled rotation toggle, naming the setting that is standing
+    /// in its way — a pin and rotation are two answers to the same question.
+    private var rotationExclusionNotice: String? {
+        guard !canRotateProviders else { return nil }
+        guard menuBarDisplayPreferences.presentationMode == .merged else {
+            return "Rotation applies to the single menu bar item only."
+        }
+        return "Pinning and rotation are mutually exclusive. Set “Menu bar shows” back to Auto to rotate."
+    }
+
     private var refreshSection: some View {
         SettingsPanelSection(title: "Refresh", systemImage: "arrow.clockwise", color: MeterBarTheme.appAccent) {
             SettingsRowView(
@@ -168,6 +188,43 @@ struct GeneralSettingsView: View {
                 // One-per-provider already shows every account, so there is
                 // nothing left for a pin to choose between.
                 .disabled(menuBarDisplayPreferences.presentationMode == .perProvider)
+            }
+
+            SettingsRowView(
+                title: "Rotate providers",
+                detail: "Cycle the single item through providers that have data. "
+                    + "Rotation pauses while the popover is open, and a critical quota keeps the item "
+                    + "until it recovers."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.rotatesProviders },
+                    set: { menuBarDisplayPreferences.setRotatesProviders($0) }
+                ))
+                .labelsHidden()
+                .meterBarSwitch()
+                .disabled(!canRotateProviders)
+            }
+
+            if let notice = rotationExclusionNotice {
+                SettingsNotice(text: notice, color: .secondary)
+            }
+
+            SettingsRowView(
+                title: "Rotation interval",
+                detail: "How long each provider keeps the item."
+            ) {
+                Picker("", selection: Binding(
+                    get: { menuBarDisplayPreferences.rotationInterval },
+                    set: { menuBarDisplayPreferences.setRotationInterval($0) }
+                )) {
+                    ForEach(StatusItemRotationInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .disabled(!canRotateProviders || !menuBarDisplayPreferences.rotatesProviders)
             }
 
             SettingsRowView(
