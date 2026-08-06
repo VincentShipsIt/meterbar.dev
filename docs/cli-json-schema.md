@@ -278,6 +278,30 @@ flags are supplied.
 `source` is always `"manual"` — a marker (not a variant to branch on today) that a future live-rate
 source, if ever added, would need to distinguish itself from.
 
+### Pricing provenance
+
+Added in version 1 as an additive field. Events are priced at the rate in effect at their own
+timestamp, so a scan can span more than one rate entry. The top-level `pricing` object reports
+which entries the cached scan actually used:
+
+```json
+{
+  "pricing": {
+    "verifiedFrom": "2026-01-05",
+    "verifiedThrough": "2026-07-02",
+    "eventsBeforeFirstEntry": 0
+  }
+}
+```
+
+- `verifiedFrom` / `verifiedThrough` — verification dates of the oldest and newest rate entry that
+  priced this scan. Equal when a single entry priced everything.
+- `eventsBeforeFirstEntry` — events older than every entry in the pricing table. Those are priced
+  at the oldest known rate, so a non-zero value means the total is an estimate for that portion.
+
+The object is omitted entirely when the cache predates dated pricing or the scan priced nothing.
+Consumers on version 1 that do not know the field keep working unchanged.
+
 ## Errors
 
 When cached input is unavailable, JSON mode still emits a versioned document:

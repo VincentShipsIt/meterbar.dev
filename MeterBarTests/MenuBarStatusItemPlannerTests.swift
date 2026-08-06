@@ -51,6 +51,23 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         )
     }
 
+    private func rotatedPlan(
+        _ candidates: [StatusLimitCandidate],
+        tick: Int,
+        pinnedKey: String? = nil
+    ) -> [MenuBarStatusItemDescriptor] {
+        MenuBarStatusItemPlanner.plan(
+            mode: .merged,
+            candidates: candidates,
+            previousKey: nil,
+            pinnedKey: pinnedKey,
+            metric: .percentLeft,
+            size: .compact,
+            rotationTick: tick,
+            now: now
+        )
+    }
+
     // MARK: - Merged mode
 
     func testMergedModeProducesExactlyOneItemForTheSelectedQuota() {
@@ -118,6 +135,42 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         let codex = candidate(key: "codex", service: .codexCli, percentUsed: 50, activeMinutesAgo: 1)
 
         XCTAssertEqual(plan([claude, codex], previousKey: "codex").first?.selectionKey, "codex")
+    }
+
+    // MARK: - Rotation
+
+    func testMergedModeFollowsTheRotationTickWhenRotationIsOn() {
+        let claude = candidate(key: "claude:gen", percentUsed: 48, activeMinutesAgo: 1)
+        let codex = candidate(key: "codex", service: .codexCli, percentUsed: 20, activeMinutesAgo: 1)
+
+        // Auto would stay on the tighter Claude window; rotation overrides it.
+        XCTAssertEqual(rotatedPlan([claude, codex], tick: 0).first?.selectionKey, "claude:gen")
+        let rotated = rotatedPlan([claude, codex], tick: 1).first
+        XCTAssertEqual(rotated?.selectionKey, "codex")
+        XCTAssertEqual(rotated?.service, .codexCli)
+        XCTAssertEqual(rotated?.title, " 80%")
+    }
+
+    func testMergedModeKeepsAutoSelectionWhenRotationIsOff() {
+        let claude = candidate(key: "claude:gen", percentUsed: 48, activeMinutesAgo: 1)
+        let codex = candidate(key: "codex", service: .codexCli, percentUsed: 20, activeMinutesAgo: 1)
+
+        XCTAssertEqual(plan([claude, codex]).first?.selectionKey, "claude:gen")
+    }
+
+    func testRotationNeverOverridesAPin() {
+        let claude = candidate(key: "claude:gen", percentUsed: 48, activeMinutesAgo: 1)
+        let codex = candidate(
+            key: "codex",
+            service: .codexCli,
+            percentUsed: 20,
+            pinKey: "Codex:weekly",
+            activeMinutesAgo: 1
+        )
+
+        let descriptors = rotatedPlan([claude, codex], tick: 0, pinnedKey: "Codex:weekly")
+
+        XCTAssertEqual(descriptors.first?.selectionKey, "codex")
     }
 
     // MARK: - Per-provider mode

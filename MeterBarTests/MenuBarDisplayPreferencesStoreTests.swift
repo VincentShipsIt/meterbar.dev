@@ -31,6 +31,8 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.showsExhaustedResetCountdown)
         XCTAssertEqual(store.resetTimeFormat, .countdown)
         XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertEqual(store.rotationInterval, .fifteenSeconds)
     }
 
     // MARK: - Follow focused app (#341)
@@ -126,6 +128,8 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         store.setHighContrast(true)
         store.setShowsExhaustedResetCountdown(true)
         store.setResetTimeFormat(.clock)
+        store.setRotatesProviders(true)
+        store.setRotationInterval(.sixtySeconds)
 
         let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
@@ -137,6 +141,8 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.highContrast)
         XCTAssertTrue(reloaded.showsExhaustedResetCountdown)
         XCTAssertEqual(reloaded.resetTimeFormat, .clock)
+        XCTAssertTrue(reloaded.rotatesProviders)
+        XCTAssertEqual(reloaded.rotationInterval, .sixtySeconds)
     }
 
     func testInvalidPersistedValuesFallBackToExistingDefaults() {
@@ -145,6 +151,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         defaults.set("invalid", forKey: StorageKeys.statusItemWindowMode)
         defaults.set("invalid", forKey: StorageKeys.statusItemFontSize)
         defaults.set("invalid", forKey: StorageKeys.popoverResetTimeFormat)
+        defaults.set(7, forKey: StorageKeys.statusItemRotationInterval)
 
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
@@ -153,6 +160,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertEqual(store.windowMode, .selected)
         XCTAssertEqual(store.fontSize, .standard)
         XCTAssertEqual(store.resetTimeFormat, .countdown)
+        XCTAssertEqual(store.rotationInterval, .fifteenSeconds)
     }
 
     func testBlankPinRestoresAutoAndRemovesPersistence() {

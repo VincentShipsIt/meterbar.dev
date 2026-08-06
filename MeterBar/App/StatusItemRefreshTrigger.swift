@@ -48,7 +48,12 @@ enum StatusItemRefreshTrigger {
             displayPreferences.$highContrast.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$showsExhaustedResetCountdown.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$followsFocusedApp.map { _ in () }.eraseToAnyPublisher(),
-            displayPreferences.$focusAppMapping.map { _ in () }.eraseToAnyPublisher()
+            displayPreferences.$focusAppMapping.map { _ in () }.eraseToAnyPublisher(),
+            // Rotation reshapes the merged item the moment it is toggled, and a
+            // new interval has to reschedule the timer rather than wait out the
+            // old cadence.
+            displayPreferences.$rotatesProviders.map { _ in () }.eraseToAnyPublisher(),
+            displayPreferences.$rotationInterval.map { _ in () }.eraseToAnyPublisher()
         ])
 
         // Which app the user is working in, when focus following is on. The

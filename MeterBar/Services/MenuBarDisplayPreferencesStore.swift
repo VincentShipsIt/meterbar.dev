@@ -147,6 +147,22 @@ nonisolated enum ResetTimeFormat: String, CaseIterable, Identifiable {
     }
 }
 
+/// How long each provider keeps the merged status item when rotation is on.
+/// Raw value is the interval in seconds, so the persisted number stays readable
+/// in `defaults read` and survives renaming a case.
+nonisolated enum StatusItemRotationInterval: Int, CaseIterable, Identifiable, Sendable {
+    case fiveSeconds = 5
+    case fifteenSeconds = 15
+    case thirtySeconds = 30
+    case sixtySeconds = 60
+
+    var id: Int { rawValue }
+
+    var seconds: TimeInterval { TimeInterval(rawValue) }
+
+    var displayName: String { "\(rawValue)s" }
+}
+
 /// Persists the status-item and popover-label choices introduced by issue #142.
 /// Defaults preserve the exact pre-feature presentation: Auto selection, a
 /// compact percentage-left label, and reset countdowns.
@@ -168,6 +184,8 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     /// App bundle identifier → provider, the only link between a focused app and
     /// a quota. MeterBar never infers this from window contents.
     @Published private(set) var focusAppMapping: [String: ServiceType]
+    @Published private(set) var rotatesProviders: Bool
+    @Published private(set) var rotationInterval: StatusItemRotationInterval
 
     private let userDefaults: UserDefaults
 
@@ -193,6 +211,10 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
             .flatMap(ResetTimeFormat.init(rawValue:)) ?? .countdown
         followsFocusedApp = userDefaults.bool(forKey: StorageKeys.statusItemFollowsFocusedApp)
         focusAppMapping = Self.loadFocusMapping(from: userDefaults)
+        rotatesProviders = userDefaults.bool(forKey: StorageKeys.statusItemRotatesProviders)
+        rotationInterval = StatusItemRotationInterval(
+            rawValue: userDefaults.integer(forKey: StorageKeys.statusItemRotationInterval)
+        ) ?? .fifteenSeconds
     }
 
     func setPinnedCandidateKey(_ key: String?) {
@@ -280,6 +302,18 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         guard format != resetTimeFormat else { return }
         resetTimeFormat = format
         userDefaults.set(format.rawValue, forKey: StorageKeys.popoverResetTimeFormat)
+    }
+
+    func setRotatesProviders(_ enabled: Bool) {
+        guard enabled != rotatesProviders else { return }
+        rotatesProviders = enabled
+        userDefaults.set(enabled, forKey: StorageKeys.statusItemRotatesProviders)
+    }
+
+    func setRotationInterval(_ interval: StatusItemRotationInterval) {
+        guard interval != rotationInterval else { return }
+        rotationInterval = interval
+        userDefaults.set(interval.rawValue, forKey: StorageKeys.statusItemRotationInterval)
     }
 
     nonisolated private static func normalizedPin(_ key: String) -> String? {

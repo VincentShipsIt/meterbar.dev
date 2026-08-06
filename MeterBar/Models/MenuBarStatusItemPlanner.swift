@@ -45,6 +45,10 @@ enum MenuBarStatusItemPlanner {
     ///   Nil whenever the opt-in is off, which is the default; the parameter is
     ///   honored in merged mode only, since the account-scoped and per-provider
     ///   modes already show every provider at once.
+    /// - Parameter rotationTick: the merged item's current rotation step, when
+    ///   the user opted into timed rotation. Nil — the default — leaves selection
+    ///   exactly as it was before rotation existed, and the other modes own their
+    ///   items outright so it never applies to them.
     static func plan(
         mode: MenuBarPresentationMode,
         accountPlan: MenuBarAccountItemPlan? = nil,
@@ -59,6 +63,7 @@ enum MenuBarStatusItemPlanner {
         highContrast: Bool = false,
         showsExhaustedResetCountdown: Bool = false,
         focus: MenuBarFocusContext? = nil,
+        rotationTick: Int? = nil,
         now: Date = Date()
     ) -> [MenuBarStatusItemDescriptor] {
         let context = SelectionContext(
@@ -71,6 +76,7 @@ enum MenuBarStatusItemPlanner {
             visualStyle: StatusItemVisualStyle(fontSize: fontSize, highContrast: highContrast),
             showsExhaustedResetCountdown: showsExhaustedResetCountdown,
             focus: mode == .merged ? focus : nil,
+            rotationTick: mode == .merged ? rotationTick : nil,
             now: now
         )
 
@@ -153,6 +159,8 @@ enum MenuBarStatusItemPlanner {
         /// Nil unless the user opted into focus following *and* the mode is
         /// merged, so every other path is byte-identical to pre-#341 behavior.
         let focus: MenuBarFocusContext?
+        /// Set only when the merged item is rotating; nil everywhere else.
+        let rotationTick: Int?
         let now: Date
 
         /// What the item with this id showed last refresh. The merged slot
@@ -168,11 +176,38 @@ enum MenuBarStatusItemPlanner {
         context: SelectionContext
     ) -> MenuBarStatusItemDescriptor {
         // A pin is an explicit "show exactly this", so it outranks the focused
-        // app; when the focus resolver has no opinion (unmapped app, hidden or
-        // dataless provider, critical quota elsewhere) Auto decides as before.
+        // app. Focus following then outranks rotation when it has an eligible
+        // mapped provider; rotation remains the fallback for an unmapped app.
         let focused = context.pinnedKey == nil
             ? context.focus.flatMap { MenuBarFocusSelector.select(candidates: candidates, context: $0) }
             : nil
+
+        // Rotation is another way of choosing *which* candidate the one merged
+        // item shows, so it resolves ahead of auto-selection and hands the same
+        // descriptor builder its winner. It stands down for a pin, for a
+        // critical or exhausted quota, when focus already selected a provider,
+        // and when nothing has fresh data.
+        if focused == nil, let rotationTick = context.rotationTick {
+            let outcome = MenuBarRotationSequencer.outcome(
+                candidates: candidates,
+                tick: rotationTick,
+                pinnedKey: context.pinnedKey,
+                now: context.now
+            )
+            switch outcome {
+            case let .rotate(candidate), let .hold(candidate):
+                return descriptor(
+                    id: mergedItemID,
+                    selectionKey: candidate.key,
+                    candidate: candidate,
+                    candidates: candidates,
+                    qualifiedName: false,
+                    context: context
+                )
+            case .inactive:
+                break
+            }
+        }
 
         guard let selection = focused ?? StatusItemLimitSelector.select(
             candidates: candidates,

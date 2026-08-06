@@ -93,9 +93,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Decides what each menu bar item shows and styles its button. Item
     /// lifecycle stays here; the presenter never creates or removes one.
-    private lazy var statusItemPresenter = StatusItemPresenter { [weak self] descriptors in
-        self?.applyStatusItemDescriptors(descriptors)
-    }
+    private lazy var statusItemPresenter = StatusItemPresenter(
+        isPopoverOpen: { [weak self] in self?.menuPanel?.isShown ?? false },
+        applyDescriptors: { [weak self] descriptors in
+            self?.applyStatusItemDescriptors(descriptors)
+        }
+    )
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Apply the persisted Dock visibility as early as possible so users who

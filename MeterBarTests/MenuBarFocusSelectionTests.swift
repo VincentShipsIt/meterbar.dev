@@ -226,7 +226,8 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         _ candidates: [StatusLimitCandidate],
         mode: MenuBarPresentationMode = .merged,
         pinnedKey: String? = nil,
-        focus: MenuBarFocusContext? = nil
+        focus: MenuBarFocusContext? = nil,
+        rotationTick: Int? = nil
     ) -> [MenuBarStatusItemDescriptor] {
         MenuBarStatusItemPlanner.plan(
             mode: mode,
@@ -236,6 +237,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
             metric: .percentLeft,
             size: .compact,
             focus: focus,
+            rotationTick: rotationTick,
             now: now
         )
     }
@@ -286,6 +288,32 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         )
 
         XCTAssertEqual(descriptors.first?.selectionKey, "claude:gen")
+    }
+
+    func testFocusMappingBeatsRotationWhenBothAreEnabled() {
+        let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
+        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+
+        let descriptors = plan(
+            [claude, cursor],
+            focus: context(bundleID: cursorBundleID),
+            rotationTick: 0
+        )
+
+        XCTAssertEqual(descriptors.first?.selectionKey, "cursor")
+    }
+
+    func testRotationRemainsTheFallbackForAnUnmappedFocusedApp() {
+        let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
+        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+
+        let descriptors = plan(
+            [claude, cursor],
+            focus: context(bundleID: unknownBundleID),
+            rotationTick: 1
+        )
+
+        XCTAssertEqual(descriptors.first?.selectionKey, "cursor")
     }
 
     func testFocusIsIgnoredOutsideMergedMode() {

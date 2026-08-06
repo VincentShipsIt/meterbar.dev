@@ -44,7 +44,32 @@ final class StatusItemPresenter {
     /// directory activity probes or performs network work.
     private var countdownTimer: Timer?
 
-    init(applyDescriptors: @escaping ([MenuBarStatusItemDescriptor]) -> Void) {
+    /// The single scheduled source behind opt-in provider rotation (issue #340).
+    /// Like the countdown timer it only re-runs the pure presentation pass over
+    /// the cached candidates — rotation never triggers a refresh. Torn down
+    /// whenever rotation stops applying, so the default (off) build schedules
+    /// nothing at all.
+    private var rotationTimer: Timer?
+
+    /// Interval the live rotation timer was built with, so changing the setting
+    /// reschedules instead of leaving the old cadence running.
+    private var rotationTimerInterval: StatusItemRotationInterval?
+
+    /// Which provider currently has the turn. Reset when rotation stops so
+    /// re-enabling it starts from the top of the cycle rather than mid-list.
+    private var rotationTick = 0
+
+    /// Whether the popover is open, asked at tick time rather than mirrored:
+    /// the panel clears its own presentation flag on paths that never route
+    /// back through the delegate, and a stale mirror would rotate the label out
+    /// from under an open popover.
+    private let isPopoverOpen: () -> Bool
+
+    init(
+        isPopoverOpen: @escaping () -> Bool = { false },
+        applyDescriptors: @escaping ([MenuBarStatusItemDescriptor]) -> Void
+    ) {
+        self.isPopoverOpen = isPopoverOpen
         self.applyDescriptors = applyDescriptors
     }
 
@@ -73,6 +98,11 @@ final class StatusItemPresenter {
         let preferences = MenuBarDisplayPreferencesStore.shared
         let plan = accountPlan(mode: preferences.presentationMode)
         accountItemPlan = plan
+        let rotates = MenuBarRotationSequencer.rotates(
+            mode: preferences.presentationMode,
+            isEnabled: preferences.rotatesProviders,
+            pinnedKey: preferences.pinnedCandidateKey
+        )
         let descriptors = MenuBarStatusItemPlanner.plan(
             mode: preferences.presentationMode,
             accountPlan: plan,
@@ -86,7 +116,8 @@ final class StatusItemPresenter {
             fontSize: preferences.fontSize,
             highContrast: preferences.highContrast,
             showsExhaustedResetCountdown: preferences.showsExhaustedResetCountdown,
-            focus: focusContext(preferences: preferences)
+            focus: focusContext(preferences: preferences),
+            rotationTick: rotates ? rotationTick : nil
         )
 
         // Rebuilt rather than merged, so an item that just left the plan doesn't
@@ -98,6 +129,7 @@ final class StatusItemPresenter {
 
         applyDescriptors(descriptors)
         updateCountdownTimer(preferences: preferences)
+        updateRotationTimer(preferences: preferences, rotates: rotates)
     }
 
     /// The frontmost-app input to the merged selection, or nil when the user has
@@ -285,6 +317,48 @@ final class StatusItemPresenter {
         timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         countdownTimer = timer
+    }
+
+    @MainActor
+    private func updateRotationTimer(
+        preferences: MenuBarDisplayPreferencesStore,
+        rotates: Bool
+    ) {
+        guard rotates else {
+            rotationTimer?.invalidate()
+            rotationTimer = nil
+            rotationTimerInterval = nil
+            rotationTick = 0
+            return
+        }
+        // Already running at the chosen cadence; leaving it alone keeps the
+        // current provider's turn from being cut short by an unrelated refresh.
+        guard rotationTimer == nil || rotationTimerInterval != preferences.rotationInterval else {
+            return
+        }
+
+        rotationTimer?.invalidate()
+        let timer = Timer(timeInterval: preferences.rotationInterval.seconds, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.advanceRotation()
+            }
+        }
+        // Generous next to the shortest 5s step, and it lets macOS coalesce the
+        // wakeup with other timers instead of demanding its own.
+        timer.tolerance = 1
+        RunLoop.main.add(timer, forMode: .common)
+        rotationTimer = timer
+        rotationTimerInterval = preferences.rotationInterval
+    }
+
+    @MainActor
+    private func advanceRotation() {
+        let next = MenuBarRotationSequencer.advance(tick: rotationTick, isPaused: isPopoverOpen())
+        // Paused: the tick stands still, so there is nothing to redraw and the
+        // label cannot change while the user is reading the popover it belongs to.
+        guard next != rotationTick else { return }
+        rotationTick = next
+        apply(candidates: latestCandidates)
     }
 
     @MainActor

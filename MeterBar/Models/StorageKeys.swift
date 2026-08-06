@@ -52,6 +52,10 @@ nonisolated enum StorageKeys {
     static let statusItemFocusAppMapping = "StatusItemFocusAppMapping"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
+    /// Opt-in timed rotation of the merged status item through visible providers.
+    static let statusItemRotatesProviders = "StatusItemRotatesProviders"
+    /// `StatusItemRotationInterval` raw value: seconds between rotation steps.
+    static let statusItemRotationInterval = "StatusItemRotationIntervalSeconds"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
     /// in the order the user selected them.
     static let menuBarSelectedAccountKeys = "MenuBarSelectedAccountKeys"
