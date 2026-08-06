@@ -46,8 +46,20 @@ enum StatusItemRefreshTrigger {
             displayPreferences.$windowMode.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$fontSize.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$highContrast.map { _ in () }.eraseToAnyPublisher(),
-            displayPreferences.$showsExhaustedResetCountdown.map { _ in () }.eraseToAnyPublisher()
+            displayPreferences.$showsExhaustedResetCountdown.map { _ in () }.eraseToAnyPublisher(),
+            displayPreferences.$followsFocusedApp.map { _ in () }.eraseToAnyPublisher(),
+            displayPreferences.$focusAppMapping.map { _ in () }.eraseToAnyPublisher(),
+            // Rotation reshapes the merged item the moment it is toggled, and a
+            // new interval has to reschedule the timer rather than wait out the
+            // old cadence.
+            displayPreferences.$rotatesProviders.map { _ in () }.eraseToAnyPublisher(),
+            displayPreferences.$rotationInterval.map { _ in () }.eraseToAnyPublisher()
         ])
+
+        // Which app the user is working in, when focus following is on. The
+        // monitor publishes nil (and observes nothing) while the feature is off,
+        // so this upstream is inert until the user opts in.
+        let focusedAppChanges = FrontmostAppMonitor.shared.$bundleIdentifier.map { _ in () }
 
         // Which accounts own items, and which one the switcher shows. Without
         // these, picking an account from the switcher submenu (or toggling one
@@ -76,7 +88,8 @@ enum StatusItemRefreshTrigger {
             accountSelectionChanges.eraseToAnyPublisher(),
             visibilityChanges.eraseToAnyPublisher(),
             parseHealthChanges.eraseToAnyPublisher(),
-            displayPreferenceChanges.eraseToAnyPublisher()
+            displayPreferenceChanges.eraseToAnyPublisher(),
+            focusedAppChanges.eraseToAnyPublisher()
         ]
     }
 

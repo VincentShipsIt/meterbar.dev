@@ -284,6 +284,11 @@ nonisolated public struct CostSummary: Codable, Sendable {
     public let periodDays: Int
     public let dailyUsage: [DailyTokenUsage]
     public let lifetime: LifetimeCostSummary?
+    /// Which dated rate entries actually priced this scan, and how many events
+    /// predated the table (issue #339). Optional so summaries cached by builds
+    /// that predate dated pricing still decode; readers fall back to
+    /// `ModelPricing.tableProvenance`.
+    public let pricing: PricingProvenance?
 
     public init(
         costs: [TokenCost],
@@ -291,7 +296,8 @@ nonisolated public struct CostSummary: Codable, Sendable {
         totalTokens: Int,
         periodDays: Int,
         dailyUsage: [DailyTokenUsage] = [],
-        lifetime: LifetimeCostSummary? = nil
+        lifetime: LifetimeCostSummary? = nil,
+        pricing: PricingProvenance? = nil
     ) {
         self.costs = costs
         self.totalCostUSD = totalCostUSD
@@ -299,6 +305,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         self.periodDays = periodDays
         self.dailyUsage = dailyUsage
         self.lifetime = lifetime
+        self.pricing = pricing
     }
 
     public var formattedTotalCost: String {

@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// Two accumulators filled by a single traversal: the reporting period and
 /// all-time.
@@ -35,7 +36,11 @@ nonisolated struct ScanWindows<Totals> {
 extension ScanWindows: Sendable where Totals: Sendable {}
 
 /// Per-window tally for one Claude Code transcript, or many merged together.
-nonisolated struct ClaudeSessionTotals: Sendable {
+///
+/// `Codable` because a single file's tally is what `CostScanFileCache` persists
+/// between refreshes — the byte offset alone would be worthless without the
+/// totals the already-read bytes produced.
+nonisolated struct ClaudeSessionTotals: Sendable, Codable {
     var input = 0
     var output = 0
     var cacheCreation = 0
@@ -60,6 +65,9 @@ nonisolated struct ClaudeSessionTotals: Sendable {
     /// Nested per-project, per-model totals powering the "drill-down to model
     /// breakdown" view under each project's rollup row.
     var projectModels: [String: [String: TokenAccumulator]] = [:]
+    /// Which dated rate entries priced these events, and how many predated the
+    /// table entirely (issue #339).
+    var pricing = PricingProvenance()
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
@@ -115,6 +123,7 @@ nonisolated struct ClaudeSessionTotals: Sendable {
             }
         }
 
+        pricing.merge(other.pricing)
         earliest = Self.earlier(earliest, other.earliest)
         latest = Self.later(latest, other.latest)
     }
@@ -141,11 +150,17 @@ nonisolated struct ClaudeSessionTotals: Sendable {
 nonisolated struct CostScanResult {
     var costs: [TokenCost] = []
     var dailyUsage: [DailyTokenUsage] = []
+    /// Union of the rate entries every provider in this window priced with.
+    var pricing = PricingProvenance()
 
     mutating func append(_ scan: (TokenCost, [DailyTokenUsage])?) {
         guard let scan else { return }
         costs.append(scan.0)
         dailyUsage.append(contentsOf: scan.1)
+    }
+
+    mutating func record(_ provenance: PricingProvenance) {
+        pricing.merge(provenance)
     }
 }
 
@@ -155,7 +170,7 @@ nonisolated struct CostScanResult {
 /// a single `inout` argument.
 ///
 /// Internal (not private) so `CodexCostScanner.scanRollouts` can be fixture-tested.
-nonisolated struct CodexScanContext: Sendable {
+nonisolated struct CodexScanContext: Sendable, Codable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
     var dailyModelTotals: [Date: [String: TokenAccumulator]] = [:]
@@ -169,11 +184,67 @@ nonisolated struct CodexScanContext: Sendable {
     var projectModelTotals: [String: [String: TokenAccumulator]] = [:]
     var eventKeys: Set<String> = []
     var sessionIDs: Set<String> = []
+    /// Which dated rate entries priced these events (issue #339).
+    var pricing = PricingProvenance()
     var earliestDate: Date
     var latestDate: Date
+
+    /// Folds a cached rollout's tally into this window.
+    ///
+    /// The `eventKeys` guard is not an optimization. A cached context for a file
+    /// that contributed nothing still carries `earliestDate = Date()` from
+    /// whichever refresh created it, and merging that would drag the reported
+    /// period start backwards to an instant no event ever happened at.
+    mutating func merge(_ other: CodexScanContext) {
+        guard !other.eventKeys.isEmpty else { return }
+
+        totals.merge(other.totals)
+        for (day, tokens) in other.dailyTotals {
+            dailyTotals[day, default: TokenAccumulator()].merge(tokens)
+        }
+        for (day, modelTotals) in other.dailyModelTotals {
+            for (model, tokens) in modelTotals {
+                dailyModelTotals[day, default: [:]][model, default: TokenAccumulator()].merge(tokens)
+            }
+        }
+        for (day, projectTotals) in other.dailyProjectTotals {
+            for (project, tokens) in projectTotals {
+                dailyProjectTotals[day, default: [:]][project, default: TokenAccumulator()].merge(tokens)
+            }
+        }
+        for (day, projectTotals) in other.dailyProjectModelTotals {
+            for (project, modelTotals) in projectTotals {
+                for (model, tokens) in modelTotals {
+                    dailyProjectModelTotals[day, default: [:]][project, default: [:]][
+                        model,
+                        default: TokenAccumulator()
+                    ].merge(tokens)
+                }
+            }
+        }
+        for (name, tokens) in other.modelTotals {
+            modelTotals[name, default: TokenAccumulator()].merge(tokens)
+        }
+        for (name, tokens) in other.originTotals {
+            originTotals[name, default: TokenAccumulator()].merge(tokens)
+        }
+        for (project, tokens) in other.projectTotals {
+            projectTotals[project, default: TokenAccumulator()].merge(tokens)
+        }
+        for (project, modelTotals) in other.projectModelTotals {
+            for (model, tokens) in modelTotals {
+                projectModelTotals[project, default: [:]][model, default: TokenAccumulator()].merge(tokens)
+            }
+        }
+
+        eventKeys.formUnion(other.eventKeys)
+        sessionIDs.formUnion(other.sessionIDs)
+        earliestDate = min(earliestDate, other.earliestDate)
+        latestDate = max(latestDate, other.latestDate)
+    }
 }
 
-nonisolated struct TokenAccumulator: Sendable {
+nonisolated struct TokenAccumulator: Sendable, Codable {
     var input = 0
     var output = 0
     var cacheCreation = 0

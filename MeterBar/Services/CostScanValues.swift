@@ -7,21 +7,9 @@ import MeterBarShared
 enum CostScanValues {
     /// Identifies the rules a cached scan digest was produced under.
     ///
-    /// **Bump this on any change that alters parsed output.** A cached digest is
-    /// only meaningful under the parsing and pricing logic that produced it, and
-    /// there is no migration path — a mismatch discards the whole cache and
-    /// rescans, which is slow but always right. Bump it when:
-    ///
-    /// - a scanner starts reading a usage field it previously ignored, or stops;
-    /// - a deduplication key changes (message/request identity, session identity);
-    /// - `ModelPricing` gains, drops, or re-rates a model, or its normalization
-    ///   maps a raw model name somewhere new;
-    /// - day bucketing changes (boundary, calendar, or what counts as a day).
-    ///
-    /// A hand-maintained integer rather than a hash of the sources: a hash would
-    /// invalidate the entire corpus on every comment edit, and the cost of a
-    /// forgotten bump is bounded by the fact that a stale digest is only ever
-    /// reused for a file that has not itself changed.
+    /// Bump this whenever a change alters parsed output: usage extraction,
+    /// deduplication, pricing, model normalization, or local-day bucketing.
+    /// A mismatch discards the persisted cache and performs a full rescan.
     nonisolated static let costCacheParserVersion = 1
 
     /// Token counts arrive as `Int`, `Int64`, `Double`, or a numeric string

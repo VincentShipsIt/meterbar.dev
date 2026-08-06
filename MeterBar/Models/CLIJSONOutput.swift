@@ -109,6 +109,10 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     /// no persisted rate of its own; `--currency`/`--rate` are stateless,
     /// per-invocation flags, never a background exchange-rate fetch.
     private let displayCurrency: DisplayCurrencyJSON?
+    /// Provenance of the dated rate entries the last scan priced with (issue
+    /// #339). Additive and optional, so version 1 stays intact: caches written
+    /// before dated pricing simply omit the key.
+    private let pricing: PricingJSON?
 
     public init(
         cache: CostSummaryCache,
@@ -166,6 +170,26 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
         // property (including `self.displayCurrency` itself) is initialized.
         let finalTotalCostUSD = totalCostUSD
         self.displayCurrency = displayCurrency.map { DisplayCurrencyJSON($0, totalCostUSD: finalTotalCostUSD) }
+        pricing = cache.summary.pricing.flatMap(PricingJSON.init(provenance:))
+    }
+
+    private struct PricingJSON: Encodable {
+        /// Verification date of the oldest rate entry this scan priced with.
+        let verifiedFrom: String
+        /// Verification date of the newest one; equal to `verifiedFrom` when a
+        /// single entry priced everything.
+        let verifiedThrough: String
+        /// Events older than every entry in the table, priced at the oldest
+        /// known rate. Non-zero means those figures are an estimate.
+        let eventsBeforeFirstEntry: Int
+
+        init?(provenance: PricingProvenance) {
+            guard let first = provenance.verificationDates.first,
+                  let last = provenance.verificationDates.last else { return nil }
+            verifiedFrom = first
+            verifiedThrough = last
+            eventsBeforeFirstEntry = provenance.eventsBeforeFirstEntry
+        }
     }
 
     private struct Period: Encodable {

@@ -420,4 +420,32 @@ extension Array where Element == ProviderSnapshot {
     var tightestLimit: SnapshotLimit? {
         compactMap(\.primaryLimit).min { $0.percentLeft < $1.percentLeft }
     }
+
+    /// Ranks these providers by remaining headroom — the "what should I use
+    /// next?" answer. Pass the *unfiltered* snapshot list: the planner needs the
+    /// providers with no cached usage in order to list them under its no-data
+    /// state instead of silently dropping them. Hidden providers never appear
+    /// here because `ProviderSnapshotBuilder` only emits enabled services, so
+    /// they are omitted from every recommendation surface for free.
+    func headroomRecommendation(now: Date = Date()) -> ProviderRecommendation {
+        var displayOrderByService: [ServiceType: Int] = [:]
+        let candidates = map { snapshot -> ProviderRecommendationCandidate in
+            let displayOrder = displayOrderByService[snapshot.service, default: 0]
+            displayOrderByService[snapshot.service] = displayOrder + 1
+            return ProviderRecommendationCandidate(
+                id: snapshot.id,
+                name: snapshot.title,
+                service: snapshot.service,
+                displayOrder: displayOrder,
+                sessionLimit: snapshot.limits.first { $0.kind == .session }?.usageLimit,
+                weeklyLimit: snapshot.limits.first { $0.kind == .weekly }?.usageLimit,
+                lastUpdated: snapshot.updatedAt,
+                // A signed-out or unreachable account can still hold a fresh,
+                // healthy-looking cache. Recommending it would send the user to
+                // a tool they cannot actually run.
+                unavailableReason: snapshot.authNotice.map { .blocked($0.shortLabel) }
+            )
+        }
+        return ProviderRecommendationPlanner.rank(candidates: candidates, now: now)
+    }
 }
