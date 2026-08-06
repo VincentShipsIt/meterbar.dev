@@ -153,27 +153,77 @@ enum CodexCostScanner {
     /// scan streams each file in order and carries the last `turn_context`
     /// model and the opening `session_meta` originator forward. Attribution is
     /// per file: state resets on every rollout.
+    ///
+    /// Unlike Claude's per-file dedup, `CodexScanContext.eventKeys` spans every
+    /// rollout *and* the SQLite log, first event wins. So only the parse fans
+    /// out: each file is turned into an ordered list of usage events on a
+    /// worker, and those lists are applied to the shared windows serially, in
+    /// sorted-path order. Merging per-file contexts instead would have to
+    /// resolve dedup collisions after the fact, and the winner would depend on
+    /// which worker finished first.
     nonisolated static func scanRollouts(
         directory: URL,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CodexScanContext>,
+        width: Int = CostScanParallel.defaultWidth
     ) {
-        guard CostScanFileSystem.isLocalDirectory(directory) else { return }
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return
-        }
-
         // The per-file mtime prefilter is gone on purpose: the lifetime window
         // needs every file, and the period window is still bounded by the
         // per-event timestamp check inside `ScanWindows.update` (an event is
         // never newer than the file holding it).
-        for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            Self.parseRollout(at: fileURL, windows: &windows)
+        let files = CostScanFileSystem.transcriptFiles(in: directory, options: [.skipsHiddenFiles])
+
+        CostScanParallel.parseInOrder(
+            files,
+            width: width,
+            parse: { Self.parseRollout(at: $0) },
+            fold: { events in
+                for event in events {
+                    Self.apply(event, windows: &windows)
+                }
+            }
+        )
+    }
+
+    /// Turns one rollout into the usage events it contributes, in the order the
+    /// serial scan would have applied them.
+    ///
+    /// Everything this reads is scoped to the single file — attribution carried
+    /// across rollouts would label one session's spend with another's model —
+    /// which is precisely why it is safe to run on a worker thread.
+    nonisolated static func parseRollout(at fileURL: URL) -> [CodexUsageEvent] {
+        var events: [CodexUsageEvent] = []
+        var rollout = CodexRolloutContext()
+        // Codex emits a session's opening `token_count` events *before* its
+        // first `turn_context`, so forward-only attribution orphaned them even
+        // though the same file names the model seconds later. Park them here
+        // instead and back-fill once the file declares a model. Per file, like
+        // the rollout context: a sibling rollout's model must never name events
+        // this file left unexplained.
+        var deferred: [CodexDeferredUsage] = []
+
+        FileLineReader.forEachLine(in: fileURL) { readerLine in
+            let line = readerLine.bytes
+            guard line.contains(Self.tokenCountMarker) else {
+                Self.updateRolloutContext(&rollout, from: line)
+                // Reaches back only as far as the *first* model the file
+                // declares — a later mid-session switch must not relabel the
+                // events that preceded it.
+                if let model = rollout.turnModel ?? rollout.sessionModel {
+                    Self.flushDeferred(&deferred, modelName: model, into: &events)
+                }
+                return
+            }
+            Self.addTokenCountLine(
+                line,
+                fileURL: fileURL,
+                rollout: rollout,
+                deferred: &deferred,
+                events: &events
+            )
         }
+        // Whatever the file never explained is genuinely unattributed.
+        Self.flushDeferred(&deferred, modelName: nil, into: &events)
+        return events
     }
 
     /// Streams one rollout end to end into `windows`.
@@ -184,36 +234,9 @@ enum CodexCostScanner {
         at fileURL: URL,
         windows: inout ScanWindows<CodexScanContext>
     ) {
-        var rollout = CodexRolloutContext()
-        // Codex emits a session's opening `token_count` events *before* its
-        // first `turn_context`, so forward-only attribution orphaned them
-        // even though the same file names the model seconds later. Park
-        // them here instead and back-fill once the file declares a model.
-        // Per file, like the rollout context: a sibling rollout's model
-        // must never name events this file left unexplained.
-        var deferred: [CodexDeferredUsage] = []
-        FileLineReader.forEachLine(in: fileURL) { readerLine in
-            let line = readerLine.bytes
-            guard line.contains(Self.tokenCountMarker) else {
-                Self.updateRolloutContext(&rollout, from: line)
-                // Reaches back only as far as the *first* model the file
-                // declares — a later mid-session switch must not relabel
-                // the events that preceded it.
-                if let model = rollout.turnModel ?? rollout.sessionModel {
-                    Self.flushDeferred(&deferred, modelName: model, windows: &windows)
-                }
-                return
-            }
-            Self.addTokenCountLine(
-                line,
-                fileURL: fileURL,
-                rollout: rollout,
-                deferred: &deferred,
-                windows: &windows
-            )
+        for event in Self.parseRollout(at: fileURL) {
+            Self.apply(event, windows: &windows)
         }
-        // Whatever the file never explained is genuinely unattributed.
-        Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
     }
 
     /// Single-window entry point kept for callers that only care about one
@@ -221,14 +244,15 @@ enum CodexCostScanner {
     nonisolated static func scanRollouts(
         directory: URL,
         since cutoffDate: Date,
-        context: inout CodexScanContext
+        context: inout CodexScanContext,
+        width: Int = CostScanParallel.defaultWidth
     ) {
         var windows = ScanWindows(
             period: context,
             lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
             cutoff: cutoffDate
         )
-        Self.scanRollouts(directory: directory, windows: &windows)
+        Self.scanRollouts(directory: directory, windows: &windows, width: width)
         context = windows.period
     }
 
@@ -459,12 +483,12 @@ enum CodexCostScanner {
     nonisolated private static func flushDeferred(
         _ deferred: inout [CodexDeferredUsage],
         modelName: String?,
-        windows: inout ScanWindows<CodexScanContext>
+        into events: inout [CodexUsageEvent]
     ) {
         guard !deferred.isEmpty else { return }
 
         for pending in deferred {
-            Self.addUsage(
+            guard let event = Self.makeUsageEvent(
                 pending.usage,
                 timestamp: pending.timestamp,
                 sessionID: pending.sessionID,
@@ -472,11 +496,26 @@ enum CodexCostScanner {
                     modelName: modelName,
                     originName: pending.originName,
                     projectID: pending.projectID
-                ),
-                windows: &windows
-            )
+                )
+            ) else { continue }
+            events.append(event)
         }
         deferred.removeAll()
+    }
+
+    /// Budgeted scans fold each completed line immediately so their cache can
+    /// commit progress at a line boundary. Keep that path on the same event
+    /// extraction used by the parallel whole-file scan.
+    nonisolated private static func flushDeferred(
+        _ deferred: inout [CodexDeferredUsage],
+        modelName: String?,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        var events: [CodexUsageEvent] = []
+        Self.flushDeferred(&deferred, modelName: modelName, into: &events)
+        for event in events {
+            Self.apply(event, windows: &windows)
+        }
     }
 
     nonisolated private static func addTokenCountLine(
@@ -484,7 +523,7 @@ enum CodexCostScanner {
         fileURL: URL,
         rollout: CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
-        windows: inout ScanWindows<CodexScanContext>
+        events: inout [CodexUsageEvent]
     ) {
         guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let timestampText = json["timestamp"] as? String,
@@ -520,7 +559,7 @@ enum CodexCostScanner {
             return
         }
 
-        Self.addUsage(
+        guard let event = Self.makeUsageEvent(
             usage,
             timestamp: timestamp,
             sessionID: sessionID,
@@ -528,9 +567,29 @@ enum CodexCostScanner {
                 modelName: modelName,
                 originName: originName,
                 projectID: projectID
-            ),
-            windows: &windows
+            )
+        ) else { return }
+        events.append(event)
+    }
+
+    nonisolated private static func addTokenCountLine(
+        _ line: Data,
+        fileURL: URL,
+        rollout: CodexRolloutContext,
+        deferred: inout [CodexDeferredUsage],
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        var events: [CodexUsageEvent] = []
+        Self.addTokenCountLine(
+            line,
+            fileURL: fileURL,
+            rollout: rollout,
+            deferred: &deferred,
+            events: &events
         )
+        for event in events {
+            Self.apply(event, windows: &windows)
+        }
     }
 
     nonisolated private static func eventPayload(
@@ -584,7 +643,7 @@ enum CodexCostScanner {
             let sessionID = Self.logValue("conversation.id", in: body)
                 ?? Self.logValue("thread.id", in: body)
                 ?? "codex"
-            Self.addUsage(
+            guard let event = Self.makeUsageEvent(
                 usage,
                 timestamp: timestamp,
                 sessionID: sessionID,
@@ -595,29 +654,59 @@ enum CodexCostScanner {
                     // all (issue #270) — always the explicit unknown bucket,
                     // never a guess.
                     projectID: CostProjectAttribution.unknownProjectID
-                ),
-                windows: &windows
-            )
+                )
+            ) else { continue }
+            // Same `eventKeys` set the rollouts filled, so a turn recorded in
+            // both places is still billed once.
+            Self.apply(event, windows: &windows)
         }
     }
 
-    /// Stays at five named parameters — SwiftLint's `function_parameter_count`
-    /// warns at seven and CI lints with `--strict` — because the cutoff travels
-    /// inside `ScanWindows` rather than as its own argument, and `modelName`/
+    /// Stays at four named parameters — SwiftLint's `function_parameter_count`
+    /// warns at seven and CI lints with `--strict` — because `modelName`/
     /// `originName`/`projectID` are bundled into one `CodexUsageAttribution`
     /// value instead of three separate parameters.
-    nonisolated private static func addUsage(
+    ///
+    /// Pulling the extraction out of `apply` is what lets a rollout be parsed
+    /// on a worker thread: `[String: Any]` is not `Sendable` and never leaves
+    /// the parse, while `CodexUsageEvent` is a plain value the fold can carry
+    /// back to the shared windows.
+    nonisolated private static func makeUsageEvent(
         _ usage: [String: Any],
         timestamp: Date,
         sessionID: String,
-        attribution: CodexUsageAttribution,
-        windows: inout ScanWindows<CodexScanContext>
-    ) {
+        attribution: CodexUsageAttribution
+    ) -> CodexUsageEvent? {
         let input = CostScanValues.int(usage["input_tokens"])
         let cached = CostScanValues.int(usage["cached_input_tokens"])
         let output = CostScanValues.int(usage["output_tokens"])
         let reasoning = CostScanValues.int(usage["reasoning_output_tokens"])
-        guard input > 0 || output > 0 || cached > 0 || reasoning > 0 else { return }
+        guard input > 0 || output > 0 || cached > 0 || reasoning > 0 else { return nil }
+
+        return CodexUsageEvent(
+            timestamp: timestamp,
+            sessionID: sessionID,
+            input: input,
+            cached: cached,
+            output: output,
+            reasoning: reasoning,
+            attribution: attribution
+        )
+    }
+
+    /// Folds one usage event into both windows. Serial by construction: the
+    /// dedup below is first-event-wins across every file, so the order events
+    /// arrive here is the order that decides the answer.
+    nonisolated private static func apply(
+        _ event: CodexUsageEvent,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        let timestamp = event.timestamp
+        let sessionID = event.sessionID
+        let input = event.input
+        let cached = event.cached
+        let output = event.output
+        let reasoning = event.reasoning
 
         // Use whole-millisecond precision for the dedup key so equivalent events
         // produce a stable, collision-resistant string (raw Double formatting can
@@ -625,16 +714,16 @@ enum CodexCostScanner {
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
         let day = Calendar.current.startOfDay(for: timestamp)
-        let modelKey = CostScanValues.displayModelName(attribution.modelName)
-        let originKey = CostScanValues.displayOriginName(attribution.originName)
-        let projectKey = attribution.projectID
+        let modelKey = CostScanValues.displayModelName(event.attribution.modelName)
+        let originKey = CostScanValues.displayOriginName(event.attribution.originName)
+        let projectKey = event.attribution.projectID
 
         // Price the event at the rate in effect when it was recorded (issue
         // #339). Codex used to cost the whole window in one shot at today's
         // rate, which could not distinguish a session billed under an older
         // rate card. Cached input is already billed by `cacheRead`, so it is
         // subtracted from the billable input exactly as the aggregate did.
-        let resolved = Self.resolvePricing(for: attribution.modelName, at: timestamp)
+        let resolved = Self.resolvePricing(for: event.attribution.modelName, at: timestamp)
         let eventCost = TokenCostMath.calculateCost(
             input: max(0, input - cached),
             output: output + reasoning,
@@ -779,14 +868,10 @@ nonisolated struct CodexRolloutContext: Sendable, Codable {
     var cwd: String?
 }
 
-/// Bundles the three "who/what/where" labels a single usage event needs so
-/// `addUsage` can stay under SwiftLint's `function_parameter_count` limit
-/// (issue #270 added `projectID` as the third label alongside the pre-existing
-/// model/origin pair).
 /// A `token_count` event parked because its rollout has not named a model yet.
 ///
 /// Deliberately not `Sendable`: it carries the raw `[String: Any]` usage
-/// payload. It never outlives the single-threaded scan of the file that made
+/// payload. It never outlives the single-threaded parse of the file that made
 /// it, so it does not need to be.
 nonisolated struct CodexDeferredUsage {
     let usage: [String: Any]
@@ -796,8 +881,30 @@ nonisolated struct CodexDeferredUsage {
     let projectID: String
 }
 
+/// Bundles the three "who/what/where" labels a single usage event needs so
+/// `makeUsageEvent` can stay under SwiftLint's `function_parameter_count` limit
+/// (issue #270 added `projectID` as the third label alongside the pre-existing
+/// model/origin pair).
 nonisolated struct CodexUsageAttribution: Sendable {
     let modelName: String?
     let originName: String?
     let projectID: String
+}
+
+/// One usage event, extracted from a rollout line or a SQLite log row and ready
+/// to fold into a `CodexScanContext`.
+///
+/// This is the boundary between the parallel half of the scan and the serial
+/// half: rollouts are parsed into these on worker threads, then applied to the
+/// shared windows one at a time, in file order. It holds only value types so it
+/// can cross that boundary — the raw `[String: Any]` payload it came from stays
+/// behind on the worker.
+nonisolated struct CodexUsageEvent: Sendable {
+    let timestamp: Date
+    let sessionID: String
+    let input: Int
+    let cached: Int
+    let output: Int
+    let reasoning: Int
+    let attribution: CodexUsageAttribution
 }

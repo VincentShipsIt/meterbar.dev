@@ -8,39 +8,63 @@ import os
 enum ClaudeCostScanner {
     nonisolated static func scanSessions(
         since cutoffDate: Date,
-        claudeAccounts: [ClaudeCodeAccount]
+        claudeAccounts: [ClaudeCodeAccount],
+        width: Int = CostScanParallel.defaultWidth
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        scanSessions(
+            since: cutoffDate,
+            projectRoots: Self.projectRoots(accounts: claudeAccounts),
+            width: width
+        )
+    }
+
+    /// Roots-explicit seam. The account-based entry point always includes the
+    /// real `~/.claude*/projects` directories, so tests that want to scan a
+    /// fixture tree — and only that tree — go through here.
+    ///
+    /// Deduplication is per file: `parseSessionWindows` keeps its own
+    /// `messageID:requestID` map and throws it away at the end of each
+    /// transcript, so a file's totals depend on nothing outside that file and
+    /// merging them is a plain sum. That is what makes the parse safe to fan
+    /// out. The merge itself stays serial and in sorted-path order because
+    /// summing `Double` costs is not associative.
+    nonisolated static func scanSessions(
+        since cutoffDate: Date,
+        projectRoots: [URL],
+        width: Int = CostScanParallel.defaultWidth
     ) -> ScanWindows<ClaudeSessionTotals> {
         var windows = ScanWindows(
             period: ClaudeSessionTotals(),
             lifetime: ClaudeSessionTotals(),
             cutoff: cutoffDate
         )
-        let projectRoots = Self.projectRoots(accounts: claudeAccounts)
         guard !projectRoots.isEmpty else { return windows }
 
         for root in projectRoots {
-            guard CostScanFileSystem.isLocalDirectory(root) else { continue }
-
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else {
-                continue
-            }
-
             // No mtime prefilter: the lifetime window needs every file, and the
             // period window is already bounded by the per-event timestamp check
             // (an event is never newer than the file that holds it).
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                // Computed once per file, not per event: project identity is a
-                // property of where the transcript lives, unlike `usageOrigin`
-                // which can vary line-to-line within the same file.
-                let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
-                let file = Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID)
-                windows.period.merge(file.period)
-                windows.lifetime.merge(file.lifetime)
-            }
+            let files = CostScanFileSystem.transcriptFiles(
+                in: root,
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+
+            CostScanParallel.parseInOrder(
+                files,
+                width: width,
+                parse: { url in
+                    // Computed once per file, not per event: project identity is
+                    // a property of where the transcript lives, unlike
+                    // `usageOrigin` which can vary line-to-line within the same
+                    // file.
+                    let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
+                    return Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID)
+                },
+                fold: { file in
+                    windows.period.merge(file.period)
+                    windows.lifetime.merge(file.lifetime)
+                }
+            )
         }
 
         return windows
