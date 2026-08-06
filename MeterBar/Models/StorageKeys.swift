@@ -40,6 +40,10 @@ nonisolated enum StorageKeys {
     static let statusItemShowsExhaustedResetCountdown = "StatusItemShowsExhaustedResetCountdown"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
+    /// Opt-in for the one-line "what to use next" hint at the top of the popover.
+    /// Absent means off: the full ranking already lives in the dashboard's
+    /// Optimize tab, so the popover keeps its pre-feature layout by default.
+    static let popoverShowsRecommendationHint = "PopoverShowsRecommendationHint"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),
     /// in the order the user selected them.
     static let menuBarSelectedAccountKeys = "MenuBarSelectedAccountKeys"

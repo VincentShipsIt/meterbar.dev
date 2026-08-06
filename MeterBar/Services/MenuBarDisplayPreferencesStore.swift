@@ -162,6 +162,7 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     @Published private(set) var highContrast: Bool
     @Published private(set) var showsExhaustedResetCountdown: Bool
     @Published private(set) var resetTimeFormat: ResetTimeFormat
+    @Published private(set) var showsRecommendationHint: Bool
 
     private let userDefaults: UserDefaults
 
@@ -185,6 +186,9 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         )
         resetTimeFormat = userDefaults.string(forKey: StorageKeys.popoverResetTimeFormat)
             .flatMap(ResetTimeFormat.init(rawValue:)) ?? .countdown
+        // Off unless asked for: the popover's layout stays exactly as it was
+        // before the recommendation shipped.
+        showsRecommendationHint = userDefaults.bool(forKey: StorageKeys.popoverShowsRecommendationHint)
     }
 
     func setPinnedCandidateKey(_ key: String?) {
@@ -244,6 +248,12 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         guard format != resetTimeFormat else { return }
         resetTimeFormat = format
         userDefaults.set(format.rawValue, forKey: StorageKeys.popoverResetTimeFormat)
+    }
+
+    func setShowsRecommendationHint(_ enabled: Bool) {
+        guard enabled != showsRecommendationHint else { return }
+        showsRecommendationHint = enabled
+        userDefaults.set(enabled, forKey: StorageKeys.popoverShowsRecommendationHint)
     }
 
     nonisolated private static func normalizedPin(_ key: String) -> String? {

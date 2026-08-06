@@ -282,6 +282,19 @@ struct GeneralSettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
             }
+
+            SettingsRowView(
+                title: "What to use next",
+                detail: "Show the top provider by remaining headroom at the top of the popover. "
+                    + "The full ranking stays in the dashboard’s Optimize tab."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { menuBarDisplayPreferences.showsRecommendationHint },
+                    set: { menuBarDisplayPreferences.setShowsRecommendationHint($0) }
+                ))
+                .labelsHidden()
+                .meterBarSwitch()
+            }
         }
     }
 

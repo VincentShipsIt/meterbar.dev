@@ -20,6 +20,7 @@ struct MenuBarView: View {
   @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
   @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
+  @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
   @State private var contentHeight: CGFloat = 320
   @State private var expandedDetailID: String?
@@ -96,7 +97,8 @@ struct MenuBarView: View {
             claudeEnabledAccountMetrics: claudeAccountStore.enabledAccounts.compactMap {
               dataManager.claudeCodeAccountMetrics[$0.id]
             },
-            grokAccounts: grokAccountStore.accounts
+            grokAccounts: grokAccountStore.accounts,
+            showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
           )
 
           if SessionWakeMenuControl.shouldShow(

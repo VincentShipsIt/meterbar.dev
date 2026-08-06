@@ -119,6 +119,17 @@ final class CardStateTransitionTests: XCTestCase {
                 openProviderOverview: { _ in }
             )
         )
+
+        // Hint enabled: the opt-in "what to use next" row joins the stack.
+        assertRenders(
+            PopoverOverviewPanel(
+                snapshots: snapshots,
+                openDashboard: {},
+                openStatusDetail: {},
+                openProviderOverview: { _ in },
+                showsRecommendationHint: true
+            )
+        )
     }
 
     // MARK: - OptimizeInsightsView build smoke
@@ -128,6 +139,21 @@ final class CardStateTransitionTests: XCTestCase {
         // this asserts the phase-switched body lays out rather than a specific
         // branch.
         assertRenders(OptimizeInsightsView(), minHeight: 0)
+
+        // With snapshots the recommendation card renders above the phase content,
+        // including its "no data" section for the provider without metrics.
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [
+                    .codexCli: makeMetrics(service: .codexCli, weekly: 10),
+                    .cursor: makeMetrics(service: .cursor, weekly: 30)
+                ],
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [:],
+                enabledServices: [.codexCli, .cursor, .claudeCode]
+            )
+        )
+        assertRenders(OptimizeInsightsView(providerSnapshots: snapshots), minHeight: 0)
     }
 
     // MARK: - Helpers

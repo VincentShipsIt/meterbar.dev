@@ -30,6 +30,8 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.highContrast)
         XCTAssertFalse(store.showsExhaustedResetCountdown)
         XCTAssertEqual(store.resetTimeFormat, .countdown)
+        // The popover keeps its pre-feature layout until the hint is asked for.
+        XCTAssertFalse(store.showsRecommendationHint)
     }
 
     func testPreferencesPersistAcrossRelaunch() {
@@ -42,6 +44,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         store.setHighContrast(true)
         store.setShowsExhaustedResetCountdown(true)
         store.setResetTimeFormat(.clock)
+        store.setShowsRecommendationHint(true)
 
         let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
@@ -53,6 +56,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.highContrast)
         XCTAssertTrue(reloaded.showsExhaustedResetCountdown)
         XCTAssertEqual(reloaded.resetTimeFormat, .clock)
+        XCTAssertTrue(reloaded.showsRecommendationHint)
     }
 
     func testInvalidPersistedValuesFallBackToExistingDefaults() {
