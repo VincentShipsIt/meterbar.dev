@@ -215,6 +215,13 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         rotationInterval = StatusItemRotationInterval(
             rawValue: userDefaults.integer(forKey: StorageKeys.statusItemRotationInterval)
         ) ?? .fifteenSeconds
+        // Both features independently predated their integration. If a local
+        // development build persisted both, focus wins and rotation is repaired
+        // once so an unmapped focused app still falls back to Auto.
+        if followsFocusedApp, rotatesProviders {
+            rotatesProviders = false
+            userDefaults.set(false, forKey: StorageKeys.statusItemRotatesProviders)
+        }
     }
 
     func setPinnedCandidateKey(_ key: String?) {
@@ -233,12 +240,13 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     }
 
     func setFollowsFocusedApp(_ enabled: Bool) {
+        if enabled {
+            setPinnedCandidateKey(nil)
+            setRotatesProviders(false)
+        }
         guard enabled != followsFocusedApp else { return }
         followsFocusedApp = enabled
         userDefaults.set(enabled, forKey: StorageKeys.statusItemFollowsFocusedApp)
-        if enabled {
-            setPinnedCandidateKey(nil)
-        }
     }
 
     /// Maps one app to a provider, or removes its mapping when `service` is nil.
@@ -305,6 +313,9 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     }
 
     func setRotatesProviders(_ enabled: Bool) {
+        if enabled {
+            setFollowsFocusedApp(false)
+        }
         guard enabled != rotatesProviders else { return }
         rotatesProviders = enabled
         userDefaults.set(enabled, forKey: StorageKeys.statusItemRotatesProviders)

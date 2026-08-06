@@ -303,7 +303,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         XCTAssertEqual(descriptors.first?.selectionKey, "cursor")
     }
 
-    func testRotationRemainsTheFallbackForAnUnmappedFocusedApp() {
+    func testUnmappedFocusedAppKeepsAutoEvenWithADefensiveRotationTick() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
         let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
 
@@ -313,7 +313,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
             rotationTick: 1
         )
 
-        XCTAssertEqual(descriptors.first?.selectionKey, "cursor")
+        XCTAssertEqual(descriptors.first?.selectionKey, "claude:gen")
     }
 
     func testFocusIsIgnoredOutsideMergedMode() {

@@ -83,7 +83,8 @@ struct GeneralSettingsView: View {
     /// Same predicate the presenter uses to decide whether a rotation timer may
     /// exist, so the controls can never claim rotation is running when it isn't.
     private var canRotateProviders: Bool {
-        MenuBarRotationSequencer.rotates(
+        guard !menuBarDisplayPreferences.followsFocusedApp else { return false }
+        return MenuBarRotationSequencer.rotates(
             mode: menuBarDisplayPreferences.presentationMode,
             isEnabled: true,
             pinnedKey: menuBarDisplayPreferences.pinnedCandidateKey
@@ -96,6 +97,9 @@ struct GeneralSettingsView: View {
         guard !canRotateProviders else { return nil }
         guard menuBarDisplayPreferences.presentationMode == .merged else {
             return "Rotation applies to the single menu bar item only."
+        }
+        if menuBarDisplayPreferences.followsFocusedApp {
+            return "Focus following and rotation are mutually exclusive. Turn off focus following to rotate."
         }
         return "Pinning and rotation are mutually exclusive. Set “Menu bar shows” back to Auto to rotate."
     }
@@ -346,17 +350,16 @@ struct GeneralSettingsView: View {
 
     /// Opt-in merged-mode focus following and its per-app mapping (issue #341).
     ///
-    /// Off by default, and mutually exclusive with pinning: turning it on clears
-    /// the pin, and pinning turns it back off. The privacy posture is stated in
-    /// the row copy because it is the whole reason this can be a plain toggle
-    /// rather than a permission prompt.
+    /// Off by default, and mutually exclusive with pinning and rotation. The
+    /// privacy posture is stated in the row copy because it is the whole reason
+    /// this can be a plain toggle rather than a permission prompt.
     @ViewBuilder private var followFocusedAppRows: some View {
         SettingsRowView(
             title: "Follow focused app",
             detail: "Show the provider mapped to whichever app you are working in. "
                 + "MeterBar reads only the frontmost app’s bundle identifier — no accessibility "
                 + "permission is requested, and no window titles or contents are read. "
-                + "Turning this on clears the pin above; pinning turns it back off."
+                + "Turning this on clears the pin and rotation; either one turns focus following off."
         ) {
             Toggle("", isOn: Binding(
                 get: { menuBarDisplayPreferences.followsFocusedApp },
@@ -366,7 +369,10 @@ struct GeneralSettingsView: View {
             .meterBarSwitch()
             // Focus following only decides the single merged item; the other
             // layouts already show every provider or account.
-            .disabled(menuBarDisplayPreferences.presentationMode != .merged)
+            .disabled(
+                menuBarDisplayPreferences.presentationMode != .merged
+                    || menuBarDisplayPreferences.rotatesProviders
+            )
         }
 
         if menuBarDisplayPreferences.presentationMode != .merged {
@@ -374,12 +380,18 @@ struct GeneralSettingsView: View {
                 text: "Switch the menu bar layout to Single Item to follow the focused app.",
                 color: .secondary
             )
+        } else if menuBarDisplayPreferences.rotatesProviders {
+            SettingsNotice(
+                text: "Focus following and rotation are mutually exclusive. "
+                    + "Turn off rotation to follow the focused app.",
+                color: .secondary
+            )
         } else if menuBarDisplayPreferences.followsFocusedApp {
             if focusMappableServices.isEmpty {
                 SettingsNotice(text: "No tracked providers to map yet.", color: .secondary)
             } else {
                 SettingsNotice(
-                    text: "Unmapped apps keep the normal selection behavior. A provider that is hidden, has no data, "
+                    text: "Unmapped apps keep Auto. A provider that is hidden, has no data, "
                         + "or is out of quota is treated as unmapped, and a critical or exhausted "
                         + "quota anywhere still takes over the menu bar.",
                     color: .secondary

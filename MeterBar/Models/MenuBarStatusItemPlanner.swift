@@ -185,9 +185,9 @@ enum MenuBarStatusItemPlanner {
         // Rotation is another way of choosing *which* candidate the one merged
         // item shows, so it resolves ahead of auto-selection and hands the same
         // descriptor builder its winner. It stands down for a pin, for a
-        // critical or exhausted quota, when focus already selected a provider,
-        // and when nothing has fresh data.
-        if focused == nil, let rotationTick = context.rotationTick {
+        // critical or exhausted quota, whenever focus following is active, and
+        // when nothing has fresh data. An unmapped focused app must keep Auto.
+        if context.focus == nil, let rotationTick = context.rotationTick {
             let outcome = MenuBarRotationSequencer.outcome(
                 candidates: candidates,
                 tick: rotationTick,

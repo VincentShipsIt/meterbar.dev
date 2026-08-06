@@ -118,6 +118,43 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.followsFocusedApp)
     }
 
+    func testEnablingFocusFollowingDisablesRotationAndPersistsBothStates() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setRotatesProviders(true)
+
+        store.setFollowsFocusedApp(true)
+
+        XCTAssertTrue(store.followsFocusedApp)
+        XCTAssertFalse(store.rotatesProviders)
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        XCTAssertTrue(reloaded.followsFocusedApp)
+        XCTAssertFalse(reloaded.rotatesProviders)
+    }
+
+    func testEnablingRotationDisablesFocusFollowingAndPersistsBothStates() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setFollowsFocusedApp(true)
+
+        store.setRotatesProviders(true)
+
+        XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertTrue(store.rotatesProviders)
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        XCTAssertFalse(reloaded.followsFocusedApp)
+        XCTAssertTrue(reloaded.rotatesProviders)
+    }
+
+    func testPersistedFocusFollowingRepairsAnOldConflictingRotationValue() {
+        defaults.set(true, forKey: StorageKeys.statusItemFollowsFocusedApp)
+        defaults.set(true, forKey: StorageKeys.statusItemRotatesProviders)
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.followsFocusedApp)
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.statusItemRotatesProviders))
+    }
+
     func testPreferencesPersistAcrossRelaunch() {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
         store.setPinnedCandidateKey("codex:account-id:weekly")

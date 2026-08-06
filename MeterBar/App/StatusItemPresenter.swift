@@ -100,7 +100,7 @@ final class StatusItemPresenter {
         accountItemPlan = plan
         let rotates = MenuBarRotationSequencer.rotates(
             mode: preferences.presentationMode,
-            isEnabled: preferences.rotatesProviders,
+            isEnabled: preferences.rotatesProviders && !preferences.followsFocusedApp,
             pinnedKey: preferences.pinnedCandidateKey
         )
         let descriptors = MenuBarStatusItemPlanner.plan(
