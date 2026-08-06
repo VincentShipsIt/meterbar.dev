@@ -243,7 +243,11 @@ enum ClaudeCostScanner {
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
 
         for event in events {
-            let pricing = Self.pricing(for: event.model)
+            // Price at the rate in effect when the event was recorded, not
+            // today's (issue #339).
+            let resolved = Self.resolvePricing(for: event.model, at: event.timestamp)
+            let pricing = resolved.pricing
+            totals.pricing.record(resolved)
             let eventCost = TokenCostMath.calculateClaudeCost(
                 input: event.input,
                 output: event.output,
@@ -338,8 +342,12 @@ enum ClaudeCostScanner {
         return min(total, max(0, oneHour))
     }
 
-    nonisolated static func pricing(for model: String?) -> TokenPricing {
-        ModelPricing.claude(for: model)
+    nonisolated static func pricing(for model: String?, at timestamp: Date = Date()) -> TokenPricing {
+        ModelPricing.claude(for: model, at: timestamp)
+    }
+
+    nonisolated static func resolvePricing(for model: String?, at timestamp: Date) -> ResolvedPricing {
+        ModelPricing.resolveClaude(for: model, at: timestamp)
     }
 
     nonisolated static func normalizeModel(_ raw: String) -> String {

@@ -1,4 +1,6 @@
 import Foundation
+import MeterBarShared
+import os
 
 /// Runs the per-provider scanners and folds their windows into the published
 /// `CostSummary`. Split out of `CostTracker` (audit C1d) so the summary shape
@@ -31,7 +33,8 @@ enum CostSummaryBuilder {
             totalTokens: totalTokens,
             periodDays: days,
             dailyUsage: scan.period.dailyUsage.sorted { $0.date < $1.date },
-            lifetime: LifetimeCostSummary(costs: scan.lifetime.costs)
+            lifetime: LifetimeCostSummary(costs: scan.lifetime.costs),
+            pricing: scan.period.pricing.isEmpty ? nil : scan.period.pricing
         )
     }
 
@@ -47,12 +50,23 @@ enum CostSummaryBuilder {
             let claude = ClaudeCostScanner.scanSessions(since: cutoffDate, claudeAccounts: claudeAccounts)
             scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: cutoffDate))
             scan.lifetime.append(ClaudeCostScanner.makeCost(from: claude.lifetime, windowStart: .distantPast))
+            scan.period.record(claude.period.pricing)
+            scan.lifetime.record(claude.lifetime.pricing)
         }
 
         if includeCodexCli {
             let codex = CodexCostScanner.scanSessions(since: cutoffDate)
             scan.period.append(CodexCostScanner.makeCost(from: codex.period))
             scan.lifetime.append(CodexCostScanner.makeCost(from: codex.lifetime))
+            scan.period.record(codex.period.pricing)
+            scan.lifetime.record(codex.lifetime.pricing)
+        }
+
+        // Events older than every entry in the table were priced at the oldest
+        // known rate — a documented guess, so say so rather than let it pass as
+        // a verified figure (issue #339).
+        if let note = scan.lifetime.pricing.diagnosticNote {
+            AppLog.cost.warning("Pricing table gap: \(note, privacy: .public)")
         }
 
         return scan
