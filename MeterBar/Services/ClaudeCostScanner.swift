@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 
 /// Reads Claude Code transcripts off disk and turns them into cost totals.
 /// Split out of `CostTracker` (audit C1d) so the transcript parsing, project
@@ -189,8 +190,12 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        FileLineReader.forEachLine(in: url) { lineData in
-            guard let event = Self.usageEvent(from: lineData, url: url) else { return }
+        // A line the reader had to truncate is parsed like any other: the usage
+        // block sits near the front of a transcript record, so the retained
+        // prefix often still decodes. Only a prefix that fails to parse is
+        // skipped — never the line for being long.
+        FileLineReader.forEachLine(in: url) { line in
+            guard let event = Self.usageEvent(from: line.bytes, url: url) else { return }
 
             let inPeriod = event.timestamp >= cutoffDate
             if let key = event.deduplicationKey {
@@ -320,8 +325,8 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        let read = FileLineReader.readLines(in: file.url, request: request) { lineData, _ in
-            guard let event = Self.usageEvent(from: lineData, url: file.url) else { return }
+        let read = FileLineReader.readLines(in: file.url, request: request) { line, _ in
+            guard let event = Self.usageEvent(from: line.bytes, url: file.url) else { return }
 
             if let key = event.deduplicationKey {
                 // First-wins across a resume boundary: an event with this key is
@@ -429,7 +434,11 @@ enum ClaudeCostScanner {
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
 
         for event in events {
-            let pricing = Self.pricing(for: event.model)
+            // Price at the rate in effect when the event was recorded, not
+            // today's (issue #339).
+            let resolved = Self.resolvePricing(for: event.model, at: event.timestamp)
+            let pricing = resolved.pricing
+            totals.pricing.record(resolved)
             let eventCost = TokenCostMath.calculateClaudeCost(
                 input: event.input,
                 output: event.output,
@@ -524,8 +533,12 @@ enum ClaudeCostScanner {
         return min(total, max(0, oneHour))
     }
 
-    nonisolated static func pricing(for model: String?) -> TokenPricing {
-        ModelPricing.claude(for: model)
+    nonisolated static func pricing(for model: String?, at timestamp: Date = Date()) -> TokenPricing {
+        ModelPricing.claude(for: model, at: timestamp)
+    }
+
+    nonisolated static func resolvePricing(for model: String?, at timestamp: Date) -> ResolvedPricing {
+        ModelPricing.resolveClaude(for: model, at: timestamp)
     }
 
     nonisolated static func normalizeModel(_ raw: String) -> String {

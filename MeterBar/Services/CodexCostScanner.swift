@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 import SQLite3
 
 /// Reads Codex CLI rollouts and the CLI's SQLite log database and turns them
@@ -50,6 +51,19 @@ enum CodexCostScanner {
         )
     }
 
+    /// The rate card in effect for `model` at `timestamp`. Every Codex price
+    /// resolution goes through the shared table so the app, the widget, and the
+    /// CLI cannot drift apart (issues #130 and #339).
+    nonisolated static func pricing(for model: String?, at timestamp: Date = Date()) -> TokenPricing {
+        ModelPricing.codex(for: model, at: timestamp)
+    }
+
+    /// Same lookup, but keeping the entry's verification date and whether the
+    /// event predates the table so the scan can report what it priced with.
+    nonisolated static func resolvePricing(for model: String?, at timestamp: Date) -> ResolvedPricing {
+        ModelPricing.resolveCodex(for: model, at: timestamp)
+    }
+
     nonisolated static func makeCost(
         from context: CodexScanContext
     ) -> (TokenCost, [DailyTokenUsage])? {
@@ -59,13 +73,17 @@ enum CodexCostScanner {
         let pricing = ModelPricing.codex
         let billableInput = max(0, totals.input - totals.cacheRead)
         let output = totals.output + totals.reasoning
-        let cost = TokenCostMath.calculateCost(
+        // Prefer the sum of per-event costs, each priced at its own timestamp's
+        // rate; fall back to today's rate only for totals that carry no per-event
+        // cost (issue #339).
+        let fallbackCost = TokenCostMath.calculateCost(
             input: billableInput,
             output: output,
             cacheCreation: 0,
             cacheRead: totals.cacheRead,
             pricing: pricing
         )
+        let cost = totals.estimatedCostUSD > 0 ? totals.estimatedCostUSD : fallbackCost
 
         return (TokenCost(
             provider: .codexCli,
@@ -174,7 +192,8 @@ enum CodexCostScanner {
         // Per file, like the rollout context: a sibling rollout's model
         // must never name events this file left unexplained.
         var deferred: [CodexDeferredUsage] = []
-        FileLineReader.forEachLine(in: fileURL) { line in
+        FileLineReader.forEachLine(in: fileURL) { readerLine in
+            let line = readerLine.bytes
             guard line.contains(Self.tokenCountMarker) else {
                 Self.updateRolloutContext(&rollout, from: line)
                 // Reaches back only as far as the *first* model the file
@@ -304,7 +323,8 @@ enum CodexCostScanner {
         request.startOffset = record?.offset ?? 0
         request.maxBytes = allowance
 
-        let read = FileLineReader.readLines(in: file.url, request: request) { line, offset in
+        let read = FileLineReader.readLines(in: file.url, request: request) { readerLine, offset in
+            let line = readerLine.bytes
             guard line.contains(Self.tokenCountMarker) else {
                 Self.updateRolloutContext(&rollout, from: line)
                 if let model = rollout.turnModel ?? rollout.sessionModel {
@@ -609,6 +629,20 @@ enum CodexCostScanner {
         let originKey = CostScanValues.displayOriginName(attribution.originName)
         let projectKey = attribution.projectID
 
+        // Price the event at the rate in effect when it was recorded (issue
+        // #339). Codex used to cost the whole window in one shot at today's
+        // rate, which could not distinguish a session billed under an older
+        // rate card. Cached input is already billed by `cacheRead`, so it is
+        // subtracted from the billable input exactly as the aggregate did.
+        let resolved = Self.resolvePricing(for: attribution.modelName, at: timestamp)
+        let eventCost = TokenCostMath.calculateCost(
+            input: max(0, input - cached),
+            output: output + reasoning,
+            cacheCreation: 0,
+            cacheRead: cached,
+            pricing: resolved.pricing
+        )
+
         // Each window keeps its own `eventKeys`, so an event that lands in both
         // is deduplicated independently in each — exactly what the two separate
         // scans did.
@@ -616,30 +650,35 @@ enum CodexCostScanner {
             guard context.eventKeys.insert(key).inserted else { return }
 
             context.sessionIDs.insert(sessionID)
+            context.pricing.record(resolved)
             context.totals.add(
                 input: input,
                 output: output,
                 cacheCreation: 0,
                 cacheRead: cached,
-                reasoning: reasoning
+                reasoning: reasoning,
+                estimatedCostUSD: eventCost
             )
             context.dailyTotals[day, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.dailyModelTotals[day, default: [:]][modelKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.dailyProjectTotals[day, default: [:]][projectKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             var dailyProjectModels = context.dailyProjectModelTotals[day] ?? [:]
             dailyProjectModels[projectKey, default: [:]][
@@ -649,32 +688,37 @@ enum CodexCostScanner {
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.dailyProjectModelTotals[day] = dailyProjectModels
             context.modelTotals[modelKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.originTotals[originKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.projectTotals[projectKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             context.projectModelTotals[projectKey, default: [:]][modelKey, default: TokenAccumulator()].add(
                 input: input,
                 output: output + reasoning,
                 cacheCreation: 0,
-                cacheRead: cached
+                cacheRead: cached,
+                estimatedCostUSD: eventCost
             )
             if timestamp < context.earliestDate { context.earliestDate = timestamp }
             if timestamp > context.latestDate { context.latestDate = timestamp }

@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// Two accumulators filled by a single traversal: the reporting period and
 /// all-time.
@@ -64,6 +65,9 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable {
     /// Nested per-project, per-model totals powering the "drill-down to model
     /// breakdown" view under each project's rollup row.
     var projectModels: [String: [String: TokenAccumulator]] = [:]
+    /// Which dated rate entries priced these events, and how many predated the
+    /// table entirely (issue #339).
+    var pricing = PricingProvenance()
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
@@ -119,6 +123,7 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable {
             }
         }
 
+        pricing.merge(other.pricing)
         earliest = Self.earlier(earliest, other.earliest)
         latest = Self.later(latest, other.latest)
     }
@@ -145,11 +150,17 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable {
 nonisolated struct CostScanResult {
     var costs: [TokenCost] = []
     var dailyUsage: [DailyTokenUsage] = []
+    /// Union of the rate entries every provider in this window priced with.
+    var pricing = PricingProvenance()
 
     mutating func append(_ scan: (TokenCost, [DailyTokenUsage])?) {
         guard let scan else { return }
         costs.append(scan.0)
         dailyUsage.append(contentsOf: scan.1)
+    }
+
+    mutating func record(_ provenance: PricingProvenance) {
+        pricing.merge(provenance)
     }
 }
 
@@ -173,6 +184,8 @@ nonisolated struct CodexScanContext: Sendable, Codable {
     var projectModelTotals: [String: [String: TokenAccumulator]] = [:]
     var eventKeys: Set<String> = []
     var sessionIDs: Set<String> = []
+    /// Which dated rate entries priced these events (issue #339).
+    var pricing = PricingProvenance()
     var earliestDate: Date
     var latestDate: Date
 

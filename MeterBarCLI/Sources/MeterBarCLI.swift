@@ -300,6 +300,18 @@ struct Cost: ParsableCommand {
         }
     }
 
+    /// The verification dates of the rate entries this scan actually priced
+    /// with, falling back to the shipped table for caches written before dated
+    /// pricing existed (issue #339). Events older than every entry were priced
+    /// at the oldest known rate, so that guess is called out rather than hidden.
+    private func printPricing(_ cache: CostSummaryCache) {
+        let provenance = cache.summary.pricing.flatMap { $0.isEmpty ? nil : $0 } ?? ModelPricing.tableProvenance
+        print("Pricing: \(provenance.label)")
+        if let note = provenance.diagnosticNote {
+            print("⚠ \(note)")
+        }
+    }
+
     /// A USD figure, plus its converted equivalent in parentheses when a
     /// `--currency`/`--rate` pair was supplied — otherwise just the USD text.
     private func costText(_ usd: Double, currency: DisplayCurrency?) -> String {
@@ -319,7 +331,7 @@ struct Cost: ParsableCommand {
         print()
         print("Period: \(periodLabel)")
         print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
-        print("Pricing: \(ModelPricing.revisionLabel)")
+        printPricing(cache)
         // Printed once, near every converted figure below, so a converted
         // total can never be mistaken for a live quote (issue #270).
         if let currency {
@@ -374,7 +386,7 @@ struct Cost: ParsableCommand {
         print()
         print("Period: Last \(summary.periodDays) days")
         print("Scanned: \(UsageFormat.relative(cache.lastScanDate))")
-        print("Pricing: \(ModelPricing.revisionLabel)")
+        printPricing(cache)
         if let currency {
             print("Currency: \(currency.disclosureText)")
         }

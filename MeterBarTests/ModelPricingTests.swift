@@ -4,7 +4,9 @@ import XCTest
 
 final class ModelPricingTests: XCTestCase {
     func testSharedTableOwnsRevisionAndProviderRates() {
-        XCTAssertEqual(ModelPricing.revision, "2026-07-02")
+        // Each entry now carries its own verification date (issue #339); the
+        // table's provenance is the span across every shipped entry.
+        XCTAssertEqual(ModelPricing.tableProvenance.verificationDates, ["2026-07-02"])
         XCTAssertEqual(ModelPricing.claude(for: "claude-fable-5").input, 10.0)
         XCTAssertEqual(ModelPricing.claude(for: "claude-opus-4-8-20260101").input, 5.0)
         XCTAssertEqual(ModelPricing.claude(for: "mystery-model").input, 3.0)
