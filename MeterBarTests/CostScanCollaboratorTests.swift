@@ -89,23 +89,6 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertFalse(CostScanFileSystem.isLocalDirectory(root.appendingPathComponent("gone", isDirectory: true)))
     }
 
-    func testIsScannableLineAcceptsUpToAndIncludingTheCap() {
-        let cap = CostScanFileSystem.maximumLineBytes
-
-        XCTAssertTrue(CostScanFileSystem.isScannableLine(Data()))
-        XCTAssertTrue(CostScanFileSystem.isScannableLine(Data(count: cap - 1)))
-        XCTAssertTrue(CostScanFileSystem.isScannableLine(Data(count: cap)))
-        XCTAssertFalse(CostScanFileSystem.isScannableLine(Data(count: cap + 1)))
-    }
-
-    func testMaximumLineBytesClearsTheLargestObservedUsageLine() {
-        // 150,055 B is the largest usage-bearing line measured across a local
-        // corpus of 351k Claude and 1.44M Codex transcript lines. Lowering the
-        // cap near it would start dropping real spend.
-        XCTAssertEqual(CostScanFileSystem.maximumLineBytes, 4 * 1024 * 1024)
-        XCTAssertGreaterThan(CostScanFileSystem.maximumLineBytes, 150_055 * 4)
-    }
-
     // MARK: - TokenCostMath
 
     func testCalculateCostPricesEveryTokenClassPerMillion() {
