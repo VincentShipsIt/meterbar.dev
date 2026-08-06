@@ -85,7 +85,8 @@ final class StatusItemPresenter {
             windowMode: preferences.windowMode,
             fontSize: preferences.fontSize,
             highContrast: preferences.highContrast,
-            showsExhaustedResetCountdown: preferences.showsExhaustedResetCountdown
+            showsExhaustedResetCountdown: preferences.showsExhaustedResetCountdown,
+            focus: focusContext(preferences: preferences)
         )
 
         // Rebuilt rather than merged, so an item that just left the plan doesn't
@@ -97,6 +98,19 @@ final class StatusItemPresenter {
 
         applyDescriptors(descriptors)
         updateCountdownTimer(preferences: preferences)
+    }
+
+    /// The frontmost-app input to the merged selection, or nil when the user has
+    /// not opted into focus following — in which case the planner behaves
+    /// exactly as it did before the feature existed.
+    @MainActor
+    private func focusContext(preferences: MenuBarDisplayPreferencesStore) -> MenuBarFocusContext? {
+        guard preferences.followsFocusedApp else { return nil }
+        return MenuBarFocusContext(
+            bundleID: FrontmostAppMonitor.shared.bundleIdentifier,
+            mapping: preferences.focusAppMapping,
+            visibleServices: ProviderVisibilityStore.shared.enabledServices
+        )
     }
 
     /// Which accounts own an item right now, so the delegate can build the

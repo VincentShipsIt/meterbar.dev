@@ -38,6 +38,18 @@ nonisolated enum StorageKeys {
     static let statusItemHighContrast = "StatusItemHighContrast"
     /// Replaces an exhausted quota value with its reset countdown when available.
     static let statusItemShowsExhaustedResetCountdown = "StatusItemShowsExhaustedResetCountdown"
+
+    // MARK: - Follow Focused App (#341)
+
+    /// Explicit opt-in for merged-mode focus following (Bool, default off).
+    /// Mutually exclusive with pinning: enabling it clears the pin, and pinning
+    /// turns it back off.
+    static let statusItemFollowsFocusedApp = "StatusItemFollowsFocusedApp"
+    /// JSON-encoded `[String: ServiceType]` mapping app bundle identifiers to
+    /// providers. Missing means "never edited" and yields
+    /// `MenuBarFocusAppCatalog.defaultMapping`; an empty dictionary is a
+    /// deliberate "nothing mapped" and is preserved as written.
+    static let statusItemFocusAppMapping = "StatusItemFocusAppMapping"
     /// `ResetTimeFormat` raw value for reset labels in popover cards.
     static let popoverResetTimeFormat = "PopoverResetTimeFormat"
     /// Accounts that each get their own status item ([String] of MenuBarAccountKey),

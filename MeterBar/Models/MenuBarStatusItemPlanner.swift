@@ -41,6 +41,10 @@ enum MenuBarStatusItemPlanner {
     /// - Parameter previousKeys: what each *account* item showed last refresh,
     ///   by item id. Account items each own a slot, so they each need their own
     ///   history; sharing the merged key would hand every item the same anchor.
+    /// - Parameter focus: the frontmost app and its provider mapping (#341).
+    ///   Nil whenever the opt-in is off, which is the default; the parameter is
+    ///   honored in merged mode only, since the account-scoped and per-provider
+    ///   modes already show every provider at once.
     static func plan(
         mode: MenuBarPresentationMode,
         accountPlan: MenuBarAccountItemPlan? = nil,
@@ -54,6 +58,7 @@ enum MenuBarStatusItemPlanner {
         fontSize: StatusItemFontSize = .standard,
         highContrast: Bool = false,
         showsExhaustedResetCountdown: Bool = false,
+        focus: MenuBarFocusContext? = nil,
         now: Date = Date()
     ) -> [MenuBarStatusItemDescriptor] {
         let context = SelectionContext(
@@ -65,6 +70,7 @@ enum MenuBarStatusItemPlanner {
             windowMode: windowMode,
             visualStyle: StatusItemVisualStyle(fontSize: fontSize, highContrast: highContrast),
             showsExhaustedResetCountdown: showsExhaustedResetCountdown,
+            focus: mode == .merged ? focus : nil,
             now: now
         )
 
@@ -144,6 +150,9 @@ enum MenuBarStatusItemPlanner {
         let windowMode: StatusItemWindowMode
         let visualStyle: StatusItemVisualStyle
         let showsExhaustedResetCountdown: Bool
+        /// Nil unless the user opted into focus following *and* the mode is
+        /// merged, so every other path is byte-identical to pre-#341 behavior.
+        let focus: MenuBarFocusContext?
         let now: Date
 
         /// What the item with this id showed last refresh. The merged slot
@@ -158,7 +167,14 @@ enum MenuBarStatusItemPlanner {
         candidates: [StatusLimitCandidate],
         context: SelectionContext
     ) -> MenuBarStatusItemDescriptor {
-        guard let selection = StatusItemLimitSelector.select(
+        // A pin is an explicit "show exactly this", so it outranks the focused
+        // app; when the focus resolver has no opinion (unmapped app, hidden or
+        // dataless provider, critical quota elsewhere) Auto decides as before.
+        let focused = context.pinnedKey == nil
+            ? context.focus.flatMap { MenuBarFocusSelector.select(candidates: candidates, context: $0) }
+            : nil
+
+        guard let selection = focused ?? StatusItemLimitSelector.select(
             candidates: candidates,
             previousKey: context.previousKey(forItem: mergedItemID),
             pinnedKey: context.pinnedKey,
