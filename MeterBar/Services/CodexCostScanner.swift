@@ -638,7 +638,12 @@ enum CodexCostScanner {
                 FROM logs
             WHERE ts >= ?
               AND target = 'codex_otel.trace_safe'
-              AND feedback_log_body LIKE '%input_token_count=%'
+              AND (
+                    feedback_log_body LIKE '%input_token_count=%'
+                 OR feedback_log_body LIKE '%output_token_count=%'
+                 OR feedback_log_body LIKE '%cached_token_count=%'
+                 OR feedback_log_body LIKE '%reasoning_token_count=%'
+              )
               AND feedback_log_body LIKE '%event.timestamp=%'
             ORDER BY ts ASC, ts_nanos ASC, id ASC
         """

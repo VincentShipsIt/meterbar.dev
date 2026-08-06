@@ -425,9 +425,13 @@ final class CostScanCollaboratorTests: XCTestCase {
             + "output_token_count=30 cached_token_count=20 reasoning_token_count=5 "
             + "conversation.id=recent model=gpt-5.6-sol originator=codex_exec}"
         let oldUsage = recentUsage.replacingOccurrences(of: "2026-07-15", with: "2026-06-01")
+        let outputOnlyUsage = "event.timestamp=2026-07-16T10:00:00Z output_token_count=7 "
+            + "conversation.id=output-only model=gpt-5.6-sol originator=codex_exec}"
         let inserts = [
             "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
                 + "VALUES(1784110000, 0, 'codex_otel.trace_safe', '\(recentUsage)');",
+            "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
+                + "VALUES(1784196000, 0, 'codex_otel.trace_safe', '\(outputOnlyUsage)');",
             // Diagnostic bodies can contain copied parser text. A non-OTel
             // producer must never be interpreted as a usage event.
             "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
@@ -444,10 +448,10 @@ final class CostScanCollaboratorTests: XCTestCase {
         CodexCostScanner.scanSQLiteLogs(database: database, since: cutoff, windows: &windows)
 
         XCTAssertEqual(windows.period.totals.input, 120)
-        XCTAssertEqual(windows.period.totals.output, 30)
+        XCTAssertEqual(windows.period.totals.output, 37)
         XCTAssertEqual(windows.period.totals.cacheRead, 20)
         XCTAssertEqual(windows.period.totals.reasoning, 5)
-        XCTAssertEqual(windows.period.sessionIDs, ["recent"])
+        XCTAssertEqual(windows.period.sessionIDs, ["output-only", "recent"])
         XCTAssertEqual(windows.lifetime.totals.input, 120)
     }
 
