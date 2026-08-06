@@ -41,6 +41,10 @@ enum MenuBarStatusItemPlanner {
     /// - Parameter previousKeys: what each *account* item showed last refresh,
     ///   by item id. Account items each own a slot, so they each need their own
     ///   history; sharing the merged key would hand every item the same anchor.
+    /// - Parameter rotationTick: the merged item's current rotation step, when
+    ///   the user opted into timed rotation. Nil — the default — leaves selection
+    ///   exactly as it was before rotation existed, and the other modes own their
+    ///   items outright so it never applies to them.
     static func plan(
         mode: MenuBarPresentationMode,
         accountPlan: MenuBarAccountItemPlan? = nil,
@@ -54,6 +58,7 @@ enum MenuBarStatusItemPlanner {
         fontSize: StatusItemFontSize = .standard,
         highContrast: Bool = false,
         showsExhaustedResetCountdown: Bool = false,
+        rotationTick: Int? = nil,
         now: Date = Date()
     ) -> [MenuBarStatusItemDescriptor] {
         let context = SelectionContext(
@@ -65,6 +70,7 @@ enum MenuBarStatusItemPlanner {
             windowMode: windowMode,
             visualStyle: StatusItemVisualStyle(fontSize: fontSize, highContrast: highContrast),
             showsExhaustedResetCountdown: showsExhaustedResetCountdown,
+            rotationTick: mode == .merged ? rotationTick : nil,
             now: now
         )
 
@@ -144,6 +150,8 @@ enum MenuBarStatusItemPlanner {
         let windowMode: StatusItemWindowMode
         let visualStyle: StatusItemVisualStyle
         let showsExhaustedResetCountdown: Bool
+        /// Set only when the merged item is rotating; nil everywhere else.
+        let rotationTick: Int?
         let now: Date
 
         /// What the item with this id showed last refresh. The merged slot
@@ -158,6 +166,33 @@ enum MenuBarStatusItemPlanner {
         candidates: [StatusLimitCandidate],
         context: SelectionContext
     ) -> MenuBarStatusItemDescriptor {
+        // Rotation is another way of choosing *which* candidate the one merged
+        // item shows, so it resolves ahead of auto-selection and hands the same
+        // descriptor builder its winner. It stands down for a pin, for a
+        // critical or exhausted quota, and when nothing has fresh data, which
+        // leaves the untouched auto path below in charge.
+        if let rotationTick = context.rotationTick {
+            let outcome = MenuBarRotationSequencer.outcome(
+                candidates: candidates,
+                tick: rotationTick,
+                pinnedKey: context.pinnedKey,
+                now: context.now
+            )
+            switch outcome {
+            case let .rotate(candidate), let .hold(candidate):
+                return descriptor(
+                    id: mergedItemID,
+                    selectionKey: candidate.key,
+                    candidate: candidate,
+                    candidates: candidates,
+                    qualifiedName: false,
+                    context: context
+                )
+            case .inactive:
+                break
+            }
+        }
+
         guard let selection = StatusItemLimitSelector.select(
             candidates: candidates,
             previousKey: context.previousKey(forItem: mergedItemID),

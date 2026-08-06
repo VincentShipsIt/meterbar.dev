@@ -46,7 +46,12 @@ enum StatusItemRefreshTrigger {
             displayPreferences.$windowMode.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$fontSize.map { _ in () }.eraseToAnyPublisher(),
             displayPreferences.$highContrast.map { _ in () }.eraseToAnyPublisher(),
-            displayPreferences.$showsExhaustedResetCountdown.map { _ in () }.eraseToAnyPublisher()
+            displayPreferences.$showsExhaustedResetCountdown.map { _ in () }.eraseToAnyPublisher(),
+            // Rotation reshapes the merged item the moment it is toggled, and a
+            // new interval has to reschedule the timer rather than wait out the
+            // old cadence.
+            displayPreferences.$rotatesProviders.map { _ in () }.eraseToAnyPublisher(),
+            displayPreferences.$rotationInterval.map { _ in () }.eraseToAnyPublisher()
         ])
 
         // Which accounts own items, and which one the switcher shows. Without
