@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 import SQLite3
 
 /// Reads Codex CLI rollouts and the CLI's SQLite log database and turns them
@@ -181,7 +182,12 @@ enum CodexCostScanner {
             // Per file, like the rollout context: a sibling rollout's model
             // must never name events this file left unexplained.
             var deferred: [CodexDeferredUsage] = []
-            FileLineReader.forEachLine(in: fileURL) { line in
+            // Rollout lines reach 56 MB, so the reader hands back a bounded
+            // prefix for the largest of them. That prefix is parsed like any
+            // other line — a `token_count` payload lives near the front of the
+            // record — and only a prefix that fails to parse is skipped.
+            FileLineReader.forEachLine(in: fileURL) { readerLine in
+                let line = readerLine.bytes
                 guard line.contains(Self.tokenCountMarker) else {
                     Self.updateRolloutContext(&rollout, from: line)
                     // Reaches back only as far as the *first* model the file

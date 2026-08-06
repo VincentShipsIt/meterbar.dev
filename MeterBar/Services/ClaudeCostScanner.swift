@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 
 /// Reads Claude Code transcripts off disk and turns them into cost totals.
 /// Split out of `CostTracker` (audit C1d) so the transcript parsing, project
@@ -187,7 +188,12 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        FileLineReader.forEachLine(in: url) { lineData in
+        // A line the reader had to truncate is parsed like any other: the usage
+        // block sits near the front of a transcript record, so the retained
+        // prefix often still decodes. Only a prefix that fails to parse is
+        // skipped — never the line for being long.
+        FileLineReader.forEachLine(in: url) { line in
+            let lineData = line.bytes
             guard !lineData.isEmpty,
                   let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let timestampStr = json["timestamp"] as? String,
