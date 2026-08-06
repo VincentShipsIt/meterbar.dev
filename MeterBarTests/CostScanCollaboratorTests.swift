@@ -412,4 +412,199 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(summary.totalTokens, 0)
         XCTAssertEqual(summary.periodDays, 7)
     }
+
+    // MARK: - CostScanBudget
+
+    func testProductionBudgetIsBoundedPerFileAndPerRefresh() {
+        let options = CostScanBudgetOptions.default
+
+        XCTAssertEqual(options.maxBytesPerFile, 256 * 1024 * 1024)
+        XCTAssertEqual(options.maxNewBytesPerRefresh, 512 * 1024 * 1024)
+        XCTAssertNotNil(options.wallClock)
+        XCTAssertFalse(options.isUnbounded)
+        XCTAssertTrue(CostScanBudgetOptions.unlimited.isUnbounded)
+    }
+
+    func testAllowanceIsTheSmallerOfThePerFileAndRemainingRefreshBudgets() {
+        let budget = CostScanBudget(
+            options: CostScanBudgetOptions(maxBytesPerFile: 100, maxNewBytesPerRefresh: 250, wallClock: nil)
+        )
+
+        XCTAssertEqual(budget.allowance, 100)
+        budget.consume(180)
+        XCTAssertEqual(budget.bytesRead, 180)
+        XCTAssertEqual(budget.allowance, 70)
+        XCTAssertFalse(budget.isExhausted)
+
+        budget.consume(70)
+        XCTAssertEqual(budget.allowance, 0)
+        XCTAssertTrue(budget.isExhausted)
+    }
+
+    func testUnlimitedBudgetIsNeverExhausted() {
+        let budget = CostScanBudget(options: .unlimited)
+
+        budget.consume(4 * 1024 * 1024 * 1024)
+
+        XCTAssertFalse(budget.isExhausted)
+        XCTAssertEqual(budget.allowance, Int.max)
+    }
+
+    func testWallClockBudgetExpiresIndependentlyOfBytes() {
+        let options = CostScanBudgetOptions(maxBytesPerFile: .max, maxNewBytesPerRefresh: .max, wallClock: 5)
+        let budget = CostScanBudget(options: options, startedAt: Date(timeIntervalSinceNow: -10))
+
+        XCTAssertTrue(budget.isExhausted)
+        XCTAssertEqual(budget.allowance, 0)
+    }
+
+    func testCancellingTheTokenExhaustsTheBudget() {
+        let token = CostScanCancellationToken()
+        let budget = CostScanBudget(options: .unlimited, token: token)
+
+        XCTAssertFalse(budget.isExhausted)
+        token.cancel()
+        XCTAssertTrue(budget.isExhausted)
+        XCTAssertTrue(budget.isCancelled)
+    }
+
+    // MARK: - CostScanCorpus
+
+    func testTranscriptsAreOrderedNewestModifiedFirst() throws {
+        let root = try makeCorpusDirectory()
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        try writeCorpusFile(in: root, name: "middle.jsonl", bytes: 10, modified: now.addingTimeInterval(-60))
+        try writeCorpusFile(in: root, name: "oldest.jsonl", bytes: 10, modified: now.addingTimeInterval(-120))
+        try writeCorpusFile(in: root, name: "newest.jsonl", bytes: 10, modified: now)
+        // Only `.jsonl` transcripts participate in the scan.
+        try writeCorpusFile(in: root, name: "notes.txt", bytes: 10, modified: now)
+
+        let files = CostScanCorpus.transcripts(in: root)
+
+        XCTAssertEqual(files.map { $0.url.lastPathComponent }, ["newest.jsonl", "middle.jsonl", "oldest.jsonl"])
+        XCTAssertEqual(files.first?.size, 10)
+    }
+
+    func testCorpusOfAMissingDirectoryIsEmpty() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanCorpus-missing-\(UUID().uuidString)", isDirectory: true)
+
+        XCTAssertTrue(CostScanCorpus.transcripts(in: missing).isEmpty)
+    }
+
+    // MARK: - CostScanExecutor
+
+    func testExecutorReturnsTheWorkResult() async throws {
+        let value = try await CostScanExecutor.run { _ in 42 }
+
+        XCTAssertEqual(value, 42)
+    }
+
+    func testCancelledWorkDoesNotWaitBehindAnInFlightScan() async throws {
+        // The whole point of the serial queue is that a stale refresh can be
+        // abandoned instantly: work still queued must fail fast rather than sit
+        // behind a scan that is already reading the corpus.
+        let gate = DispatchSemaphore(value: 0)
+        let running = CostScanFlag()
+        let blocker = Task {
+            try await CostScanExecutor.run { _ in
+                running.set()
+                gate.wait()
+            }
+        }
+        try await waitUntil(running.isSet, "the blocking scan to occupy the queue")
+
+        let queued = Task { try await CostScanExecutor.run { _ in true } }
+        queued.cancel()
+
+        do {
+            _ = try await queued.value
+            XCTFail("expected the queued scan to be cancelled")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        gate.signal()
+        _ = try await blocker.value
+    }
+
+    func testCancellingAnInFlightScanSignalsItsToken() async throws {
+        let started = CostScanFlag()
+        let observed = CostScanFlag()
+        let task = Task {
+            try await CostScanExecutor.run { token in
+                started.set()
+                while !token.isCancelled {
+                    usleep(1_000)
+                }
+                observed.set()
+                return true
+            }
+        }
+        // Polled rather than waited on a semaphore: this method runs on the main
+        // actor, and `task` is enqueued to it too, so blocking here would starve
+        // the very work we are waiting to start.
+        try await waitUntil(started.isSet, "the scan to reach the queue")
+
+        task.cancel()
+        _ = try? await task.value
+        // The queue is serial, so this only runs once the cancelled work returned.
+        _ = try await CostScanExecutor.run { _ in true }
+
+        XCTAssertTrue(observed.isSet)
+    }
+
+    /// Yields until `condition` holds, or fails after five seconds.
+    ///
+    /// Every wait in these tests has to suspend rather than block: the test
+    /// methods are main-actor isolated, and so are the `Task`s they spawn, so a
+    /// `DispatchSemaphore.wait` on this thread deadlocks against the work it is
+    /// waiting for.
+    private func waitUntil(
+        _ condition: @autoclosure () -> Bool,
+        _ description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        for _ in 0..<5_000 {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("timed out waiting for \(description)", file: file, line: line)
+    }
+
+    // MARK: - Corpus fixtures
+
+    private func makeCorpusDirectory() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanCorpus-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return root
+    }
+
+    private func writeCorpusFile(in root: URL, name: String, bytes: Int, modified: Date) throws {
+        let url = root.appendingPathComponent(name)
+        try Data(repeating: UInt8(ascii: "x"), count: bytes).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+    }
+}
+
+/// Lock-guarded boolean so a scan closure running on the serial queue can report
+/// back to the test without tripping `Sendable` checking.
+private final class CostScanFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
 }

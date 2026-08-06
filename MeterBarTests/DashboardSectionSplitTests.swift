@@ -128,6 +128,29 @@ final class DashboardSectionSplitTests: XCTestCase {
         )
     }
 
+    /// The estimate card's subtitle names the window and nothing else: refresh
+    /// state belongs on the trailing edge, matching "Lifetime Local Cost" and
+    /// "30 Day Spend" rather than replacing the card's own caption.
+    func testCostOverviewSubtitleIsWindowOnlyAndStatusMatchesTheOtherCards() {
+        XCTAssertEqual(CostOverviewStatusCard.subtitle, "Last 30 days")
+
+        for isScanning in [true, false] {
+            for isRefreshingMissingDays in [true, false] {
+                XCTAssertEqual(
+                    CostOverviewStatusCard.headerStatus(
+                        isScanning: isScanning,
+                        isRefreshingMissingDays: isRefreshingMissingDays
+                    ),
+                    DashboardCostsSection.refreshStatusText(
+                        isScanning: isScanning,
+                        isRefreshingMissingDays: isRefreshingMissingDays
+                    ),
+                    "estimate card must reuse the page's trailing status wording"
+                )
+            }
+        }
+    }
+
     func testStatusPageSummaryReportsRefreshFirst() {
         XCTAssertEqual(
             DashboardStatusSection.summary(isRefreshing: true, issueCount: 3, reportCount: 0),

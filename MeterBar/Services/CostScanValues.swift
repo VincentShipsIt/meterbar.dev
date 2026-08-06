@@ -5,6 +5,10 @@ import MeterBarShared
 /// Split out of `CostTracker` (audit C1d) so each rule is directly assertable
 /// instead of reachable only through a full filesystem scan.
 enum CostScanValues {
+    /// Producer identity for persisted scan payloads. Bump when parsing,
+    /// deduplication, pricing, normalization, or day-bucketing rules change.
+    nonisolated static let costCacheParserVersion = 1
+
     /// Token counts arrive as `Int`, `Int64`, `Double`, or a numeric string
     /// depending on which writer produced the log line; coerce every shape.
     nonisolated static func int(_ value: Any?) -> Int {
