@@ -1,5 +1,51 @@
 import Foundation
 
+/// Where to start reading, and how much to read.
+nonisolated struct FileLineReadRequest {
+    /// Byte offset to seek to before reading. Comes from the previous refresh's
+    /// `FileLineReadResult.committedOffset`, so a resumed read sees only bytes
+    /// appended since.
+    var startOffset: UInt64 = 0
+
+    /// Ceiling on bytes pulled off disk in this call. The reader stops at the
+    /// last complete line inside the ceiling; the rest of the file is left for
+    /// the next refresh.
+    var maxBytes: Int = .max
+
+    var chunkSize: Int = FileLineReader.defaultChunkSize
+
+    /// Maximum bytes retained for one line while its full on-disk length keeps
+    /// being counted for offsets and truncation metadata.
+    var maxLineBytes: Int = FileLineReader.defaultMaxLineBytes
+
+    /// Leading bytes of an oversized line passed to the parser.
+    var prefixBytes: Int = FileLineReader.defaultPrefixBytes
+
+    /// Yield the final line even when it has no trailing newline and is not
+    /// structurally complete JSON.
+    ///
+    /// Only `forEachLine` sets this, to preserve its whole-file semantics. The
+    /// resumable path must not: transcripts are appended to while being read, so
+    /// a trailing fragment there is a record still being written.
+    var commitsUnterminatedTrailingLine = false
+}
+
+/// Where the next read should pick up, and why this one stopped.
+nonisolated struct FileLineReadResult {
+    /// One past the last line handed to `body`. Safe to persist: every byte
+    /// before it has been accounted for exactly once.
+    var committedOffset: UInt64
+
+    /// Bytes actually read from disk, which is what the refresh budget spends.
+    /// Larger than `committedOffset - startOffset` whenever the read stopped
+    /// mid-line.
+    var bytesRead: Int
+
+    /// `true` only when a read came back empty. `false` means the byte ceiling
+    /// stopped the read with more file left.
+    var reachedEndOfFile: Bool
+}
+
 /// Streams a newline-delimited file one line at a time.
 ///
 /// The cost scanners used to read each transcript with `Data(contentsOf:)` and
@@ -76,14 +122,46 @@ nonisolated enum FileLineReader {
         prefixBytes: Int = defaultPrefixBytes,
         _ body: (Line) -> Void
     ) -> Bool {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        var request = FileLineReadRequest()
+        request.chunkSize = chunkSize
+        request.maxLineBytes = maxLineBytes
+        request.prefixBytes = prefixBytes
+        // Whole-file reads have no budget and no follow-up pass, so a trailing
+        // fragment is all the caller will ever get — yield it.
+        request.commitsUnterminatedTrailingLine = true
+        return readLines(in: url, request: request) { line, _ in body(line) } != nil
+    }
+
+    /// Reads lines from `request.startOffset` up to `request.maxBytes`.
+    ///
+    /// `body` receives each line's payload and the byte offset the line *starts*
+    /// at, which is what the Codex scan needs to roll its committed offset back
+    /// to the first event it had to defer.
+    ///
+    /// - Returns: `nil` when the file could not be opened or sought.
+    static func readLines(
+        in url: URL,
+        request: FileLineReadRequest,
+        _ body: (Line, UInt64) -> Void
+    ) -> FileLineReadResult? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
+        if request.startOffset > 0 {
+            do {
+                try handle.seek(toOffset: request.startOffset)
+            } catch {
+                return nil
+            }
+        }
 
         // Guards against a caller passing 0 and spinning forever on empty reads.
-        let size = max(1, chunkSize)
-        let cap = max(0, maxLineBytes)
-        let prefix = min(max(0, prefixBytes), cap)
-
+        let chunkSize = max(1, request.chunkSize)
+        let cap = max(0, request.maxLineBytes)
+        let prefix = min(max(0, request.prefixBytes), cap)
+        let budget = max(0, request.maxBytes)
+        var committed = request.startOffset
+        var bytesRead = 0
+        var reachedEnd = false
         var retained = Data()
         var byteCount = 0
 
@@ -95,13 +173,31 @@ nonisolated enum FileLineReader {
             retained.append(start, count: min(count, room))
         }
 
-        func emitRetained() {
-            body(Self.line(retained, byteCount: byteCount, prefixBytes: prefix))
+        func emitRetained(hasNewline: Bool) {
+            body(Self.line(retained, byteCount: byteCount, prefixBytes: prefix), committed)
+            committed += UInt64(byteCount + (hasNewline ? 1 : 0))
             retained = Data()
             byteCount = 0
         }
 
-        while let chunk = try? handle.read(upToCount: size), !chunk.isEmpty {
+        while bytesRead < budget {
+            // `read(upToCount:)` signals end of file by returning `nil` *or* an
+            // empty `Data` depending on the handle, and only a thrown error means
+            // the read actually failed. Collapsing the two with `try?` would
+            // report EOF as a failure, and the caller reads `reachedEndOfFile` to
+            // decide whether a file is done — a false negative there re-reads
+            // every transcript from its offset on every refresh, forever.
+            let chunk: Data?
+            do {
+                chunk = try handle.read(upToCount: min(chunkSize, budget - bytesRead))
+            } catch {
+                break
+            }
+            guard let chunk, !chunk.isEmpty else {
+                reachedEnd = true
+                break
+            }
+            bytesRead += chunk.count
             chunk.withUnsafeBytes { raw in
                 guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
                 var cursor = 0
@@ -111,10 +207,11 @@ nonisolated enum FileLineReader {
                     let newlineOffset = UnsafeRawPointer(hit) - UnsafeRawPointer(base)
                     let segmentCount = newlineOffset - cursor
                     if byteCount == 0, segmentCount <= cap {
-                        body(Self.line(base + cursor, count: segmentCount))
+                        body(Self.line(base + cursor, count: segmentCount), committed)
+                        committed += UInt64(segmentCount) + 1
                     } else {
                         absorb(base + cursor, count: segmentCount)
-                        emitRetained()
+                        emitRetained(hasNewline: true)
                     }
                     cursor = newlineOffset + 1
                 }
@@ -128,12 +225,73 @@ nonisolated enum FileLineReader {
             }
         }
 
-        // A file ending in a newline leaves nothing pending; one that does not
-        // still owes its final line.
-        if byteCount > 0 {
-            emitRetained()
+        // A residual left behind because the budget ran out is a line the file
+        // continues past — never commit it, even when the bytes read so far
+        // happen to look like complete JSON.
+        let stoppedForBudget = !reachedEnd && bytesRead >= budget
+        if byteCount > 0, !stoppedForBudget {
+            let line = Self.line(retained, byteCount: byteCount, prefixBytes: prefix)
+            if request.commitsUnterminatedTrailingLine
+                || (!line.wasTruncated && isStructurallyCompleteJSONLine(line.bytes)) {
+                emitRetained(hasNewline: false)
+            }
         }
-        return true
+
+        return FileLineReadResult(
+            committedOffset: committed,
+            bytesRead: bytesRead,
+            reachedEndOfFile: reachedEnd
+        )
+    }
+
+    /// Cheap structural check for a trailing line with no newline yet.
+    ///
+    /// Claude Code and Codex append to transcripts while the scan reads them, so
+    /// the last line is routinely half-written. Committing one would double-count
+    /// the record once the rest lands, and re-reading from before it every
+    /// refresh would give up the offsets entirely — so the reader commits a
+    /// newline-less line only when its brackets balance outside of strings.
+    ///
+    /// This is not validation: `{"a":}` passes, and the parser rejects it
+    /// harmlessly a moment later. It only has to catch a write that stopped
+    /// mid-record, which always leaves an unclosed bracket or an open string.
+    static func isStructurallyCompleteJSONLine(_ data: Data) -> Bool {
+        var expected: [UInt8] = []
+        var inString = false
+        var escaped = false
+        var sawContent = false
+
+        for byte in data {
+            if escaped {
+                escaped = false
+                continue
+            }
+            if inString {
+                switch byte {
+                case UInt8(ascii: "\\"): escaped = true
+                case UInt8(ascii: "\""): inString = false
+                default: break
+                }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: " "), UInt8(ascii: "\t"), UInt8(ascii: "\r"), UInt8(ascii: "\n"):
+                continue
+            case UInt8(ascii: "\""):
+                inString = true
+            case UInt8(ascii: "{"):
+                expected.append(UInt8(ascii: "}"))
+            case UInt8(ascii: "["):
+                expected.append(UInt8(ascii: "]"))
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                guard expected.popLast() == byte else { return false }
+            default:
+                break
+            }
+            sawContent = true
+        }
+
+        return sawContent && !inString && !escaped && expected.isEmpty
     }
 
     /// Builds the emitted line: trims an oversized buffer down to the salvage
