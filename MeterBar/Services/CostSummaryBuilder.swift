@@ -10,7 +10,8 @@ enum CostSummaryBuilder {
         days: Int,
         includeClaudeCode: Bool,
         includeCodexCli: Bool,
-        claudeAccounts: [ClaudeCodeAccount]
+        claudeAccounts: [ClaudeCodeAccount],
+        claudeProjectRoots: [URL]? = nil
     ) -> CostSummary {
         let cutoffDate = CostWindow.start(days: days)
         // One traversal fills both windows. The lifetime scan reads a strict
@@ -20,7 +21,8 @@ enum CostSummaryBuilder {
             since: cutoffDate,
             includeClaudeCode: includeClaudeCode,
             includeCodexCli: includeCodexCli,
-            claudeAccounts: claudeAccounts
+            claudeAccounts: claudeAccounts,
+            claudeProjectRoots: claudeProjectRoots
         )
 
         let costs = scan.period.costs
@@ -42,12 +44,18 @@ enum CostSummaryBuilder {
         since cutoffDate: Date,
         includeClaudeCode: Bool,
         includeCodexCli: Bool,
-        claudeAccounts: [ClaudeCodeAccount]
+        claudeAccounts: [ClaudeCodeAccount],
+        claudeProjectRoots: [URL]?
     ) -> ScanWindows<CostScanResult> {
         var scan = ScanWindows(period: CostScanResult(), lifetime: CostScanResult(), cutoff: cutoffDate)
 
         if includeClaudeCode {
-            let claude = ClaudeCostScanner.scanSessions(since: cutoffDate, claudeAccounts: claudeAccounts)
+            let claude: ScanWindows<ClaudeSessionTotals>
+            if let claudeProjectRoots {
+                claude = ClaudeCostScanner.scanSessions(since: cutoffDate, projectRoots: claudeProjectRoots)
+            } else {
+                claude = ClaudeCostScanner.scanSessions(since: cutoffDate, claudeAccounts: claudeAccounts)
+            }
             scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: cutoffDate))
             scan.lifetime.append(ClaudeCostScanner.makeCost(from: claude.lifetime, windowStart: .distantPast))
             scan.period.record(claude.period.pricing)
@@ -97,7 +105,8 @@ enum CostSummaryBuilder {
         includeClaudeCode: Bool,
         includeCodexCli: Bool,
         claudeAccounts: [ClaudeCodeAccount],
-        session: CostScanSession
+        session: CostScanSession,
+        claudeProjectRoots: [URL]? = nil
     ) -> CostSummaryScan {
         var scan = ScanWindows(
             period: CostScanResult(),
@@ -106,16 +115,24 @@ enum CostSummaryBuilder {
         )
 
         if includeClaudeCode {
-            let roots = ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
+            let roots = claudeProjectRoots ?? ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
             let claude = ClaudeCostScanner.scanRoots(roots, session: session)
             scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: session.cutoff))
             scan.lifetime.append(ClaudeCostScanner.makeCost(from: claude.lifetime, windowStart: .distantPast))
+            scan.period.record(claude.period.pricing)
+            scan.lifetime.record(claude.lifetime.pricing)
         }
 
         if includeCodexCli {
             let codex = CodexCostScanner.scanSessions(session: session)
             scan.period.append(CodexCostScanner.makeCost(from: codex.period))
             scan.lifetime.append(CodexCostScanner.makeCost(from: codex.lifetime))
+            scan.period.record(codex.period.pricing)
+            scan.lifetime.record(codex.lifetime.pricing)
+        }
+
+        if let note = scan.lifetime.pricing.diagnosticNote {
+            AppLog.cost.warning("Pricing table gap: \(note, privacy: .public)")
         }
 
         let costs = scan.period.costs
@@ -126,7 +143,8 @@ enum CostSummaryBuilder {
                 totalTokens: costs.reduce(0) { $0 + $1.totalTokens },
                 periodDays: days,
                 dailyUsage: scan.period.dailyUsage.sorted { $0.date < $1.date },
-                lifetime: LifetimeCostSummary(costs: scan.lifetime.costs)
+                lifetime: LifetimeCostSummary(costs: scan.lifetime.costs),
+                pricing: scan.period.pricing.isEmpty ? nil : scan.period.pricing
             ),
             isComplete: session.isComplete
         )
