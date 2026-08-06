@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One refresh's view of the incremental scan cache.
 ///

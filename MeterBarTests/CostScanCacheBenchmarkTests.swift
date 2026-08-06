@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 import XCTest
 @testable import MeterBar
 
