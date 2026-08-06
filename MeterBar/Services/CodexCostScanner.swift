@@ -323,7 +323,7 @@ enum CodexCostScanner {
         let record = Self.resumableRecord(for: file, session: session)
 
         // Nothing appended since the last pass.
-        if let record, record.isComplete, record.size == file.size {
+        if let record, record.isComplete, record.stamp.matches(file.stamp) {
             return record.payload
         }
 
@@ -395,7 +395,7 @@ enum CodexCostScanner {
         session.setCodexRecord(
             CostScanFileRecord(
                 offset: committed,
-                size: file.size,
+                stamp: file.stamp,
                 cutoff: session.cutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
@@ -435,9 +435,13 @@ enum CodexCostScanner {
         session: CostScanSession
     ) -> CostScanFileRecord<CodexFileTotals>? {
         guard var record = session.codexRecord(for: file.cacheKey) else { return nil }
-        // A file that shrank was rotated or replaced, so the cached tally
-        // describes bytes that no longer exist.
         guard record.offset <= UInt64(file.size) else { return nil }
+        if record.isComplete, record.stamp.size == file.size {
+            guard record.stamp.matches(file.stamp) else { return nil }
+        } else {
+            guard record.stamp.isSameFile(as: file.stamp),
+                  file.size >= record.stamp.size else { return nil }
+        }
         guard record.cutoff != session.cutoff else { return record }
 
         let lifetime = record.payload.lifetime

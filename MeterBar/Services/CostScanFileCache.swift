@@ -11,10 +11,9 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
     /// Byte offset one past the last *complete* line folded into `payload`.
     var offset: UInt64
 
-    /// The file's size when `offset` was written. A file that has since shrunk
-    /// was rotated or replaced, so the cached totals describe bytes that no
-    /// longer exist — the entry is discarded rather than resumed.
-    var size: Int
+    /// File identity when `offset` was written. Size alone cannot distinguish
+    /// an append from an atomic replacement at the same path.
+    var stamp: CostScanFileStamp
 
     /// The period cutoff `payload`'s period window was computed against. The
     /// 30-day window slides every day, so a record written yesterday describes
@@ -29,14 +28,12 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
 
 /// Every transcript's record, keyed by standardized path.
 nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Sendable {
-    /// Bumped to 2 when the date strategy was pinned to `.secondsSince1970`: a
-    /// v1 file's dates were written against `.deferredToDate`'s 2001 epoch, and
-    /// decoding those numbers as Unix seconds succeeds while landing every daily
-    /// row 31 years early. Dropping the file costs one slow refresh; reading it
-    /// would be silently wrong.
-    static var currentSchemaVersion: Int { 2 }
+    /// Version 3 adds producer/time-zone identity and full per-file stamps.
+    static var currentSchemaVersion: Int { 3 }
 
     var schemaVersion = CostScanFileCache.currentSchemaVersion
+    var parserVersion = CostScanValues.costCacheParserVersion
+    var timeZoneIdentifier = TimeZone.current.identifier
     var records: [String: CostScanFileRecord<Payload>] = [:]
 }
 
@@ -47,11 +44,13 @@ nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Send
 /// its own migration story, while these are a private, disposable read-through
 /// cache. Losing them costs one slow refresh, not a wrong number.
 nonisolated struct CostScanCacheStore: Sendable {
-    /// The `v1` in the file names is the *path* generation, not the schema —
-    /// `schemaVersion` inside the file is what gates a read. Bumping the name
-    /// too would strand the old file on disk forever with nothing to delete it.
-    static let claudeFileName = "cost-scan-claude-v1.json"
-    static let codexFileName = "cost-scan-codex-v1.json"
+    static let maximumArtifactBytes = 64 * 1024 * 1024
+    static var claudeFileName: String {
+        "cost-scan-claude-v\(CostScanFileCache<ClaudeFileTotals>.currentSchemaVersion).json"
+    }
+    static var codexFileName: String {
+        "cost-scan-codex-v\(CostScanFileCache<CodexFileTotals>.currentSchemaVersion).json"
+    }
 
     let directory: URL
 
@@ -69,19 +68,49 @@ nonisolated struct CostScanCacheStore: Sendable {
     }
 
     func loadClaude() -> CostScanFileCache<ClaudeFileTotals> {
-        Self.load(from: directory.appendingPathComponent(Self.claudeFileName))
+        Self.loadClaude(from: directory.appendingPathComponent(Self.claudeFileName))
     }
 
     func loadCodex() -> CostScanFileCache<CodexFileTotals> {
-        Self.load(from: directory.appendingPathComponent(Self.codexFileName))
+        Self.loadCodex(from: directory.appendingPathComponent(Self.codexFileName))
     }
 
     func saveClaude(_ cache: CostScanFileCache<ClaudeFileTotals>) throws {
-        try Self.save(cache, to: directory.appendingPathComponent(Self.claudeFileName))
+        try Self.saveClaude(cache, to: directory.appendingPathComponent(Self.claudeFileName))
     }
 
     func saveCodex(_ cache: CostScanFileCache<CodexFileTotals>) throws {
-        try Self.save(cache, to: directory.appendingPathComponent(Self.codexFileName))
+        try Self.saveCodex(cache, to: directory.appendingPathComponent(Self.codexFileName))
+    }
+
+    static func loadClaude(
+        from url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) -> CostScanFileCache<ClaudeFileTotals> {
+        Self.load(from: url, maximumBytes: maximumBytes)
+    }
+
+    static func loadCodex(
+        from url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) -> CostScanFileCache<CodexFileTotals> {
+        Self.load(from: url, maximumBytes: maximumBytes)
+    }
+
+    static func saveClaude(
+        _ cache: CostScanFileCache<ClaudeFileTotals>,
+        to url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) throws {
+        try Self.save(cache, to: url, maximumBytes: maximumBytes)
+    }
+
+    static func saveCodex(
+        _ cache: CostScanFileCache<CodexFileTotals>,
+        to url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) throws {
+        try Self.save(cache, to: url, maximumBytes: maximumBytes)
     }
 
     /// Both payloads roll usage up in `[Date: TokenAccumulator]` dictionaries,
@@ -104,10 +133,17 @@ nonisolated struct CostScanCacheStore: Sendable {
         return decoder
     }
 
-    private static func load<Payload>(from url: URL) -> CostScanFileCache<Payload> {
-        guard let data = try? Data(contentsOf: url),
+    private static func load<Payload>(
+        from url: URL,
+        maximumBytes: Int
+    ) -> CostScanFileCache<Payload> {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= maximumBytes,
+              let data = try? Data(contentsOf: url),
               let cache = try? decoder.decode(CostScanFileCache<Payload>.self, from: data),
-              cache.schemaVersion == CostScanFileCache<Payload>.currentSchemaVersion else {
+              cache.schemaVersion == CostScanFileCache<Payload>.currentSchemaVersion,
+              cache.parserVersion == CostScanValues.costCacheParserVersion,
+              cache.timeZoneIdentifier == TimeZone.current.identifier else {
             // A cache from a future or unreadable build is dropped, not
             // migrated: a full re-scan is slow, but a mis-decoded offset would
             // silently under-count forever.
@@ -116,10 +152,47 @@ nonisolated struct CostScanCacheStore: Sendable {
         return cache
     }
 
-    private static func save<Payload>(_ cache: CostScanFileCache<Payload>, to url: URL) throws {
+    private static func save<Payload>(
+        _ cache: CostScanFileCache<Payload>,
+        to url: URL,
+        maximumBytes: Int
+    ) throws {
         let data = try encoder.encode(cache)
+        guard data.count <= maximumBytes else {
+            throw CostScanCacheStoreError.artifactTooLarge(data.count)
+        }
         try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
         try SecureFileWriter.write(data, to: url)
+        Self.removeSupersededFiles(for: url)
+    }
+
+    private static func removeSupersededFiles(for currentURL: URL) {
+        let directory = currentURL.deletingLastPathComponent()
+        let stem = currentURL.lastPathComponent
+            .split(separator: "-v", maxSplits: 1)
+            .first
+            .map(String.init) ?? currentURL.deletingPathExtension().lastPathComponent
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        let currentPath = currentURL.standardizedFileURL.path
+        for file in files where file.standardizedFileURL.path != currentPath
+            && file.lastPathComponent.hasPrefix("\(stem)-v")
+            && file.pathExtension == "json" {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
+nonisolated enum CostScanCacheStoreError: LocalizedError {
+    case artifactTooLarge(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .artifactTooLarge(bytes):
+            "Cost scan cache is too large to persist (\(bytes) bytes)"
+        }
     }
 }
 

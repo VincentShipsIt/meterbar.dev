@@ -329,7 +329,7 @@ enum ClaudeCostScanner {
 
         // Nothing appended since the last pass. This is the steady state once
         // the corpus is warm, and it is why a refresh costs almost no I/O.
-        if let record, record.isComplete, record.size == file.size {
+        if let record, record.isComplete, record.stamp.matches(file.stamp) {
             return Self.windows(record.payload, cutoff: session.cutoff)
         }
 
@@ -398,7 +398,7 @@ enum ClaudeCostScanner {
         session.setClaudeRecord(
             CostScanFileRecord(
                 offset: read.committedOffset,
-                size: file.size,
+                stamp: file.stamp,
                 cutoff: session.cutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
@@ -416,9 +416,13 @@ enum ClaudeCostScanner {
         session: CostScanSession
     ) -> CostScanFileRecord<ClaudeFileTotals>? {
         guard var record = session.claudeRecord(for: file.cacheKey) else { return nil }
-        // A file that shrank was rotated or replaced, so the cached tally
-        // describes bytes that no longer exist.
         guard record.offset <= UInt64(file.size) else { return nil }
+        if record.isComplete, record.stamp.size == file.size {
+            guard record.stamp.matches(file.stamp) else { return nil }
+        } else {
+            guard record.stamp.isSameFile(as: file.stamp),
+                  file.size >= record.stamp.size else { return nil }
+        }
         guard record.cutoff != session.cutoff else { return record }
 
         // The period window slides every day; lifetime totals never expire. So

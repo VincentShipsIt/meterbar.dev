@@ -1209,7 +1209,7 @@ final class CostTrackerTests: XCTestCase {
         var cache = CostScanFileCache<ClaudeFileTotals>()
         cache.records["/transcripts/a.jsonl"] = CostScanFileRecord(
             offset: 512,
-            size: 4_096,
+            stamp: CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42),
             cutoff: day,
             isComplete: false,
             payload: totals
