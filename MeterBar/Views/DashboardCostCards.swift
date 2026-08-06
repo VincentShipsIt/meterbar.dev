@@ -21,10 +21,18 @@ struct CostOverviewStatusCard: View {
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
-  private var subtitle: String {
-    if isScanning { return "Scanning local logs" }
-    if isRefreshingMissingDays { return "Updating…" }
-    return "Last 30 days"
+  /// The subtitle names the reporting window only. Refresh state used to
+  /// replace it, which read as if the window itself had changed; it now sits on
+  /// the trailing edge like the neighbouring "Lifetime Local Cost" date range.
+  static let subtitle = "Last 30 days"
+
+  /// Shared with the "30 Day Spend" card so both trailing captions say the same
+  /// thing at the same time — they are driven by the same two scan flags.
+  static func headerStatus(isScanning: Bool, isRefreshingMissingDays: Bool) -> String? {
+    DashboardCostsSection.refreshStatusText(
+      isScanning: isScanning,
+      isRefreshingMissingDays: isRefreshingMissingDays
+    )
   }
 
   /// The hero value's three mutually-exclusive states. Animate the swap on the
@@ -38,6 +46,13 @@ struct CostOverviewStatusCard: View {
     return .needsScan
   }
 
+  /// Verification dates of the rate entries this scan actually priced with, not
+  /// a global table revision (issue #339). Summaries cached before dated
+  /// pricing carry none, so those fall back to the shipped table's own dates.
+  private var pricingProvenance: PricingProvenance {
+    summary?.pricing.flatMap { $0.isEmpty ? nil : $0 } ?? ModelPricing.tableProvenance
+  }
+
   var body: some View {
     DashboardTile {
       VStack(alignment: .leading, spacing: 12) {
@@ -49,11 +64,17 @@ struct CostOverviewStatusCard: View {
             Text("API-Rate Estimate")
               .font(.headline)
               .fontWeight(.semibold)
-            Text(subtitle)
+            Text(Self.subtitle)
               .font(.caption)
               .foregroundColor(.secondary)
           }
           Spacer()
+          DashboardCardCaption(
+            text: Self.headerStatus(
+              isScanning: isScanning,
+              isRefreshingMissingDays: isRefreshingMissingDays
+            )
+          )
         }
 
         heroValue
@@ -88,9 +109,10 @@ struct CostOverviewStatusCard: View {
               .font(.caption)
               .foregroundColor(.secondary)
             Spacer()
-            Text(ModelPricing.revisionLabel)
+            Text(pricingProvenance.label)
               .font(.caption)
               .fontWeight(.semibold)
+              .help(pricingProvenance.diagnosticNote ?? pricingProvenance.label)
           }
         }
       }
