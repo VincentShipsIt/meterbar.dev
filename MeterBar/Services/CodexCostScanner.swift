@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 import SQLite3
 
 /// Reads Codex CLI rollouts and the CLI's SQLite log database and turns them

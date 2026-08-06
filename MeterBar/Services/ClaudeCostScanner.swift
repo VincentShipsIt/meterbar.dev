@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 
 /// Reads Claude Code transcripts off disk and turns them into cost totals.
 /// Split out of `CostTracker` (audit C1d) so the transcript parsing, project
