@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import os
 
 /// Reads Claude Code transcripts off disk and turns them into cost totals.
 /// Split out of `CostTracker` (audit C1d) so the transcript parsing, project
@@ -124,7 +125,9 @@ enum ClaudeCostScanner {
         ))
     }
 
-    nonisolated private static func projectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
+    /// Internal (not private) so the budgeted scan can enumerate the same roots
+    /// the whole-corpus scan walks.
+    nonisolated static func projectRoots(accounts: [ClaudeCodeAccount]) -> [URL] {
         let fileManager = FileManager.default
         // realHomeDirectory, not homeDirectoryForCurrentUser: in sandboxed
         // builds the latter is the app container, and the scan would silently
@@ -211,31 +214,14 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        FileLineReader.forEachLine(in: url) { lineData in
-            guard !lineData.isEmpty,
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let timestampStr = json["timestamp"] as? String,
-                  let timestamp = FlexibleISO8601.date(from: timestampStr),
-                  let message = json["message"] as? [String: Any],
-                  let usage = message["usage"] as? [String: Any] else {
-                return
-            }
+        // A line the reader had to truncate is parsed like any other: the usage
+        // block sits near the front of a transcript record, so the retained
+        // prefix often still decodes. Only a prefix that fails to parse is
+        // skipped — never the line for being long.
+        FileLineReader.forEachLine(in: url) { line in
+            guard let event = Self.usageEvent(from: line.bytes, url: url) else { return }
 
-            let event = ClaudeUsageEvent(
-                timestamp: timestamp,
-                model: message["model"] as? String,
-                messageID: message["id"] as? String,
-                requestID: json["requestId"] as? String,
-                input: CostScanValues.int(usage["input_tokens"]),
-                output: CostScanValues.int(usage["output_tokens"]),
-                cacheCreation: CostScanValues.int(usage["cache_creation_input_tokens"]),
-                cacheCreationOneHour: Self.oneHourCacheCreationTokens(in: usage),
-                cacheRead: CostScanValues.int(usage["cache_read_input_tokens"]),
-                origin: Self.usageOrigin(json: json, message: message, url: url)
-            )
-            guard event.hasUsage else { return }
-
-            let inPeriod = timestamp >= cutoffDate
+            let inPeriod = event.timestamp >= cutoffDate
             if let key = event.deduplicationKey {
                 lifetimeKeyed[key] = event
                 if inPeriod { periodKeyed[key] = event }
@@ -252,6 +238,217 @@ enum ClaudeCostScanner {
         )
     }
 
+    /// Decodes one transcript line into a usage event, or `nil` when the line is
+    /// not one (blank, malformed, or a non-usage record).
+    nonisolated private static func usageEvent(from lineData: Data, url: URL) -> ClaudeUsageEvent? {
+        guard !lineData.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              let timestampStr = json["timestamp"] as? String,
+              let timestamp = FlexibleISO8601.date(from: timestampStr),
+              let message = json["message"] as? [String: Any],
+              let usage = message["usage"] as? [String: Any] else {
+            return nil
+        }
+
+        let event = ClaudeUsageEvent(
+            timestamp: timestamp,
+            model: message["model"] as? String,
+            messageID: message["id"] as? String,
+            requestID: json["requestId"] as? String,
+            input: CostScanValues.int(usage["input_tokens"]),
+            output: CostScanValues.int(usage["output_tokens"]),
+            cacheCreation: CostScanValues.int(usage["cache_creation_input_tokens"]),
+            cacheCreationOneHour: Self.oneHourCacheCreationTokens(in: usage),
+            cacheRead: CostScanValues.int(usage["cache_read_input_tokens"]),
+            origin: Self.usageOrigin(json: json, message: message, url: url)
+        )
+        return event.hasUsage ? event : nil
+    }
+
+    // MARK: - Budgeted, resumable scan
+
+    /// Walks `roots` newest transcript first, reading only bytes appended since
+    /// the last refresh and stopping when `session`'s budget runs out.
+    ///
+    /// Every file's tally lives on its own cache entry, so a refresh that only
+    /// gets through the newest handful still returns the *whole* corpus total —
+    /// freshly-read files plus every previously-cached one. The number on screen
+    /// improves monotonically as the slices land instead of appearing all at
+    /// once after a 70-second freeze.
+    nonisolated static func scanRoots(
+        _ roots: [URL],
+        session: CostScanSession
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        var windows = ScanWindows(
+            period: ClaudeSessionTotals(),
+            lifetime: ClaudeSessionTotals(),
+            cutoff: session.cutoff
+        )
+        var live: Set<String> = []
+
+        for root in roots {
+            guard CostScanFileSystem.isLocalDirectory(root) else { continue }
+
+            for file in CostScanCorpus.transcripts(in: root) {
+                // `projectRoots` can name the same directory twice (an account's
+                // configured path is often just `~/.claude`), and the cache is
+                // keyed by standardized path — counting a file once per root
+                // would double its spend.
+                guard live.insert(file.cacheKey).inserted else { continue }
+
+                let projectID = CostProjectAttribution.claudeProjectID(
+                    forTranscriptURL: file.url,
+                    root: root
+                )
+                guard let file = Self.totals(for: file, projectID: projectID, session: session) else {
+                    continue
+                }
+                windows.period.merge(file.period)
+                windows.lifetime.merge(file.lifetime)
+            }
+        }
+
+        // Enumeration always runs to completion even when the read budget is
+        // spent, so `live` is every transcript that exists — safe to prune
+        // against on a partial refresh. Without it, deleted transcripts would
+        // keep contributing their totals forever.
+        session.retainClaude(keys: live)
+        return windows
+    }
+
+    /// One transcript's contribution: cached, resumed, or skipped.
+    ///
+    /// - Returns: `nil` when the file has never been read and there was no
+    ///   budget left to start it, so it contributes nothing this refresh.
+    nonisolated private static func totals(
+        for file: CostScanFile,
+        projectID: String,
+        session: CostScanSession
+    ) -> ScanWindows<ClaudeSessionTotals>? {
+        let record = Self.resumableRecord(for: file, session: session)
+
+        // Nothing appended since the last pass. This is the steady state once
+        // the corpus is warm, and it is why a refresh costs almost no I/O.
+        if let record, record.isComplete, record.size == file.size {
+            return Self.windows(record.payload, cutoff: session.cutoff)
+        }
+
+        let allowance = session.budget.allowance
+        guard allowance > 0 else {
+            session.noteDeferred()
+            return record.map { Self.windows($0.payload, cutoff: session.cutoff) }
+        }
+
+        var payload = record?.payload ?? ClaudeFileTotals()
+        var request = FileLineReadRequest()
+        request.startOffset = record?.offset ?? 0
+        request.maxBytes = allowance
+
+        var periodKeyed: [String: ClaudeUsageEvent] = [:]
+        var periodUnkeyed: [ClaudeUsageEvent] = []
+        var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
+        var lifetimeUnkeyed: [ClaudeUsageEvent] = []
+
+        let read = FileLineReader.readLines(in: file.url, request: request) { line, _ in
+            guard let event = Self.usageEvent(from: line.bytes, url: file.url) else { return }
+
+            if let key = event.deduplicationKey {
+                // First-wins across a resume boundary: an event with this key is
+                // already folded into `payload`, and its bytes are behind the
+                // committed offset. Within a single pass the last copy still
+                // wins, exactly as a cold scan does.
+                if !payload.lifetimeKeys.contains(key) {
+                    lifetimeKeyed[key] = event
+                }
+                if event.timestamp >= session.cutoff, !payload.periodKeys.contains(key) {
+                    periodKeyed[key] = event
+                }
+            } else {
+                lifetimeUnkeyed.append(event)
+                if event.timestamp >= session.cutoff { periodUnkeyed.append(event) }
+            }
+        }
+
+        guard let read else {
+            // Unreadable (permissions, deleted mid-scan). Keep whatever the
+            // cache already had rather than dropping the file's history.
+            return record.map { Self.windows($0.payload, cutoff: session.cutoff) }
+        }
+        session.budget.consume(read.bytesRead)
+
+        payload.period.merge(Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID))
+        payload.lifetime.merge(Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed, projectID: projectID))
+        // `merge` sums `sessions`, but one transcript is one session however
+        // many slices it took to read.
+        payload.period.sessions = payload.period.hasUsage ? 1 : 0
+        payload.lifetime.sessions = payload.lifetime.hasUsage ? 1 : 0
+
+        if read.reachedEndOfFile {
+            // Dedup keys only matter while a read can resume mid-file. Keeping
+            // ~10k files' worth of them on disk forever would cost more to load
+            // than the scan they save.
+            payload.periodKeys = []
+            payload.lifetimeKeys = []
+        } else {
+            payload.periodKeys.formUnion(periodKeyed.keys)
+            payload.lifetimeKeys.formUnion(lifetimeKeyed.keys)
+            session.noteDeferred()
+        }
+
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: read.committedOffset,
+                size: file.size,
+                cutoff: session.cutoff,
+                isComplete: read.reachedEndOfFile,
+                payload: payload
+            ),
+            for: file.cacheKey
+        )
+        return Self.windows(payload, cutoff: session.cutoff)
+    }
+
+    /// The cached entry to resume from, rebased onto this refresh's cutoff.
+    ///
+    /// - Returns: `nil` when the file has to be re-read from byte zero.
+    nonisolated private static func resumableRecord(
+        for file: CostScanFile,
+        session: CostScanSession
+    ) -> CostScanFileRecord<ClaudeFileTotals>? {
+        guard var record = session.claudeRecord(for: file.cacheKey) else { return nil }
+        // A file that shrank was rotated or replaced, so the cached tally
+        // describes bytes that no longer exist.
+        guard record.offset <= UInt64(file.size) else { return nil }
+        guard record.cutoff != session.cutoff else { return record }
+
+        // The period window slides every day; lifetime totals never expire. So
+        // the only question is whether the cached period tally can be rebased
+        // without re-reading the file.
+        let lifetime = record.payload.lifetime
+        if (lifetime.latest ?? .distantPast) < session.cutoff {
+            // Every event predates the new window.
+            record.payload.period = ClaudeSessionTotals()
+            record.payload.periodKeys = []
+        } else if (lifetime.earliest ?? .distantFuture) >= session.cutoff {
+            // Every event falls inside it.
+            record.payload.period = lifetime
+            record.payload.periodKeys = record.payload.lifetimeKeys
+        } else {
+            // The file straddles the cutoff and only its individual events know
+            // where. Re-read it — but only files that actually straddle pay.
+            return nil
+        }
+        record.cutoff = session.cutoff
+        return record
+    }
+
+    nonisolated private static func windows(
+        _ payload: ClaudeFileTotals,
+        cutoff: Date
+    ) -> ScanWindows<ClaudeSessionTotals> {
+        ScanWindows(period: payload.period, lifetime: payload.lifetime, cutoff: cutoff)
+    }
+
     nonisolated private static func tally(
         keyed: [String: ClaudeUsageEvent],
         unkeyed: [ClaudeUsageEvent],
@@ -261,7 +458,11 @@ enum ClaudeCostScanner {
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
 
         for event in events {
-            let pricing = Self.pricing(for: event.model)
+            // Price at the rate in effect when the event was recorded, not
+            // today's (issue #339).
+            let resolved = Self.resolvePricing(for: event.model, at: event.timestamp)
+            let pricing = resolved.pricing
+            totals.pricing.record(resolved)
             let eventCost = TokenCostMath.calculateClaudeCost(
                 input: event.input,
                 output: event.output,
@@ -356,8 +557,12 @@ enum ClaudeCostScanner {
         return min(total, max(0, oneHour))
     }
 
-    nonisolated static func pricing(for model: String?) -> TokenPricing {
-        ModelPricing.claude(for: model)
+    nonisolated static func pricing(for model: String?, at timestamp: Date = Date()) -> TokenPricing {
+        ModelPricing.claude(for: model, at: timestamp)
+    }
+
+    nonisolated static func resolvePricing(for model: String?, at timestamp: Date) -> ResolvedPricing {
+        ModelPricing.resolveClaude(for: model, at: timestamp)
     }
 
     nonisolated static func normalizeModel(_ raw: String) -> String {

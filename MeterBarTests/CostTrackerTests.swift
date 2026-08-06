@@ -188,6 +188,43 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(result.input, 5)
     }
 
+    // MARK: - Oversized transcript lines
+
+    /// A line past `FileLineReader.defaultMaxLineBytes` reaches the scanner as a
+    /// bounded prefix rather than being dropped. Length alone must never
+    /// suppress a record: this one's usage block survives inside the prefix, so
+    /// its spend still counts.
+    func testParseSessionFileCountsTruncatedRecordsWhoseUsageSurvived() throws {
+        let padding = String(repeating: " ", count: FileLineReader.defaultPrefixBytes)
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 120, output: 30) + padding
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 120)
+        XCTAssertEqual(result.output, 30)
+    }
+
+    /// The other half of the contract: a prefix that does not parse is skipped
+    /// like any other malformed line, without stalling the rest of the file.
+    /// Before the streaming cap this shape is what put a whole transcript's
+    /// worth of spend at risk.
+    func testParseSessionFileKeepsScanningPastAnOversizedUnparseableLine() throws {
+        let blob = String(repeating: "x", count: FileLineReader.defaultMaxLineBytes + 2_048)
+        let url = try writeSessionFile(lines: [
+            "{\"timestamp\": \"2026-07-01T10:00:00.000Z\", \"toolUseResult\": \"\(blob)\"}",
+            eventLine(timestamp: "2026-07-02T10:00:00.000Z", input: 5, output: 5)
+        ])
+
+        let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 5)
+        XCTAssertEqual(result.output, 5)
+    }
+
     // MARK: - Project attribution (issue #270)
 
     func testParseSessionFileDefaultsUnattributedEventsToTheUnknownProjectBucket() throws {
@@ -415,6 +452,46 @@ final class CostTrackerTests: XCTestCase {
         // Only the post-cutoff line is counted.
         XCTAssertEqual(context.totals.input, 100)
         XCTAssertEqual(context.sessionIDs, ["new"])
+    }
+
+    /// Rollouts in `~/.codex/sessions` reach 56 MB on a single line. The reader
+    /// keeps a bounded prefix of one instead of dropping it, and `token_count`
+    /// sits near the front of the record — so the tokens still land. Dropping
+    /// the line would silently under-report the session's spend.
+    func testScanCodexRolloutsCountsTruncatedTokenCountLines() throws {
+        let padding = String(repeating: " ", count: FileLineReader.defaultPrefixBytes)
+        let dir = try writeCodexArchive(lines: [
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z") + padding
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 1_000)
+        XCTAssertEqual(context.totals.output, 500)
+        XCTAssertEqual(context.sessionIDs, ["conv-1"])
+    }
+
+    /// An oversized line the prefix cannot explain is skipped, but the rollout
+    /// keeps streaming: the usage recorded after it is still counted.
+    func testScanCodexRolloutsKeepsScanningPastAnOversizedUnparseableLine() throws {
+        let blob = String(repeating: "x", count: FileLineReader.defaultMaxLineBytes + 2_048)
+        let oversized = """
+        {"timestamp": "2026-06-15T09:00:00Z", "type": "response_item", "payload": \
+        {"type": "message", "content": "\(blob)"}}
+        """
+        let dir = try writeCodexArchive(lines: [
+            oversized,
+            codexTokenLine(timestamp: "2026-06-15T10:00:00Z", input: 42, output: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 42)
+        XCTAssertEqual(context.totals.output, 7)
     }
 
     // MARK: - Codex model + origin attribution
@@ -833,5 +910,377 @@ final class CostTrackerTests: XCTestCase {
 
         XCTAssertEqual(windows.period.totals.input, 1_000)
         XCTAssertEqual(windows.lifetime.totals.input, 1_000)
+    }
+
+    // MARK: - Budgeted, resumable corpus scan
+
+    func testByteBudgetSmallerThanTheCorpusDefersTheRestWithoutLosingData() throws {
+        let root = try makeTranscriptRoot()
+        let newest = try writeTranscript(in: root, name: "newest.jsonl", modifiedAgo: 0, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 10)
+        ])
+        let older = try writeTranscript(in: root, name: "older.jsonl", modifiedAgo: 3_600, lines: [
+            eventLine(timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: try fileSize(newest),
+            wallClock: nil
+        )
+
+        let first = CostScanSession(cutoff: cutoff, options: budget, store: store)
+        let firstWindows = ClaudeCostScanner.scanRoots([root], session: first)
+        first.persist()
+
+        XCTAssertFalse(first.isComplete)
+        XCTAssertEqual(firstWindows.period.input, 100)
+        XCTAssertEqual(firstWindows.period.sessions, 1)
+        XCTAssertNil(first.claude.records[older.standardizedFileURL.path])
+
+        // A fresh refresh gets a fresh budget and picks up exactly what was left.
+        let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let secondWindows = ClaudeCostScanner.scanRoots([root], session: second)
+        second.persist()
+
+        XCTAssertTrue(second.isComplete)
+        XCTAssertEqual(secondWindows.period.input, 107)
+        XCTAssertEqual(secondWindows.period.output, 13)
+        XCTAssertEqual(secondWindows.period.sessions, 2)
+    }
+
+    func testSecondRefreshResumesFromThePersistedOffsetAndReadsOnlyAppendedBytes() throws {
+        let root = try makeTranscriptRoot()
+        let url = try writeTranscript(in: root, name: "session.jsonl", modifiedAgo: 0, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 10)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: first)
+        first.persist()
+
+        let firstSize = try fileSize(url)
+        XCTAssertEqual(first.budget.bytesRead, firstSize)
+        XCTAssertEqual(first.claude.records[url.standardizedFileURL.path]?.offset, UInt64(firstSize))
+
+        let appended = eventLine(
+            timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3
+        ) + "\n"
+        try append(appended, to: url)
+
+        let second = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        let windows = ClaudeCostScanner.scanRoots([root], session: second)
+        second.persist()
+
+        XCTAssertEqual(second.budget.bytesRead, appended.utf8.count)
+        XCTAssertEqual(windows.period.input, 107)
+    }
+
+    func testAppendingBetweenScansCountsTheNewRecordsExactlyOnce() throws {
+        let root = try makeTranscriptRoot()
+        let url = try writeTranscript(in: root, name: "session.jsonl", modifiedAgo: 0, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 10)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: first)
+        first.persist()
+
+        try append(eventLine(
+            timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3
+        ) + "\n", to: url)
+
+        let second = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        let incremental = ClaudeCostScanner.scanRoots([root], session: second)
+
+        // A cold scan of the finished file is the reference: incremental reads
+        // must land on exactly the same totals, not double the appended event.
+        let cold = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(incremental.period.input, cold.period.input)
+        XCTAssertEqual(incremental.period.output, cold.period.output)
+        XCTAssertEqual(incremental.period.estimatedCost, cold.period.estimatedCost, accuracy: 0.000_001)
+        XCTAssertEqual(incremental.period.sessions, 1)
+        XCTAssertEqual(incremental.lifetime.input, cold.lifetime.input)
+    }
+
+    func testHalfWrittenTrailingLineIsNotCommittedUntilItIsComplete() throws {
+        let root = try makeTranscriptRoot()
+        let complete = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 10
+        )
+        let tail = eventLine(
+            timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3
+        )
+        let url = root.appendingPathComponent("session.jsonl")
+        let head = String(tail.prefix(20))
+        try (complete + "\n" + head).write(to: url, atomically: true, encoding: .utf8)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        let firstWindows = ClaudeCostScanner.scanRoots([root], session: first)
+        first.persist()
+
+        XCTAssertEqual(firstWindows.period.input, 100)
+        XCTAssertEqual(
+            first.claude.records[url.standardizedFileURL.path]?.offset,
+            UInt64((complete + "\n").utf8.count)
+        )
+
+        try append(String(tail.dropFirst(head.count)) + "\n", to: url)
+
+        let second = CostScanSession(cutoff: cutoff, options: .default, store: store)
+        let secondWindows = ClaudeCostScanner.scanRoots([root], session: second)
+
+        XCTAssertEqual(secondWindows.period.input, 107)
+        XCTAssertEqual(secondWindows.period.output, 13)
+    }
+
+    func testNewestTranscriptsAreScannedFirstWhenTheBudgetCoversOnlySome() throws {
+        let root = try makeTranscriptRoot()
+        let oldest = try writeTranscript(in: root, name: "oldest.jsonl", modifiedAgo: 7_200, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "c", requestID: "c", input: 1, output: 1)
+        ])
+        let middle = try writeTranscript(in: root, name: "middle.jsonl", modifiedAgo: 3_600, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "b", requestID: "b", input: 10, output: 1)
+        ])
+        let newest = try writeTranscript(in: root, name: "newest.jsonl", modifiedAgo: 0, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 1)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: try fileSize(newest),
+            wallClock: nil
+        )
+
+        let session = CostScanSession(cutoff: cutoff, options: budget)
+        let windows = ClaudeCostScanner.scanRoots([root], session: session)
+
+        XCTAssertFalse(session.isComplete)
+        XCTAssertEqual(windows.period.input, 100)
+        XCTAssertNotNil(session.claude.records[newest.standardizedFileURL.path])
+        XCTAssertNil(session.claude.records[middle.standardizedFileURL.path])
+        XCTAssertNil(session.claude.records[oldest.standardizedFileURL.path])
+    }
+
+    func testCancellationMidScanLeavesPersistedOffsetsOnLineBoundaries() async throws {
+        let root = try makeTranscriptRoot()
+        let fileCount = 40
+        let linesPerFile = 40
+        for file in 0..<fileCount {
+            try writeTranscript(
+                in: root,
+                name: "session-\(file).jsonl",
+                modifiedAgo: TimeInterval(file),
+                lines: (0..<linesPerFile).map { line in
+                    eventLine(
+                        timestamp: "2026-07-01T10:00:00.000Z",
+                        messageID: "m-\(file)-\(line)",
+                        requestID: "r-\(file)-\(line)",
+                        input: 10,
+                        output: 1
+                    )
+                }
+            )
+        }
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let scan = Task {
+            try await CostScanExecutor.run { token in
+                let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store, token: token)
+                _ = ClaudeCostScanner.scanRoots([root], session: session)
+                session.persist()
+            }
+        }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+        scan.cancel()
+        _ = try? await scan.value
+        // The scan queue is serial, so this only returns once the cancelled work
+        // has finished persisting whatever it managed to read.
+        _ = try await CostScanExecutor.run { _ in true }
+
+        for (path, record) in store.loadClaude().records {
+            let bytes = try Data(contentsOf: URL(fileURLWithPath: path))
+            XCTAssertLessThanOrEqual(Int(record.offset), bytes.count, path)
+            if record.offset > 0 {
+                XCTAssertEqual(bytes[Int(record.offset) - 1], UInt8(ascii: "\n"), path)
+            }
+        }
+
+        let resumed = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let windows = ClaudeCostScanner.scanRoots([root], session: resumed)
+
+        XCTAssertTrue(resumed.isComplete)
+        XCTAssertEqual(windows.period.input, fileCount * linesPerFile * 10)
+        XCTAssertEqual(windows.period.output, fileCount * linesPerFile)
+        XCTAssertEqual(windows.period.sessions, fileCount)
+    }
+
+    // MARK: - Applying a slice's result
+
+    /// Demo mode is the vehicle rather than the subject: it stubs out the cache
+    /// write, so these assert the publish/stamp decision without touching the
+    /// real `~/Library/Application Support` summary.
+    @MainActor
+    private func makeApplyTracker(lastScan: Date) -> CostTracker {
+        let tracker = CostTracker(demoMode: true)
+        tracker.lastScanDate = lastScan
+        return tracker
+    }
+
+    @MainActor
+    func testIncompleteScanPublishesItsPartialTotalWithoutStampingTheScanClock() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let partial = CostSummary(
+            costs: [],
+            totalCostUSD: 4,
+            totalTokens: 40,
+            periodDays: 30,
+            dailyUsage: [],
+            lifetime: nil
+        )
+
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: partial, isComplete: false))
+
+        // The number on screen improves with every slice...
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, 4)
+        // ...but an undercount must not be recorded as a finished scan: a
+        // `lastScanDate` of today suppresses the background backfill for the
+        // rest of the calendar day.
+        XCTAssertEqual(tracker.lastScanDate, previous)
+    }
+
+    @MainActor
+    func testCompleteScanStampsTheScanClock() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let whole = CostSummary(
+            costs: [],
+            totalCostUSD: 9,
+            totalTokens: 90,
+            periodDays: 30,
+            dailyUsage: [],
+            lifetime: nil
+        )
+
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: whole, isComplete: true))
+
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, 9)
+        XCTAssertNotEqual(tracker.lastScanDate, previous)
+    }
+
+    @MainActor
+    func testCancelledScanLeavesBothTheSummaryAndTheScanClockAlone() {
+        let previous = Date(timeIntervalSince1970: 1_000)
+        let tracker = makeApplyTracker(lastScan: previous)
+        let before = tracker.costSummary?.totalCostUSD
+
+        // No slice completed, so there is nothing to publish and nothing learned.
+        tracker.apply(nil)
+
+        XCTAssertEqual(tracker.costSummary?.totalCostUSD, before)
+        XCTAssertEqual(tracker.lastScanDate, previous)
+    }
+
+    // MARK: - Cache round-trip
+
+    /// The persisted payloads roll usage up in `[Date: TokenAccumulator]`
+    /// dictionaries, and a `Date` key survives a round trip only while the
+    /// encoder and decoder agree on a date strategy. They fail *silently* when
+    /// they drift: every strategy but `.iso8601` writes a bare number, so a
+    /// mismatched pair still decodes — into the wrong day. Every daily row would
+    /// land in a bucket decades away with nothing thrown, so pin the invariant
+    /// here rather than trusting two defaults to stay matched.
+    func testDateKeyedDailyRollupsSurviveACacheRoundTrip() throws {
+        let store = try makeScanCacheStore()
+        let day = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_780_000_000))
+        var totals = ClaudeFileTotals()
+        totals.period.daily[day] = TokenAccumulator(input: 11, output: 22)
+
+        var cache = CostScanFileCache<ClaudeFileTotals>()
+        cache.records["/transcripts/a.jsonl"] = CostScanFileRecord(
+            offset: 512,
+            size: 4_096,
+            cutoff: day,
+            isComplete: false,
+            payload: totals
+        )
+        try store.saveClaude(cache)
+
+        let loaded = store.loadClaude()
+        let record = try XCTUnwrap(loaded.records["/transcripts/a.jsonl"])
+        XCTAssertEqual(record.cutoff, day)
+        XCTAssertEqual(record.offset, 512)
+        XCTAssertEqual(record.payload.period.daily[day]?.input, 11)
+        XCTAssertEqual(record.payload.period.daily[day]?.output, 22)
+    }
+
+    func testPersistReportsCacheWriteFailure() throws {
+        let blockedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanBlocked-\(UUID().uuidString)")
+        try Data().write(to: blockedDirectory)
+        addTeardownBlock { try? FileManager.default.removeItem(at: blockedDirectory) }
+
+        let session = CostScanSession(
+            cutoff: Date(timeIntervalSince1970: 1_780_000_000),
+            options: .unlimited,
+            store: CostScanCacheStore(directory: blockedDirectory)
+        )
+
+        XCTAssertFalse(session.persist())
+    }
+
+    // MARK: - Corpus fixtures
+
+    private func makeTranscriptRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanRoot-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return root
+    }
+
+    private func makeScanCacheStore() throws -> CostScanCacheStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanCache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return CostScanCacheStore(directory: directory)
+    }
+
+    @discardableResult
+    private func writeTranscript(
+        in root: URL,
+        name: String,
+        modifiedAgo: TimeInterval,
+        lines: [String]
+    ) throws -> URL {
+        let url = root.appendingPathComponent(name)
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_780_000_000 - modifiedAgo)],
+            ofItemAtPath: url.path
+        )
+        return url
+    }
+
+    private func append(_ text: String, to url: URL) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+    }
+
+    private func fileSize(_ url: URL) throws -> Int {
+        try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
     }
 }

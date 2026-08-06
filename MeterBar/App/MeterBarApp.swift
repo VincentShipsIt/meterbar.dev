@@ -93,9 +93,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Decides what each menu bar item shows and styles its button. Item
     /// lifecycle stays here; the presenter never creates or removes one.
-    private lazy var statusItemPresenter = StatusItemPresenter { [weak self] descriptors in
-        self?.applyStatusItemDescriptors(descriptors)
-    }
+    private lazy var statusItemPresenter = StatusItemPresenter(
+        isPopoverOpen: { [weak self] in self?.menuPanel?.isShown ?? false },
+        applyDescriptors: { [weak self] descriptors in
+            self?.applyStatusItemDescriptors(descriptors)
+        }
+    )
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Apply the persisted Dock visibility as early as possible so users who
@@ -156,6 +159,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
+            // Watches the follow-focused-app opt-in; observes NSWorkspace only
+            // while that preference is on (issue #341).
+            FrontmostAppMonitor.shared.activate()
             // The managed agent owns completion banners while it is available,
             // including when the GUI is quit. Development builds without the
             // embedded helper retain the in-app notification observer.
