@@ -1,6 +1,7 @@
 import XCTest
 @testable import MeterBar
 import MeterBarShared
+import SQLite3
 
 /// Contract tests for the collaborators split out of `CostTracker` (audit C1d).
 ///
@@ -394,6 +395,60 @@ final class CostScanCollaboratorTests: XCTestCase {
             CodexCostScanner.logDate(in: body),
             FlexibleISO8601.date(from: "2026-07-01T10:00:00Z")
         )
+    }
+
+    func testSQLiteFallbackReadsOnlyRecentOpenTelemetryUsageRows() throws {
+        let database = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meterbar-codex-log-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: database) }
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(database.path, &db), SQLITE_OK)
+        guard let db else {
+            return XCTFail("Expected a temporary SQLite database")
+        }
+        defer { sqlite3_close(db) }
+
+        let schema = """
+            CREATE TABLE logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                ts_nanos INTEGER NOT NULL,
+                target TEXT NOT NULL,
+                feedback_log_body TEXT
+            );
+            CREATE INDEX idx_logs_ts ON logs(ts DESC, ts_nanos DESC, id DESC);
+        """
+        XCTAssertEqual(sqlite3_exec(db, schema, nil, nil, nil), SQLITE_OK)
+
+        let recentUsage = "event.timestamp=2026-07-15T10:00:00Z input_token_count=120 "
+            + "output_token_count=30 cached_token_count=20 reasoning_token_count=5 "
+            + "conversation.id=recent model=gpt-5.6-sol originator=codex_exec}"
+        let oldUsage = recentUsage.replacingOccurrences(of: "2026-07-15", with: "2026-06-01")
+        let inserts = [
+            "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
+                + "VALUES(1784110000, 0, 'codex_otel.trace_safe', '\(recentUsage)');",
+            // Diagnostic bodies can contain copied parser text. A non-OTel
+            // producer must never be interpreted as a usage event.
+            "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
+                + "VALUES(1784110001, 0, 'codex_core::stream_events_utils', '\(recentUsage)');",
+            "INSERT INTO logs(ts, ts_nanos, target, feedback_log_body) "
+                + "VALUES(1780270000, 0, 'codex_otel.trace_safe', '\(oldUsage)');",
+        ]
+        for insert in inserts {
+            XCTAssertEqual(sqlite3_exec(db, insert, nil, nil, nil), SQLITE_OK)
+        }
+
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-07-01T00:00:00Z"))
+        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        CodexCostScanner.scanSQLiteLogs(database: database, since: cutoff, windows: &windows)
+
+        XCTAssertEqual(windows.period.totals.input, 120)
+        XCTAssertEqual(windows.period.totals.output, 30)
+        XCTAssertEqual(windows.period.totals.cacheRead, 20)
+        XCTAssertEqual(windows.period.totals.reasoning, 5)
+        XCTAssertEqual(windows.period.sessionIDs, ["recent"])
+        XCTAssertEqual(windows.lifetime.totals.input, 120)
     }
 
     // MARK: - CostSummaryBuilder

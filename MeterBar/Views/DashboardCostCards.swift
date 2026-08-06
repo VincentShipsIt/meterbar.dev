@@ -10,11 +10,6 @@ struct CostOverviewStatusCard: View {
   let isRefreshingMissingDays: Bool
   let formattedTokens: String
 
-  // Headline sizes scale with Dynamic Type (from their default 34/28pt) instead
-  // of being frozen in pixels, so the cost figure grows for larger accessibility
-  // text sizes. `minimumScaleFactor` + `lineLimit(1)` keep the tile from breaking.
-  @ScaledMetric(relativeTo: .largeTitle)
-  private var headlineSize: CGFloat = 34
   @ScaledMetric(relativeTo: .title)
   private var scanningHeadlineSize: CGFloat = 28
 
@@ -54,7 +49,7 @@ struct CostOverviewStatusCard: View {
   }
 
   var body: some View {
-    DashboardTile {
+    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight) {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           Image(systemName: "dollarsign.circle.fill")
@@ -124,12 +119,7 @@ struct CostOverviewStatusCard: View {
   @ViewBuilder private var heroValue: some View {
     switch phase {
     case .loaded:
-      Text(summary?.formattedTotalCost ?? "")
-        .font(.system(size: headlineSize, weight: .bold))
-        .foregroundColor(.primary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.75)
-        .contentTransition(.numericText())
+      CostHeadlineAmount(summary?.formattedTotalCost ?? "")
         .id(Phase.loaded)
         .transition(MeterBarTheme.Motion.cardPhase)
     case .scanning:
@@ -146,7 +136,8 @@ struct CostOverviewStatusCard: View {
       .transition(MeterBarTheme.Motion.cardPhase)
     case .needsScan:
       Text("Scan needed")
-        .font(.system(size: headlineSize, weight: .bold))
+        .font(.largeTitle)
+        .fontWeight(.bold)
         .foregroundColor(.primary)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
@@ -161,13 +152,27 @@ struct LifetimeCostSummaryCard: View {
   let isScanning: Bool
 
   var body: some View {
-    DashboardCard(title: "Lifetime Local Cost", trailing: trackedDateRange) {
-      if let summary, summary.hasBillableHistory {
-        VStack(alignment: .leading, spacing: 12) {
-          Text(summary.formattedTotalCost)
-            .font(.largeTitle)
-            .fontWeight(.bold)
-            .contentTransition(.numericText())
+    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight) {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .center, spacing: 9) {
+          Image(systemName: "clock.arrow.circlepath")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(MeterBarTheme.appAccent)
+            .accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Lifetime Local Cost")
+              .font(.headline)
+              .fontWeight(.semibold)
+            Text("All available history")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          DashboardCardCaption(text: trackedDateRange)
+        }
+
+        if let summary, summary.hasBillableHistory {
+          CostHeadlineAmount(summary.formattedTotalCost)
 
           ForEach(summary.providers) { provider in
             HStack(spacing: 10) {
@@ -186,27 +191,27 @@ struct LifetimeCostSummaryCard: View {
             .accessibilityLabel(provider.provider.displayName)
             .accessibilityValue(provider.formattedCost)
           }
+        } else if isScanning {
+          HStack(spacing: 10) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Scanning all available local history…")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+        } else if summary == nil {
+          EmptyStateCard(
+            systemImage: "magnifyingglass",
+            title: "Lifetime scan needed",
+            message: "Run a local scan to calculate lifetime cost from available history."
+          )
+        } else {
+          EmptyStateCard(
+            systemImage: "clock.arrow.circlepath",
+            title: "No lifetime cost",
+            message: "No billable Claude or Codex history was found in local logs."
+          )
         }
-      } else if isScanning {
-        HStack(spacing: 10) {
-          ProgressView()
-            .controlSize(.small)
-          Text("Scanning all available local history…")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-      } else if summary == nil {
-        EmptyStateCard(
-          systemImage: "magnifyingglass",
-          title: "Lifetime scan needed",
-          message: "Run a local scan to calculate lifetime cost from available history."
-        )
-      } else {
-        EmptyStateCard(
-          systemImage: "clock.arrow.circlepath",
-          title: "No lifetime cost",
-          message: "No billable Claude or Codex history was found in local logs."
-        )
       }
     }
   }
@@ -220,6 +225,32 @@ struct LifetimeCostSummaryCard: View {
     let first = firstDate.formatted(date: .abbreviated, time: .omitted)
     let last = lastDate.formatted(date: .abbreviated, time: .omitted)
     return first == last ? first : "\(first) – \(last)"
+  }
+}
+
+private enum CostHeadlineCardMetrics {
+  static let minimumHeight: CGFloat = 180
+}
+
+/// One typography contract for the two headline cost cards. Keeping the font,
+/// scaling, and digit treatment in one view prevents the 30-day and lifetime
+/// amounts from drifting apart again.
+private struct CostHeadlineAmount: View {
+  let value: String
+
+  init(_ value: String) {
+    self.value = value
+  }
+
+  var body: some View {
+    Text(value)
+      .font(.largeTitle)
+      .fontWeight(.bold)
+      .monospacedDigit()
+      .foregroundStyle(.primary)
+      .lineLimit(1)
+      .minimumScaleFactor(0.75)
+      .contentTransition(.numericText())
   }
 }
 

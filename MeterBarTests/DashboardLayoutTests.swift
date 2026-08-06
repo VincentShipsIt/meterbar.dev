@@ -5,7 +5,7 @@ import SwiftUI
 import XCTest
 
 /// Layout-audit coverage: sidebar grouping, header-hosted card controls,
-/// and content-hugging cost card.
+/// and the paired cost headline cards.
 @MainActor
 final class DashboardLayoutTests: XCTestCase {
     // MARK: - Sidebar groups
@@ -99,28 +99,49 @@ final class DashboardLayoutTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 
-    // MARK: - Cost overview card hugs content
+    // MARK: - Cost headline cards
 
-    func testCostOverviewCardHasNoArtificialMinHeight() {
-        let card = CostOverviewStatusCard(
-            summary: nil,
+    func testLoadedCostHeadlineCardsUseTheSameCompactHeight() {
+        let start = Date(timeIntervalSince1970: 1_765_324_800)
+        let end = Date(timeIntervalSince1970: 1_786_003_200)
+        let cost = TokenCost(
+            provider: .claudeCode,
+            inputTokens: 1_000,
+            outputTokens: 200,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 5_015.59,
+            sessionCount: 1,
+            periodStart: start,
+            periodEnd: end
+        )
+        let summary = CostSummary(
+            costs: [cost],
+            totalCostUSD: cost.estimatedCostUSD,
+            totalTokens: cost.totalTokens,
+            periodDays: 30,
+            lifetime: LifetimeCostSummary(costs: [cost])
+        )
+        let overview = CostOverviewStatusCard(
+            summary: summary,
             isScanning: false,
             isRefreshingMissingDays: false,
-            formattedTokens: "0"
+            formattedTokens: UsageFormat.tokens(summary.totalTokens)
         )
+        let lifetime = LifetimeCostSummaryCard(summary: summary.lifetime, isScanning: false)
 
-        let hostingView = NSHostingView(rootView: card)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 700, height: 400)
-        hostingView.layoutSubtreeIfNeeded()
+        let overviewHost = NSHostingView(rootView: overview.frame(width: 380))
+        let lifetimeHost = NSHostingView(rootView: lifetime.frame(width: 380))
+        overviewHost.layoutSubtreeIfNeeded()
+        lifetimeHost.layoutSubtreeIfNeeded()
 
-        // 220 was the old overview-grid min-height floor (since removed in favor
-        // of content-driven cards); the costs-page card must hug its content and
-        // stay well under that former floor.
-        XCTAssertLessThan(
-            hostingView.fittingSize.height,
-            220,
-            "costs-page card should hug its content, not pad out to the old grid floor"
+        XCTAssertEqual(
+            overviewHost.fittingSize.height,
+            lifetimeHost.fittingSize.height,
+            accuracy: 0.5,
+            "30-day and lifetime surfaces must end on the same baseline"
         )
+        XCTAssertLessThan(overviewHost.fittingSize.height, 220)
     }
 
     // MARK: - Provider card context-menu commands
