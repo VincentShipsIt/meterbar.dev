@@ -89,11 +89,23 @@ enum CostProjectAttribution {
     /// Home directory without a trailing separator. Both `sanitize` overloads
     /// append their own boundary character, so a `HOME` that happens to end in
     /// "/" would otherwise never match and send every session to `unknown`.
-    nonisolated private static func homeDirectory() -> String {
+    ///
+    /// Resolved once per process rather than per call. `realHomeDirectory()`
+    /// goes through `getpwuid`, which leaves its result in a shared static
+    /// object and is not safe to call from several threads at once — and both
+    /// scanners now reach this from worker threads, once per Claude transcript
+    /// and once per Codex usage event. The value cannot change while the
+    /// process runs, so a `static let` (initialized exactly once, under the
+    /// runtime's own lock) is both the safe answer and strictly less work.
+    nonisolated private static let cachedHomeDirectory: String = {
         var home = ServiceSupport.realHomeDirectory()
         while home.count > 1, home.hasSuffix("/") {
             home.removeLast()
         }
         return home
+    }()
+
+    nonisolated private static func homeDirectory() -> String {
+        cachedHomeDirectory
     }
 }
