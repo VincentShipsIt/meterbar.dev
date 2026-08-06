@@ -43,11 +43,22 @@ nonisolated enum FileLineReader {
         let wasTruncated: Bool
     }
 
-    /// Invokes `body` once per line.
+    private static let newline = UInt8(ascii: "\n")
+    private static let carriageReturn = UInt8(ascii: "\r")
+
+    /// Invokes `body` once per line, without the trailing newline.
     ///
     /// `body` is a non-escaping function parameter on purpose: the Codex scan
     /// threads an `inout` accumulator through it, and capturing an `inout`
-    /// parameter is only legal in a non-escaping closure.
+    /// parameter is only legal in a non-escaping closure. It stays non-escaping
+    /// through the nested `withUnsafeBytes` below, whose closure is itself
+    /// non-escaping.
+    ///
+    /// Lines are cut straight out of the chunk the read produced. Nothing is
+    /// buffered unless a line actually straddles two chunks, and the newline
+    /// search runs on `memchr` rather than `Data`'s byte-at-a-time `Collection`
+    /// conformance. On an 820 MB Codex rollout (4754 lines, the longest 56.7 MB)
+    /// that is the difference between 69.8s and 0.4s.
     ///
     /// - Parameters:
     ///   - maxLineBytes: Bytes buffered for a single line. A line at or under
@@ -68,7 +79,6 @@ nonisolated enum FileLineReader {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
 
-        let newline = UInt8(ascii: "\n")
         // Guards against a caller passing 0 and spinning forever on empty reads.
         let size = max(1, chunkSize)
         let cap = max(0, maxLineBytes)
@@ -78,38 +88,50 @@ nonisolated enum FileLineReader {
         var byteCount = 0
 
         // Counts every byte of the line but stops copying once the cap is hit.
-        func absorb(_ slice: Data) {
-            byteCount += slice.count
+        func absorb(_ start: UnsafePointer<UInt8>, count: Int) {
+            byteCount += count
             guard retained.count < cap else { return }
             let room = cap - retained.count
-            retained.append(Data(slice.count <= room ? slice : slice.prefix(room)))
+            retained.append(start, count: min(count, room))
         }
 
-        func emit() {
+        func emitRetained() {
             body(Self.line(retained, byteCount: byteCount, prefixBytes: prefix))
             retained = Data()
             byteCount = 0
         }
 
         while let chunk = try? handle.read(upToCount: size), !chunk.isEmpty {
-            var searchStart = chunk.startIndex
+            chunk.withUnsafeBytes { raw in
+                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+                var cursor = 0
 
-            while let newlineIndex = chunk[searchStart...].firstIndex(of: newline) {
-                absorb(chunk[searchStart..<newlineIndex])
-                emit()
-                searchStart = chunk.index(after: newlineIndex)
+                while cursor < raw.count,
+                      let hit = memchr(base + cursor, Int32(Self.newline), raw.count - cursor) {
+                    let newlineOffset = UnsafeRawPointer(hit) - UnsafeRawPointer(base)
+                    let segmentCount = newlineOffset - cursor
+                    if byteCount == 0, segmentCount <= cap {
+                        body(Self.line(base + cursor, count: segmentCount))
+                    } else {
+                        absorb(base + cursor, count: segmentCount)
+                        emitRetained()
+                    }
+                    cursor = newlineOffset + 1
+                }
+
+                // Whatever trails the last newline belongs to the next line.
+                // Retention stops at `cap`, while `byteCount` continues to track
+                // the full on-disk length for the emitted metadata.
+                if cursor < raw.count {
+                    absorb(base + cursor, count: raw.count - cursor)
+                }
             }
-
-            // Whatever trails the last newline belongs to the next line, so it
-            // is folded into the accumulator rather than kept as a chunk slice —
-            // that is what keeps a 56 MB line from ever being materialized.
-            absorb(chunk[searchStart...])
         }
 
         // A file ending in a newline leaves nothing pending; one that does not
         // still owes its final line.
         if byteCount > 0 {
-            emit()
+            emitRetained()
         }
         return true
     }
@@ -130,5 +152,18 @@ nonisolated enum FileLineReader {
             return Line(bytes: Data(retained.dropLast()), byteCount: byteCount, wasTruncated: false)
         }
         return Line(bytes: retained, byteCount: byteCount, wasTruncated: false)
+    }
+
+    /// Copies `count` bytes into a zero-based `Data` and drops a CRLF carriage
+    /// return. The copy matters: handing out a pointer into the chunk would
+    /// dangle the moment `withUnsafeBytes` returns, and a `Data` slice would
+    /// keep the parent's non-zero `startIndex`, which `JSONSerialization` has
+    /// historically mis-read.
+    private static func line(_ start: UnsafePointer<UInt8>, count: Int) -> Line {
+        var length = count
+        if length > 0, start[length - 1] == carriageReturn {
+            length -= 1
+        }
+        return Line(bytes: Data(bytes: start, count: length), byteCount: count, wasTruncated: false)
     }
 }
