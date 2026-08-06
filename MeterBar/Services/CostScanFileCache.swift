@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// What one transcript contributed, and where to pick its reading back up.
 ///
@@ -77,12 +76,12 @@ nonisolated struct CostScanCacheStore: Sendable {
         Self.load(from: directory.appendingPathComponent(Self.codexFileName))
     }
 
-    func saveClaude(_ cache: CostScanFileCache<ClaudeFileTotals>) {
-        Self.save(cache, to: directory.appendingPathComponent(Self.claudeFileName))
+    func saveClaude(_ cache: CostScanFileCache<ClaudeFileTotals>) throws {
+        try Self.save(cache, to: directory.appendingPathComponent(Self.claudeFileName))
     }
 
-    func saveCodex(_ cache: CostScanFileCache<CodexFileTotals>) {
-        Self.save(cache, to: directory.appendingPathComponent(Self.codexFileName))
+    func saveCodex(_ cache: CostScanFileCache<CodexFileTotals>) throws {
+        try Self.save(cache, to: directory.appendingPathComponent(Self.codexFileName))
     }
 
     /// Both payloads roll usage up in `[Date: TokenAccumulator]` dictionaries,
@@ -117,27 +116,10 @@ nonisolated struct CostScanCacheStore: Sendable {
         return cache
     }
 
-    /// Failures are logged, not propagated. This cache is an optimisation — the
-    /// next refresh re-reads from offset 0 and produces the same number, just
-    /// slowly — so there is nothing for a caller to do about a failed write and
-    /// no reason to fail a scan that otherwise succeeded. The log line is what
-    /// distinguishes "cold corpus" from "this write has been failing for weeks",
-    /// which is otherwise invisible: both look like a permanently slow refresh.
-    private static func save<Payload>(_ cache: CostScanFileCache<Payload>, to url: URL) {
-        do {
-            let data = try encoder.encode(cache)
-            try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
-            try SecureFileWriter.write(data, to: url)
-        } catch {
-            // The file name is one of two compile-time constants, so it carries
-            // nothing about the user's projects.
-            AppLog.cost.error(
-                """
-                Failed to save scan cache \(url.lastPathComponent, privacy: .public): \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-        }
+    private static func save<Payload>(_ cache: CostScanFileCache<Payload>, to url: URL) throws {
+        let data = try encoder.encode(cache)
+        try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
+        try SecureFileWriter.write(data, to: url)
     }
 }
 

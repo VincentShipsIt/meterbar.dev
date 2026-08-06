@@ -1,4 +1,6 @@
 import Foundation
+import MeterBarShared
+import os
 
 /// One refresh's worth of scanning: the budget it spends, the per-file caches it
 /// resumes from, and whether it managed to reach the end of the corpus.
@@ -114,9 +116,27 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Writes both caches back, including after a cancelled slice — the whole
     /// point of committing on line boundaries is that partial progress is safe
     /// to keep.
-    func persist() {
-        guard let store else { return }
-        store.saveClaude(claude)
-        store.saveCodex(codex)
+    @discardableResult
+    func persist() -> Bool {
+        guard let store else { return true }
+
+        var succeeded = true
+        do {
+            try store.saveClaude(claude)
+        } catch {
+            succeeded = false
+            AppLog.cost.error(
+                "Failed to persist Claude scan progress: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        do {
+            try store.saveCodex(codex)
+        } catch {
+            succeeded = false
+            AppLog.cost.error(
+                "Failed to persist Codex scan progress: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        return succeeded
     }
 }

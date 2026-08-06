@@ -1137,7 +1137,7 @@ final class CostTrackerTests: XCTestCase {
             isComplete: false,
             payload: totals
         )
-        store.saveClaude(cache)
+        try store.saveClaude(cache)
 
         let loaded = store.loadClaude()
         let record = try XCTUnwrap(loaded.records["/transcripts/a.jsonl"])
@@ -1145,6 +1145,21 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(record.offset, 512)
         XCTAssertEqual(record.payload.period.daily[day]?.input, 11)
         XCTAssertEqual(record.payload.period.daily[day]?.output, 22)
+    }
+
+    func testPersistReportsCacheWriteFailure() throws {
+        let blockedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanBlocked-\(UUID().uuidString)")
+        try Data().write(to: blockedDirectory)
+        addTeardownBlock { try? FileManager.default.removeItem(at: blockedDirectory) }
+
+        let session = CostScanSession(
+            cutoff: Date(timeIntervalSince1970: 1_780_000_000),
+            options: .unlimited,
+            store: CostScanCacheStore(directory: blockedDirectory)
+        )
+
+        XCTAssertFalse(session.persist())
     }
 
     // MARK: - Corpus fixtures
