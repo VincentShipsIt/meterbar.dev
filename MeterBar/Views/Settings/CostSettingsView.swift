@@ -18,6 +18,47 @@ enum CostPeriodMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Human-readable project identity for the settings drill-down. Scanner IDs
+/// stay stable and lossless in the cache; this projection strips storage
+/// scaffolding such as `www/` and `.claude/worktrees/...` from the UI.
+nonisolated struct CostProjectPresentation: Equatable {
+    let title: String
+    let detail: String?
+
+    init(identifier: String) {
+        let components = identifier
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        guard identifier != CostProjectAttribution.unknownProjectID, !components.isEmpty else {
+            title = "Unknown project"
+            detail = "No working directory recorded"
+            return
+        }
+
+        if let worktreesIndex = components.firstIndex(of: "worktrees") {
+            let markerIndex = max(0, worktreesIndex - 1)
+            let base = Array(components[..<markerIndex]).last ?? components.first ?? "Worktree"
+            var branch = Array(components.dropFirst(worktreesIndex + 1))
+            if let last = branch.last, Self.looksLikeWorktreeID(last) {
+                branch.removeLast()
+            }
+            title = base
+            detail = branch.isEmpty ? "Worktree" : "Worktree · \(branch.joined(separator: "/"))"
+            return
+        }
+
+        title = components.last ?? identifier
+        let parent = components.dropLast().filter { $0 != "www" }
+        detail = parent.isEmpty ? nil : parent.suffix(2).joined(separator: "/")
+    }
+
+    private static func looksLikeWorktreeID(_ value: String) -> Bool {
+        guard (6...12).contains(value.count) else { return false }
+        return value.allSatisfy { $0.isHexDigit }
+    }
+}
+
 /// Renders one cost-summary period — the rolling 30-day window or the
 /// calendar month-to-date window — plus its per-provider project/worktree
 /// rollup and, when set, a converted-currency caption (issue #270). A pure
@@ -57,39 +98,31 @@ struct CostPeriodContentView: View {
     // MARK: Private
 
     @ViewBuilder private var last30DaysContent: some View {
-        SettingsRowView(title: "Total cost") {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(summary.formattedTotalCost)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                convertedCaption(summary.totalCostUSD)
-            }
-        }
+        summaryHero(
+            totalCost: summary.formattedTotalCost,
+            totalCostUSD: summary.totalCostUSD,
+            dailyAverage: summary.formattedDailyCost,
+            totalTokens: summary.totalTokens,
+            providerCount: summary.costs.count
+        )
 
-        SettingsRowView(title: "Daily average") {
-            Text(summary.formattedDailyCost)
-                .foregroundColor(.secondary)
-        }
+        Divider()
 
-        ForEach(summary.costs) { cost in
-            SettingsRowView(title: cost.provider.displayName) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(cost.formattedCost)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    convertedCaption(cost.estimatedCostUSD)
-                    Text("\(cost.formattedTokens) tokens")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Providers")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
 
-            // Per-project/worktree rollup (issue #270): every scanned session
-            // attributes to exactly one row here, including the explicit
-            // "unknown" bucket for anything unattributable — never dropped,
-            // never guessed.
-            if !cost.projectBreakdowns.isEmpty {
-                projectBreakdownRows(cost.projectBreakdowns)
+            ForEach(summary.costs) { cost in
+                CostProviderBreakdownGroup(
+                    provider: cost.provider,
+                    formattedCost: cost.formattedCost,
+                    estimatedCostUSD: cost.estimatedCostUSD,
+                    formattedTokens: "\(cost.formattedTokens) tokens",
+                    projects: cost.projectBreakdowns,
+                    currency: currency
+                )
             }
         }
     }
@@ -119,14 +152,13 @@ struct CostPeriodContentView: View {
     private func monthToDateRows(now: Date) -> some View {
         let window = summary.monthToDateCostWindow(now: now)
 
-        SettingsRowView(title: "Total cost") {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(window.formattedTotalCost)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                convertedCaption(window.totalCostUSD)
-            }
-        }
+        summaryHero(
+            totalCost: window.formattedTotalCost,
+            totalCostUSD: window.totalCostUSD,
+            dailyAverage: UsageFormat.cost(window.totalCostUSD / Double(max(1, window.coveredDays))),
+            totalTokens: window.totalTokens,
+            providerCount: window.providers.count
+        )
 
         if window.isTruncated {
             SettingsNotice(
@@ -142,68 +174,55 @@ struct CostPeriodContentView: View {
                 message: "No cached daily usage recorded so far this month."
             )
         } else {
-            ForEach(window.providers) { provider in
-                SettingsRowView(title: provider.provider.displayName) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(provider.formattedCost)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        convertedCaption(provider.estimatedCostUSD)
-                        // Daily rows carry no cache-creation tokens or session
-                        // counts, so this reports input+output+cache-read only —
-                        // matching `ProviderDailyTotal.totalTokens` exactly.
-                        Text("\(UsageFormat.groupedTokens(provider.totalTokens)) tokens")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
+            Divider()
 
-                if let projects = provider.projectBreakdowns, !projects.isEmpty {
-                    projectBreakdownRows(projects)
-                }
+            Text("Providers")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            ForEach(window.providers) { provider in
+                CostProviderBreakdownGroup(
+                    provider: provider.provider,
+                    formattedCost: provider.formattedCost,
+                    estimatedCostUSD: provider.estimatedCostUSD,
+                    formattedTokens: "\(UsageFormat.groupedTokens(provider.totalTokens)) tokens",
+                    projects: provider.projectBreakdowns ?? [],
+                    currency: currency
+                )
             }
         }
     }
 
-    /// Rollup view plus drill-down to model breakdown (issue #270): each
-    /// project/worktree row expands to the models used within it, without
-    /// duplicating the rollup row's own layout.
     @ViewBuilder
-    private func projectBreakdownRows(_ projects: [TokenUsageBreakdown]) -> some View {
-        ForEach(projects.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD })) { project in
-            DisclosureGroup {
-                ForEach(project.modelBreakdowns) { model in
-                    HStack {
-                        Text(model.name)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(model.formattedCost)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.leading, 20)
-                }
-            } label: {
-                HStack(alignment: .top) {
-                    Text(project.name)
+    private func summaryHero(
+        totalCost: String,
+        totalCostUSD: Double,
+        dailyAverage: String,
+        totalTokens: Int,
+        providerCount: Int
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Estimated spend")
                         .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text(project.formattedCost)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        convertedCaption(project.estimatedCostUSD)
-                        Text("\(project.sessionCount) session\(project.sessionCount == 1 ? "" : "s")")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
+                        .foregroundStyle(.secondary)
+                    Text(totalCost)
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
+                Spacer(minLength: 16)
+                convertedCaption(totalCostUSD)
             }
-            .padding(.leading, 8)
-            .accessibilityIdentifier("project-breakdown-\(project.name)")
+
+            HStack(spacing: MeterBarTheme.Spacing.lg) {
+                CostSettingsMetric(title: "Daily average", value: dailyAverage)
+                CostSettingsMetric(title: "Tokens", value: UsageFormat.tokens(totalTokens))
+                CostSettingsMetric(title: "Providers", value: "\(providerCount)")
+            }
         }
     }
 
@@ -220,6 +239,147 @@ struct CostPeriodContentView: View {
     }
 }
 
+private struct CostSettingsMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct CostProviderBreakdownGroup: View {
+    let provider: ServiceType
+    let formattedCost: String
+    let estimatedCostUSD: Double
+    let formattedTokens: String
+    let projects: [TokenUsageBreakdown]
+    let currency: DisplayCurrency?
+
+    var body: some View {
+        if projects.isEmpty {
+            providerLabel
+        } else {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(projects.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD })) { project in
+                        CostProjectBreakdownRow(project: project, currency: currency)
+                    }
+                }
+                .padding(.top, MeterBarTheme.Spacing.sm)
+                .padding(.leading, MeterBarTheme.Spacing.xxl)
+            } label: {
+                providerLabel
+            }
+            .accessibilityIdentifier("cost-provider-\(provider.rawValue)")
+        }
+    }
+
+    private var providerLabel: some View {
+        HStack(spacing: 10) {
+            ProviderLogoView(
+                kind: .forService(provider),
+                size: 18,
+                foregroundColor: MeterBarTheme.accent(for: provider)
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(provider.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(formattedTokens)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formattedCost)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                if let currency {
+                    Text("≈ \(currency.formattedConverted(usd: estimatedCostUSD))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct CostProjectBreakdownRow: View {
+    let project: TokenUsageBreakdown
+    let currency: DisplayCurrency?
+
+    private var presentation: CostProjectPresentation {
+        CostProjectPresentation(identifier: project.name)
+    }
+
+    var body: some View {
+        DisclosureGroup {
+            ForEach(project.modelBreakdowns) { model in
+                HStack {
+                    Text(model.name)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(model.formattedCost)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, MeterBarTheme.Spacing.lg)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.title)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    if let detail = presentation.detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(project.formattedCost)
+                        .font(.caption.monospacedDigit())
+                        .fontWeight(.semibold)
+                    if let currency {
+                        Text("≈ \(currency.formattedConverted(usd: project.estimatedCostUSD))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("\(project.sessionCount) usage events")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("project-breakdown-\(project.name)")
+    }
+}
+
 /// The "Cost" settings tab: local session cost scan results, the 30-day scan
 /// control, and (issue #270) the month-to-date period switch and the display
 /// currency preference. Extracted from the SettingsView monolith.
@@ -227,8 +387,10 @@ struct CostSettingsView: View {
     // MARK: Internal
 
     var body: some View {
-        costTrackingSection
-        displayCurrencySection
+        VStack(alignment: .leading, spacing: 14) {
+            costTrackingSection
+            displayCurrencySection
+        }
     }
 
     // MARK: Private
@@ -250,24 +412,23 @@ struct CostSettingsView: View {
     }
 
     private var costTrackingSection: some View {
-        SettingsPanelSection(title: "Cost Tracking", systemImage: "chart.bar.xaxis", color: MeterBarTheme.success) {
-            if costTracker.isScanning {
-                SettingsRowView(title: "Status") {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text("Scanning sessions...")
-                            .foregroundColor(.secondary)
-                    }
-                }
-            } else if let summary = visibleCostSummary, !summary.costs.isEmpty {
-                periodPicker
+        SettingsPanelSection(title: "Local Cost", systemImage: "dollarsign.circle", color: MeterBarTheme.success) {
+            costToolbar
+
+            if let summary = visibleCostSummary, !summary.costs.isEmpty {
+                Divider()
 
                 CostPeriodContentView(summary: summary, periodMode: periodMode, currency: displayCurrencyStore.currency)
 
                 if let lastScan = costTracker.lastScanDate {
                     SettingsNotice(text: "Last scanned \(formatDate(lastScan)) ago.", color: .secondary)
                 }
+            } else if costTracker.isRefreshInProgress {
+                EmptyStateCard(
+                    systemImage: "magnifyingglass",
+                    title: "Building local cost history",
+                    message: "Recent usage appears first while older local sessions finish in the background."
+                )
             } else if costTracker.costSummary != nil {
                 // Scanned, but nothing landed for the providers that are enabled.
                 EmptyStateCard(
@@ -292,28 +453,36 @@ struct CostSettingsView: View {
                     tone: .warning
                 )
             }
+        }
+    }
 
-            SettingsRowView(title: "Local sessions") {
-                Button {
-                    Task {
-                        await costTracker.scanCosts(days: 30)
-                    }
-                } label: {
-                    HStack(spacing: 7) {
-                        if costTracker.isRefreshInProgress {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.75)
-                            Text(costTracker.isRefreshingMissingDays ? "Updating..." : "Scanning...")
-                        } else {
-                            Image(systemName: "magnifyingglass")
-                            Text("Scan 30 Days")
-                        }
+    private var costToolbar: some View {
+        HStack(spacing: 12) {
+            periodPicker
+                .frame(width: 250)
+
+            Spacer(minLength: 12)
+
+            Button {
+                Task {
+                    await costTracker.scanCosts(days: 30)
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    if costTracker.isRefreshInProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.75)
+                        Text(costTracker.isRefreshingMissingDays ? "Updating" : "Scanning")
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Refresh")
                     }
                 }
-                .buttonStyle(.glassProminent)
-                .disabled(costTracker.isRefreshInProgress || !canScanCosts)
             }
+            .buttonStyle(.glassProminent)
+            .disabled(costTracker.isRefreshInProgress || !canScanCosts)
+            .accessibilityIdentifier("cost-refresh-button")
         }
     }
 

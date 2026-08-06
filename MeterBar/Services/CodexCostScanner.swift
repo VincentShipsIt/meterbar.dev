@@ -34,7 +34,7 @@ enum CodexCostScanner {
         for directory in Self.rolloutDirectories(in: codexDir) {
             Self.scanRollouts(directory: directory, windows: &windows)
         }
-        Self.scanSQLiteLogs(database: logsDatabase, windows: &windows)
+        Self.scanSQLiteLogs(database: logsDatabase, since: cutoffDate, windows: &windows)
 
         return windows
     }
@@ -265,14 +265,18 @@ enum CodexCostScanner {
             directories: Self.rolloutDirectories(in: codexDir),
             session: session
         )
-        // The SQLite log is a single file with no append-only guarantee and no
-        // line structure to resume from, so it is re-read whole every refresh.
-        // It is orders of magnitude smaller than the rollout corpus, so it is
-        // not what the budget exists to bound.
-        Self.scanSQLiteLogs(
-            database: codexDir.appendingPathComponent("logs_2.sqlite"),
-            windows: &windows
-        )
+        // Rollouts are the authoritative lifetime corpus. The SQLite store is
+        // only a recent-session fallback, and it must not escape the slice
+        // budget: a modern Codex database can be multiple gigabytes even when
+        // it contains no usage telemetry at all. Read it once, after the
+        // resumable rollout pass has completed, instead of once per slice.
+        if session.isComplete {
+            Self.scanSQLiteLogs(
+                database: codexDir.appendingPathComponent("logs_2.sqlite"),
+                since: session.cutoff,
+                windows: &windows
+            )
+        }
         return windows
     }
 
@@ -608,8 +612,9 @@ enum CodexCostScanner {
         return payload
     }
 
-    nonisolated private static func scanSQLiteLogs(
+    nonisolated static func scanSQLiteLogs(
         database: URL,
+        since cutoffDate: Date,
         windows: inout ScanWindows<CodexScanContext>
     ) {
         guard FileManager.default.fileExists(atPath: database.path) else { return }
@@ -621,21 +626,35 @@ enum CodexCostScanner {
         defer { sqlite3_close(db) }
         guard openResult == SQLITE_OK else { return }
 
+        // `logs_2.sqlite` now stores the complete Codex diagnostic stream, not
+        // just the old OpenTelemetry cost rows. Restricting the indexed time
+        // range and producer target avoids reading arbitrary prompt/tool bodies
+        // merely because they happen to contain one of the parser's key names.
+        // Recent SQLite rows are enough here: rollouts above own lifetime
+        // history, while this fallback covers a current session before its
+        // rollout is visible.
         let sql = """
             SELECT feedback_log_body
-            FROM logs
-            WHERE feedback_log_body LIKE '%input_token_count=%'
+                FROM logs
+            WHERE ts >= ?
+              AND target = 'codex_otel.trace_safe'
+              AND (
+                    feedback_log_body LIKE '%input_token_count=%'
+                 OR feedback_log_body LIKE '%output_token_count=%'
+                 OR feedback_log_body LIKE '%cached_token_count=%'
+                 OR feedback_log_body LIKE '%reasoning_token_count=%'
+              )
               AND feedback_log_body LIKE '%event.timestamp=%'
+            ORDER BY ts ASC, ts_nanos ASC, id ASC
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, Int64(cutoffDate.timeIntervalSince1970.rounded(.down)))
 
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let bodyPointer = sqlite3_column_text(statement, 0) else { continue }
             let body = String(cString: bodyPointer)
-            // No cutoff skip: the window split now happens per event, and the
-            // lifetime window needs the rows this used to drop.
             guard let timestamp = Self.logDate(in: body) else { continue }
 
             let usage: [String: Any] = [

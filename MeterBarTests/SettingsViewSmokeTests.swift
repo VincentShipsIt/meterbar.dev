@@ -231,6 +231,29 @@ final class SettingsViewSmokeTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 
+    func testCostProjectPresentationRemovesStorageScaffoldingFromRegularProjects() {
+        let presentation = CostProjectPresentation(identifier: "www/vincentshipsit/public/meterbardev")
+
+        XCTAssertEqual(presentation.title, "meterbardev")
+        XCTAssertEqual(presentation.detail, "vincentshipsit/public")
+    }
+
+    func testCostProjectPresentationNamesWorktreesWithoutOpaqueIDs() {
+        let presentation = CostProjectPresentation(
+            identifier: "www/vincentshipsit/public/meterbardev/.claude/worktrees/loving/kalam/ccb0b4"
+        )
+
+        XCTAssertEqual(presentation.title, "meterbardev")
+        XCTAssertEqual(presentation.detail, "Worktree · loving/kalam")
+    }
+
+    func testCostProjectPresentationExplainsUnknownAttribution() {
+        let presentation = CostProjectPresentation(identifier: CostProjectAttribution.unknownProjectID)
+
+        XCTAssertEqual(presentation.title, "Unknown project")
+        XCTAssertEqual(presentation.detail, "No working directory recorded")
+    }
+
     func testCostSettingsViewRendersDisplayCurrencySectionAlongsideCostTracking() {
         // Hosts the real tab (real singletons, like testGlassCostScanAndRefreshCTAsStillRender
         // above) so a broken Display Currency section or period picker fails to compile/layout
