@@ -32,9 +32,14 @@ final class TokenActivityCalendarTests: XCTestCase {
 
     // MARK: - Grid geometry
 
-    func testTrailingGridIsFiftyThreeWeeksOfSevenWeekdaySlots() {
+    func testTrailingGridIsAMonthOfSevenWeekdaySlots() {
         let activity = TokenActivityCalendar(summary: makeSummary(), now: now, calendar: calendar)
 
+        XCTAssertEqual(TokenActivityCalendar.defaultWeeks, 6)
+        // Six columns is the smallest window that always spans the 30 days the
+        // rest of the dashboard reports: five would bottom out at 29 when today
+        // is the first weekday of its column, clipping a day off the scan.
+        XCTAssertGreaterThanOrEqual(activity.days.count, 30)
         XCTAssertEqual(activity.weeks.count, TokenActivityCalendar.defaultWeeks)
         XCTAssertTrue(activity.weeks.allSatisfy { $0.days.count == 7 })
         XCTAssertEqual(activity.weeks.map(\.index), Array(0..<TokenActivityCalendar.defaultWeeks))
@@ -64,7 +69,7 @@ final class TokenActivityCalendarTests: XCTestCase {
         XCTAssertEqual(activity.weeks.last?.days.dropFirst().compactMap { $0 }.count, 0)
         XCTAssertEqual(activity.endDate, today)
         XCTAssertNil(activity.days.first { $0.date > today })
-        XCTAssertEqual(activity.days.count, 52 * 7 + 1)
+        XCTAssertEqual(activity.days.count, (TokenActivityCalendar.defaultWeeks - 1) * 7 + 1)
     }
 
     func testGridHonoursAMondayFirstCalendar() {
@@ -94,13 +99,22 @@ final class TokenActivityCalendarTests: XCTestCase {
         let huge = TokenActivityCalendar(summary: makeSummary(), weeks: 500, now: now, calendar: calendar)
 
         XCTAssertEqual(tiny.weeks.count, 1)
-        XCTAssertEqual(huge.weeks.count, TokenActivityCalendar.defaultWeeks)
+        // The ceiling is its own constant: while it was the default too,
+        // narrowing the visible window would have silently capped every caller
+        // that asks for a longer one.
+        XCTAssertEqual(huge.weeks.count, TokenActivityCalendar.maxWeeks)
+        XCTAssertGreaterThan(TokenActivityCalendar.maxWeeks, TokenActivityCalendar.defaultWeeks)
     }
 
     // MARK: - Month labels
 
     func testMonthLabelsAppearOncePerMonthChangeInWeekOrder() {
-        let activity = TokenActivityCalendar(summary: makeSummary(), now: now, calendar: calendar)
+        let activity = TokenActivityCalendar(
+            summary: makeSummary(),
+            weeks: TokenActivityCalendar.maxWeeks,
+            now: now,
+            calendar: calendar
+        )
         let labels = activity.monthLabels
 
         XCTAssertEqual(labels.map(\.weekIndex), labels.map(\.weekIndex).sorted())
@@ -109,6 +123,15 @@ final class TokenActivityCalendarTests: XCTestCase {
         XCTAssertFalse(labels.contains { $0.weekIndex == 0 }, "the leading partial month stays unlabelled")
         XCTAssertFalse(labels.contains { $0.title.isEmpty })
         XCTAssertEqual(labels.last?.title, "Jun")
+    }
+
+    func testDefaultMonthWindowStillLabelsItsMonthChange() {
+        let activity = TokenActivityCalendar(summary: makeSummary(), now: now, calendar: calendar)
+
+        // Six columns back from Sunday 2025-06-15 open on May 11, so the window
+        // straddles exactly one boundary. A month view that labelled nothing
+        // would leave the header row blank.
+        XCTAssertEqual(activity.monthLabels.map(\.title), ["Jun"])
     }
 
     func testMonthLabelsSurviveTheYearBoundary() {

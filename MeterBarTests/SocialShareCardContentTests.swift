@@ -78,7 +78,7 @@ final class SocialShareCardContentTests: XCTestCase {
         XCTAssertEqual(content.tokenHeroCaption, "your 30-day receipts are hiding")
         XCTAssertEqual(content.sessionLabel, "Scan pending")
         XCTAssertEqual(content.averageTokensPerSession, "—")
-        XCTAssertEqual(content.activeDaysLabel, "0/30")
+        XCTAssertEqual(content.activeDaysLabel, "0/7")
         XCTAssertEqual(content.topProviderLabel, "Scan pending")
         XCTAssertEqual(content.usageTier.title, "NO RECEIPTS YET")
     }
@@ -96,7 +96,7 @@ final class SocialShareCardContentTests: XCTestCase {
         XCTAssertEqual(content.providerNames, ["Codex", "Claude"])
         XCTAssertEqual(content.sessionLabel, "24 sessions")
         XCTAssertEqual(content.averageTokensPerSession, "100.0K")
-        XCTAssertEqual(content.activeDaysLabel, "3/30")
+        XCTAssertEqual(content.activeDaysLabel, "3/7")
         XCTAssertEqual(content.topProviderLabel, "Claude")
     }
 
@@ -145,7 +145,38 @@ final class SocialShareCardContentTests: XCTestCase {
         )
     }
 
-    func testDefaultFilenameUsesGeneratedTimestampAndKeepsThirtyDays() {
+    func testDefaultDailyWindowCoversTheChartWeek() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let now = Date(timeIntervalSince1970: 86400 * 40)
+        let usage = [
+            DailyTokenUsage(
+                date: Date(timeIntervalSince1970: 86400 * 40),
+                provider: .codexCli,
+                inputTokens: 5,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0
+            ),
+            // A day inside the old 30-day window but outside the new one, so the
+            // narrowed default is provable rather than merely shorter.
+            DailyTokenUsage(
+                date: Date(timeIntervalSince1970: 86400 * 20),
+                provider: .claudeCode,
+                inputTokens: 900,
+                outputTokens: 100,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 1
+            ),
+        ]
+
+        let totals = SocialShareCardContent.dailyTokenTotals(from: usage, now: now, calendar: calendar)
+
+        XCTAssertEqual(totals.count, SocialShareCardContent.chartDayCount)
+        XCTAssertEqual(totals, [0, 0, 0, 0, 0, 0, 10])
+    }
+
+    func testDefaultFilenameUsesGeneratedTimestampAndKeepsTheChartWeek() {
         let content = SocialShareCardContent(
             tokenTotal: 1,
             sessionCount: 1,
@@ -155,7 +186,11 @@ final class SocialShareCardContentTests: XCTestCase {
             generatedAt: Date(timeIntervalSince1970: 3600)
         )
 
-        XCTAssertEqual(content.dailyTokenTotals.count, 30)
+        XCTAssertEqual(SocialShareCardContent.chartDayCount, 7)
+        XCTAssertEqual(content.dailyTokenTotals.count, SocialShareCardContent.chartDayCount)
+        // The newest days survive the trim — an oldest-first slice would draw a
+        // week-old chart under a fresh timestamp.
+        XCTAssertEqual(content.dailyTokenTotals, Array(33 ..< 40))
         XCTAssertEqual(content.defaultFilename, "meterbar-token-card-19700101-010000.png")
     }
 }

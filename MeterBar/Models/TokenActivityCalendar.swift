@@ -137,7 +137,15 @@ struct TokenActivityMonthLabel: Identifiable, Equatable {
 /// Days inside that span with no rows are confirmed zero-usage days; days before
 /// it are unavailable history, not synthetic zeros.
 struct TokenActivityCalendar {
-    static let defaultWeeks = 53
+    /// Columns the dashboard draws: the trailing month. Six is the smallest
+    /// window that always covers the 30 days every other cost surface reports —
+    /// five spans only 29 when today opens its own column — and it leaves the
+    /// cells wide enough to read, which a year-wide grid never was.
+    static let defaultWeeks = 6
+    /// Widest grid the geometry stays honest for. Separate from `defaultWeeks`
+    /// so narrowing the visible window cannot silently cap a caller that asks
+    /// for more.
+    static let maxWeeks = 53
     static let weekdayCount = 7
 
     let requestedWeeks: Int
@@ -163,7 +171,7 @@ struct TokenActivityCalendar {
         now: Date = Date(),
         calendar: Calendar = .current
     ) {
-        let requestedWeeks = min(max(1, weeks), Self.defaultWeeks)
+        let requestedWeeks = min(max(1, weeks), Self.maxWeeks)
         let today = calendar.startOfDay(for: now)
         let weekdayOffset = (calendar.component(.weekday, from: today) - calendar.firstWeekday + Self.weekdayCount)
             % Self.weekdayCount

@@ -296,8 +296,10 @@ private struct SocialShareTokenChart: View {
     let scale: CGFloat
 
     private var chartValues: [Int] {
-        let visibleValues = Array(values.suffix(30))
-        return visibleValues.isEmpty ? Array(repeating: 0, count: 30) : visibleValues
+        let visibleValues = Array(values.suffix(SocialShareCardContent.chartDayCount))
+        return visibleValues.isEmpty
+            ? Array(repeating: 0, count: SocialShareCardContent.chartDayCount)
+            : visibleValues
     }
 
     private var maxValue: Int {
@@ -316,7 +318,7 @@ private struct SocialShareTokenChart: View {
                         .font(.system(size: 13 * scale, weight: .black, design: .monospaced))
                         .tracking(0.8 * scale)
                         .foregroundStyle(.white)
-                    Text(hasUsage ? "30-day session tokens" : "feed me more sessions")
+                    Text(hasUsage ? "7-day session tokens" : "feed me more sessions")
                         .font(.system(size: 11 * scale, weight: .bold))
                         .foregroundStyle(.white.opacity(0.50))
                 }
