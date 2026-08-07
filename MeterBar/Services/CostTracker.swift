@@ -148,9 +148,17 @@ class CostTracker: ObservableObject {
     ///   along because the caller must not record a budget-truncated total as a
     ///   finished scan — see `apply(_:)`.
     private func makeCostSummary(days: Int) async -> CostSummaryBuilder.CostSummaryScan? {
-        let includeClaudeCode = providerVisibilityStore.isEnabled(.claudeCode)
-        let includeCodexCli = providerVisibilityStore.isEnabled(.codexCli)
+        // Read off `CostScanProvider` itself rather than a hand-listed set, so a
+        // provider added to the enum reaches the scan without a second edit here.
+        let enabledProviders = Set(
+            CostScanProvider.allCases.filter { providerVisibilityStore.isEnabled($0.service) }
+        )
         let claudeAccounts = ClaudeCodeAccountStore.shared.accounts
+        // Every configured account, not just the enabled ones — matching the
+        // Claude line above. Both scanners are looking for the home directories
+        // spend was written to, and disabling an account hides its quota gauge
+        // without unspending what it already cost.
+        let grokAccounts = GrokAccountStore.shared.accounts
         let cutoff = CostWindow.start(days: days)
         let store = CostScanCacheStore.applicationSupport
         var latest: CostSummaryBuilder.CostSummaryScan?
@@ -165,9 +173,9 @@ class CostTracker: ObservableObject {
                 )
                 let scan = CostSummaryBuilder.makeScan(
                     days: days,
-                    includeClaudeCode: includeClaudeCode,
-                    includeCodexCli: includeCodexCli,
+                    enabledProviders: enabledProviders,
                     claudeAccounts: claudeAccounts,
+                    grokAccounts: grokAccounts,
                     session: session
                 )
                 // Persist even when the slice was cut short: offsets commit on
@@ -222,7 +230,7 @@ class CostTracker: ObservableObject {
 
     private static func logStoppedScan(_ slice: ScanSlice) {
         for provider in slice.scan.deferredProviders {
-            let name = provider == .claude ? "Claude" : "Codex"
+            let name = provider.logName
             switch slice.persistence.outcome(for: provider) {
             case .persisted:
                 continue

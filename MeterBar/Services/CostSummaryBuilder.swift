@@ -39,11 +39,16 @@ enum CostSummaryBuilder {
     /// One traversal fills both windows. The lifetime scan reads a strict
     /// superset of the period scan, so running it separately would mean reading
     /// every transcript twice for the same numbers.
+    ///
+    /// `enabledProviders` replaces what used to be one `Bool` per provider: with
+    /// three corpora that shape had grown to three flags whose order at the call
+    /// site was load-bearing, and a set states the same thing without letting a
+    /// fourth provider silently push the argument list past the linter's cap.
     nonisolated static func makeScan(
         days: Int,
-        includeClaudeCode: Bool,
-        includeCodexCli: Bool,
+        enabledProviders: Set<CostScanProvider>,
         claudeAccounts: [ClaudeCodeAccount],
+        grokAccounts: [GrokAccount],
         session: CostScanSession,
         claudeProjectRoots: [URL]? = nil
     ) -> CostSummaryScan {
@@ -53,7 +58,7 @@ enum CostSummaryBuilder {
             cutoff: session.cutoff
         )
 
-        if includeClaudeCode {
+        if enabledProviders.contains(.claude) {
             let roots = claudeProjectRoots ?? ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
             let claude = ClaudeCostScanner.scanRoots(roots, session: session)
             scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: session.cutoff))
@@ -62,12 +67,21 @@ enum CostSummaryBuilder {
             scan.lifetime.record(claude.lifetime.pricing)
         }
 
-        if includeCodexCli {
+        if enabledProviders.contains(.codex) {
             let codex = CodexCostScanner.scanSessions(session: session)
             scan.period.append(CodexCostScanner.makeCost(from: codex.period))
             scan.lifetime.append(CodexCostScanner.makeCost(from: codex.lifetime))
             scan.period.record(codex.period.pricing)
             scan.lifetime.record(codex.lifetime.pricing)
+        }
+
+        // No `record(...)` pass: Grok bills each turn itself, so its rows are
+        // never priced from the local table and have no provenance to report.
+        if enabledProviders.contains(.grok) {
+            let roots = GrokCostScanner.sessionRoots(accounts: grokAccounts)
+            let grok = GrokCostScanner.scanRoots(roots, session: session)
+            scan.period.append(GrokCostScanner.makeCost(from: grok.period))
+            scan.lifetime.append(GrokCostScanner.makeCost(from: grok.lifetime))
         }
 
         // Events older than every entry in the table were priced at the oldest

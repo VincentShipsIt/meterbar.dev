@@ -500,7 +500,7 @@ final class CostScanCollaboratorTests: XCTestCase {
 
         // No `estimatedCostUSD` anywhere, so every row falls back to the table.
         let tokens = totals(input: 1_000_000, output: 0, cacheRead: 0)
-        var context = CodexScanContext(earliestDate: recorded, latestDate: recorded)
+        var context = CostScanWindowContext(earliestDate: recorded, latestDate: recorded)
         context.totals = tokens
         context.sessionIDs = ["session"]
         context.modelTotals = ["gpt-5.6-sol": tokens]
@@ -534,9 +534,9 @@ final class CostScanCollaboratorTests: XCTestCase {
         let days = 7
         let scan = CostSummaryBuilder.makeScan(
             days: days,
-            includeClaudeCode: false,
-            includeCodexCli: false,
+            enabledProviders: [],
             claudeAccounts: [],
+            grokAccounts: [],
             session: CostScanSession(cutoff: CostWindow.start(days: days), options: .unlimited)
         )
 
@@ -578,9 +578,9 @@ final class CostScanCollaboratorTests: XCTestCase {
 
         let budgeted = CostSummaryBuilder.makeScan(
             days: days,
-            includeClaudeCode: true,
-            includeCodexCli: false,
+            enabledProviders: [.claude],
             claudeAccounts: [],
+            grokAccounts: [],
             session: session,
             claudeProjectRoots: [projects]
         )

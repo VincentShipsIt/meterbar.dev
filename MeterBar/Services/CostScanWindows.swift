@@ -215,13 +215,19 @@ nonisolated struct CostScanResult {
     }
 }
 
-/// Mutable accumulators threaded through the Codex scan. Bundling these into one
+/// Mutable accumulators threaded through a corpus scan. Bundling these into one
 /// value collapses `CodexCostScanner`'s `addUsage`/`scanRollouts`/`scanSQLiteLogs`
 /// from 10–13 parameters (a SwiftLint `function_parameter_count` error) down to
 /// a single `inout` argument.
 ///
+/// Shared by the Codex and Grok scanners rather than duplicated: both fold the
+/// same eight breakdown dimensions plus dedup keys, and a second copy would mean
+/// a second `merge` and a second set of `_modify` forwarders to keep in step.
+/// Renaming the *type* is safe for the on-disk cache — `Codable` keys come from
+/// the stored property names below, not from the type's name.
+///
 /// Internal (not private) so `CodexCostScanner.scanRollouts` can be fixture-tested.
-nonisolated struct CodexScanContext: Sendable, Codable {
+nonisolated struct CostScanWindowContext: Sendable, Codable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
     var dailyModelTotals: [Date: [String: TokenAccumulator]] = [:]
@@ -246,7 +252,7 @@ nonisolated struct CodexScanContext: Sendable, Codable {
     /// that contributed nothing still carries `earliestDate = Date()` from
     /// whichever refresh created it, and merging that would drag the reported
     /// period start backwards to an instant no event ever happened at.
-    mutating func merge(_ other: CodexScanContext) {
+    mutating func merge(_ other: CostScanWindowContext) {
         guard !other.eventKeys.isEmpty else { return }
 
         totals.merge(other.totals)
@@ -295,14 +301,14 @@ nonisolated struct CodexScanContext: Sendable, Codable {
     }
 }
 
-/// Forwarders rather than renamed stored properties: `CodexScanContext` is the
+/// Forwarders rather than renamed stored properties: `CostScanWindowContext` is the
 /// `Codable` payload `CostScanFileCache` persists, so renaming its fields would
 /// change the on-disk keys and force every user into a full rescan.
 ///
 /// `_modify` rather than a setter: the fold subscripts these thousands of times
 /// per scan, and a get-mutate-set forwarder would copy the whole dictionary on
 /// every one of them.
-nonisolated extension CodexScanContext: CostScanBreakdowns {
+nonisolated extension CostScanWindowContext: CostScanBreakdowns {
     var daily: [Date: TokenAccumulator] {
         get { dailyTotals }
         _modify { yield &dailyTotals }

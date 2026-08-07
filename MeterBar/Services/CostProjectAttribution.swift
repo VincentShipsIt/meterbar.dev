@@ -49,6 +49,21 @@ enum CostProjectAttribution {
         return sanitize(absolutePath: cwd)
     }
 
+    /// Project for one Grok session directory.
+    ///
+    /// Grok names each session directory after the percent-encoded absolute
+    /// project path (`%2FUsers%2Falice%2Fwww%2Fapp`), so decoding recovers the
+    /// same absolute path Codex reads straight out of `session_meta`, and the
+    /// two then share one sanitizer. A name that does not decode is treated as
+    /// unattributable rather than reported raw — an undecodable name is not a
+    /// path, and passing it through would put percent escapes on screen.
+    nonisolated static func grokProjectID(encodedDirectoryName raw: String) -> String {
+        guard let decoded = raw.removingPercentEncoding, !decoded.isEmpty else {
+            return unknownProjectID
+        }
+        return sanitize(absolutePath: decoded)
+    }
+
     /// Strips the encoded real-home-directory prefix so a displayed
     /// identifier never leaks a full home-directory path, then reads dashes
     /// in the remainder as path separators.
