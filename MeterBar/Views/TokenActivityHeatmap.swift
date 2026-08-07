@@ -2,12 +2,12 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-/// Dashboard card wrapping the trailing contribution calendar.
+/// Dashboard card wrapping the trailing month's contribution calendar.
 ///
 /// Takes plain values rather than reaching for `CostTracker.shared` (same shape
 /// as ``CostOverviewStatusCard``) so the card hosts in a test without standing
 /// up the scanner. The calendar is derived once in `init` — `body` runs on every
-/// hover tick, and re-slicing a year of daily rows there would be wasteful.
+/// hover tick, and re-bucketing the daily rows there would be wasteful.
 struct TokenActivityCard: View {
     private let activity: TokenActivityCalendar
     private let isScanning: Bool
@@ -157,8 +157,9 @@ struct TokenActivityHeatmap: View {
 
             ForEach(activity.weeks) { week in
                 // `fixedSize` before the column-width frame lets the label keep
-                // its natural width and overhang the following columns, which is
-                // the only way a month name fits above an 11pt cell.
+                // its natural width and overhang the following columns. A month
+                // cell is now wide enough for an English abbreviation, but not
+                // for the longer ones other locales use.
                 Text(monthTitles[week.index] ?? "")
                     .fixedSize()
                     .frame(width: TokenActivityMetrics.cell, alignment: .leading)
@@ -171,10 +172,10 @@ struct TokenActivityHeatmap: View {
 
     private var weekdayGutter: some View {
         VStack(spacing: TokenActivityMetrics.spacing) {
-            ForEach(Array(activity.weekdaySymbols.enumerated()), id: \.offset) { index, symbol in
-                // Every other row only — seven stacked labels do not fit beside
-                // 11pt cells, and the alternating ones still orient the reader.
-                Text(index.isMultiple(of: 2) ? "" : symbol)
+            ForEach(Array(activity.weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                // Every row is labelled: the month grid's cells are taller than a
+                // 9pt line, which the year-wide grid's were not.
+                Text(symbol)
                     .frame(
                         width: TokenActivityMetrics.gutterWidth,
                         height: TokenActivityMetrics.cell,
@@ -273,14 +274,18 @@ private struct TokenActivitySwatch: View {
 
 /// Grid geometry, kept in one place so the month header, weekday gutter, cells,
 /// and legend stay on the same rhythm.
+/// Sized for the trailing month. Six columns leave room a 53-column year never
+/// had, so the cells are large enough to hover accurately and to carry a legible
+/// weekday label on every row.
 private enum TokenActivityMetrics {
-    static let cell: CGFloat = 11
-    static let spacing: CGFloat = 3
-    static let radius: CGFloat = 2.5
-    static let gutterWidth: CGFloat = 22
+    static let cell: CGFloat = 20
+    static let spacing: CGFloat = 4
+    static let radius: CGFloat = 4
+    static let gutterWidth: CGFloat = 28
     static let focusRingInset: CGFloat = 2
-    /// Placeholder height while a scan runs, matching the loaded grid.
-    static let gridHeight: CGFloat = 132
+    /// Placeholder height while a scan runs, matching the loaded grid: seven
+    /// cell rows plus their gaps, the month header, and the focus-ring inset.
+    static let gridHeight: CGFloat = 186
 }
 
 /// Heatmap band colors.

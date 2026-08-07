@@ -10,7 +10,7 @@ import XCTest
 final class TokenActivityCardTests: XCTestCase {
     // MARK: - Hosting
 
-    func testLoadedCardHostsWithAFullYearOfCells() {
+    func testLoadedCardHostsWithMoreHistoryThanTheMonthWindowDraws() {
         let card = TokenActivityCard(
             summary: makeSummary(dayCount: 90),
             isScanning: false,

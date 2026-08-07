@@ -17,7 +17,7 @@ struct SocialShareCardContent: Equatable {
         self.sessionCount = sessionCount.map { max(0, $0) }
         self.providerNames = Self.uniqueProviderNames(providerNames)
         self.topProviderName = topProviderName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.dailyTokenTotals = Array(dailyTokenTotals.suffix(30))
+        self.dailyTokenTotals = Array(dailyTokenTotals.suffix(Self.chartDayCount))
         self.generatedAt = generatedAt
     }
 
@@ -26,6 +26,13 @@ struct SocialShareCardContent: Equatable {
     static let appName = "MeterBar"
     static let websiteURL = "https://meterbar.dev"
     static let websiteDisplay = "meterbar.dev"
+
+    /// Days the sparkline covers. The hero number stays a 30-day total — it
+    /// comes from `CostSummary`, not from these buckets — but a 30-bar chart at
+    /// card width is a texture rather than a trend, so the chart reads the last
+    /// week instead. Every site that slices, pads, or counts the series derives
+    /// from this so the window cannot drift between them.
+    static let chartDayCount = 7
 
     let tokenTotal: Int?
     let sessionCount: Int?
@@ -38,7 +45,7 @@ struct SocialShareCardContent: Equatable {
         tokenTotal != nil
     }
 
-    /// Whether the 30-day chart has any real usage to draw. When this is false
+    /// Whether the chart window has any real usage to draw. When this is false
     /// the share card must render an honest empty state — never fabricated bars.
     /// This is the single source of truth the chart view keys its empty state on.
     var hasDailyChartData: Bool {
@@ -76,7 +83,9 @@ struct SocialShareCardContent: Equatable {
 
     var activeDaysLabel: String {
         let activeDays = dailyTokenTotals.filter { $0 > 0 }.count
-        return "\(activeDays)/30"
+        // Denominator is the window, not `dailyTokenTotals.count`: an unscanned
+        // card carries an empty series and would otherwise read "0/0".
+        return "\(activeDays)/\(Self.chartDayCount)"
     }
 
     var topProviderLabel: String {
@@ -108,7 +117,7 @@ struct SocialShareCardContent: Equatable {
 
     static func dailyTokenTotals(
         from dailyUsage: [DailyTokenUsage],
-        days: Int = 30,
+        days: Int = SocialShareCardContent.chartDayCount,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [Int] {
