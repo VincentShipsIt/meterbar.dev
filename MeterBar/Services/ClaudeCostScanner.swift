@@ -6,70 +6,6 @@ import os
 /// Split out of `CostTracker` (audit C1d) so the transcript parsing, project
 /// discovery, and per-event tally are testable without publishing a summary.
 enum ClaudeCostScanner {
-    nonisolated static func scanSessions(
-        since cutoffDate: Date,
-        claudeAccounts: [ClaudeCodeAccount],
-        width: Int = CostScanParallel.defaultWidth
-    ) -> ScanWindows<ClaudeSessionTotals> {
-        scanSessions(
-            since: cutoffDate,
-            projectRoots: Self.projectRoots(accounts: claudeAccounts),
-            width: width
-        )
-    }
-
-    /// Roots-explicit seam. The account-based entry point always includes the
-    /// real `~/.claude*/projects` directories, so tests that want to scan a
-    /// fixture tree — and only that tree — go through here.
-    ///
-    /// Deduplication is per file: `parseSessionWindows` keeps its own
-    /// `messageID:requestID` map and throws it away at the end of each
-    /// transcript, so a file's totals depend on nothing outside that file and
-    /// merging them is a plain sum. That is what makes the parse safe to fan
-    /// out. The merge itself stays serial and in sorted-path order because
-    /// summing `Double` costs is not associative.
-    nonisolated static func scanSessions(
-        since cutoffDate: Date,
-        projectRoots: [URL],
-        width: Int = CostScanParallel.defaultWidth
-    ) -> ScanWindows<ClaudeSessionTotals> {
-        var windows = ScanWindows(
-            period: ClaudeSessionTotals(),
-            lifetime: ClaudeSessionTotals(),
-            cutoff: cutoffDate
-        )
-        guard !projectRoots.isEmpty else { return windows }
-
-        for root in projectRoots {
-            // No mtime prefilter: the lifetime window needs every file, and the
-            // period window is already bounded by the per-event timestamp check
-            // (an event is never newer than the file that holds it).
-            let files = CostScanFileSystem.transcriptFiles(
-                in: root,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            )
-
-            CostScanParallel.parseInOrder(
-                files,
-                width: width,
-                parse: { url in
-                    // Computed once per file, not per event: project identity is
-                    // a property of where the transcript lives, unlike
-                    // `usageOrigin` which can vary line-to-line within the same
-                    // file.
-                    let projectID = CostProjectAttribution.claudeProjectID(forTranscriptURL: url, root: root)
-                    return Self.parseSessionWindows(at: url, since: cutoffDate, projectID: projectID)
-                },
-                fold: { file in
-                    windows.period.merge(file.period)
-                    windows.lifetime.merge(file.lifetime)
-                }
-            )
-        }
-
-        return windows
-    }
-
     /// `windowStart` is the floor the old code seeded `latestDate` with — the
     /// cutoff for the period window, `.distantPast` for lifetime.
     nonisolated static func makeCost(
@@ -531,6 +467,9 @@ enum ClaudeCostScanner {
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
+        // Resolving the current calendar is not free, and it cannot change
+        // mid-fold.
+        let calendar = Calendar.current
 
         for event in events {
             // Price at the rate in effect when the event was recorded, not
@@ -546,7 +485,6 @@ enum ClaudeCostScanner {
                 cacheRead: event.cacheRead,
                 pricing: pricing
             )
-            let day = Calendar.current.startOfDay(for: event.timestamp)
 
             totals.input += event.input
             totals.output += event.output
@@ -554,67 +492,20 @@ enum ClaudeCostScanner {
             totals.cacheRead += event.cacheRead
             totals.estimatedCost += eventCost
             totals.note(event.timestamp)
-            totals.daily[day, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            let displayModel = CostScanValues.displayModelName(event.model)
-            totals.dailyModels[day, default: [:]][displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.dailyProjects[day, default: [:]][projectID, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            var dailyProjectModels = totals.dailyProjectModels[day] ?? [:]
-            dailyProjectModels[projectID, default: [:]][
-                displayModel,
-                default: TokenAccumulator()
-            ].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.dailyProjectModels[day] = dailyProjectModels
-            totals.models[displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.origins[event.origin, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.projects[projectID, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.projectModels[projectID, default: [:]][displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
+            totals.record(
+                CostScanEventTotals(
+                    input: event.input,
+                    output: event.output,
+                    cacheCreation: event.cacheCreation,
+                    cacheRead: event.cacheRead,
+                    estimatedCostUSD: eventCost
+                ),
+                at: CostScanEventKeys(
+                    day: calendar.startOfDay(for: event.timestamp),
+                    model: CostScanValues.displayModelName(event.model),
+                    origin: event.origin,
+                    project: projectID
+                )
             )
         }
 

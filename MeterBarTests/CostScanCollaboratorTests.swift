@@ -531,21 +531,25 @@ final class CostScanCollaboratorTests: XCTestCase {
     // MARK: - CostSummaryBuilder
 
     func testSummaryWithEveryProviderDisabledScansNothingAndStaysEmpty() {
-        let summary = CostSummaryBuilder.makeSummary(
-            days: 7,
+        let days = 7
+        let scan = CostSummaryBuilder.makeScan(
+            days: days,
             includeClaudeCode: false,
             includeCodexCli: false,
-            claudeAccounts: []
+            claudeAccounts: [],
+            session: CostScanSession(cutoff: CostWindow.start(days: days), options: .unlimited)
         )
 
-        XCTAssertTrue(summary.costs.isEmpty)
-        XCTAssertTrue(summary.dailyUsage.isEmpty)
-        XCTAssertEqual(summary.totalCostUSD, 0, accuracy: 0.0001)
-        XCTAssertEqual(summary.totalTokens, 0)
-        XCTAssertEqual(summary.periodDays, 7)
+        XCTAssertTrue(scan.summary.costs.isEmpty)
+        XCTAssertTrue(scan.summary.dailyUsage.isEmpty)
+        XCTAssertEqual(scan.summary.totalCostUSD, 0, accuracy: 0.0001)
+        XCTAssertEqual(scan.summary.totalTokens, 0)
+        XCTAssertEqual(scan.summary.periodDays, days)
+        // Nothing to read is not the same as running out of budget.
+        XCTAssertTrue(scan.isComplete)
     }
 
-    func testBudgetedSummaryPreservesFullScanPricingProvenance() throws {
+    func testBudgetedSummaryReportsThePricingProvenanceItScannedWith() throws {
         let root = try makeCorpusDirectory()
         let config = root.appendingPathComponent("claude", isDirectory: true)
         let projects = config.appendingPathComponent("projects", isDirectory: true)
@@ -566,13 +570,6 @@ final class CostScanCollaboratorTests: XCTestCase {
             encoding: .utf8
         )
         let days = 30
-        let full = CostSummaryBuilder.makeSummary(
-            days: days,
-            includeClaudeCode: true,
-            includeCodexCli: false,
-            claudeAccounts: [],
-            claudeProjectRoots: [projects]
-        )
         let session = CostScanSession(
             cutoff: CostWindow.start(days: days),
             options: .unlimited,
@@ -588,8 +585,11 @@ final class CostScanCollaboratorTests: XCTestCase {
             claudeProjectRoots: [projects]
         )
 
-        XCTAssertNotNil(full.pricing)
-        XCTAssertEqual(budgeted.summary.pricing, full.pricing)
+        let pricing = try XCTUnwrap(budgeted.summary.pricing)
+        XCTAssertFalse(pricing.verificationDates.isEmpty)
+        // Every event was priced from a table entry, so none predate the table.
+        XCTAssertEqual(pricing.eventsBeforeFirstEntry, 0)
+        XCTAssertNil(pricing.diagnosticNote)
     }
 
     // MARK: - CostScanBudget

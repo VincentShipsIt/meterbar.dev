@@ -337,7 +337,11 @@ final class CostTrackerTests: XCTestCase {
 
         let account = ClaudeCodeAccount(id: UUID(), name: "demo", configDirectory: configDir.path)
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
-        let windows = ClaudeCostScanner.scanSessions(since: cutoff, claudeAccounts: [account])
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+        let windows = ClaudeCostScanner.scanRoots(
+            ClaudeCostScanner.projectRoots(accounts: [account]),
+            session: session
+        )
 
         XCTAssertEqual(windows.period.projects["www/demo/project"]?.input, 10)
     }
@@ -345,7 +349,7 @@ final class CostTrackerTests: XCTestCase {
     // MARK: - Codex rollout scan
 
     /// Writes a `.jsonl` into an `archived_sessions` directory and returns that
-    /// directory (the argument `CodexCostScanner.scanRollouts` expects). Every file is
+    /// directory (the argument `CostScanFixtureScan.codexRollouts` expects). Every file is
     /// read regardless of its modification date, so the lifetime window sees
     /// pre-cutoff lines too.
     private func writeCodexArchive(lines: [String]) throws -> URL {
@@ -456,7 +460,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.totals.input, 1_000)
         // output accumulates the reasoning tokens on the daily/model rollups, but
@@ -473,7 +477,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         // Identical events collapse to one via the dedup key.
         XCTAssertEqual(context.totals.input, 1_000)
@@ -488,7 +492,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         // Only the post-cutoff line is counted.
         XCTAssertEqual(context.totals.input, 100)
@@ -507,7 +511,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.totals.input, 1_000)
         XCTAssertEqual(context.totals.output, 500)
@@ -529,7 +533,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.totals.input, 42)
         XCTAssertEqual(context.totals.output, 7)
@@ -549,7 +553,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(Array(context.modelTotals.keys), ["gpt-5.6-sol"])
         XCTAssertEqual(Array(context.originTotals.keys), ["Codex Desktop"])
@@ -578,7 +582,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.projectTotals["www/genfeed/apps/admin"]?.input, 1_000)
         XCTAssertNil(context.projectTotals[CostProjectAttribution.unknownProjectID])
@@ -592,7 +596,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.projectTotals[CostProjectAttribution.unknownProjectID]?.input, 1_000)
     }
@@ -608,7 +612,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.projectModelTotals["www/genfeed/apps/admin"]?["gpt-5.6-sol"]?.input, 1_000)
 
@@ -648,7 +652,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
         XCTAssertEqual(context.modelTotals["gpt-5.6-luna"]?.input, 7)
@@ -663,7 +667,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(Array(context.modelTotals.keys), ["Unknown model"])
         XCTAssertEqual(Array(context.originTotals.keys), ["Codex CLI"])
@@ -679,7 +683,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(Array(context.modelTotals.keys), ["gpt-5.5"])
     }
@@ -700,7 +704,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
         XCTAssertEqual(context.modelTotals["Unknown model"]?.input, 7)
@@ -722,7 +726,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 107)
         XCTAssertNil(context.modelTotals["Unknown model"], "the file names the model — nothing is unknown")
@@ -742,7 +746,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 107)
         XCTAssertEqual(context.modelTotals["gpt-5.6-luna"]?.input, 3)
@@ -763,7 +767,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["Unknown model"]?.input, 100)
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 7)
@@ -780,7 +784,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         let firstDay = Calendar.current.startOfDay(
             for: try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-14T12:00:00Z"))
@@ -815,7 +819,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var context = makeContext(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, since: cutoff, context: &context)
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
 
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
         XCTAssertEqual(context.sessionIDs, ["conv-x"])
@@ -837,7 +841,7 @@ final class CostTrackerTests: XCTestCase {
         var context = makeContext(cutoff: cutoff)
 
         for directory in CodexCostScanner.rolloutDirectories(in: root) {
-            CodexCostScanner.scanRollouts(directory: directory, since: cutoff, context: &context)
+            CostScanFixtureScan.codexRollouts(in: directory, since: cutoff, context: &context)
         }
 
         XCTAssertEqual(context.totals.input, 100)
@@ -1233,7 +1237,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, windows: &windows)
+        CostScanFixtureScan.codexRollouts(in: dir, windows: &windows)
 
         XCTAssertEqual(windows.period.totals.input, 100)
         XCTAssertEqual(windows.period.sessionIDs, ["new"])
@@ -1247,7 +1251,7 @@ final class CostTrackerTests: XCTestCase {
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
         var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
 
-        CodexCostScanner.scanRollouts(directory: dir, windows: &windows)
+        CostScanFixtureScan.codexRollouts(in: dir, windows: &windows)
 
         XCTAssertEqual(windows.period.totals.input, 1_000)
         XCTAssertEqual(windows.lifetime.totals.input, 1_000)
