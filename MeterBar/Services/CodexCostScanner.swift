@@ -342,7 +342,7 @@ enum CodexCostScanner {
 
         let allowance = session.budget.allowance
         guard allowance > 0 else {
-            session.noteDeferred()
+            session.noteDeferred(.codex)
             return record?.payload
         }
 
@@ -390,7 +390,7 @@ enum CodexCostScanner {
         if read.reachedEndOfFile {
             Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
         } else {
-            session.noteDeferred()
+            session.noteDeferred(.codex)
             if let deferredOffset {
                 // Events still waiting on a model the *next* slice may yet
                 // declare. Rolling the offset back re-reads them rather than
