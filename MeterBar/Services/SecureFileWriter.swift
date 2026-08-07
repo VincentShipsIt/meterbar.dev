@@ -189,6 +189,24 @@ enum SecureFileWriterError: LocalizedError {
         }
     }
 
+    /// Path-free rendering, for callers that log at `privacy: .public`.
+    ///
+    /// `errorDescription` names the file, which is right in front of a human
+    /// holding the URL. Everything this writer touches lives under the user's
+    /// home directory, though, so a log line built from it publishes the account
+    /// name to the system log. The errno is the part an operator acts on —
+    /// `ENOSPC` and `EACCES` call for different fixes — and it carries no path.
+    var logDescription: String {
+        switch self {
+        case let .create(code, _):
+            "create failed: \(Self.describe(code))"
+        case let .write(code, _):
+            "write failed: \(Self.describe(code))"
+        case let .replace(code, _):
+            "replace failed: \(Self.describe(code))"
+        }
+    }
+
     private static func describe(_ code: Int32) -> String {
         String(cString: strerror(code))
     }

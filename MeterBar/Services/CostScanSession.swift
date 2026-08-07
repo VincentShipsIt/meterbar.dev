@@ -116,15 +116,23 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Writes both caches back, including after a cancelled slice — the whole
     /// point of committing on line boundaries is that partial progress is safe
     /// to keep.
-    @discardableResult
-    func persist() -> Bool {
-        guard let store else { return true }
+    ///
+    /// Deliberately not `@discardableResult`: a slice whose caches never reached
+    /// disk made no *resumable* progress, and a caller that ignores that spends
+    /// its remaining slices re-reading the same bytes.
+    func persist() -> CostScanPersistOutcome {
+        // No store is not the same as nothing to save. `CostScanCacheStore
+        // .applicationSupport` is optional, and every slice builds a fresh
+        // session from it — so a session without one starts from an empty cache,
+        // re-reads the corpus from offset 0, and defers in the same place. Say
+        // so, or the slice loop keeps calling that forward progress.
+        guard let store else { return .unavailable }
 
-        var succeeded = true
+        var outcome = CostScanPersistOutcome.persisted
         do {
             try store.saveClaude(claude)
         } catch {
-            succeeded = false
+            outcome = .failed
             AppLog.cost.error(
                 "Failed to persist Claude scan progress: \(error.localizedDescription, privacy: .public)"
             )
@@ -132,11 +140,30 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         do {
             try store.saveCodex(codex)
         } catch {
-            succeeded = false
+            outcome = .failed
             AppLog.cost.error(
                 "Failed to persist Codex scan progress: \(error.localizedDescription, privacy: .public)"
             )
         }
-        return succeeded
+        return outcome
     }
+}
+
+/// Whether a slice's offsets are durable enough for the next one to resume from.
+///
+/// Only `persisted` earns another slice. The two failure shapes are kept apart
+/// because they need different log lines — one is a disk error worth reporting,
+/// the other is a machine whose Application Support directory never resolved.
+nonisolated enum CostScanPersistOutcome: Sendable, Equatable {
+    /// Every cache this session owns is on disk.
+    case persisted
+
+    /// At least one cache could not be written. Whatever this slice read is
+    /// still correct in memory, but it dies with the session: the store holds
+    /// exactly what the previous slice left there.
+    case failed
+
+    /// There is no store to write to, so nothing this slice read can outlive
+    /// it. Correct for the summary on screen, useless to the next slice.
+    case unavailable
 }
