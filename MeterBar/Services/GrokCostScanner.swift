@@ -310,13 +310,30 @@ enum GrokCostScanner {
         )
     }
 
+    /// Whole milliseconds since the epoch, or `nil` when the value cannot be
+    /// expressed as one. `Int(_:)` traps on a `Double` outside `Int`'s range and
+    /// `isFinite` does not rule that out — `1e300` is finite, and its
+    /// millisecond value (~1e303) crashed the scan on the way into the dedup
+    /// key. Unlike Codex, whose timestamps arrive as bounded ISO-8601 strings,
+    /// Grok logs a raw JSON number, so any file on disk can carry one.
+    nonisolated private static func millisecondsSinceEpoch(_ seconds: Double) -> Int? {
+        let milliseconds = (seconds * 1000).rounded()
+        guard milliseconds.isFinite,
+              milliseconds >= Double(Int.min),
+              milliseconds < Double(Int.max) else { return nil }
+        return Int(milliseconds)
+    }
+
     /// One `turn_completed` line's usage, or `nil` for every other line.
     ///
     /// Tolerant on the envelope, strict on the numbers: the method name is
     /// matched by suffix because Grok writes the same update under both
     /// `session/update` and a vendor-prefixed `_x.ai/session/update`, while a
     /// non-numeric `timestamp` drops the record rather than fabricating a 1970
-    /// date that would land in the lifetime window.
+    /// date that would land in the lifetime window. A numeric timestamp too
+    /// large to express in whole milliseconds is dropped for the same reason:
+    /// it is corrupt, and letting it through would put an absurd date through
+    /// `startOfDay` and the window bounds.
     nonisolated private static func usageEvent(
         from line: Data,
         attribution: GrokUsageAttribution
@@ -326,7 +343,7 @@ enum GrokCostScanner {
               let method = envelope["method"] as? String,
               method.hasSuffix("session/update"),
               let seconds = (envelope["timestamp"] as? NSNumber)?.doubleValue,
-              seconds.isFinite,
+              Self.millisecondsSinceEpoch(seconds) != nil,
               let params = envelope["params"] as? [String: Any],
               let update = params["update"] as? [String: Any],
               update["sessionUpdate"] as? String == "turn_completed",
@@ -404,7 +421,10 @@ enum GrokCostScanner {
 
         // Whole-millisecond precision, matching the Codex key, so equivalent
         // records produce a stable string rather than a formatted Double.
-        let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
+        // Parsing already rejected timestamps that cannot be expressed this way;
+        // converting through the same helper keeps the conversion trap-free
+        // rather than relying on that guarantee holding at a distance.
+        guard let timestampMillis = Self.millisecondsSinceEpoch(timestamp.timeIntervalSince1970) else { return }
         let key = """
             \(timestampMillis)-\(sessionID)-\(event.input)-\(event.cached)-\
             \(event.output)-\(event.reasoning)-\(event.ticks)

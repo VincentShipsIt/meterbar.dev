@@ -188,6 +188,56 @@ final class GrokCostScannerTests: XCTestCase {
         XCTAssertEqual(cost.outputTokens, 30)
     }
 
+    /// `isFinite` is not the same test as "fits in `Int`": `1e300` is finite and
+    /// its millisecond value is ~1e303, which trapped the whole scan when the
+    /// dedup key converted it. A corrupt timestamp may only cost its own record.
+    func testTimestampsTooLargeForWholeMillisecondsDropOnlyTheirOwnRecord() throws {
+        let root = try makeSessionsRoot()
+        let now = Date()
+        try writeUpdates(
+            in: root,
+            project: "www/meterbar",
+            session: "session-a",
+            lines: [
+                turnCompleted(at: now.addingTimeInterval(-120), input: 100, cachedRead: 0, output: 10, reasoning: 0, ticks: 1_000_000),
+                turnCompleted(rawTimestamp: "1e300", input: 999, output: 999, ticks: 9_000_000),
+                turnCompleted(rawTimestamp: "-1e300", input: 999, output: 999, ticks: 9_000_000),
+                turnCompleted(at: now, input: 200, cachedRead: 0, output: 20, reasoning: 0, ticks: 2_000_000)
+            ]
+        )
+
+        let cost = try XCTUnwrap(scanCost(roots: [root], days: 30))
+
+        XCTAssertEqual(cost.inputTokens, 300)
+        XCTAssertEqual(cost.outputTokens, 30)
+    }
+
+    /// Overriding `GROK_HOME` has to hand back exactly what the process started
+    /// with. Unsetting it unconditionally repoints the session root for every
+    /// later test in the same process whenever the developer's shell exports one.
+    func testOverridingGrokHomeRestoresThePreexistingValue() {
+        setenv("GROK_HOME", "/tmp/meterbar-preexisting-grok", 1)
+        defer { unsetenv("GROK_HOME") }
+
+        let restore = Self.overrideGrokHome("/tmp/meterbar-fixture-grok")
+        XCTAssertEqual(ProcessInfo.processInfo.environment["GROK_HOME"], "/tmp/meterbar-fixture-grok")
+
+        restore()
+
+        XCTAssertEqual(ProcessInfo.processInfo.environment["GROK_HOME"], "/tmp/meterbar-preexisting-grok")
+    }
+
+    /// The other half of the contract: with nothing set going in, the override
+    /// has to leave nothing set going out.
+    func testOverridingGrokHomeClearsItWhenNothingWasSet() {
+        unsetenv("GROK_HOME")
+
+        let restore = Self.overrideGrokHome("/tmp/meterbar-fixture-grok")
+        restore()
+
+        XCTAssertNil(ProcessInfo.processInfo.environment["GROK_HOME"])
+    }
+
     /// One turn re-logged verbatim (a retried write) must not be billed twice.
     func testIdenticalRecordsInOneFileAreCountedOnce() throws {
         let root = try makeSessionsRoot()
@@ -368,8 +418,7 @@ final class GrokCostScannerTests: XCTestCase {
         // account's, because most users enable Grok without ever adding an
         // account entry. Point the default at the fixture too, or this asserts
         // against whatever the developer's own `~/.grok` happens to hold.
-        setenv("GROK_HOME", home.path, 1)
-        addTeardownBlock { unsetenv("GROK_HOME") }
+        addTeardownBlock(Self.overrideGrokHome(home.path))
         let root = home.appendingPathComponent("sessions", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try writeUpdates(
@@ -404,6 +453,23 @@ final class GrokCostScannerTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    /// Points `GROK_HOME` at a fixture and hands back the undo, so the caller
+    /// can pass it straight to `addTeardownBlock`. Restoring the previous value
+    /// rather than unsetting matters because the scanner falls back to the
+    /// default home: a leaked unset would silently repoint later tests at the
+    /// developer's real `~/.grok`.
+    private static func overrideGrokHome(_ path: String) -> () -> Void {
+        let previous = ProcessInfo.processInfo.environment["GROK_HOME"]
+        setenv("GROK_HOME", path, 1)
+        return {
+            if let previous {
+                setenv("GROK_HOME", previous, 1)
+            } else {
+                unsetenv("GROK_HOME")
+            }
+        }
+    }
+
     /// One `turn_completed` envelope, shaped exactly like the ones on disk:
     /// usage nested at `params.update.usage`, per-model copies under
     /// `modelUsage`, and a whole-second `timestamp`.
@@ -426,6 +492,23 @@ final class GrokCostScannerTests: XCTestCase {
             """
         return """
             {"timestamp":\(Int(date.timeIntervalSince1970)),"method":"\(method)",\
+            "params":{"sessionId":"019fafec-972e-7413-8cbd-01647988c8f9",\
+            "update":{"sessionUpdate":"turn_completed","stop_reason":"end_turn","usage":\(usage)}}}
+            """
+    }
+
+    /// The same envelope with the `timestamp` written verbatim, so a test can
+    /// feed a value that is valid JSON and a finite `Double` yet has no whole
+    /// millisecond representation — `1e300`. Interpolating it as text is the
+    /// only way to express that: `Date` cannot carry it.
+    private func turnCompleted(rawTimestamp: String, input: Int, output: Int, ticks: Int) -> String {
+        let usage = """
+            {"inputTokens":\(input),"outputTokens":\(output),"totalTokens":\(input + output),\
+            "cachedReadTokens":0,"reasoningTokens":0,"modelCalls":1,\
+            "apiDurationMs":1234,"costUsdTicks":\(ticks),"numTurns":1}
+            """
+        return """
+            {"timestamp":\(rawTimestamp),"method":"session/update",\
             "params":{"sessionId":"019fafec-972e-7413-8cbd-01647988c8f9",\
             "update":{"sessionUpdate":"turn_completed","stop_reason":"end_turn","usage":\(usage)}}}
             """
