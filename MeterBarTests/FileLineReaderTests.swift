@@ -35,14 +35,16 @@ final class FileLineReaderTests: XCTestCase {
         of url: URL,
         chunkSize: Int = FileLineReader.defaultChunkSize,
         maxLineBytes: Int = FileLineReader.defaultMaxLineBytes,
-        prefixBytes: Int = FileLineReader.defaultPrefixBytes
+        prefixBytes: Int = FileLineReader.defaultPrefixBytes,
+        salvageTailBytes: Int = FileLineReader.defaultSalvageTailBytes
     ) -> [FileLineReader.Line] {
         var collected: [FileLineReader.Line] = []
         FileLineReader.forEachLine(
             in: url,
             chunkSize: chunkSize,
             maxLineBytes: maxLineBytes,
-            prefixBytes: prefixBytes
+            prefixBytes: prefixBytes,
+            salvageTailBytes: salvageTailBytes
         ) { line in
             collected.append(line)
         }
@@ -370,6 +372,62 @@ final class FileLineReaderTests: XCTestCase {
         XCTAssertEqual(collected[0].bytes.count, 200)
         XCTAssertTrue(collected[1].wasTruncated)
         XCTAssertEqual(collected[1].bytes.count, 64)
+    }
+
+    // MARK: - Salvage tail
+
+    func testOversizedLineKeepsATrailingWindowForSalvage() throws {
+        // In a Claude transcript `usage` follows `content`, so a line made
+        // oversized by a large `content` strands its accounting past the prefix
+        // cut. The tail is the only window that can reach it.
+        let url = try writeFile(String(repeating: "x", count: 4_000) + "TAILTAIL")
+
+        let collected = records(of: url, chunkSize: 64, maxLineBytes: 128, prefixBytes: 128, salvageTailBytes: 8)
+
+        XCTAssertEqual(collected.count, 1)
+        XCTAssertTrue(collected[0].wasTruncated)
+        XCTAssertEqual(collected[0].byteCount, 4_008)
+        XCTAssertEqual(String(bytes: collected[0].truncatedTail, encoding: .utf8), "TAILTAIL")
+    }
+
+    func testTruncatedTailDoesNotGrowWithLineLength() throws {
+        // The tail is the second retention window, so it needs the same flat
+        // ceiling the prefix has: an 800 MB line must not be held to reach its
+        // last 64 bytes.
+        for length in [1_000, 10_000, 1_000_000] {
+            let url = try writeFile(String(repeating: "y", count: length) + "END")
+
+            let collected = records(
+                of: url, chunkSize: 4_096, maxLineBytes: 256, prefixBytes: 256, salvageTailBytes: 64
+            )
+
+            XCTAssertEqual(collected.count, 1, "length \(length)")
+            XCTAssertEqual(collected[0].bytes.count, 256, "length \(length)")
+            XCTAssertEqual(collected[0].truncatedTail.count, 64, "length \(length)")
+            XCTAssertEqual(collected[0].byteCount, length + 3, "length \(length)")
+            XCTAssertEqual(
+                String(bytes: collected[0].truncatedTail.suffix(3), encoding: .utf8), "END", "length \(length)"
+            )
+        }
+    }
+
+    func testLinesWithinTheCapCarryNoSalvageTail() throws {
+        let url = try writeFile("alpha\nbeta\n")
+
+        let collected = records(of: url, maxLineBytes: 128, prefixBytes: 128, salvageTailBytes: 64)
+
+        XCTAssertEqual(collected.map(\.wasTruncated), [false, false])
+        XCTAssertEqual(collected.map(\.truncatedTail), [Data(), Data()])
+    }
+
+    func testSalvageTailSurvivesALineSpanningManyChunks() throws {
+        let url = try writeFile(String(repeating: "z", count: 10_000) + "FINISH\ntail\n")
+
+        let collected = records(of: url, chunkSize: 7, maxLineBytes: 32, prefixBytes: 32, salvageTailBytes: 6)
+
+        XCTAssertEqual(collected.count, 2)
+        XCTAssertEqual(String(bytes: collected[0].truncatedTail, encoding: .utf8), "FINISH")
+        XCTAssertEqual(String(bytes: collected[1].bytes, encoding: .utf8), "tail")
     }
 
     func testMissingFileReturnsFalseAndYieldsNothing() {

@@ -214,12 +214,12 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
-        // A line the reader had to truncate is parsed like any other: the usage
-        // block sits near the front of a transcript record, so the retained
-        // prefix often still decodes. Only a prefix that fails to parse is
-        // skipped — never the line for being long.
+        var truncation = CostScanTruncationTally()
+
         FileLineReader.forEachLine(in: url) { line in
-            guard let event = Self.usageEvent(from: line.bytes, url: url) else { return }
+            let event = Self.usageEvent(from: line, url: url)
+            truncation.note(line, recovered: event != nil)
+            guard let event else { return }
 
             let inPeriod = event.timestamp >= cutoffDate
             if let key = event.deduplicationKey {
@@ -230,6 +230,7 @@ enum ClaudeCostScanner {
                 if inPeriod { periodUnkeyed.append(event) }
             }
         }
+        truncation.log(url: url)
 
         return ScanWindows(
             period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID),
@@ -240,10 +241,74 @@ enum ClaudeCostScanner {
 
     /// Decodes one transcript line into a usage event, or `nil` when the line is
     /// not one (blank, malformed, or a non-usage record).
-    nonisolated private static func usageEvent(from lineData: Data, url: URL) -> ClaudeUsageEvent? {
-        guard !lineData.isEmpty,
-              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-              let timestampStr = json["timestamp"] as? String,
+    ///
+    /// A line the reader had to truncate gets a second attempt through the
+    /// salvage path. `content` precedes `usage` inside a Claude record and the
+    /// top-level `timestamp` trails the whole message object, so a line made
+    /// oversized by its content leaves nothing decodable in the retained prefix
+    /// — every token in it used to be lost silently.
+    nonisolated private static func usageEvent(from line: FileLineReader.Line, url: URL) -> ClaudeUsageEvent? {
+        if !line.bytes.isEmpty,
+           let json = try? JSONSerialization.jsonObject(with: line.bytes) as? [String: Any],
+           let event = Self.usageEvent(json: json, url: url) {
+            return event
+        }
+        guard line.wasTruncated else { return nil }
+        return Self.usageEvent(json: Self.salvagedJSON(from: line), url: url)
+    }
+
+    /// Reassembles the fields a usage event needs from the two windows a
+    /// truncated line carries.
+    ///
+    /// Which occurrence to trust follows from the record's field order: `model`
+    /// and `id` sit ahead of `content`, so the head prefix's first match is the
+    /// record's own, while `usage`, `timestamp` and `requestId` all trail it and
+    /// the tail's last match is. Anything a matching key finds earlier came from
+    /// inside `content` and is not the record speaking.
+    ///
+    /// `origin` cannot be salvaged: it is derived from the `tool_use` blocks in
+    /// `content`, which is exactly the part that was cut. A salvaged event lands
+    /// in "Main chat" unless the record declared itself a sidechain.
+    nonisolated private static func salvagedJSON(from line: FileLineReader.Line) -> [String: Any] {
+        var message: [String: Any] = [:]
+        if let usage = Self.salvagedUsage(in: line.truncatedTail) {
+            message["usage"] = usage
+        }
+        if let model = TruncatedJSONLineSalvage.firstValue(forKey: "model", in: line.bytes) as? String {
+            message["model"] = model
+        }
+        if let messageID = TruncatedJSONLineSalvage.firstValue(forKey: "id", in: line.bytes) as? String {
+            message["id"] = messageID
+        }
+
+        var json: [String: Any] = ["message": message]
+        if let timestamp = TruncatedJSONLineSalvage.lastValue(forKey: "timestamp", in: line.truncatedTail) as? String {
+            json["timestamp"] = timestamp
+        }
+        if let requestID = TruncatedJSONLineSalvage.lastValue(forKey: "requestId", in: line.truncatedTail) as? String {
+            json["requestId"] = requestID
+        }
+        if let isSidechain = TruncatedJSONLineSalvage.firstValue(forKey: "isSidechain", in: line.bytes) as? Bool {
+            json["isSidechain"] = isSidechain
+        }
+        return json
+    }
+
+    /// The last `usage` object in the tail that actually carries token fields.
+    ///
+    /// The filter is what separates the record's own accounting from a `"usage"`
+    /// that happens to appear inside a transcript's prose.
+    nonisolated private static func salvagedUsage(in tail: Data) -> [String: Any]? {
+        let tokenKeys = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        return TruncatedJSONLineSalvage.values(forKey: "usage", in: tail)
+            .reversed()
+            .lazy
+            .compactMap { $0 as? [String: Any] }
+            .first { candidate in tokenKeys.contains(where: { candidate[$0] != nil }) }
+    }
+
+    nonisolated private static func usageEvent(json: [String: Any], url: URL) -> ClaudeUsageEvent? {
+        guard let timestampStr = json["timestamp"] as? String,
               let timestamp = FlexibleISO8601.date(from: timestampStr),
               let message = json["message"] as? [String: Any],
               let usage = message["usage"] as? [String: Any] else {
@@ -349,8 +414,12 @@ enum ClaudeCostScanner {
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
         var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
+        var truncation = CostScanTruncationTally()
+
         let read = FileLineReader.readLines(in: file.url, request: request) { line, _ in
-            guard let event = Self.usageEvent(from: line.bytes, url: file.url) else { return }
+            let event = Self.usageEvent(from: line, url: file.url)
+            truncation.note(line, recovered: event != nil)
+            guard let event else { return }
 
             if let key = event.deduplicationKey {
                 // First-wins across a resume boundary: an event with this key is
@@ -368,6 +437,8 @@ enum ClaudeCostScanner {
                 if event.timestamp >= session.cutoff { periodUnkeyed.append(event) }
             }
         }
+
+        truncation.log(url: file.url)
 
         guard let read else {
             // Unreadable (permissions, deleted mid-scan). Keep whatever the

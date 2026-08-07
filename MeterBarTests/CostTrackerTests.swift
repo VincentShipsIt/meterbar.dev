@@ -343,12 +343,28 @@ final class CostTrackerTests: XCTestCase {
 
     /// Writes a rollout at an arbitrary path under a Codex home, creating the
     /// intermediate `sessions/YYYY/MM/DD` folders Codex nests live rollouts in.
-    private func writeCodexRollout(in root: URL, path: String, lines: [String]) throws {
+    ///
+    /// The trailing newline is not decoration: the budgeted scan withholds an
+    /// unterminated last line, so a fixture without one loses its final event.
+    @discardableResult
+    private func writeCodexRollout(
+        in root: URL,
+        path: String,
+        modifiedAgo: TimeInterval? = nil,
+        lines: [String]
+    ) throws -> URL {
         let url = root.appendingPathComponent(path)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        if let modifiedAgo {
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: 1_780_000_000 - modifiedAgo)],
+                ofItemAtPath: url.path
+            )
+        }
+        return url
     }
 
     /// Real rollouts open with a `session_meta` event; the model field there is
@@ -882,6 +898,124 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(windows.period.earliest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
         XCTAssertEqual(windows.lifetime.earliest, FlexibleISO8601.date(from: "2026-05-01T10:00:00.000Z"))
         XCTAssertEqual(windows.lifetime.latest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
+    }
+
+    /// Mirrors the key order of a real Claude transcript record: `content` sits
+    /// ahead of `usage` inside `message`, and the top-level `timestamp` trails
+    /// the whole message object. Both fields a usage event needs are therefore
+    /// past the prefix cut once `content` is large. Nothing pads the line after
+    /// its closing brace — padding is what made the older truncation fixtures
+    /// salvageable by accident.
+    private func oversizedEventLine(
+        timestamp: String,
+        contentBytes: Int,
+        messageID: String = "msg_big",
+        requestID: String = "req_big",
+        model: String = "claude-sonnet-4-5",
+        input: Int = 100,
+        output: Int = 50
+    ) -> String {
+        let blob = String(repeating: "a", count: contentBytes)
+        return """
+        {"parentUuid": "p-1", "isSidechain": false, "message": {"model": "\(model)", "id": "\(messageID)", \
+        "type": "message", "role": "assistant", "content": [{"type": "text", "text": "\(blob)"}], \
+        "stop_reason": "end_turn", "stop_sequence": null, \
+        "usage": {"input_tokens": \(input), "output_tokens": \(output), \
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}, \
+        "requestId": "\(requestID)", "type": "assistant", "uuid": "u-1", "timestamp": "\(timestamp)"}
+        """
+    }
+
+    func testParseSessionWindowsCountsUsageStrandedPastTheTruncationCap() throws {
+        let url = try writeSessionFile(lines: [
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            ),
+            eventLine(
+                timestamp: "2026-07-01T11:00:00.000Z",
+                messageID: "small",
+                requestID: "small",
+                input: 100,
+                output: 10
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 1_000)
+        XCTAssertEqual(windows.period.output, 100)
+        XCTAssertEqual(windows.lifetime.input, 1_000)
+        XCTAssertEqual(windows.period.models["claude-sonnet-4-5"]?.input, 1_000)
+    }
+
+    func testSalvagedUsageIsDeduplicatedAgainstItsUntruncatedCopy() throws {
+        // A retried record can land once small and once oversized. The salvage
+        // path has to recover the same `messageID:requestID` key, or the spend
+        // is counted twice.
+        let url = try writeSessionFile(lines: [
+            eventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                messageID: "msg_big",
+                requestID: "req_big",
+                input: 900,
+                output: 90
+            ),
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:01.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 900)
+        XCTAssertEqual(windows.period.output, 90)
+    }
+
+    func testTruncatedLineWithNoRecoverableUsageIsSkippedWithoutDisturbingTheScan() throws {
+        let blob = String(repeating: "a", count: FileLineReader.defaultMaxLineBytes + 4_096)
+        let url = try writeSessionFile(lines: [
+            #"{"type": "user", "message": {"role": "user", "content": "\#(blob)"}}"#,
+            eventLine(
+                timestamp: "2026-07-01T11:00:00.000Z",
+                messageID: "after",
+                requestID: "after",
+                input: 12,
+                output: 3
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 12)
+        XCTAssertEqual(windows.period.output, 3)
+    }
+
+    func testBudgetedScanCountsUsageStrandedPastTheTruncationCap() throws {
+        let root = try makeTranscriptRoot()
+        try writeTranscript(in: root, name: "session.jsonl", modifiedAgo: 0, lines: [
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = ClaudeCostScanner.scanRoots([root], session: session)
+
+        XCTAssertEqual(windows.period.input, 900)
+        XCTAssertEqual(windows.period.output, 90)
     }
 
     func testScanCodexRolloutWindowsSplitPeriodFromLifetime() throws {
