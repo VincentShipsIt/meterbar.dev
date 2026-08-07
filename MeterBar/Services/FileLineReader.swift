@@ -21,6 +21,9 @@ nonisolated struct FileLineReadRequest {
     /// Leading bytes of an oversized line passed to the parser.
     var prefixBytes: Int = FileLineReader.defaultPrefixBytes
 
+    /// Trailing bytes of an oversized line kept alongside the prefix.
+    var salvageTailBytes: Int = FileLineReader.defaultSalvageTailBytes
+
     /// Yield the final line even when it has no trailing newline and is not
     /// structurally complete JSON.
     ///
@@ -74,6 +77,15 @@ nonisolated enum FileLineReader {
     /// usage record and under-report spend, which is the failure this avoids.
     static let defaultPrefixBytes = 1024 * 1024
 
+    /// 256 KiB — the trailing window of an oversized line kept for salvage.
+    ///
+    /// A Claude transcript record orders `content` before `usage` and puts the
+    /// top-level `timestamp` after the whole message object, so a line made
+    /// oversized by its content strands both fields the accounting needs past
+    /// the prefix cut. They sit within the last few hundred bytes of the record;
+    /// this window reaches them without retention ever tracking line length.
+    static let defaultSalvageTailBytes = 256 * 1024
+
     /// One line of the file, carrying enough context for a caller to tell a
     /// whole record from a salvaged prefix.
     struct Line {
@@ -87,6 +99,17 @@ nonisolated enum FileLineReader {
         /// Callers should still try to parse it: a truncated record whose usage
         /// fields survived is real spend and must be counted.
         let wasTruncated: Bool
+        /// The last `salvageTailBytes` of a truncated line, cut at an arbitrary
+        /// byte. Empty whenever `wasTruncated` is `false`. It is not valid JSON
+        /// on its own — only ``TruncatedJSONLineSalvage`` should read it.
+        let truncatedTail: Data
+
+        init(bytes: Data, byteCount: Int, wasTruncated: Bool, truncatedTail: Data = Data()) {
+            self.bytes = bytes
+            self.byteCount = byteCount
+            self.wasTruncated = wasTruncated
+            self.truncatedTail = truncatedTail
+        }
     }
 
     private static let newline = UInt8(ascii: "\n")
@@ -112,6 +135,8 @@ nonisolated enum FileLineReader {
     ///     only keeps counting, so peak retention never tracks line length.
     ///   - prefixBytes: Bytes of an oversized line handed to `body`. Clamped to
     ///     `maxLineBytes`, since nothing beyond that was ever buffered.
+    ///   - salvageTailBytes: Trailing bytes of an oversized line kept alongside
+    ///     the prefix, for the fields that sit past the cut.
     /// - Returns: `false` when the file could not be opened, `true` otherwise.
     ///   An empty file opens successfully and yields nothing.
     @discardableResult
@@ -120,12 +145,14 @@ nonisolated enum FileLineReader {
         chunkSize: Int = defaultChunkSize,
         maxLineBytes: Int = defaultMaxLineBytes,
         prefixBytes: Int = defaultPrefixBytes,
+        salvageTailBytes: Int = defaultSalvageTailBytes,
         _ body: (Line) -> Void
     ) -> Bool {
         var request = FileLineReadRequest()
         request.chunkSize = chunkSize
         request.maxLineBytes = maxLineBytes
         request.prefixBytes = prefixBytes
+        request.salvageTailBytes = salvageTailBytes
         // Whole-file reads have no budget and no follow-up pass, so a trailing
         // fragment is all the caller will ever get — yield it.
         request.commitsUnterminatedTrailingLine = true
@@ -158,25 +185,41 @@ nonisolated enum FileLineReader {
         let chunkSize = max(1, request.chunkSize)
         let cap = max(0, request.maxLineBytes)
         let prefix = min(max(0, request.prefixBytes), cap)
+        let tail = max(0, request.salvageTailBytes)
         let budget = max(0, request.maxBytes)
         var committed = request.startOffset
         var bytesRead = 0
         var reachedEnd = false
         var retained = Data()
+        var overflow = Data()
         var byteCount = 0
 
         // Counts every byte of the line but stops copying once the cap is hit.
+        // Past the cap a rolling window of the most recent bytes is kept, halved
+        // back to `tail` whenever it doubles, so both buffers stay flat no matter
+        // how long the line runs.
         func absorb(_ start: UnsafePointer<UInt8>, count: Int) {
             byteCount += count
-            guard retained.count < cap else { return }
-            let room = cap - retained.count
-            retained.append(start, count: min(count, room))
+            var consumed = 0
+            if retained.count < cap {
+                consumed = min(count, cap - retained.count)
+                retained.append(start, count: consumed)
+            }
+            guard tail > 0, consumed < count else { return }
+            overflow.append(start + consumed, count: count - consumed)
+            if overflow.count > 2 * tail {
+                overflow = Data(overflow.suffix(tail))
+            }
         }
 
         func emitRetained(hasNewline: Bool) {
-            body(Self.line(retained, byteCount: byteCount, prefixBytes: prefix), committed)
+            let line = Self.line(
+                retained, overflow: overflow, byteCount: byteCount, prefixBytes: prefix, tailBytes: tail
+            )
+            body(line, committed)
             committed += UInt64(byteCount + (hasNewline ? 1 : 0))
             retained = Data()
+            overflow = Data()
             byteCount = 0
         }
 
@@ -230,7 +273,9 @@ nonisolated enum FileLineReader {
         // happen to look like complete JSON.
         let stoppedForBudget = !reachedEnd && bytesRead >= budget
         if byteCount > 0, !stoppedForBudget {
-            let line = Self.line(retained, byteCount: byteCount, prefixBytes: prefix)
+            let line = Self.line(
+                retained, overflow: overflow, byteCount: byteCount, prefixBytes: prefix, tailBytes: tail
+            )
             if request.commitsUnterminatedTrailingLine
                 || (!line.wasTruncated && isStructurallyCompleteJSONLine(line.bytes)) {
                 emitRetained(hasNewline: false)
@@ -295,16 +340,27 @@ nonisolated enum FileLineReader {
     }
 
     /// Builds the emitted line: trims an oversized buffer down to the salvage
-    /// prefix, and drops a CRLF carriage return.
+    /// prefix and its trailing window, and drops a CRLF carriage return.
     ///
     /// The copies matter: slicing `Data` keeps the parent's non-zero
     /// `startIndex`, and `JSONSerialization` has historically mis-read offset
     /// slices. The carriage return is only stripped from a complete line — on a
     /// truncated one the last byte is an arbitrary mid-line byte, not a
     /// terminator.
-    private static func line(_ retained: Data, byteCount: Int, prefixBytes: Int) -> Line {
+    private static func line(
+        _ retained: Data,
+        overflow: Data,
+        byteCount: Int,
+        prefixBytes: Int,
+        tailBytes: Int
+    ) -> Line {
         guard byteCount <= retained.count else {
-            return Line(bytes: Data(retained.prefix(prefixBytes)), byteCount: byteCount, wasTruncated: true)
+            return Line(
+                bytes: Data(retained.prefix(prefixBytes)),
+                byteCount: byteCount,
+                wasTruncated: true,
+                truncatedTail: Data(overflow.suffix(tailBytes))
+            )
         }
         if retained.last == UInt8(ascii: "\r") {
             return Line(bytes: Data(retained.dropLast()), byteCount: byteCount, wasTruncated: false)

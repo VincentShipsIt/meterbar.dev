@@ -10,7 +10,7 @@ enum CostScanValues {
     /// Bump this whenever a change alters parsed output: usage extraction,
     /// deduplication, pricing, model normalization, or local-day bucketing.
     /// A mismatch discards the persisted cache and performs a full rescan.
-    nonisolated static let costCacheParserVersion = 1
+    nonisolated static let costCacheParserVersion = 2
 
     /// Token counts arrive as `Int`, `Int64`, `Double`, or a numeric string
     /// depending on which writer produced the log line; coerce every shape.

@@ -372,12 +372,28 @@ final class CostTrackerTests: XCTestCase {
 
     /// Writes a rollout at an arbitrary path under a Codex home, creating the
     /// intermediate `sessions/YYYY/MM/DD` folders Codex nests live rollouts in.
-    private func writeCodexRollout(in root: URL, path: String, lines: [String]) throws {
+    ///
+    /// The trailing newline is not decoration: the budgeted scan withholds an
+    /// unterminated last line, so a fixture without one loses its final event.
+    @discardableResult
+    private func writeCodexRollout(
+        in root: URL,
+        path: String,
+        modifiedAgo: TimeInterval? = nil,
+        lines: [String]
+    ) throws -> URL {
         let url = root.appendingPathComponent(path)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        if let modifiedAgo {
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: 1_780_000_000 - modifiedAgo)],
+                ofItemAtPath: url.path
+            )
+        }
+        return url
     }
 
     /// Real rollouts open with a `session_meta` event; the model field there is
@@ -832,6 +848,188 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
     }
 
+    // MARK: - Budgeted Codex rollout scan
+
+    /// Names a rollout the way Codex does: the session UUID trails an ISO
+    /// timestamp, and the archived copy keeps the whole name.
+    private func codexRolloutName(sessionID: UUID, stamp: String = "2026-06-15T09-00-00") -> String {
+        "rollout-\(stamp)-\(sessionID.uuidString.lowercased()).jsonl"
+    }
+
+    func testRolloutSessionIDIdentifiesTheArchivedCopyOfALiveRollout() {
+        let id = UUID()
+        let live = URL(fileURLWithPath: "/codex/sessions/2026/06/15/\(codexRolloutName(sessionID: id))")
+        let archived = URL(fileURLWithPath: "/codex/archived_sessions/\(codexRolloutName(sessionID: id))")
+
+        XCTAssertEqual(
+            CodexCostScanner.rolloutSessionID(for: live),
+            CodexCostScanner.rolloutSessionID(for: archived)
+        )
+        XCTAssertEqual(CodexCostScanner.rolloutSessionID(for: live), id.uuidString.lowercased())
+    }
+
+    func testRolloutSessionIDFallsBackToTheWholeStemWithoutAUUIDSuffix() {
+        let legacy = URL(fileURLWithPath: "/codex/archived_sessions/rollout-conv-x.jsonl")
+
+        XCTAssertEqual(CodexCostScanner.rolloutSessionID(for: legacy), "rollout-conv-x")
+    }
+
+    /// The duplicate the fold fallback exists for. Reading only one copy is what
+    /// keeps the fallback — and its unbudgeted re-parse — off the hot path
+    /// entirely.
+    func testBudgetedCodexScanReadsOnlyOneCopyOfADuplicatedRollout() throws {
+        let root = try makeCodexHome()
+        let name = codexRolloutName(sessionID: UUID())
+        let lines = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-x", input: 100)
+        ]
+        try writeCodexRollout(in: root, path: "archived_sessions/\(name)", modifiedAgo: 60, lines: lines)
+        let live = try writeCodexRollout(
+            in: root, path: "sessions/2026/06/15/\(name)", modifiedAgo: 0, lines: lines
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root), session: session
+        )
+
+        XCTAssertTrue(session.isComplete)
+        XCTAssertEqual(windows.period.totals.input, 100)
+        // The copy still being appended to is the one worth caching an offset
+        // against.
+        XCTAssertEqual(Set(session.codex.records.keys), [live.standardizedFileURL.path])
+    }
+
+    /// A live rollout keeps growing after it is archived, so the longer copy is
+    /// the one that carries every event.
+    func testBudgetedCodexScanKeepsTheLongerCopyOfADuplicatedRollout() throws {
+        let root = try makeCodexHome()
+        let name = codexRolloutName(sessionID: UUID())
+        let shared = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-x", input: 100)
+        ]
+        try writeCodexRollout(in: root, path: "archived_sessions/\(name)", modifiedAgo: 60, lines: shared)
+        try writeCodexRollout(
+            in: root,
+            path: "sessions/2026/06/15/\(name)",
+            modifiedAgo: 0,
+            lines: shared + [
+                codexUsageLine(timestamp: "2026-06-15T09:03:00Z", conversationID: "conv-x", input: 25)
+            ]
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root), session: session
+        )
+
+        XCTAssertEqual(windows.period.totals.input, 125)
+        XCTAssertEqual(session.codex.records.count, 1)
+    }
+
+    /// Deduplication picks one copy per session; it must not also decide the
+    /// reading order. `archived_sessions` is enumerated first, so returning
+    /// discovery order would put every archived rollout ahead of every live one
+    /// and spend a slice's whole budget on the oldest conversations on disk —
+    /// the exact inversion of the newest-first walk the budget assumes.
+    func testDistinctRolloutsOrdersNewestFirstAcrossDirectories() throws {
+        let root = try makeCodexHome()
+        let lines = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-x", input: 100)
+        ]
+        let old = try writeCodexRollout(
+            in: root,
+            path: "archived_sessions/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 6000,
+            lines: lines
+        )
+        let recent = try writeCodexRollout(
+            in: root,
+            path: "sessions/2026/06/15/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 60,
+            lines: lines
+        )
+
+        let files = CodexCostScanner.distinctRollouts(
+            in: CodexCostScanner.rolloutDirectories(in: root)
+        )
+
+        XCTAssertEqual(
+            files.map(\.url.standardizedFileURL.path),
+            [recent.standardizedFileURL.path, old.standardizedFileURL.path]
+        )
+    }
+
+    /// Two rollouts that are not copies of one session but still share events.
+    /// Aggregates cannot be de-overlapped, so the shorter one is re-read event
+    /// by event — and that read has to answer to the same budget as every other.
+    func testCodexFoldFallbackCountsTheOverlappingRolloutOnce() throws {
+        let root = try makeCodexHome()
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        try writeOverlappingCodexRollouts(in: root)
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root), session: session
+        )
+
+        XCTAssertTrue(session.isComplete)
+        XCTAssertEqual(windows.period.totals.input, 150)
+    }
+
+    func testCodexFoldFallbackDefersRatherThanReadingPastTheBudget() throws {
+        let root = try makeCodexHome()
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let sizes = try writeOverlappingCodexRollouts(in: root)
+        // Exactly enough to read both files once. The fallback re-read of the
+        // second one has to come out of a budget that is already spent.
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: sizes.reduce(0, +),
+            wallClock: nil
+        )
+        let session = CostScanSession(cutoff: cutoff, options: budget)
+
+        let windows = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root), session: session
+        )
+
+        // 150 would mean the fallback read the overlapping rollout anyway.
+        XCTAssertEqual(windows.period.totals.input, 100)
+        XCTAssertFalse(session.isComplete)
+    }
+
+    /// Two distinct sessions whose events overlap: the newer file holds one
+    /// event, the older holds that same event plus one more. Returns each file's
+    /// size in scan order.
+    @discardableResult
+    private func writeOverlappingCodexRollouts(in root: URL) throws -> [Int] {
+        let shared = codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-x", input: 100)
+        let context = codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol")
+        let newer = try writeCodexRollout(
+            in: root,
+            path: "sessions/2026/06/15/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 0,
+            lines: [context, shared]
+        )
+        let older = try writeCodexRollout(
+            in: root,
+            path: "sessions/2026/06/15/\(codexRolloutName(sessionID: UUID(), stamp: "2026-06-15T08-00-00"))",
+            modifiedAgo: 60,
+            lines: [
+                context,
+                shared,
+                codexUsageLine(timestamp: "2026-06-15T09:05:00Z", conversationID: "conv-x", input: 50)
+            ]
+        )
+        return try [newer, older].map { try fileSize($0) }
+    }
+
     // MARK: - Period/lifetime windows (single-pass scan)
 
     func testParseSessionWindowsSplitsPeriodFromLifetime() throws {
@@ -911,6 +1109,124 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(windows.period.earliest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
         XCTAssertEqual(windows.lifetime.earliest, FlexibleISO8601.date(from: "2026-05-01T10:00:00.000Z"))
         XCTAssertEqual(windows.lifetime.latest, FlexibleISO8601.date(from: "2026-07-01T10:00:00.000Z"))
+    }
+
+    /// Mirrors the key order of a real Claude transcript record: `content` sits
+    /// ahead of `usage` inside `message`, and the top-level `timestamp` trails
+    /// the whole message object. Both fields a usage event needs are therefore
+    /// past the prefix cut once `content` is large. Nothing pads the line after
+    /// its closing brace — padding is what made the older truncation fixtures
+    /// salvageable by accident.
+    private func oversizedEventLine(
+        timestamp: String,
+        contentBytes: Int,
+        messageID: String = "msg_big",
+        requestID: String = "req_big",
+        model: String = "claude-sonnet-4-5",
+        input: Int = 100,
+        output: Int = 50
+    ) -> String {
+        let blob = String(repeating: "a", count: contentBytes)
+        return """
+        {"parentUuid": "p-1", "isSidechain": false, "message": {"model": "\(model)", "id": "\(messageID)", \
+        "type": "message", "role": "assistant", "content": [{"type": "text", "text": "\(blob)"}], \
+        "stop_reason": "end_turn", "stop_sequence": null, \
+        "usage": {"input_tokens": \(input), "output_tokens": \(output), \
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}, \
+        "requestId": "\(requestID)", "type": "assistant", "uuid": "u-1", "timestamp": "\(timestamp)"}
+        """
+    }
+
+    func testParseSessionWindowsCountsUsageStrandedPastTheTruncationCap() throws {
+        let url = try writeSessionFile(lines: [
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            ),
+            eventLine(
+                timestamp: "2026-07-01T11:00:00.000Z",
+                messageID: "small",
+                requestID: "small",
+                input: 100,
+                output: 10
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 1_000)
+        XCTAssertEqual(windows.period.output, 100)
+        XCTAssertEqual(windows.lifetime.input, 1_000)
+        XCTAssertEqual(windows.period.models["claude-sonnet-4-5"]?.input, 1_000)
+    }
+
+    func testSalvagedUsageIsDeduplicatedAgainstItsUntruncatedCopy() throws {
+        // A retried record can land once small and once oversized. The salvage
+        // path has to recover the same `messageID:requestID` key, or the spend
+        // is counted twice.
+        let url = try writeSessionFile(lines: [
+            eventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                messageID: "msg_big",
+                requestID: "req_big",
+                input: 900,
+                output: 90
+            ),
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:01.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 900)
+        XCTAssertEqual(windows.period.output, 90)
+    }
+
+    func testTruncatedLineWithNoRecoverableUsageIsSkippedWithoutDisturbingTheScan() throws {
+        let blob = String(repeating: "a", count: FileLineReader.defaultMaxLineBytes + 4_096)
+        let url = try writeSessionFile(lines: [
+            #"{"type": "user", "message": {"role": "user", "content": "\#(blob)"}}"#,
+            eventLine(
+                timestamp: "2026-07-01T11:00:00.000Z",
+                messageID: "after",
+                requestID: "after",
+                input: 12,
+                output: 3
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertEqual(windows.period.input, 12)
+        XCTAssertEqual(windows.period.output, 3)
+    }
+
+    func testBudgetedScanCountsUsageStrandedPastTheTruncationCap() throws {
+        let root = try makeTranscriptRoot()
+        try writeTranscript(in: root, name: "session.jsonl", modifiedAgo: 0, lines: [
+            oversizedEventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                contentBytes: FileLineReader.defaultMaxLineBytes + 4_096,
+                input: 900,
+                output: 90
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = ClaudeCostScanner.scanRoots([root], session: session)
+
+        XCTAssertEqual(windows.period.input, 900)
+        XCTAssertEqual(windows.period.output, 90)
     }
 
     func testScanCodexRolloutWindowsSplitPeriodFromLifetime() throws {

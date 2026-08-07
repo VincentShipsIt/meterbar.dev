@@ -129,6 +129,61 @@ enum CodexCostScanner {
         ]
     }
 
+    /// The conversation a rollout belongs to, taken from its file name.
+    ///
+    /// Codex names rollouts `rollout-<ISO timestamp>-<session uuid>.jsonl` and
+    /// keeps the whole name when it archives one, so the trailing UUID is what
+    /// ties the copy in `archived_sessions/` to the one still being written in
+    /// `sessions/`. Anything that does not end in a UUID — an older layout, a
+    /// hand-placed file — is its own session under its full stem.
+    nonisolated static func rolloutSessionID(for url: URL) -> String {
+        let stem = url.deletingPathExtension().lastPathComponent
+        let uuidLength = 36
+        guard stem.count > uuidLength else { return stem }
+        let suffix = String(stem.suffix(uuidLength))
+        guard UUID(uuidString: suffix) != nil else { return stem }
+        return suffix.lowercased()
+    }
+
+    /// One file per conversation, in the order the scan should read them.
+    ///
+    /// A session that exists in both `sessions/` and `archived_sessions/` is the
+    /// same bytes twice. Reading both and reconciling them afterwards is what
+    /// used to force a whole rollout back through an unbudgeted re-parse on
+    /// every slice; picking a copy up front removes that case instead of paying
+    /// for it. The larger copy wins because archiving happens while a session is
+    /// still live, so the archived snapshot can be short — and a tie goes to the
+    /// copy found last, which is the one under `sessions/` that may still grow.
+    ///
+    /// The result is re-sorted rather than returned in discovery order.
+    /// `CostScanCorpus.transcripts` only orders within one directory, and
+    /// `archived_sessions` is enumerated first, so discovery order would put
+    /// every archived rollout ahead of every live one — handing a slice's whole
+    /// budget to the oldest conversations on disk. The comparator is the
+    /// corpus's own, so a rollout's position does not depend on which directory
+    /// its surviving copy came from.
+    nonisolated static func distinctRollouts(in directories: [URL]) -> [CostScanFile] {
+        var chosen: [String: CostScanFile] = [:]
+        var seen: Set<String> = []
+
+        for directory in directories {
+            guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
+
+            for file in CostScanCorpus.transcripts(in: directory) {
+                guard seen.insert(file.cacheKey).inserted else { continue }
+                let sessionID = Self.rolloutSessionID(for: file.url)
+                guard let incumbent = chosen[sessionID] else {
+                    chosen[sessionID] = file
+                    continue
+                }
+                if file.size >= incumbent.size { chosen[sessionID] = file }
+            }
+        }
+        return chosen.values.sorted {
+            $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
+        }
+    }
+
     // swiftlint:disable contains_over_range_nil_comparison
     /// The byte-level equivalent of the old `line.contains("\"token_count\"")`
     /// prefilter. Rollout files are mostly non-usage events, so skipping
@@ -163,6 +218,7 @@ enum CodexCostScanner {
         // the rollout context: a sibling rollout's model must never name events
         // this file left unexplained.
         var deferred: [CodexDeferredUsage] = []
+        var truncation = CostScanTruncationTally()
 
         FileLineReader.forEachLine(in: fileURL) { readerLine in
             let line = readerLine.bytes
@@ -176,6 +232,12 @@ enum CodexCostScanner {
                 }
                 return
             }
+            // Counted only past this guard, and so only for usage lines. Codex
+            // rollouts are full of oversized `function_call_output` records that
+            // carry no accounting; calling their truncation a dropped record
+            // would bury the one case that costs tokens under thousands that
+            // cost nothing.
+            let produced = events.count + deferred.count
             Self.addTokenCountLine(
                 line,
                 fileURL: fileURL,
@@ -183,9 +245,11 @@ enum CodexCostScanner {
                 deferred: &deferred,
                 events: &events
             )
+            truncation.note(readerLine, recovered: events.count + deferred.count > produced)
         }
         // Whatever the file never explained is genuinely unattributed.
         Self.flushDeferred(&deferred, modelName: nil, into: &events)
+        truncation.log(url: fileURL)
         return events
     }
 
@@ -239,24 +303,27 @@ enum CodexCostScanner {
         session: CostScanSession
     ) -> ScanWindows<CodexScanContext> {
         var windows = Self.scanWindows(cutoff: session.cutoff)
+        let files = Self.distinctRollouts(in: directories)
         var live: Set<String> = []
 
-        for directory in directories {
-            guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
-
-            for file in CostScanCorpus.transcripts(in: directory) {
-                guard live.insert(file.cacheKey).inserted else { continue }
-                guard let totals = Self.totals(for: file, session: session) else { continue }
-                guard Self.fold(totals, into: &windows) else {
-                    // This rollout shares events with one already folded in —
-                    // in practice a session that exists in both `sessions/` and
-                    // `archived_sessions/` at once. Aggregates cannot be
-                    // de-overlapped after the fact, so this one file goes back
-                    // through the live path, where `addUsage` drops the
-                    // duplicates event by event.
-                    Self.parseRollout(at: file.url, windows: &windows)
-                    continue
-                }
+        for file in files {
+            live.insert(file.cacheKey)
+            guard let totals = Self.totals(for: file, session: session) else { continue }
+            guard Self.fold(totals, into: &windows) else {
+                // This rollout shares only *some* of its events with one already
+                // folded in. Aggregates cannot be de-overlapped after the fact,
+                // so the file goes back through the event-level path, where
+                // `apply` drops each duplicate against the window's `eventKeys`.
+                //
+                // Rollouts duplicated across `sessions/` and
+                // `archived_sessions/` no longer reach here at all — only one
+                // copy is ever read. What is left is two genuinely different
+                // conversations that recorded the same event, which still costs
+                // a re-read on every slice; it is budgeted and cancellable, but
+                // it is not cached, because a tally that overlaps the shared
+                // windows is not one a later refresh can reuse.
+                Self.foldByEvent(file, session: session, windows: &windows)
+                continue
             }
         }
 
@@ -299,6 +366,7 @@ enum CodexCostScanner {
         var deferred: [CodexDeferredUsage] = []
         var deferredOffset: UInt64?
         let calendar = Calendar.current
+        var truncation = CostScanTruncationTally()
 
         var request = FileLineReadRequest()
         request.startOffset = record?.offset ?? 0
@@ -320,6 +388,7 @@ enum CodexCostScanner {
                 return
             }
             let parked = deferred.count
+            let counted = windows.lifetime.eventKeys.count
             Self.addTokenCountLine(
                 line,
                 fileURL: file.url,
@@ -328,10 +397,15 @@ enum CodexCostScanner {
                 windows: &windows,
                 calendar: calendar
             )
+            truncation.note(
+                readerLine,
+                recovered: deferred.count > parked || windows.lifetime.eventKeys.count > counted
+            )
             if deferred.count > parked, deferredOffset == nil {
                 deferredOffset = offset
             }
         }
+        truncation.log(url: file.url)
 
         guard let read else { return record?.payload }
         session.budget.consume(read.bytesRead)
@@ -366,6 +440,75 @@ enum CodexCostScanner {
             for: file.cacheKey
         )
         return payload
+    }
+
+    /// Streams one rollout straight into the shared windows, under the same
+    /// budget every other read answers to.
+    ///
+    /// The per-file cache is deliberately left alone. This read starts at byte
+    /// zero and produces no tally of its own, so there is nothing here a later
+    /// slice could resume from — the record `totals(for:session:)` already
+    /// committed stays the file's cached state.
+    nonisolated private static func foldByEvent(
+        _ file: CostScanFile,
+        session: CostScanSession,
+        windows: inout ScanWindows<CodexScanContext>
+    ) {
+        let allowance = session.budget.allowance
+        guard allowance > 0 else {
+            session.noteDeferred(.codex)
+            return
+        }
+
+        let calendar = Calendar.current
+        var rollout = CodexRolloutContext()
+        var deferred: [CodexDeferredUsage] = []
+        var truncation = CostScanTruncationTally()
+        var request = FileLineReadRequest()
+        request.maxBytes = allowance
+
+        let read = FileLineReader.readLines(in: file.url, request: request) { readerLine, _ in
+            let line = readerLine.bytes
+            guard line.range(of: Self.tokenCountMarker) != nil else {
+                Self.updateRolloutContext(&rollout, from: line)
+                if let model = rollout.turnModel ?? rollout.sessionModel {
+                    Self.flushDeferred(
+                        &deferred,
+                        modelName: model,
+                        windows: &windows,
+                        calendar: calendar
+                    )
+                }
+                return
+            }
+            let parked = deferred.count
+            let counted = windows.lifetime.eventKeys.count
+            Self.addTokenCountLine(
+                line,
+                fileURL: file.url,
+                rollout: rollout,
+                deferred: &deferred,
+                windows: &windows,
+                calendar: calendar
+            )
+            truncation.note(
+                readerLine,
+                recovered: deferred.count > parked || windows.lifetime.eventKeys.count > counted
+            )
+        }
+        truncation.log(url: file.url)
+
+        guard let read else { return }
+        session.budget.consume(read.bytesRead)
+
+        if read.reachedEndOfFile {
+            Self.flushDeferred(&deferred, modelName: nil, windows: &windows, calendar: calendar)
+        } else {
+            // Whatever is still parked belongs to a model the unread remainder
+            // may yet name. Dropping it as unattributed would be worse than
+            // letting the next slice read the file again.
+            session.noteDeferred(.codex)
+        }
     }
 
     /// Adds one rollout's tally to the shared windows.
