@@ -274,6 +274,33 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(unbilled, 0.0, accuracy: 0.0001)
     }
 
+    func testDailyUsageResolvesEachDaysRateFromThatDayRatherThanOneSharedRate() throws {
+        let cheapDay = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-10T00:00:00Z"))
+        let dearDay = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
+        let source = [
+            cheapDay: totals(input: 1_000_000, output: 0, cacheRead: 0),
+            dearDay: totals(input: 1_000_000, output: 0, cacheRead: 0)
+        ]
+        let cheap = TokenPricing(input: 1.0, output: 0, cacheCreation: 0, cacheRead: 0)
+        let dear = TokenPricing(input: 5.0, output: 0, cacheCreation: 0, cacheRead: 0)
+
+        let rows = TokenUsageAggregator.makeDailyUsage(
+            from: source,
+            provider: .codexCli,
+            pricing: dear,
+            modelsByDay: [cheapDay: ["sol": totals(input: 1_000_000, output: 0, cacheRead: 0)]],
+            pricingAt: { _, at in at < dearDay ? cheap : dear }
+        )
+
+        XCTAssertEqual(rows.first { $0.date == cheapDay }?.estimatedCostUSD ?? -1, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(rows.first { $0.date == dearDay }?.estimatedCostUSD ?? -1, 5.0, accuracy: 0.0001)
+        XCTAssertEqual(
+            rows.first { $0.date == cheapDay }?.modelBreakdowns?.first?.estimatedCostUSD ?? -1,
+            1.0,
+            accuracy: 0.0001
+        )
+    }
+
     func testProjectBreakdownsNestTheirOwnModelSliceUnderEachRollupRow() {
         let projectTotals: [String: TokenAccumulator] = [
             "app-a": totals(input: 100, output: 0, cacheRead: 0, cost: 5),
@@ -453,6 +480,52 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(windows.period.totals.reasoning, 5)
         XCTAssertEqual(windows.period.sessionIDs, ["output-only", "recent"])
         XCTAssertEqual(windows.lifetime.totals.input, 120)
+    }
+
+    /// Issue #339's invariant reaches the fallback path too: totals that carry
+    /// no per-event cost must be priced at the rate in effect when they were
+    /// recorded, not at today's. Exercised through an injected dated schedule
+    /// because every entry in the shipped table is still open-ended backwards.
+    func testCodexFallbackPricingUsesTheRateInEffectWhenTheTokensWereRecorded() throws {
+        let recorded = try XCTUnwrap(FlexibleISO8601.date(from: "2026-02-10T10:00:00Z"))
+        let day = Calendar.current.startOfDay(for: recorded)
+        let oldRate = TokenPricing(input: 3.0, output: 0, cacheCreation: 0, cacheRead: 0)
+        let newRate = TokenPricing(input: 30.0, output: 0, cacheCreation: 0, cacheRead: 0)
+        let schedule = PricingSchedule([
+            DatedTokenPricing(
+                effectiveFrom: DatedTokenPricing.utcDay(2026, 1, 1), verifiedOn: "2026-01-05", pricing: oldRate),
+            DatedTokenPricing(
+                effectiveFrom: DatedTokenPricing.utcDay(2026, 6, 1), verifiedOn: "2026-06-02", pricing: newRate)
+        ])
+
+        // No `estimatedCostUSD` anywhere, so every row falls back to the table.
+        let tokens = totals(input: 1_000_000, output: 0, cacheRead: 0)
+        var context = CodexScanContext(earliestDate: recorded, latestDate: recorded)
+        context.totals = tokens
+        context.sessionIDs = ["session"]
+        context.modelTotals = ["gpt-5.6-sol": tokens]
+        context.projectTotals = ["app": tokens]
+        context.projectModelTotals = ["app": ["gpt-5.6-sol": tokens]]
+        context.dailyTotals = [day: tokens]
+        context.dailyModelTotals = [day: ["gpt-5.6-sol": tokens]]
+        context.dailyProjectTotals = [day: ["app": tokens]]
+        context.dailyProjectModelTotals = [day: ["app": ["gpt-5.6-sol": tokens]]]
+
+        let (cost, dailyRows) = try XCTUnwrap(
+            CodexCostScanner.makeCost(from: context) { _, at in
+                schedule.resolve(at: at)?.pricing ?? newRate
+            }
+        )
+        let daily = try XCTUnwrap(dailyRows.first)
+
+        XCTAssertEqual(cost.estimatedCostUSD, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(cost.modelBreakdowns.first?.estimatedCostUSD ?? -1, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(
+            cost.projectBreakdowns.first?.modelBreakdowns.first?.estimatedCostUSD ?? -1, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(daily.estimatedCostUSD, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(daily.modelBreakdowns?.first?.estimatedCostUSD ?? -1, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(
+            daily.projectBreakdowns?.first?.modelBreakdowns.first?.estimatedCostUSD ?? -1, 3.0, accuracy: 0.0001)
     }
 
     // MARK: - CostSummaryBuilder

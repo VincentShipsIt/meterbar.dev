@@ -56,13 +56,19 @@ nonisolated enum MenuBarFocusSelector {
         return selection
     }
 
-    /// Tightest quota with anything left, falling back to the whole pool when
-    /// every window of the focused provider is spent — mirrors the spent-account
-    /// rule in `StatusItemLimitSelector` so the two inputs never disagree about
+    /// Tightest measurable quota with anything left, falling back to the spent
+    /// ones when every window of the focused provider is spent — mirrors the
+    /// spent-account rule in `StatusItemLimitSelector` so the two never disagree about
     /// which window of a provider represents it.
     private static func tightest(in candidates: [StatusLimitCandidate]) -> StatusLimitCandidate? {
-        let withQuotaLeft = candidates.filter { QuotaMath.percentLeft(for: $0.limit) > 0 }
-        let pool = withQuotaLeft.isEmpty ? candidates : withQuotaLeft
+        // A zero total carries no headroom information — reading it as "100%
+        // left" would put the one window MeterBar cannot measure in the menu
+        // bar, and ahead of the provider's spent windows at that. Dropped
+        // outright rather than kept as a fallback pool: with nothing measurable
+        // for the focused provider this input has no opinion, so Auto decides.
+        let measurable = candidates.filter { $0.limit.total > 0 }
+        let withQuotaLeft = measurable.filter { QuotaMath.percentLeft(for: $0.limit) > 0 }
+        let pool = withQuotaLeft.isEmpty ? measurable : withQuotaLeft
         return pool.min { lhs, rhs in
             // Tie-break on key so equal quotas resolve deterministically.
             (QuotaMath.percentLeft(for: lhs.limit), lhs.key)

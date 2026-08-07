@@ -95,7 +95,10 @@ public struct PricingSchedule: Equatable, Sendable {
         guard let oldest = entries.first else { return nil }
 
         var chosen = oldest
-        for entry in entries where entry.effectiveFrom <= timestamp {
+        for entry in entries {
+            // Ascending order means the first entry that starts after the
+            // requested date ends the search — nothing later can apply.
+            guard entry.effectiveFrom <= timestamp else { break }
             chosen = entry
         }
 

@@ -1149,7 +1149,7 @@ final class CostTrackerTests: XCTestCase {
             lifetime: nil
         )
 
-        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: partial, isComplete: false))
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: partial, deferredProviders: [.claude]))
 
         // The number on screen improves with every slice...
         XCTAssertEqual(tracker.costSummary?.totalCostUSD, 4)
@@ -1172,7 +1172,7 @@ final class CostTrackerTests: XCTestCase {
             lifetime: nil
         )
 
-        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: whole, isComplete: true))
+        tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: whole))
 
         XCTAssertEqual(tracker.costSummary?.totalCostUSD, 9)
         XCTAssertNotEqual(tracker.lastScanDate, previous)
@@ -1244,7 +1244,7 @@ final class CostTrackerTests: XCTestCase {
             for: "/transcripts/a.jsonl"
         )
 
-        XCTAssertEqual(session.persist(), .failed)
+        XCTAssertEqual(session.persist(), CostScanPersistReport(claude: .failed, codex: .failed))
         // Nothing reached disk, so the offsets this slice committed are not
         // resumable — the next slice would re-read the same bytes.
         XCTAssertTrue(store.loadClaude().records.isEmpty)
@@ -1253,6 +1253,47 @@ final class CostTrackerTests: XCTestCase {
 
         XCTAssertEqual(session.persist(), .persisted)
         XCTAssertEqual(store.loadClaude().records["/transcripts/a.jsonl"]?.offset, 512)
+    }
+
+    /// The two caches are separate artifacts with separate failure modes, so one
+    /// provider's blocked write says nothing about the other's. Reporting a
+    /// shared verdict costs the healthy provider its resumable offsets: the
+    /// slice loop stops, and its next slice re-reads bytes it already paid for.
+    func testPersistIsolatesOneProvidersWriteFailureFromTheOthersProgress() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanSplit-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        // A directory standing where the Claude artifact belongs: that write
+        // fails while the Codex artifact beside it lands normally.
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(CostScanCacheStore.claudeFileName),
+            withIntermediateDirectories: true
+        )
+
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let stamp = CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42)
+        let store = CostScanCacheStore(directory: directory)
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 512, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+        session.setCodexRecord(
+            CostScanFileRecord(
+                offset: 512, stamp: stamp, cutoff: cutoff, isComplete: false, payload: CodexFileTotals(cutoff: cutoff)
+            ),
+            for: "/rollouts/b.jsonl"
+        )
+
+        let report = session.persist()
+
+        XCTAssertEqual(report.outcome(for: .claude), .failed)
+        XCTAssertEqual(report.outcome(for: .codex), .persisted)
+        XCTAssertTrue(store.loadClaude().records.isEmpty)
+        XCTAssertEqual(store.loadCodex().records["/rollouts/b.jsonl"]?.offset, 512)
     }
 
     func testPersistReportsNoStoreAsUnavailableRatherThanPersisted() {
@@ -1277,18 +1318,60 @@ final class CostTrackerTests: XCTestCase {
     // MARK: - Slice loop control
 
     func testAnotherSliceRunsOnlyWhenThePreviousOneLeftResumableProgress() {
-        let partial = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary(), isComplete: false)
-        let whole = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary(), isComplete: true)
+        let partial = CostSummaryBuilder.CostSummaryScan(
+            summary: makeEmptySummary(), deferredProviders: [.claude, .codex])
+        let whole = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary())
+        let failed = CostScanPersistReport(claude: .failed, codex: .failed)
 
         XCTAssertTrue(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .persisted))
         // A slice whose caches never landed leaves the store exactly as it found
         // it, so 63 more slices would re-read the same bytes and defer in the
         // same place.
-        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .failed))
+        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: failed))
         // Same waste, different cause: with no store at all every slice rebuilds
         // an empty cache and re-reads the corpus from offset 0.
         XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .unavailable))
         XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: whole, persistence: .persisted))
+    }
+
+    /// The stop condition is per provider, not per slice: one provider that
+    /// cannot write must not end the other's scan, and must not keep the loop
+    /// alive once it is the only one left with work.
+    func testAnotherSliceRunsWhileAnyDeferringProviderStillPersistsItsProgress() {
+        let bothDeferred = CostSummaryBuilder.CostSummaryScan(
+            summary: makeEmptySummary(), deferredProviders: [.claude, .codex])
+        let claudeDeferred = CostSummaryBuilder.CostSummaryScan(
+            summary: makeEmptySummary(), deferredProviders: [.claude])
+        let report = CostScanPersistReport(claude: .failed, codex: .persisted)
+
+        XCTAssertTrue(CostTracker.shouldRunAnotherSlice(after: bothDeferred, persistence: report))
+        // Codex has finished; the only provider still deferring is the one whose
+        // offsets never reach disk, so another slice would read the same bytes.
+        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: claudeDeferred, persistence: report))
+        // ...and the mirror image: Codex still has work and can still resume it.
+        XCTAssertTrue(
+            CostTracker.shouldRunAnotherSlice(
+                after: CostSummaryBuilder.CostSummaryScan(
+                    summary: makeEmptySummary(), deferredProviders: [.codex]),
+                persistence: report
+            )
+        )
+    }
+
+    /// Each scanner defers its own corpus. A shared flag would report Claude as
+    /// unfinished because Codex ran out of budget, and the slice loop's
+    /// per-provider stop condition reads this set.
+    func testDeferringOneProviderLeavesTheOtherReportedAsFinished() {
+        let session = CostScanSession(
+            cutoff: Date(timeIntervalSince1970: 1_780_000_000), options: .unlimited, store: nil)
+
+        XCTAssertTrue(session.isComplete)
+        XCTAssertEqual(session.deferredProviders, [])
+
+        session.noteDeferred(.codex)
+
+        XCTAssertFalse(session.isComplete)
+        XCTAssertEqual(session.deferredProviders, [.codex])
     }
 
     private func makeEmptySummary() -> CostSummary {

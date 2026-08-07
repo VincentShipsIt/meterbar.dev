@@ -247,6 +247,36 @@ final class SettingsViewSmokeTests: XCTestCase {
         XCTAssertEqual(presentation.detail, "Worktree · loving/kalam")
     }
 
+    func testCostProjectPresentationStripsGeneratedWorktreeIDsFromEveryBranchDepth() {
+        for identifier in [
+            "www/vincentshipsit/public/meterbardev/.claude/worktrees/loving/kalam/ccb0b4",
+            "www/vincentshipsit/public/meterbardev/.claude/worktrees/nice/taussig/b68029",
+            "www/vincentshipsit/public/meterbardev/.claude/worktrees/0f1e2d"
+        ] {
+            let presentation = CostProjectPresentation(identifier: identifier)
+
+            XCTAssertEqual(presentation.title, "meterbardev", "\(identifier)")
+            XCTAssertFalse(
+                presentation.detail?.contains(identifier.split(separator: "/").last ?? "") ?? false,
+                "\(identifier) kept its generated ID"
+            )
+        }
+    }
+
+    /// Every one of these is valid hex, so the character class alone cannot tell
+    /// them from a generated ID — and a branch someone named `deadbeef` losing
+    /// its last segment is a worse failure than an ID surviving on screen.
+    func testCostProjectPresentationKeepsWorktreeNamesThatOnlyLookLikeIDs() {
+        for name in ["deadbeef", "cafe123", "decade", "facade", "accede"] {
+            let presentation = CostProjectPresentation(
+                identifier: "www/vincentshipsit/public/meterbardev/.claude/worktrees/loving/\(name)"
+            )
+
+            XCTAssertEqual(presentation.title, "meterbardev", "\(name)")
+            XCTAssertEqual(presentation.detail, "Worktree · loving/\(name)", "\(name) was mistaken for an ID")
+        }
+    }
+
     func testCostProjectPresentationExplainsUnknownAttribution() {
         let presentation = CostProjectPresentation(identifier: CostProjectAttribution.unknownProjectID)
 
