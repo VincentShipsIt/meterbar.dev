@@ -120,6 +120,31 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.followsFocusedApp)
     }
 
+    func testPinningTurnsRotationOffAndPersistsIt() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setRotatesProviders(true)
+
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(MenuBarDisplayPreferencesStore(userDefaults: defaults).rotatesProviders)
+    }
+
+    func testClearingThePinLeavesRotationOff() {
+        // Rotation is only suppressed at read time while a pin exists, so a pin
+        // that left the stored flag on would hand rotation back the moment the
+        // user returned the menu bar to Auto.
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setRotatesProviders(true)
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        store.setPinnedCandidateKey(nil)
+
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertFalse(MenuBarDisplayPreferencesStore(userDefaults: defaults).rotatesProviders)
+    }
+
     func testEnablingFocusFollowingDisablesRotationAndPersistsBothStates() {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
         store.setRotatesProviders(true)
