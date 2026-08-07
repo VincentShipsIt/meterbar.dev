@@ -108,8 +108,7 @@ struct GeneralSettingsView: View {
         SettingsPanelSection(title: "Refresh", systemImage: "arrow.clockwise", color: MeterBarTheme.appAccent) {
             SettingsRowView(
                 title: "Auto-refresh interval",
-                detail: "Adaptive stays between 1 and 30 minutes using only recent MeterBar interaction, "
-                    + "quota movement, battery/Low Power Mode, and thermal state."
+                detail: GeneralSettingsCopy.autoRefreshInterval
             ) {
                 Picker("", selection: Binding(
                     get: { dataManager.refreshInterval },
@@ -147,11 +146,7 @@ struct GeneralSettingsView: View {
         ) {
             SettingsRowView(
                 title: "Menu bar layout",
-                detail: "Single Item keeps today’s behavior. "
-                    + "One Per Provider gives every tracked provider its own item. "
-                    + "One Per Account gives each selected account its own item "
-                    + "(up to \(menuBarAccountSelection.itemLimit)). "
-                    + "One Account With Switcher shows a single item you can repoint from its right-click menu."
+                detail: GeneralSettingsCopy.menuBarLayout(itemLimit: menuBarAccountSelection.itemLimit)
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.presentationMode },
@@ -171,8 +166,7 @@ struct GeneralSettingsView: View {
 
             SettingsRowView(
                 title: "Menu bar shows",
-                detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota "
-                    + "window visible, and turns off focus following and rotation."
+                detail: GeneralSettingsCopy.menuBarShows
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.pinnedCandidateKey },
@@ -199,9 +193,7 @@ struct GeneralSettingsView: View {
 
             SettingsRowView(
                 title: "Rotate providers",
-                detail: "Cycle the single item through providers that have data. "
-                    + "Rotation pauses while the popover is open, and a critical quota keeps the item "
-                    + "until it recovers."
+                detail: GeneralSettingsCopy.rotateProviders
             ) {
                 Toggle("", isOn: Binding(
                     get: { menuBarDisplayPreferences.rotatesProviders },
@@ -370,10 +362,7 @@ struct GeneralSettingsView: View {
     @ViewBuilder private var followFocusedAppRows: some View {
         SettingsRowView(
             title: "Follow focused app",
-            detail: "Show the provider mapped to whichever app you are working in. "
-                + "MeterBar reads only the frontmost app’s bundle identifier — no accessibility "
-                + "permission is requested, and no window titles or contents are read. "
-                + "Turning this on clears the pin and rotation; either one turns focus following off."
+            detail: GeneralSettingsCopy.followFocusedApp
         ) {
             Toggle("", isOn: Binding(
                 get: { menuBarDisplayPreferences.followsFocusedApp },
