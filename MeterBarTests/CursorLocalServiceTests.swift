@@ -196,6 +196,73 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertNil(metrics.sessionLimit)
     }
 
+    // MARK: - Poll observations
+
+    /// The single most important assertion about Cursor in this codebase.
+    /// `/api/usage-summary` carries no currency field anywhere — `plan.used`,
+    /// `plan.limit` and the on-demand figures are all integer counts against a
+    /// plan allowance — so the observation is `.requests`. Flipping this to
+    /// `.usd` would publish a request count as dollars in the spend chart, the
+    /// dashboard total, and the share card.
+    func testSummaryObservesPlanUsageAsRequestsNotDollars() throws {
+        let json = """
+        {
+          "billingCycleStart": "2026-07-01T00:00:00Z",
+          "billingCycleEnd": "2026-08-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "used": 137, "limit": 750 },
+            "onDemand": { "used": 4, "limit": 20, "enabled": true }
+          }
+        }
+        """
+        let observedAt = Date(timeIntervalSince1970: 1_780_000_000)
+
+        let observation = CursorLocalService.observation(try decodeSummary(json), at: observedAt)
+
+        XCTAssertEqual(observation.provider, .cursor)
+        XCTAssertEqual(observation.unit, .requests)
+        XCTAssertEqual(observation.runningTotal, 137)
+        XCTAssertEqual(observation.observedAt, observedAt)
+    }
+
+    /// On-demand spend is billed separately and counted separately, so adding it
+    /// to the plan count would produce a number in neither unit. It is left out
+    /// rather than folded in.
+    func testOnDemandUsageIsNotAddedToThePlanCount() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 100, "limit": 500 },
+            "onDemand": { "used": 25, "limit": 50, "enabled": true }
+          }
+        }
+        """
+
+        let observation = CursorLocalService.observation(try decodeSummary(json), at: Date())
+
+        XCTAssertEqual(observation.runningTotal, 100)
+    }
+
+    /// Cursor publishes no per-day figure at all, so there is nothing
+    /// authoritative to prefer over the poll-to-poll delta.
+    func testSummaryPublishesNoAuthoritativeDailyTotal() throws {
+        let json = #"{ "individualUsage": { "plan": { "used": 3, "limit": 500 } } }"#
+
+        let observation = CursorLocalService.observation(try decodeSummary(json), at: Date())
+
+        XCTAssertNil(observation.authoritativeDailyTotal)
+    }
+
+    /// A payload with no individual usage at all still yields a well-formed
+    /// baseline. Zero here is the counter's value, not a claim about a day —
+    /// the ledger writes no row for an unchanged counter.
+    func testMissingIndividualUsageObservesZeroRatherThanFailing() throws {
+        let observation = CursorLocalService.observation(try decodeSummary("{}"), at: Date())
+
+        XCTAssertEqual(observation.runningTotal, 0)
+        XCTAssertEqual(observation.unit, .requests)
+    }
+
     // MARK: - JWT userId extraction
 
     func testExtractUserIdSplitsAuth0PrefixedSub() {

@@ -64,6 +64,54 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 86_400)
     }
 
+    // MARK: - Poll observations
+
+    /// OpenRouter denominates `usage` and `usage_daily` in dollars, so the
+    /// observation is `.usd` and no conversion is involved. If this ever became
+    /// `.requests` the ledger would stop folding OpenRouter into `costs[]`
+    /// entirely; if a request-denominated provider were ever marked `.usd`, its
+    /// counter would be published as money.
+    func testKeyResponseObservesRunningSpendInDollars() throws {
+        let key = try decodeKey(
+            #"{"data":{"limit":40,"limit_reset":"monthly","usage":27.5,"usage_daily":1.25,"is_free_tier":false}}"#
+        )
+        let now = date(2026, 7, 13)
+
+        let observation = OpenRouterService.observation(key: key.data, at: now)
+
+        XCTAssertEqual(observation.provider, .openRouter)
+        XCTAssertEqual(observation.unit, .usd)
+        XCTAssertEqual(observation.runningTotal, 27.5)
+        XCTAssertEqual(observation.authoritativeDailyTotal, 1.25)
+        XCTAssertEqual(observation.observedAt, now)
+    }
+
+    /// `usage_daily` is optional in the payload. Its absence must leave the
+    /// authoritative slot empty so the ledger falls back to differencing polls,
+    /// rather than being read as a published zero that erases the day.
+    func testMissingDailyTotalLeavesTheAuthoritativeSlotEmpty() throws {
+        let key = try decodeKey(#"{"data":{"limit":null,"limit_reset":null,"usage":9,"is_free_tier":true}}"#)
+
+        let observation = OpenRouterService.observation(key: key.data, at: date(2026, 7, 13))
+
+        XCTAssertEqual(observation.runningTotal, 9)
+        XCTAssertNil(observation.authoritativeDailyTotal)
+    }
+
+    /// The running total and the published daily total must describe the same
+    /// scope, or the delta path and the authoritative path contradict each other
+    /// on alternating polls. Both are key-scoped, so the account-wide
+    /// `total_usage` from `/credits` is deliberately not the counter.
+    func testObservationUsesKeyScopedUsageNotAccountWideCredits() throws {
+        let credits = try decodeCredits(#"{"data":{"total_credits":100,"total_usage":80}}"#)
+        let key = try decodeKey(#"{"data":{"limit":null,"limit_reset":null,"usage":12,"usage_daily":2}}"#)
+
+        let observation = OpenRouterService.observation(key: key.data, at: date(2026, 7, 13))
+
+        XCTAssertEqual(observation.runningTotal, 12)
+        XCTAssertNotEqual(observation.runningTotal, credits.data.totalUsage)
+    }
+
     private func decodeCredits(_ json: String) throws -> OpenRouterCreditsResponse {
         try JSONDecoder().decode(OpenRouterCreditsResponse.self, from: Data(json.utf8))
     }

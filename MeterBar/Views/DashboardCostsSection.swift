@@ -64,6 +64,15 @@ struct DashboardCostsSection: View {
                 scan: { Task { await costTracker.scanCosts(days: 30) } }
             )
 
+            // Directly under the spend chart, because it answers the question
+            // the chart's absence of Cursor raises. Hidden entirely when no
+            // request-denominated provider has been polled — an empty card
+            // would read as "measured nothing".
+            let polledUsage = PolledRequestSeriesPresentation(ledger: costTracker.usageLedger)
+            if !polledUsage.isEmpty {
+                PolledUsageCard(presentation: polledUsage)
+            }
+
             if let summary, !summary.dailyUsage.isEmpty {
                 DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
                     DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)
@@ -92,6 +101,10 @@ struct DashboardCostsSection: View {
             }
         }
         .task {
+            // One small JSON read, no log scan. The provider refresh cycle
+            // appends to this artifact between scans, so the copy loaded at
+            // launch is stale by the time the Costs page opens.
+            costTracker.refreshUsageLedger()
             if apiUsageStore.hasAnyAuthenticated, !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
             }
@@ -124,7 +137,7 @@ struct DashboardCostsSection: View {
                             EmptyStateCard(
                                 systemImage: "chart.bar.xaxis",
                                 title: "No spend in this window",
-                                message: "No billable Claude or Codex usage was found in the last 30 days."
+                                message: "No billable usage was found in the last 30 days."
                             )
                         }
 

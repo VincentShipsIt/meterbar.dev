@@ -44,13 +44,22 @@ enum CostSummaryBuilder {
     /// three corpora that shape had grown to three flags whose order at the call
     /// site was load-bearing, and a set states the same thing without letting a
     /// fourth provider silently push the argument list past the linter's cap.
+    ///
+    /// `usageLedger` carries the providers that have no corpus to scan at all.
+    /// Cursor and OpenRouter publish a running counter and no session log, so
+    /// their rows come from MeterBar's own poll history rather than from disk —
+    /// see `ProviderUsageLedger`. It arrives pre-filtered to the enabled
+    /// services (there is no `CostScanProvider` case to test against, and adding
+    /// one would drag a poll into the byte-offset deferral machinery it has no
+    /// use for).
     nonisolated static func makeScan(
         days: Int,
         enabledProviders: Set<CostScanProvider>,
         claudeAccounts: [ClaudeCodeAccount],
         grokAccounts: [GrokAccount],
         session: CostScanSession,
-        claudeProjectRoots: [URL]? = nil
+        claudeProjectRoots: [URL]? = nil,
+        usageLedger: ProviderUsageLedger = ProviderUsageLedger()
     ) -> CostSummaryScan {
         var scan = ScanWindows(
             period: CostScanResult(),
@@ -82,6 +91,28 @@ enum CostSummaryBuilder {
             let grok = GrokCostScanner.scanRoots(roots, session: session)
             scan.period.append(GrokCostScanner.makeCost(from: grok.period))
             scan.lifetime.append(GrokCostScanner.makeCost(from: grok.lifetime))
+        }
+
+        // No pricing pass either: these totals arrive already denominated in
+        // dollars by the provider, so no local rate priced them and there is no
+        // provenance to report. Providers denominated in requests never reach
+        // here — `usdProviders` is the guard, and it is the only one between a
+        // Cursor request count and `estimatedCostUSD`.
+        for provider in usageLedger.usdProviders {
+            scan.period.append(
+                ProviderUsageCostBuilder.makeCost(
+                    from: usageLedger,
+                    provider: provider,
+                    windowStart: session.cutoff
+                )
+            )
+            scan.lifetime.append(
+                ProviderUsageCostBuilder.makeCost(
+                    from: usageLedger,
+                    provider: provider,
+                    windowStart: .distantPast
+                )
+            )
         }
 
         // Events older than every entry in the table were priced at the oldest

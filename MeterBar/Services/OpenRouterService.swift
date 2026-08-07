@@ -12,6 +12,15 @@ final class OpenRouterService: ObservableObject {
     @Published private(set) var hasAccess: Bool
     @Published private(set) var lastError: ServiceError?
 
+    /// The running spend counter from the last successful poll.
+    ///
+    /// OpenRouter writes no session log and serves no dated history, so
+    /// differencing this scalar across polls is the only way its spend can reach
+    /// the chart at all — see `ProviderUsageLedger`. Held here rather than
+    /// returned inside `UsageMetrics`, which is serialized into the app-group
+    /// cache the widget and the CLI decode.
+    private(set) var latestUsageObservation: ProviderUsageObservation?
+
     private let keychain: KeychainManager
     private let fetchData: (URLRequest) async throws -> Data
 
@@ -60,6 +69,7 @@ final class OpenRouterService: ObservableObject {
             let credits = try decoder.decode(OpenRouterCreditsResponse.self, from: await creditsData)
             let key = try decoder.decode(OpenRouterKeyResponse.self, from: await keyData)
             let metrics = Self.map(credits: credits.data, key: key.data)
+            latestUsageObservation = Self.observation(key: key.data, at: metrics.lastUpdated)
             hasAccess = true
             lastError = nil
             return metrics
@@ -102,6 +112,30 @@ final class OpenRouterService: ObservableObject {
             sessionLimit: keyLimit,
             weeklyLimit: accountCredits,
             lastUpdated: now
+        )
+    }
+
+    /// One poll's reading of the key's running spend, in dollars.
+    ///
+    /// Both fields are already USD — OpenRouter bills in dollars and publishes
+    /// them as such — so nothing is converted here and no rate is guessed. No
+    /// token counts ride along because the endpoint reports none; see
+    /// `ProviderUsageCostBuilder`.
+    ///
+    /// Key-scoped rather than account-scoped: `usage` and `usage_daily` both
+    /// describe the key MeterBar authenticates with, while `/credits` reports
+    /// the whole account. Mixing the two would have the delta path and the
+    /// authoritative-today path measuring different things and contradicting
+    /// each other on alternating polls.
+    static func observation(key: OpenRouterKey, at observedAt: Date) -> ProviderUsageObservation {
+        ProviderUsageObservation(
+            provider: .openRouter,
+            unit: .usd,
+            runningTotal: key.usage,
+            // Authoritative for the whole of today, including the hours MeterBar
+            // was not running — which a delta between two polls cannot see.
+            authoritativeDailyTotal: key.usageDaily,
+            observedAt: observedAt
         )
     }
 

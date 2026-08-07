@@ -17,6 +17,18 @@ class CostTracker: ObservableObject {
     @Published var isRefreshingMissingDays: Bool = false
     @Published var lastScanDate: Date?
 
+    /// Polled running counters, accumulated into a dated series.
+    ///
+    /// Published separately from `costSummary` because it refreshes on a
+    /// different clock: `UsageDataManager` appends to the artifact on every
+    /// provider poll, while `costSummary` is rebuilt only by a scan. Folding
+    /// this into the scan alone would leave the request series days stale.
+    ///
+    /// Its dollar-denominated entries still travel through `costSummary` — see
+    /// `ProviderUsageCostBuilder`. What only lives here is the part that has no
+    /// honest place in `costs[]`: Cursor's request counter.
+    @Published private(set) var usageLedger = ProviderUsageLedger()
+
     private let providerVisibilityStore = ProviderVisibilityStore.shared
 
     /// When true, the tracker publishes the synthetic `DemoData.costSummary`
@@ -39,6 +51,20 @@ class CostTracker: ObservableObject {
             return
         }
         loadCachedSummary()
+        refreshUsageLedger()
+    }
+
+    /// Re-reads the polled series from disk.
+    ///
+    /// Cheap enough to call on every Costs view appearance: one small JSON read,
+    /// no log scan. Called from there rather than only at init because
+    /// `UsageDataManager` writes the artifact from its own refresh cycle, so the
+    /// copy loaded at launch goes stale within a poll interval.
+    func refreshUsageLedger() {
+        guard !demoMode else { return }
+        usageLedger = ProviderUsageLedgerStore.applicationSupport?
+            .load()
+            .filtered(to: providerVisibilityStore.enabledServices) ?? ProviderUsageLedger()
     }
 
     /// What a `scanCosts` call actually did, for callers that stamp a timestamp
@@ -161,6 +187,12 @@ class CostTracker: ObservableObject {
         let grokAccounts = GrokAccountStore.shared.accounts
         let cutoff = CostWindow.start(days: days)
         let store = CostScanCacheStore.applicationSupport
+        // Read once, outside the slice loop: polling providers contribute no
+        // bytes, so their rows are identical in every slice and re-reading the
+        // artifact 64 times would buy nothing. Refreshed here rather than
+        // reused as-is so a scan never folds in a ledger older than itself.
+        refreshUsageLedger()
+        let usageLedger = usageLedger
         var latest: CostSummaryBuilder.CostSummaryScan?
 
         for _ in 0..<Self.maxScanSlices {
@@ -176,7 +208,8 @@ class CostTracker: ObservableObject {
                     enabledProviders: enabledProviders,
                     claudeAccounts: claudeAccounts,
                     grokAccounts: grokAccounts,
-                    session: session
+                    session: session,
+                    usageLedger: usageLedger
                 )
                 // Persist even when the slice was cut short: offsets commit on
                 // line boundaries, so partial progress is exactly what the next

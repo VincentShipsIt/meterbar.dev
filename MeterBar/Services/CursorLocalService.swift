@@ -32,6 +32,14 @@ class CursorLocalService: ObservableObject {
     @Published private(set) var subscriptionType: String?
     @Published private(set) var lastError: ServiceError?
 
+    /// The running request counter from the last successful poll.
+    ///
+    /// Cursor keeps no per-session usage log on disk — `~/.cursor` holds an
+    /// auth/state database and an AI-authored-lines tracker, neither of which
+    /// records tokens or spend — so differencing this scalar across polls is the
+    /// only way Cursor can appear in a dated series. See `ProviderUsageLedger`.
+    private(set) var latestUsageObservation: ProviderUsageObservation?
+
     private init() {
         // Defer I/O off main thread; only @Published mutations land on main actor
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess(forceRescan: false) }
@@ -251,13 +259,48 @@ class CursorLocalService: ObservableObject {
         // Fetch usage summary data (uses /api/usage-summary endpoint)
         let summaryData = try await fetchUsageSummary(userId: userId, token: token)
 
+        let metrics = CursorLocalService.mapSummary(summaryData)
+
         // Clear any previous errors on success
         await MainActor.run {
             self.lastError = nil
             self.subscriptionType = summaryData.membershipType
+            self.latestUsageObservation = CursorLocalService.observation(summaryData, at: metrics.lastUpdated)
         }
 
-        return CursorLocalService.mapSummary(summaryData)
+        return metrics
+    }
+
+    /// One poll's reading of the plan counter, in requests.
+    ///
+    /// `.requests`, never `.usd`: `/api/usage-summary` publishes no currency
+    /// field — `plan.used`, `plan.limit` and the on-demand figures are integer
+    /// counts against a plan allowance, and Cursor publishes no per-request rate
+    /// anywhere MeterBar can read. Any dollar figure derived here would be
+    /// invented, so this counter is barred from `costs[]` by
+    /// `ProviderUsageLedger.dailyUSDSeries(for:)` and surfaces as a request
+    /// series instead.
+    ///
+    /// On-demand usage is billed and counted separately, so it is deliberately
+    /// not summed in: the total would then be in neither unit. No token counts
+    /// ride along either — the endpoint reports none.
+    ///
+    /// The counter zeroes at `billingCycleStart`; the ledger reads a drop as a
+    /// reset rather than a negative delta, so no cycle rollover emits a negative
+    /// day.
+    static func observation(
+        _ summaryData: CursorUsageSummaryResponse,
+        at observedAt: Date
+    ) -> ProviderUsageObservation {
+        ProviderUsageObservation(
+            provider: .cursor,
+            unit: .requests,
+            runningTotal: Double(summaryData.individualUsage?.plan?.used ?? 0),
+            // Cursor publishes no per-day figure, so there is nothing
+            // authoritative to prefer over the poll-to-poll delta.
+            authoritativeDailyTotal: nil,
+            observedAt: observedAt
+        )
     }
 
     /// Maps a decoded Cursor usage-summary response onto the shared

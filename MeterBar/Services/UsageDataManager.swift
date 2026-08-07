@@ -11,6 +11,23 @@ import os
 protocol SimpleUsageProviding: AnyObject {
     var hasAccess: Bool { get }
     func fetchUsageMetrics() async throws -> UsageMetrics
+
+    /// The running counter this provider reported on its last successful poll,
+    /// or nil if it has not polled successfully or publishes no such counter.
+    ///
+    /// Both providers behind this seam serve running scalars and no history —
+    /// neither will re-serve a day once it has passed — so this is the only
+    /// point at which their spend can be captured for a dated series. Read
+    /// after `fetchUsageMetrics()` rather than returned from it, because that
+    /// return value is serialized into the app-group cache the widget and the
+    /// CLI decode.
+    var latestUsageObservation: ProviderUsageObservation? { get }
+}
+
+/// Defaulted so stub providers in tests, which have no counter to publish,
+/// keep conforming without restating this.
+extension SimpleUsageProviding {
+    var latestUsageObservation: ProviderUsageObservation? { nil }
 }
 
 extension CursorLocalService: SimpleUsageProviding {}
@@ -107,6 +124,14 @@ class UsageDataManager: ObservableObject {
     private let grokAccountStore: GrokAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
     private let parseHealthStore: ProviderParseHealthStore
+
+    /// Where polled running counters are accumulated into a dated series.
+    ///
+    /// Its own artifact, not shared with the scan caches: those are derived
+    /// from log files that can be re-read, while this ledger is the only copy
+    /// of Cursor's and OpenRouter's history that will ever exist. `CostTracker`
+    /// reads the same file back when it builds the published summary.
+    private let usageLedgerStore = ProviderUsageLedgerStore.applicationSupport
 
     /// When true, the manager publishes the synthetic `DemoData` fixture and
     /// performs no real fetches, cache reads, or shared-store writes. Gated at
@@ -474,10 +499,12 @@ class UsageDataManager: ObservableObject {
         // Fold in the original provider order so the reported failure stays
         // deterministic rather than reflecting whichever leg finished last.
         var firstFailure: Error?
+        var refreshed: [ServiceType] = []
         for (service, leg) in zip(pending, legs) {
             if let fetched = leg.metrics {
                 metrics[service] = fetched
                 states[service] = (.refreshed, nil)
+                refreshed.append(service)
             } else if let error = leg.error {
                 if firstFailure == nil { firstFailure = error }
                 let safeMessage = ServiceSupport.safeErrorMessage(for: error)
@@ -487,7 +514,49 @@ class UsageDataManager: ObservableObject {
             }
         }
 
+        recordUsageObservations(for: refreshed)
+
         return SimpleProviderRefresh(metrics: metrics, states: states, firstFailure: firstFailure)
+    }
+
+    /// Folds this refresh's polled counters into the persisted ledger.
+    ///
+    /// A poll that is not recorded here is spend that can never reach the
+    /// chart: neither provider serves dated history, so the delta between two
+    /// consecutive polls is the only measurement of a day that exists, and it
+    /// is gone once the next poll overwrites the counter in memory.
+    ///
+    /// Failure to persist is logged, not surfaced: the refresh itself
+    /// succeeded, and the counters are running totals, so the next poll's delta
+    /// spans the gap and no spend is lost — only its attribution to a
+    /// particular day.
+    private func recordUsageObservations(for services: [ServiceType]) {
+        guard !demoMode, let store = usageLedgerStore else { return }
+        let observations = services.compactMap { simpleProvider(for: $0)?.latestUsageObservation }
+        guard !observations.isEmpty else { return }
+
+        var ledger = store.load()
+        for observation in observations {
+            ledger.record(observation)
+        }
+        do {
+            try store.save(ledger)
+        } catch {
+            AppLog.usage.error(
+                "Failed to persist provider usage observations: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func simpleProvider(for service: ServiceType) -> SimpleUsageProviding? {
+        switch service {
+        case .cursor:
+            return cursorService
+        case .openRouter:
+            return openRouterService
+        case .claudeCode, .codexCli, .grok:
+            return nil
+        }
     }
 
     func refresh(service: ServiceType) async {
