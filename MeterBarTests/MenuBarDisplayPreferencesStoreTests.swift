@@ -182,9 +182,46 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: StorageKeys.statusItemRotatesProviders))
     }
 
+    func testEnablingRotationClearsAPin() {
+        // The mirror of `testClearingThePinLeavesRotationOff`: the three modes
+        // are exclusive in both directions, so turning rotation on cannot leave
+        // a pin parked behind it either.
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        store.setPinnedCandidateKey("Claude Code:gen:weekly")
+
+        store.setRotatesProviders(true)
+
+        XCTAssertNil(store.pinnedCandidateKey)
+        XCTAssertTrue(store.rotatesProviders)
+        let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+        XCTAssertNil(reloaded.pinnedCandidateKey)
+        XCTAssertTrue(reloaded.rotatesProviders)
+    }
+
+    func testAPersistedPinRepairsConflictingRotationAndFocusValues() {
+        // What a build from before pin exclusivity could leave on disk: rotation
+        // was suppressed at read time only, so both flags survived alongside a
+        // pin and would resurface the moment the pin was cleared.
+        defaults.set("Claude Code:gen:weekly", forKey: StorageKeys.statusItemPinnedCandidate)
+        defaults.set(true, forKey: StorageKeys.statusItemRotatesProviders)
+        defaults.set(true, forKey: StorageKeys.statusItemFollowsFocusedApp)
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.pinnedCandidateKey, "Claude Code:gen:weekly")
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(store.followsFocusedApp)
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.statusItemRotatesProviders))
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.statusItemFollowsFocusedApp))
+
+        store.setPinnedCandidateKey(nil)
+
+        XCTAssertFalse(store.rotatesProviders)
+        XCTAssertFalse(store.followsFocusedApp)
+    }
+
     func testPreferencesPersistAcrossRelaunch() {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
-        store.setPinnedCandidateKey("codex:account-id:weekly")
         store.setLabelMetric(.percentUsed)
         store.setLabelSize(.regular)
         store.setWindowMode(.combined)
@@ -195,10 +232,14 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         store.setShowsRecommendationHint(true)
         store.setRotatesProviders(true)
         store.setRotationInterval(.sixtySeconds)
+        // Pinned last, because a pin and rotation are mutually exclusive and
+        // whichever the user chose last is the one that survives.
+        store.setPinnedCandidateKey("codex:account-id:weekly")
 
         let reloaded = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
         XCTAssertEqual(reloaded.pinnedCandidateKey, "codex:account-id:weekly")
+        XCTAssertFalse(reloaded.rotatesProviders)
         XCTAssertEqual(reloaded.labelMetric, .percentUsed)
         XCTAssertEqual(reloaded.labelSize, .regular)
         XCTAssertEqual(reloaded.windowMode, .combined)
@@ -207,7 +248,6 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.showsExhaustedResetCountdown)
         XCTAssertEqual(reloaded.resetTimeFormat, .clock)
         XCTAssertTrue(reloaded.showsRecommendationHint)
-        XCTAssertTrue(reloaded.rotatesProviders)
         XCTAssertEqual(reloaded.rotationInterval, .sixtySeconds)
     }
 

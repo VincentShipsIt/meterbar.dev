@@ -187,6 +187,11 @@ struct DashboardShareSection: View {
     }
 
     private func saveCardImage() {
+        // The bytes are rendered now; the save panel can sit open long enough
+        // for the scan to finish. The caveat has to describe the totals baked
+        // into the PNG, not whatever the tracker happens to say once the user
+        // has picked a destination.
+        let wasRefreshInProgress = costTracker.isRefreshInProgress
         let content = stampedContent()
 
         guard let pngData = SocialCardRenderer.pngData(for: content) else {
@@ -206,7 +211,9 @@ struct DashboardShareSection: View {
                 // owner-only default the app applies to its own state would be
                 // wrong here. Normal umask semantics are the correct behavior.
                 try pngData.write(to: url, options: .atomic)
-                setExportStatus("PNG saved")
+                setShareStatus(
+                    Self.exportStatus("PNG saved", isRefreshInProgress: wasRefreshInProgress)
+                )
             } catch {
                 setShareStatus("Save failed")
             }
