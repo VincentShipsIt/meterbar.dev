@@ -57,6 +57,13 @@ struct DashboardCostsSection: View {
 
             costTrendCard
 
+            TokenActivityCard(
+                summary: summary,
+                isScanning: costTracker.isScanning,
+                isScanDisabled: costTracker.isRefreshInProgress,
+                scan: { Task { await costTracker.scanCosts(days: 30) } }
+            )
+
             if let summary, !summary.dailyUsage.isEmpty {
                 DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
                     DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)
