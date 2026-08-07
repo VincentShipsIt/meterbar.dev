@@ -335,7 +335,7 @@ enum ClaudeCostScanner {
 
         let allowance = session.budget.allowance
         guard allowance > 0 else {
-            session.noteDeferred()
+            session.noteDeferred(.claude)
             return record.map { Self.windows($0.payload, cutoff: session.cutoff) }
         }
 
@@ -392,7 +392,7 @@ enum ClaudeCostScanner {
         } else {
             payload.periodKeys.formUnion(periodKeyed.keys)
             payload.lifetimeKeys.formUnion(lifetimeKeyed.keys)
-            session.noteDeferred()
+            session.noteDeferred(.claude)
         }
 
         session.setClaudeRecord(

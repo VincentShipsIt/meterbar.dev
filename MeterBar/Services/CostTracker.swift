@@ -186,16 +186,7 @@ class CostTracker: ObservableObject {
             await MainActor.run { costSummary = slice.scan.summary }
 
             guard Self.shouldRunAnotherSlice(after: slice.scan, persistence: slice.persistence) else {
-                switch slice.persistence {
-                case .unavailable:
-                    AppLog.cost.error(
-                        "Stopping the cost scan: no cache store, so every slice would re-read the corpus from zero"
-                    )
-                default:
-                    AppLog.cost.error(
-                        "Stopping the cost scan: this slice's progress was not persisted, so no later slice can resume"
-                    )
-                }
+                Self.logStoppedScan(slice)
                 break
             }
         }
@@ -207,23 +198,50 @@ class CostTracker: ObservableObject {
     /// up where it stopped.
     private struct ScanSlice: Sendable {
         let scan: CostSummaryBuilder.CostSummaryScan
-        let persistence: CostScanPersistOutcome
+        let persistence: CostScanPersistReport
     }
 
     /// Whether another slice can improve on the one that just finished.
     ///
-    /// A slice that could not write its caches — or had no store to write them
-    /// to — left the store exactly as it found it, so the next slice would
+    /// A provider that could not write its cache — or had no store to write it
+    /// to — left that artifact exactly as it found it, so the next slice would
     /// re-read the same bytes, defer in the same place, and fail to persist
-    /// again — 63 times over, pinning the scan queue for nothing. Stopping costs
-    /// one refresh: the next one retries the write from the last durable
-    /// offsets.
+    /// again — 63 times over, pinning the scan queue for nothing.
+    ///
+    /// Asked per provider because the two caches fail independently: a blocked
+    /// Claude write must neither end Codex's scan while Codex is still resuming,
+    /// nor keep the loop alive once Codex has finished and Claude is the only
+    /// one still deferring. Stopping costs one refresh — the next one retries
+    /// the write from the last durable offsets.
     static func shouldRunAnotherSlice(
         after scan: CostSummaryBuilder.CostSummaryScan,
-        persistence: CostScanPersistOutcome
+        persistence: CostScanPersistReport
     ) -> Bool {
-        guard !scan.isComplete else { return false }
-        return persistence == .persisted
+        scan.deferredProviders.contains { persistence.outcome(for: $0) == .persisted }
+    }
+
+    private static func logStoppedScan(_ slice: ScanSlice) {
+        for provider in slice.scan.deferredProviders {
+            let name = provider == .claude ? "Claude" : "Codex"
+            switch slice.persistence.outcome(for: provider) {
+            case .persisted:
+                continue
+            case .unavailable:
+                AppLog.cost.error(
+                    """
+                    Stopping the \(name, privacy: .public) cost scan: no cache store, \
+                    so every slice would re-read the corpus from zero
+                    """
+                )
+            case .failed:
+                AppLog.cost.error(
+                    """
+                    Stopping the \(name, privacy: .public) cost scan: this slice's progress \
+                    was not persisted, so no later slice can resume
+                    """
+                )
+            }
+        }
     }
 
     private func loadCachedSummary() {

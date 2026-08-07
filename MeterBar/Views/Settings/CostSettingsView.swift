@@ -53,10 +53,20 @@ nonisolated struct CostProjectPresentation: Equatable {
         detail = parent.isEmpty ? nil : parent.suffix(2).joined(separator: "/")
     }
 
+    /// Width and a digit, not the character class alone.
+    ///
+    /// The IDs this drops are the fixed 6-character lowercase-hex suffix a
+    /// worktree tool appends; anything of another length is a name someone
+    /// chose. `deadbeef` and `cafe123` are hex too, and a branch losing its
+    /// last segment is worse than an ID surviving on screen — which is also
+    /// why the all-letter hex words (`decade`, `facade`, `accede`) are spared
+    /// at the cost of the 1-in-360 real IDs that draw no digit.
     private static func looksLikeWorktreeID(_ value: String) -> Bool {
-        guard (6...12).contains(value.count) else { return false }
-        return value.allSatisfy { $0.isHexDigit }
+        guard value.count == generatedWorktreeIDLength, value.contains(where: \.isNumber) else { return false }
+        return value.allSatisfy { $0.isHexDigit && !$0.isUppercase }
     }
+
+    private static let generatedWorktreeIDLength = 6
 }
 
 /// Renders one cost-summary period — the rolling 30-day window or the

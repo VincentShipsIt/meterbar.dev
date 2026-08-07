@@ -5,6 +5,10 @@ import MeterBarShared
 /// daily-usage rows and breakdown rows the UI renders.
 /// Split out of `CostTracker` (audit C1d).
 enum TokenUsageAggregator {
+    /// `pricingAt` resolves one row's rate from its model name (`nil` for the
+    /// day's own flat total) and the day it was recorded, so a dated schedule
+    /// prices history at the rate that was in effect then instead of today's
+    /// (issue #339). Without it every row falls back to `pricing`.
     nonisolated static func makeDailyUsage(
         from dailyTotals: [Date: TokenAccumulator],
         provider: ServiceType,
@@ -12,9 +16,11 @@ enum TokenUsageAggregator {
         modelsByDay: [Date: [String: TokenAccumulator]] = [:],
         projectsByDay: [Date: [String: TokenAccumulator]] = [:],
         projectModelsByDay: [Date: [String: [String: TokenAccumulator]]] = [:],
-        pricingForName: ((String) -> TokenPricing)? = nil
+        pricingAt: ((String?, Date) -> TokenPricing)? = nil
     ) -> [DailyTokenUsage] {
         dailyTotals.map { day, tokens in
+            let dayPricing = pricingAt?(nil, day) ?? pricing
+            let pricingForName = pricingAt.map { resolve in { (name: String) in resolve(name, day) } }
             let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
             let cost = tokens.estimatedCostUSD > 0
                 ? tokens.estimatedCostUSD
@@ -23,7 +29,7 @@ enum TokenUsageAggregator {
                     output: tokens.output + tokens.reasoning,
                     cacheCreation: tokens.cacheCreation,
                     cacheRead: tokens.cacheRead,
-                    pricing: pricing
+                    pricing: dayPricing
                 )
             return DailyTokenUsage(
                 date: day,
@@ -36,7 +42,7 @@ enum TokenUsageAggregator {
                     makeBreakdowns(
                         from: $0,
                         provider: provider,
-                        pricing: pricing,
+                        pricing: dayPricing,
                         pricingForName: pricingForName
                     )
                 },
@@ -45,7 +51,7 @@ enum TokenUsageAggregator {
                         from: $0,
                         modelsByProject: projectModelsByDay[day] ?? [:],
                         provider: provider,
-                        pricing: pricing,
+                        pricing: dayPricing,
                         pricingForName: pricingForName
                     )
                 }
