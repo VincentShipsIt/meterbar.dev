@@ -435,13 +435,19 @@ struct UsageDashboardView: View {
         case .providerStatus:
             await providerStatusMonitor.refreshAll()
         case .costs:
-            await costTracker.scanCosts(days: 30)
+            let outcome = await costTracker.scanCosts(days: 30)
             if activeSection.refreshesApiUsage,
                apiUsageStore.hasAnyAuthenticated,
                !apiUsageStore.isLoading {
                 await apiUsageStore.refresh()
             }
-            socialCardGeneratedAt = Date()
+            // Opening Share starts the background backfill, which makes the
+            // refresh that follows it return without reading anything. Restamp
+            // the card only when a scan actually finished, so the timestamp on
+            // the artwork means what it says.
+            if outcome.isAuthoritative {
+                socialCardGeneratedAt = Date()
+            }
         case .usage:
             await dataManager.refreshForExplicitAction(.manualRefresh)
         }
