@@ -1255,6 +1255,25 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(store.loadClaude().records["/transcripts/a.jsonl"]?.offset, 512)
     }
 
+    func testPersistReportsNoStoreAsUnavailableRatherThanPersisted() {
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: nil)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 512,
+                stamp: CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42),
+                cutoff: cutoff,
+                isComplete: false,
+                payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+
+        // A session with nowhere to write is not "persisted": the offsets it
+        // committed die with it, so a later slice would start from zero.
+        XCTAssertEqual(session.persist(), .unavailable)
+    }
+
     // MARK: - Slice loop control
 
     func testAnotherSliceRunsOnlyWhenThePreviousOneLeftResumableProgress() {
@@ -1266,6 +1285,9 @@ final class CostTrackerTests: XCTestCase {
         // it, so 63 more slices would re-read the same bytes and defer in the
         // same place.
         XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .failed))
+        // Same waste, different cause: with no store at all every slice rebuilds
+        // an empty cache and re-reads the corpus from offset 0.
+        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .unavailable))
         XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: whole, persistence: .persisted))
     }
 

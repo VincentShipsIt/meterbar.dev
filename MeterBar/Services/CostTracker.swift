@@ -168,9 +168,16 @@ class CostTracker: ObservableObject {
             await MainActor.run { costSummary = slice.scan.summary }
 
             guard Self.shouldRunAnotherSlice(after: slice.scan, persistence: slice.persistence) else {
-                AppLog.cost.error(
-                    "Stopping the cost scan: this slice's progress was not persisted, so no later slice can resume"
-                )
+                switch slice.persistence {
+                case .unavailable:
+                    AppLog.cost.error(
+                        "Stopping the cost scan: no cache store, so every slice would re-read the corpus from zero"
+                    )
+                default:
+                    AppLog.cost.error(
+                        "Stopping the cost scan: this slice's progress was not persisted, so no later slice can resume"
+                    )
+                }
                 break
             }
         }
@@ -187,11 +194,12 @@ class CostTracker: ObservableObject {
 
     /// Whether another slice can improve on the one that just finished.
     ///
-    /// A slice that could not write its caches left the store exactly as it
-    /// found it, so the next slice would re-read the same bytes, defer in the
-    /// same place, and fail to persist again — 63 times over, pinning the scan
-    /// queue for nothing. Stopping costs one refresh: the next one retries the
-    /// write from the last durable offsets.
+    /// A slice that could not write its caches — or had no store to write them
+    /// to — left the store exactly as it found it, so the next slice would
+    /// re-read the same bytes, defer in the same place, and fail to persist
+    /// again — 63 times over, pinning the scan queue for nothing. Stopping costs
+    /// one refresh: the next one retries the write from the last durable
+    /// offsets.
     static func shouldRunAnotherSlice(
         after scan: CostSummaryBuilder.CostSummaryScan,
         persistence: CostScanPersistOutcome
