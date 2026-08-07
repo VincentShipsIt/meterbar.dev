@@ -43,11 +43,15 @@ nonisolated struct ProviderUsageLedgerStore: Sendable {
         try Self.save(ledger, to: fileURL)
     }
 
-    /// Matches `CostScanCacheStore`: the payload keys dictionaries by `Date`, and
-    /// a mismatched strategy would not throw — every strategy but `.iso8601`
-    /// writes a bare number, so the decode succeeds and lands each day decades
-    /// from where it belongs. Pinned rather than left to independently
-    /// defaulted instances that only happen to agree today.
+    /// `.secondsSince1970`, pinned on both sides, matching `CostScanCacheStore`.
+    ///
+    /// Pinned rather than left to independently defaulted instances that only
+    /// happen to agree today, because a mismatch here would not throw: the
+    /// payload keys dictionaries by `Date`, and Foundation's own default
+    /// (`.deferredToDate`) also writes a bare number — just one counted from
+    /// 2001 rather than 1970. Reading one as the other decodes cleanly and lands
+    /// every day thirty-one years from where it belongs. Change one of these two
+    /// and you must change the other.
     private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
@@ -60,18 +64,32 @@ nonisolated struct ProviderUsageLedgerStore: Sendable {
         return decoder
     }
 
+    /// Loads the ledger, or an empty one when the artifact is missing, oversized,
+    /// unreadable, or written by a different schema.
+    ///
+    /// A schema mismatch drops rather than migrates: the cost is one poll
+    /// interval of accumulation, and `fileName` is schema-versioned so the two
+    /// generations never share a path. A *time-zone* change is deliberately not
+    /// grounds to drop. Moving zones is routine — travel, a corrected system
+    /// setting, DST on a machine configured by offset — and discarding here would
+    /// silently destroy up to `retainedDays` of the only copy of Cursor's and
+    /// OpenRouter's history, which neither provider will re-serve.
+    ///
+    /// So the days already recorded keep the boundary they were recorded
+    /// against, and the ledger is re-anchored to the current zone for the days
+    /// still to come. That leaves a bounded error on the one or two days
+    /// straddling the move — strictly better than total, irreversible loss.
+    /// Entries dated in UTC are unaffected either way; their boundary never
+    /// depended on the system zone.
     static func load(from url: URL, maximumBytes: Int = maximumArtifactBytes) -> ProviderUsageLedger {
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
               size <= maximumBytes,
               let data = try? Data(contentsOf: url),
-              let ledger = try? decoder.decode(ProviderUsageLedger.self, from: data),
-              ledger.schemaVersion == ProviderUsageLedger.currentSchemaVersion,
-              ledger.timeZoneIdentifier == TimeZone.current.identifier else {
-            // Dropped rather than migrated. Losing the baseline costs one poll
-            // interval of accumulation; a day bucket decoded against the wrong
-            // calendar would misdate spend with no way to tell afterwards.
+              var ledger = try? decoder.decode(ProviderUsageLedger.self, from: data),
+              ledger.schemaVersion == ProviderUsageLedger.currentSchemaVersion else {
             return ProviderUsageLedger()
         }
+        ledger.timeZoneIdentifier = TimeZone.current.identifier
         return ledger
     }
 

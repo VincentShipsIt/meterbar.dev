@@ -86,6 +86,18 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertEqual(observation.observedAt, now)
     }
 
+    /// `usage_daily` is spend since midnight UTC, and the ledger writes it into
+    /// its day absolutely. Dated against a local calendar it would land in the
+    /// wrong day for every user off UTC — and overwrite whatever that day had
+    /// legitimately accumulated from deltas.
+    func testDailyTotalIsDatedAgainstUTCNotTheUsersCalendar() throws {
+        let key = try decodeKey(#"{"data":{"limit":40,"limit_reset":"monthly","usage":27.5,"usage_daily":1.25}}"#)
+
+        let observation = OpenRouterService.observation(key: key.data, at: date(2026, 7, 13))
+
+        XCTAssertEqual(observation.dayBoundary, .utc)
+    }
+
     /// `usage_daily` is optional in the payload. Its absence must leave the
     /// authoritative slot empty so the ledger falls back to differencing polls,
     /// rather than being read as a published zero that erases the day.

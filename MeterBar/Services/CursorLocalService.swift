@@ -288,17 +288,27 @@ class CursorLocalService: ObservableObject {
     /// The counter zeroes at `billingCycleStart`; the ledger reads a drop as a
     /// reset rather than a negative delta, so no cycle rollover emits a negative
     /// day.
+    ///
+    /// Returns `nil` when the payload carries no plan counter at all. Defaulting
+    /// the absent field to `0` would be indistinguishable from a real reset to
+    /// the ledger, which reads a drop as a new billing cycle and re-baselines to
+    /// zero — so the next complete poll would charge the entire cycle-to-date
+    /// count to a single day as a phantom spike.
     static func observation(
         _ summaryData: CursorUsageSummaryResponse,
         at observedAt: Date
-    ) -> ProviderUsageObservation {
-        ProviderUsageObservation(
+    ) -> ProviderUsageObservation? {
+        guard let used = summaryData.individualUsage?.plan?.used else { return nil }
+        return ProviderUsageObservation(
             provider: .cursor,
             unit: .requests,
-            runningTotal: Double(summaryData.individualUsage?.plan?.used ?? 0),
+            runningTotal: Double(used),
             // Cursor publishes no per-day figure, so there is nothing
             // authoritative to prefer over the poll-to-poll delta.
             authoritativeDailyTotal: nil,
+            // Deltas are dated when MeterBar observed them, so the user's own
+            // calendar is the right one.
+            dayBoundary: .local,
             observedAt: observedAt
         )
     }

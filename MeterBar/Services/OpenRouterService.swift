@@ -135,6 +135,11 @@ final class OpenRouterService: ObservableObject {
             // Authoritative for the whole of today, including the hours MeterBar
             // was not running — which a delta between two polls cannot see.
             authoritativeDailyTotal: key.usageDaily,
+            // `usage_daily` is documented as spend since midnight UTC, and it is
+            // written into its day's bucket absolutely. Filing it under a local
+            // day would both misdate it and overwrite the delta sum that day had
+            // legitimately accumulated, for every user not already on UTC.
+            dayBoundary: .utc,
             observedAt: observedAt
         )
     }

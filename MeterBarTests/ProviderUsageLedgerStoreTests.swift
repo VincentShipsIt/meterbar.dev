@@ -70,16 +70,26 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
         XCTAssertTrue(ProviderUsageLedgerStore.load(from: url).entries.isEmpty)
     }
 
-    /// Days are a local-calendar notion. A ledger accumulated in one time zone
-    /// cannot be extended in another without mixing day boundaries, so the
-    /// mismatch restarts the series instead of appending to it.
-    func testTimeZoneMismatchDropsTheArtifact() throws {
+    /// A time-zone change re-anchors the ledger; it never discards it.
+    ///
+    /// Moving zones is routine — travel, a corrected system setting, DST on a
+    /// machine configured by offset — and this file is the only copy of these
+    /// providers' history. Dropping here would silently destroy up to
+    /// `retainedDays` of days neither provider will re-serve. The recorded days
+    /// keep the boundary they were recorded against and the zone is updated for
+    /// the days still to come, which costs a bounded error on the one day
+    /// straddling the move instead of the lot.
+    func testTimeZoneMismatchReanchorsInsteadOfDiscardingHistory() throws {
         let url = directory.appendingPathComponent(ProviderUsageLedgerStore.fileName)
-        try ProviderUsageLedgerStore.save(makeLedger(), to: url)
+        let saved = makeLedger()
+        try ProviderUsageLedgerStore.save(saved, to: url)
 
         try rewrite(url) { $0["timeZoneIdentifier"] = "Antarctica/Troll" }
 
-        XCTAssertTrue(ProviderUsageLedgerStore.load(from: url).entries.isEmpty)
+        let loaded = ProviderUsageLedgerStore.load(from: url)
+        XCTAssertFalse(loaded.entries.isEmpty)
+        XCTAssertEqual(loaded.entries, saved.entries)
+        XCTAssertEqual(loaded.timeZoneIdentifier, TimeZone.current.identifier)
     }
 
     /// Truncated or hand-edited JSON must not crash the poll that reads it.

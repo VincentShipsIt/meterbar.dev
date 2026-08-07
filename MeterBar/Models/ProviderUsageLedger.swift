@@ -18,6 +18,39 @@ nonisolated enum ProviderUsageUnit: String, Codable, Sendable {
     case requests
 }
 
+/// Which day boundary a provider's figures are dated against.
+///
+/// Not cosmetic. OpenRouter documents `usage_daily` as the credits spent since
+/// midnight *UTC*, so filing it under the user's local day would hand part of
+/// one local day's spend to another for every user who is not on UTC — and the
+/// authoritative path writes the bucket absolutely, so the misfiled figure also
+/// erases the delta sum that was correctly there. Cursor publishes no daily
+/// figure at all; its deltas are dated when MeterBar observed them, which is a
+/// local-calendar notion. The boundary rides with the observation and is stored
+/// on the entry so one provider's buckets can never be extended against the
+/// other's calendar.
+nonisolated enum ProviderUsageDayBoundary: String, Codable, Sendable {
+    /// Dated in the user's own calendar, matching every other MeterBar surface.
+    case local
+
+    /// Dated in UTC, because the provider's published day is.
+    case utc
+
+    /// The calendar this boundary's day buckets are computed in. `local` defers
+    /// to the caller's so a test can pin one; `utc` is fixed, because the
+    /// provider's own day is fixed.
+    func calendar(local: Calendar) -> Calendar {
+        switch self {
+        case .local:
+            return local
+        case .utc:
+            var utc = Calendar(identifier: .gregorian)
+            utc.timeZone = .gmt
+            return utc
+        }
+    }
+}
+
 /// One poll's reading of a provider's running counter.
 ///
 /// Deliberately not a `UsageMetrics`: that type is serialized into the shared
@@ -33,11 +66,14 @@ nonisolated struct ProviderUsageObservation: Sendable, Equatable {
     /// that it moves monotonically until it resets.
     let runningTotal: Double
 
-    /// The provider's own figure for the whole of `observedAt`'s calendar day,
-    /// when it publishes one (OpenRouter's `usage_daily`). Authoritative for
-    /// that day: it covers the hours MeterBar was not running, which a delta
-    /// between two polls cannot.
+    /// The provider's own figure for the whole of `observedAt`'s day, when it
+    /// publishes one (OpenRouter's `usage_daily`). Authoritative for that day:
+    /// it covers the hours MeterBar was not running, which a delta between two
+    /// polls cannot. Which day it means is `dayBoundary`, not the user's.
     let authoritativeDailyTotal: Double?
+
+    /// The calendar this provider's figures are dated against.
+    let dayBoundary: ProviderUsageDayBoundary
 
     let observedAt: Date
 
@@ -46,12 +82,14 @@ nonisolated struct ProviderUsageObservation: Sendable, Equatable {
         unit: ProviderUsageUnit,
         runningTotal: Double,
         authoritativeDailyTotal: Double? = nil,
+        dayBoundary: ProviderUsageDayBoundary = .local,
         observedAt: Date
     ) {
         self.provider = provider
         self.unit = unit
         self.runningTotal = runningTotal
         self.authoritativeDailyTotal = authoritativeDailyTotal
+        self.dayBoundary = dayBoundary
         self.observedAt = observedAt
     }
 }
@@ -66,6 +104,11 @@ nonisolated struct ProviderUsageDay: Sendable, Equatable, Codable {
 nonisolated struct ProviderUsageLedgerEntry: Codable, Sendable, Equatable {
     var provider: ServiceType
     var unit: ProviderUsageUnit
+
+    /// The calendar `daily`'s keys were computed in. Stored so a later poll can
+    /// tell whether it is about to extend the map against the same boundary, the
+    /// same way `unit` guards against extending it in the wrong denomination.
+    var dayBoundary: ProviderUsageDayBoundary
 
     /// The counter as of `lastObservedAt`, i.e. the baseline the next reading is
     /// differenced against.
@@ -104,7 +147,7 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
     /// Bumped whenever the stored shape changes. A mismatch drops the artifact
     /// rather than migrating it — the cost is one lost baseline, and the series
     /// resumes from the next poll.
-    static var currentSchemaVersion: Int { 1 }
+    static var currentSchemaVersion: Int { 2 }
 
     /// How much history the ledger keeps, in days.
     ///
@@ -117,9 +160,12 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
 
     var schemaVersion = ProviderUsageLedger.currentSchemaVersion
 
-    /// The time zone the day buckets were computed in. Days are a local-calendar
-    /// notion, so a ledger accumulated in one zone cannot be extended in another
-    /// without silently mixing boundaries.
+    /// The zone the most recent `.local` buckets were computed in.
+    ///
+    /// Recorded for provenance, not as a validity check: this ledger is the only
+    /// copy of its providers' history, so `ProviderUsageLedgerStore.load`
+    /// re-anchors it on a zone change rather than discarding days that can never
+    /// be fetched again.
     var timeZoneIdentifier = TimeZone.current.identifier
 
     /// An array rather than a dictionary keyed by provider, matching
@@ -195,10 +241,15 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
     /// worse than useless if accepted: a `NaN` baseline makes every later
     /// comparison read as a reset, and a stale reading re-baselines downwards so
     /// that the next real poll charges the entire counter as one day's usage.
+    ///
+    /// `calendar` is the *local* calendar. A provider that dates its figures in
+    /// UTC is bucketed in UTC regardless of what is passed here — see
+    /// `ProviderUsageDayBoundary`.
     mutating func record(_ observation: ProviderUsageObservation, calendar: Calendar = .current) {
         guard observation.runningTotal.isFinite, observation.runningTotal >= 0 else { return }
 
-        let day = calendar.startOfDay(for: observation.observedAt)
+        let bucketCalendar = observation.dayBoundary.calendar(local: calendar)
+        let day = bucketCalendar.startOfDay(for: observation.observedAt)
         // A non-finite published total is dropped rather than stored: it would
         // propagate through every `reduce` downstream until the headline reads
         // "$nan".
@@ -214,7 +265,11 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
         // A unit change means the counter now measures something else, so the
         // old baseline is not comparable. Restarting costs one poll interval;
         // differencing dollars against requests yields a number in neither unit.
-        guard entries[index].unit == observation.unit else {
+        // A boundary change is the same problem one axis over: the existing keys
+        // are midnights in a different calendar, so adding to them would sum two
+        // definitions of "day" into one bucket.
+        guard entries[index].unit == observation.unit,
+              entries[index].dayBoundary == observation.dayBoundary else {
             entries[index] = Self.makeEntry(from: observation, day: day, authoritative: authoritative)
             return
         }
@@ -245,7 +300,7 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
         // the last non-authoritative reading.
         entries[index].lastObservedTotal = observation.runningTotal
         entries[index].lastObservedAt = observation.observedAt
-        Self.prune(&entries[index], calendar: calendar)
+        Self.prune(&entries[index], calendar: bucketCalendar)
     }
 
     /// The first entry for a provider: a baseline, and nothing more.
@@ -265,6 +320,7 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
         return ProviderUsageLedgerEntry(
             provider: observation.provider,
             unit: observation.unit,
+            dayBoundary: observation.dayBoundary,
             lastObservedTotal: observation.runningTotal,
             lastObservedAt: observation.observedAt,
             firstObservedOn: day,

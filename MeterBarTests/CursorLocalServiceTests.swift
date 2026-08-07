@@ -217,12 +217,13 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let observedAt = Date(timeIntervalSince1970: 1_780_000_000)
 
-        let observation = CursorLocalService.observation(try decodeSummary(json), at: observedAt)
+        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: observedAt))
 
         XCTAssertEqual(observation.provider, .cursor)
         XCTAssertEqual(observation.unit, .requests)
         XCTAssertEqual(observation.runningTotal, 137)
         XCTAssertEqual(observation.observedAt, observedAt)
+        XCTAssertEqual(observation.dayBoundary, .local, "deltas are dated when MeterBar saw them")
     }
 
     /// On-demand spend is billed separately and counted separately, so adding it
@@ -238,7 +239,7 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
 
-        let observation = CursorLocalService.observation(try decodeSummary(json), at: Date())
+        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertEqual(observation.runningTotal, 100)
     }
@@ -248,16 +249,28 @@ final class CursorLocalServiceTests: XCTestCase {
     func testSummaryPublishesNoAuthoritativeDailyTotal() throws {
         let json = #"{ "individualUsage": { "plan": { "used": 3, "limit": 500 } } }"#
 
-        let observation = CursorLocalService.observation(try decodeSummary(json), at: Date())
+        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertNil(observation.authoritativeDailyTotal)
     }
 
-    /// A payload with no individual usage at all still yields a well-formed
-    /// baseline. Zero here is the counter's value, not a claim about a day —
-    /// the ledger writes no row for an unchanged counter.
-    func testMissingIndividualUsageObservesZeroRatherThanFailing() throws {
-        let observation = CursorLocalService.observation(try decodeSummary("{}"), at: Date())
+    /// A payload with no plan counter is not a reading of zero, and must not be
+    /// reported as one: the ledger reads a drop as a billing-cycle reset and
+    /// re-baselines, so the next complete poll would charge the whole
+    /// cycle-to-date count to a single day.
+    func testMissingPlanCounterYieldsNoObservationRatherThanZero() throws {
+        XCTAssertNil(CursorLocalService.observation(try decodeSummary("{}"), at: Date()))
+        XCTAssertNil(
+            CursorLocalService.observation(try decodeSummary(#"{ "individualUsage": {} }"#), at: Date())
+        )
+    }
+
+    /// A published zero is a real reading, though — the start of a billing cycle
+    /// — and still establishes the baseline the next poll differences against.
+    func testExplicitZeroPlanCounterIsStillObserved() throws {
+        let json = #"{ "individualUsage": { "plan": { "used": 0, "limit": 500 } } }"#
+
+        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertEqual(observation.runningTotal, 0)
         XCTAssertEqual(observation.unit, .requests)

@@ -330,6 +330,54 @@ final class ProviderUsageObservationTests: XCTestCase {
         XCTAssertEqual(ledger.unit(for: .cursor), .usd)
     }
 
+    // MARK: - Day boundaries
+
+    /// A provider that dates its figures in UTC is bucketed in UTC, whatever the
+    /// user's calendar says.
+    ///
+    /// OpenRouter documents `usage_daily` as spend since midnight *UTC*, and the
+    /// authoritative path writes its bucket absolutely. Filing it under the local
+    /// day would therefore do two things at once for every user off UTC: date the
+    /// figure to the wrong day, and overwrite whatever that day had legitimately
+    /// accumulated from deltas.
+    func testUTCBoundaryBucketsAgainstUTCRatherThanTheLocalCalendar() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        var pacific = Calendar(identifier: .gregorian)
+        pacific.timeZone = TimeZone(secondsFromGMT: -8 * 3600) ?? .gmt
+        // 02:00 UTC on the 2nd is still 18:00 on the 1st in the local calendar,
+        // so the two boundaries disagree about which day this instant is in.
+        let instant = utc.date(from: DateComponents(year: 2026, month: 1, day: 2, hour: 2)) ?? Date()
+        var ledger = ProviderUsageLedger()
+
+        ledger.record(
+            observation(.openRouter, unit: .usd, total: 100, authoritativeDaily: 7, boundary: .utc, at: instant),
+            calendar: pacific
+        )
+
+        let series = ledger.dailySeries(for: .openRouter)
+        XCTAssertEqual(series.map(\.date), [utc.startOfDay(for: instant)])
+        XCTAssertNotEqual(series.first?.date, pacific.startOfDay(for: instant))
+    }
+
+    /// A provider whose day boundary changes starts a fresh baseline.
+    ///
+    /// This is the unit-change guard one axis over: the keys already in the map
+    /// are midnights in a different calendar, so extending it would sum two
+    /// definitions of "day" into one bucket and shift part of one day's spend
+    /// onto its neighbour.
+    func testDayBoundaryChangeRestartsTheBaselineInsteadOfMixingCalendars() {
+        var ledger = ProviderUsageLedger()
+
+        ledger.record(observation(.openRouter, unit: .usd, total: 100, at: day(1)), calendar: calendar)
+        ledger.record(
+            observation(.openRouter, unit: .usd, total: 140, boundary: .utc, at: day(2)),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(ledger.dailySeries(for: .openRouter), [])
+    }
+
     // MARK: - Malformed input
 
     /// Non-finite and negative readings are ignored, baseline included.
@@ -414,6 +462,7 @@ final class ProviderUsageObservationTests: XCTestCase {
         unit: ProviderUsageUnit,
         total: Double,
         authoritativeDaily: Double? = nil,
+        boundary: ProviderUsageDayBoundary = .local,
         at date: Date
     ) -> ProviderUsageObservation {
         ProviderUsageObservation(
@@ -421,6 +470,7 @@ final class ProviderUsageObservationTests: XCTestCase {
             unit: unit,
             runningTotal: total,
             authoritativeDailyTotal: authoritativeDaily,
+            dayBoundary: boundary,
             observedAt: date
         )
     }
