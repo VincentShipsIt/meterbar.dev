@@ -485,7 +485,7 @@ enum CodexCostScanner {
     ) {
         let allowance = session.budget.allowance
         guard allowance > 0 else {
-            session.noteDeferred()
+            session.noteDeferred(.codex)
             return
         }
 
@@ -529,7 +529,7 @@ enum CodexCostScanner {
             // Whatever is still parked belongs to a model the unread remainder
             // may yet name. Dropping it as unattributed would be worse than
             // letting the next slice read the file again.
-            session.noteDeferred()
+            session.noteDeferred(.codex)
         }
     }
 
