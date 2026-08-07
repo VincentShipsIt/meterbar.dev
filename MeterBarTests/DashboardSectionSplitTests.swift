@@ -299,6 +299,37 @@ final class DashboardSectionSplitTests: XCTestCase {
         )
     }
 
+    // MARK: - Share card freshness
+
+    func testShareScanStatusMatchesTheCostCardsExactly() {
+        for isScanning in [true, false] {
+            for isRefreshingMissingDays in [true, false] {
+                XCTAssertEqual(
+                    DashboardShareSection.scanStatusText(
+                        isScanning: isScanning,
+                        isRefreshingMissingDays: isRefreshingMissingDays
+                    ),
+                    DashboardCostsSection.refreshStatusText(
+                        isScanning: isScanning,
+                        isRefreshingMissingDays: isRefreshingMissingDays
+                    ),
+                    "share preview and cost cards must announce the same scan state"
+                )
+            }
+        }
+    }
+
+    func testExportStatusWarnsThatTotalsAreStillSettlingDuringAScan() {
+        XCTAssertEqual(
+            DashboardShareSection.exportStatus("PNG copied", isRefreshInProgress: true),
+            "PNG copied — totals still updating"
+        )
+        XCTAssertEqual(
+            DashboardShareSection.exportStatus("Caption copied", isRefreshInProgress: false),
+            "Caption copied"
+        )
+    }
+
     // MARK: - Extracted section views still render
 
     func testOverviewSectionRenders() {
