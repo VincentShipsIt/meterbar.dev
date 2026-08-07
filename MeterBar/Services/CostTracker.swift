@@ -41,20 +41,38 @@ class CostTracker: ObservableObject {
         loadCachedSummary()
     }
 
-    func scanCosts(days: Int = 30) async {
-        guard !demoMode else { return }
+    /// What a `scanCosts` call actually did, for callers that stamp a timestamp
+    /// or otherwise present the totals as freshly read.
+    enum ScanOutcome: Sendable {
+        /// Demo mode, or another scan/backfill already held the tracker, so no
+        /// log was read and the published totals are exactly as stale as before.
+        case skipped
+        /// Slices ran, but the scan stopped before it saw the whole corpus, so
+        /// the published totals are an undercount that later slices will raise.
+        case partial
+        /// A scan saw the whole corpus.
+        case completed
+
+        /// True only when the published totals came from a scan that finished.
+        var isAuthoritative: Bool { self == .completed }
+    }
+
+    @discardableResult
+    func scanCosts(days: Int = 30) async -> ScanOutcome {
+        guard !demoMode else { return .skipped }
         let shouldStart = await MainActor.run {
             guard !isRefreshInProgress else { return false }
             isScanning = true
             return true
         }
-        guard shouldStart else { return }
+        guard shouldStart else { return .skipped }
 
         let scan = await makeCostSummary(days: days)
 
-        await MainActor.run {
+        return await MainActor.run {
             apply(scan)
             isScanning = false
+            return scan?.isComplete == true ? .completed : .partial
         }
     }
 
