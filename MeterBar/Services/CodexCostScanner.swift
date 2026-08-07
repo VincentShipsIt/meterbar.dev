@@ -30,10 +30,10 @@ enum CodexCostScanner {
     /// `earliestDate` starts at now and only decreases, `latestDate` starts at the
     /// window floor (the cutoff for the period, `.distantPast` for lifetime) and
     /// only increases.
-    nonisolated static func scanWindows(cutoff: Date) -> ScanWindows<CodexScanContext> {
+    nonisolated static func scanWindows(cutoff: Date) -> ScanWindows<CostScanWindowContext> {
         ScanWindows(
-            period: CodexScanContext(earliestDate: Date(), latestDate: cutoff),
-            lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
+            period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
+            lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
             cutoff: cutoff
         )
     }
@@ -54,7 +54,7 @@ enum CodexCostScanner {
     /// `pricingAt` is the seam that lets a test drive a dated schedule; the
     /// default is the shared table every caller ships with.
     nonisolated static func makeCost(
-        from context: CodexScanContext,
+        from context: CostScanWindowContext,
         pricingAt: @escaping (String?, Date) -> TokenPricing = ModelPricing.codex(for:at:)
     ) -> (TokenCost, [DailyTokenUsage])? {
         let totals = context.totals
@@ -256,7 +256,7 @@ enum CodexCostScanner {
     /// Streams one rollout end to end into `windows`.
     ///
     /// Serial by construction. Unlike Claude's per-file dedup,
-    /// `CodexScanContext.eventKeys` spans every rollout *and* the SQLite log,
+    /// `CostScanWindowContext.eventKeys` spans every rollout *and* the SQLite log,
     /// first event wins — so the order files reach here is the order that
     /// decides the answer.
     ///
@@ -264,7 +264,7 @@ enum CodexCostScanner {
     /// through it.
     nonisolated static func parseRollout(
         at fileURL: URL,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CostScanWindowContext>
     ) {
         let calendar = Calendar.current
         for event in Self.parseRollout(at: fileURL) {
@@ -275,7 +275,7 @@ enum CodexCostScanner {
     // MARK: - Budgeted, resumable scan
 
     /// Rollouts and the flat SQLite log, read under `session`'s budget.
-    nonisolated static func scanSessions(session: CostScanSession) -> ScanWindows<CodexScanContext> {
+    nonisolated static func scanSessions(session: CostScanSession) -> ScanWindows<CostScanWindowContext> {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
         var windows = Self.scanRollouts(
             directories: Self.rolloutDirectories(in: codexDir),
@@ -301,7 +301,7 @@ enum CodexCostScanner {
     nonisolated static func scanRollouts(
         directories: [URL],
         session: CostScanSession
-    ) -> ScanWindows<CodexScanContext> {
+    ) -> ScanWindows<CostScanWindowContext> {
         var windows = Self.scanWindows(cutoff: session.cutoff)
         let files = Self.distinctRollouts(in: directories)
         var live: Set<String> = []
@@ -452,7 +452,7 @@ enum CodexCostScanner {
     nonisolated private static func foldByEvent(
         _ file: CostScanFile,
         session: CostScanSession,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CostScanWindowContext>
     ) {
         let allowance = session.budget.allowance
         guard allowance > 0 else {
@@ -518,7 +518,7 @@ enum CodexCostScanner {
     ///   re-read that file event by event.
     nonisolated private static func fold(
         _ totals: CodexFileTotals,
-        into windows: inout ScanWindows<CodexScanContext>
+        into windows: inout ScanWindows<CostScanWindowContext>
     ) -> Bool {
         // Period keys are a subset of lifetime keys by construction (every
         // in-window event is also a lifetime event), so the lifetime test
@@ -553,7 +553,7 @@ enum CodexCostScanner {
         let lifetime = record.payload.lifetime
         if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
             // Every event predates the new window.
-            record.payload.period = CodexScanContext(
+            record.payload.period = CostScanWindowContext(
                 earliestDate: Date(),
                 latestDate: session.cutoff
             )
@@ -620,7 +620,7 @@ enum CodexCostScanner {
     nonisolated private static func flushDeferred(
         _ deferred: inout [CodexDeferredUsage],
         modelName: String?,
-        windows: inout ScanWindows<CodexScanContext>,
+        windows: inout ScanWindows<CostScanWindowContext>,
         calendar: Calendar
     ) {
         var events: [CodexUsageEvent] = []
@@ -689,7 +689,7 @@ enum CodexCostScanner {
         fileURL: URL,
         rollout: CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
-        windows: inout ScanWindows<CodexScanContext>,
+        windows: inout ScanWindows<CostScanWindowContext>,
         calendar: Calendar
     ) {
         var events: [CodexUsageEvent] = []
@@ -720,7 +720,7 @@ enum CodexCostScanner {
     nonisolated static func scanSQLiteLogs(
         database: URL,
         since cutoffDate: Date,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CostScanWindowContext>
     ) {
         guard FileManager.default.fileExists(atPath: database.path) else { return }
 
@@ -831,7 +831,7 @@ enum CodexCostScanner {
     /// calendar is not free, and it cannot change part-way through a scan.
     nonisolated private static func apply(
         _ event: CodexUsageEvent,
-        windows: inout ScanWindows<CodexScanContext>,
+        windows: inout ScanWindows<CostScanWindowContext>,
         calendar: Calendar
     ) {
         let timestamp = event.timestamp
@@ -977,7 +977,7 @@ nonisolated struct CodexUsageAttribution: Sendable {
 }
 
 /// One usage event, extracted from a rollout line or a SQLite log row and ready
-/// to fold into a `CodexScanContext`.
+/// to fold into a `CostScanWindowContext`.
 ///
 /// This is the boundary between the parallel half of the scan and the serial
 /// half: rollouts are parsed into these on worker threads, then applied to the

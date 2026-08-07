@@ -21,6 +21,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     private let lock = NSLock()
     private var claudeCache: CostScanFileCache<ClaudeFileTotals>
     private var codexCache: CostScanFileCache<CodexFileTotals>
+    private var grokCache: CostScanFileCache<GrokFileTotals>
     private var deferred: Set<CostScanProvider> = []
 
     init(
@@ -34,6 +35,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         self.store = store
         self.claudeCache = store?.loadClaude() ?? CostScanFileCache<ClaudeFileTotals>()
         self.codexCache = store?.loadCodex() ?? CostScanFileCache<CodexFileTotals>()
+        self.grokCache = store?.loadGrok() ?? CostScanFileCache<GrokFileTotals>()
     }
 
     var claude: CostScanFileCache<ClaudeFileTotals> {
@@ -46,6 +48,12 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return codexCache
+    }
+
+    var grok: CostScanFileCache<GrokFileTotals> {
+        lock.lock()
+        defer { lock.unlock() }
+        return grokCache
     }
 
     var isCancelled: Bool { budget.isCancelled }
@@ -104,6 +112,18 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.unlock()
     }
 
+    func grokRecord(for key: String) -> CostScanFileRecord<GrokFileTotals>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return grokCache.records[key]
+    }
+
+    func setGrokRecord(_ record: CostScanFileRecord<GrokFileTotals>, for key: String) {
+        lock.lock()
+        grokCache.records[key] = record
+        lock.unlock()
+    }
+
     /// Drops cache entries whose file no longer exists.
     ///
     /// Without this the cache grows forever: Claude Code and Codex delete old
@@ -121,7 +141,13 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Writes both caches back, including after a cancelled slice — the whole
+    func retainGrok(keys: Set<String>) {
+        lock.lock()
+        grokCache.records = grokCache.records.filter { keys.contains($0.key) }
+        lock.unlock()
+    }
+
+    /// Writes every cache back, including after a cancelled slice — the whole
     /// point of committing on line boundaries is that partial progress is safe
     /// to keep.
     ///
@@ -138,7 +164,8 @@ nonisolated final class CostScanSession: @unchecked Sendable {
 
         return CostScanPersistReport(
             claude: Self.write("Claude") { try store.saveClaude(claude) },
-            codex: Self.write("Codex") { try store.saveCodex(codex) }
+            codex: Self.write("Codex") { try store.saveCodex(codex) },
+            grok: Self.write("Grok") { try store.saveGrok(grok) }
         )
     }
 
@@ -158,12 +185,34 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     }
 }
 
-/// The two corpora a refresh reads. They have separate caches, separate budgets
+/// The corpora a refresh reads. They have separate caches, separate budgets
 /// to run out of, and separate ways to fail a write, so every "did this make
 /// resumable progress" answer is scoped to one of them.
 nonisolated enum CostScanProvider: Sendable, Hashable, CaseIterable {
     case claude
     case codex
+    case grok
+
+    /// The user-facing service this corpus bills against, so callers can gate a
+    /// scan on `ProviderVisibilityStore` without a second parallel mapping.
+    var service: ServiceType {
+        switch self {
+        case .claude: .claudeCode
+        case .codex: .codexCli
+        case .grok: .grok
+        }
+    }
+
+    /// Name used in log lines. A stored mapping rather than a ternary at each
+    /// call site — the two-way ternary this replaced silently labelled every
+    /// non-Claude provider "Codex".
+    var logName: String {
+        switch self {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .grok: "Grok"
+        }
+    }
 }
 
 /// Whether a slice's offsets are durable enough for the next one to resume from.
@@ -191,19 +240,25 @@ nonisolated enum CostScanPersistOutcome: Sendable, Equatable {
 /// separate artifacts, and a shared verdict would let a permanently blocked
 /// Claude write cancel Codex's scan while Codex is still resuming cleanly.
 nonisolated struct CostScanPersistReport: Sendable, Equatable {
-    /// Both caches reached disk.
-    static let persisted = CostScanPersistReport(claude: .persisted, codex: .persisted)
+    /// Every cache reached disk.
+    static let persisted = CostScanPersistReport(claude: .persisted, codex: .persisted, grok: .persisted)
 
-    /// There was no store, so neither cache could outlive the slice.
-    static let unavailable = CostScanPersistReport(claude: .unavailable, codex: .unavailable)
+    /// There was no store, so no cache could outlive the slice.
+    static let unavailable = CostScanPersistReport(
+        claude: .unavailable,
+        codex: .unavailable,
+        grok: .unavailable
+    )
 
     let claude: CostScanPersistOutcome
     let codex: CostScanPersistOutcome
+    let grok: CostScanPersistOutcome
 
     func outcome(for provider: CostScanProvider) -> CostScanPersistOutcome {
         switch provider {
         case .claude: claude
         case .codex: codex
+        case .grok: grok
         }
     }
 }

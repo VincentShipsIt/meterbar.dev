@@ -37,12 +37,16 @@ nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Send
     var records: [String: CostScanFileRecord<Payload>] = [:]
 }
 
-/// Reads and writes the two per-file scan caches.
+/// Reads and writes the per-file scan caches — one artifact per corpus.
 ///
 /// Deliberately separate files from `cost-summary-v2.json`: that envelope is a
 /// published artifact (`meterbar cost` reads it) with its own schema version and
 /// its own migration story, while these are a private, disposable read-through
 /// cache. Losing them costs one slow refresh, not a wrong number.
+///
+/// One artifact per corpus, never a shared one: the payload types differ, and a
+/// corpus added later must not invalidate the caches the existing ones already
+/// filled.
 nonisolated struct CostScanCacheStore: Sendable {
     static let maximumArtifactBytes = 64 * 1024 * 1024
     static var claudeFileName: String {
@@ -50,6 +54,9 @@ nonisolated struct CostScanCacheStore: Sendable {
     }
     static var codexFileName: String {
         "cost-scan-codex-v\(CostScanFileCache<CodexFileTotals>.currentSchemaVersion).json"
+    }
+    static var grokFileName: String {
+        "cost-scan-grok-v\(CostScanFileCache<GrokFileTotals>.currentSchemaVersion).json"
     }
 
     let directory: URL
@@ -75,12 +82,20 @@ nonisolated struct CostScanCacheStore: Sendable {
         Self.loadCodex(from: directory.appendingPathComponent(Self.codexFileName))
     }
 
+    func loadGrok() -> CostScanFileCache<GrokFileTotals> {
+        Self.loadGrok(from: directory.appendingPathComponent(Self.grokFileName))
+    }
+
     func saveClaude(_ cache: CostScanFileCache<ClaudeFileTotals>) throws {
         try Self.saveClaude(cache, to: directory.appendingPathComponent(Self.claudeFileName))
     }
 
     func saveCodex(_ cache: CostScanFileCache<CodexFileTotals>) throws {
         try Self.saveCodex(cache, to: directory.appendingPathComponent(Self.codexFileName))
+    }
+
+    func saveGrok(_ cache: CostScanFileCache<GrokFileTotals>) throws {
+        try Self.saveGrok(cache, to: directory.appendingPathComponent(Self.grokFileName))
     }
 
     static func loadClaude(
@@ -94,6 +109,13 @@ nonisolated struct CostScanCacheStore: Sendable {
         from url: URL,
         maximumBytes: Int = maximumArtifactBytes
     ) -> CostScanFileCache<CodexFileTotals> {
+        Self.load(from: url, maximumBytes: maximumBytes)
+    }
+
+    static func loadGrok(
+        from url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) -> CostScanFileCache<GrokFileTotals> {
         Self.load(from: url, maximumBytes: maximumBytes)
     }
 
@@ -113,11 +135,19 @@ nonisolated struct CostScanCacheStore: Sendable {
         try Self.save(cache, to: url, maximumBytes: maximumBytes)
     }
 
-    /// Both payloads roll usage up in `[Date: TokenAccumulator]` dictionaries,
-    /// and a mismatched date strategy across these two would not throw — every
+    static func saveGrok(
+        _ cache: CostScanFileCache<GrokFileTotals>,
+        to url: URL,
+        maximumBytes: Int = maximumArtifactBytes
+    ) throws {
+        try Self.save(cache, to: url, maximumBytes: maximumBytes)
+    }
+
+    /// Every payload rolls usage up in `[Date: TokenAccumulator]` dictionaries,
+    /// and a mismatched date strategy across them would not throw — every
     /// strategy but `.iso8601` writes a bare number, so the decode succeeds and
     /// lands each daily row in a bucket decades from the right one. Pinned
-    /// explicitly rather than left to two independently-defaulted instances that
+    /// explicitly rather than left to independently-defaulted instances that
     /// only happen to agree today.
     private static var encoder: JSONEncoder {
         // Not `.prettyPrinted`: ~10k entries, and this file is machine-only.
@@ -263,8 +293,8 @@ nonisolated struct ClaudeFileTotals: Codable, Sendable {
 
 /// One Codex rollout's tally, plus the attribution state carried across slices.
 nonisolated struct CodexFileTotals: Codable, Sendable {
-    var period: CodexScanContext
-    var lifetime: CodexScanContext
+    var period: CostScanWindowContext
+    var lifetime: CostScanWindowContext
 
     /// `turn_context` / `session_meta` attribution seen so far. A rollout
     /// declares its model once and its originator once, usually in the first few
@@ -273,7 +303,22 @@ nonisolated struct CodexFileTotals: Codable, Sendable {
     var rollout = CodexRolloutContext()
 
     init(cutoff: Date) {
-        period = CodexScanContext(earliestDate: Date(), latestDate: cutoff)
-        lifetime = CodexScanContext(earliestDate: Date(), latestDate: .distantPast)
+        period = CostScanWindowContext(earliestDate: Date(), latestDate: cutoff)
+        lifetime = CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast)
+    }
+}
+
+/// One Grok `updates.jsonl` tally.
+///
+/// No `rollout` analog: a Grok turn names its own model inside `modelUsage`, and
+/// the project comes from the session directory's own name, so a slice that
+/// starts mid-file still attributes every record it reads.
+nonisolated struct GrokFileTotals: Codable, Sendable {
+    var period: CostScanWindowContext
+    var lifetime: CostScanWindowContext
+
+    init(cutoff: Date) {
+        period = CostScanWindowContext(earliestDate: Date(), latestDate: cutoff)
+        lifetime = CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast)
     }
 }

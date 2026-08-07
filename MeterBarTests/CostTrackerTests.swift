@@ -449,8 +449,8 @@ final class CostTrackerTests: XCTestCase {
         """
     }
 
-    private func makeContext(cutoff: Date) -> CodexScanContext {
-        CodexScanContext(earliestDate: Date(), latestDate: cutoff)
+    private func makeContext(cutoff: Date) -> CostScanWindowContext {
+        CostScanWindowContext(earliestDate: Date(), latestDate: cutoff)
     }
 
     func testScanCodexRolloutsAccumulatesTokenCounts() throws {
@@ -1589,7 +1589,7 @@ final class CostTrackerTests: XCTestCase {
             for: "/transcripts/a.jsonl"
         )
 
-        XCTAssertEqual(session.persist(), CostScanPersistReport(claude: .failed, codex: .failed))
+        XCTAssertEqual(session.persist(), CostScanPersistReport(claude: .failed, codex: .failed, grok: .failed))
         // Nothing reached disk, so the offsets this slice committed are not
         // resumable — the next slice would re-read the same bytes.
         XCTAssertTrue(store.loadClaude().records.isEmpty)
@@ -1666,7 +1666,7 @@ final class CostTrackerTests: XCTestCase {
         let partial = CostSummaryBuilder.CostSummaryScan(
             summary: makeEmptySummary(), deferredProviders: [.claude, .codex])
         let whole = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary())
-        let failed = CostScanPersistReport(claude: .failed, codex: .failed)
+        let failed = CostScanPersistReport(claude: .failed, codex: .failed, grok: .failed)
 
         XCTAssertTrue(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .persisted))
         // A slice whose caches never landed leaves the store exactly as it found
@@ -1687,7 +1687,7 @@ final class CostTrackerTests: XCTestCase {
             summary: makeEmptySummary(), deferredProviders: [.claude, .codex])
         let claudeDeferred = CostSummaryBuilder.CostSummaryScan(
             summary: makeEmptySummary(), deferredProviders: [.claude])
-        let report = CostScanPersistReport(claude: .failed, codex: .persisted)
+        let report = CostScanPersistReport(claude: .failed, codex: .persisted, grok: .failed)
 
         XCTAssertTrue(CostTracker.shouldRunAnotherSlice(after: bothDeferred, persistence: report))
         // Codex has finished; the only provider still deferring is the one whose

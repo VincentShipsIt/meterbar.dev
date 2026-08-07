@@ -11,7 +11,7 @@ import Foundation
 /// entries in whatever order the volume hands back, and Codex dedup is
 /// first-event-wins — and hands each file to the scanner one at a time.
 enum CostScanFixtureScan {
-    static func codexRollouts(in directory: URL, windows: inout ScanWindows<CodexScanContext>) {
+    static func codexRollouts(in directory: URL, windows: inout ScanWindows<CostScanWindowContext>) {
         for url in Self.transcripts(in: directory) {
             CodexCostScanner.parseRollout(at: url, windows: &windows)
         }
@@ -22,11 +22,11 @@ enum CostScanFixtureScan {
     static func codexRollouts(
         in directory: URL,
         since cutoffDate: Date,
-        context: inout CodexScanContext
+        context: inout CostScanWindowContext
     ) {
         var windows = ScanWindows(
             period: context,
-            lifetime: CodexScanContext(earliestDate: Date(), latestDate: .distantPast),
+            lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
             cutoff: cutoffDate
         )
         Self.codexRollouts(in: directory, windows: &windows)
