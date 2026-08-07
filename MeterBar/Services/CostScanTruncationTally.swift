@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Counts the lines a scan could not retain whole, and how many of them still
 /// yielded usage.
