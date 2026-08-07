@@ -116,15 +116,18 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Writes both caches back, including after a cancelled slice — the whole
     /// point of committing on line boundaries is that partial progress is safe
     /// to keep.
-    @discardableResult
-    func persist() -> Bool {
-        guard let store else { return true }
+    ///
+    /// Deliberately not `@discardableResult`: a slice whose caches never reached
+    /// disk made no *resumable* progress, and a caller that ignores that spends
+    /// its remaining slices re-reading the same bytes.
+    func persist() -> CostScanPersistOutcome {
+        guard let store else { return .persisted }
 
-        var succeeded = true
+        var outcome = CostScanPersistOutcome.persisted
         do {
             try store.saveClaude(claude)
         } catch {
-            succeeded = false
+            outcome = .failed
             AppLog.cost.error(
                 "Failed to persist Claude scan progress: \(error.localizedDescription, privacy: .public)"
             )
@@ -132,11 +135,23 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         do {
             try store.saveCodex(codex)
         } catch {
-            succeeded = false
+            outcome = .failed
             AppLog.cost.error(
                 "Failed to persist Codex scan progress: \(error.localizedDescription, privacy: .public)"
             )
         }
-        return succeeded
+        return outcome
     }
+}
+
+/// Whether a slice's offsets are durable enough for the next one to resume from.
+nonisolated enum CostScanPersistOutcome: Sendable, Equatable {
+    /// Every cache this session owns is on disk — or there is no store, so there
+    /// was never anything to lose.
+    case persisted
+
+    /// At least one cache could not be written. Whatever this slice read is
+    /// still correct in memory, but it dies with the session: the store holds
+    /// exactly what the previous slice left there.
+    case failed
 }

@@ -932,7 +932,7 @@ final class CostTrackerTests: XCTestCase {
 
         let first = CostScanSession(cutoff: cutoff, options: budget, store: store)
         let firstWindows = ClaudeCostScanner.scanRoots([root], session: first)
-        first.persist()
+        XCTAssertEqual(first.persist(), .persisted)
 
         XCTAssertFalse(first.isComplete)
         XCTAssertEqual(firstWindows.period.input, 100)
@@ -942,7 +942,7 @@ final class CostTrackerTests: XCTestCase {
         // A fresh refresh gets a fresh budget and picks up exactly what was left.
         let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
         let secondWindows = ClaudeCostScanner.scanRoots([root], session: second)
-        second.persist()
+        XCTAssertEqual(second.persist(), .persisted)
 
         XCTAssertTrue(second.isComplete)
         XCTAssertEqual(secondWindows.period.input, 107)
@@ -960,7 +960,7 @@ final class CostTrackerTests: XCTestCase {
 
         let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
         _ = ClaudeCostScanner.scanRoots([root], session: first)
-        first.persist()
+        XCTAssertEqual(first.persist(), .persisted)
 
         let firstSize = try fileSize(url)
         XCTAssertEqual(first.budget.bytesRead, firstSize)
@@ -973,7 +973,7 @@ final class CostTrackerTests: XCTestCase {
 
         let second = CostScanSession(cutoff: cutoff, options: .default, store: store)
         let windows = ClaudeCostScanner.scanRoots([root], session: second)
-        second.persist()
+        XCTAssertEqual(second.persist(), .persisted)
 
         XCTAssertEqual(second.budget.bytesRead, appended.utf8.count)
         XCTAssertEqual(windows.period.input, 107)
@@ -989,7 +989,7 @@ final class CostTrackerTests: XCTestCase {
 
         let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
         _ = ClaudeCostScanner.scanRoots([root], session: first)
-        first.persist()
+        XCTAssertEqual(first.persist(), .persisted)
 
         try append(eventLine(
             timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3
@@ -1025,7 +1025,7 @@ final class CostTrackerTests: XCTestCase {
 
         let first = CostScanSession(cutoff: cutoff, options: .default, store: store)
         let firstWindows = ClaudeCostScanner.scanRoots([root], session: first)
-        first.persist()
+        XCTAssertEqual(first.persist(), .persisted)
 
         XCTAssertEqual(firstWindows.period.input, 100)
         XCTAssertEqual(
@@ -1097,7 +1097,7 @@ final class CostTrackerTests: XCTestCase {
             try await CostScanExecutor.run { token in
                 let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store, token: token)
                 _ = ClaudeCostScanner.scanRoots([root], session: session)
-                session.persist()
+                _ = session.persist()
             }
         }
         try? await Task.sleep(nanoseconds: 2_000_000)
@@ -1224,19 +1224,60 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(record.payload.period.daily[day]?.output, 22)
     }
 
-    func testPersistReportsCacheWriteFailure() throws {
+    func testPersistReportsCacheWriteFailureAndASuccessfulRetryPersists() throws {
         let blockedDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CostScanBlocked-\(UUID().uuidString)")
         try Data().write(to: blockedDirectory)
         addTeardownBlock { try? FileManager.default.removeItem(at: blockedDirectory) }
 
-        let session = CostScanSession(
-            cutoff: Date(timeIntervalSince1970: 1_780_000_000),
-            options: .unlimited,
-            store: CostScanCacheStore(directory: blockedDirectory)
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let store = CostScanCacheStore(directory: blockedDirectory)
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 512,
+                stamp: CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42),
+                cutoff: cutoff,
+                isComplete: false,
+                payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
         )
 
-        XCTAssertFalse(session.persist())
+        XCTAssertEqual(session.persist(), .failed)
+        // Nothing reached disk, so the offsets this slice committed are not
+        // resumable — the next slice would re-read the same bytes.
+        XCTAssertTrue(store.loadClaude().records.isEmpty)
+
+        try FileManager.default.removeItem(at: blockedDirectory)
+
+        XCTAssertEqual(session.persist(), .persisted)
+        XCTAssertEqual(store.loadClaude().records["/transcripts/a.jsonl"]?.offset, 512)
+    }
+
+    // MARK: - Slice loop control
+
+    func testAnotherSliceRunsOnlyWhenThePreviousOneLeftResumableProgress() {
+        let partial = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary(), isComplete: false)
+        let whole = CostSummaryBuilder.CostSummaryScan(summary: makeEmptySummary(), isComplete: true)
+
+        XCTAssertTrue(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .persisted))
+        // A slice whose caches never landed leaves the store exactly as it found
+        // it, so 63 more slices would re-read the same bytes and defer in the
+        // same place.
+        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: partial, persistence: .failed))
+        XCTAssertFalse(CostTracker.shouldRunAnotherSlice(after: whole, persistence: .persisted))
+    }
+
+    private func makeEmptySummary() -> CostSummary {
+        CostSummary(
+            costs: [],
+            totalCostUSD: 0,
+            totalTokens: 0,
+            periodDays: 30,
+            dailyUsage: [],
+            lifetime: nil
+        )
     }
 
     // MARK: - Corpus fixtures

@@ -99,6 +99,80 @@ final class CostScanFileCacheSafetyTests: XCTestCase {
         )
     }
 
+    // MARK: - Persistence failures
+
+    /// A cache that cannot be encoded must say so rather than leave the caller
+    /// believing the slice's offsets are on disk. `.infinity` is the cheapest
+    /// real trigger: `JSONEncoder` rejects non-conforming floats by default.
+    func testEncodingFailureIsReportedAndWritesNothing() throws {
+        var cache = makeCache()
+        cache.records["/tmp/session.jsonl"]?.payload.period.estimatedCost = .infinity
+        let url = directory.appendingPathComponent(CostScanCacheStore.claudeFileName)
+
+        XCTAssertThrowsError(try CostScanCacheStore.saveClaude(cache, to: url)) { error in
+            guard let error = error as? CostScanCacheStoreError, case .encodingFailed = error else {
+                XCTFail("expected an encoding failure, got \(error)")
+                return
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testDirectorySetupFailureIsReportedAndASuccessfulRetryPersists() throws {
+        // A regular file where the cache directory's parent belongs: creating
+        // the directory underneath it cannot succeed.
+        let blocker = directory.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blocker)
+        let store = CostScanCacheStore(directory: blocker.appendingPathComponent("MeterBar", isDirectory: true))
+
+        XCTAssertThrowsError(try store.saveClaude(makeCache())) { error in
+            guard let error = error as? CostScanCacheStoreError, case .directoryUnavailable = error else {
+                XCTFail("expected a directory failure, got \(error)")
+                return
+            }
+        }
+
+        try FileManager.default.removeItem(at: blocker)
+
+        XCTAssertNoThrow(try store.saveClaude(makeCache()))
+        XCTAssertEqual(store.loadClaude().records.count, 1)
+    }
+
+    func testWriteFailureIsReportedAndASuccessfulRetryPersists() throws {
+        // The cache directory's path is taken by a regular file, so staging the
+        // atomic write inside it fails.
+        let occupied = directory.appendingPathComponent("MeterBar")
+        try Data("occupied".utf8).write(to: occupied)
+        let store = CostScanCacheStore(directory: occupied)
+
+        XCTAssertThrowsError(try store.saveClaude(makeCache())) { error in
+            guard let error = error as? CostScanCacheStoreError, case .writeFailed = error else {
+                XCTFail("expected a write failure, got \(error)")
+                return
+            }
+        }
+
+        try FileManager.default.removeItem(at: occupied)
+
+        XCTAssertNoThrow(try store.saveClaude(makeCache()))
+        XCTAssertEqual(store.loadClaude().records.count, 1)
+    }
+
+    /// These descriptions are logged at `privacy: .public`, and the cache lives
+    /// under the user's home directory. The errno is the actionable part; the
+    /// path is not, and must not ride along.
+    func testFailureDescriptionsCarryNoFileSystemPaths() throws {
+        let occupied = directory.appendingPathComponent("MeterBar")
+        try Data("occupied".utf8).write(to: occupied)
+        let store = CostScanCacheStore(directory: occupied)
+
+        XCTAssertThrowsError(try store.saveClaude(makeCache())) { error in
+            let description = error.localizedDescription
+            XCTAssertFalse(description.contains(self.directory.path), description)
+            XCTAssertFalse(description.contains("/"), description)
+        }
+    }
+
     private func makeCache() -> CostScanFileCache<ClaudeFileTotals> {
         var cache = CostScanFileCache<ClaudeFileTotals>()
         cache.records["/tmp/session.jsonl"] = CostScanFileRecord(
