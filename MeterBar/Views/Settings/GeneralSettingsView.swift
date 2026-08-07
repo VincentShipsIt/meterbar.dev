@@ -171,7 +171,8 @@ struct GeneralSettingsView: View {
 
             SettingsRowView(
                 title: "Menu bar shows",
-                detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota window visible."
+                detail: "Auto follows recent activity. Pinning keeps one provider, account, and quota "
+                    + "window visible, and turns off focus following and rotation."
             ) {
                 Picker("", selection: Binding(
                     get: { menuBarDisplayPreferences.pinnedCandidateKey },

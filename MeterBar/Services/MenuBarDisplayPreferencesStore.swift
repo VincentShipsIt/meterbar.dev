@@ -219,6 +219,20 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         rotationInterval = StatusItemRotationInterval(
             rawValue: userDefaults.integer(forKey: StorageKeys.statusItemRotationInterval)
         ) ?? .fifteenSeconds
+        // A build that predates pin exclusivity could persist a pin alongside
+        // either opt-in, because rotation was only ever suppressed at read time.
+        // Repair it here rather than at read time, so clearing the pin later
+        // cannot hand back a mode the user never re-enabled.
+        if pinnedCandidateKey != nil {
+            if followsFocusedApp {
+                followsFocusedApp = false
+                userDefaults.set(false, forKey: StorageKeys.statusItemFollowsFocusedApp)
+            }
+            if rotatesProviders {
+                rotatesProviders = false
+                userDefaults.set(false, forKey: StorageKeys.statusItemRotatesProviders)
+            }
+        }
         // Both features independently predated their integration. If a local
         // development build persisted both, focus wins and rotation is repaired
         // once so an unmapped focused app still falls back to Auto.
@@ -234,10 +248,12 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         pinnedCandidateKey = normalized
         if let normalized {
             userDefaults.set(normalized, forKey: StorageKeys.statusItemPinnedCandidate)
-            // A pin is a deliberate "show exactly this", so it wins over focus
-            // following rather than fighting it on every app switch. Clearing
-            // the pin later does not re-enable the opt-in.
+            // A pin is a deliberate "show exactly this", so it wins over the two
+            // modes that would move the item out from under it rather than
+            // fighting them on every app switch or rotation tick. Clearing the
+            // pin later does not re-enable either opt-in.
             setFollowsFocusedApp(false)
+            setRotatesProviders(false)
         } else {
             userDefaults.removeObject(forKey: StorageKeys.statusItemPinnedCandidate)
         }
@@ -325,6 +341,10 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
     func setRotatesProviders(_ enabled: Bool) {
         if enabled {
             setFollowsFocusedApp(false)
+            // Symmetric with the pin: whichever mode the user turned on last is
+            // the one they meant, and the other two go off rather than sitting
+            // parked behind it waiting to resurface.
+            setPinnedCandidateKey(nil)
         }
         guard enabled != rotatesProviders else { return }
         rotatesProviders = enabled
