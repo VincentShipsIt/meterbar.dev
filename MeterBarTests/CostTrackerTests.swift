@@ -902,6 +902,40 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(session.codex.records.count, 1)
     }
 
+    /// Deduplication picks one copy per session; it must not also decide the
+    /// reading order. `archived_sessions` is enumerated first, so returning
+    /// discovery order would put every archived rollout ahead of every live one
+    /// and spend a slice's whole budget on the oldest conversations on disk —
+    /// the exact inversion of the newest-first walk the budget assumes.
+    func testDistinctRolloutsOrdersNewestFirstAcrossDirectories() throws {
+        let root = try makeCodexHome()
+        let lines = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-x", input: 100)
+        ]
+        let old = try writeCodexRollout(
+            in: root,
+            path: "archived_sessions/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 6000,
+            lines: lines
+        )
+        let recent = try writeCodexRollout(
+            in: root,
+            path: "sessions/2026/06/15/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 60,
+            lines: lines
+        )
+
+        let files = CodexCostScanner.distinctRollouts(
+            in: CodexCostScanner.rolloutDirectories(in: root)
+        )
+
+        XCTAssertEqual(
+            files.map(\.url.standardizedFileURL.path),
+            [recent.standardizedFileURL.path, old.standardizedFileURL.path]
+        )
+    }
+
     /// Two rollouts that are not copies of one session but still share events.
     /// Aggregates cannot be de-overlapped, so the shorter one is re-read event
     /// by event — and that read has to answer to the same budget as every other.

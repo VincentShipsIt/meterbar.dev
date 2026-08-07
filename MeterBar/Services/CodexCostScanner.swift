@@ -167,8 +167,15 @@ enum CodexCostScanner {
     /// for it. The larger copy wins because archiving happens while a session is
     /// still live, so the archived snapshot can be short — and a tie goes to the
     /// copy found last, which is the one under `sessions/` that may still grow.
+    ///
+    /// The result is re-sorted rather than returned in discovery order.
+    /// `CostScanCorpus.transcripts` only orders within one directory, and
+    /// `archived_sessions` is enumerated first, so discovery order would put
+    /// every archived rollout ahead of every live one — handing a slice's whole
+    /// budget to the oldest conversations on disk. The comparator is the
+    /// corpus's own, so a rollout's position does not depend on which directory
+    /// its surviving copy came from.
     nonisolated static func distinctRollouts(in directories: [URL]) -> [CostScanFile] {
-        var order: [String] = []
         var chosen: [String: CostScanFile] = [:]
         var seen: Set<String> = []
 
@@ -180,13 +187,14 @@ enum CodexCostScanner {
                 let sessionID = Self.rolloutSessionID(for: file.url)
                 guard let incumbent = chosen[sessionID] else {
                     chosen[sessionID] = file
-                    order.append(sessionID)
                     continue
                 }
                 if file.size >= incumbent.size { chosen[sessionID] = file }
             }
         }
-        return order.compactMap { chosen[$0] }
+        return chosen.values.sorted {
+            $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
+        }
     }
 
     // swiftlint:disable contains_over_range_nil_comparison
