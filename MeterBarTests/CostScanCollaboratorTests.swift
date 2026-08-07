@@ -472,6 +472,53 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertEqual(summary.periodDays, 7)
     }
 
+    func testBudgetedSummaryPreservesFullScanPricingProvenance() throws {
+        let root = try makeCorpusDirectory()
+        let config = root.appendingPathComponent("claude", isDirectory: true)
+        let projects = config.appendingPathComponent("projects", isDirectory: true)
+        let project = projects
+            .appendingPathComponent("fixture", isDirectory: true)
+        let cache = root.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let event = """
+        {"timestamp":"\(timestamp)","requestId":"request","message":{"id":"message",\
+        "model":"claude-sonnet-4-5","usage":{"input_tokens":100,"output_tokens":50,\
+        "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+        """
+        try event.write(
+            to: project.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let days = 30
+        let full = CostSummaryBuilder.makeSummary(
+            days: days,
+            includeClaudeCode: true,
+            includeCodexCli: false,
+            claudeAccounts: [],
+            claudeProjectRoots: [projects]
+        )
+        let session = CostScanSession(
+            cutoff: CostWindow.start(days: days),
+            options: .unlimited,
+            store: CostScanCacheStore(directory: cache)
+        )
+
+        let budgeted = CostSummaryBuilder.makeScan(
+            days: days,
+            includeClaudeCode: true,
+            includeCodexCli: false,
+            claudeAccounts: [],
+            session: session,
+            claudeProjectRoots: [projects]
+        )
+
+        XCTAssertNotNil(full.pricing)
+        XCTAssertEqual(budgeted.summary.pricing, full.pricing)
+    }
+
     // MARK: - CostScanBudget
 
     func testProductionBudgetIsBoundedPerFileAndPerRefresh() {

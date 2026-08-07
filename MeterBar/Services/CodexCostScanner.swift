@@ -135,9 +135,11 @@ enum CodexCostScanner {
         ]
     }
 
+    // swiftlint:disable contains_over_range_nil_comparison
     /// The byte-level equivalent of the old `line.contains("\"token_count\"")`
     /// prefilter. Rollout files are mostly non-usage events, so skipping
     /// `JSONSerialization` on them is what keeps the scan cheap.
+    /// Generic `Data.contains(_:)` runs near 3 MB/s; `range(of:)` reaches 1.8 GB/s, which slice budgets require.
     nonisolated private static let tokenCountMarker = Data("\"token_count\"".utf8)
 
     /// Same prefilter for the two events that carry the attribution a
@@ -203,7 +205,7 @@ enum CodexCostScanner {
 
         FileLineReader.forEachLine(in: fileURL) { readerLine in
             let line = readerLine.bytes
-            guard line.contains(Self.tokenCountMarker) else {
+            guard line.range(of: Self.tokenCountMarker) != nil else {
                 Self.updateRolloutContext(&rollout, from: line)
                 // Reaches back only as far as the *first* model the file
                 // declares — a later mid-session switch must not relabel the
@@ -353,7 +355,7 @@ enum CodexCostScanner {
 
         let read = FileLineReader.readLines(in: file.url, request: request) { readerLine, offset in
             let line = readerLine.bytes
-            guard line.contains(Self.tokenCountMarker) else {
+            guard line.range(of: Self.tokenCountMarker) != nil else {
                 Self.updateRolloutContext(&rollout, from: line)
                 if let model = rollout.turnModel ?? rollout.sessionModel {
                     Self.flushDeferred(&deferred, modelName: model, windows: &windows)
@@ -473,10 +475,10 @@ enum CodexCostScanner {
         _ rollout: inout CodexRolloutContext,
         from line: Data
     ) {
-        if line.contains(Self.turnContextMarker) {
+        if line.range(of: Self.turnContextMarker) != nil {
             guard let payload = Self.eventPayload(in: line, type: "turn_context") else { return }
             rollout.turnModel = (payload["model"] as? String) ?? rollout.turnModel
-        } else if line.contains(Self.sessionMetaMarker) {
+        } else if line.range(of: Self.sessionMetaMarker) != nil {
             guard let payload = Self.eventPayload(in: line, type: "session_meta") else { return }
             // `model` is null on every rollout observed so far, but read it
             // anyway so pre-turn events get named the day Codex populates it.
@@ -485,6 +487,7 @@ enum CodexCostScanner {
             rollout.cwd = (payload["cwd"] as? String) ?? rollout.cwd
         }
     }
+    // swiftlint:enable contains_over_range_nil_comparison
 
     /// Replays the events parked before the file named a model. Each keeps its
     /// own timestamp, so `ScanWindows.update` still places it on its own day.
