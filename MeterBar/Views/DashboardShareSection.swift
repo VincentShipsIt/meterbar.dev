@@ -56,15 +56,42 @@ struct DashboardShareSection: View {
         return labels
     }
 
+    /// Shared with the Costs cards so the preview and the spend cards announce
+    /// the same scan state in the same words — the same two flags drive both.
+    static func scanStatusText(isScanning: Bool, isRefreshingMissingDays: Bool) -> String? {
+        DashboardCostsSection.refreshStatusText(
+            isScanning: isScanning,
+            isRefreshingMissingDays: isRefreshingMissingDays
+        )
+    }
+
+    /// The budgeted scan publishes partial totals after every slice, so an export
+    /// taken mid-scan bakes an undercount into the PNG and the caption. Only
+    /// successful exports are qualified; a failure toast is about the export
+    /// itself and the caveat would only muddy it.
+    static func exportStatus(_ status: String, isRefreshInProgress: Bool) -> String {
+        isRefreshInProgress ? "\(status) — totals still updating" : status
+    }
+
     var body: some View {
         let previewSize = SocialShareCardLayout.previewSize(
             viewportWidth: viewportWidth,
-            horizontalInsets: horizontalInsets
+            // The preview now sits inside a card, whose own inset eats into the
+            // width the fixed-size artwork can claim.
+            horizontalInsets: horizontalInsets + MeterBarTheme.CardPadding.standard.value * 2
         )
 
         return VStack(alignment: .leading, spacing: 14) {
-            SocialShareCardPreview(content: cardContent, size: previewSize)
-                .accessibilityLabel("MeterBar 30-day token receipt preview")
+            DashboardCard(
+                title: "Share Card",
+                trailing: Self.scanStatusText(
+                    isScanning: costTracker.isScanning,
+                    isRefreshingMissingDays: costTracker.isRefreshingMissingDays
+                )
+            ) {
+                SocialShareCardPreview(content: cardContent, size: previewSize)
+                    .accessibilityLabel("MeterBar 30-day token receipt preview")
+            }
 
             HStack(spacing: 10) {
                 Button {
@@ -91,8 +118,9 @@ struct DashboardShareSection: View {
                 if costSummary?.dailyUsage.isEmpty ?? true {
                     Button {
                         Task {
-                            await costTracker.scanCosts(days: 30)
-                            generatedAt = Date()
+                            if await costTracker.scanCosts(days: 30).isAuthoritative {
+                                generatedAt = Date()
+                            }
                         }
                     } label: {
                         Label("Scan 30 Days", systemImage: "magnifyingglass")
@@ -152,13 +180,18 @@ struct DashboardShareSection: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if pasteboard.writeObjects([image]) {
-            setShareStatus("PNG copied")
+            setExportStatus("PNG copied")
         } else {
             setShareStatus("Copy failed")
         }
     }
 
     private func saveCardImage() {
+        // The bytes are rendered now; the save panel can sit open long enough
+        // for the scan to finish. The caveat has to describe the totals baked
+        // into the PNG, not whatever the tracker happens to say once the user
+        // has picked a destination.
+        let wasRefreshInProgress = costTracker.isRefreshInProgress
         let content = stampedContent()
 
         guard let pngData = SocialCardRenderer.pngData(for: content) else {
@@ -178,7 +211,9 @@ struct DashboardShareSection: View {
                 // owner-only default the app applies to its own state would be
                 // wrong here. Normal umask semantics are the correct behavior.
                 try pngData.write(to: url, options: .atomic)
-                setShareStatus("PNG saved")
+                setShareStatus(
+                    Self.exportStatus("PNG saved", isRefreshInProgress: wasRefreshInProgress)
+                )
             } catch {
                 setShareStatus("Save failed")
             }
@@ -191,7 +226,11 @@ struct DashboardShareSection: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(content.shareCaption, forType: .string)
-        setShareStatus("Caption copied")
+        setExportStatus("Caption copied")
+    }
+
+    private func setExportStatus(_ status: String) {
+        setShareStatus(Self.exportStatus(status, isRefreshInProgress: costTracker.isRefreshInProgress))
     }
 
     private func setShareStatus(_ status: String) {
