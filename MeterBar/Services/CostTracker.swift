@@ -138,7 +138,7 @@ class CostTracker: ObservableObject {
         var latest: CostSummaryBuilder.CostSummaryScan?
 
         for _ in 0..<Self.maxScanSlices {
-            let scan = try? await CostScanExecutor.run { token in
+            let slice = try? await CostScanExecutor.run { token in
                 let session = CostScanSession(
                     cutoff: cutoff,
                     options: .default,
@@ -155,21 +155,57 @@ class CostTracker: ObservableObject {
                 // Persist even when the slice was cut short: offsets commit on
                 // line boundaries, so partial progress is exactly what the next
                 // slice needs to resume from.
-                session.persist()
-                return scan
+                return ScanSlice(scan: scan, persistence: session.persist())
             }
             // Cancelled. Whatever earlier slices published stands, and the
             // offsets they committed are already on disk.
-            guard let scan else { break }
+            guard let slice else { break }
 
-            latest = scan
-            if scan.isComplete { break }
+            latest = slice.scan
+            if slice.scan.isComplete { break }
             // Publish the partial total so the number on screen improves with
             // every slice instead of only when the last one lands.
-            await MainActor.run { costSummary = scan.summary }
+            await MainActor.run { costSummary = slice.scan.summary }
+
+            guard Self.shouldRunAnotherSlice(after: slice.scan, persistence: slice.persistence) else {
+                switch slice.persistence {
+                case .unavailable:
+                    AppLog.cost.error(
+                        "Stopping the cost scan: no cache store, so every slice would re-read the corpus from zero"
+                    )
+                default:
+                    AppLog.cost.error(
+                        "Stopping the cost scan: this slice's progress was not persisted, so no later slice can resume"
+                    )
+                }
+                break
+            }
         }
 
         return latest
+    }
+
+    /// One budgeted slice: what it computed, and whether the next one can pick
+    /// up where it stopped.
+    private struct ScanSlice: Sendable {
+        let scan: CostSummaryBuilder.CostSummaryScan
+        let persistence: CostScanPersistOutcome
+    }
+
+    /// Whether another slice can improve on the one that just finished.
+    ///
+    /// A slice that could not write its caches — or had no store to write them
+    /// to — left the store exactly as it found it, so the next slice would
+    /// re-read the same bytes, defer in the same place, and fail to persist
+    /// again — 63 times over, pinning the scan queue for nothing. Stopping costs
+    /// one refresh: the next one retries the write from the last durable
+    /// offsets.
+    static func shouldRunAnotherSlice(
+        after scan: CostSummaryBuilder.CostSummaryScan,
+        persistence: CostScanPersistOutcome
+    ) -> Bool {
+        guard !scan.isComplete else { return false }
+        return persistence == .persisted
     }
 
     private func loadCachedSummary() {

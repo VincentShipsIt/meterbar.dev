@@ -152,17 +152,38 @@ nonisolated struct CostScanCacheStore: Sendable {
         return cache
     }
 
+    /// Writes one cache through, or throws describing which stage failed.
+    ///
+    /// Each stage is mapped to its own case rather than letting the underlying
+    /// error escape: the caller logs this and nothing else, so "the encoder
+    /// refused a value", "the directory could not be prepared", and "the bytes
+    /// never landed" have to be distinguishable from the log line alone. The
+    /// atomic-replace behaviour is unchanged — a failure at any stage leaves the
+    /// previous artifact exactly as it was.
     private static func save<Payload>(
         _ cache: CostScanFileCache<Payload>,
         to url: URL,
         maximumBytes: Int
     ) throws {
-        let data = try encoder.encode(cache)
+        let data: Data
+        do {
+            data = try encoder.encode(cache)
+        } catch {
+            throw CostScanCacheStoreError.encodingFailed(reason: CostScanCacheStoreError.reason(for: error))
+        }
         guard data.count <= maximumBytes else {
             throw CostScanCacheStoreError.artifactTooLarge(data.count)
         }
-        try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
-        try SecureFileWriter.write(data, to: url)
+        do {
+            try SecureFileWriter.ensurePrivateDirectory(url.deletingLastPathComponent())
+        } catch {
+            throw CostScanCacheStoreError.directoryUnavailable(reason: CostScanCacheStoreError.reason(for: error))
+        }
+        do {
+            try SecureFileWriter.write(data, to: url)
+        } catch {
+            throw CostScanCacheStoreError.writeFailed(reason: CostScanCacheStoreError.reason(for: error))
+        }
         Self.removeSupersededFiles(for: url)
     }
 
@@ -185,14 +206,40 @@ nonisolated struct CostScanCacheStore: Sendable {
     }
 }
 
+/// Why a cache could not be written. One case per stage of ``save``, because a
+/// scan that stops resuming is diagnosed from this line and no other.
 nonisolated enum CostScanCacheStoreError: LocalizedError {
     case artifactTooLarge(Int)
+    case encodingFailed(reason: String)
+    case directoryUnavailable(reason: String)
+    case writeFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
         case let .artifactTooLarge(bytes):
             "Cost scan cache is too large to persist (\(bytes) bytes)"
+        case let .encodingFailed(reason):
+            "Could not encode the cost scan cache: \(reason)"
+        case let .directoryUnavailable(reason):
+            "Could not prepare the cost scan cache directory: \(reason)"
+        case let .writeFailed(reason):
+            "Could not write the cost scan cache: \(reason)"
         }
+    }
+
+    /// Describes `error` without the file paths its own description carries.
+    ///
+    /// These reasons are logged at `privacy: .public`, and every path involved
+    /// sits under the user's home directory. An errno, or failing that a domain
+    /// and code, says what to do about it; the path says who the user is.
+    /// Encoder failures matter here too — the cache is keyed by transcript path,
+    /// so `EncodingError`'s own description would name one.
+    static func reason(for error: Error) -> String {
+        if let error = error as? SecureFileWriterError {
+            return error.logDescription
+        }
+        let error = error as NSError
+        return "\(error.domain) \(error.code)"
     }
 }
 
