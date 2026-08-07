@@ -234,10 +234,12 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         pinnedCandidateKey = normalized
         if let normalized {
             userDefaults.set(normalized, forKey: StorageKeys.statusItemPinnedCandidate)
-            // A pin is a deliberate "show exactly this", so it wins over focus
-            // following rather than fighting it on every app switch. Clearing
-            // the pin later does not re-enable the opt-in.
+            // A pin is a deliberate "show exactly this", so it wins over the two
+            // modes that would move the item out from under it rather than
+            // fighting them on every app switch or rotation tick. Clearing the
+            // pin later does not re-enable either opt-in.
             setFollowsFocusedApp(false)
+            setRotatesProviders(false)
         } else {
             userDefaults.removeObject(forKey: StorageKeys.statusItemPinnedCandidate)
         }
