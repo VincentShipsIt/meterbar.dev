@@ -91,8 +91,9 @@ struct DashboardShareSection: View {
                 if costSummary?.dailyUsage.isEmpty ?? true {
                     Button {
                         Task {
-                            await costTracker.scanCosts(days: 30)
-                            generatedAt = Date()
+                            if await costTracker.scanCosts(days: 30).isAuthoritative {
+                                generatedAt = Date()
+                            }
                         }
                     } label: {
                         Label("Scan 30 Days", systemImage: "magnifyingglass")

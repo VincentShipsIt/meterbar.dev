@@ -26,6 +26,31 @@ final class CostTrackerTests: XCTestCase {
         }
     }
 
+    // MARK: - Scan outcome
+
+    func testOnlyACompletedScanIsAuthoritative() {
+        XCTAssertTrue(CostTracker.ScanOutcome.completed.isAuthoritative)
+        XCTAssertFalse(CostTracker.ScanOutcome.partial.isAuthoritative)
+        XCTAssertFalse(CostTracker.ScanOutcome.skipped.isAuthoritative)
+    }
+
+    func testDemoModeScanReportsThatItReadNothing() async {
+        let outcome = await CostTracker(demoMode: true).scanCosts(days: 30)
+
+        XCTAssertEqual(outcome, .skipped)
+    }
+
+    @MainActor
+    func testScanReportsSkippedWhileTheBackgroundBackfillHoldsTheTracker() async {
+        let tracker = CostTracker()
+        tracker.isRefreshingMissingDays = true
+
+        let outcome = await tracker.scanCosts(days: 30)
+
+        XCTAssertEqual(outcome, .skipped)
+        XCTAssertFalse(outcome.isAuthoritative)
+    }
+
     // MARK: - Model-id normalization
 
     func testNormalizeClaudeModelStripsDateSuffix() {
