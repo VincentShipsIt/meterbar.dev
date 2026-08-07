@@ -11,8 +11,23 @@ import SwiftUI
 // MARK: - SettingsRowViewMetrics
 
 enum SettingsRowViewMetrics {
+    /// Fixed width of `SettingsInfoRow`'s label, and the floor `SettingsRowView`
+    /// keeps its label column at so the two line up in a shared panel. Above the
+    /// floor `SettingsRowView`'s column is elastic — it used to be pinned here,
+    /// which wrapped multi-sentence details to six or eight lines while the rest
+    /// of the pane sat empty.
     static let labelWidth: CGFloat = 190
-    static let controlWidth: CGFloat = 240
+
+    /// The control column is a range, not a constant. The floor keeps segmented
+    /// pickers and switches on a common right edge; the ceiling is set by the
+    /// widest control any row actually installs (QuotaEvent's 300pt webhook
+    /// field, then the provider panes' 260pt key field). A control narrower than
+    /// the floor still reserves only the floor, so the label keeps the rest.
+    static let controlMinWidth: CGFloat = 240
+    static let controlMaxWidth: CGFloat = 300
+
+    /// Gutter between the two columns.
+    static let columnSpacing: CGFloat = 16
 }
 
 // MARK: - SettingsInfoRow
@@ -122,7 +137,7 @@ struct SettingsRowView<Content: View>: View {
     let content: Content
 
     var body: some View {
-        HStack(alignment: .center, spacing: 0) {
+        HStack(alignment: .center, spacing: SettingsRowViewMetrics.columnSpacing) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline)
@@ -134,16 +149,30 @@ struct SettingsRowView<Content: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(width: SettingsRowViewMetrics.labelWidth, alignment: .leading)
+            .frame(
+                minWidth: SettingsRowViewMetrics.labelWidth,
+                maxWidth: .infinity,
+                alignment: .leading
+            )
             // Read the title and its explanatory detail as one VoiceOver element
             // rather than two adjacent fragments. The trailing control stays a
             // separate focusable element so its own label/actuation are intact.
             .accessibilityElement(children: .combine)
 
-            Spacer(minLength: 16)
-
+            // `fixedSize` is what makes the split work: it resolves the control
+            // to its own ideal width (clamped to the column's range) instead of
+            // leaving it flexible, so the HStack has exactly one greedy child
+            // and hands every remaining point to the label. Without it the two
+            // elastic columns split the slack and the detail still wraps early.
+            // Call sites that set their own `.frame(width:)` or `.fixedSize()`
+            // are unaffected — their ideal is already what they asked for.
             content
-                .frame(width: SettingsRowViewMetrics.controlWidth, alignment: .trailing)
+                .frame(
+                    minWidth: SettingsRowViewMetrics.controlMinWidth,
+                    maxWidth: SettingsRowViewMetrics.controlMaxWidth,
+                    alignment: .trailing
+                )
+                .fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxWidth: .infinity)
     }
