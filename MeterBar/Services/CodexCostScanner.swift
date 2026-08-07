@@ -195,8 +195,9 @@ enum CodexCostScanner {
         at fileURL: URL,
         windows: inout ScanWindows<CodexScanContext>
     ) {
+        let calendar = Calendar.current
         for event in Self.parseRollout(at: fileURL) {
-            Self.apply(event, windows: &windows)
+            Self.apply(event, windows: &windows, calendar: calendar)
         }
     }
 
@@ -290,6 +291,7 @@ enum CodexCostScanner {
         var rollout = payload.rollout
         var deferred: [CodexDeferredUsage] = []
         var deferredOffset: UInt64?
+        let calendar = Calendar.current
 
         var request = FileLineReadRequest()
         request.startOffset = record?.offset ?? 0
@@ -300,7 +302,12 @@ enum CodexCostScanner {
             guard line.range(of: Self.tokenCountMarker) != nil else {
                 Self.updateRolloutContext(&rollout, from: line)
                 if let model = rollout.turnModel ?? rollout.sessionModel {
-                    Self.flushDeferred(&deferred, modelName: model, windows: &windows)
+                    Self.flushDeferred(
+                        &deferred,
+                        modelName: model,
+                        windows: &windows,
+                        calendar: calendar
+                    )
                     deferredOffset = nil
                 }
                 return
@@ -311,7 +318,8 @@ enum CodexCostScanner {
                 fileURL: file.url,
                 rollout: rollout,
                 deferred: &deferred,
-                windows: &windows
+                windows: &windows,
+                calendar: calendar
             )
             if deferred.count > parked, deferredOffset == nil {
                 deferredOffset = offset
@@ -323,7 +331,7 @@ enum CodexCostScanner {
 
         var committed = read.committedOffset
         if read.reachedEndOfFile {
-            Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
+            Self.flushDeferred(&deferred, modelName: nil, windows: &windows, calendar: calendar)
         } else {
             session.noteDeferred()
             if let deferredOffset {
@@ -462,12 +470,13 @@ enum CodexCostScanner {
     nonisolated private static func flushDeferred(
         _ deferred: inout [CodexDeferredUsage],
         modelName: String?,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CodexScanContext>,
+        calendar: Calendar
     ) {
         var events: [CodexUsageEvent] = []
         Self.flushDeferred(&deferred, modelName: modelName, into: &events)
         for event in events {
-            Self.apply(event, windows: &windows)
+            Self.apply(event, windows: &windows, calendar: calendar)
         }
     }
 
@@ -530,7 +539,8 @@ enum CodexCostScanner {
         fileURL: URL,
         rollout: CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CodexScanContext>,
+        calendar: Calendar
     ) {
         var events: [CodexUsageEvent] = []
         Self.addTokenCountLine(
@@ -541,7 +551,7 @@ enum CodexCostScanner {
             events: &events
         )
         for event in events {
-            Self.apply(event, windows: &windows)
+            Self.apply(event, windows: &windows, calendar: calendar)
         }
     }
 
@@ -596,6 +606,7 @@ enum CodexCostScanner {
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_int64(statement, 1, Int64(cutoffDate.timeIntervalSince1970.rounded(.down)))
+        let calendar = Calendar.current
 
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let bodyPointer = sqlite3_column_text(statement, 0) else { continue }
@@ -626,7 +637,7 @@ enum CodexCostScanner {
             ) else { continue }
             // Same `eventKeys` set the rollouts filled, so a turn recorded in
             // both places is still billed once.
-            Self.apply(event, windows: &windows)
+            Self.apply(event, windows: &windows, calendar: calendar)
         }
     }
 
@@ -665,9 +676,13 @@ enum CodexCostScanner {
     /// Folds one usage event into both windows. Serial by construction: the
     /// dedup below is first-event-wins across every file, so the order events
     /// arrive here is the order that decides the answer.
+    ///
+    /// `calendar` is passed in rather than resolved here: resolving the current
+    /// calendar is not free, and it cannot change part-way through a scan.
     nonisolated private static func apply(
         _ event: CodexUsageEvent,
-        windows: inout ScanWindows<CodexScanContext>
+        windows: inout ScanWindows<CodexScanContext>,
+        calendar: Calendar
     ) {
         let timestamp = event.timestamp
         let sessionID = event.sessionID
@@ -681,10 +696,12 @@ enum CodexCostScanner {
         // vary and risks both false matches and false misses).
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
-        let day = Calendar.current.startOfDay(for: timestamp)
-        let modelKey = CostScanValues.displayModelName(event.attribution.modelName)
-        let originKey = CostScanValues.displayOriginName(event.attribution.originName)
-        let projectKey = event.attribution.projectID
+        let keys = CostScanEventKeys(
+            day: calendar.startOfDay(for: timestamp),
+            model: CostScanValues.displayModelName(event.attribution.modelName),
+            origin: CostScanValues.displayOriginName(event.attribution.originName),
+            project: event.attribution.projectID
+        )
 
         // Price the event at the rate in effect when it was recorded (issue
         // #339). Codex used to cost the whole window in one shot at today's
@@ -698,6 +715,16 @@ enum CodexCostScanner {
             cacheCreation: 0,
             cacheRead: cached,
             pricing: resolved.pricing
+        )
+
+        // Reasoning tokens are billed as output everywhere except the headline
+        // `totals`, which keeps them broken out.
+        let breakdown = CostScanEventTotals(
+            input: input,
+            output: output + reasoning,
+            cacheCreation: 0,
+            cacheRead: cached,
+            estimatedCostUSD: eventCost
         )
 
         // Each window keeps its own `eventKeys`, so an event that lands in both
@@ -716,67 +743,7 @@ enum CodexCostScanner {
                 reasoning: reasoning,
                 estimatedCostUSD: eventCost
             )
-            context.dailyTotals[day, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.dailyModelTotals[day, default: [:]][modelKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.dailyProjectTotals[day, default: [:]][projectKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            var dailyProjectModels = context.dailyProjectModelTotals[day] ?? [:]
-            dailyProjectModels[projectKey, default: [:]][
-                modelKey,
-                default: TokenAccumulator()
-            ].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.dailyProjectModelTotals[day] = dailyProjectModels
-            context.modelTotals[modelKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.originTotals[originKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.projectTotals[projectKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
-            context.projectModelTotals[projectKey, default: [:]][modelKey, default: TokenAccumulator()].add(
-                input: input,
-                output: output + reasoning,
-                cacheCreation: 0,
-                cacheRead: cached,
-                estimatedCostUSD: eventCost
-            )
+            context.record(breakdown, at: keys)
             if timestamp < context.earliestDate { context.earliestDate = timestamp }
             if timestamp > context.latestDate { context.latestDate = timestamp }
         }

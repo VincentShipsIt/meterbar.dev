@@ -35,12 +35,63 @@ nonisolated struct ScanWindows<Totals> {
 // to be `Sendable` just to name `ScanWindows<CostScanResult>`.
 extension ScanWindows: Sendable where Totals: Sendable {}
 
+/// The eight breakdowns every scan folds a usage event into.
+///
+/// Claude and Codex accumulate into different types but the same eight
+/// dimensions, so the fold itself lives once in `record(_:at:)` rather than
+/// twice as near-identical stanzas in each scanner.
+nonisolated protocol CostScanBreakdowns {
+    var daily: [Date: TokenAccumulator] { get set }
+    var dailyModels: [Date: [String: TokenAccumulator]] { get set }
+    var dailyProjects: [Date: [String: TokenAccumulator]] { get set }
+    var dailyProjectModels: [Date: [String: [String: TokenAccumulator]]] { get set }
+    var models: [String: TokenAccumulator] { get set }
+    var origins: [String: TokenAccumulator] { get set }
+    var projects: [String: TokenAccumulator] { get set }
+    var projectModels: [String: [String: TokenAccumulator]] { get set }
+}
+
+/// Which bucket of each breakdown one event lands in.
+nonisolated struct CostScanEventKeys {
+    let day: Date
+    let model: String
+    let origin: String
+    let project: String
+}
+
+/// One event's contribution, already in the units the breakdowns store. The
+/// scanners normalize before handing it over — Codex bills reasoning tokens as
+/// output here, Claude has none to fold in.
+nonisolated struct CostScanEventTotals {
+    let input: Int
+    let output: Int
+    let cacheCreation: Int
+    let cacheRead: Int
+    let estimatedCostUSD: Double
+}
+
+nonisolated extension CostScanBreakdowns {
+    mutating func record(_ event: CostScanEventTotals, at keys: CostScanEventKeys) {
+        daily[keys.day, default: TokenAccumulator()].add(event)
+        dailyModels[keys.day, default: [:]][keys.model, default: TokenAccumulator()].add(event)
+        dailyProjects[keys.day, default: [:]][keys.project, default: TokenAccumulator()].add(event)
+        dailyProjectModels[keys.day, default: [:]][keys.project, default: [:]][
+            keys.model,
+            default: TokenAccumulator()
+        ].add(event)
+        models[keys.model, default: TokenAccumulator()].add(event)
+        origins[keys.origin, default: TokenAccumulator()].add(event)
+        projects[keys.project, default: TokenAccumulator()].add(event)
+        projectModels[keys.project, default: [:]][keys.model, default: TokenAccumulator()].add(event)
+    }
+}
+
 /// Per-window tally for one Claude Code transcript, or many merged together.
 ///
 /// `Codable` because a single file's tally is what `CostScanFileCache` persists
 /// between refreshes — the byte offset alone would be worthless without the
 /// totals the already-read bytes produced.
-nonisolated struct ClaudeSessionTotals: Sendable, Codable {
+nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
     var input = 0
     var output = 0
     var cacheCreation = 0
@@ -244,6 +295,55 @@ nonisolated struct CodexScanContext: Sendable, Codable {
     }
 }
 
+/// Forwarders rather than renamed stored properties: `CodexScanContext` is the
+/// `Codable` payload `CostScanFileCache` persists, so renaming its fields would
+/// change the on-disk keys and force every user into a full rescan.
+///
+/// `_modify` rather than a setter: the fold subscripts these thousands of times
+/// per scan, and a get-mutate-set forwarder would copy the whole dictionary on
+/// every one of them.
+nonisolated extension CodexScanContext: CostScanBreakdowns {
+    var daily: [Date: TokenAccumulator] {
+        get { dailyTotals }
+        _modify { yield &dailyTotals }
+    }
+
+    var dailyModels: [Date: [String: TokenAccumulator]] {
+        get { dailyModelTotals }
+        _modify { yield &dailyModelTotals }
+    }
+
+    var dailyProjects: [Date: [String: TokenAccumulator]] {
+        get { dailyProjectTotals }
+        _modify { yield &dailyProjectTotals }
+    }
+
+    var dailyProjectModels: [Date: [String: [String: TokenAccumulator]]] {
+        get { dailyProjectModelTotals }
+        _modify { yield &dailyProjectModelTotals }
+    }
+
+    var models: [String: TokenAccumulator] {
+        get { modelTotals }
+        _modify { yield &modelTotals }
+    }
+
+    var origins: [String: TokenAccumulator] {
+        get { originTotals }
+        _modify { yield &originTotals }
+    }
+
+    var projects: [String: TokenAccumulator] {
+        get { projectTotals }
+        _modify { yield &projectTotals }
+    }
+
+    var projectModels: [String: [String: TokenAccumulator]] {
+        get { projectModelTotals }
+        _modify { yield &projectModelTotals }
+    }
+}
+
 nonisolated struct TokenAccumulator: Sendable, Codable {
     var input = 0
     var output = 0
@@ -269,6 +369,16 @@ nonisolated struct TokenAccumulator: Sendable, Codable {
         self.reasoning += reasoning
         self.estimatedCostUSD += estimatedCostUSD
         self.events += events
+    }
+
+    mutating func add(_ event: CostScanEventTotals) {
+        add(
+            input: event.input,
+            output: event.output,
+            cacheCreation: event.cacheCreation,
+            cacheRead: event.cacheRead,
+            estimatedCostUSD: event.estimatedCostUSD
+        )
     }
 
     mutating func merge(_ other: TokenAccumulator) {

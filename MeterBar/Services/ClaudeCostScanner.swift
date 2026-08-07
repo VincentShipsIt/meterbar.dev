@@ -396,6 +396,9 @@ enum ClaudeCostScanner {
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
+        // Resolving the current calendar is not free, and it cannot change
+        // mid-fold.
+        let calendar = Calendar.current
 
         for event in events {
             // Price at the rate in effect when the event was recorded, not
@@ -411,7 +414,6 @@ enum ClaudeCostScanner {
                 cacheRead: event.cacheRead,
                 pricing: pricing
             )
-            let day = Calendar.current.startOfDay(for: event.timestamp)
 
             totals.input += event.input
             totals.output += event.output
@@ -419,67 +421,20 @@ enum ClaudeCostScanner {
             totals.cacheRead += event.cacheRead
             totals.estimatedCost += eventCost
             totals.note(event.timestamp)
-            totals.daily[day, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            let displayModel = CostScanValues.displayModelName(event.model)
-            totals.dailyModels[day, default: [:]][displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.dailyProjects[day, default: [:]][projectID, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            var dailyProjectModels = totals.dailyProjectModels[day] ?? [:]
-            dailyProjectModels[projectID, default: [:]][
-                displayModel,
-                default: TokenAccumulator()
-            ].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.dailyProjectModels[day] = dailyProjectModels
-            totals.models[displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.origins[event.origin, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.projects[projectID, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
-            )
-            totals.projectModels[projectID, default: [:]][displayModel, default: TokenAccumulator()].add(
-                input: event.input,
-                output: event.output,
-                cacheCreation: event.cacheCreation,
-                cacheRead: event.cacheRead,
-                estimatedCostUSD: eventCost
+            totals.record(
+                CostScanEventTotals(
+                    input: event.input,
+                    output: event.output,
+                    cacheCreation: event.cacheCreation,
+                    cacheRead: event.cacheRead,
+                    estimatedCostUSD: eventCost
+                ),
+                at: CostScanEventKeys(
+                    day: calendar.startOfDay(for: event.timestamp),
+                    model: CostScanValues.displayModelName(event.model),
+                    origin: event.origin,
+                    project: projectID
+                )
             )
         }
 
