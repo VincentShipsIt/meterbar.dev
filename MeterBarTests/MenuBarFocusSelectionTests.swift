@@ -17,6 +17,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         service: ServiceType = .claudeCode,
         accountKey: String? = nil,
         percentUsed: Double,
+        total: Double = 100,
         displayName: String? = nil,
         windowName: String = "Session",
         pinKey: String? = nil,
@@ -30,7 +31,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
             accountKey: accountKey,
             displayName: displayName ?? key,
             windowName: windowName,
-            limit: UsageLimit(used: percentUsed, total: 100, resetTime: nil),
+            limit: UsageLimit(used: percentUsed, total: total, resetTime: nil),
             lastUpdated: now,
             lastActivity: activeMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
             isAutoSelectable: isAutoSelectable
@@ -163,6 +164,26 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         )
 
         XCTAssertNil(select([cursorReview], bundleID: cursorBundleID))
+    }
+
+    /// A zero total reads as 100% left, which makes the window MeterBar can
+    /// measure least look like the one with the most headroom.
+    func testMappingToAProviderWithOnlyAnUnmeasurableWindowIsTreatedAsUnmapped() {
+        let cursorSession = candidate(key: "Cursor:default:session", service: .cursor, percentUsed: 0, total: 0)
+
+        XCTAssertNil(select([cursorSession], bundleID: cursorBundleID))
+    }
+
+    func testUnmeasurableWindowNeverStandsInForTheFocusedProvidersSpentOne() {
+        let cursorSession = candidate(key: "Cursor:default:session", service: .cursor, percentUsed: 0, total: 0)
+        let cursorWeekly = candidate(
+            key: "Cursor:default:weekly",
+            service: .cursor,
+            percentUsed: 100,
+            windowName: "Weekly"
+        )
+
+        XCTAssertEqual(select([cursorSession, cursorWeekly], bundleID: cursorBundleID)?.key, cursorWeekly.key)
     }
 
     // MARK: - Critical priority

@@ -52,6 +52,28 @@ final class DatedModelPricingTests: XCTestCase {
         XCTAssertEqual(resolved.verifiedOn, "2026-07-02")
     }
 
+    /// `resolve(at:)` stops at the first entry that starts after the requested
+    /// date. With more than two entries that shortcut has to land on the newest
+    /// applicable one — stopping an iteration early would return its predecessor.
+    func testResolvePicksTheNewestApplicableEntryAcrossALongSchedule() throws {
+        let rates = (1...5).map { step in
+            DatedTokenPricing(
+                effectiveFrom: DatedTokenPricing.utcDay(2026, step, 1),
+                verifiedOn: "2026-0\(step)-02",
+                pricing: TokenPricing(
+                    input: Double(step), output: 0, cacheCreation: 0, cacheRead: 0)
+            )
+        }
+        let schedule = PricingSchedule(rates)
+
+        for step in 1...5 {
+            let midMonth = DatedTokenPricing.utcDay(2026, step, 15)
+            let resolved = try XCTUnwrap(schedule.resolve(at: midMonth))
+            XCTAssertEqual(resolved.pricing.input, Double(step), "resolved the wrong entry for month \(step)")
+            XCTAssertEqual(resolved.verifiedOn, "2026-0\(step)-02")
+        }
+    }
+
     func testEntriesResolveRegardlessOfConstructionOrder() throws {
         let reversed = PricingSchedule([
             DatedTokenPricing(effectiveFrom: secondEffective, verifiedOn: "2026-07-02", pricing: newRate),

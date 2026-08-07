@@ -64,18 +64,25 @@ enum CodexCostScanner {
         ModelPricing.resolveCodex(for: model, at: timestamp)
     }
 
+    /// `pricingAt` is the seam that lets a test drive a dated schedule; the
+    /// default is the shared table every caller ships with.
     nonisolated static func makeCost(
-        from context: CodexScanContext
+        from context: CodexScanContext,
+        pricingAt: @escaping (String?, Date) -> TokenPricing = ModelPricing.codex(for:at:)
     ) -> (TokenCost, [DailyTokenUsage])? {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
-        let pricing = ModelPricing.codex
+        // A window aggregates many events, so it has no single event time; its
+        // newest event is the closest defensible stand-in, and it is already
+        // what the window reports as `periodEnd`. Daily rows resolve per day.
+        let windowEnd = context.latestDate
+        let pricing = pricingAt(nil, windowEnd)
         let billableInput = max(0, totals.input - totals.cacheRead)
         let output = totals.output + totals.reasoning
         // Prefer the sum of per-event costs, each priced at its own timestamp's
-        // rate; fall back to today's rate only for totals that carry no per-event
-        // cost (issue #339).
+        // rate; fall back to the rate in effect when the tokens were recorded
+        // only for totals that carry no per-event cost (issue #339).
         let fallbackCost = TokenCostMath.calculateCost(
             input: billableInput,
             output: output,
@@ -99,7 +106,7 @@ enum CodexCostScanner {
                 from: context.modelTotals,
                 provider: .codexCli,
                 pricing: pricing,
-                pricingForName: { ModelPricing.codex(for: $0) }
+                pricingForName: { pricingAt($0, windowEnd) }
             ),
             originBreakdowns: TokenUsageAggregator.makeBreakdowns(
                 from: context.originTotals,
@@ -111,7 +118,7 @@ enum CodexCostScanner {
                 modelsByProject: context.projectModelTotals,
                 provider: .codexCli,
                 pricing: pricing,
-                pricingForName: { ModelPricing.codex(for: $0) }
+                pricingForName: { pricingAt($0, windowEnd) }
             )
         ), TokenUsageAggregator.makeDailyUsage(
             from: context.dailyTotals,
@@ -120,7 +127,7 @@ enum CodexCostScanner {
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
             projectModelsByDay: context.dailyProjectModelTotals,
-            pricingForName: { ModelPricing.codex(for: $0) }
+            pricingAt: pricingAt
         ))
     }
 
@@ -381,7 +388,7 @@ enum CodexCostScanner {
 
         let allowance = session.budget.allowance
         guard allowance > 0 else {
-            session.noteDeferred()
+            session.noteDeferred(.codex)
             return record?.payload
         }
 
@@ -436,7 +443,7 @@ enum CodexCostScanner {
         if read.reachedEndOfFile {
             Self.flushDeferred(&deferred, modelName: nil, windows: &windows)
         } else {
-            session.noteDeferred()
+            session.noteDeferred(.codex)
             if let deferredOffset {
                 // Events still waiting on a model the *next* slice may yet
                 // declare. Rolling the offset back re-reads them rather than

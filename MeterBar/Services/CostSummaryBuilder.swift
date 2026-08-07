@@ -86,11 +86,22 @@ enum CostSummaryBuilder {
     nonisolated struct CostSummaryScan: Sendable {
         let summary: CostSummary
 
-        /// `false` when the budget ran out (or the refresh was cancelled) with
-        /// files still unread. The summary is correct as far as it goes — every
-        /// number in it comes from bytes actually accounted for — but it is not
-        /// yet the whole corpus, so the caller should run another slice.
-        let isComplete: Bool
+        /// The providers whose corpus still has unread files, because the budget
+        /// ran out or the refresh was cancelled. The summary is correct as far
+        /// as it goes — every number in it comes from bytes actually accounted
+        /// for — but it is not yet the whole corpus.
+        ///
+        /// Named per provider rather than as one flag so the caller can pair
+        /// each with that provider's own persist outcome; see
+        /// `CostTracker.shouldRunAnotherSlice`.
+        let deferredProviders: Set<CostScanProvider>
+
+        var isComplete: Bool { deferredProviders.isEmpty }
+
+        init(summary: CostSummary, deferredProviders: Set<CostScanProvider> = []) {
+            self.summary = summary
+            self.deferredProviders = deferredProviders
+        }
     }
 
     /// One budgeted slice of the corpus scan.
@@ -146,7 +157,7 @@ enum CostSummaryBuilder {
                 lifetime: LifetimeCostSummary(costs: scan.lifetime.costs),
                 pricing: scan.period.pricing.isEmpty ? nil : scan.period.pricing
             ),
-            isComplete: session.isComplete
+            deferredProviders: session.deferredProviders
         )
     }
 }

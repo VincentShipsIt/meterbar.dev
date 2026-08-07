@@ -21,7 +21,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     private let lock = NSLock()
     private var claudeCache: CostScanFileCache<ClaudeFileTotals>
     private var codexCache: CostScanFileCache<CodexFileTotals>
-    private var deferred = false
+    private var deferred: Set<CostScanProvider> = []
 
     init(
         cutoff: Date,
@@ -54,21 +54,29 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// budget ran out or the refresh was cancelled and some files were skipped
     /// entirely or read only partway — the caller should schedule another slice
     /// rather than treat the summary as final.
-    var isComplete: Bool {
+    var isComplete: Bool { deferredProviders.isEmpty }
+
+    /// Which corpora were left unfinished.
+    ///
+    /// Tracked per provider rather than as one flag because the slice loop's
+    /// stop condition pairs each of these with that provider's own persist
+    /// outcome: a provider that still has work but cannot write its offsets is
+    /// the one case where another slice buys nothing.
+    var deferredProviders: Set<CostScanProvider> {
         lock.lock()
         defer { lock.unlock() }
-        return !deferred
+        return deferred
     }
 
-    /// Records that at least one file was left unfinished.
+    /// Records that at least one of `provider`'s files was left unfinished.
     ///
     /// Deliberately *not* driven by "did we reach EOF": a transcript that is
     /// being appended to right now ends in a half-written line the scan
     /// legitimately withholds, and treating that as incomplete would keep the
     /// refresh loop spinning forever on a live session.
-    func noteDeferred() {
+    func noteDeferred(_ provider: CostScanProvider) {
         lock.lock()
-        deferred = true
+        deferred.insert(provider)
         lock.unlock()
     }
 
@@ -120,7 +128,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Deliberately not `@discardableResult`: a slice whose caches never reached
     /// disk made no *resumable* progress, and a caller that ignores that spends
     /// its remaining slices re-reading the same bytes.
-    func persist() -> CostScanPersistOutcome {
+    func persist() -> CostScanPersistReport {
         // No store is not the same as nothing to save. `CostScanCacheStore
         // .applicationSupport` is optional, and every slice builds a fresh
         // session from it — so a session without one starts from an empty cache,
@@ -128,25 +136,34 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         // so, or the slice loop keeps calling that forward progress.
         guard let store else { return .unavailable }
 
-        var outcome = CostScanPersistOutcome.persisted
-        do {
-            try store.saveClaude(claude)
-        } catch {
-            outcome = .failed
-            AppLog.cost.error(
-                "Failed to persist Claude scan progress: \(error.localizedDescription, privacy: .public)"
-            )
-        }
-        do {
-            try store.saveCodex(codex)
-        } catch {
-            outcome = .failed
-            AppLog.cost.error(
-                "Failed to persist Codex scan progress: \(error.localizedDescription, privacy: .public)"
-            )
-        }
-        return outcome
+        return CostScanPersistReport(
+            claude: Self.write("Claude") { try store.saveClaude(claude) },
+            codex: Self.write("Codex") { try store.saveCodex(codex) }
+        )
     }
+
+    private static func write(_ provider: String, _ save: () throws -> Void) -> CostScanPersistOutcome {
+        do {
+            try save()
+            return .persisted
+        } catch {
+            AppLog.cost.error(
+                """
+                Failed to persist \(provider, privacy: .public) scan progress: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+            return .failed
+        }
+    }
+}
+
+/// The two corpora a refresh reads. They have separate caches, separate budgets
+/// to run out of, and separate ways to fail a write, so every "did this make
+/// resumable progress" answer is scoped to one of them.
+nonisolated enum CostScanProvider: Sendable, Hashable, CaseIterable {
+    case claude
+    case codex
 }
 
 /// Whether a slice's offsets are durable enough for the next one to resume from.
@@ -155,15 +172,38 @@ nonisolated final class CostScanSession: @unchecked Sendable {
 /// because they need different log lines — one is a disk error worth reporting,
 /// the other is a machine whose Application Support directory never resolved.
 nonisolated enum CostScanPersistOutcome: Sendable, Equatable {
-    /// Every cache this session owns is on disk.
+    /// This provider's cache is on disk.
     case persisted
 
-    /// At least one cache could not be written. Whatever this slice read is
-    /// still correct in memory, but it dies with the session: the store holds
-    /// exactly what the previous slice left there.
+    /// The cache could not be written. Whatever this slice read is still correct
+    /// in memory, but it dies with the session: the store holds exactly what the
+    /// previous slice left there.
     case failed
 
     /// There is no store to write to, so nothing this slice read can outlive
     /// it. Correct for the summary on screen, useless to the next slice.
     case unavailable
+}
+
+/// One slice's persist result, per provider.
+///
+/// Kept apart rather than reduced to a single worst-case verdict: the caches are
+/// separate artifacts, and a shared verdict would let a permanently blocked
+/// Claude write cancel Codex's scan while Codex is still resuming cleanly.
+nonisolated struct CostScanPersistReport: Sendable, Equatable {
+    /// Both caches reached disk.
+    static let persisted = CostScanPersistReport(claude: .persisted, codex: .persisted)
+
+    /// There was no store, so neither cache could outlive the slice.
+    static let unavailable = CostScanPersistReport(claude: .unavailable, codex: .unavailable)
+
+    let claude: CostScanPersistOutcome
+    let codex: CostScanPersistOutcome
+
+    func outcome(for provider: CostScanProvider) -> CostScanPersistOutcome {
+        switch provider {
+        case .claude: claude
+        case .codex: codex
+        }
+    }
 }
