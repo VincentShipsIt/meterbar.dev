@@ -209,7 +209,7 @@ struct LifetimeCostSummaryCard: View {
           EmptyStateCard(
             systemImage: "clock.arrow.circlepath",
             title: "No lifetime cost",
-            message: "No billable Claude or Codex history was found in local logs."
+            message: "No billable history was found for any enabled provider."
           )
         }
       }
