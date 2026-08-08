@@ -23,7 +23,8 @@ struct DashboardOverviewSection: View {
         for recommendation: ProviderRecommendation
     ) -> (value: String, caption: String, band: QuotaBand?) {
         if let top = recommendation.rows.first, !recommendation.isFullyExhausted {
-            var parts = ["\(top.headroomText) of \(top.windowTitle) left"]
+            // `headroomText` already reads "44% left", so the window name leads.
+            var parts = ["\(top.windowTitle) · \(top.headroomText)"]
             if let resetText = top.resetText {
                 parts.append(resetText)
             }

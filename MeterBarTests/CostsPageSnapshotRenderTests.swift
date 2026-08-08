@@ -16,6 +16,15 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
         let outputDir = URL(fileURLWithPath: dir, isDirectory: true)
         let summary = DemoData.costSummary()
 
+        try render(width: 1000, name: "0-overview", into: outputDir) {
+            DashboardOverviewSection(
+                snapshots: overviewSnapshots(),
+                tightestLimit: overviewSnapshots().first?.limits.first,
+                costSummary: summary,
+                onSelectProvider: { _ in }
+            )
+        }
+
         try render(width: 1000, name: "1-headline-row", into: outputDir) {
             HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
                 CostOverviewStatusCard(
@@ -46,6 +55,41 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
                 scan: {}
             )
         }
+    }
+
+    /// One healthy provider and one logged-out stale one, so the render shows
+    /// both the "Use next" tile and the collapsed login one-liner.
+    private func overviewSnapshots() -> [ProviderSnapshot] {
+        let healthy = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: UsageMetrics(
+                service: .codexCli,
+                sessionLimit: UsageLimit(used: 56, total: 100, resetTime: Date().addingTimeInterval(9_000)),
+                weeklyLimit: UsageLimit(used: 8, total: 100, resetTime: Date().addingTimeInterval(345_600))
+            ),
+            emptyDetail: "Run codex login"
+        )
+        let staleLogin = ProviderSnapshot(
+            id: "claude-shipshitdev",
+            title: "shipshitdev",
+            service: .claudeCode,
+            updatedAt: Date().addingTimeInterval(-3 * 60 * 60),
+            limits: [
+                SnapshotLimit(
+                    id: "session",
+                    kind: .session,
+                    title: "Session",
+                    usageLimit: UsageLimit(used: 56, total: 100, resetTime: nil)
+                ),
+            ],
+            emptyDetail: "Run claude login",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil,
+            authNotice: .loginRequired
+        )
+        return [staleLogin, healthy]
     }
 
     private func render<V: View>(
