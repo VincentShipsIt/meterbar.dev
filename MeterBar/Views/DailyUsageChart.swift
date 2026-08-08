@@ -622,7 +622,14 @@ enum DashboardDateFormat {
     return formatter
   }()
 
+  private static let monthDay: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("MMMd")
+    return formatter
+  }()
+
   static func medium(_ date: Date) -> String { mediumDate.string(from: date) }
   static func month(_ date: Date) -> String { month.string(from: date) }
   static func weekdayMonthDay(_ date: Date) -> String { weekdayMonthDay.string(from: date) }
+  static func monthDay(_ date: Date) -> String { monthDay.string(from: date) }
 }

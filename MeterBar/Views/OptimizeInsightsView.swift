@@ -29,8 +29,15 @@ struct OptimizeInsightsView: View {
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
-  /// 7/30-day window for the token-burn chart.
-  @State private var chartDays = 30
+  /// The same persisted 7/30-day window the Costs page uses — one preference,
+  /// two pages. Replaces the picker that used to hide inside the Token Burn
+  /// card and the fixed "Last 7 days" tile beside it.
+  @AppStorage(StorageKeys.costsWindowDays)
+  private var costsWindowDays = CostWindowSelection.month.rawValue
+
+  private var windowSelection: CostWindowSelection {
+    CostWindowSelection(rawValue: costsWindowDays) ?? .month
+  }
 
   private var visibleSummary: CostSummary? {
     costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
@@ -52,12 +59,30 @@ struct OptimizeInsightsView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
+      windowPicker
       recommendationCard
       phaseContent
         .animation(
           MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
           value: phase
         )
+    }
+  }
+
+  /// The page-level window control, in the same position and style as the
+  /// Costs page's — the two pages share the persisted selection.
+  private var windowPicker: some View {
+    HStack {
+      Spacer()
+      Picker("Reporting window", selection: $costsWindowDays) {
+        ForEach(CostWindowSelection.allCases) { window in
+          Text(window.pickerLabel).tag(window.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .fixedSize()
+      .accessibilityLabel("Reporting window")
     }
   }
 
@@ -201,6 +226,26 @@ struct OptimizeInsightsView: View {
     )
   }
 
+  /// The window KPI tile, following the page's 7/30-day toggle. The week keeps
+  /// `recentWindowTile`'s empty-week wording; the month reports the 30-day
+  /// total the rest of the page's insights are computed over.
+  static func windowTile(
+    selection: CostWindowSelection,
+    tokens7Day: Int,
+    tokens30Day: Int
+  ) -> (title: String, value: String, caption: String) {
+    switch selection {
+    case .week:
+      let tile = recentWindowTile(tokens7Day: tokens7Day, tokens30Day: tokens30Day)
+      return (selection.subtitle, tile.value, tile.caption)
+    case .month:
+      guard tokens30Day > 0 else {
+        return (selection.subtitle, "None", "no tokens recorded in the last 30 days")
+      }
+      return (selection.subtitle, UsageFormat.tokens(tokens30Day), "tokens in the last 30 days")
+    }
+  }
+
   private func kpiGrid(for insights: OptimizationInsights) -> some View {
     LazyVGrid(columns: Self.kpiColumns, alignment: .leading, spacing: 12) {
       DashboardMetricTile(
@@ -223,12 +268,13 @@ struct OptimizeInsightsView: View {
         caption: "context sent vs generated",
         systemImage: "text.append"
       )
-      let recentWindow = Self.recentWindowTile(
+      let recentWindow = Self.windowTile(
+        selection: windowSelection,
         tokens7Day: insights.tokens7Day,
         tokens30Day: insights.tokens30Day
       )
       DashboardMetricTile(
-        title: "Last 7 days",
+        title: recentWindow.title,
         value: recentWindow.value,
         caption: recentWindow.caption,
         systemImage: "calendar"
@@ -238,17 +284,11 @@ struct OptimizeInsightsView: View {
   }
 
   private var tokenBurnCard: some View {
-    DashboardCard(title: "Token Burn") {
-      Picker("Window", selection: $chartDays) {
-        Text("7 days").tag(7)
-        Text("30 days").tag(30)
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .fixedSize()
-    } content: {
+    // No in-card picker: the page-level window toggle above governs this chart
+    // (and the window tile), matching the Costs page's pattern.
+    DashboardCard(title: "Token Burn", trailing: windowSelection.subtitle) {
       if let summary = visibleSummary, !summary.dailyUsage.isEmpty {
-        DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: chartDays)
+        DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: windowSelection.days)
           .frame(height: 200)
       } else {
         Text("No daily token history yet.")

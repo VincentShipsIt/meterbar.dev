@@ -161,6 +161,143 @@ final class CostChartPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.modelPoints.allSatisfy { $0.chartLabel.contains($0.provider.displayName) })
     }
 
+    func testSevenDayWindowDerivesModelSpendFromAttributedDailyRows() {
+        let summary = makeSummary(
+            costs: [
+                tokenCost(
+                    provider: .claudeCode,
+                    totalCost: 40,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 40)]
+                ),
+            ],
+            dailyUsage: [
+                dailyRow(
+                    daysAgo: 2,
+                    provider: .claudeCode,
+                    cost: 4,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 4)]
+                ),
+                dailyRow(
+                    daysAgo: 5,
+                    provider: .codexCli,
+                    cost: 3,
+                    models: [model(provider: .codexCli, name: "gpt-5.6-sol", cost: 3)]
+                ),
+                // Outside the 7-day window: must not leak into the model chart.
+                dailyRow(
+                    daysAgo: 20,
+                    provider: .claudeCode,
+                    cost: 33,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 33)]
+                ),
+            ]
+        )
+
+        let presentation = CostChartPresentation(
+            summary: summary,
+            requestedDays: 7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(presentation.modelWindowDays, 7)
+        XCTAssertTrue(presentation.modelWindowMatchesRequested)
+        XCTAssertEqual(presentation.modelPoints.count, 2)
+        XCTAssertEqual(
+            presentation.modelPoints.first { $0.model == "claude-fable-5" }?.costUSD ?? 0,
+            4,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(presentation.modelTotalUSD, 7, accuracy: 0.000_001)
+        XCTAssertEqual(presentation.selectedPeriodTotalUSD, 7, accuracy: 0.000_001)
+        XCTAssertTrue(presentation.modelTotalReconciles)
+    }
+
+    func testSevenDayWindowReportsUnattributedRemainderPerDay() {
+        let summary = makeSummary(
+            dailyUsage: [
+                dailyRow(
+                    daysAgo: 1,
+                    provider: .claudeCode,
+                    cost: 5,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 3)]
+                ),
+            ]
+        )
+
+        let presentation = CostChartPresentation(
+            summary: summary,
+            requestedDays: 7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            presentation.modelPoints.first { $0.model == "Unattributed" }?.costUSD ?? 0,
+            2,
+            accuracy: 0.000_001
+        )
+        XCTAssertTrue(presentation.hasUnattributedModelSpend)
+        XCTAssertTrue(presentation.modelTotalReconciles)
+    }
+
+    func testSevenDayWindowFallsBackToPeriodModelDetailWhenRowsPredateAttribution() {
+        let summary = makeSummary(
+            costs: [
+                tokenCost(
+                    provider: .claudeCode,
+                    totalCost: 40,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 40)]
+                ),
+            ],
+            dailyUsage: [
+                // v1 cache rows: no model attribution to re-window from.
+                dailyRow(daysAgo: 1, provider: .claudeCode, cost: 4),
+            ]
+        )
+
+        let presentation = CostChartPresentation(
+            summary: summary,
+            requestedDays: 7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(presentation.modelWindowDays, 30, "period detail is the honest fallback")
+        XCTAssertFalse(presentation.modelWindowMatchesRequested)
+        XCTAssertEqual(presentation.modelTotalUSD, 40, accuracy: 0.000_001)
+    }
+
+    func testFullWindowKeepsTheAuthoritativePeriodModelDetail() {
+        let summary = makeSummary(
+            costs: [
+                tokenCost(
+                    provider: .claudeCode,
+                    totalCost: 40,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 40)]
+                ),
+            ],
+            dailyUsage: [
+                dailyRow(
+                    daysAgo: 1,
+                    provider: .claudeCode,
+                    cost: 4,
+                    models: [model(provider: .claudeCode, name: "claude-fable-5", cost: 4)]
+                ),
+            ]
+        )
+
+        let presentation = CostChartPresentation(summary: summary, now: now, calendar: calendar)
+
+        XCTAssertEqual(presentation.modelWindowDays, 30)
+        XCTAssertEqual(
+            presentation.modelTotalUSD,
+            40,
+            accuracy: 0.000_001,
+            "a 30-day request must keep the scan's own totals, not re-derive them from daily rows"
+        )
+    }
+
     func testNegativeCostsDoNotProduceChartMarks() {
         let summary = makeSummary(
             costs: [
@@ -259,7 +396,8 @@ final class CostChartPresentationTests: XCTestCase {
     private func dailyRow(
         daysAgo: Int,
         provider: ServiceType,
-        cost: Double
+        cost: Double,
+        models: [TokenUsageBreakdown]? = nil
     ) -> DailyTokenUsage {
         DailyTokenUsage(
             date: dailyDate(daysAgo: daysAgo),
@@ -267,7 +405,8 @@ final class CostChartPresentationTests: XCTestCase {
             inputTokens: 1,
             outputTokens: 0,
             cacheReadTokens: 0,
-            estimatedCostUSD: cost
+            estimatedCostUSD: cost,
+            modelBreakdowns: models
         )
     }
 

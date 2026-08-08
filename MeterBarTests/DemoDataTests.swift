@@ -95,9 +95,9 @@ final class DemoDataTests: XCTestCase {
         XCTAssertNil(metrics[.cursor]?.weeklyLimit?.pace(now: now))
     }
 
-    // MARK: - Cost summary: non-alarming, no project/model leakage
+    // MARK: - Cost summary: non-alarming, synthetic breakdowns only
 
-    func testCostSummaryIsNonAlarmingAndLeaksNoOriginOrModelBreakdowns() {
+    func testCostSummaryIsNonAlarmingAndCarriesOnlySyntheticBreakdowns() {
         let summary = DemoData.costSummary(now: now)
 
         XCTAssertEqual(summary.totalCostUSD, 204.90, accuracy: 0.001, "~$205, deliberately modest")
@@ -112,10 +112,52 @@ final class DemoDataTests: XCTestCase {
         )
         XCTAssertGreaterThan(summary.totalTokens, 0)
 
-        // Never surface real project paths or private model routing.
-        for cost in summary.costs {
-            XCTAssertTrue(cost.modelBreakdowns.isEmpty, "\(cost.provider) must carry no model breakdown")
-            XCTAssertTrue(cost.originBreakdowns.isEmpty, "\(cost.provider) must carry no origin breakdown")
+        // Breakdowns exist so demo screenshots show the model/origin charts —
+        // but only from the fixture's fixed synthetic vocabulary. Nothing here
+        // may ever look like a real project path or leak private routing.
+        for cost in summary.costs where cost.provider != .cursor {
+            XCTAssertFalse(cost.modelBreakdowns.isEmpty, "\(cost.provider) demo needs model rows")
+            XCTAssertFalse(cost.originBreakdowns.isEmpty, "\(cost.provider) demo needs origin rows")
+
+            let attributed = cost.modelBreakdowns.reduce(0) { $0 + $1.estimatedCostUSD }
+            XCTAssertEqual(
+                attributed,
+                cost.estimatedCostUSD,
+                accuracy: 0.005,
+                "\(cost.provider) model rows must reconcile — no Unattributed remainder in demo"
+            )
+
+            for breakdown in cost.modelBreakdowns + cost.originBreakdowns {
+                XCTAssertTrue(
+                    DemoData.syntheticBreakdownNames.contains(breakdown.name),
+                    "unexpected demo breakdown name: \(breakdown.name)"
+                )
+                XCTAssertFalse(breakdown.name.contains("/"), "no path-like names in demo data")
+            }
+        }
+
+        // Cursor is dollar-billed with no token telemetry; it stays plain.
+        let cursor = summary.costs.first { $0.provider == .cursor }
+        XCTAssertEqual(cursor?.modelBreakdowns.isEmpty, true)
+    }
+
+    /// Daily rows carry per-model attribution so the 7-day window's model chart
+    /// derives from them instead of falling back to the mismatch caption.
+    func testDemoDailyRowsCarryReconcilingModelAttribution() {
+        let summary = DemoData.costSummary(now: now)
+
+        for row in summary.dailyUsage {
+            let models = row.modelBreakdowns ?? []
+            XCTAssertFalse(models.isEmpty, "daily rows need model attribution for windowed charts")
+            XCTAssertEqual(
+                models.reduce(0) { $0 + $1.estimatedCostUSD },
+                row.estimatedCostUSD,
+                accuracy: 0.005,
+                "daily model rows must reconcile to the day's cost"
+            )
+            for model in models {
+                XCTAssertTrue(DemoData.syntheticBreakdownNames.contains(model.name))
+            }
         }
     }
 

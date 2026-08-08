@@ -37,25 +37,9 @@ struct DashboardDiagnosticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(
-                title: "Refresh Cadence",
-                trailing: refreshCadenceDiagnostic.effectiveInterval
-            ) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Selected: \(refreshCadenceDiagnostic.selection)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(refreshCadenceDiagnostic.reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if dataManager.refreshInterval == .adaptive {
-                        Text("Adaptive range: 1–30 minutes. Activity signals stay in memory and are never sent.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-
+            // No Refresh Cadence card here: cadence is configured in Settings
+            // and restating it on this page was pure duplication. The copied
+            // report still includes it — it is genuinely diagnostic there.
             DashboardCard(
                 title: "Provider Diagnostics",
                 trailing: DiagnosticsRunner.summary(for: readinessReports)
@@ -69,16 +53,18 @@ struct DashboardDiagnosticsSection: View {
                         Button {
                             Task { await runDiagnostics() }
                         } label: {
-                            Label("Re-run checks", systemImage: "arrow.clockwise")
+                            Label("Refresh", systemImage: "arrow.clockwise")
                         }
                         .disabled(isRunningDiagnostics)
+                        .help("Re-run every provider readiness check")
 
                         Button {
                             copyDiagnosticsToClipboard()
                         } label: {
-                            Label("Copy report", systemImage: "doc.on.doc")
+                            Label("Copy", systemImage: "doc.on.doc")
                         }
                         .disabled(readinessReports.isEmpty)
+                        .help("Copy the redacted diagnostics report")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)

@@ -130,9 +130,11 @@ final class DashboardSectionSplitTests: XCTestCase {
 
     /// The estimate card's subtitle names the window and nothing else: refresh
     /// state belongs on the trailing edge, matching "Lifetime Local Cost" and
-    /// "30 Day Spend" rather than replacing the card's own caption.
+    /// the spend card rather than replacing the card's own caption. The window
+    /// now follows the page's 7/30-day toggle.
     func testCostOverviewSubtitleIsWindowOnlyAndStatusMatchesTheOtherCards() {
-        XCTAssertEqual(CostOverviewStatusCard.subtitle, "Last 30 days")
+        XCTAssertEqual(CostWindowSelection.month.subtitle, "Last 30 days")
+        XCTAssertEqual(CostWindowSelection.week.subtitle, "Last 7 days")
 
         for isScanning in [true, false] {
             for isRefreshingMissingDays in [true, false] {
@@ -149,6 +151,22 @@ final class DashboardSectionSplitTests: XCTestCase {
                 )
             }
         }
+    }
+
+    /// The model list leads with the three biggest spenders; the rest live
+    /// behind an explicit control. No control at all when nothing is hidden.
+    func testModelSpendListCompactsPastTheTopThree() {
+        XCTAssertEqual(CostSpendCharts.compactModelLimit, 3)
+        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 3))
+        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 0))
+        XCTAssertEqual(
+            CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 12),
+            "Show all 12 models"
+        )
+        XCTAssertEqual(
+            CostSpendCharts.modelToggleTitle(showingAll: true, totalCount: 12),
+            "Show top 3"
+        )
     }
 
     func testStatusPageSummaryReportsRefreshFirst() {
@@ -244,6 +262,76 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertEqual(DashboardOverviewSection.masonryColumns([1, 2], columnCount: 0), [[1, 2]])
     }
 
+    // MARK: - Week-row date labels
+
+    /// The week-row gutter label is locale-templated ("MMMd"), so the exact
+    /// ordering varies by machine locale — but the day number must survive in
+    /// every arrangement ("10 Jul", "Jul 10", "7月10日").
+    func testMonthDayLabelCarriesTheDayNumberInAnyLocale() {
+        let date = Date(timeIntervalSince1970: 1_750_000_000)
+        let label = DashboardDateFormat.monthDay(date)
+
+        XCTAssertFalse(label.isEmpty)
+        XCTAssertTrue(
+            label.contains("\(Calendar.current.component(.day, from: date))"),
+            "label must include the day of month: \(label)"
+        )
+    }
+
+    // MARK: - Overview "Use next" tile
+
+    private func rankedRecommendation(
+        sessionUsed: Double = 8,
+        weeklyUsed: Double = 8
+    ) -> ProviderRecommendation {
+        ProviderRecommendationPlanner.rank(
+            candidates: [
+                ProviderRecommendationCandidate(
+                    id: "codex",
+                    name: "Codex",
+                    service: .codexCli,
+                    displayOrder: 0,
+                    sessionLimit: UsageLimit(used: sessionUsed, total: 100, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: weeklyUsed, total: 100, resetTime: nil),
+                    lastUpdated: Date(timeIntervalSince1970: 1_750_000_000)
+                ),
+            ],
+            now: Date(timeIntervalSince1970: 1_750_000_100)
+        )
+    }
+
+    func testUseNextTileLeadsWithTheTopRankedProvider() throws {
+        let recommendation = rankedRecommendation()
+        let tile = DashboardOverviewSection.useNextTile(for: recommendation)
+        let top = try XCTUnwrap(recommendation.rows.first)
+
+        XCTAssertEqual(tile.value, top.name)
+        XCTAssertTrue(
+            tile.caption.contains(top.headroomText),
+            "the caption must carry the headroom that earned the rank: \(tile.caption)"
+        )
+        XCTAssertTrue(tile.caption.contains(top.windowTitle))
+        XCTAssertEqual(tile.band, top.band)
+    }
+
+    func testUseNextTileSaysSoWhenEveryWindowIsSpent() {
+        let recommendation = rankedRecommendation(sessionUsed: 100, weeklyUsed: 100)
+        let tile = DashboardOverviewSection.useNextTile(for: recommendation)
+
+        XCTAssertEqual(tile.value, "Every window spent")
+        XCTAssertEqual(tile.band, .exhausted)
+    }
+
+    func testUseNextTileFallsBackWhenNothingIsRankable() {
+        let tile = DashboardOverviewSection.useNextTile(
+            for: ProviderRecommendationPlanner.rank(candidates: [], now: Date())
+        )
+
+        XCTAssertEqual(tile.value, "No data")
+        XCTAssertEqual(tile.caption, "Waiting for provider refresh")
+        XCTAssertNil(tile.band)
+    }
+
     // MARK: - Optimize KPI tiles
 
     /// The four KPI tiles are one glanceable band of headline numbers, not a
@@ -280,6 +368,32 @@ final class DashboardSectionSplitTests: XCTestCase {
 
         XCTAssertEqual(busy.value, UsageFormat.tokens(1_200_000))
         XCTAssertEqual(busy.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
+    }
+
+    /// The window KPI tile follows the page's 7/30-day toggle: the week keeps
+    /// the empty-week wording above; the month reports the 30-day total.
+    func testWindowTileFollowsTheSelectedWindow() {
+        let week = OptimizeInsightsView.windowTile(
+            selection: .week,
+            tokens7Day: 1_200_000,
+            tokens30Day: 9_000_000
+        )
+        XCTAssertEqual(week.title, "Last 7 days")
+        XCTAssertEqual(week.value, UsageFormat.tokens(1_200_000))
+        XCTAssertEqual(week.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
+
+        let month = OptimizeInsightsView.windowTile(
+            selection: .month,
+            tokens7Day: 1_200_000,
+            tokens30Day: 9_000_000
+        )
+        XCTAssertEqual(month.title, "Last 30 days")
+        XCTAssertEqual(month.value, UsageFormat.tokens(9_000_000))
+        XCTAssertEqual(month.caption, "tokens in the last 30 days")
+
+        let emptyMonth = OptimizeInsightsView.windowTile(selection: .month, tokens7Day: 0, tokens30Day: 0)
+        XCTAssertEqual(emptyMonth.value, "None")
+        XCTAssertEqual(emptyMonth.caption, "no tokens recorded in the last 30 days")
     }
 
     // MARK: - Share card sources
@@ -336,7 +450,6 @@ final class DashboardSectionSplitTests: XCTestCase {
         let view = DashboardOverviewSection(
             snapshots: [snapshot()],
             tightestLimit: snapshot().limits.first,
-            enabledSourceCount: 2,
             costSummary: nil,
             onSelectProvider: { _ in }
         )

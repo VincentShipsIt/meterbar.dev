@@ -225,25 +225,6 @@ enum SettingsSidebarModel {
     }
 }
 
-enum EnabledQuotaSourceCounter {
-    static func count(
-        enabledServices: Set<ServiceType>,
-        codexAccountCount: Int,
-        claudeAccountCount: Int
-    ) -> Int {
-        enabledServices.reduce(into: 0) { count, service in
-            switch service {
-            case .codexCli:
-                count += codexAccountCount
-            case .claudeCode:
-                count += claudeAccountCount
-            case .cursor, .openRouter, .grok:
-                count += 1
-            }
-        }
-    }
-}
-
 @MainActor
 final class DashboardNavigationStore: ObservableObject {
     static let shared = DashboardNavigationStore()

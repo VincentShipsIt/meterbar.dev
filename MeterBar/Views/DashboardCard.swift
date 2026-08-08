@@ -11,6 +11,7 @@ struct DashboardTile<Content: View>: View {
   let cornerRadius: CGFloat
   let padding: MeterBarTheme.CardPadding
   let minHeight: CGFloat?
+  let maxHeight: CGFloat?
   let alignment: Alignment
   @ViewBuilder let content: Content
 
@@ -18,12 +19,14 @@ struct DashboardTile<Content: View>: View {
     cornerRadius: CGFloat = MeterBarTheme.Radius.card,
     padding: MeterBarTheme.CardPadding = .standard,
     minHeight: CGFloat? = nil,
+    maxHeight: CGFloat? = nil,
     alignment: Alignment = .topLeading,
     @ViewBuilder content: () -> Content
   ) {
     self.cornerRadius = cornerRadius
     self.padding = padding
     self.minHeight = minHeight
+    self.maxHeight = maxHeight
     self.alignment = alignment
     self.content = content()
   }
@@ -31,7 +34,7 @@ struct DashboardTile<Content: View>: View {
   var body: some View {
     content
       .padding(padding.value)
-      .frame(maxWidth: .infinity, minHeight: minHeight, alignment: alignment)
+      .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight, alignment: alignment)
       .meterBarCardSurface(cornerRadius: cornerRadius)
   }
 }

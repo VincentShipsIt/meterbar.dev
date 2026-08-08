@@ -56,32 +56,25 @@ struct ProviderStatusTable: View {
     private var reduceMotion
 
     var body: some View {
-        DashboardTile(padding: .nested) {
-            VStack(spacing: 0) {
-                ForEach(Array(ServiceType.allCases.enumerated()), id: \.element) { index, service in
-                    if index > 0 {
-                        Divider()
-                            .padding(.horizontal, MeterBarTheme.Spacing.sm)
-                    }
-
-                    ProviderStatusDisclosureRow(
-                        service: service,
-                        report: reports[service],
-                        error: errors[service],
-                        isExpanded: expandedServices.contains(service),
-                        toggle: { toggleExpansion(for: service) },
-                        openStatusPage: { openStatusPage(service) }
-                    )
-                }
+        // One tile per provider, like the popover's status detail sections —
+        // the previous single divider-separated tile read as one blurred list,
+        // and its unclipped move-in transition drew the expanding content on
+        // top of the row above it.
+        VStack(spacing: MeterBarTheme.Spacing.sm) {
+            ForEach(ServiceType.allCases) { service in
+                ProviderStatusDisclosureRow(
+                    service: service,
+                    report: reports[service],
+                    error: errors[service],
+                    isExpanded: expandedServices.contains(service),
+                    toggle: { toggleExpansion(for: service) },
+                    openStatusPage: { openStatusPage(service) }
+                )
             }
         }
     }
 
     private func toggleExpansion(for service: ServiceType) {
-        // These rows sit on a shared flat tile (divider-separated), with no
-        // per-row glass surface, so a `glassEffectID` morph would read wrong —
-        // they keep the in-place move/opacity transition, now on a shared token
-        // and gated by Reduce Motion.
         withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
             if expandedServices.contains(service) {
                 expandedServices.remove(service)
@@ -112,60 +105,63 @@ private struct ProviderStatusDisclosureRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                Button(action: toggle) {
-                    HStack(alignment: .center, spacing: 10) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.secondary)
-                            .frame(width: 12)
-                            .contentTransition(.symbolEffect(.replace))
-                            .animation(MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion), value: isExpanded)
+        DashboardTile(padding: .popover) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 10) {
+                    Button(action: toggle) {
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+                                .frame(width: 12)
+                                .contentTransition(.symbolEffect(.replace))
+                                .animation(MeterBarTheme.Motion.snappy(reduceMotion: reduceMotion), value: isExpanded)
 
-                        ProviderLogoView(
-                            kind: .forService(service),
-                            size: 17,
-                            foregroundColor: MeterBarTheme.accent(for: service)
-                        )
+                            ProviderLogoView(
+                                kind: .forService(service),
+                                size: 17,
+                                foregroundColor: MeterBarTheme.accent(for: service)
+                            )
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(service.statusPageDisplayName)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(service.statusPageDisplayName)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text(subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: 10)
+
+                            ProviderStatusBadge(indicator: indicator, label: headline)
                         }
-
-                        Spacer(minLength: 10)
-
-                        ProviderStatusBadge(indicator: indicator, label: headline)
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(isExpanded ? "Collapse status details" : "Show status details")
+                    .buttonStyle(.plain)
+                    .accessibilityHint(isExpanded ? "Collapse status details" : "Show status details")
 
-                Button(action: openStatusPage) {
-                    Image(systemName: "arrow.up.right.square")
+                    Button(action: openStatusPage) {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open \(service.statusPageDisplayName) status page")
                 }
-                .buttonStyle(.borderless)
-                .help("Open \(service.statusPageDisplayName) status page")
-            }
-            .padding(.horizontal, MeterBarTheme.Spacing.sm)
-            .padding(.vertical, MeterBarTheme.Spacing.sm)
 
-            if isExpanded {
-                expandedDetails
-                    .padding(.leading, MeterBarTheme.Spacing.xxl)
-                    .padding(.trailing, MeterBarTheme.Spacing.sm)
-                    .padding(.bottom, MeterBarTheme.Spacing.md)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                if isExpanded {
+                    // Fade only: the tile's height change carries the motion.
+                    // The old `.move(edge: .top)` slid the incoming rows over
+                    // the header because nothing clipped them mid-flight.
+                    expandedDetails
+                        .padding(.top, MeterBarTheme.Spacing.md)
+                        .padding(.leading, MeterBarTheme.Spacing.xxl)
+                        .transition(.opacity)
+                }
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
     }
 
     @ViewBuilder private var expandedDetails: some View {
