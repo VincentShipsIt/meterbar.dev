@@ -130,6 +130,10 @@ enum CostSummaryBuilder {
                 totalTokens: costs.reduce(0) { $0 + $1.totalTokens },
                 periodDays: days,
                 dailyUsage: scan.period.dailyUsage.sorted { $0.date < $1.date },
+                hourlyUsage: scan.period.hourlyUsage.sorted { lhs, rhs in
+                    if lhs.date != rhs.date { return lhs.date < rhs.date }
+                    return lhs.provider.rawValue < rhs.provider.rawValue
+                },
                 lifetime: LifetimeCostSummary(costs: scan.lifetime.costs),
                 pricing: scan.period.pricing.isEmpty ? nil : scan.period.pricing
             ),

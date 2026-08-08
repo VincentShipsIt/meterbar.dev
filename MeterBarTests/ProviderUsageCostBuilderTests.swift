@@ -60,6 +60,7 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         XCTAssertEqual(built.0.periodEnd, day(2))
         XCTAssertEqual(built.1.map(\.date), [day(1), day(2)])
         XCTAssertEqual(built.1.map(\.estimatedCostUSD), [2, 3.5])
+        XCTAssertTrue(built.2.isEmpty, "poll-only providers have no event timestamp for hourly bucketing")
     }
 
     /// OpenRouter's key endpoint reports spend and no token counts whatsoever.

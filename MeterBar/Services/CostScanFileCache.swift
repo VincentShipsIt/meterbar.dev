@@ -20,6 +20,9 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
     /// the wrong period today and has to be rebased (or re-read) before use.
     var cutoff: Date
 
+    /// Seven-day hourly boundary used to build `payload`'s hourly buckets.
+    var hourlyCutoff: Date = .distantPast
+
     /// Whether the last pass read this file all the way to end of file.
     var isComplete: Bool
 
@@ -28,8 +31,11 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
 
 /// Every transcript's record, keyed by standardized path.
 nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Sendable {
-    /// Version 3 adds producer/time-zone identity and full per-file stamps.
-    static var currentSchemaVersion: Int { 3 }
+    /// Version 4 adds trailing-seven-day hourly accumulators. This private
+    /// disposable cache intentionally invalidates v3 so the upgrade's first
+    /// background refresh re-reads source events instead of trusting offsets
+    /// whose payload has no hourly totals.
+    static var currentSchemaVersion: Int { 4 }
 
     var schemaVersion = CostScanFileCache.currentSchemaVersion
     var parserVersion = CostScanValues.costCacheParserVersion

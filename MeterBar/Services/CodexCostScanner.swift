@@ -30,11 +30,15 @@ enum CodexCostScanner {
     /// `earliestDate` starts at now and only decreases, `latestDate` starts at the
     /// window floor (the cutoff for the period, `.distantPast` for lifetime) and
     /// only increases.
-    nonisolated static func scanWindows(cutoff: Date) -> ScanWindows<CostScanWindowContext> {
+    nonisolated static func scanWindows(
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
+    ) -> ScanWindows<CostScanWindowContext> {
         ScanWindows(
             period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
             lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
-            cutoff: cutoff
+            cutoff: cutoff,
+            hourlyCutoff: hourlyCutoff
         )
     }
 
@@ -56,7 +60,7 @@ enum CodexCostScanner {
     nonisolated static func makeCost(
         from context: CostScanWindowContext,
         pricingAt: @escaping (String?, Date) -> TokenPricing = ModelPricing.codex(for:at:)
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
@@ -115,6 +119,11 @@ enum CodexCostScanner {
             projectsByDay: context.dailyProjectTotals,
             projectModelsByDay: context.dailyProjectModelTotals,
             pricingAt: pricingAt
+        ), TokenUsageAggregator.makeHourlyUsage(
+            from: context.hourlyTotals,
+            provider: .codexCli,
+            pricing: pricing,
+            pricingAt: { pricingAt(nil, $0) }
         ))
     }
 
@@ -302,7 +311,7 @@ enum CodexCostScanner {
         directories: [URL],
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
-        var windows = Self.scanWindows(cutoff: session.cutoff)
+        var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
         let files = Self.distinctRollouts(in: directories)
         var live: Set<String> = []
 
@@ -360,7 +369,8 @@ enum CodexCostScanner {
         var windows = ScanWindows(
             period: payload.period,
             lifetime: payload.lifetime,
-            cutoff: session.cutoff
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
         )
         var rollout = payload.rollout
         var deferred: [CodexDeferredUsage] = []
@@ -434,6 +444,7 @@ enum CodexCostScanner {
                 offset: committed,
                 stamp: file.stamp,
                 cutoff: session.cutoff,
+                hourlyCutoff: session.hourlyCutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
@@ -547,6 +558,16 @@ enum CodexCostScanner {
         } else {
             guard record.stamp.isSameFile(as: file.stamp),
                   file.size >= record.stamp.size else { return nil }
+        }
+        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
+        if record.hourlyCutoff < session.hourlyCutoff {
+            record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.payload.lifetime.hourlyTotals = record.payload.lifetime.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.hourlyCutoff = session.hourlyCutoff
         }
         guard record.cutoff != session.cutoff else { return record }
 
@@ -848,6 +869,9 @@ enum CodexCostScanner {
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
         let keys = CostScanEventKeys(
             day: calendar.startOfDay(for: timestamp),
+            hour: timestamp >= windows.hourlyCutoff
+                ? CostScanHourBucket.start(for: timestamp, calendar: calendar)
+                : nil,
             model: CostScanValues.displayModelName(event.attribution.modelName),
             origin: CostScanValues.displayOriginName(event.attribution.originName),
             project: event.attribution.projectID

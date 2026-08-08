@@ -511,7 +511,7 @@ final class CostScanCollaboratorTests: XCTestCase {
         context.dailyProjectTotals = [day: ["app": tokens]]
         context.dailyProjectModelTotals = [day: ["app": ["gpt-5.6-sol": tokens]]]
 
-        let (cost, dailyRows) = try XCTUnwrap(
+        let (cost, dailyRows, _) = try XCTUnwrap(
             CodexCostScanner.makeCost(from: context) { _, at in
                 schedule.resolve(at: at)?.pricing ?? newRate
             }

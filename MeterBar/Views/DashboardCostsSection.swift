@@ -72,7 +72,7 @@ struct DashboardCostsSection: View {
 
             TokenActivityCard(
                 summary: summary,
-                weeks: windowSelection.activityWeeks,
+                windowSelection: windowSelection,
                 isScanning: costTracker.isScanning,
                 isScanDisabled: costTracker.isRefreshInProgress,
                 scan: { Task { await costTracker.scanCosts(days: 30) } }
