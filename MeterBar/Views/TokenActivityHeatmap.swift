@@ -2,34 +2,36 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-/// Dashboard card wrapping the trailing month's contribution calendar.
+/// Dashboard card wrapping the selected token-activity grid.
 ///
 /// Takes plain values rather than reaching for `CostTracker.shared` (same shape
 /// as ``CostOverviewStatusCard``) so the card hosts in a test without standing
-/// up the scanner. The calendar is derived once in `init` — `body` runs on every
-/// hover tick, and re-bucketing the daily rows there would be wasteful.
+/// up the scanner. The grid is derived once in `init` — `body` runs on every
+/// hover tick, and re-bucketing usage rows there would be wasteful.
 struct TokenActivityCard: View {
-    private let activity: TokenActivityCalendar
+    private let grid: TokenActivityGrid
     private let isScanning: Bool
     private let isScanDisabled: Bool
     private let scan: () -> Void
 
     init(
         summary: CostSummary?,
-        weeks: Int = TokenActivityCalendar.defaultWeeks,
+        windowSelection: CostWindowSelection = .month,
         isScanning: Bool,
         isScanDisabled: Bool,
         scan: @escaping () -> Void
     ) {
-        self.activity = TokenActivityCalendar(summary: summary, weeks: weeks)
+        self.grid = TokenActivityGrid(summary: summary, windowSelection: windowSelection)
         self.isScanning = isScanning
         self.isScanDisabled = isScanDisabled
         self.scan = scan
     }
 
     var body: some View {
-        DashboardCard(title: "Token Activity", trailing: activity.coverageSummary) {
-            if activity.hasHistory {
+        DashboardCard(title: "Token Activity", trailing: grid.coverageSummary) {
+            if let hourly = grid.hourly {
+                TokenActivityHourlyHeatmap(activity: hourly)
+            } else if let activity = grid.daily, activity.hasHistory {
                 TokenActivityHeatmap(activity: activity)
             } else if isScanning {
                 CostScanLoadingChart(compact: true)
@@ -57,6 +59,110 @@ struct TokenActivityCard: View {
             .buttonStyle(.glassProminent)
             .disabled(isScanDisabled)
         }
+    }
+}
+
+/// Seven local-day rows by 24 local-hour columns. The model is already fully
+/// derived, so pointer and keyboard focus updates only select a stable cell.
+struct TokenActivityHourlyHeatmap: View {
+    private let activity: TokenActivityHourlyCalendar
+
+    @State private var hoveredHour: TokenActivityHourKey?
+    @FocusState private var focusedHour: TokenActivityHourKey?
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
+    init(activity: TokenActivityHourlyCalendar) {
+        self.activity = activity
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TokenActivityMetrics.spacing) {
+                hourHeader
+                ForEach(activity.days) { day in
+                    dayRow(day)
+                }
+            }
+            .padding(TokenActivityMetrics.focusRingInset)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Hourly token activity calendar")
+
+            detail
+            TokenActivityLegend()
+        }
+        .animation(
+            MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.quick, reduceMotion: reduceMotion),
+            value: highlightedHour
+        )
+    }
+
+    private var hourHeader: some View {
+        HStack(spacing: TokenActivityMetrics.hourlySpacing) {
+            Color.clear
+                .frame(width: TokenActivityMetrics.weekLabelWidth, height: 1)
+
+            ForEach(0..<TokenActivityHourlyCalendar.hourCount, id: \.self) { hour in
+                Text(String(format: "%02d", hour))
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .font(.system(size: 8))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+
+    private func dayRow(_ day: TokenActivityHourDay) -> some View {
+        HStack(spacing: TokenActivityMetrics.hourlySpacing) {
+            Text(DashboardDateFormat.monthDay(day.date))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: TokenActivityMetrics.weekLabelWidth, alignment: .trailing)
+                .accessibilityHidden(true)
+
+            ForEach(day.hours) { hour in
+                cell(for: hour)
+            }
+        }
+    }
+
+    private func cell(for hour: TokenActivityHour) -> some View {
+        TokenActivitySwatch(
+            level: hour.level,
+            isHighlighted: highlightedHour == hour.id,
+            fillsWidth: true
+        )
+        .focusable()
+        .focused($focusedHour, equals: hour.id)
+        .onHover { isHovering in
+            if isHovering {
+                hoveredHour = hour.id
+            } else if hoveredHour == hour.id {
+                hoveredHour = nil
+            }
+        }
+        .help(hour.tooltip)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(hour.accessibilityLabel)
+        .accessibilityValue(hour.accessibilityValue)
+    }
+
+    private var detail: some View {
+        Text(highlightedCell?.detailLine ?? activity.overviewLine)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityHidden(true)
+    }
+
+    private var highlightedHour: TokenActivityHourKey? { hoveredHour ?? focusedHour }
+
+    private var highlightedCell: TokenActivityHour? {
+        highlightedHour.flatMap(activity.hour(for:))
     }
 }
 
@@ -265,6 +371,8 @@ private enum TokenActivityMetrics {
     /// Leading gutter naming the day each week row starts on.
     static let weekLabelWidth: CGFloat = 52
     static let spacing: CGFloat = 6
+    /// A tighter gap preserves useful hover targets across all 24 hour columns.
+    static let hourlySpacing: CGFloat = 3
     static let radius: CGFloat = 5
     static let focusRingInset: CGFloat = 2
     /// Placeholder height while a scan runs, matching the loaded grid: the

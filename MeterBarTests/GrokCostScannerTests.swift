@@ -296,6 +296,57 @@ final class GrokCostScannerTests: XCTestCase {
         XCTAssertEqual(row.estimatedCostUSD, 0.0003, accuracy: 1e-9)
     }
 
+    func testScanAccumulatesOnlyTrailingSevenDaysIntoHourlyBuckets() throws {
+        let root = try makeSessionsRoot()
+        let periodCutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+        let currentHour = try XCTUnwrap(Calendar.current.dateInterval(of: .hour, for: Date())?.start)
+        let hourlyCutoff = currentHour.addingTimeInterval(-7 * 24 * 60 * 60)
+        try writeUpdates(
+            in: root,
+            project: "www/meterbar",
+            session: "session-hourly",
+            lines: [
+                turnCompleted(
+                    at: hourlyCutoff.addingTimeInterval(-60),
+                    input: 90,
+                    cachedRead: 0,
+                    output: 9,
+                    reasoning: 0,
+                    ticks: 900_000
+                ),
+                turnCompleted(
+                    at: hourlyCutoff.addingTimeInterval(3_599),
+                    input: 100,
+                    cachedRead: 10,
+                    output: 10,
+                    reasoning: 0,
+                    ticks: 1_000_000
+                ),
+                turnCompleted(
+                    at: hourlyCutoff.addingTimeInterval(3_600),
+                    input: 200,
+                    cachedRead: 20,
+                    output: 20,
+                    reasoning: 0,
+                    ticks: 2_000_000
+                ),
+            ]
+        )
+        let session = CostScanSession(
+            cutoff: periodCutoff,
+            hourlyCutoff: hourlyCutoff,
+            options: .unlimited
+        )
+
+        let rows = try XCTUnwrap(GrokCostScanner.makeCost(
+            from: GrokCostScanner.scanRoots([root], session: session).period
+        )?.2)
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.map(\.provider), [.grok, .grok])
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.totalTokens }, 330)
+    }
+
     // MARK: - Attribution
 
     /// Grok names each session directory after the URL-encoded absolute project

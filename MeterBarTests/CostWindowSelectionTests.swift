@@ -25,10 +25,10 @@ final class CostWindowSelectionTests: XCTestCase {
         XCTAssertEqual(CostWindowSelection.month.spendCardTitle, "30 Day Spend")
     }
 
-    func testActivityWeeksCoverTheSelectedWindow() {
-        // Two 7-day columns are the narrowest grid that always spans the last
-        // 7 days; the month keeps the existing six-week calendar.
-        XCTAssertEqual(CostWindowSelection.week.activityWeeks, 2)
-        XCTAssertEqual(CostWindowSelection.month.activityWeeks, TokenActivityCalendar.defaultWeeks)
+    func testFallbackActivityWeeksCoverTheSelectedWindow() {
+        // Old summaries without hourly rows keep the existing two-week fallback;
+        // the month keeps the unchanged six-week calendar.
+        XCTAssertEqual(CostWindowSelection.week.fallbackActivityWeeks, 2)
+        XCTAssertEqual(CostWindowSelection.month.fallbackActivityWeeks, TokenActivityCalendar.defaultWeeks)
     }
 }

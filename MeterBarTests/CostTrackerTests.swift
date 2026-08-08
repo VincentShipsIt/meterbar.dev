@@ -301,7 +301,7 @@ final class CostTrackerTests: XCTestCase {
             7
         )
 
-        let (_, dailyRows) = try XCTUnwrap(
+        let (_, dailyRows, _) = try XCTUnwrap(
             ClaudeCostScanner.makeCost(from: result, windowStart: cutoff)
         )
         let daily = try XCTUnwrap(dailyRows.first)
@@ -631,7 +631,7 @@ final class CostTrackerTests: XCTestCase {
             1_000
         )
 
-        let (_, dailyRows) = try XCTUnwrap(CodexCostScanner.makeCost(from: context))
+        let (_, dailyRows, _) = try XCTUnwrap(CodexCostScanner.makeCost(from: context))
         let daily = try XCTUnwrap(dailyRows.first)
         XCTAssertEqual(daily.modelBreakdowns?.first?.name, "gpt-5.6-sol")
         XCTAssertEqual(daily.projectBreakdowns?.first?.name, "www/genfeed/apps/admin")

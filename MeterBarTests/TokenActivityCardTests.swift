@@ -69,6 +69,23 @@ final class TokenActivityCardTests: XCTestCase {
         XCTAssertEqual(activity.weeks.count, TokenActivityCalendar.defaultWeeks)
     }
 
+    func testSevenDayCardHostsTheHourlyHeatmap() {
+        let summary = makeSummaryWithHourlyUsage()
+        let card = TokenActivityCard(
+            summary: summary,
+            windowSelection: .week,
+            isScanning: false,
+            isScanDisabled: false,
+            scan: {}
+        )
+
+        let hostingView = NSHostingView(rootView: card)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 720, height: 400)
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
+    }
+
     // MARK: - Placement regression
 
     func testCostsSectionStillHostsWithTheNewCard() {
@@ -90,7 +107,7 @@ final class TokenActivityCardTests: XCTestCase {
             DashboardCostsSection.refreshStatusText(isScanning: true, isRefreshingMissingDays: true),
             "Scanning..."
         )
-        XCTAssertEqual(CostChartPresentation(summary: summary).hasSpend, true)
+        XCTAssertTrue(CostChartPresentation(summary: summary).hasSpend)
 
         let details = DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
             DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)
@@ -148,6 +165,31 @@ final class TokenActivityCardTests: XCTestCase {
             totalTokens: cost.totalTokens,
             periodDays: 30,
             dailyUsage: dailyUsage
+        )
+    }
+
+    private func makeSummaryWithHourlyUsage() -> CostSummary {
+        let summary = makeSummary(dayCount: 30)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let hour = calendar.date(byAdding: .hour, value: 10, to: today) ?? today
+
+        return CostSummary(
+            costs: summary.costs,
+            totalCostUSD: summary.totalCostUSD,
+            totalTokens: summary.totalTokens,
+            periodDays: summary.periodDays,
+            dailyUsage: summary.dailyUsage,
+            hourlyUsage: [
+                HourlyTokenUsage(
+                    date: hour,
+                    provider: .claudeCode,
+                    inputTokens: 10_000,
+                    outputTokens: 2_000,
+                    cacheReadTokens: 500,
+                    estimatedCostUSD: 0.75
+                ),
+            ]
         )
     }
 }

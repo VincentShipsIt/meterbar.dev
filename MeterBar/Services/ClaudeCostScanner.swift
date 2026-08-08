@@ -11,7 +11,7 @@ enum ClaudeCostScanner {
     nonisolated static func makeCost(
         from totals: ClaudeSessionTotals,
         windowStart: Date
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
         guard totals.hasUsage else { return nil }
 
         let pricing = ModelPricing.claude(for: nil)
@@ -58,6 +58,10 @@ enum ClaudeCostScanner {
             modelsByDay: totals.dailyModels,
             projectsByDay: totals.dailyProjects,
             projectModelsByDay: totals.dailyProjectModels
+        ), TokenUsageAggregator.makeHourlyUsage(
+            from: totals.hourly,
+            provider: .claudeCode,
+            pricing: pricing
         ))
     }
 
@@ -143,6 +147,7 @@ enum ClaudeCostScanner {
     nonisolated static func parseSessionWindows(
         at url: URL,
         since cutoffDate: Date,
+        hourlyCutoff: Date = .distantPast,
         projectID: String = CostProjectAttribution.unknownProjectID
     ) -> ScanWindows<ClaudeSessionTotals> {
         var periodKeyed: [String: ClaudeUsageEvent] = [:]
@@ -169,9 +174,20 @@ enum ClaudeCostScanner {
         truncation.log(url: url)
 
         return ScanWindows(
-            period: Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID),
-            lifetime: Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed, projectID: projectID),
-            cutoff: cutoffDate
+            period: Self.tally(
+                keyed: periodKeyed,
+                unkeyed: periodUnkeyed,
+                projectID: projectID,
+                hourlyCutoff: hourlyCutoff
+            ),
+            lifetime: Self.tally(
+                keyed: lifetimeKeyed,
+                unkeyed: lifetimeUnkeyed,
+                projectID: projectID,
+                hourlyCutoff: hourlyCutoff
+            ),
+            cutoff: cutoffDate,
+            hourlyCutoff: hourlyCutoff
         )
     }
 
@@ -331,13 +347,19 @@ enum ClaudeCostScanner {
         // Nothing appended since the last pass. This is the steady state once
         // the corpus is warm, and it is why a refresh costs almost no I/O.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
-            return Self.windows(record.payload, cutoff: session.cutoff)
+            return Self.windows(
+                record.payload,
+                cutoff: session.cutoff,
+                hourlyCutoff: session.hourlyCutoff
+            )
         }
 
         let allowance = session.budget.allowance
         guard allowance > 0 else {
             session.noteDeferred(.claude)
-            return record.map { Self.windows($0.payload, cutoff: session.cutoff) }
+            return record.map {
+                Self.windows($0.payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
+            }
         }
 
         var payload = record?.payload ?? ClaudeFileTotals()
@@ -383,8 +405,18 @@ enum ClaudeCostScanner {
         }
         session.budget.consume(read.bytesRead)
 
-        payload.period.merge(Self.tally(keyed: periodKeyed, unkeyed: periodUnkeyed, projectID: projectID))
-        payload.lifetime.merge(Self.tally(keyed: lifetimeKeyed, unkeyed: lifetimeUnkeyed, projectID: projectID))
+        payload.period.merge(Self.tally(
+            keyed: periodKeyed,
+            unkeyed: periodUnkeyed,
+            projectID: projectID,
+            hourlyCutoff: session.hourlyCutoff
+        ))
+        payload.lifetime.merge(Self.tally(
+            keyed: lifetimeKeyed,
+            unkeyed: lifetimeUnkeyed,
+            projectID: projectID,
+            hourlyCutoff: session.hourlyCutoff
+        ))
         // `merge` sums `sessions`, but one transcript is one session however
         // many slices it took to read.
         payload.period.sessions = payload.period.hasUsage ? 1 : 0
@@ -407,12 +439,13 @@ enum ClaudeCostScanner {
                 offset: read.committedOffset,
                 stamp: file.stamp,
                 cutoff: session.cutoff,
+                hourlyCutoff: session.hourlyCutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
             for: file.cacheKey
         )
-        return Self.windows(payload, cutoff: session.cutoff)
+        return Self.windows(payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
     }
 
     /// The cached entry to resume from, rebased onto this refresh's cutoff.
@@ -429,6 +462,12 @@ enum ClaudeCostScanner {
         } else {
             guard record.stamp.isSameFile(as: file.stamp),
                   file.size >= record.stamp.size else { return nil }
+        }
+        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
+        if record.hourlyCutoff < session.hourlyCutoff {
+            record.payload.period.hourly = record.payload.period.hourly.filter { $0.key >= session.hourlyCutoff }
+            record.payload.lifetime.hourly = record.payload.lifetime.hourly.filter { $0.key >= session.hourlyCutoff }
+            record.hourlyCutoff = session.hourlyCutoff
         }
         guard record.cutoff != session.cutoff else { return record }
 
@@ -455,15 +494,22 @@ enum ClaudeCostScanner {
 
     nonisolated private static func windows(
         _ payload: ClaudeFileTotals,
-        cutoff: Date
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
     ) -> ScanWindows<ClaudeSessionTotals> {
-        ScanWindows(period: payload.period, lifetime: payload.lifetime, cutoff: cutoff)
+        ScanWindows(
+            period: payload.period,
+            lifetime: payload.lifetime,
+            cutoff: cutoff,
+            hourlyCutoff: hourlyCutoff
+        )
     }
 
     nonisolated private static func tally(
         keyed: [String: ClaudeUsageEvent],
         unkeyed: [ClaudeUsageEvent],
-        projectID: String
+        projectID: String,
+        hourlyCutoff: Date = .distantPast
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
         let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
@@ -502,6 +548,9 @@ enum ClaudeCostScanner {
                 ),
                 at: CostScanEventKeys(
                     day: calendar.startOfDay(for: event.timestamp),
+                    hour: event.timestamp >= hourlyCutoff
+                        ? CostScanHourBucket.start(for: event.timestamp, calendar: calendar)
+                        : nil,
                     model: CostScanValues.displayModelName(event.model),
                     origin: event.origin,
                     project: projectID

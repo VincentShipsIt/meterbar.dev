@@ -5,6 +5,36 @@ import MeterBarShared
 /// daily-usage rows and breakdown rows the UI renders.
 /// Split out of `CostTracker` (audit C1d).
 enum TokenUsageAggregator {
+    nonisolated static func makeHourlyUsage(
+        from hourlyTotals: [Date: TokenAccumulator],
+        provider: ServiceType,
+        pricing: TokenPricing,
+        pricingAt: ((Date) -> TokenPricing)? = nil
+    ) -> [HourlyTokenUsage] {
+        hourlyTotals.map { hour, tokens in
+            let rowPricing = pricingAt?(hour) ?? pricing
+            let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
+            let output = tokens.output + tokens.reasoning
+            let cost = tokens.estimatedCostUSD > 0
+                ? tokens.estimatedCostUSD
+                : TokenCostMath.calculateCost(
+                    input: billableInput,
+                    output: output,
+                    cacheCreation: tokens.cacheCreation,
+                    cacheRead: tokens.cacheRead,
+                    pricing: rowPricing
+                )
+            return HourlyTokenUsage(
+                date: hour,
+                provider: provider,
+                inputTokens: billableInput,
+                outputTokens: output,
+                cacheReadTokens: tokens.cacheRead,
+                estimatedCostUSD: cost
+            )
+        }
+    }
+
     /// `pricingAt` resolves one row's rate from its model name (`nil` for the
     /// day's own flat total) and the day it was recorded, so a dated schedule
     /// prices history at the rate that was in effect then instead of today's
