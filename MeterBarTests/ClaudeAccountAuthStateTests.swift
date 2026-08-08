@@ -216,7 +216,82 @@ final class ClaudeAccountAuthStateTests: XCTestCase {
         XCTAssertNil(cursor.authNotice)
     }
 
+    // MARK: - Stale login collapse (dashboard/popover one-liner)
+
+    func testLoginRequiredCardCollapsesOnceItsCacheIsOlderThanTwoHours() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let threeHoursAgo = now.addingTimeInterval(-3 * 60 * 60)
+        let card = makeCard(notice: .loginRequired, updatedAt: threeHoursAgo)
+
+        XCTAssertTrue(ProviderCardPresentation.collapsesToLoginRow(snapshot: card, now: now))
+    }
+
+    func testLoginRequiredCardKeepsItsGaugesWhileTheCacheIsStillFresh() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let oneHourAgo = now.addingTimeInterval(-60 * 60)
+        let card = makeCard(notice: .loginRequired, updatedAt: oneHourAgo)
+
+        XCTAssertFalse(ProviderCardPresentation.collapsesToLoginRow(snapshot: card, now: now))
+    }
+
+    func testOnlyTheLoginNoticeCollapsesAnAgedCard() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let yesterday = now.addingTimeInterval(-24 * 60 * 60)
+
+        for notice: ProviderAuthNotice? in [nil, .stale(since: yesterday), .attention("boom"), .notConnected] {
+            let card = makeCard(notice: notice, updatedAt: yesterday)
+            XCTAssertFalse(
+                ProviderCardPresentation.collapsesToLoginRow(snapshot: card, now: now),
+                "\(String(describing: notice)) must not collapse to the login one-liner"
+            )
+        }
+    }
+
+    func testCardWithoutMetricsNeverCollapsesToTheLoginRow() {
+        // No cache at all is the offline row's territory, not the login row's.
+        let card = makeCard(notice: .loginRequired, updatedAt: nil)
+
+        XCTAssertFalse(ProviderCardPresentation.collapsesToLoginRow(snapshot: card, now: Date()))
+    }
+
+    func testCollapsedLoginCardOffersNoDetailNavigation() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let collapsed = makeCard(notice: .loginRequired, updatedAt: now.addingTimeInterval(-3 * 60 * 60))
+        let fresh = makeCard(notice: .loginRequired, updatedAt: now.addingTimeInterval(-60 * 60))
+
+        XCTAssertFalse(
+            ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: collapsed, now: now),
+            "A collapsed login row is terminal; its stale detail would mislead"
+        )
+        XCTAssertTrue(
+            ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: fresh, now: now),
+            "A fresh login-required card keeps its recent detail reachable"
+        )
+    }
+
     // MARK: - Helpers
+
+    private func makeCard(notice: ProviderAuthNotice?, updatedAt: Date?) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: "claude-work-collapse",
+            title: "Work",
+            service: .claudeCode,
+            updatedAt: updatedAt,
+            limits: [
+                SnapshotLimit(
+                    id: "session",
+                    kind: .session,
+                    title: "Session",
+                    usageLimit: UsageLimit(used: 12, total: 100, resetTime: nil)
+                ),
+            ],
+            emptyDetail: "Run claude login",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil,
+            authNotice: notice
+        )
+    }
 
     private func makeSnapshot(sessionUsedPercent: Double, notice: ProviderAuthNotice?) -> ProviderSnapshot {
         ProviderSnapshotBuilder.snapshot(

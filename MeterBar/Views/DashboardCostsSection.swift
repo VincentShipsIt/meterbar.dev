@@ -12,6 +12,16 @@ struct DashboardCostsSection: View {
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
 
+    /// The page-wide 7/30-day reporting window. Presentation-only: both windows
+    /// are cut from the same cached 30-day scan, so flipping never rescans —
+    /// the 7-day view just draws a quarter of the marks.
+    @AppStorage(StorageKeys.costsWindowDays)
+    private var costsWindowDays = CostWindowSelection.month.rawValue
+
+    private var windowSelection: CostWindowSelection {
+        CostWindowSelection(rawValue: costsWindowDays) ?? .month
+    }
+
     init(
         summary: CostSummary?,
         quotaSnapshot: @escaping (ServiceType) -> ProviderSnapshot?
@@ -34,6 +44,8 @@ struct DashboardCostsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            windowPicker
+
             // The two headline figures answer the same question over different
             // windows, so they read as a pair. `maxHeight: .infinity` on both,
             // with the row fixed to its intrinsic height, stretches the shorter
@@ -43,7 +55,8 @@ struct DashboardCostsSection: View {
                     summary: summary,
                     isScanning: costTracker.isScanning,
                     isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
-                    formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0)
+                    formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0),
+                    windowSelection: windowSelection
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -59,6 +72,7 @@ struct DashboardCostsSection: View {
 
             TokenActivityCard(
                 summary: summary,
+                weeks: windowSelection.activityWeeks,
                 isScanning: costTracker.isScanning,
                 isScanDisabled: costTracker.isRefreshInProgress,
                 scan: { Task { await costTracker.scanCosts(days: 30) } }
@@ -74,8 +88,12 @@ struct DashboardCostsSection: View {
             }
 
             if let summary, !summary.dailyUsage.isEmpty {
-                DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
-                    DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)
+                let windowStart = CostWindow.start(days: windowSelection.days)
+                let windowRows = summary.dailyUsage.filter { $0.date >= windowStart }
+                if !windowRows.isEmpty {
+                    DashboardCard(title: "Daily Details", trailing: windowSelection.subtitle) {
+                        DailyUsageBreakdownList(dailyUsage: windowRows)
+                    }
                 }
             }
 
@@ -111,9 +129,27 @@ struct DashboardCostsSection: View {
         }
     }
 
+    /// One page-wide window control, trailing-aligned above the cards it
+    /// governs. A segmented picker rather than per-card toggles so every cost
+    /// surface below always reports the same days.
+    private var windowPicker: some View {
+        HStack {
+            Spacer()
+            Picker("Reporting window", selection: $costsWindowDays) {
+                ForEach(CostWindowSelection.allCases) { window in
+                    Text(window.pickerLabel).tag(window.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel("Reporting window")
+        }
+    }
+
     private var costTrendCard: some View {
         DashboardCard(
-            title: "30 Day Spend",
+            title: windowSelection.spendCardTitle,
             trailing: Self.refreshStatusText(
                 isScanning: costTracker.isScanning,
                 isRefreshingMissingDays: costTracker.isRefreshingMissingDays
@@ -128,7 +164,10 @@ struct DashboardCostsSection: View {
                     .foregroundColor(.secondary)
 
                 if let summary {
-                    let presentation = CostChartPresentation(summary: summary)
+                    let presentation = CostChartPresentation(
+                        summary: summary,
+                        requestedDays: windowSelection.days
+                    )
                     ZStack {
                         if presentation.hasSpend {
                             CostSpendCharts(presentation: presentation)
@@ -137,7 +176,7 @@ struct DashboardCostsSection: View {
                             EmptyStateCard(
                                 systemImage: "chart.bar.xaxis",
                                 title: "No spend in this window",
-                                message: "No billable usage was found in the last 30 days."
+                                message: "No billable usage was found in the \(windowSelection.subtitle.lowercased())."
                             )
                         }
 

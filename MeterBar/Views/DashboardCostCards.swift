@@ -9,17 +9,17 @@ struct CostOverviewStatusCard: View {
   let isScanning: Bool
   let isRefreshingMissingDays: Bool
   let formattedTokens: String
+  /// The page's 7/30-day toggle. The month keeps the scan's own totals
+  /// (authoritative, cache-creation tokens included); the week is cut from the
+  /// cached daily rows — no rescan. Defaulted so existing hosts and tests keep
+  /// meaning "the full scan window".
+  var windowSelection: CostWindowSelection = .month
 
   @ScaledMetric(relativeTo: .title)
   private var scanningHeadlineSize: CGFloat = 28
 
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
-
-  /// The subtitle names the reporting window only. Refresh state used to
-  /// replace it, which read as if the window itself had changed; it now sits on
-  /// the trailing edge like the neighbouring "Lifetime Local Cost" date range.
-  static let subtitle = "Last 30 days"
 
   /// Shared with the "30 Day Spend" card so both trailing captions say the same
   /// thing at the same time — they are driven by the same two scan flags.
@@ -41,6 +41,23 @@ struct CostOverviewStatusCard: View {
     return .needsScan
   }
 
+  /// The figures the card renders for the selected window. The month view keeps
+  /// the scan's own totals; the week view aggregates the cached daily rows,
+  /// which carry input/output/cache-read tokens but not cache-creation tokens —
+  /// the same basis every daily chart on this page already reports.
+  private var figures: (cost: String, tokens: String, providers: Int) {
+    guard let summary else { return ("", formattedTokens, 0) }
+    guard windowSelection != .month else {
+      return (summary.formattedTotalCost, formattedTokens, summary.costs.count)
+    }
+    let window = summary.dailyCostWindow(lastDays: windowSelection.days)
+    return (
+      UsageFormat.cost(window.totalCostUSD),
+      UsageFormat.tokens(window.totalTokens),
+      window.providers.count
+    )
+  }
+
   /// Verification dates of the rate entries this scan actually priced with, not
   /// a global table revision (issue #339). Summaries cached before dated
   /// pricing carry none, so those fall back to the shipped table's own dates.
@@ -59,7 +76,7 @@ struct CostOverviewStatusCard: View {
             Text("API-Rate Estimate")
               .font(.headline)
               .fontWeight(.semibold)
-            Text(Self.subtitle)
+            Text(windowSelection.subtitle)
               .font(.caption)
               .foregroundColor(.secondary)
           }
@@ -84,20 +101,20 @@ struct CostOverviewStatusCard: View {
               .font(.caption)
               .foregroundColor(.secondary)
             Spacer()
-            Text(formattedTokens)
+            Text(figures.tokens)
               .font(.caption)
               .fontWeight(.semibold)
-              .numericRefreshTransition(value: formattedTokens, reduceMotion: reduceMotion)
+              .numericRefreshTransition(value: figures.tokens, reduceMotion: reduceMotion)
           }
           HStack {
             Text("Providers")
               .font(.caption)
               .foregroundColor(.secondary)
             Spacer()
-            Text("\(summary?.costs.count ?? 0)")
+            Text("\(figures.providers)")
               .font(.caption)
               .fontWeight(.semibold)
-              .numericRefreshTransition(value: summary?.costs.count ?? 0, reduceMotion: reduceMotion)
+              .numericRefreshTransition(value: figures.providers, reduceMotion: reduceMotion)
           }
           HStack {
             Text("Pricing")
@@ -119,7 +136,7 @@ struct CostOverviewStatusCard: View {
   @ViewBuilder private var heroValue: some View {
     switch phase {
     case .loaded:
-      CostHeadlineAmount(summary?.formattedTotalCost ?? "")
+      CostHeadlineAmount(figures.cost)
         .id(Phase.loaded)
         .transition(MeterBarTheme.Motion.cardPhase)
     case .scanning:

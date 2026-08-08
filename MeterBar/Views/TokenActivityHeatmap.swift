@@ -16,11 +16,12 @@ struct TokenActivityCard: View {
 
     init(
         summary: CostSummary?,
+        weeks: Int = TokenActivityCalendar.defaultWeeks,
         isScanning: Bool,
         isScanDisabled: Bool,
         scan: @escaping () -> Void
     ) {
-        self.activity = TokenActivityCalendar(summary: summary)
+        self.activity = TokenActivityCalendar(summary: summary, weeks: weeks)
         self.isScanning = isScanning
         self.isScanDisabled = isScanDisabled
         self.scan = scan

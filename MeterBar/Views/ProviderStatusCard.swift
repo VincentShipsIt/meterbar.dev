@@ -103,6 +103,8 @@ struct ProviderStatusCard: View {
     @ViewBuilder private var cardBody: some View {
         if !snapshot.hasMetrics {
             offlineRow
+        } else if ProviderCardPresentation.collapsesToLoginRow(snapshot: snapshot) {
+            staleLoginRow
         } else if snapshot.hasExhaustedWeeklyLimit {
             weeklyExhaustedRow
         } else {
@@ -125,6 +127,26 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// A logged-out card whose cache has aged past the collapse threshold —
+    /// see `ProviderCardPresentation.collapsesToLoginRow`. One line: the gauges
+    /// below described a session that ended hours ago, so the only thing worth
+    /// stating is the provider and the way back in.
+    private var staleLoginRow: some View {
+        HStack(spacing: 7) {
+            ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+            Text(snapshot.title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(ProviderAuthNotice.loginRequired.shortLabel)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(MeterBarTheme.warning)
+        }
+        .help("\(snapshot.updatedText) — log in to resume tracking")
     }
 
     /// A weekly block makes every shorter/model-specific gauge non-actionable.

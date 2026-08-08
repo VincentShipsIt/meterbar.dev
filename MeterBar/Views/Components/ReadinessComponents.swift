@@ -131,7 +131,7 @@ struct ReadinessBadge: View {
   }
 }
 
-/// Renders readiness reports as a plain-text block for the "Copy report" button.
+/// Renders readiness reports as a plain-text block for the Diagnostics Copy button.
 /// Mirrors the `meterbar doctor` layout so a pasted report reads the same whether
 /// it came from the CLI or the app. Every string is already redacted upstream.
 enum DiagnosticsReportText {

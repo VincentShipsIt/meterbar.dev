@@ -91,18 +91,35 @@ nonisolated struct CostChartPresentation: Sendable {
                 return $0.date < $1.date
             }
 
-        let modelResult = Self.makeModelPoints(from: summary.costs)
-        modelPoints = modelResult.points
-        hasUnattributedModelSpend = modelResult.hasUnattributed
+        let windowTotalUSD = windowRows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) }
+
+        // A window narrower than the scan re-derives model spend from the daily
+        // rows' own attribution, so "Spend by model" describes the same days as
+        // the daily chart above it. Rows from a v1 cache carry no attribution,
+        // so those fall back to the scan-period detail and the mismatch caption.
+        if let windowed = Self.makeModelPoints(
+            fromWindowRows: windowRows,
+            requestedDays: normalizedDays,
+            periodDays: summary.periodDays
+        ) {
+            modelPoints = windowed.points
+            hasUnattributedModelSpend = windowed.hasUnattributed
+            modelWindowDays = normalizedDays
+            selectedPeriodTotalUSD = windowTotalUSD
+        } else {
+            let modelResult = Self.makeModelPoints(from: summary.costs)
+            modelPoints = modelResult.points
+            hasUnattributedModelSpend = modelResult.hasUnattributed
+            modelWindowDays = max(0, summary.periodDays)
+            selectedPeriodTotalUSD = max(0, summary.totalCostUSD)
+        }
 
         self.requestedDays = normalizedDays
         coveredDays = costWindow.coveredDays
         self.startDate = startDate
         endDate = today
         chartDomainEndDate = calendar.date(byAdding: .day, value: 1, to: today) ?? today
-        modelWindowDays = max(0, summary.periodDays)
-        selectedPeriodTotalUSD = max(0, summary.totalCostUSD)
-        dailyTotalUSD = windowRows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) }
+        dailyTotalUSD = windowTotalUSD
         modelTotalUSD = modelPoints.reduce(0) { $0 + $1.costUSD }
     }
 
@@ -130,6 +147,42 @@ nonisolated struct CostChartPresentation: Sendable {
         modelWindowDays == requestedDays
     }
 
+    /// Model points for a window narrower than the scan, cut from the daily
+    /// rows' own model attribution. `nil` when the request *is* the scan window
+    /// (the scan's totals are authoritative there), when the window holds no
+    /// rows, or when any row predates attribution — the callers fall back to
+    /// the scan-period detail plus the mismatch caption in all three cases.
+    private static func makeModelPoints(
+        fromWindowRows windowRows: [DailyTokenUsage],
+        requestedDays: Int,
+        periodDays: Int
+    ) -> (points: [CostModelSpendPoint], hasUnattributed: Bool)? {
+        guard requestedDays < periodDays,
+              !windowRows.isEmpty,
+              windowRows.allSatisfy({ $0.modelBreakdowns != nil })
+        else { return nil }
+
+        var totals: [CostModelKey: Double] = [:]
+        var hasUnattributed = false
+
+        for row in windowRows {
+            let rowTotal = max(0, row.estimatedCostUSD)
+            let attributedTotal = (row.modelBreakdowns ?? []).reduce(0) { result, breakdown in
+                let amount = max(0, breakdown.estimatedCostUSD)
+                guard amount > 0 else { return result }
+                totals[CostModelKey(provider: row.provider, name: breakdown.name), default: 0] += amount
+                return result + amount
+            }
+            let unattributed = rowTotal - attributedTotal
+            if unattributed > Self.reconciliationToleranceUSD {
+                totals[CostModelKey(provider: row.provider, name: "Unattributed"), default: 0] += unattributed
+                hasUnattributed = true
+            }
+        }
+
+        return (labelledModelPoints(from: totals), hasUnattributed)
+    }
+
     private static func makeModelPoints(
         from costs: [TokenCost]
     ) -> (points: [CostModelSpendPoint], hasUnattributed: Bool) {
@@ -152,6 +205,15 @@ nonisolated struct CostChartPresentation: Sendable {
             }
         }
 
+        return (labelledModelPoints(from: totals), hasUnattributed)
+    }
+
+    /// Sorts the accumulated totals and disambiguates model names shared across
+    /// providers — one implementation for the scan-period and windowed makers so
+    /// the chart's ordering and labels cannot depend on the selected window.
+    private static func labelledModelPoints(
+        from totals: [CostModelKey: Double]
+    ) -> [CostModelSpendPoint] {
         let rawPoints = totals
             .compactMap { key, costUSD -> CostModelSpendPoint? in
                 guard costUSD > 0 else { return nil }
@@ -173,7 +235,7 @@ nonisolated struct CostChartPresentation: Sendable {
             }
 
         let duplicateNames = Dictionary(grouping: rawPoints, by: \.model)
-        let points = rawPoints.map { point in
+        return rawPoints.map { point in
             let label = duplicateNames[point.model, default: []].count > 1
                 ? "\(point.model) · \(point.provider.displayName)"
                 : point.model
@@ -184,7 +246,6 @@ nonisolated struct CostChartPresentation: Sendable {
                 costUSD: point.costUSD
             )
         }
-        return (points, hasUnattributed)
     }
 }
 
