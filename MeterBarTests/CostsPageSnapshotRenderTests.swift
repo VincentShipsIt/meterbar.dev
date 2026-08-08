@@ -14,6 +14,7 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
             throw XCTSkip("render only when SNAPSHOT_DIR is set")
         }
         let outputDir = URL(fileURLWithPath: dir, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         let summary = DemoData.costSummary()
 
         try render(width: 1000, name: "0-overview", into: outputDir) {

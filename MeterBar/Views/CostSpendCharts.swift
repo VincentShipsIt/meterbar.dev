@@ -196,8 +196,10 @@ struct CostSpendCharts: View {
             : Array(presentation.modelPoints.prefix(Self.compactModelLimit))
     }
 
+    /// Legend/scale providers come from the rows actually drawn, so the
+    /// compact top-3 view never lists a provider with no visible bar.
     private var modelProviders: [ServiceType] {
-        Set(presentation.modelPoints.map(\.provider))
+        Set(displayedModelPoints.map(\.provider))
             .sorted { $0.rawValue < $1.rawValue }
     }
 

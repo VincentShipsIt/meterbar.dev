@@ -262,6 +262,22 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertEqual(DashboardOverviewSection.masonryColumns([1, 2], columnCount: 0), [[1, 2]])
     }
 
+    // MARK: - Week-row date labels
+
+    /// The week-row gutter label is locale-templated ("MMMd"), so the exact
+    /// ordering varies by machine locale — but the day number must survive in
+    /// every arrangement ("10 Jul", "Jul 10", "7月10日").
+    func testMonthDayLabelCarriesTheDayNumberInAnyLocale() {
+        let date = Date(timeIntervalSince1970: 1_750_000_000)
+        let label = DashboardDateFormat.monthDay(date)
+
+        XCTAssertFalse(label.isEmpty)
+        XCTAssertTrue(
+            label.contains("\(Calendar.current.component(.day, from: date))"),
+            "label must include the day of month: \(label)"
+        )
+    }
+
     // MARK: - Overview "Use next" tile
 
     private func rankedRecommendation(
