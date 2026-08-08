@@ -267,7 +267,6 @@ struct UsageDashboardView: View {
             DashboardOverviewSection(
                 snapshots: providerSnapshots,
                 tightestLimit: tightestLimit,
-                enabledSourceCount: enabledQuotaSourceCount,
                 costSummary: visibleCostSummary,
                 onSelectProvider: { providerID in
                     navigation.navigate(to: .limits, focusedProviderID: providerID)
@@ -343,11 +342,27 @@ struct UsageDashboardView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                ForEach(orderedProviderSnapshotsForLimits) { snapshot in
-                    // The one provider card, shared with the popover, so the two
-                    // surfaces are physically the same component and cannot drift.
-                    ProviderStatusCard(snapshot: snapshot)
+                // Same two-column masonry as Overview: the shared provider card
+                // was designed at popover width, and stretching its gauges
+                // across the whole detail pane read as one washed-out column.
+                // The focused provider is first in the list, so it lands top-left.
+                HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
+                    let columns = DashboardOverviewSection.masonryColumns(
+                        orderedProviderSnapshotsForLimits,
+                        columnCount: 2
+                    )
+                    ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+                            ForEach(column) { snapshot in
+                                // The one provider card, shared with the popover, so
+                                // the two surfaces cannot drift.
+                                ProviderStatusCard(snapshot: snapshot)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -400,14 +415,6 @@ struct UsageDashboardView: View {
 
     private var visibleCostSummary: CostSummary? {
         costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
-    }
-
-    private var enabledQuotaSourceCount: Int {
-        EnabledQuotaSourceCounter.count(
-            enabledServices: providerVisibility.enabledServices,
-            codexAccountCount: codexAccountStore.enabledAccounts.count,
-            claudeAccountCount: claudeAccountStore.enabledAccounts.count
-        )
     }
 
     private var tightestLimit: SnapshotLimit? {

@@ -262,6 +262,60 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertEqual(DashboardOverviewSection.masonryColumns([1, 2], columnCount: 0), [[1, 2]])
     }
 
+    // MARK: - Overview "Use next" tile
+
+    private func rankedRecommendation(
+        sessionUsed: Double = 8,
+        weeklyUsed: Double = 8
+    ) -> ProviderRecommendation {
+        ProviderRecommendationPlanner.rank(
+            candidates: [
+                ProviderRecommendationCandidate(
+                    id: "codex",
+                    name: "Codex",
+                    service: .codexCli,
+                    displayOrder: 0,
+                    sessionLimit: UsageLimit(used: sessionUsed, total: 100, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: weeklyUsed, total: 100, resetTime: nil),
+                    lastUpdated: Date(timeIntervalSince1970: 1_750_000_000)
+                ),
+            ],
+            now: Date(timeIntervalSince1970: 1_750_000_100)
+        )
+    }
+
+    func testUseNextTileLeadsWithTheTopRankedProvider() throws {
+        let recommendation = rankedRecommendation()
+        let tile = DashboardOverviewSection.useNextTile(for: recommendation)
+        let top = try XCTUnwrap(recommendation.rows.first)
+
+        XCTAssertEqual(tile.value, top.name)
+        XCTAssertTrue(
+            tile.caption.contains(top.headroomText),
+            "the caption must carry the headroom that earned the rank: \(tile.caption)"
+        )
+        XCTAssertTrue(tile.caption.contains(top.windowTitle))
+        XCTAssertEqual(tile.band, top.band)
+    }
+
+    func testUseNextTileSaysSoWhenEveryWindowIsSpent() {
+        let recommendation = rankedRecommendation(sessionUsed: 100, weeklyUsed: 100)
+        let tile = DashboardOverviewSection.useNextTile(for: recommendation)
+
+        XCTAssertEqual(tile.value, "Every window spent")
+        XCTAssertEqual(tile.band, .exhausted)
+    }
+
+    func testUseNextTileFallsBackWhenNothingIsRankable() {
+        let tile = DashboardOverviewSection.useNextTile(
+            for: ProviderRecommendationPlanner.rank(candidates: [], now: Date())
+        )
+
+        XCTAssertEqual(tile.value, "No data")
+        XCTAssertEqual(tile.caption, "Waiting for provider refresh")
+        XCTAssertNil(tile.band)
+    }
+
     // MARK: - Optimize KPI tiles
 
     /// The four KPI tiles are one glanceable band of headline numbers, not a
@@ -298,6 +352,32 @@ final class DashboardSectionSplitTests: XCTestCase {
 
         XCTAssertEqual(busy.value, UsageFormat.tokens(1_200_000))
         XCTAssertEqual(busy.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
+    }
+
+    /// The window KPI tile follows the page's 7/30-day toggle: the week keeps
+    /// the empty-week wording above; the month reports the 30-day total.
+    func testWindowTileFollowsTheSelectedWindow() {
+        let week = OptimizeInsightsView.windowTile(
+            selection: .week,
+            tokens7Day: 1_200_000,
+            tokens30Day: 9_000_000
+        )
+        XCTAssertEqual(week.title, "Last 7 days")
+        XCTAssertEqual(week.value, UsageFormat.tokens(1_200_000))
+        XCTAssertEqual(week.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
+
+        let month = OptimizeInsightsView.windowTile(
+            selection: .month,
+            tokens7Day: 1_200_000,
+            tokens30Day: 9_000_000
+        )
+        XCTAssertEqual(month.title, "Last 30 days")
+        XCTAssertEqual(month.value, UsageFormat.tokens(9_000_000))
+        XCTAssertEqual(month.caption, "tokens in the last 30 days")
+
+        let emptyMonth = OptimizeInsightsView.windowTile(selection: .month, tokens7Day: 0, tokens30Day: 0)
+        XCTAssertEqual(emptyMonth.value, "None")
+        XCTAssertEqual(emptyMonth.caption, "no tokens recorded in the last 30 days")
     }
 
     // MARK: - Share card sources
@@ -354,7 +434,6 @@ final class DashboardSectionSplitTests: XCTestCase {
         let view = DashboardOverviewSection(
             snapshots: [snapshot()],
             tightestLimit: snapshot().limits.first,
-            enabledSourceCount: 2,
             costSummary: nil,
             onSelectProvider: { _ in }
         )

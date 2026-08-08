@@ -8,11 +8,33 @@ import SwiftUI
 struct DashboardOverviewSection: View {
     let snapshots: [ProviderSnapshot]
     let tightestLimit: SnapshotLimit?
-    let enabledSourceCount: Int
     let costSummary: CostSummary?
     let onSelectProvider: (ProviderSnapshot.ID) -> Void
 
     private static let masonryColumnCount = 2
+
+    /// Copy for the "Use next" tile — the Optimize ranking's top pick, boiled
+    /// down to one glance. Replaces the old "Tracked sources" tile, which was a
+    /// Settings fact that almost always read "all reporting".
+    ///
+    /// Internal (not private) so the three states can be asserted without
+    /// hosting the page, matching `OptimizeInsightsView.recentWindowTile`.
+    static func useNextTile(
+        for recommendation: ProviderRecommendation
+    ) -> (value: String, caption: String, band: QuotaBand?) {
+        if let top = recommendation.rows.first, !recommendation.isFullyExhausted {
+            var parts = ["\(top.headroomText) of \(top.windowTitle) left"]
+            if let resetText = top.resetText {
+                parts.append(resetText)
+            }
+            return (top.name, parts.joined(separator: " · "), top.band)
+        }
+        if recommendation.isFullyExhausted {
+            let caption = recommendation.rows.first?.availabilityText ?? "Waiting for the next reset"
+            return ("Every window spent", caption, .exhausted)
+        }
+        return ("No data", "Waiting for provider refresh", nil)
+    }
 
     /// Deals items round-robin across `columnCount` independent columns.
     ///
@@ -36,9 +58,8 @@ struct DashboardOverviewSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             OverviewSummaryStrip(
+                snapshots: snapshots,
                 tightestLimit: tightestLimit,
-                sourceCount: snapshots.count,
-                enabledSourceCount: enabledSourceCount,
                 estimatedCost: costSummary?.formattedTotalCost,
                 formattedTokens: UsageFormat.tokens(costSummary?.totalTokens ?? 0)
             )
@@ -66,9 +87,8 @@ struct DashboardOverviewSection: View {
 }
 
 private struct OverviewSummaryStrip: View {
+    let snapshots: [ProviderSnapshot]
     let tightestLimit: SnapshotLimit?
-    let sourceCount: Int
-    let enabledSourceCount: Int
     let estimatedCost: String?
     let formattedTokens: String
 
@@ -105,13 +125,26 @@ private struct OverviewSummaryStrip: View {
                 style: .compact
             )
 
-            DashboardMetricTile(
-                title: "Tracked sources",
-                value: "\(sourceCount)",
-                caption: sourceCaption,
-                systemImage: "checklist.checked",
-                style: .compact
-            )
+            // The Optimize ranking's top pick, on the same countdown clock as
+            // the tightest-window tile so its reset caption stays current.
+            TimelineView(
+                .periodic(
+                    from: ResetCountdownSchedule.anchor,
+                    by: ResetCountdownSchedule.interval
+                )
+            ) { timeline in
+                let tile = DashboardOverviewSection.useNextTile(
+                    for: snapshots.headroomRecommendation(now: timeline.date)
+                )
+                DashboardMetricTile(
+                    title: "Use next",
+                    value: tile.value,
+                    caption: tile.caption,
+                    systemImage: "arrow.forward.circle",
+                    indicatorTint: tile.band?.color ?? .secondary,
+                    style: .compact
+                )
+            }
         }
     }
 
@@ -130,16 +163,6 @@ private struct OverviewSummaryStrip: View {
     private var tightestCaption: String {
         guard let tightestLimit else { return "Waiting for provider refresh" }
         return "\(tightestLimit.title) quota"
-    }
-
-    private var sourceCaption: String {
-        if enabledSourceCount == 0 {
-            return "Enable providers in Settings"
-        }
-        if sourceCount == enabledSourceCount {
-            return "All enabled sources reporting"
-        }
-        return "\(sourceCount) of \(enabledSourceCount) enabled reporting"
     }
 
     private func tightestValue(now: Date) -> String {

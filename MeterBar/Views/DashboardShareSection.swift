@@ -89,53 +89,58 @@ struct DashboardShareSection: View {
                     isRefreshingMissingDays: costTracker.isRefreshingMissingDays
                 )
             ) {
-                SocialShareCardPreview(content: cardContent, size: previewSize)
-                    .accessibilityLabel("MeterBar 30-day token receipt preview")
-            }
+                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+                    SocialShareCardPreview(content: cardContent, size: previewSize)
+                        .accessibilityLabel("MeterBar 30-day token receipt preview")
 
-            HStack(spacing: 10) {
-                Button {
-                    copyCardImage()
-                } label: {
-                    Label("Copy PNG", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(.glassProminent)
-
-                Button {
-                    saveCardImage()
-                } label: {
-                    Label("Save PNG", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    copyCaption()
-                } label: {
-                    Label("Copy Caption", systemImage: "text.quote")
-                }
-                .buttonStyle(.bordered)
-
-                if costSummary?.dailyUsage.isEmpty ?? true {
-                    Button {
-                        Task {
-                            if await costTracker.scanCosts(days: 30).isAuthoritative {
-                                generatedAt = Date()
-                            }
+                    // The export actions live with the artifact they export —
+                    // as a bare row between two cards they were anchored to
+                    // neither.
+                    HStack(spacing: 10) {
+                        Button {
+                            copyCardImage()
+                        } label: {
+                            Label("Copy PNG", systemImage: "doc.on.doc")
                         }
-                    } label: {
-                        Label("Scan 30 Days", systemImage: "magnifyingglass")
+                        .buttonStyle(.glassProminent)
+
+                        Button {
+                            saveCardImage()
+                        } label: {
+                            Label("Save PNG", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            copyCaption()
+                        } label: {
+                            Label("Copy Caption", systemImage: "text.quote")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if costSummary?.dailyUsage.isEmpty ?? true {
+                            Button {
+                                Task {
+                                    if await costTracker.scanCosts(days: 30).isAuthoritative {
+                                        generatedAt = Date()
+                                    }
+                                }
+                            } label: {
+                                Label("Scan 30 Days", systemImage: "magnifyingglass")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(costTracker.isRefreshInProgress)
+                        }
+
+                        Spacer()
+
+                        if let shareStatus {
+                            Text(shareStatus)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .transition(.opacity)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(costTracker.isRefreshInProgress)
-                }
-
-                Spacer()
-
-                if let shareStatus {
-                    Text(shareStatus)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .transition(.opacity)
                 }
             }
 
