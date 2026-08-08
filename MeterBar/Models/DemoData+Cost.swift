@@ -9,12 +9,74 @@ import MeterBarShared
 /// scanning real CLI logs when demo mode is active.
 ///
 /// The summary is deliberately **non-alarming** — a ~$205 30-day estimate split
-/// across three providers — and carries **no origin or model breakdowns**, so
-/// it never surfaces the owner's real project paths or private model routing.
+/// across three providers. Model and origin breakdowns are **fully synthetic**,
+/// drawn from `syntheticBreakdownNames` only (public model ids and generic
+/// origin labels), so the model-spend and origin charts render in screenshots
+/// without ever surfacing the owner's real project paths or private routing.
 /// Daily rows are a smooth, deterministic weekly rhythm so the cost chart reads
 /// as populated and healthy in screenshots. Everything is a pure function of
 /// `now`.
 extension DemoData {
+    /// The only names demo breakdowns may carry — public model identifiers and
+    /// generic origin labels. Internal (not private) so the leak test can pin
+    /// every rendered breakdown row to this vocabulary.
+    static let syntheticBreakdownNames: Set<String> = [
+        "claude-fable-5", "claude-opus-5", "claude-haiku-4-5",
+        "gpt-5.6-sol", "gpt-5.6-luna",
+        "Main chat", "Agents", "Code review",
+    ]
+
+    /// One named slice of a provider's synthetic spend. Fractions per provider
+    /// sum to 1 so the breakdown reconciles exactly — a demo chart must never
+    /// show an "Unattributed" remainder.
+    private struct DemoSplit {
+        let name: String
+        let fraction: Double
+    }
+
+    private static let demoModelSplits: [ServiceType: [DemoSplit]] = [
+        .claudeCode: [
+            DemoSplit(name: "claude-fable-5", fraction: 0.52),
+            DemoSplit(name: "claude-opus-5", fraction: 0.31),
+            DemoSplit(name: "claude-haiku-4-5", fraction: 0.17),
+        ],
+        .codexCli: [
+            DemoSplit(name: "gpt-5.6-sol", fraction: 0.72),
+            DemoSplit(name: "gpt-5.6-luna", fraction: 0.28),
+        ],
+    ]
+
+    private static let demoOriginSplits: [ServiceType: [DemoSplit]] = [
+        .claudeCode: [
+            DemoSplit(name: "Main chat", fraction: 0.44),
+            DemoSplit(name: "Agents", fraction: 0.38),
+            DemoSplit(name: "Code review", fraction: 0.18),
+        ],
+        .codexCli: [
+            DemoSplit(name: "Main chat", fraction: 0.57),
+            DemoSplit(name: "Agents", fraction: 0.43),
+        ],
+    ]
+
+    /// Slices token/cost totals along `splits`. Token counts truncate — nothing
+    /// asserts on their sums — but the dollar fractions add back to the total.
+    private static func syntheticBreakdowns(
+        splits: [DemoSplit],
+        of totals: DemoProviderCost
+    ) -> [TokenUsageBreakdown] {
+        splits.map { split in
+            TokenUsageBreakdown(
+                provider: totals.provider,
+                name: split.name,
+                inputTokens: Int(Double(totals.inputTokens) * split.fraction),
+                outputTokens: Int(Double(totals.outputTokens) * split.fraction),
+                cacheCreationTokens: Int(Double(totals.cacheCreationTokens) * split.fraction),
+                cacheReadTokens: Int(Double(totals.cacheReadTokens) * split.fraction),
+                estimatedCostUSD: totals.costUSD * split.fraction,
+                sessionCount: max(1, Int(Double(totals.sessionCount) * split.fraction))
+            )
+        }
+    }
     /// Per-provider 30-day totals (USD) and token magnitudes for the demo cost
     /// summary. Sums to $204.90 ≈ "$205".
     private struct DemoProviderCost {
@@ -76,8 +138,14 @@ extension DemoData {
                 sessionCount: provider.sessionCount,
                 periodStart: periodStart,
                 periodEnd: periodEnd,
-                modelBreakdowns: [],
-                originBreakdowns: []
+                modelBreakdowns: syntheticBreakdowns(
+                    splits: demoModelSplits[provider.provider] ?? [],
+                    of: provider
+                ),
+                originBreakdowns: syntheticBreakdowns(
+                    splits: demoOriginSplits[provider.provider] ?? [],
+                    of: provider
+                )
             )
         }
 
@@ -116,13 +184,33 @@ extension DemoData {
                     ) else { return nil }
                     let weight = Double(weeklyWeights[index % weeklyWeights.count])
                     let fraction = weight / Double(weightTotal)
+                    let dayInput = Int(Double(provider.inputTokens) * fraction)
+                    let dayOutput = Int(Double(provider.outputTokens) * fraction)
+                    let dayCacheRead = Int(Double(provider.cacheReadTokens) * fraction)
+                    let dayCost = provider.costUSD * fraction
                     return DailyTokenUsage(
                         date: date,
                         provider: provider.provider,
-                        inputTokens: Int(Double(provider.inputTokens) * fraction),
-                        outputTokens: Int(Double(provider.outputTokens) * fraction),
-                        cacheReadTokens: Int(Double(provider.cacheReadTokens) * fraction),
-                        estimatedCostUSD: provider.costUSD * fraction
+                        inputTokens: dayInput,
+                        outputTokens: dayOutput,
+                        cacheReadTokens: dayCacheRead,
+                        estimatedCostUSD: dayCost,
+                        // Per-day model attribution, so the 7-day window's model
+                        // chart re-derives from these rows like it does for a
+                        // real v2 cache instead of falling back to the
+                        // scan-period detail and the mismatch caption.
+                        modelBreakdowns: syntheticBreakdowns(
+                            splits: demoModelSplits[provider.provider] ?? [],
+                            of: DemoProviderCost(
+                                provider: provider.provider,
+                                inputTokens: dayInput,
+                                outputTokens: dayOutput,
+                                cacheCreationTokens: 0,
+                                cacheReadTokens: dayCacheRead,
+                                costUSD: dayCost,
+                                sessionCount: 1
+                            )
+                        )
                     )
                 }
             }

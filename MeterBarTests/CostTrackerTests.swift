@@ -19,10 +19,15 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertNotNil(tracker.lastScanDate)
         XCTAssertFalse(tracker.isScanning)
 
-        // Never leaks real project paths or private model routing.
+        // Breakdowns are synthetic-only: every name comes from the fixture's
+        // fixed vocabulary, so no real project path or routing can leak.
         for cost in summary?.costs ?? [] {
-            XCTAssertTrue(cost.modelBreakdowns.isEmpty)
-            XCTAssertTrue(cost.originBreakdowns.isEmpty)
+            for breakdown in cost.modelBreakdowns + cost.originBreakdowns {
+                XCTAssertTrue(
+                    DemoData.syntheticBreakdownNames.contains(breakdown.name),
+                    "unexpected demo breakdown name: \(breakdown.name)"
+                )
+            }
         }
     }
 
