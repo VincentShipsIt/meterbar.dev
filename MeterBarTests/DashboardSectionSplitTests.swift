@@ -153,6 +153,22 @@ final class DashboardSectionSplitTests: XCTestCase {
         }
     }
 
+    /// The model list leads with the three biggest spenders; the rest live
+    /// behind an explicit control. No control at all when nothing is hidden.
+    func testModelSpendListCompactsPastTheTopThree() {
+        XCTAssertEqual(CostSpendCharts.compactModelLimit, 3)
+        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 3))
+        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 0))
+        XCTAssertEqual(
+            CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 12),
+            "Show all 12 models"
+        )
+        XCTAssertEqual(
+            CostSpendCharts.modelToggleTitle(showingAll: true, totalCount: 12),
+            "Show top 3"
+        )
+    }
+
     func testStatusPageSummaryReportsRefreshFirst() {
         XCTAssertEqual(
             DashboardStatusSection.summary(isRefreshing: true, issueCount: 3, reportCount: 0),

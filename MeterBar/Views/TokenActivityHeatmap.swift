@@ -60,11 +60,14 @@ struct TokenActivityCard: View {
     }
 }
 
-/// The grid itself: month headers, weekday gutter, cells, hover/focus detail,
-/// and the intensity legend.
+/// The grid itself: weekday header, one full-width row per week, hover/focus
+/// detail, and the intensity legend.
+///
+/// Weeks run as *rows* with the weekday columns stretched across the card —
+/// the transposed month grid was anchored to one edge and left half the card
+/// empty, and its 20pt cells were fiddly hover targets.
 struct TokenActivityHeatmap: View {
     private let activity: TokenActivityCalendar
-    private let monthTitles: [Int: String]
 
     @State private var hoveredDate: Date?
     @FocusState private var focusedDate: Date?
@@ -73,28 +76,21 @@ struct TokenActivityHeatmap: View {
 
     init(activity: TokenActivityCalendar) {
         self.activity = activity
-        self.monthTitles = Dictionary(
-            activity.monthLabels.map { ($0.weekIndex, $0.title) },
-            uniquingKeysWith: { first, _ in first }
-        )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
-            ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xs) {
-                    monthHeader
-                    HStack(alignment: .top, spacing: TokenActivityMetrics.spacing) {
-                        weekdayGutter
-                        grid
-                    }
+            VStack(alignment: .leading, spacing: TokenActivityMetrics.spacing) {
+                weekdayHeader
+                ForEach(activity.weeks) { week in
+                    weekRow(week)
                 }
-                // Focus rings sit just outside a cell; without the inset the
-                // leading and trailing columns clip theirs against the card.
-                .padding(TokenActivityMetrics.focusRingInset)
             }
-            .scrollIndicators(.hidden)
-            .defaultScrollAnchor(.trailing)
+            // Focus rings sit just outside a cell; without the inset the
+            // leading and trailing columns clip theirs against the card.
+            .padding(TokenActivityMetrics.focusRingInset)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Token activity calendar")
 
             detail
             TokenActivityLegend()
@@ -107,32 +103,52 @@ struct TokenActivityHeatmap: View {
 
     // MARK: - Grid
 
-    private var grid: some View {
-        HStack(alignment: .top, spacing: TokenActivityMetrics.spacing) {
-            ForEach(activity.weeks) { week in
-                VStack(spacing: TokenActivityMetrics.spacing) {
-                    ForEach(Array(week.days.enumerated()), id: \.offset) { _, day in
-                        if let day {
-                            cell(for: day)
-                        } else {
-                            // A future weekday in the current column: the slot
-                            // still holds the grid's shape, it just has no cell.
-                            Color.clear
-                                .frame(width: TokenActivityMetrics.cell, height: TokenActivityMetrics.cell)
-                        }
-                    }
+    private var weekdayHeader: some View {
+        HStack(spacing: TokenActivityMetrics.spacing) {
+            Color.clear
+                .frame(width: TokenActivityMetrics.weekLabelWidth, height: 1)
+
+            ForEach(Array(activity.weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                Text(symbol)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+
+    private func weekRow(_ week: TokenActivityWeek) -> some View {
+        HStack(spacing: TokenActivityMetrics.spacing) {
+            // Each row names the day it starts on; a single month header can't
+            // label rows that all begin mid-month.
+            Text(DashboardDateFormat.monthDay(week.startDate))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: TokenActivityMetrics.weekLabelWidth, alignment: .trailing)
+                .accessibilityHidden(true)
+
+            ForEach(Array(week.days.enumerated()), id: \.offset) { _, day in
+                if let day {
+                    cell(for: day)
+                } else {
+                    // A future weekday in the current row: the slot still holds
+                    // the grid's shape, it just has no cell.
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .frame(height: TokenActivityMetrics.rowHeight)
                 }
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Token activity calendar")
     }
 
     private func cell(for day: TokenActivityDay) -> some View {
         TokenActivitySwatch(
             level: day.level,
             isCovered: day.isCovered,
-            isHighlighted: highlightedDate == day.date
+            isHighlighted: highlightedDate == day.date,
+            fillsWidth: true
         )
         .focusable()
         .focused($focusedDate, equals: day.date)
@@ -147,46 +163,6 @@ struct TokenActivityHeatmap: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(day.accessibilityLabel)
         .accessibilityValue(day.accessibilityValue)
-    }
-
-    // MARK: - Headers
-
-    private var monthHeader: some View {
-        HStack(alignment: .bottom, spacing: TokenActivityMetrics.spacing) {
-            Color.clear
-                .frame(width: TokenActivityMetrics.gutterWidth, height: 1)
-
-            ForEach(activity.weeks) { week in
-                // `fixedSize` before the column-width frame lets the label keep
-                // its natural width and overhang the following columns. A month
-                // cell is now wide enough for an English abbreviation, but not
-                // for the longer ones other locales use.
-                Text(monthTitles[week.index] ?? "")
-                    .fixedSize()
-                    .frame(width: TokenActivityMetrics.cell, alignment: .leading)
-            }
-        }
-        .font(.system(size: 9))
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-    }
-
-    private var weekdayGutter: some View {
-        VStack(spacing: TokenActivityMetrics.spacing) {
-            ForEach(Array(activity.weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
-                // Every row is labelled: the month grid's cells are taller than a
-                // 9pt line, which the year-wide grid's were not.
-                Text(symbol)
-                    .frame(
-                        width: TokenActivityMetrics.gutterWidth,
-                        height: TokenActivityMetrics.cell,
-                        alignment: .leading
-                    )
-            }
-        }
-        .font(.system(size: 9))
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
     }
 
     // MARK: - Detail line
@@ -242,11 +218,13 @@ private struct TokenActivityLegend: View {
 // MARK: - Cell chrome
 
 /// One rounded tile, shared by the grid and the legend so a swatch can never
-/// drift from the cells it explains.
+/// drift from the cells it explains. Grid cells stretch to their column's
+/// width; legend swatches stay fixed squares.
 private struct TokenActivitySwatch: View {
     let level: Int
     var isCovered = true
     var isHighlighted = false
+    var fillsWidth = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: TokenActivityMetrics.radius, style: .continuous)
@@ -255,7 +233,11 @@ private struct TokenActivitySwatch: View {
                 RoundedRectangle(cornerRadius: TokenActivityMetrics.radius, style: .continuous)
                     .strokeBorder(borderColor, style: borderStyle)
             }
-            .frame(width: TokenActivityMetrics.cell, height: TokenActivityMetrics.cell)
+            .frame(
+                minWidth: fillsWidth ? nil : TokenActivityMetrics.cell,
+                maxWidth: fillsWidth ? .infinity : TokenActivityMetrics.cell
+            )
+            .frame(height: fillsWidth ? TokenActivityMetrics.rowHeight : TokenActivityMetrics.cell)
     }
 
     private var borderColor: Color {
@@ -273,20 +255,21 @@ private struct TokenActivitySwatch: View {
 
 // MARK: - Metrics and palette
 
-/// Grid geometry, kept in one place so the month header, weekday gutter, cells,
-/// and legend stay on the same rhythm.
-/// Sized for the trailing month. Six columns leave room a 53-column year never
-/// had, so the cells are large enough to hover accurately and to carry a legible
-/// weekday label on every row.
+/// Grid geometry, kept in one place so the weekday header, week rows, and
+/// legend stay on the same rhythm.
 private enum TokenActivityMetrics {
-    static let cell: CGFloat = 20
-    static let spacing: CGFloat = 4
-    static let radius: CGFloat = 4
-    static let gutterWidth: CGFloat = 28
+    /// Fixed square used by the legend swatches.
+    static let cell: CGFloat = 14
+    /// Height of a full-width week-row cell.
+    static let rowHeight: CGFloat = 26
+    /// Leading gutter naming the day each week row starts on.
+    static let weekLabelWidth: CGFloat = 52
+    static let spacing: CGFloat = 6
+    static let radius: CGFloat = 5
     static let focusRingInset: CGFloat = 2
-    /// Placeholder height while a scan runs, matching the loaded grid: seven
-    /// cell rows plus their gaps, the month header, and the focus-ring inset.
-    static let gridHeight: CGFloat = 186
+    /// Placeholder height while a scan runs, matching the loaded grid: the
+    /// weekday header plus six week rows and their gaps.
+    static let gridHeight: CGFloat = 204
 }
 
 /// Heatmap band colors.

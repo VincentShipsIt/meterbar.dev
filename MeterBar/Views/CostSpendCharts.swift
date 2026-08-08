@@ -5,6 +5,23 @@ import SwiftUI
 struct CostSpendCharts: View {
     let presentation: CostChartPresentation
 
+    /// The model list opens on the biggest spenders and hides the long tail —
+    /// a dozen sub-$200 rows were most of the card's height.
+    @State private var showsAllModels = false
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
+    /// Models shown before the reader asks for the rest.
+    static let compactModelLimit = 3
+
+    /// Title for the expand/collapse control, or `nil` when the list already
+    /// fits within the compact limit and a control would toggle nothing.
+    static func modelToggleTitle(showingAll: Bool, totalCount: Int) -> String? {
+        guard totalCount > compactModelLimit else { return nil }
+        return showingAll ? "Show top \(compactModelLimit)" : "Show all \(totalCount) models"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xl) {
             if presentation.hasDailyCoverage {
@@ -95,7 +112,7 @@ struct CostSpendCharts: View {
                 value: UsageFormat.cost(presentation.modelTotalUSD)
             )
 
-            Chart(presentation.modelPoints) { point in
+            Chart(displayedModelPoints) { point in
                 BarMark(
                     x: .value("Spend", point.costUSD),
                     y: .value("Model", point.chartLabel)
@@ -112,12 +129,31 @@ struct CostSpendCharts: View {
                 currencyXAxisMarks
             }
             .chartLegend(position: .top, alignment: .leading, spacing: MeterBarTheme.Spacing.sm)
-            .frame(height: max(180, CGFloat(presentation.modelPoints.count) * 30))
+            .frame(height: max(110, CGFloat(displayedModelPoints.count) * 30))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Spend by model")
             .accessibilityValue(
                 "\(presentation.modelPoints.count) models totaling \(UsageFormat.cost(presentation.modelTotalUSD))"
             )
+
+            if let toggleTitle = Self.modelToggleTitle(
+                showingAll: showsAllModels,
+                totalCount: presentation.modelPoints.count
+            ) {
+                Button {
+                    withAnimation(MeterBarTheme.Motion.resolve(
+                        MeterBarTheme.Motion.disclosure,
+                        reduceMotion: reduceMotion
+                    )) {
+                        showsAllModels.toggle()
+                    }
+                } label: {
+                    Label(toggleTitle, systemImage: showsAllModels ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
 
             if presentation.hasUnattributedModelSpend {
                 Text("Spend without model metadata is shown as Unattributed.")
@@ -149,6 +185,15 @@ struct CostSpendCharts: View {
     private var dailyProviders: [ServiceType] {
         Set(presentation.dailyProviderPoints.map(\.provider))
             .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    /// The rows the chart draws: the top spenders, or everything on request.
+    /// `modelPoints` is already sorted by descending spend, so a prefix *is*
+    /// the top of the list. The heading total always reports every model.
+    private var displayedModelPoints: [CostModelSpendPoint] {
+        showsAllModels
+            ? presentation.modelPoints
+            : Array(presentation.modelPoints.prefix(Self.compactModelLimit))
     }
 
     private var modelProviders: [ServiceType] {

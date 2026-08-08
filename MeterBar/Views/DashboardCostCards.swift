@@ -66,7 +66,11 @@ struct CostOverviewStatusCard: View {
   }
 
   var body: some View {
-    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight) {
+    // `maxHeight: .infinity` lets the card *surface* stretch to the paired
+    // Lifetime card's height — the section already offers the row height, but
+    // without this the tile kept its intrinsic size and the shorter card ended
+    // mid-air beside the taller one.
+    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight, maxHeight: .infinity) {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           Image(systemName: "dollarsign.circle.fill")
@@ -169,7 +173,9 @@ struct LifetimeCostSummaryCard: View {
   let isScanning: Bool
 
   var body: some View {
-    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight) {
+    // Same stretch as the estimate card — both surfaces must end on the same
+    // baseline whichever one is intrinsically taller.
+    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight, maxHeight: .infinity) {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           Image(systemName: "clock.arrow.circlepath")
@@ -393,6 +399,13 @@ struct CostScanProgressBadge: View {
 struct ProviderCostBreakdown: View {
   let cost: TokenCost
   var quotaSnapshot: ProviderSnapshot?
+  /// Windowed totals for this provider when the page's 7-day window is active.
+  /// `nil` renders the scan-period card exactly as before. Daily rows carry no
+  /// session counts or origin split, so the windowed card reports cache-read
+  /// tokens and the project rollup in their place.
+  var window: ProviderDailyTotal?
+  /// Caption naming the window the figures cover, shown only when windowed.
+  var windowSubtitle: String?
 
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
@@ -405,6 +418,14 @@ struct ProviderCostBreakdown: View {
     MeterBarTheme.accent(for: cost.provider)
   }
 
+  private var formattedCost: String {
+    window?.formattedCost ?? cost.formattedCost
+  }
+
+  private var modelBreakdowns: [TokenUsageBreakdown] {
+    window.map { $0.modelBreakdowns ?? [] } ?? cost.modelBreakdowns
+  }
+
   var body: some View {
     DashboardTile {
       VStack(alignment: .leading, spacing: 10) {
@@ -415,11 +436,14 @@ struct ProviderCostBreakdown: View {
             color: logoColor,
             font: .headline
           )
+          if let windowSubtitle {
+            DashboardCardCaption(text: windowSubtitle)
+          }
           Spacer()
-          Text(cost.formattedCost)
+          Text(formattedCost)
             .font(.title3)
             .bold()
-            .numericRefreshTransition(value: cost.formattedCost, reduceMotion: reduceMotion)
+            .numericRefreshTransition(value: formattedCost, reduceMotion: reduceMotion)
         }
 
         if let quotaSnapshot, quotaSnapshot.hasExhaustedLimit {
@@ -429,18 +453,31 @@ struct ProviderCostBreakdown: View {
           )
         }
 
-        HStack(spacing: 14) {
-          CostMetric(label: "Tokens", value: cost.formattedTokens)
-          CostMetric(label: "Input", value: UsageFormat.tokens(cost.inputTokens))
-          CostMetric(label: "Output", value: UsageFormat.tokens(cost.outputTokens))
-          CostMetric(label: "Sessions", value: "\(cost.sessionCount)")
+        if let window {
+          HStack(spacing: 14) {
+            CostMetric(label: "Tokens", value: UsageFormat.groupedTokens(window.totalTokens))
+            CostMetric(label: "Input", value: UsageFormat.tokens(window.inputTokens))
+            CostMetric(label: "Output", value: UsageFormat.tokens(window.outputTokens))
+            CostMetric(label: "Cache", value: UsageFormat.tokens(window.cacheReadTokens))
+          }
+        } else {
+          HStack(spacing: 14) {
+            CostMetric(label: "Tokens", value: cost.formattedTokens)
+            CostMetric(label: "Input", value: UsageFormat.tokens(cost.inputTokens))
+            CostMetric(label: "Output", value: UsageFormat.tokens(cost.outputTokens))
+            CostMetric(label: "Sessions", value: "\(cost.sessionCount)")
+          }
         }
 
-        if !cost.modelBreakdowns.isEmpty {
-          CostBreakdownSection(title: "Models", items: Array(cost.modelBreakdowns.prefix(6)))
+        if !modelBreakdowns.isEmpty {
+          CostBreakdownSection(title: "Models", items: Array(modelBreakdowns.prefix(6)))
         }
 
-        if !cost.originBreakdowns.isEmpty {
+        if let window {
+          if let projects = window.projectBreakdowns, !projects.isEmpty {
+            CostBreakdownSection(title: "Projects", items: Array(projects.prefix(6)))
+          }
+        } else if !cost.originBreakdowns.isEmpty {
           CostBreakdownSection(title: "Usage Origin", items: Array(cost.originBreakdowns.prefix(6)))
         }
       }

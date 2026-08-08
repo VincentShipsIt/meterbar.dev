@@ -82,7 +82,10 @@ struct DashboardCostsSection: View {
             // the chart's absence of Cursor raises. Hidden entirely when no
             // request-denominated provider has been polled — an empty card
             // would read as "measured nothing".
-            let polledUsage = PolledRequestSeriesPresentation(ledger: costTracker.usageLedger)
+            let polledUsage = PolledRequestSeriesPresentation(
+                ledger: costTracker.usageLedger,
+                requestedDays: windowSelection.days
+            )
             if !polledUsage.isEmpty {
                 PolledUsageCard(presentation: polledUsage)
             }
@@ -98,11 +101,23 @@ struct DashboardCostsSection: View {
             }
 
             if let summary, !summary.costs.isEmpty {
+                // In the 7-day window the per-provider cards re-cut to the same
+                // days as every chart above; a provider with no spend inside
+                // the window drops out instead of showing 30-day numbers under
+                // a 7-day heading.
+                let weekWindow = windowSelection == .week
+                    ? summary.dailyCostWindow(lastDays: windowSelection.days)
+                    : nil
                 ForEach(summary.costs) { cost in
-                    ProviderCostBreakdown(
-                        cost: cost,
-                        quotaSnapshot: quotaSnapshot(cost.provider)
-                    )
+                    let providerWindow = weekWindow?.providers.first { $0.provider == cost.provider }
+                    if weekWindow == nil || providerWindow != nil {
+                        ProviderCostBreakdown(
+                            cost: cost,
+                            quotaSnapshot: quotaSnapshot(cost.provider),
+                            window: providerWindow,
+                            windowSubtitle: providerWindow != nil ? windowSelection.subtitle : nil
+                        )
+                    }
                 }
             } else {
                 DashboardCard(title: "No Local Logs Found") {
