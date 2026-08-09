@@ -279,6 +279,11 @@ refresh or mutates state. It binds to loopback only unless you pass
 once at startup if you do not supply `--token`), and rate-limits to 5 requests
 per second by default.
 
+`--allow-remote` exposes a **plaintext HTTP** listener on your network. The
+bearer token and cached usage/cost data are not encrypted in transit, so use it
+only on a trusted private network or place MeterBar behind a TLS-terminating
+reverse proxy. Do not expose the listener directly to the public internet.
+
 ### Event Integrations
 
 Settings → General → Event Integrations can run a literal-argv local command or
@@ -323,7 +328,8 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 - No data is sent beyond providers' own usage endpoints by default. An explicitly
   enabled webhook sends only the documented quota event fields to the URL the
   user configured; credentials and config paths are never included.
-- `meterbar serve` is opt-in, read-only, loopback-bound by default, and token-gated
+- `meterbar serve` is opt-in, read-only, loopback-bound by default, and token-gated.
+  `--allow-remote` is plaintext HTTP; use a trusted private network or a TLS proxy.
 - The main app is **not** sandboxed — it must read other tools' credential/log files
   (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.
