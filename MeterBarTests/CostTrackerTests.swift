@@ -177,6 +177,61 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(result.output, 53)
     }
 
+    func testParseSessionFileDeduplicatesIdenticalUnkeyedEvents() throws {
+        let line = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z",
+            messageID: nil,
+            requestID: nil,
+            input: 120,
+            output: 30
+        )
+        let url = try writeSessionFile(lines: [line, line])
+
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 120)
+        XCTAssertEqual(result.output, 30)
+    }
+
+    func testParseSessionFileCountsUnkeyedEventsThatDifferOnlyInTokenCounts() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                messageID: nil,
+                requestID: nil,
+                input: 120,
+                output: 30
+            ),
+            eventLine(
+                timestamp: "2026-07-01T10:00:00.000Z",
+                messageID: nil,
+                requestID: nil,
+                input: 121,
+                output: 30
+            )
+        ])
+
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 241)
+        XCTAssertEqual(result.output, 60)
+    }
+
+    func testParseSessionFileKeepsExistingKeyedDeduplicationSemantics() throws {
+        let url = try writeSessionFile(lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 120, output: 30),
+            eventLine(timestamp: "2026-07-01T10:01:00.000Z", input: 7, output: 3)
+        ])
+
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let result = ClaudeCostScanner.parseSessionFile(at: url, since: cutoff)
+
+        XCTAssertEqual(result.input, 7)
+        XCTAssertEqual(result.output, 3)
+    }
+
     func testParseSessionFileHonorsPerEventCutoff() throws {
         // Events older than the cutoff are excluded even when the FILE was
         // modified recently. (The old CLI scanner only checked file mtime.)
@@ -1469,6 +1524,43 @@ final class CostTrackerTests: XCTestCase {
     }
 
     // MARK: - Budgeted, resumable corpus scan
+
+    func testBudgetedClaudeScanMatchesWholeFileForDuplicateUnkeyedEvents() throws {
+        let root = try makeTranscriptRoot()
+        let line = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z",
+            messageID: nil,
+            requestID: nil,
+            input: 120,
+            output: 30
+        )
+        let url = try writeTranscript(in: root, name: "session.jsonl", modifiedAgo: 0, lines: [line, line])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let firstLineBytes = (line + "\n").utf8.count
+        let firstSliceOptions = CostScanBudgetOptions(
+            maxBytesPerFile: firstLineBytes,
+            maxNewBytesPerRefresh: firstLineBytes,
+            wallClock: nil
+        )
+
+        let firstSlice = CostScanSession(cutoff: cutoff, options: firstSliceOptions, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: firstSlice)
+        XCTAssertEqual(firstSlice.persist(), .persisted)
+        XCTAssertFalse(firstSlice.isComplete)
+
+        let resumed = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let resumedWindows = ClaudeCostScanner.scanRoots([root], session: resumed)
+        let wholeFileWindows = ClaudeCostScanner.parseSessionWindows(at: url, since: cutoff)
+
+        XCTAssertTrue(resumed.isComplete)
+        XCTAssertEqual(resumedWindows.period.input, 120)
+        XCTAssertEqual(resumedWindows.period.output, 30)
+        XCTAssertEqual(resumedWindows.period.input, wholeFileWindows.period.input)
+        XCTAssertEqual(resumedWindows.period.output, wholeFileWindows.period.output)
+        XCTAssertEqual(resumedWindows.lifetime.input, wholeFileWindows.lifetime.input)
+        XCTAssertEqual(resumedWindows.lifetime.output, wholeFileWindows.lifetime.output)
+    }
 
     func testByteBudgetSmallerThanTheCorpusDefersTheRestWithoutLosingData() throws {
         let root = try makeTranscriptRoot()
