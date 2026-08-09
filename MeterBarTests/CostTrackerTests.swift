@@ -454,6 +454,29 @@ final class CostTrackerTests: XCTestCase {
         """
     }
 
+    private func codexUsageSelectionLine(
+        timestamp: String,
+        conversationID: String = "conv-1",
+        model: String? = "gpt-5.5",
+        lastInput: Int? = nil,
+        totalInput: Int? = nil
+    ) -> String {
+        var info: [String] = []
+        if let model {
+            info.append("\"model\": \"\(model)\"")
+        }
+        if let lastInput {
+            info.append("\"last_token_usage\": {\"input_tokens\": \(lastInput), \"output_tokens\": 0}")
+        }
+        if let totalInput {
+            info.append("\"total_token_usage\": {\"input_tokens\": \(totalInput), \"output_tokens\": 0}")
+        }
+        return """
+        {"timestamp": "\(timestamp)", "type": "event_msg", "payload": {"type": "token_count", \
+        "rate_limits": {"conversation_id": "\(conversationID)"}, "info": {\(info.joined(separator: ", "))}}}
+        """
+    }
+
     private func makeContext(cutoff: Date) -> CostScanWindowContext {
         CostScanWindowContext(earliestDate: Date(), latestDate: cutoff)
     }
@@ -474,6 +497,116 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(context.totals.reasoning, 50)
         XCTAssertEqual(context.totals.cacheRead, 200)
         XCTAssertEqual(context.sessionIDs, ["conv-1"])
+    }
+
+    func testScanCodexRolloutsKeepsLastTokenUsageAsPerEventDeltas() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:00:00Z", lastInput: 100),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:01:00Z", lastInput: 25)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 125)
+    }
+
+    func testScanCodexRolloutsDerivesDeltasFromCumulativeTotals() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:00:00Z", totalInput: 100),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:01:00Z", totalInput: 150),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:02:00Z", totalInput: 180)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 180)
+    }
+
+    func testScanCodexRolloutsKeepsCumulativeBaselineAcrossMixedUsageLines() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:00:00Z", lastInput: 100),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:01:00Z", totalInput: 140),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T10:02:00Z", lastInput: 10, totalInput: 150
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 150)
+    }
+
+    func testScanCodexRolloutsClampsCumulativeCounterDecreaseToZero() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:00:00Z", totalInput: 100),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:01:00Z", totalInput: 90),
+            codexUsageSelectionLine(timestamp: "2026-06-15T10:02:00Z", totalInput: 110)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 120)
+    }
+
+    func testScanCodexRolloutsKeepsCumulativeBaselinesPerSession() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T10:00:00Z", conversationID: "conv-a", totalInput: 100
+            ),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T10:01:00Z", conversationID: "conv-b", totalInput: 1_000
+            ),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T10:02:00Z", conversationID: "conv-a", totalInput: 150
+            ),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T10:03:00Z", conversationID: "conv-b", totalInput: 1_050
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.totals.input, 1_200)
+        XCTAssertEqual(context.sessionIDs, ["conv-a", "conv-b"])
+    }
+
+    func testWholeFileAndBudgetedCodexScansMatchForDeferredCumulativeUsage() throws {
+        let root = try makeCodexHome()
+        let directory = root.appendingPathComponent("sessions", isDirectory: true)
+        try writeCodexRollout(in: directory, path: "rollout.jsonl", lines: [
+            codexSessionMetaLine(timestamp: "2026-06-15T09:00:00Z"),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:00:30Z", model: nil, totalInput: 100
+            ),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:00:45Z", model: nil, totalInput: 150
+            ),
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:02:00Z", model: nil, totalInput: 180
+            )
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var wholeFile = CodexCostScanner.scanWindows(cutoff: cutoff)
+        CostScanFixtureScan.codexRollouts(in: directory, windows: &wholeFile)
+
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+        let budgeted = CodexCostScanner.scanRollouts(directories: [directory], session: session)
+
+        XCTAssertEqual(wholeFile.period.totals.input, 180)
+        XCTAssertEqual(budgeted.period.totals.input, wholeFile.period.totals.input)
+        XCTAssertEqual(budgeted.period.eventKeys, wholeFile.period.eventKeys)
+        XCTAssertEqual(budgeted.period.sessionIDs, wholeFile.period.sessionIDs)
     }
 
     func testScanCodexRolloutsDeduplicatesIdenticalEvents() throws {
@@ -934,6 +1067,79 @@ final class CostTrackerTests: XCTestCase {
 
         XCTAssertEqual(windows.period.totals.input, 125)
         XCTAssertEqual(session.codex.records.count, 1)
+    }
+
+    func testBudgetedCodexScanResumesCumulativeBaselineWithoutRecounting() throws {
+        let root = try makeCodexHome()
+        let directory = root.appendingPathComponent("sessions", isDirectory: true)
+        let lines = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:00:00Z", model: "gpt-5.6-sol"),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:01:00Z", model: nil, totalInput: 100
+            ),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:02:00Z", model: nil, totalInput: 150
+            )
+        ]
+        try writeCodexRollout(in: directory, path: "rollout.jsonl", lines: lines)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let firstSliceBytes = (lines.prefix(2).joined(separator: "\n") + "\n").utf8.count
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: firstSliceBytes,
+            wallClock: nil
+        )
+
+        let first = CostScanSession(cutoff: cutoff, options: budget, store: store)
+        let firstWindows = CodexCostScanner.scanRollouts(directories: [directory], session: first)
+        XCTAssertEqual(first.persist(), .persisted)
+
+        XCTAssertFalse(first.isComplete)
+        XCTAssertEqual(firstWindows.period.totals.input, 100)
+
+        let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let resumed = CodexCostScanner.scanRollouts(directories: [directory], session: second)
+
+        XCTAssertTrue(second.isComplete)
+        XCTAssertEqual(resumed.period.totals.input, 150)
+    }
+
+    func testBudgetedCodexScanRollsBackCumulativeBaselineWithDeferredUsage() throws {
+        let root = try makeCodexHome()
+        let directory = root.appendingPathComponent("sessions", isDirectory: true)
+        let lines = [
+            codexSessionMetaLine(timestamp: "2026-06-15T09:00:00Z"),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:00:30Z", model: nil, totalInput: 100
+            ),
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageSelectionLine(
+                timestamp: "2026-06-15T09:02:00Z", model: nil, totalInput: 150
+            )
+        ]
+        try writeCodexRollout(in: directory, path: "rollout.jsonl", lines: lines)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let firstSliceBytes = (lines.prefix(2).joined(separator: "\n") + "\n").utf8.count
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: firstSliceBytes,
+            wallClock: nil
+        )
+
+        let first = CostScanSession(cutoff: cutoff, options: budget, store: store)
+        let firstWindows = CodexCostScanner.scanRollouts(directories: [directory], session: first)
+        XCTAssertEqual(first.persist(), .persisted)
+
+        XCTAssertFalse(first.isComplete)
+        XCTAssertEqual(firstWindows.period.totals.input, 0)
+
+        let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let resumed = CodexCostScanner.scanRollouts(directories: [directory], session: second)
+
+        XCTAssertTrue(second.isComplete)
+        XCTAssertEqual(resumed.period.totals.input, 150)
     }
 
     /// Deduplication picks one copy per session; it must not also decide the
