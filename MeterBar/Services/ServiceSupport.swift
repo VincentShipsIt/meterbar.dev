@@ -68,12 +68,22 @@ nonisolated enum ServiceSupport {
         request.timeoutInterval = usageRequestTimeout
     }
 
-    static func makeUsageSession() -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 60
-        configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
+    /// Minimal, ephemeral, cookie-free transport for provider usage requests.
+    /// It keeps credentials in their provider-managed stores and prevents
+    /// responses from persisting cookies, cached data, or credential state.
+    static func makeUsageSession(
+        configuration: URLSessionConfiguration = .ephemeral
+    ) -> URLSession {
+        let safeConfiguration = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
+        safeConfiguration.urlCache = nil
+        safeConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        safeConfiguration.httpCookieStorage = nil
+        safeConfiguration.httpShouldSetCookies = false
+        safeConfiguration.urlCredentialStorage = nil
+        safeConfiguration.timeoutIntervalForRequest = 30
+        safeConfiguration.timeoutIntervalForResource = 60
+        safeConfiguration.waitsForConnectivity = true
+        return URLSession(configuration: safeConfiguration)
     }
 
     /// Validates an HTTP response, mapping 401 to `.notAuthenticated` and any
