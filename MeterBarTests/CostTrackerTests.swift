@@ -1574,6 +1574,183 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(record.payload.period.daily[day]?.output, 22)
     }
 
+    func testPersistDoesNotResaveUntouchedProvidersOnASubsequentPersist() throws {
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let stamp = CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42)
+        let store = try makeScanCacheStore()
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+        session.setCodexRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: CodexFileTotals(cutoff: cutoff)
+            ),
+            for: "/rollouts/b.jsonl"
+        )
+        session.setGrokRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: GrokFileTotals(cutoff: cutoff)
+            ),
+            for: "/sessions/c/updates.jsonl"
+        )
+        XCTAssertEqual(session.persist(), .persisted)
+
+        let codexURL = store.directory.appendingPathComponent(CostScanCacheStore.codexFileName)
+        let grokURL = store.directory.appendingPathComponent(CostScanCacheStore.grokFileName)
+        let codexArtifact = try cacheArtifactID(at: codexURL)
+        let grokArtifact = try cacheArtifactID(at: grokURL)
+
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 2, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+        XCTAssertEqual(session.persist(), .persisted)
+
+        XCTAssertEqual(try cacheArtifactID(at: codexURL), codexArtifact)
+        XCTAssertEqual(try cacheArtifactID(at: grokURL), grokArtifact)
+    }
+
+    func testPersistSavesAProviderTouchedSinceThePreviousPersist() throws {
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let stamp = CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42)
+        let store = try makeScanCacheStore()
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+        XCTAssertEqual(session.persist(), .persisted)
+
+        let url = store.directory.appendingPathComponent(CostScanCacheStore.claudeFileName)
+        let firstArtifact = try cacheArtifactID(at: url)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 2, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+
+        XCTAssertEqual(session.persist().outcome(for: .claude), .persisted)
+        XCTAssertNotEqual(try cacheArtifactID(at: url), firstArtifact)
+        XCTAssertEqual(store.loadClaude().records["/transcripts/a.jsonl"]?.offset, 2)
+    }
+
+    func testRetentionDirtiesOnlyAProviderWhoseEntriesWereRemoved() throws {
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let stamp = CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42)
+        let store = try makeScanCacheStore()
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+        session.setCodexRecord(
+            CostScanFileRecord(
+                offset: 1, stamp: stamp, cutoff: cutoff, isComplete: false, payload: CodexFileTotals(cutoff: cutoff)
+            ),
+            for: "/rollouts/b.jsonl"
+        )
+        XCTAssertEqual(session.persist(), .persisted)
+
+        let claudeURL = store.directory.appendingPathComponent(CostScanCacheStore.claudeFileName)
+        let codexURL = store.directory.appendingPathComponent(CostScanCacheStore.codexFileName)
+        let claudeArtifact = try cacheArtifactID(at: claudeURL)
+        let codexArtifact = try cacheArtifactID(at: codexURL)
+
+        session.retainClaude(keys: [])
+        session.retainCodex(keys: ["/rollouts/b.jsonl"])
+        XCTAssertEqual(session.persist(), .persisted)
+
+        XCTAssertNotEqual(try cacheArtifactID(at: claudeURL), claudeArtifact)
+        XCTAssertTrue(store.loadClaude().records.isEmpty)
+        XCTAssertEqual(try cacheArtifactID(at: codexURL), codexArtifact)
+    }
+
+    func testFailedProviderSaveRemainsDirtyAndRetriesOnTheNextPersist() throws {
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+        let stamp = CostScanFileStamp(size: 4_096, modified: 1_780_000_000, fileID: 42)
+        let store = try makeScanCacheStore()
+        let url = store.directory.appendingPathComponent(CostScanCacheStore.claudeFileName)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        session.setClaudeRecord(
+            CostScanFileRecord(
+                offset: 512, stamp: stamp, cutoff: cutoff, isComplete: false, payload: ClaudeFileTotals()
+            ),
+            for: "/transcripts/a.jsonl"
+        )
+
+        XCTAssertEqual(session.persist().outcome(for: .claude), .failed)
+        try FileManager.default.removeItem(at: url)
+
+        XCTAssertEqual(session.persist().outcome(for: .claude), .persisted)
+        XCTAssertEqual(store.loadClaude().records["/transcripts/a.jsonl"]?.offset, 512)
+    }
+
+    func testDirtySaveGatingLeavesEndToEndScanResultsByteForByteIdentical() throws {
+        let root = try makeTranscriptRoot()
+        let newest = try writeTranscript(in: root, name: "newest.jsonl", modifiedAgo: 0, lines: [
+            eventLine(timestamp: "2026-07-01T10:00:00.000Z", messageID: "a", requestID: "a", input: 100, output: 10)
+        ])
+        try writeTranscript(in: root, name: "older.jsonl", modifiedAgo: 3_600, lines: [
+            eventLine(timestamp: "2026-07-02T10:00:00.000Z", messageID: "b", requestID: "b", input: 7, output: 3)
+        ])
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let first = CostScanSession(
+            cutoff: cutoff,
+            options: CostScanBudgetOptions(
+                maxBytesPerFile: .max,
+                maxNewBytesPerRefresh: try fileSize(newest),
+                wallClock: nil
+            ),
+            store: store
+        )
+        _ = CostSummaryBuilder.makeScan(
+            days: 30,
+            enabledProviders: [.claude],
+            claudeAccounts: [],
+            grokAccounts: [],
+            session: first,
+            claudeProjectRoots: [root]
+        )
+        XCTAssertEqual(first.persist(), .persisted)
+
+        let resumed = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let incremental = CostSummaryBuilder.makeScan(
+            days: 30,
+            enabledProviders: [.claude],
+            claudeAccounts: [],
+            grokAccounts: [],
+            session: resumed,
+            claudeProjectRoots: [root]
+        )
+        XCTAssertEqual(resumed.persist(), .persisted)
+
+        let cold = CostSummaryBuilder.makeScan(
+            days: 30,
+            enabledProviders: [.claude],
+            claudeAccounts: [],
+            grokAccounts: [],
+            session: CostScanSession(cutoff: cutoff, options: .unlimited),
+            claudeProjectRoots: [root]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        XCTAssertEqual(try encoder.encode(incremental.summary), try encoder.encode(cold.summary))
+    }
+
     func testPersistReportsCacheWriteFailureAndASuccessfulRetryPersists() throws {
         let blockedDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CostScanBlocked-\(UUID().uuidString)")
@@ -1594,7 +1771,7 @@ final class CostTrackerTests: XCTestCase {
             for: "/transcripts/a.jsonl"
         )
 
-        XCTAssertEqual(session.persist(), CostScanPersistReport(claude: .failed, codex: .failed, grok: .failed))
+        XCTAssertEqual(session.persist(), CostScanPersistReport(claude: .failed, codex: .persisted, grok: .persisted))
         // Nothing reached disk, so the offsets this slice committed are not
         // resumable — the next slice would re-read the same bytes.
         XCTAssertTrue(store.loadClaude().records.isEmpty)
@@ -1751,6 +1928,11 @@ final class CostTrackerTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         return CostScanCacheStore(directory: directory)
+    }
+
+    private func cacheArtifactID(at url: URL) throws -> UInt64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap((attributes[.systemFileNumber] as? NSNumber)?.uint64Value)
     }
 
     @discardableResult

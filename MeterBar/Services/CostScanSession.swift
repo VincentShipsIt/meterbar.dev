@@ -22,6 +22,9 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     private var claudeCache: CostScanFileCache<ClaudeFileTotals>
     private var codexCache: CostScanFileCache<CodexFileTotals>
     private var grokCache: CostScanFileCache<GrokFileTotals>
+    private var isClaudeDirty = false
+    private var isCodexDirty = false
+    private var isGrokDirty = false
     private var deferred: Set<CostScanProvider> = []
 
     init(
@@ -97,6 +100,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     func setClaudeRecord(_ record: CostScanFileRecord<ClaudeFileTotals>, for key: String) {
         lock.lock()
         claudeCache.records[key] = record
+        isClaudeDirty = true
         lock.unlock()
     }
 
@@ -109,6 +113,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     func setCodexRecord(_ record: CostScanFileRecord<CodexFileTotals>, for key: String) {
         lock.lock()
         codexCache.records[key] = record
+        isCodexDirty = true
         lock.unlock()
     }
 
@@ -121,6 +126,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     func setGrokRecord(_ record: CostScanFileRecord<GrokFileTotals>, for key: String) {
         lock.lock()
         grokCache.records[key] = record
+        isGrokDirty = true
         lock.unlock()
     }
 
@@ -131,25 +137,31 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// every future summary even though the spend it describes is long gone.
     func retainClaude(keys: Set<String>) {
         lock.lock()
+        let previousCount = claudeCache.records.count
         claudeCache.records = claudeCache.records.filter { keys.contains($0.key) }
+        if claudeCache.records.count != previousCount { isClaudeDirty = true }
         lock.unlock()
     }
 
     func retainCodex(keys: Set<String>) {
         lock.lock()
+        let previousCount = codexCache.records.count
         codexCache.records = codexCache.records.filter { keys.contains($0.key) }
+        if codexCache.records.count != previousCount { isCodexDirty = true }
         lock.unlock()
     }
 
     func retainGrok(keys: Set<String>) {
         lock.lock()
+        let previousCount = grokCache.records.count
         grokCache.records = grokCache.records.filter { keys.contains($0.key) }
+        if grokCache.records.count != previousCount { isGrokDirty = true }
         lock.unlock()
     }
 
-    /// Writes every cache back, including after a cancelled slice — the whole
-    /// point of committing on line boundaries is that partial progress is safe
-    /// to keep.
+    /// Writes caches with pending changes, including after a cancelled slice —
+    /// the whole point of committing on line boundaries is that partial
+    /// progress is safe to keep.
     ///
     /// Deliberately not `@discardableResult`: a slice whose caches never reached
     /// disk made no *resumable* progress, and a caller that ignores that spends
@@ -163,10 +175,37 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         guard let store else { return .unavailable }
 
         return CostScanPersistReport(
-            claude: Self.write("Claude") { try store.saveClaude(claude) },
-            codex: Self.write("Codex") { try store.saveCodex(codex) },
-            grok: Self.write("Grok") { try store.saveGrok(grok) }
+            claude: persistClaude(to: store),
+            codex: persistCodex(to: store),
+            grok: persistGrok(to: store)
         )
+    }
+
+    private func persistClaude(to store: CostScanCacheStore) -> CostScanPersistOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isClaudeDirty else { return .persisted }
+        let outcome = Self.write("Claude") { try store.saveClaude(claudeCache) }
+        if outcome == .persisted { isClaudeDirty = false }
+        return outcome
+    }
+
+    private func persistCodex(to store: CostScanCacheStore) -> CostScanPersistOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isCodexDirty else { return .persisted }
+        let outcome = Self.write("Codex") { try store.saveCodex(codexCache) }
+        if outcome == .persisted { isCodexDirty = false }
+        return outcome
+    }
+
+    private func persistGrok(to store: CostScanCacheStore) -> CostScanPersistOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isGrokDirty else { return .persisted }
+        let outcome = Self.write("Grok") { try store.saveGrok(grokCache) }
+        if outcome == .persisted { isGrokDirty = false }
+        return outcome
     }
 
     private static func write(_ provider: String, _ save: () throws -> Void) -> CostScanPersistOutcome {
