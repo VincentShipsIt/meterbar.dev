@@ -196,6 +196,78 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertNil(metrics.sessionLimit)
     }
 
+    func testMapSummaryFallsBackToTeamUsageWithServerQuota() throws {
+        let json = """
+        {
+          "teamUsage": {
+            "plan": { "used": 340, "limit": 1200, "remaining": 860 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 340)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 1200)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryEstimatesTeamQuotaWhenDenominatorMissing() throws {
+        let json = """
+        {
+          "teamUsage": {
+            "plan": { "used": 85 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 85)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
+    }
+
+    func testMapSummaryPrefersIndividualUsageWhenBothShapesHavePlanCounters() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 40, "limit": 500 },
+            "onDemand": { "used": 3, "limit": 15, "enabled": true }
+          },
+          "teamUsage": {
+            "plan": { "used": 900, "limit": 2000 },
+            "onDemand": { "used": 70, "limit": 100, "enabled": true }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 40)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 500)
+        XCTAssertEqual(metrics.sessionLimit?.used, 3)
+        XCTAssertEqual(metrics.sessionLimit?.total, 15)
+    }
+
+    func testMapSummaryUsesTeamOnDemandWithTeamPlan() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "limit": 500 },
+            "onDemand": { "used": 2, "limit": 10, "enabled": true }
+          },
+          "teamUsage": {
+            "plan": { "used": 240, "limit": 1000 },
+            "onDemand": { "used": 18, "limit": 60, "enabled": true }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 240)
+        XCTAssertEqual(metrics.sessionLimit?.used, 18)
+        XCTAssertEqual(metrics.sessionLimit?.total, 60)
+        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
+    }
+
     // MARK: - Poll observations
 
     /// The single most important assertion about Cursor in this codebase.
@@ -263,6 +335,27 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertNil(
             CursorLocalService.observation(try decodeSummary(#"{ "individualUsage": {} }"#), at: Date())
         )
+    }
+
+    func testEmptySummaryStillYieldsNoObservationWithTeamFallback() throws {
+        XCTAssertNil(CursorLocalService.observation(try decodeSummary("{}"), at: Date()))
+    }
+
+    func testSummaryObservesTeamPlanRunningTotal() throws {
+        let json = """
+        {
+          "teamUsage": {
+            "plan": { "used": 612, "limit": 1500 }
+          }
+        }
+        """
+        let observedAt = Date(timeIntervalSince1970: 1_780_000_000)
+
+        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: observedAt))
+
+        XCTAssertEqual(observation.runningTotal, 612)
+        XCTAssertEqual(observation.unit, .requests)
+        XCTAssertEqual(observation.observedAt, observedAt)
     }
 
     /// A published zero is a real reading, though — the start of a billing cycle
