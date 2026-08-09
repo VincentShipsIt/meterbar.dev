@@ -29,6 +29,39 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
     var payload: Payload
 }
 
+/// Validates cached file identity and rebases its period payload when the
+/// visible cutoff moves.
+///
+/// The validation order is correctness-critical: offsets are bounded before
+/// any stamp comparison, complete files require an exact stamp, and incomplete
+/// files may resume only when the same inode has grown or stayed the same size.
+nonisolated enum CostScanResumption {
+    static func resumableRecord<Payload>(
+        existing: CostScanFileRecord<Payload>?,
+        file: CostScanFile,
+        cutoff: Date,
+        rebase: (inout Payload, Date) -> Bool
+    ) -> CostScanFileRecord<Payload>? {
+        guard var record = existing else { return nil }
+        guard record.offset <= UInt64(file.size) else { return nil }
+        if record.isComplete, record.stamp.size == file.size {
+            guard record.stamp.matches(file.stamp) else { return nil }
+        } else {
+            guard record.stamp.isSameFile(as: file.stamp),
+                  file.size >= record.stamp.size else { return nil }
+        }
+        guard record.cutoff != cutoff else { return record }
+        guard rebase(&record.payload, cutoff) else { return nil }
+        record.cutoff = cutoff
+        return record
+    }
+}
+
+/// Provider payload behavior injected into ``CostScanResumption``.
+nonisolated protocol CostScanPeriodRebasable: Codable, Sendable {
+    mutating func rebasePeriod(to cutoff: Date) -> Bool
+}
+
 /// Every transcript's record, keyed by standardized path.
 nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Sendable {
     /// Version 4 adds trailing-seven-day hourly accumulators. This private
@@ -328,3 +361,54 @@ nonisolated struct GrokFileTotals: Codable, Sendable {
         lifetime = CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast)
     }
 }
+
+nonisolated extension ClaudeFileTotals: CostScanPeriodRebasable {
+    mutating func rebasePeriod(to cutoff: Date) -> Bool {
+        // The period window slides every day; lifetime totals never expire. So
+        // the only question is whether the cached period tally can be rebased
+        // without re-reading the file.
+        if (lifetime.latest ?? .distantPast) < cutoff {
+            // Every event predates the new window.
+            period = ClaudeSessionTotals()
+            periodKeys = []
+        } else if (lifetime.earliest ?? .distantFuture) >= cutoff {
+            // Every event falls inside it.
+            period = lifetime
+            periodKeys = lifetimeKeys
+        } else {
+            // The file straddles the cutoff and only its individual events know
+            // where. Re-read it — but only files that actually straddle pay.
+            return false
+        }
+        return true
+    }
+}
+
+/// The identical period/lifetime shape shared by Codex and Grok payloads.
+nonisolated protocol CostScanWindowPeriodRebasable: CostScanPeriodRebasable {
+    var period: CostScanWindowContext { get set }
+    var lifetime: CostScanWindowContext { get }
+}
+
+nonisolated extension CostScanWindowPeriodRebasable {
+    mutating func rebasePeriod(to cutoff: Date) -> Bool {
+        if lifetime.eventKeys.isEmpty || lifetime.latestDate < cutoff {
+            // Every event predates the new window.
+            period = CostScanWindowContext(
+                earliestDate: Date(),
+                latestDate: cutoff
+            )
+        } else if lifetime.earliestDate >= cutoff {
+            // Every event falls inside it.
+            period = lifetime
+        } else {
+            // The file straddles the cutoff. Only its individual events or
+            // records know where, so only files that straddle pay to re-read.
+            return false
+        }
+        return true
+    }
+}
+
+nonisolated extension CodexFileTotals: CostScanWindowPeriodRebasable {}
+nonisolated extension GrokFileTotals: CostScanWindowPeriodRebasable {}

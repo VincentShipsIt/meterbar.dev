@@ -67,6 +67,24 @@ final class BrowserRequestHeadersTests: XCTestCase {
         )
     }
 
+    func testUsageSessionDoesNotPersistProviderState() {
+        let configuration = ServiceSupport.makeUsageSession().configuration
+
+        XCTAssertNil(configuration.urlCache)
+        XCTAssertEqual(configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertNil(configuration.httpCookieStorage)
+        XCTAssertFalse(configuration.httpShouldSetCookies)
+        XCTAssertNil(configuration.urlCredentialStorage)
+    }
+
+    func testUsageSessionPreservesTimeoutAndConnectivityBehavior() {
+        let configuration = ServiceSupport.makeUsageSession().configuration
+
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 30)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 60)
+        XCTAssertTrue(configuration.waitsForConnectivity)
+    }
+
     func testApplyBrowserHeadersWritesEveryFieldOntoTheRequestAndSetsTheTimeout() throws {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "https://chatgpt.com/backend-api/wham/usage")))
         ServiceSupport.applyBrowserHeaders(to: &request, for: .chatGPT, accept: "*/*")

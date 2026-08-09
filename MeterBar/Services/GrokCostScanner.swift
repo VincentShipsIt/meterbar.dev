@@ -131,7 +131,7 @@ enum GrokCostScanner {
             }
         }
 
-        session.retainGrok(keys: live)
+        session.retain(keys: live, provider: .grok)
         return windows
     }
 
@@ -254,7 +254,7 @@ enum GrokCostScanner {
         payload.period = windows.period
         payload.lifetime = windows.lifetime
 
-        session.setGrokRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: read.committedOffset,
                 stamp: file.stamp,
@@ -263,7 +263,8 @@ enum GrokCostScanner {
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .grok
         )
         return payload
     }
@@ -275,14 +276,12 @@ enum GrokCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<GrokFileTotals>? {
-        guard var record = session.grokRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
-        }
+        guard var record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .grok),
+            file: file,
+            cutoff: session.cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
         guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
         if record.hourlyCutoff < session.hourlyCutoff {
             record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
@@ -293,24 +292,6 @@ enum GrokCostScanner {
             }
             record.hourlyCutoff = session.hourlyCutoff
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        let lifetime = record.payload.lifetime
-        if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = CostScanWindowContext(
-                earliestDate: Date(),
-                latestDate: session.cutoff
-            )
-        } else if lifetime.earliestDate >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-        } else {
-            // The file straddles the cutoff and only its individual records know
-            // where. Only files that actually straddle pay for the window moving.
-            return nil
-        }
-        record.cutoff = session.cutoff
         return record
     }
 

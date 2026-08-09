@@ -2,6 +2,13 @@ import Foundation
 import MeterBarShared
 import os
 
+/// Type-safe route to one provider's cache inside a scan session.
+nonisolated struct CostScanCacheKey<Payload: Codable & Sendable> {
+    fileprivate let provider: CostScanProvider
+    fileprivate let cache: ReferenceWritableKeyPath<CostScanSession, CostScanFileCache<Payload>>
+    fileprivate let save: (CostScanCacheStore, CostScanFileCache<Payload>) throws -> Void
+}
+
 /// One refresh's worth of scanning: the budget it spends, the per-file caches it
 /// resumes from, and whether it managed to reach the end of the corpus.
 ///
@@ -21,9 +28,10 @@ nonisolated final class CostScanSession: @unchecked Sendable {
 
     private let store: CostScanCacheStore?
     private let lock = NSLock()
-    private var claudeCache: CostScanFileCache<ClaudeFileTotals>
-    private var codexCache: CostScanFileCache<CodexFileTotals>
-    private var grokCache: CostScanFileCache<GrokFileTotals>
+    fileprivate var claudeCache: CostScanFileCache<ClaudeFileTotals>
+    fileprivate var codexCache: CostScanFileCache<CodexFileTotals>
+    fileprivate var grokCache: CostScanFileCache<GrokFileTotals>
+    private var dirtyProviders: Set<CostScanProvider> = []
     private var deferred: Set<CostScanProvider> = []
 
     init(
@@ -43,21 +51,21 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     }
 
     var claude: CostScanFileCache<ClaudeFileTotals> {
-        lock.lock()
-        defer { lock.unlock() }
-        return claudeCache
+        cache(for: .claude)
     }
 
     var codex: CostScanFileCache<CodexFileTotals> {
-        lock.lock()
-        defer { lock.unlock() }
-        return codexCache
+        cache(for: .codex)
     }
 
     var grok: CostScanFileCache<GrokFileTotals> {
+        cache(for: .grok)
+    }
+
+    func cache<Payload>(for provider: CostScanCacheKey<Payload>) -> CostScanFileCache<Payload> {
         lock.lock()
         defer { lock.unlock() }
-        return grokCache
+        return self[keyPath: provider.cache]
     }
 
     var isCancelled: Bool { budget.isCancelled }
@@ -92,40 +100,39 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.unlock()
     }
 
-    func claudeRecord(for key: String) -> CostScanFileRecord<ClaudeFileTotals>? {
+    func record<Payload>(
+        for key: String,
+        provider: CostScanCacheKey<Payload>
+    ) -> CostScanFileRecord<Payload>? {
         lock.lock()
         defer { lock.unlock() }
-        return claudeCache.records[key]
+        return self[keyPath: provider.cache].records[key]
     }
 
-    func setClaudeRecord(_ record: CostScanFileRecord<ClaudeFileTotals>, for key: String) {
+    func setRecord<Payload>(
+        _ record: CostScanFileRecord<Payload>,
+        for key: String,
+        provider: CostScanCacheKey<Payload>
+    ) {
         lock.lock()
-        claudeCache.records[key] = record
+        self[keyPath: provider.cache].records[key] = record
+        dirtyProviders.insert(provider.provider)
         lock.unlock()
     }
 
-    func codexRecord(for key: String) -> CostScanFileRecord<CodexFileTotals>? {
-        lock.lock()
-        defer { lock.unlock() }
-        return codexCache.records[key]
+    // Scanners route through the generic pair above. These named seams stay for
+    // tests, which build a session's starting state directly and read better
+    // naming the provider than spelling out the payload type at every call.
+    func setClaudeRecord(_ record: CostScanFileRecord<ClaudeFileTotals>, for key: String) {
+        setRecord(record, for: key, provider: .claude)
     }
 
     func setCodexRecord(_ record: CostScanFileRecord<CodexFileTotals>, for key: String) {
-        lock.lock()
-        codexCache.records[key] = record
-        lock.unlock()
-    }
-
-    func grokRecord(for key: String) -> CostScanFileRecord<GrokFileTotals>? {
-        lock.lock()
-        defer { lock.unlock() }
-        return grokCache.records[key]
+        setRecord(record, for: key, provider: .codex)
     }
 
     func setGrokRecord(_ record: CostScanFileRecord<GrokFileTotals>, for key: String) {
-        lock.lock()
-        grokCache.records[key] = record
-        lock.unlock()
+        setRecord(record, for: key, provider: .grok)
     }
 
     /// Drops cache entries whose file no longer exists.
@@ -133,27 +140,29 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Without this the cache grows forever: Claude Code and Codex delete old
     /// transcripts, and a stale entry would keep contributing its totals to
     /// every future summary even though the spend it describes is long gone.
-    func retainClaude(keys: Set<String>) {
+    func retain<Payload>(keys: Set<String>, provider: CostScanCacheKey<Payload>) {
         lock.lock()
-        claudeCache.records = claudeCache.records.filter { keys.contains($0.key) }
+        let previousCount = self[keyPath: provider.cache].records.count
+        self[keyPath: provider.cache].records = self[keyPath: provider.cache].records.filter {
+            keys.contains($0.key)
+        }
+        if self[keyPath: provider.cache].records.count != previousCount {
+            dirtyProviders.insert(provider.provider)
+        }
         lock.unlock()
+    }
+
+    func retainClaude(keys: Set<String>) {
+        retain(keys: keys, provider: .claude)
     }
 
     func retainCodex(keys: Set<String>) {
-        lock.lock()
-        codexCache.records = codexCache.records.filter { keys.contains($0.key) }
-        lock.unlock()
+        retain(keys: keys, provider: .codex)
     }
 
-    func retainGrok(keys: Set<String>) {
-        lock.lock()
-        grokCache.records = grokCache.records.filter { keys.contains($0.key) }
-        lock.unlock()
-    }
-
-    /// Writes every cache back, including after a cancelled slice — the whole
-    /// point of committing on line boundaries is that partial progress is safe
-    /// to keep.
+    /// Writes caches with pending changes, including after a cancelled slice —
+    /// the whole point of committing on line boundaries is that partial
+    /// progress is safe to keep.
     ///
     /// Deliberately not `@discardableResult`: a slice whose caches never reached
     /// disk made no *resumable* progress, and a caller that ignores that spends
@@ -167,10 +176,24 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         guard let store else { return .unavailable }
 
         return CostScanPersistReport(
-            claude: Self.write("Claude") { try store.saveClaude(claude) },
-            codex: Self.write("Codex") { try store.saveCodex(codex) },
-            grok: Self.write("Grok") { try store.saveGrok(grok) }
+            claude: persist(provider: .claude, to: store),
+            codex: persist(provider: .codex, to: store),
+            grok: persist(provider: .grok, to: store)
         )
+    }
+
+    private func persist<Payload>(
+        provider: CostScanCacheKey<Payload>,
+        to store: CostScanCacheStore
+    ) -> CostScanPersistOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard dirtyProviders.contains(provider.provider) else { return .persisted }
+        let outcome = Self.write(provider.provider.logName) {
+            try provider.save(store, self[keyPath: provider.cache])
+        }
+        if outcome == .persisted { dirtyProviders.remove(provider.provider) }
+        return outcome
     }
 
     private static func write(_ provider: String, _ save: () throws -> Void) -> CostScanPersistOutcome {
@@ -186,6 +209,36 @@ nonisolated final class CostScanSession: @unchecked Sendable {
             )
             return .failed
         }
+    }
+}
+
+nonisolated extension CostScanCacheKey where Payload == ClaudeFileTotals {
+    static var claude: Self {
+        Self(
+            provider: .claude,
+            cache: \CostScanSession.claudeCache,
+            save: { store, cache in try store.saveClaude(cache) }
+        )
+    }
+}
+
+nonisolated extension CostScanCacheKey where Payload == CodexFileTotals {
+    static var codex: Self {
+        Self(
+            provider: .codex,
+            cache: \CostScanSession.codexCache,
+            save: { store, cache in try store.saveCodex(cache) }
+        )
+    }
+}
+
+nonisolated extension CostScanCacheKey where Payload == GrokFileTotals {
+    static var grok: Self {
+        Self(
+            provider: .grok,
+            cache: \CostScanSession.grokCache,
+            save: { store, cache in try store.saveGrok(cache) }
+        )
     }
 }
 

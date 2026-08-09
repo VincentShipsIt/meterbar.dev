@@ -362,6 +362,55 @@ nonisolated enum QuotaWebhookURLPolicy {
         return sawAddress
     }
 
+    /// Whether a transaction metric's remote-address literal belongs to an
+    /// address range the webhook policy forbids. Foundation may include IPv6
+    /// brackets, an interface zone, or a transport port, so normalize those
+    /// presentation details before asking `inet_pton` to parse the address.
+    /// Unknown formats fail open, matching delivery's deliberate behavior when
+    /// URLSession reports no remote address at all.
+    static func isUnsafeAddressLiteral(_ value: String) -> Bool {
+        var candidate = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return false }
+
+        if candidate.hasPrefix("["), let closingBracket = candidate.firstIndex(of: "]") {
+            candidate = String(candidate[candidate.index(after: candidate.startIndex)..<closingBracket])
+        }
+
+        if let zone = candidate.firstIndex(of: "%") {
+            candidate = String(candidate[..<zone])
+        }
+
+        if let result = unsafeAddressParseResult(candidate) {
+            return result
+        }
+
+        // An unbracketed IPv4 address may carry `:port`. Try the complete
+        // literal first above so a valid IPv6 address ending in digits is never
+        // mistaken for a host-plus-port pair.
+        if let colon = candidate.lastIndex(of: ":") {
+            let port = candidate[candidate.index(after: colon)...]
+            let host = String(candidate[..<colon])
+            if !port.isEmpty, port.allSatisfy(\.isNumber), let result = unsafeAddressParseResult(host) {
+                return result
+            }
+        }
+
+        return false
+    }
+
+    private static func unsafeAddressParseResult(_ value: String) -> Bool? {
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, value, &ipv4) == 1 {
+            return isUnsafeIPv4(UInt32(bigEndian: ipv4.s_addr))
+        }
+
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET6, value, &ipv6) == 1 {
+            return isUnsafeIPv6(&ipv6)
+        }
+        return nil
+    }
+
     private static func isUnsafeHost(_ host: String) -> Bool {
         if host == "localhost"
             || host.hasSuffix(".localhost")

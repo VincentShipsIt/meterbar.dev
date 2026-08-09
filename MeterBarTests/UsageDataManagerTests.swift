@@ -204,6 +204,8 @@ final class UsageDataManagerTests: XCTestCase {
         savedRefreshInterval: RefreshInterval? = nil,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = false,
+        refreshLockMode: UsageRefreshLockMode = .acquirePerRefresh,
+        refreshLockFactory: (@Sendable () -> WakeLock)? = nil,
         adaptiveNow: @escaping @Sendable () -> Date = { Date() },
         adaptivePowerState: @escaping @Sendable () -> AdaptiveRefreshPowerState = {
             .unconstrained
@@ -244,6 +246,8 @@ final class UsageDataManagerTests: XCTestCase {
             sharedStore.flushPendingWrites()
         }
 
+        let isolatedLockURL = tempDirectory
+            .appendingPathComponent("refresh-\(UUID().uuidString).lock")
         let manager = UsageDataManager(
             codexCliService: codex,
             cursorService: cursor,
@@ -258,6 +262,10 @@ final class UsageDataManagerTests: XCTestCase {
             cacheDefaults: cacheDefaults,
             parseHealthStore: parseHealthStore,
             schedulesAutoRefresh: schedulesAutoRefresh,
+            refreshLockMode: refreshLockMode,
+            refreshLockFactory: refreshLockFactory ?? {
+                WakeLock(lockURL: isolatedLockURL, legacyLockURLs: [], holderKind: .app)
+            },
             adaptiveNow: adaptiveNow,
             adaptivePowerState: adaptivePowerState,
             demoMode: demoMode
@@ -1057,6 +1065,112 @@ final class UsageDataManagerTests: XCTestCase {
         cursor.resumeFetch()
         _ = await firstRefresh.value
         XCTAssertFalse(manager.isLoading)
+    }
+
+    // MARK: - Cross-process refresh lock
+
+    func testRefreshAllAcquiresSharedLockBeforeFetchAndReleasesAfterSuccess() async {
+        let lockURL = tempDirectory.appendingPathComponent("refresh-success.lock")
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        cursor.suspendsFetch = true
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            refreshLockFactory: {
+                WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app)
+            }
+        )
+
+        let refresh = Task { await manager.refreshAll() }
+        for _ in 0..<100 where cursor.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard cursor.fetchCount == 1 else {
+            cursor.resumeFetch()
+            _ = await refresh.value
+            return XCTFail("refresh should reach the suspended provider fetch")
+        }
+
+        let contender = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
+        guard case .contended = contender.acquire() else {
+            cursor.resumeFetch()
+            _ = await refresh.value
+            return XCTFail("app refresh must hold the shared lock while fetching")
+        }
+
+        cursor.resumeFetch()
+        _ = await refresh.value
+        XCTAssertEqual(contender.acquire(), .acquired)
+        contender.release()
+    }
+
+    func testRefreshAllSkipsWithoutFetchingWhenSharedLockIsHeld() async {
+        let lockURL = tempDirectory.appendingPathComponent("refresh-contended.lock")
+        let holder = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
+        XCTAssertEqual(holder.acquire(), .acquired)
+        defer { holder.release() }
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            refreshLockFactory: {
+                WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app)
+            }
+        )
+
+        let report = await manager.refreshAll(trigger: .userInitiated)
+
+        XCTAssertEqual(cursor.fetchCount, 0)
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .skipped)
+        XCTAssertEqual(report.outcome(for: .cursor)?.reason, "Another MeterBar refresh is already running.")
+        XCTAssertFalse(manager.isLoading)
+    }
+
+    func testRefreshAllReleasesSharedLockAfterProviderFailure() async {
+        let lockURL = tempDirectory.appendingPathComponent("refresh-failure.lock")
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            refreshLockFactory: {
+                WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app)
+            }
+        )
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
+        let contender = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
+        XCTAssertEqual(contender.acquire(), .acquired)
+        contender.release()
+    }
+
+    func testCLIOwnedRefreshLockDoesNotGetReacquiredByManager() async {
+        let lockURL = tempDirectory.appendingPathComponent("refresh-cli-owned.lock")
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            refreshLockMode: .externallyOwned,
+            refreshLockFactory: {
+                WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app)
+            }
+        )
+        let engine = UsageRefreshEngine(
+            lock: WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli),
+            timeout: 1,
+            refresh: { await manager.refreshAll(trigger: .userInitiated) },
+            cacheSnapshot: { [:] }
+        )
+
+        let response = await engine.run()
+
+        XCTAssertEqual(response.outcome, .success)
+        XCTAssertEqual(cursor.fetchCount, 1)
     }
 
     // MARK: - Refresh generation

@@ -151,9 +151,7 @@ enum ClaudeCostScanner {
         projectID: String = CostProjectAttribution.unknownProjectID
     ) -> ScanWindows<ClaudeSessionTotals> {
         var periodKeyed: [String: ClaudeUsageEvent] = [:]
-        var periodUnkeyed: [ClaudeUsageEvent] = []
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
-        var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
         var truncation = CostScanTruncationTally()
 
@@ -163,26 +161,20 @@ enum ClaudeCostScanner {
             guard let event else { return }
 
             let inPeriod = event.timestamp >= cutoffDate
-            if let key = event.deduplicationKey {
-                lifetimeKeyed[key] = event
-                if inPeriod { periodKeyed[key] = event }
-            } else {
-                lifetimeUnkeyed.append(event)
-                if inPeriod { periodUnkeyed.append(event) }
-            }
+            let key = event.deduplicationKey(projectID: projectID)
+            lifetimeKeyed[key] = event
+            if inPeriod { periodKeyed[key] = event }
         }
         truncation.log(url: url)
 
         return ScanWindows(
             period: Self.tally(
                 keyed: periodKeyed,
-                unkeyed: periodUnkeyed,
                 projectID: projectID,
                 hourlyCutoff: hourlyCutoff
             ),
             lifetime: Self.tally(
                 keyed: lifetimeKeyed,
-                unkeyed: lifetimeUnkeyed,
                 projectID: projectID,
                 hourlyCutoff: hourlyCutoff
             ),
@@ -329,7 +321,7 @@ enum ClaudeCostScanner {
         // spent, so `live` is every transcript that exists — safe to prune
         // against on a partial refresh. Without it, deleted transcripts would
         // keep contributing their totals forever.
-        session.retainClaude(keys: live)
+        session.retain(keys: live, provider: .claude)
         return windows
     }
 
@@ -368,9 +360,7 @@ enum ClaudeCostScanner {
         request.maxBytes = allowance
 
         var periodKeyed: [String: ClaudeUsageEvent] = [:]
-        var periodUnkeyed: [ClaudeUsageEvent] = []
         var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
-        var lifetimeUnkeyed: [ClaudeUsageEvent] = []
 
         var truncation = CostScanTruncationTally()
 
@@ -379,20 +369,16 @@ enum ClaudeCostScanner {
             truncation.note(line, recovered: event != nil)
             guard let event else { return }
 
-            if let key = event.deduplicationKey {
-                // First-wins across a resume boundary: an event with this key is
-                // already folded into `payload`, and its bytes are behind the
-                // committed offset. Within a single pass the last copy still
-                // wins, exactly as a cold scan does.
-                if !payload.lifetimeKeys.contains(key) {
-                    lifetimeKeyed[key] = event
-                }
-                if event.timestamp >= session.cutoff, !payload.periodKeys.contains(key) {
-                    periodKeyed[key] = event
-                }
-            } else {
-                lifetimeUnkeyed.append(event)
-                if event.timestamp >= session.cutoff { periodUnkeyed.append(event) }
+            let key = event.deduplicationKey(projectID: projectID)
+            // First-wins across a resume boundary: an event with this key is
+            // already folded into `payload`, and its bytes are behind the
+            // committed offset. Within a single pass the last copy still
+            // wins, exactly as a cold scan does.
+            if !payload.lifetimeKeys.contains(key) {
+                lifetimeKeyed[key] = event
+            }
+            if event.timestamp >= session.cutoff, !payload.periodKeys.contains(key) {
+                periodKeyed[key] = event
             }
         }
 
@@ -407,13 +393,11 @@ enum ClaudeCostScanner {
 
         payload.period.merge(Self.tally(
             keyed: periodKeyed,
-            unkeyed: periodUnkeyed,
             projectID: projectID,
             hourlyCutoff: session.hourlyCutoff
         ))
         payload.lifetime.merge(Self.tally(
             keyed: lifetimeKeyed,
-            unkeyed: lifetimeUnkeyed,
             projectID: projectID,
             hourlyCutoff: session.hourlyCutoff
         ))
@@ -434,7 +418,7 @@ enum ClaudeCostScanner {
             session.noteDeferred(.claude)
         }
 
-        session.setClaudeRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: read.committedOffset,
                 stamp: file.stamp,
@@ -443,7 +427,8 @@ enum ClaudeCostScanner {
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .claude
         )
         return Self.windows(payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
     }
@@ -455,40 +440,18 @@ enum ClaudeCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<ClaudeFileTotals>? {
-        guard var record = session.claudeRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
-        }
+        guard var record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .claude),
+            file: file,
+            cutoff: session.cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
         guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
         if record.hourlyCutoff < session.hourlyCutoff {
             record.payload.period.hourly = record.payload.period.hourly.filter { $0.key >= session.hourlyCutoff }
             record.payload.lifetime.hourly = record.payload.lifetime.hourly.filter { $0.key >= session.hourlyCutoff }
             record.hourlyCutoff = session.hourlyCutoff
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        // The period window slides every day; lifetime totals never expire. So
-        // the only question is whether the cached period tally can be rebased
-        // without re-reading the file.
-        let lifetime = record.payload.lifetime
-        if (lifetime.latest ?? .distantPast) < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = ClaudeSessionTotals()
-            record.payload.periodKeys = []
-        } else if (lifetime.earliest ?? .distantFuture) >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-            record.payload.periodKeys = record.payload.lifetimeKeys
-        } else {
-            // The file straddles the cutoff and only its individual events know
-            // where. Re-read it — but only files that actually straddle pay.
-            return nil
-        }
-        record.cutoff = session.cutoff
         return record
     }
 
@@ -507,12 +470,11 @@ enum ClaudeCostScanner {
 
     nonisolated private static func tally(
         keyed: [String: ClaudeUsageEvent],
-        unkeyed: [ClaudeUsageEvent],
         projectID: String,
         hourlyCutoff: Date = .distantPast
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
-        let events = keyed.keys.sorted().compactMap { keyed[$0] } + unkeyed
+        let events = keyed.keys.sorted().compactMap { keyed[$0] }
         // Resolving the current calendar is not free, and it cannot change
         // mid-fold.
         let calendar = Calendar.current
@@ -636,8 +598,27 @@ nonisolated private struct ClaudeUsageEvent: Sendable {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
     }
 
-    var deduplicationKey: String? {
-        guard let messageID, let requestID else { return nil }
-        return "\(messageID):\(requestID)"
+    func deduplicationKey(projectID: String) -> String {
+        if let messageID, let requestID {
+            return "\(messageID):\(requestID)"
+        }
+
+        let modelKey = model.map { Self.keyComponent($0) } ?? "nil"
+        return [
+            "synthetic",
+            String(timestamp.timeIntervalSinceReferenceDate.bitPattern),
+            modelKey,
+            String(input),
+            String(output),
+            String(cacheCreation),
+            String(cacheCreationOneHour),
+            String(cacheRead),
+            Self.keyComponent(origin),
+            Self.keyComponent(projectID)
+        ].joined(separator: ":")
+    }
+
+    private static func keyComponent(_ value: String) -> String {
+        "\(value.utf8.count):\(value)"
     }
 }

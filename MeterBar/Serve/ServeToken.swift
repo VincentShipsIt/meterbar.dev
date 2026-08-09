@@ -2,6 +2,100 @@ import Darwin
 import Foundation
 import Security
 
+/// Where the bearer token protecting `meterbar serve` came from. Callers use
+/// this provenance to decide whether startup may reveal the token: only a
+/// freshly generated token has nowhere else for the operator to retrieve it.
+nonisolated public enum ServeTokenOrigin: Sendable, Equatable {
+    case explicitArgument
+    case file
+    case environment
+    case generated
+}
+
+/// A usable bearer token paired with the source that won the documented
+/// precedence chain.
+nonisolated public struct ResolvedServeToken: Sendable, Equatable {
+    public let token: String
+    public let origin: ServeTokenOrigin
+
+    public init(token: String, origin: ServeTokenOrigin) {
+        self.token = token
+        self.origin = origin
+    }
+}
+
+/// Operator-actionable failures from token-source resolution. Keeping these
+/// cases typed lets the CLI translate them into concise `ValidationError`
+/// messages without parsing filesystem error copy or exposing token values.
+nonisolated public enum ServeTokenResolutionError: Error, Sendable, Equatable {
+    case blankExplicitArgument
+    case unreadableTokenFile(path: String)
+    case blankTokenFile(path: String)
+    case blankEnvironment
+}
+
+/// Pure precedence and validation policy for the `meterbar serve` bearer
+/// token. Filesystem reads and token generation are injected so every branch
+/// is deterministic in tests and no test ever needs to place a secret on disk.
+nonisolated public enum ServeTokenSource {
+    public static let environmentVariable = "METERBAR_SERVE_TOKEN"
+
+    public static func resolve(
+        explicitToken: String?,
+        tokenFilePath: String?,
+        environment: [String: String],
+        readFile: (String) throws -> String,
+        generate: () -> String
+    ) throws -> ResolvedServeToken {
+        if let explicitToken {
+            guard ServeToken.isUsable(explicitToken) else {
+                throw ServeTokenResolutionError.blankExplicitArgument
+            }
+            return ResolvedServeToken(token: explicitToken, origin: .explicitArgument)
+        }
+
+        if let tokenFilePath {
+            let contents: String
+            do {
+                contents = try readFile(tokenFilePath)
+            } catch {
+                throw ServeTokenResolutionError.unreadableTokenFile(path: tokenFilePath)
+            }
+            let token = trimmingTrailingWhitespace(from: contents)
+            guard ServeToken.isUsable(token) else {
+                throw ServeTokenResolutionError.blankTokenFile(path: tokenFilePath)
+            }
+            return ResolvedServeToken(token: token, origin: .file)
+        }
+
+        if let environmentToken = environment[environmentVariable] {
+            guard ServeToken.isUsable(environmentToken) else {
+                throw ServeTokenResolutionError.blankEnvironment
+            }
+            return ResolvedServeToken(token: environmentToken, origin: .environment)
+        }
+
+        return ResolvedServeToken(token: generate(), origin: .generated)
+    }
+
+    /// Token files commonly end in a newline because they were written by a
+    /// shell or secret manager. Strip only the suffix: leading and internal
+    /// whitespace may deliberately be part of the bearer token and must remain
+    /// byte-for-byte intact.
+    private static func trimmingTrailingWhitespace(from value: String) -> String {
+        var end = value.endIndex
+        while end > value.startIndex {
+            let previous = value.index(before: end)
+            let character = value[previous]
+            guard character.unicodeScalars.allSatisfy(CharacterSet.whitespacesAndNewlines.contains) else {
+                break
+            }
+            end = previous
+        }
+        return String(value[..<end])
+    }
+}
+
 /// Bearer token generation and comparison for `meterbar serve`. Comparison
 /// runs in constant time so a network caller can't use response latency to
 /// guess the token one byte at a time (docs/cli-json-schema.md security notes).

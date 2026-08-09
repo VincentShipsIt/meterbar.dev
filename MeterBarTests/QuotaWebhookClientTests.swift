@@ -61,6 +61,37 @@ final class QuotaWebhookClientTests: XCTestCase {
         }
     }
 
+    func testUnsafeAddressLiteralClassification() {
+        let unsafeAddresses = [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "::1",
+            "fd00::1",
+            "fe80::1%en0",
+            "[::1]",
+            "127.0.0.1:443",
+            "[::1]:443",
+            "::ffff:127.0.0.1",
+        ]
+        let safeOrUnknownAddresses = [
+            "93.184.216.34",
+            "2606:2800:220:1:248:1893:25c8:1946",
+            "garbage",
+            "",
+        ]
+
+        for address in unsafeAddresses {
+            XCTAssertTrue(QuotaWebhookURLPolicy.isUnsafeAddressLiteral(address), address)
+        }
+        for address in safeOrUnknownAddresses {
+            XCTAssertFalse(QuotaWebhookURLPolicy.isUnsafeAddressLiteral(address), address)
+        }
+    }
+
     func testPostsOnlyTheVersionedMinimalJSONContractWithoutSecrets() async throws {
         let client = makeClient()
         let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
@@ -160,6 +191,36 @@ final class QuotaWebhookClientTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .failed("Webhook URL is not allowed."))
+    }
+
+    func testPrivateObservedRemoteAddressOverridesSuccessfulHTTPResponseAndIsConsumed() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let connectionDelegate = QuotaWebhookConnectionDelegate()
+        let client = QuotaWebhookClient(
+            configuration: configuration,
+            timeout: 0.1,
+            hostIsPublic: { _ in true },
+            connectionDelegate: connectionDelegate,
+            taskCreatedForTesting: { task in
+                connectionDelegate.recordRemoteAddress(
+                    "127.0.0.1",
+                    forTaskIdentifier: task.taskIdentifier
+                )
+            }
+        )
+        let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
+        StubURLProtocol.handler = { _ in
+            (
+                try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)),
+                Data()
+            )
+        }
+
+        let result = await client.post(payload: makePayload(), to: url)
+
+        XCTAssertEqual(result, .failed("Webhook connected to a non-public address."))
+        XCTAssertEqual(connectionDelegate.observedAddressCount, 0)
     }
 
     private func makeClient() -> QuotaWebhookClient {

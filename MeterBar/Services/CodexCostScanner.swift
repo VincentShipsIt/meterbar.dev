@@ -250,7 +250,7 @@ enum CodexCostScanner {
             Self.addTokenCountLine(
                 line,
                 fileURL: fileURL,
-                rollout: rollout,
+                rollout: &rollout,
                 deferred: &deferred,
                 events: &events
             )
@@ -336,7 +336,7 @@ enum CodexCostScanner {
             }
         }
 
-        session.retainCodex(keys: live)
+        session.retain(keys: live, provider: .codex)
         return windows
     }
 
@@ -375,6 +375,7 @@ enum CodexCostScanner {
         var rollout = payload.rollout
         var deferred: [CodexDeferredUsage] = []
         var deferredOffset: UInt64?
+        var deferredRollout: CodexRolloutContext?
         let calendar = Calendar.current
         var truncation = CostScanTruncationTally()
 
@@ -399,10 +400,11 @@ enum CodexCostScanner {
             }
             let parked = deferred.count
             let counted = windows.lifetime.eventKeys.count
+            let rolloutBeforeLine = rollout
             Self.addTokenCountLine(
                 line,
                 fileURL: file.url,
-                rollout: rollout,
+                rollout: &rollout,
                 deferred: &deferred,
                 windows: &windows,
                 calendar: calendar
@@ -413,6 +415,7 @@ enum CodexCostScanner {
             )
             if deferred.count > parked, deferredOffset == nil {
                 deferredOffset = offset
+                deferredRollout = rolloutBeforeLine
             }
         }
         truncation.log(url: file.url)
@@ -432,6 +435,7 @@ enum CodexCostScanner {
                 // is re-read too, and `eventKeys` discards it as the duplicate
                 // it is.
                 committed = deferredOffset
+                if let deferredRollout { rollout = deferredRollout }
             }
         }
 
@@ -439,7 +443,7 @@ enum CodexCostScanner {
         payload.lifetime = windows.lifetime
         payload.rollout = rollout
 
-        session.setCodexRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: committed,
                 stamp: file.stamp,
@@ -448,7 +452,8 @@ enum CodexCostScanner {
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .codex
         )
         return payload
     }
@@ -497,7 +502,7 @@ enum CodexCostScanner {
             Self.addTokenCountLine(
                 line,
                 fileURL: file.url,
-                rollout: rollout,
+                rollout: &rollout,
                 deferred: &deferred,
                 windows: &windows,
                 calendar: calendar
@@ -551,14 +556,12 @@ enum CodexCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<CodexFileTotals>? {
-        guard var record = session.codexRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
-        }
+        guard var record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .codex),
+            file: file,
+            cutoff: session.cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
         guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
         if record.hourlyCutoff < session.hourlyCutoff {
             record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
@@ -569,25 +572,6 @@ enum CodexCostScanner {
             }
             record.hourlyCutoff = session.hourlyCutoff
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        let lifetime = record.payload.lifetime
-        if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = CostScanWindowContext(
-                earliestDate: Date(),
-                latestDate: session.cutoff
-            )
-        } else if lifetime.earliestDate >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-        } else {
-            // The rollout straddles the cutoff and only its individual events
-            // know where. Only files that actually straddle pay for the window
-            // moving.
-            return nil
-        }
-        record.cutoff = session.cutoff
         return record
     }
 
@@ -654,7 +638,7 @@ enum CodexCostScanner {
     nonisolated private static func addTokenCountLine(
         _ line: Data,
         fileURL: URL,
-        rollout: CodexRolloutContext,
+        rollout: inout CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
         events: inout [CodexUsageEvent]
     ) {
@@ -663,13 +647,13 @@ enum CodexCostScanner {
               let timestamp = FlexibleISO8601.date(from: timestampText),
               let payload = json["payload"] as? [String: Any],
               payload["type"] as? String == "token_count",
-              let info = payload["info"] as? [String: Any],
-              let usage = (info["last_token_usage"] ?? info["total_token_usage"]) as? [String: Any] else {
+              let info = payload["info"] as? [String: Any] else {
             return
         }
 
         let sessionID = (((payload["rate_limits"] as? [String: Any])?["conversation_id"] as? String)
             ?? fileURL.deletingPathExtension().lastPathComponent)
+        guard let usage = Self.eventUsage(from: info, sessionID: sessionID, rollout: &rollout) else { return }
         // The event's own model wins when present (older rollouts stamped it
         // there); otherwise fall back to the surrounding rollout context.
         let modelName = Self.modelName(from: info, payload: payload)
@@ -708,7 +692,7 @@ enum CodexCostScanner {
     nonisolated private static func addTokenCountLine(
         _ line: Data,
         fileURL: URL,
-        rollout: CodexRolloutContext,
+        rollout: inout CodexRolloutContext,
         deferred: inout [CodexDeferredUsage],
         windows: inout ScanWindows<CostScanWindowContext>,
         calendar: Calendar
@@ -717,13 +701,40 @@ enum CodexCostScanner {
         Self.addTokenCountLine(
             line,
             fileURL: fileURL,
-            rollout: rollout,
+            rollout: &rollout,
             deferred: &deferred,
             events: &events
         )
         for event in events {
             Self.apply(event, windows: &windows, calendar: calendar)
         }
+    }
+
+    /// Codex normally provides a per-turn delta and a cumulative session total.
+    /// Older or interrupted rollouts sometimes omit the delta; only those lines
+    /// are differenced, while any cumulative value still advances the baseline
+    /// the next fallback needs. This runs before model deferral so parked events
+    /// keep their original order and already carry a true per-event delta.
+    nonisolated private static func eventUsage(
+        from info: [String: Any],
+        sessionID: String,
+        rollout: inout CodexRolloutContext
+    ) -> [String: Any]? {
+        let last = info["last_token_usage"] as? [String: Any]
+        let total = info["total_token_usage"] as? [String: Any]
+
+        if let last {
+            let baseline = rollout.cumulativeUsageBySession[sessionID] ?? CodexTokenCounters()
+            rollout.cumulativeUsageBySession[sessionID] = total.map(CodexTokenCounters.init)
+                ?? baseline.adding(CodexTokenCounters(last))
+            return last
+        }
+
+        guard let total else { return nil }
+        let counters = CodexTokenCounters(total)
+        let previous = rollout.cumulativeUsageBySession[sessionID] ?? CodexTokenCounters()
+        rollout.cumulativeUsageBySession[sessionID] = counters
+        return counters.delta(since: previous)
     }
 
     nonisolated private static func eventPayload(
@@ -975,13 +986,65 @@ nonisolated struct CodexRolloutContext: Sendable, Codable {
     /// (issue #270) — the non-prompt-content field project attribution is
     /// derived from. `nil` until (or unless) a `session_meta` event supplies it.
     var cwd: String?
+    /// Session counters observed before the current byte offset. Kept per
+    /// conversation because one rollout can interleave telemetry streams, and
+    /// persisted because resuming with an empty baseline would bill the full
+    /// session total again as if it were newly appended usage.
+    var cumulativeUsageBySession: [String: CodexTokenCounters] = [:]
+}
+
+/// The four cumulative counters Codex reports in `total_token_usage`.
+nonisolated struct CodexTokenCounters: Sendable, Codable {
+    var input = 0
+    var cached = 0
+    var output = 0
+    var reasoning = 0
+
+    init() {}
+
+    init(_ usage: [String: Any]) {
+        input = max(0, CostScanValues.int(usage["input_tokens"]))
+        cached = max(0, CostScanValues.int(usage["cached_input_tokens"]))
+        output = max(0, CostScanValues.int(usage["output_tokens"]))
+        reasoning = max(0, CostScanValues.int(usage["reasoning_output_tokens"]))
+    }
+
+    func delta(since previous: CodexTokenCounters) -> [String: Any] {
+        [
+            "input_tokens": Self.nonnegativeDifference(input, previous.input),
+            "cached_input_tokens": Self.nonnegativeDifference(cached, previous.cached),
+            "output_tokens": Self.nonnegativeDifference(output, previous.output),
+            "reasoning_output_tokens": Self.nonnegativeDifference(reasoning, previous.reasoning)
+        ]
+    }
+
+    func adding(_ other: CodexTokenCounters) -> CodexTokenCounters {
+        CodexTokenCounters(
+            input: input + other.input,
+            cached: cached + other.cached,
+            output: output + other.output,
+            reasoning: reasoning + other.reasoning
+        )
+    }
+
+    private init(input: Int, cached: Int, output: Int, reasoning: Int) {
+        self.input = input
+        self.cached = cached
+        self.output = output
+        self.reasoning = reasoning
+    }
+
+    private static func nonnegativeDifference(_ current: Int, _ previous: Int) -> Int {
+        current >= previous ? current - previous : 0
+    }
 }
 
 /// A `token_count` event parked because its rollout has not named a model yet.
 ///
-/// Deliberately not `Sendable`: it carries the raw `[String: Any]` usage
-/// payload. It never outlives the single-threaded parse of the file that made
-/// it, so it does not need to be.
+/// Its usage is normalized to a per-event delta before parking; delaying
+/// cumulative subtraction until model attribution is known would reorder the
+/// counter stream. Deliberately not `Sendable`: it carries a raw `[String: Any]`
+/// payload and never outlives the single-threaded parse of the file that made it.
 nonisolated struct CodexDeferredUsage {
     let usage: [String: Any]
     let timestamp: Date
