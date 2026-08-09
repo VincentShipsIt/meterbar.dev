@@ -327,7 +327,7 @@ enum CodexCostScanner {
             }
         }
 
-        session.retainCodex(keys: live)
+        session.retain(keys: live, provider: .codex)
         return windows
     }
 
@@ -429,7 +429,7 @@ enum CodexCostScanner {
         payload.lifetime = windows.lifetime
         payload.rollout = rollout
 
-        session.setCodexRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: committed,
                 stamp: file.stamp,
@@ -437,7 +437,8 @@ enum CodexCostScanner {
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .codex
         )
         return payload
     }
@@ -540,34 +541,13 @@ enum CodexCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<CodexFileTotals>? {
-        guard var record = session.codexRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
+        CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .codex),
+            file: file,
+            cutoff: session.cutoff
+        ) { payload, cutoff in
+            payload.rebasePeriod(to: cutoff)
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        let lifetime = record.payload.lifetime
-        if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = CostScanWindowContext(
-                earliestDate: Date(),
-                latestDate: session.cutoff
-            )
-        } else if lifetime.earliestDate >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-        } else {
-            // The rollout straddles the cutoff and only its individual events
-            // know where. Only files that actually straddle pay for the window
-            // moving.
-            return nil
-        }
-        record.cutoff = session.cutoff
-        return record
     }
 
     /// Picks up the model/originator carried by the non-usage rollout events.
