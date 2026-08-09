@@ -208,7 +208,7 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     }
 }
 
-extension CostScanCacheKey where Payload == ClaudeFileTotals {
+nonisolated extension CostScanCacheKey where Payload == ClaudeFileTotals {
     static var claude: Self {
         Self(
             provider: .claude,
@@ -218,7 +218,7 @@ extension CostScanCacheKey where Payload == ClaudeFileTotals {
     }
 }
 
-extension CostScanCacheKey where Payload == CodexFileTotals {
+nonisolated extension CostScanCacheKey where Payload == CodexFileTotals {
     static var codex: Self {
         Self(
             provider: .codex,
@@ -228,7 +228,7 @@ extension CostScanCacheKey where Payload == CodexFileTotals {
     }
 }
 
-extension CostScanCacheKey where Payload == GrokFileTotals {
+nonisolated extension CostScanCacheKey where Payload == GrokFileTotals {
     static var grok: Self {
         Self(
             provider: .grok,

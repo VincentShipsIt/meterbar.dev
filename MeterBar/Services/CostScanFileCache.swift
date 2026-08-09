@@ -356,7 +356,7 @@ nonisolated struct GrokFileTotals: Codable, Sendable {
     }
 }
 
-extension ClaudeFileTotals: CostScanPeriodRebasable {
+nonisolated extension ClaudeFileTotals: CostScanPeriodRebasable {
     mutating func rebasePeriod(to cutoff: Date) -> Bool {
         // The period window slides every day; lifetime totals never expire. So
         // the only question is whether the cached period tally can be rebased
@@ -384,7 +384,7 @@ nonisolated protocol CostScanWindowPeriodRebasable: CostScanPeriodRebasable {
     var lifetime: CostScanWindowContext { get }
 }
 
-extension CostScanWindowPeriodRebasable {
+nonisolated extension CostScanWindowPeriodRebasable {
     mutating func rebasePeriod(to cutoff: Date) -> Bool {
         if lifetime.eventKeys.isEmpty || lifetime.latestDate < cutoff {
             // Every event predates the new window.
@@ -404,5 +404,5 @@ extension CostScanWindowPeriodRebasable {
     }
 }
 
-extension CodexFileTotals: CostScanWindowPeriodRebasable {}
-extension GrokFileTotals: CostScanWindowPeriodRebasable {}
+nonisolated extension CodexFileTotals: CostScanWindowPeriodRebasable {}
+nonisolated extension GrokFileTotals: CostScanWindowPeriodRebasable {}
