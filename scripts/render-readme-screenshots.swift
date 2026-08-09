@@ -2,84 +2,13 @@ import AppKit
 import Foundation
 import SwiftUI
 
-struct UsageLimit: Equatable {
-    let used: Double
-    let total: Double
-    let resetTime: Date?
-
-    var percentage: Double {
-        guard total > 0 else { return 0 }
-        return min(100, max(0, (used / total) * 100))
-    }
-
-    var isNearLimit: Bool {
-        percentage >= 80
-    }
-
-    var isAtLimit: Bool {
-        percentage >= 100
-    }
-
-    var statusColor: UsageStatus {
-        if isAtLimit {
-            return .critical
-        } else if isNearLimit {
-            return .warning
-        }
-        return .good
-    }
-}
-
-enum UsageStatus {
-    case good
-    case warning
-    case critical
-
+private extension UsageStatus {
     var color: Color {
         switch self {
         case .good: return .green
         case .warning: return .orange
         case .critical: return .red
         }
-    }
-}
-
-enum ServiceType: String, CaseIterable, Identifiable {
-    case claudeCode = "Claude Code"
-    case openai = "OpenAI"
-    case cursor = "Cursor"
-
-    var id: String { rawValue }
-
-    var displayName: String { rawValue }
-
-    var iconName: String {
-        switch self {
-        case .claudeCode: return "terminal"
-        case .openai: return "brain"
-        case .cursor: return "cursorarrow.click"
-        }
-    }
-}
-
-struct UsageMetrics: Identifiable {
-    let id = UUID()
-    let service: ServiceType
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
-    let lastUpdated: Date
-
-    var overallStatus: UsageStatus {
-        let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
-        guard !limits.isEmpty else { return .good }
-
-        if limits.contains(where: { $0.isAtLimit }) {
-            return .critical
-        } else if limits.contains(where: { $0.isNearLimit }) {
-            return .warning
-        }
-        return .good
     }
 }
 
@@ -577,9 +506,8 @@ enum SnapshotRenderer {
 
         let now = Date()
 
-        // This standalone renderer is intentionally self-contained (its own model
-        // copies above) so it compiles with a single `swiftc` invocation and never
-        // links the app. The FIXTURE below, however, must stay in lockstep with the
+        // This standalone renderer compiles the real MeterBarShared models but
+        // never links the app. The fixture below must stay in lockstep with the
         // in-app demo scenario in `MeterBarShared/DemoData.swift` and its cost
         // companion `MeterBar/Models/DemoData+Cost.swift`, so the landing-page
         // screenshots match exactly what `METERBAR_DEMO=1` shows in the app:
@@ -596,7 +524,7 @@ enum SnapshotRenderer {
         )
 
         let openAIMetrics = UsageMetrics(
-            service: .openai,
+            service: .codexCli,
             sessionLimit: UsageLimit(used: 61, total: 100, resetTime: now.addingTimeInterval(2 * 60 * 60)),
             weeklyLimit: UsageLimit(used: 82, total: 100, resetTime: now.addingTimeInterval(24 * 60 * 60)),
             codeReviewLimit: nil,

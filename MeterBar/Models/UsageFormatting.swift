@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// Shared, cached formatting helpers.
 ///
@@ -14,16 +15,6 @@ nonisolated public enum UsageFormat {
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.maximumFractionDigits = 0
-        return formatter
-    }()
-
-    private static let currencyNumber: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.usesGroupingSeparator = true
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
         return formatter
     }()
 
@@ -54,7 +45,7 @@ nonisolated public enum UsageFormat {
 
     /// Currency string, e.g. `$12.34`.
     public static func cost(_ value: Double) -> String {
-        "$\(currencyNumber.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value))"
+        UsageAmountFormat.currency(value)
     }
 
     /// Abbreviated relative time, e.g. `2h ago`, using a cached formatter.

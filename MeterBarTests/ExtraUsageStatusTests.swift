@@ -14,10 +14,12 @@ final class ExtraUsageStatusTests: XCTestCase {
         XCTAssertEqual(ExtraUsageStatus.formatAmount(5), "$5.00")
         XCTAssertEqual(ExtraUsageStatus.formatAmount(0), "$0.00")
         XCTAssertEqual(ExtraUsageStatus.formatAmount(12.5, currency: "usd"), "$12.50")
+        XCTAssertEqual(ExtraUsageStatus.formatAmount(6_954.07), "$6,954.07")
     }
 
     func testFormatAmountNonUSD() {
         XCTAssertEqual(ExtraUsageStatus.formatAmount(5, currency: "EUR"), "5.00 EUR")
+        XCTAssertEqual(ExtraUsageStatus.formatAmount(6_954.07, currency: "eur"), "6,954.07 EUR")
     }
 
     // MARK: - UsageMetrics integration

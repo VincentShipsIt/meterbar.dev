@@ -229,6 +229,8 @@ final class WakeCLIEngineTests: XCTestCase {
         let data = try response.jsonData()
         let text = String(decoding: data, as: UTF8.self)
         XCTAssertTrue(text.contains("\"schemaVersion\" : 1"))
+        XCTAssertTrue(text.contains(#""account" : "/x/.claude""#))
+        XCTAssertFalse(text.contains(#"\/"#))
         let decoded = try JSONDecoder().decode(WakeCLIResponse.self, from: data)
         XCTAssertEqual(decoded, response)
         XCTAssertEqual(decoded.schemaVersion, WakeCLIResponse.currentSchemaVersion)
