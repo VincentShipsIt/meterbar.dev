@@ -340,11 +340,10 @@ final class CostTrackerTests: XCTestCase {
         try eventLine(timestamp: "2026-07-01T10:00:00.000Z", input: 10, output: 5)
             .write(to: sessionURL, atomically: true, encoding: .utf8)
 
-        let account = ClaudeCodeAccount(id: UUID(), name: "demo", configDirectory: configDir.path)
         let cutoff = FlexibleISO8601.date(from: "2026-06-01T00:00:00Z")!
         let session = CostScanSession(cutoff: cutoff, options: .unlimited)
         let windows = ClaudeCostScanner.scanRoots(
-            ClaudeCostScanner.projectRoots(accounts: [account]),
+            [configDir.appendingPathComponent("projects", isDirectory: true)],
             session: session
         )
 

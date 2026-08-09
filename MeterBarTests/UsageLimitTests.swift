@@ -73,6 +73,53 @@ final class UsageLimitTests: XCTestCase {
         XCTAssertEqual(deficitPace?.rightLabel(), "Projected empty in 50m")
     }
 
+    func testUsagePaceLabelsOnPaceAndExhausted() throws {
+        let now = Date(timeIntervalSince1970: 0)
+        let resetTime = now.addingTimeInterval(2.5 * 60 * 60)
+
+        let onPace = try XCTUnwrap(UsageLimit(
+            used: 51,
+            total: 100,
+            resetTime: resetTime,
+            windowSeconds: 5 * 60 * 60
+        ).pace(now: now))
+        XCTAssertEqual(onPace.stage, .onPace)
+        XCTAssertEqual(onPace.leftLabel, "On pace")
+        XCTAssertFalse(onPace.willLastToReset)
+
+        let exhausted = try XCTUnwrap(UsageLimit(
+            used: 100,
+            total: 100,
+            resetTime: resetTime,
+            windowSeconds: 5 * 60 * 60
+        ).pace(now: now))
+        XCTAssertTrue(exhausted.isExhausted)
+        XCTAssertEqual(exhausted.leftLabel, "Out of quota")
+        XCTAssertEqual(exhausted.rightLabel(context: .weekly), "Out until reset")
+    }
+
+    func testUsagePaceRejectsInvalidOrNotYetElapsedWindows() {
+        let now = Date(timeIntervalSince1970: 0)
+        let validReset = now.addingTimeInterval(60)
+
+        XCTAssertNil(UsageLimit(used: 1, total: 100, resetTime: nil, windowSeconds: 120).pace(now: now))
+        XCTAssertNil(UsageLimit(used: 1, total: 100, resetTime: validReset).pace(now: now))
+        XCTAssertNil(UsageLimit(used: 1, total: 100, resetTime: validReset, windowSeconds: 0).pace(now: now))
+        XCTAssertNil(UsageLimit(used: 1, total: 100, resetTime: now, windowSeconds: 120).pace(now: now))
+        XCTAssertNil(UsageLimit(
+            used: 1,
+            total: 100,
+            resetTime: now.addingTimeInterval(121),
+            windowSeconds: 120
+        ).pace(now: now))
+        XCTAssertNil(UsageLimit(
+            used: 1,
+            total: 100,
+            resetTime: now.addingTimeInterval(120),
+            windowSeconds: 120
+        ).pace(now: now))
+    }
+
     func testResetCountdownText() throws {
         let now = Date(timeIntervalSince1970: 0)
         let futureReset = UsageLimit(

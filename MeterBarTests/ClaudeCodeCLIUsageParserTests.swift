@@ -70,6 +70,57 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
         XCTAssertEqual(metrics.modelLimitLabel, "Fable")
     }
 
+    func testParsesResetAcrossYearRollover() throws {
+        let calendar = Calendar.current
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 12,
+            day: 31,
+            hour: 12
+        )))
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: "Current session: 10% used · resets Jan 2 at 6pm",
+            now: now
+        )
+        let reset = try XCTUnwrap(metrics.sessionLimit?.resetTime)
+
+        XCTAssertEqual(calendar.component(.year, from: reset), 2027)
+        XCTAssertEqual(calendar.component(.month, from: reset), 1)
+        XCTAssertEqual(calendar.component(.day, from: reset), 2)
+    }
+
+    func testStripsANSICodesBeforeParsing() throws {
+        let output = "\u{001B}[31mCurrent session: 42% used · resets Jul 24 at 6pm\u{001B}[0m"
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(from: output)
+
+        XCTAssertEqual(metrics.sessionLimit?.percentage, 42)
+    }
+
+    func testClampsPercentAndIgnoresWindowWithoutPercent() throws {
+        let output = """
+        Current session: 105% used · resets Jul 24 at 6pm
+        Current week (all models): usage unavailable
+        """
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(from: output)
+
+        XCTAssertEqual(metrics.sessionLimit?.percentage, 100)
+        XCTAssertNil(metrics.weeklyLimit)
+    }
+
+    func testKeepsCompleteWindowWhenCaptureEndsMidPercent() throws {
+        let output = """
+        Current session: 42% used · resets Jul 24 at 6pm
+        Current week (all models): 9
+        """
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(from: output)
+
+        XCTAssertEqual(metrics.sessionLimit?.percentage, 42)
+        XCTAssertNil(metrics.weeklyLimit)
+    }
+
     func testThrowsWhenNoUsageWindowsArePresent() {
         XCTAssertThrowsError(try ClaudeCodeCLIUsageParser.parseMetrics(from: "No usage data"))
     }
