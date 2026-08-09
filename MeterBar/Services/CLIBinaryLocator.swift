@@ -1,4 +1,13 @@
 import Foundation
+import os
+
+/// Coarse provenance for a resolved provider CLI. This is intentionally an
+/// observability signal rather than an execution gate: developer CLIs are
+/// routinely installed as unsigned or ad-hoc-signed npm/bun shims.
+nonisolated enum CLIBinaryTrust: Equatable, Sendable {
+    case wellKnown
+    case unexpected
+}
 
 /// Resolves a CLI executable by scanning `PATH` and the common install
 /// locations MeterBar runs from (Homebrew, npm-global, yarn, bun, volta, etc.).
@@ -7,6 +16,9 @@ import Foundation
 /// out so provider-readiness diagnostics can ask "is `codex` / `claude` / `grok` on
 /// PATH?" without re-deriving the same fallback list.
 nonisolated enum CLIBinaryLocator {
+    private static let systemBinaryDirectories = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    private static let trustLogState = CLIBinaryTrustLogState()
+
     /// The install directories the fallbacks draw from, in priority order.
     /// Kept in sync with the reconnect script's `export PATH` list.
     static func fallbackDirectories(home: String) -> [String] {
@@ -56,12 +68,21 @@ nonisolated enum CLIBinaryLocator {
         command: String,
         overrideEnvVar: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: String = ServiceSupport.realHomeDirectory(),
         fileManager: FileManager = .default
     ) -> String? {
         if let overrideEnvVar,
            let override = environment[overrideEnvVar]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty,
            fileManager.isExecutableFile(atPath: override) {
+            // An explicit path is deliberate operator configuration. Its
+            // location carries no surprise signal, regardless of directory.
+            logUnexpectedResolutionIfNeeded(
+                command: command,
+                resolvedPath: override,
+                home: home,
+                isUserOverride: true
+            )
             return override
         }
 
@@ -69,13 +90,120 @@ nonisolated enum CLIBinaryLocator {
             .split(separator: ":")
             .map { "\($0)/\(command)" }
 
-        let fallbacks = fallbackCandidates(for: command, home: ServiceSupport.realHomeDirectory())
+        let fallbacks = fallbackCandidates(for: command, home: home)
 
-        return (pathCandidates + fallbacks).first { fileManager.isExecutableFile(atPath: $0) }
+        guard let resolvedPath = (pathCandidates + fallbacks).first(where: {
+            fileManager.isExecutableFile(atPath: $0)
+        }) else {
+            return nil
+        }
+
+        logUnexpectedResolutionIfNeeded(command: command, resolvedPath: resolvedPath, home: home)
+        return resolvedPath
+    }
+
+    /// Classifies a resolved executable by exact, normalized parent-directory
+    /// equality. Substring matching would incorrectly trust paths such as
+    /// `/tmp/opt/homebrew/bin`, while raw comparison would flag harmless `//`
+    /// and trailing-slash variants.
+    ///
+    /// `isUserOverride` represents a path supplied through the provider's
+    /// override environment variable. Such a path is deliberate user intent
+    /// and is therefore `.wellKnown` regardless of location.
+    ///
+    /// Code-signature enforcement was considered and rejected. Claude, Codex,
+    /// and Grok are frequently unsigned or ad-hoc-signed npm/bun shims, so a
+    /// signature requirement would reject most legitimate installations while
+    /// providing little assurance about the script/runtime ultimately executed.
+    static func trust(
+        forResolvedPath resolvedPath: String,
+        home: String,
+        isUserOverride: Bool = false
+    ) -> CLIBinaryTrust {
+        guard !isUserOverride else { return .wellKnown }
+
+        let parentDirectory = normalizedPath(
+            (normalizedPath(resolvedPath) as NSString).deletingLastPathComponent
+        )
+        let wellKnownDirectories = Set(
+            (fallbackDirectories(home: home) + systemBinaryDirectories).map(normalizedPath)
+        )
+        return wellKnownDirectories.contains(parentDirectory) ? .wellKnown : .unexpected
+    }
+
+    /// Clears process-lifetime notice deduplication so tests remain independent
+    /// of execution order.
+    static func resetTrustLogStateForTesting() {
+        trustLogState.reset()
+    }
+
+    static var trustLogCountForTesting: Int {
+        trustLogState.count
+    }
+
+    private static func logUnexpectedResolutionIfNeeded(
+        command: String,
+        resolvedPath: String,
+        home: String,
+        isUserOverride: Bool = false
+    ) {
+        guard trust(
+            forResolvedPath: resolvedPath,
+            home: home,
+            isUserOverride: isUserOverride
+        ) == .unexpected else {
+            return
+        }
+
+        let normalizedResolvedPath = normalizedPath(resolvedPath)
+        let key = "\(command)\u{0}\(normalizedResolvedPath)"
+        guard trustLogState.insert(key) else { return }
+
+        let redactedPath = ServiceSupport.compactPathForDisplay(
+            normalizedResolvedPath,
+            realHomeDirectory: home
+        )
+        AppLog.app.notice(
+            "Resolved \(command, privacy: .public) CLI from an unexpected path: \(redactedPath, privacy: .public)"
+        )
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        var normalized = (path as NSString).standardizingPath
+        while normalized.count > 1, normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
     }
 
     /// Whether `command` resolves to an executable.
     static func isAvailable(command: String, overrideEnvVar: String? = nil) -> Bool {
         resolve(command: command, overrideEnvVar: overrideEnvVar) != nil
+    }
+}
+
+/// Lock-protected because provider-readiness polling may resolve the same CLI
+/// concurrently. The set is bounded by the small number of unique command/path
+/// pairs seen during one app process.
+nonisolated private final class CLIBinaryTrustLogState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var keys: Set<String> = []
+
+    func insert(_ key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return keys.insert(key).inserted
+    }
+
+    func reset() {
+        lock.lock()
+        keys.removeAll()
+        lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return keys.count
     }
 }
