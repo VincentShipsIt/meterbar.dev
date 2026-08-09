@@ -298,7 +298,7 @@ class CursorLocalService: ObservableObject {
         _ summaryData: CursorUsageSummaryResponse,
         at observedAt: Date
     ) -> ProviderUsageObservation? {
-        guard let used = summaryData.individualUsage?.plan?.used else { return nil }
+        guard let used = selectedUsage(from: summaryData).plan?.used else { return nil }
         return ProviderUsageObservation(
             provider: .cursor,
             unit: .requests,
@@ -315,12 +315,13 @@ class CursorLocalService: ObservableObject {
 
     /// Maps a decoded Cursor usage-summary response onto the shared
     /// `UsageMetrics` shape. Pure and side-effect-free so it can be fixture-tested
-    /// without the network or Cursor's SQLite DB: individual plan → billing-cycle
-    /// (long-window) limit, enabled on-demand usage → session limit. The plan
-    /// denominator comes from the server (`plan.limit`, else `plan.breakdown`,
-    /// else the legacy flat `plan.total`); only when the payload carries none of
-    /// those is the assumed quota substituted and flagged `isEstimated`. When
-    /// on-demand has no explicit limit a headroom estimate is used.
+    /// without the network or Cursor's SQLite DB: individual-first plan (falling
+    /// back to team) → billing-cycle (long-window) limit, enabled on-demand usage
+    /// from that same shape → session limit. The plan denominator comes from the
+    /// server (`plan.limit`, else `plan.breakdown`, else the legacy flat
+    /// `plan.total`); only when the selected shape carries none of those is the
+    /// assumed quota substituted and flagged `isEstimated`. When on-demand has
+    /// no explicit limit a headroom estimate is used.
     static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
         // Parse billing cycle end date for reset time
         var resetTime: Date?
@@ -328,8 +329,8 @@ class CursorLocalService: ObservableObject {
             resetTime = FlexibleISO8601.date(from: billingEnd)
         }
 
-        // Extract usage from individual plan
-        let plan = summaryData.individualUsage?.plan
+        let usage = selectedUsage(from: summaryData)
+        let plan = usage.plan
         let planUsed = Double(plan?.used ?? 0)
         let serverQuota = plan?.serverQuota
         let planTotalIsEstimated = serverQuota == nil
@@ -347,7 +348,7 @@ class CursorLocalService: ObservableObject {
 
         // On-demand usage as secondary metric if enabled
         var sessionLimit: UsageLimit?
-        if let onDemand = summaryData.individualUsage?.onDemand, onDemand.enabled == true {
+        if let onDemand = usage.onDemand, onDemand.enabled == true {
             let onDemandUsed = Double(onDemand.used ?? 0)
             let onDemandLimit = Double(onDemand.limit ?? 0)
             if onDemandUsed > 0 || onDemandLimit > 0 {
@@ -366,6 +367,36 @@ class CursorLocalService: ObservableObject {
             weeklyLimit: weeklyLimit,
             codeReviewLimit: nil
         )
+    }
+
+    /// Resolves the two response shapes once so plan and on-demand usage cannot
+    /// come from different accounts. An explicit individual counter wins even
+    /// when it is zero; team usage is selected only when individual usage has no
+    /// counter. If neither has a counter, retain a server-backed quota or the
+    /// first available shape for the summary mapper, while `observation` still
+    /// rejects the missing counter instead of inventing a reset.
+    private static func selectedUsage(
+        from summaryData: CursorUsageSummaryResponse
+    ) -> (plan: CursorPlanUsage?, onDemand: CursorOnDemandUsage?) {
+        let individual = summaryData.individualUsage
+        let team = summaryData.teamUsage
+
+        if individual?.plan?.used != nil {
+            return (individual?.plan, individual?.onDemand)
+        }
+        if team?.plan?.used != nil {
+            return (team?.plan, team?.onDemand)
+        }
+        if individual?.plan?.serverQuota != nil {
+            return (individual?.plan, individual?.onDemand)
+        }
+        if team?.plan?.serverQuota != nil {
+            return (team?.plan, team?.onDemand)
+        }
+        if individual != nil {
+            return (individual?.plan, individual?.onDemand)
+        }
+        return (team?.plan, team?.onDemand)
     }
 
     // MARK: - API Calls
