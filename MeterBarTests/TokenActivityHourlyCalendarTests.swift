@@ -53,6 +53,8 @@ final class TokenActivityHourlyCalendarTests: XCTestCase {
         XCTAssertEqual(hourly?.days.first?.date, day(daysAgo: 6))
         XCTAssertEqual(hourly?.hour(at: hour)?.totalTokens, 40)
         XCTAssertEqual(hourly?.activeHours.count, 1)
+        XCTAssertEqual(hourly?.coverageStartDate, day(daysAgo: 2))
+        XCTAssertEqual(hourly?.coverageSummary, "3 days tracked")
     }
 
     func testFullHourlyUsageAggregatesProvidersInEveryCell() throws {
@@ -77,6 +79,7 @@ final class TokenActivityHourlyCalendarTests: XCTestCase {
         XCTAssertEqual(hourly.activeHours.count, 7 * 24)
         XCTAssertTrue(hourly.hours.allSatisfy { $0.totalTokens == 15 })
         XCTAssertTrue(hourly.hours.allSatisfy { $0.providers.map(\.provider) == [.claudeCode, .codexCli] })
+        XCTAssertEqual(hourly.coverageSummary, "7 days tracked")
     }
 
     func testMonthSelectionKeepsTheExistingThirtyDayCalendar() {

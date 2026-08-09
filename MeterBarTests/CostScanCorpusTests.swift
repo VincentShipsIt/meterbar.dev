@@ -91,6 +91,7 @@ final class CostScanCorpusTests: XCTestCase {
         let hourlyCutoff = try date("2025-06-09T00:00:00Z")
         try writeClaudeTranscript(in: root, project: "www/demo", name: "hours.jsonl", lines: [
             claudeEventLine(timestamp: "2025-06-08T23:59:00Z", messageID: "old", requestID: "old", input: 90),
+            claudeEventLine(timestamp: "2025-06-09T00:00:00Z", messageID: "edge", requestID: "edge", input: 50),
             claudeEventLine(timestamp: "2025-06-14T10:59:00Z", messageID: "a", requestID: "a", input: 100),
             claudeEventLine(timestamp: "2025-06-14T11:00:00Z", messageID: "b", requestID: "b", input: 200),
         ])
@@ -105,9 +106,9 @@ final class CostScanCorpusTests: XCTestCase {
             windowStart: periodCutoff
         )?.2)
 
-        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [100, 200])
-        XCTAssertEqual(rows.map(\.provider), [.claudeCode, .claudeCode])
-        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [10, 11])
+        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [50, 100, 200])
+        XCTAssertEqual(rows.map(\.provider), [.claudeCode, .claudeCode, .claudeCode])
+        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [0, 10, 11])
     }
 
     // MARK: - Codex
@@ -194,6 +195,7 @@ final class CostScanCorpusTests: XCTestCase {
         let hourlyCutoff = try date("2025-06-09T00:00:00Z")
         try writeCodexRollout(in: directory, path: "hours.jsonl", lines: [
             codexTokenLine(timestamp: "2025-06-08T23:59:00Z", conversationID: "old", input: 90),
+            codexTokenLine(timestamp: "2025-06-09T00:00:00Z", conversationID: "edge", input: 50),
             codexTokenLine(timestamp: "2025-06-14T10:59:00Z", conversationID: "a", input: 100),
             codexTokenLine(timestamp: "2025-06-14T11:00:00Z", conversationID: "b", input: 200),
         ])
@@ -202,10 +204,10 @@ final class CostScanCorpusTests: XCTestCase {
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
         let rows = try XCTUnwrap(CodexCostScanner.makeCost(from: windows.period)?.2)
 
-        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [0, 0])
-        XCTAssertEqual(rows.map(\.cacheReadTokens).sorted(), [200, 200])
-        XCTAssertEqual(rows.map(\.provider), [.codexCli, .codexCli])
-        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [10, 11])
+        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [0, 0, 0])
+        XCTAssertEqual(rows.map(\.cacheReadTokens).sorted(), [200, 200, 200])
+        XCTAssertEqual(rows.map(\.provider), [.codexCli, .codexCli, .codexCli])
+        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [0, 10, 11])
     }
 }
 

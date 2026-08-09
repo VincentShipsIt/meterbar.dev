@@ -315,6 +315,14 @@ final class GrokCostScannerTests: XCTestCase {
                     ticks: 900_000
                 ),
                 turnCompleted(
+                    at: hourlyCutoff,
+                    input: 50,
+                    cachedRead: 0,
+                    output: 5,
+                    reasoning: 0,
+                    ticks: 500_000
+                ),
+                turnCompleted(
                     at: hourlyCutoff.addingTimeInterval(3_599),
                     input: 100,
                     cachedRead: 10,
@@ -342,9 +350,9 @@ final class GrokCostScannerTests: XCTestCase {
             from: GrokCostScanner.scanRoots([root], session: session).period
         )?.2)
 
-        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.count, 2, "the cutoff event shares an hour bucket with the next event")
         XCTAssertEqual(rows.map(\.provider), [.grok, .grok])
-        XCTAssertEqual(rows.reduce(0) { $0 + $1.totalTokens }, 330)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.totalTokens }, 385)
     }
 
     // MARK: - Attribution

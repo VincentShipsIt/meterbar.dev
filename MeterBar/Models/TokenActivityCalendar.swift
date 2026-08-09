@@ -408,6 +408,10 @@ struct TokenActivityHourlyCalendar {
     let days: [TokenActivityHourDay]
     let hours: [TokenActivityHour]
     let scale: TokenActivityIntensityScale
+    /// First local day represented by a retained hourly row. The grid still
+    /// renders all seven rows, but days before this date are layout, not proof
+    /// that MeterBar retained a full week of history.
+    let coverageStartDate: Date?
 
     private let hoursByKey: [TokenActivityHourKey: TokenActivityHour]
     private let calendar: Calendar
@@ -423,6 +427,7 @@ struct TokenActivityHourlyCalendar {
             let day = calendar.startOfDay(for: row.date)
             return day >= startDate && day <= today
         }
+        let coverageStartDate = rows.map { calendar.startOfDay(for: $0.date) }.min()
         let rowsByKey = Dictionary(grouping: rows) { row in
             TokenActivityHourKey(
                 day: calendar.startOfDay(for: row.date),
@@ -469,6 +474,7 @@ struct TokenActivityHourlyCalendar {
         self.days = days
         self.hours = hours
         self.scale = scale
+        self.coverageStartDate = coverageStartDate
         self.hoursByKey = hoursByKey
         self.calendar = calendar
     }
@@ -490,7 +496,12 @@ struct TokenActivityHourlyCalendar {
 
     var busiestHour: TokenActivityHour? { activeHours.max { $0.totalTokens < $1.totalTokens } }
 
-    var coverageSummary: String { "7 days tracked" }
+    var coverageSummary: String? {
+        guard let coverageStartDate else { return nil }
+        let distance = calendar.dateComponents([.day], from: coverageStartDate, to: endDate).day ?? 0
+        let tracked = min(Self.dayCount, max(1, distance + 1))
+        return "\(tracked) day\(tracked == 1 ? "" : "s") tracked"
+    }
 
     var overviewLine: String {
         guard let busiestHour else { return "No tracked usage in this window." }

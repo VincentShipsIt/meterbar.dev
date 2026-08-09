@@ -108,11 +108,15 @@ class CostTracker: ObservableObject {
     func refreshMissingDaysInBackground(days: Int = 30) async {
         guard !demoMode else { return }
         let shouldStart = await MainActor.run {
+            let hasEnabledCostScanProvider = Self.hasEnabledCostScanProvider(
+                in: providerVisibilityStore.enabledServices
+            )
             guard !isRefreshInProgress,
                   let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
                   visibleSummary.lifetime == nil
                     || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate)
-                    || visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate) else {
+                    || (hasEnabledCostScanProvider
+                        && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate)) else {
                 return false
             }
             isRefreshingMissingDays = true
@@ -126,6 +130,13 @@ class CostTracker: ObservableObject {
             apply(scan)
             isRefreshingMissingDays = false
         }
+    }
+
+    /// Hourly rows come from local log scanners, not from providers whose
+    /// history is accumulated only by polling. Without this gate a
+    /// Cursor/OpenRouter-only setup would run a fruitless full scan each day.
+    static func hasEnabledCostScanProvider(in enabledServices: Set<ServiceType>) -> Bool {
+        CostScanProvider.allCases.contains { enabledServices.contains($0.service) }
     }
 
     /// Publishes one refresh's result, and records it as authoritative only when

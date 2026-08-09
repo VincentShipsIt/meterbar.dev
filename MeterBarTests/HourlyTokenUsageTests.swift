@@ -154,6 +154,13 @@ final class HourlyTokenUsageTests: XCTestCase {
         XCTAssertEqual(filtered.hourlyUsage?.map(\.provider), [.codexCli])
     }
 
+    func testHourlyBackfillOnlyRunsForEnabledLogScanners() {
+        XCTAssertFalse(CostTracker.hasEnabledCostScanProvider(in: [.cursor, .openRouter]))
+        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.claudeCode]))
+        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.codexCli, .cursor]))
+        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.grok]))
+    }
+
     private func makeSummary(
         costs: [TokenCost]? = nil,
         periodDays: Int = 30,

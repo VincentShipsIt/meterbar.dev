@@ -68,7 +68,8 @@ struct TokenActivityHourlyHeatmap: View {
     private let activity: TokenActivityHourlyCalendar
 
     @State private var hoveredHour: TokenActivityHourKey?
-    @FocusState private var focusedHour: TokenActivityHourKey?
+    @State private var keyboardHour: TokenActivityHourKey?
+    @FocusState private var isGridFocused: Bool
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
@@ -85,8 +86,16 @@ struct TokenActivityHourlyHeatmap: View {
                 }
             }
             .padding(TokenActivityMetrics.focusRingInset)
-            .accessibilityElement(children: .contain)
+            .focusable()
+            .focused($isGridFocused)
+            .onChange(of: isGridFocused) { _, focused in
+                guard focused, keyboardHour == nil else { return }
+                keyboardHour = activity.busiestHour?.id ?? activity.hours.last?.id
+            }
+            .onMoveCommand(perform: moveKeyboardSelection)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Hourly token activity calendar")
+            .accessibilityValue(highlightedCell?.accessibilityValue ?? activity.overviewLine)
 
             detail
             TokenActivityLegend()
@@ -128,14 +137,13 @@ struct TokenActivityHourlyHeatmap: View {
         }
     }
 
+    @ViewBuilder
     private func cell(for hour: TokenActivityHour) -> some View {
-        TokenActivitySwatch(
+        let swatch = TokenActivitySwatch(
             level: hour.level,
             isHighlighted: highlightedHour == hour.id,
             fillsWidth: true
         )
-        .focusable()
-        .focused($focusedHour, equals: hour.id)
         .onHover { isHovering in
             if isHovering {
                 hoveredHour = hour.id
@@ -143,10 +151,15 @@ struct TokenActivityHourlyHeatmap: View {
                 hoveredHour = nil
             }
         }
-        .help(hour.tooltip)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(hour.accessibilityLabel)
         .accessibilityValue(hour.accessibilityValue)
+
+        if highlightedHour == hour.id {
+            swatch.help(hour.tooltip)
+        } else {
+            swatch
+        }
     }
 
     private var detail: some View {
@@ -159,10 +172,40 @@ struct TokenActivityHourlyHeatmap: View {
             .accessibilityHidden(true)
     }
 
-    private var highlightedHour: TokenActivityHourKey? { hoveredHour ?? focusedHour }
+    private var highlightedHour: TokenActivityHourKey? {
+        hoveredHour ?? (isGridFocused ? keyboardHour : nil)
+    }
 
     private var highlightedCell: TokenActivityHour? {
         highlightedHour.flatMap(activity.hour(for:))
+    }
+
+    /// The whole 7 × 24 matrix is one tab stop. Arrow keys move the selection
+    /// inside it, avoiding 168 focus stops while keeping every hour reachable.
+    private func moveKeyboardSelection(_ direction: MoveCommandDirection) {
+        guard isGridFocused, !activity.hours.isEmpty else { return }
+        let current = keyboardHour.flatMap { key in activity.hours.firstIndex { $0.id == key } }
+            ?? activity.hours.indices.last
+        guard let current else { return }
+
+        let day = current / TokenActivityHourlyCalendar.hourCount
+        let hour = current % TokenActivityHourlyCalendar.hourCount
+        let target: Int
+        switch direction {
+        case .left:
+            target = day * TokenActivityHourlyCalendar.hourCount + max(0, hour - 1)
+        case .right:
+            target = day * TokenActivityHourlyCalendar.hourCount
+                + min(TokenActivityHourlyCalendar.hourCount - 1, hour + 1)
+        case .up:
+            target = max(0, day - 1) * TokenActivityHourlyCalendar.hourCount + hour
+        case .down:
+            target = min(TokenActivityHourlyCalendar.dayCount - 1, day + 1)
+                * TokenActivityHourlyCalendar.hourCount + hour
+        default:
+            return
+        }
+        keyboardHour = activity.hours[target].id
     }
 }
 
