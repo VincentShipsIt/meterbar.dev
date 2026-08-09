@@ -218,6 +218,119 @@ final class SessionWakeControllerTests: XCTestCase {
         XCTAssertEqual(recorder.startedProviders.first, .codex)
     }
 
+    func testReconcileWhileArmedOnSameIdentityDoesNotRecreateWatcher() {
+        let store = armedStore()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in
+                recorder.recordCreation()
+                return FakeWatcher(recorder: recorder, onState: onState)
+            },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+        XCTAssertEqual(recorder.creationCount, 1)
+
+        store.prompt = "Continue after the same quota window reopens."
+        pump(0.2)
+
+        XCTAssertEqual(recorder.creationCount, 1)
+        XCTAssertEqual(recorder.startCount, 1)
+        store.setOn(false)
+    }
+
+    func testReArmingAfterProviderSwitchRestartsWatcherOnNewProvider() {
+        let store = SessionWakeSettingsStore(userDefaults: defaults)
+        store.setWakeAccountID(ClaudeCodeAccount.defaultID)
+        store.setWakeCodexAccountID(CodexAccount.defaultID)
+        store.acknowledgeFirstRunAndTurnOn()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+
+        store.setWakeProvider(.codex)
+        store.setOn(true)
+        poll { recorder.startCount >= 2 }
+
+        XCTAssertTrue(store.isOn)
+        XCTAssertEqual(recorder.startedProviders, [.claude, .codex])
+        store.setOn(false)
+    }
+
+    func testReArmingAfterAccountSwitchRestartsWatcherOnNewAccount() {
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        let accountDirectory = "/tmp/session-wake-rearmed-account"
+        accounts.addAccount(name: "Second", configDirectory: accountDirectory)
+        guard let accountID = accounts.customAccounts.first?.id else {
+            return XCTFail("adding a custom account should yield a resolvable id")
+        }
+        let store = armedStore()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: SessionWakeStatus(),
+            accounts: accounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+
+        store.setWakeAccountID(accountID)
+        store.setOn(true)
+        poll { recorder.startCount >= 2 }
+
+        XCTAssertTrue(store.isOn)
+        XCTAssertEqual(recorder.lastStartedAccountLabel, accountDirectory)
+        store.setOn(false)
+    }
+
+    func testTargetSwitchWaitsForOldLifetimeLockReleaseBeforeReArming() {
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Second", configDirectory: "/tmp/session-wake-lock-sequencing")
+        guard let accountID = accounts.customAccounts.first?.id else {
+            return XCTFail("adding a custom account should yield a resolvable id")
+        }
+        let store = armedStore()
+        let sessionStatus = SessionWakeStatus()
+        let recorder = WatchRecorder()
+        let controller = SessionWakeController(
+            store: store,
+            status: sessionStatus,
+            accounts: accounts,
+            rescanInterval: 3_600,
+            makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
+            makeLifetimeLock: lifetimeLockFactory()
+        )
+        controller.activate()
+        poll { recorder.startCount >= 1 }
+
+        store.setWakeAccountID(accountID)
+        store.setOn(true)
+        poll { recorder.startCount >= 2 }
+
+        XCTAssertEqual(recorder.startCount, 2)
+        if case let .failed(reason) = sessionStatus.watcherState {
+            XCTAssertFalse(reason.contains("Another Session Wake holder is active"), reason)
+        }
+        store.setOn(false)
+    }
+
     func testDisablingSelectedCodexAccountStopsWatcherAndClearsSelection() {
         let codexAccounts = CodexAccountStore(userDefaults: defaults)
         codexAccounts.addAccount(name: "Work", homeDirectory: "/tmp/session-wake-codex")
@@ -382,14 +495,20 @@ final class SessionWakeControllerTests: XCTestCase {
 
 nonisolated private final class WatchRecorder: @unchecked Sendable {
     private let lock = NSLock()
+    private var creations = 0
     private var starts = 0
     private var stops = 0
     private var providers: [WakeProvider] = []
+    private var accountLabels: [String?] = []
+    var creationCount: Int { lock.lock(); defer { lock.unlock() }; return creations }
     var startCount: Int { lock.lock(); defer { lock.unlock() }; return starts }
     var stopCount: Int { lock.lock(); defer { lock.unlock() }; return stops }
     var startedProviders: [WakeProvider] { lock.lock(); defer { lock.unlock() }; return providers }
-    func recordStart(provider: WakeProvider) {
-        lock.lock(); starts += 1; providers.append(provider); lock.unlock()
+    var startedAccountLabels: [String?] { lock.lock(); defer { lock.unlock() }; return accountLabels }
+    var lastStartedAccountLabel: String? { lock.lock(); defer { lock.unlock() }; return accountLabels.last ?? nil }
+    func recordCreation() { lock.lock(); creations += 1; lock.unlock() }
+    func recordStart(provider: WakeProvider, accountLabel: String?) {
+        lock.lock(); starts += 1; providers.append(provider); accountLabels.append(accountLabel); lock.unlock()
     }
     func recordStop() { lock.lock(); stops += 1; lock.unlock() }
 }
@@ -399,7 +518,7 @@ nonisolated private struct FakeWatcher: WakeWatching {
     let onState: @Sendable (WakeWatcherState) -> Void
 
     func start(runtime: WakeProviderRuntime) async {
-        recorder.recordStart(provider: runtime.provider)
+        recorder.recordStart(provider: runtime.provider, accountLabel: runtime.accountLabel)
         onState(.scanning)
     }
 

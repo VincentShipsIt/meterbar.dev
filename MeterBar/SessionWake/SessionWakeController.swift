@@ -36,6 +36,11 @@ typealias WakeWatcherFactory = @Sendable (
 final class SessionWakeController: ObservableObject {
     static let shared = SessionWakeController()
 
+    private struct WatchIdentity: Equatable {
+        let provider: WakeProvider
+        let accountID: UUID
+    }
+
     private let store: SessionWakeSettingsStore
     private let status: SessionWakeStatus
     private let accounts: ClaudeCodeAccountStore
@@ -52,7 +57,9 @@ final class SessionWakeController: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var watchTask: Task<Void, Never>?
+    private var watchIdentity: WatchIdentity?
     private var localLifetimeLock: WakeLock?
+    private var rearmTask: Task<Void, Never>?
     private var agentMonitorTask: Task<Void, Never>?
     private var failedRegistrationStatus: SessionWakeAgentRegistrationStatus?
     private var started = false
@@ -255,7 +262,15 @@ final class SessionWakeController: ObservableObject {
     }
 
     private func startWatching(runtime: WakeProviderRuntime) {
-        guard watchTask == nil else { return }
+        guard let accountID = store.activeAccountID else { return }
+        let requestedIdentity = WatchIdentity(provider: runtime.provider, accountID: accountID)
+        if watchTask != nil {
+            guard watchIdentity != requestedIdentity else { return }
+            rearmWatching()
+            return
+        }
+        guard rearmTask == nil else { return }
+
         let lifetimeLock = makeLifetimeLock()
         switch lifetimeLock.acquire() {
         case .acquired:
@@ -272,6 +287,7 @@ final class SessionWakeController: ObservableObject {
             return
         }
 
+        watchIdentity = requestedIdentity
         status.updateBackgroundExecution(.inApp)
         let bounds = store.bounds
         // The factory seam still takes a runner (used by the concrete coordinator
@@ -304,12 +320,30 @@ final class SessionWakeController: ObservableObject {
         }
     }
 
+    private func rearmWatching() {
+        guard let task = watchTask else { return }
+        let lifetimeLock = localLifetimeLock
+        task.cancel()
+        watchTask = nil
+        watchIdentity = nil
+        localLifetimeLock = nil
+        rearmTask = Task { [weak self] in
+            await task.value
+            lifetimeLock?.release()
+            guard let self else { return }
+            self.rearmTask = nil
+            self.status.update(state: .off)
+            self.reconcile()
+        }
+    }
+
     private func stopWatching() {
         guard watchTask != nil else { return }
         let task = watchTask
         let lifetimeLock = localLifetimeLock
         task?.cancel()
         watchTask = nil
+        watchIdentity = nil
         localLifetimeLock = nil
         Task { [weak self] in
             await task?.value
