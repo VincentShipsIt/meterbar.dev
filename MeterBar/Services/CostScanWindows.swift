@@ -14,6 +14,21 @@ nonisolated struct ScanWindows<Totals> {
     var lifetime: Totals
     /// Events at or after this instant belong to the period window as well.
     let cutoff: Date
+    /// Start of the seven-calendar-day hourly window. Separate from `cutoff`
+    /// because the main cost scan normally retains 30 daily buckets.
+    let hourlyCutoff: Date
+
+    init(
+        period: Totals,
+        lifetime: Totals,
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
+    ) {
+        self.period = period
+        self.lifetime = lifetime
+        self.cutoff = cutoff
+        self.hourlyCutoff = hourlyCutoff
+    }
 
     /// Applies `body` to `lifetime` always, and to `period` when the event falls
     /// inside the window.
@@ -35,13 +50,14 @@ nonisolated struct ScanWindows<Totals> {
 // to be `Sendable` just to name `ScanWindows<CostScanResult>`.
 extension ScanWindows: Sendable where Totals: Sendable {}
 
-/// The eight breakdowns every scan folds a usage event into.
+/// The nine breakdowns every scan folds a usage event into.
 ///
-/// Claude and Codex accumulate into different types but the same eight
+/// Claude and Codex accumulate into different types but the same nine
 /// dimensions, so the fold itself lives once in `record(_:at:)` rather than
 /// twice as near-identical stanzas in each scanner.
 nonisolated protocol CostScanBreakdowns {
     var daily: [Date: TokenAccumulator] { get set }
+    var hourly: [Date: TokenAccumulator] { get set }
     var dailyModels: [Date: [String: TokenAccumulator]] { get set }
     var dailyProjects: [Date: [String: TokenAccumulator]] { get set }
     var dailyProjectModels: [Date: [String: [String: TokenAccumulator]]] { get set }
@@ -54,6 +70,8 @@ nonisolated protocol CostScanBreakdowns {
 /// Which bucket of each breakdown one event lands in.
 nonisolated struct CostScanEventKeys {
     let day: Date
+    /// `nil` when the event predates the retained seven-day hourly window.
+    let hour: Date?
     let model: String
     let origin: String
     let project: String
@@ -73,6 +91,9 @@ nonisolated struct CostScanEventTotals {
 nonisolated extension CostScanBreakdowns {
     mutating func record(_ event: CostScanEventTotals, at keys: CostScanEventKeys) {
         daily[keys.day, default: TokenAccumulator()].add(event)
+        if let hour = keys.hour {
+            hourly[hour, default: TokenAccumulator()].add(event)
+        }
         dailyModels[keys.day, default: [:]][keys.model, default: TokenAccumulator()].add(event)
         dailyProjects[keys.day, default: [:]][keys.project, default: TokenAccumulator()].add(event)
         dailyProjectModels[keys.day, default: [:]][keys.project, default: [:]][
@@ -103,6 +124,7 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
     var earliest: Date?
     var latest: Date?
     var daily: [Date: TokenAccumulator] = [:]
+    var hourly: [Date: TokenAccumulator] = [:]
     var dailyModels: [Date: [String: TokenAccumulator]] = [:]
     var dailyProjects: [Date: [String: TokenAccumulator]] = [:]
     var dailyProjectModels: [Date: [String: [String: TokenAccumulator]]] = [:]
@@ -138,6 +160,9 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
 
         for (day, tokens) in other.daily {
             daily[day, default: TokenAccumulator()].merge(tokens)
+        }
+        for (hour, tokens) in other.hourly {
+            hourly[hour, default: TokenAccumulator()].merge(tokens)
         }
         for (day, modelTotals) in other.dailyModels {
             for (model, tokens) in modelTotals {
@@ -201,13 +226,15 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
 nonisolated struct CostScanResult {
     var costs: [TokenCost] = []
     var dailyUsage: [DailyTokenUsage] = []
+    var hourlyUsage: [HourlyTokenUsage] = []
     /// Union of the rate entries every provider in this window priced with.
     var pricing = PricingProvenance()
 
-    mutating func append(_ scan: (TokenCost, [DailyTokenUsage])?) {
+    mutating func append(_ scan: (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])?) {
         guard let scan else { return }
         costs.append(scan.0)
         dailyUsage.append(contentsOf: scan.1)
+        hourlyUsage.append(contentsOf: scan.2)
     }
 
     mutating func record(_ provenance: PricingProvenance) {
@@ -221,7 +248,7 @@ nonisolated struct CostScanResult {
 /// a single `inout` argument.
 ///
 /// Shared by the Codex and Grok scanners rather than duplicated: both fold the
-/// same eight breakdown dimensions plus dedup keys, and a second copy would mean
+/// same nine breakdown dimensions plus dedup keys, and a second copy would mean
 /// a second `merge` and a second set of `_modify` forwarders to keep in step.
 /// Renaming the *type* is safe for the on-disk cache — `Codable` keys come from
 /// the stored property names below, not from the type's name.
@@ -230,6 +257,7 @@ nonisolated struct CostScanResult {
 nonisolated struct CostScanWindowContext: Sendable, Codable {
     var totals = TokenAccumulator()
     var dailyTotals: [Date: TokenAccumulator] = [:]
+    var hourlyTotals: [Date: TokenAccumulator] = [:]
     var dailyModelTotals: [Date: [String: TokenAccumulator]] = [:]
     var dailyProjectTotals: [Date: [String: TokenAccumulator]] = [:]
     var dailyProjectModelTotals: [Date: [String: [String: TokenAccumulator]]] = [:]
@@ -258,6 +286,9 @@ nonisolated struct CostScanWindowContext: Sendable, Codable {
         totals.merge(other.totals)
         for (day, tokens) in other.dailyTotals {
             dailyTotals[day, default: TokenAccumulator()].merge(tokens)
+        }
+        for (hour, tokens) in other.hourlyTotals {
+            hourlyTotals[hour, default: TokenAccumulator()].merge(tokens)
         }
         for (day, modelTotals) in other.dailyModelTotals {
             for (model, tokens) in modelTotals {
@@ -314,6 +345,11 @@ nonisolated extension CostScanWindowContext: CostScanBreakdowns {
         _modify { yield &dailyTotals }
     }
 
+    var hourly: [Date: TokenAccumulator] {
+        get { hourlyTotals }
+        _modify { yield &hourlyTotals }
+    }
+
     var dailyModels: [Date: [String: TokenAccumulator]] {
         get { dailyModelTotals }
         _modify { yield &dailyModelTotals }
@@ -347,6 +383,15 @@ nonisolated extension CostScanWindowContext: CostScanBreakdowns {
     var projectModels: [String: [String: TokenAccumulator]] {
         get { projectModelTotals }
         _modify { yield &projectModelTotals }
+    }
+}
+
+/// Calendar-safe hour normalization shared by all three scanners and the
+/// seven-day grid. `dateInterval` preserves distinct repeated hours at a DST
+/// fallback while still returning the local hour boundary.
+nonisolated enum CostScanHourBucket {
+    static func start(for date: Date, calendar: Calendar) -> Date {
+        calendar.dateInterval(of: .hour, for: date)?.start ?? date
     }
 }
 

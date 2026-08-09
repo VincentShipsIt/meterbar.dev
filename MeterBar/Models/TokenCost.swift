@@ -206,6 +206,42 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }()
 }
 
+/// One provider's token usage inside a local calendar-hour bucket.
+///
+/// Hourly rows intentionally stop at the same aggregate shape as daily rows:
+/// the seven-day activity heatmap needs provider totals, not model or project
+/// attribution. `date` is always the start of the represented local hour.
+nonisolated public struct HourlyTokenUsage: Codable, Identifiable, Sendable {
+    public var id: String { "\(provider.rawValue)-\(date.timeIntervalSinceReferenceDate)" }
+
+    public let date: Date
+    public let provider: ServiceType
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let estimatedCostUSD: Double
+
+    public init(
+        date: Date,
+        provider: ServiceType,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double
+    ) {
+        self.date = date
+        self.provider = provider
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+    }
+
+    public var totalTokens: Int {
+        inputTokens + outputTokens + cacheReadTokens
+    }
+}
+
 nonisolated public struct LifetimeProviderCost: Codable, Identifiable, Equatable, Sendable {
     public var id: String { provider.rawValue }
 
@@ -283,6 +319,9 @@ nonisolated public struct CostSummary: Codable, Sendable {
     public let totalTokens: Int
     public let periodDays: Int
     public let dailyUsage: [DailyTokenUsage]
+    /// Provider rows for the trailing seven calendar days, bucketed at each
+    /// local hour start. Optional so caches written before issue #372 decode.
+    public let hourlyUsage: [HourlyTokenUsage]?
     public let lifetime: LifetimeCostSummary?
     /// Which dated rate entries actually priced this scan, and how many events
     /// predated the table (issue #339). Optional so summaries cached by builds
@@ -296,6 +335,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         totalTokens: Int,
         periodDays: Int,
         dailyUsage: [DailyTokenUsage] = [],
+        hourlyUsage: [HourlyTokenUsage]? = nil,
         lifetime: LifetimeCostSummary? = nil,
         pricing: PricingProvenance? = nil
     ) {
@@ -304,6 +344,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         self.totalTokens = totalTokens
         self.periodDays = periodDays
         self.dailyUsage = dailyUsage
+        self.hourlyUsage = hourlyUsage
         self.lifetime = lifetime
         self.pricing = pricing
     }
@@ -354,6 +395,26 @@ nonisolated public struct CostSummary: Codable, Sendable {
         })
 
         return populatedDays.count < daysToCheck
+    }
+
+    /// Whether a cache that should cover the seven-day activity window still
+    /// predates hourly rows. A completed scan today is authoritative even when
+    /// it found no hourly usage, preventing an empty week from rescanning on
+    /// every Costs-page appearance.
+    func needsMissingHourlyUsageRefresh(
+        lastScanDate: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard !costs.isEmpty, totalTokens > 0, periodDays >= 7 else { return false }
+
+        let today = calendar.startOfDay(for: now)
+        if let lastScanDate,
+           calendar.startOfDay(for: lastScanDate) >= today {
+            return false
+        }
+
+        return hourlyUsage?.isEmpty != false
     }
 
     /// Aggregates the cached daily rows into per-provider totals over the last
@@ -445,6 +506,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
     public func filtered(to enabledServices: Set<ServiceType>) -> CostSummary {
         let visibleCosts = costs.filter { enabledServices.contains($0.provider) }
         let visibleDailyUsage = dailyUsage.filter { enabledServices.contains($0.provider) }
+        let visibleHourlyUsage = hourlyUsage?.filter { enabledServices.contains($0.provider) }
 
         return CostSummary(
             costs: visibleCosts,
@@ -452,6 +514,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
             totalTokens: visibleCosts.reduce(0) { $0 + $1.totalTokens },
             periodDays: periodDays,
             dailyUsage: visibleDailyUsage,
+            hourlyUsage: visibleHourlyUsage,
             lifetime: lifetime?.filtered(to: enabledServices)
         )
     }

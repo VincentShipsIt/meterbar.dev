@@ -85,6 +85,32 @@ final class CostScanCorpusTests: XCTestCase {
         XCTAssertEqual(windows.period.sessions, 3)
     }
 
+    func testClaudeScanAccumulatesOnlyTrailingSevenDaysIntoHourlyBuckets() throws {
+        let root = try makeClaudeProjectsRoot()
+        let periodCutoff = try date("2025-05-17T00:00:00Z")
+        let hourlyCutoff = try date("2025-06-09T00:00:00Z")
+        try writeClaudeTranscript(in: root, project: "www/demo", name: "hours.jsonl", lines: [
+            claudeEventLine(timestamp: "2025-06-08T23:59:00Z", messageID: "old", requestID: "old", input: 90),
+            claudeEventLine(timestamp: "2025-06-09T00:00:00Z", messageID: "edge", requestID: "edge", input: 50),
+            claudeEventLine(timestamp: "2025-06-14T10:59:00Z", messageID: "a", requestID: "a", input: 100),
+            claudeEventLine(timestamp: "2025-06-14T11:00:00Z", messageID: "b", requestID: "b", input: 200),
+        ])
+
+        let session = CostScanSession(
+            cutoff: periodCutoff,
+            hourlyCutoff: hourlyCutoff,
+            options: .unlimited
+        )
+        let rows = try XCTUnwrap(ClaudeCostScanner.makeCost(
+            from: ClaudeCostScanner.scanRoots([root], session: session).period,
+            windowStart: periodCutoff
+        )?.2)
+
+        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [50, 100, 200])
+        XCTAssertEqual(rows.map(\.provider), [.claudeCode, .claudeCode, .claudeCode])
+        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [0, 10, 11])
+    }
+
     // MARK: - Codex
 
     func testCodexDeduplicationStaysGlobalAcrossFiles() throws {
@@ -162,6 +188,27 @@ final class CostScanCorpusTests: XCTestCase {
 
         XCTAssertEqual(windows.lifetime.sessionIDs.count, 5)
     }
+
+    func testCodexScanAccumulatesOnlyTrailingSevenDaysIntoHourlyBuckets() throws {
+        let directory = try makeTemporaryDirectory(named: "CodexHourlyRollouts")
+        let periodCutoff = try date("2025-05-17T00:00:00Z")
+        let hourlyCutoff = try date("2025-06-09T00:00:00Z")
+        try writeCodexRollout(in: directory, path: "hours.jsonl", lines: [
+            codexTokenLine(timestamp: "2025-06-08T23:59:00Z", conversationID: "old", input: 90),
+            codexTokenLine(timestamp: "2025-06-09T00:00:00Z", conversationID: "edge", input: 50),
+            codexTokenLine(timestamp: "2025-06-14T10:59:00Z", conversationID: "a", input: 100),
+            codexTokenLine(timestamp: "2025-06-14T11:00:00Z", conversationID: "b", input: 200),
+        ])
+
+        var windows = CodexCostScanner.scanWindows(cutoff: periodCutoff, hourlyCutoff: hourlyCutoff)
+        CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
+        let rows = try XCTUnwrap(CodexCostScanner.makeCost(from: windows.period)?.2)
+
+        XCTAssertEqual(rows.map(\.inputTokens).sorted(), [0, 0, 0])
+        XCTAssertEqual(rows.map(\.cacheReadTokens).sorted(), [200, 200, 200])
+        XCTAssertEqual(rows.map(\.provider), [.codexCli, .codexCli, .codexCli])
+        XCTAssertEqual(rows.map { calendarHour($0.date) }.sorted(), [0, 10, 11])
+    }
 }
 
 // MARK: - Fixtures
@@ -171,6 +218,16 @@ extension CostScanCorpusTests {
     /// itself is covered by `CostScanCollaboratorTests`.
     private func makeSession(cutoff: Date) -> CostScanSession {
         CostScanSession(cutoff: cutoff, options: .unlimited)
+    }
+
+    private func date(_ value: String) throws -> Date {
+        try XCTUnwrap(FlexibleISO8601.date(from: value))
+    }
+
+    private func calendarHour(_ date: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return calendar.component(.hour, from: date)
     }
 
     private func makeTemporaryDirectory(named prefix: String) throws -> URL {

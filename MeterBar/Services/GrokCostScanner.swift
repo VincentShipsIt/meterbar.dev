@@ -69,11 +69,15 @@ enum GrokCostScanner {
 
     /// Seeds both windows: `earliestDate` starts at now and only decreases,
     /// `latestDate` starts at the window floor and only increases.
-    nonisolated static func scanWindows(cutoff: Date) -> ScanWindows<CostScanWindowContext> {
+    nonisolated static func scanWindows(
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
+    ) -> ScanWindows<CostScanWindowContext> {
         ScanWindows(
             period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
             lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
-            cutoff: cutoff
+            cutoff: cutoff,
+            hourlyCutoff: hourlyCutoff
         )
     }
 
@@ -114,7 +118,7 @@ enum GrokCostScanner {
         _ roots: [URL],
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
-        var windows = Self.scanWindows(cutoff: session.cutoff)
+        var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
         var live: Set<String> = []
 
         for root in roots {
@@ -143,7 +147,7 @@ enum GrokCostScanner {
     /// itself billed at $0 — which is the right answer for them.
     nonisolated static func makeCost(
         from context: CostScanWindowContext
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
@@ -182,6 +186,10 @@ enum GrokCostScanner {
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
             projectModelsByDay: context.dailyProjectModelTotals
+        ), TokenUsageAggregator.makeHourlyUsage(
+            from: context.hourlyTotals,
+            provider: .grok,
+            pricing: pricing
         ))
     }
 
@@ -214,7 +222,8 @@ enum GrokCostScanner {
         var windows = ScanWindows(
             period: payload.period,
             lifetime: payload.lifetime,
-            cutoff: session.cutoff
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
         )
         let attribution = Self.attribution(for: file.url)
         let calendar = Calendar.current
@@ -250,6 +259,7 @@ enum GrokCostScanner {
                 offset: read.committedOffset,
                 stamp: file.stamp,
                 cutoff: session.cutoff,
+                hourlyCutoff: session.hourlyCutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
@@ -266,13 +276,23 @@ enum GrokCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<GrokFileTotals>? {
-        CostScanResumption.resumableRecord(
+        guard var record = CostScanResumption.resumableRecord(
             existing: session.record(for: file.cacheKey, provider: .grok),
             file: file,
-            cutoff: session.cutoff
-        ) { payload, cutoff in
-            payload.rebasePeriod(to: cutoff)
+            cutoff: session.cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
+        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
+        if record.hourlyCutoff < session.hourlyCutoff {
+            record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.payload.lifetime.hourlyTotals = record.payload.lifetime.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.hourlyCutoff = session.hourlyCutoff
         }
+        return record
     }
 
     /// Project and fallback session identity, both derived from where the file
@@ -412,6 +432,9 @@ enum GrokCostScanner {
             """
         let keys = CostScanEventKeys(
             day: calendar.startOfDay(for: timestamp),
+            hour: timestamp >= windows.hourlyCutoff
+                ? CostScanHourBucket.start(for: timestamp, calendar: calendar)
+                : nil,
             model: CostScanValues.displayModelName(event.model),
             origin: CostScanValues.displayOriginName(Self.originName),
             project: event.projectID

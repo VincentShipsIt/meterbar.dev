@@ -21,6 +21,8 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// for the cutoff they were tallied against, so this is part of every
     /// cache-hit decision.
     let cutoff: Date
+    /// Start of the seven-calendar-day hour buckets retained by this refresh.
+    let hourlyCutoff: Date
 
     let budget: CostScanBudget
 
@@ -34,11 +36,13 @@ nonisolated final class CostScanSession: @unchecked Sendable {
 
     init(
         cutoff: Date,
+        hourlyCutoff: Date = .distantPast,
         options: CostScanBudgetOptions,
         store: CostScanCacheStore? = nil,
         token: CostScanCancellationToken = .never
     ) {
         self.cutoff = cutoff
+        self.hourlyCutoff = hourlyCutoff
         self.budget = CostScanBudget(options: options, token: token)
         self.store = store
         self.claudeCache = store?.loadClaude() ?? CostScanFileCache<ClaudeFileTotals>()

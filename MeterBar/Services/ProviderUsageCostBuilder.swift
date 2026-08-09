@@ -1,9 +1,10 @@
 import Foundation
 import MeterBarShared
 
-/// Turns the accumulated ledger into the same `(TokenCost, [DailyTokenUsage])`
-/// pair the log scanners produce, so a provider with no local corpus lands in
-/// `costs[]`/`dailyUsage[]` through exactly the same fold.
+/// Turns the accumulated ledger into the same cost/daily/hourly tuple the log
+/// scanners produce, so a provider with no local corpus lands in
+/// `costs[]`/`dailyUsage[]` through exactly the same fold. Poll-only providers
+/// have no event timestamps, so their hourly slice is intentionally empty.
 ///
 /// The counterpart to `ClaudeCostScanner.makeCost` and friends, and deliberately
 /// the *only* path from the ledger into money: it emits nothing for an entry
@@ -28,7 +29,7 @@ nonisolated enum ProviderUsageCostBuilder {
         windowStart: Date,
         now: Date = Date(),
         calendar: Calendar = .current
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
         let cutoff = calendar.startOfDay(for: windowStart)
         let today = calendar.startOfDay(for: now)
         // Days are only ever written by an observation, so a future-dated one
@@ -66,6 +67,6 @@ nonisolated enum ProviderUsageCostBuilder {
             )
         }
 
-        return (cost, daily)
+        return (cost, daily, [])
     }
 }
