@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Coarse provenance for a resolved provider CLI. This is intentionally an
 /// observability signal rather than an execution gate: developer CLIs are
