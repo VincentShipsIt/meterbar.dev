@@ -238,7 +238,9 @@ enum ProviderSnapshotBuilder {
             let enabledAccounts = input.codexAccounts.filter(\.isEnabled)
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
-                    let title = account.isDefault && enabledAccounts.count == 1
+                    let title = account.isDefault
+                        && account.name == CodexAccount.defaultName
+                        && enabledAccounts.count == 1
                         ? ServiceType.codexCli.shortName
                         : account.name
                     // A signed-in custom `CODEX_HOME` profile is waiting for a
@@ -272,7 +274,9 @@ enum ProviderSnapshotBuilder {
             let accountMetrics = input.claudeAccountMetrics
             if !enabledAccounts.isEmpty {
                 for account in enabledAccounts {
-                    let title = account.isDefault && enabledAccounts.count == 1
+                    let title = account.isDefault
+                        && account.name == ClaudeCodeAccount.defaultName
+                        && enabledAccounts.count == 1
                         ? ServiceType.claudeCode.shortName
                         : account.name
                     let emptyDetail = account.isDefault && input.claudeCodeHasAccess
@@ -311,7 +315,9 @@ enum ProviderSnapshotBuilder {
         if input.enabledServices.contains(.grok) {
             let enabledAccounts = input.grokAccounts.filter(\.isEnabled)
             for account in enabledAccounts {
-                let title = account.isDefault && enabledAccounts.count == 1
+                let title = account.isDefault
+                    && account.name == GrokAccount.defaultName
+                    && enabledAccounts.count == 1
                     ? ServiceType.grok.shortName
                     : account.name
                 let fallbackMetrics = account.isDefault
