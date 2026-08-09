@@ -396,13 +396,19 @@ class ClaudeCodeLocalService: ObservableObject {
             let (data, response) = try await session.data(for: request)
             try ServiceSupport.validate(response, data: data)
 
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let usageResponse = try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+            let usageResponse = try decodeUsageResponse(from: data)
             return metrics(from: usageResponse)
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
+    }
+
+    /// The OAuth metrics fetch and best-effort extra-usage probe decode the
+    /// same response contract with the same date strategy.
+    nonisolated static func decodeUsageResponse(from data: Data) throws -> ClaudeCodeUsageResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
     }
 
     /// Reads a non-expired Claude Code OAuth access token for `account`
@@ -575,14 +581,8 @@ class ClaudeCodeLocalService: ObservableObject {
 
         do {
             let (data, response) = try await urlSession.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                return .unknown
-            }
-
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let usageResponse = try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+            try ServiceSupport.validate(response, data: data)
+            let usageResponse = try Self.decodeUsageResponse(from: data)
             return usageResponse.extraUsageStatus
         } catch {
             return .unknown

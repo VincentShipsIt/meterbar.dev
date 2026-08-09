@@ -215,10 +215,8 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
     // MARK: - Helpers
 
     private func decodeUsage(_ json: String) throws -> ClaudeCodeUsageResponse {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         let data = try XCTUnwrap(json.data(using: .utf8))
-        return try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+        return try ClaudeCodeLocalService.decodeUsageResponse(from: data)
     }
 
     private func credentials(

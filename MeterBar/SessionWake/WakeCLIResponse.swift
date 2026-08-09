@@ -5,7 +5,7 @@ import Foundation
 /// stdout carries only this object; all diagnostics go to stderr/logs. The
 /// `schemaVersion` lets consumers detect breaking changes; new fields are
 /// additive within a version.
-struct WakeCLIResponse: Codable, Equatable, Sendable {
+struct WakeCLIResponse: Codable, Equatable, Sendable, CLIJSONDocument {
     static let currentSchemaVersion = 1
 
     struct Session: Codable, Equatable, Sendable {
@@ -34,13 +34,6 @@ struct WakeCLIResponse: Codable, Equatable, Sendable {
     var summary: Summary
     /// Human-readable, machine-stable reason for a non-success outcome.
     let message: String?
-
-    /// Encode to a single stdout-ready JSON line.
-    func jsonData() throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-        return try encoder.encode(self)
-    }
 
     static func from(
         candidates: [WakeSessionCandidate],
