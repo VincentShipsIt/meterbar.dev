@@ -69,11 +69,15 @@ enum GrokCostScanner {
 
     /// Seeds both windows: `earliestDate` starts at now and only decreases,
     /// `latestDate` starts at the window floor and only increases.
-    nonisolated static func scanWindows(cutoff: Date) -> ScanWindows<CostScanWindowContext> {
+    nonisolated static func scanWindows(
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
+    ) -> ScanWindows<CostScanWindowContext> {
         ScanWindows(
             period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
             lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
-            cutoff: cutoff
+            cutoff: cutoff,
+            hourlyCutoff: hourlyCutoff
         )
     }
 
@@ -114,7 +118,7 @@ enum GrokCostScanner {
         _ roots: [URL],
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
-        var windows = Self.scanWindows(cutoff: session.cutoff)
+        var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
         var live: Set<String> = []
 
         for root in roots {
@@ -127,7 +131,7 @@ enum GrokCostScanner {
             }
         }
 
-        session.retainGrok(keys: live)
+        session.retain(keys: live, provider: .grok)
         return windows
     }
 
@@ -143,7 +147,7 @@ enum GrokCostScanner {
     /// itself billed at $0 — which is the right answer for them.
     nonisolated static func makeCost(
         from context: CostScanWindowContext
-    ) -> (TokenCost, [DailyTokenUsage])? {
+    ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
         let totals = context.totals
         guard totals.input > 0 || totals.output > 0 || totals.cacheRead > 0 else { return nil }
 
@@ -182,6 +186,10 @@ enum GrokCostScanner {
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
             projectModelsByDay: context.dailyProjectModelTotals
+        ), TokenUsageAggregator.makeHourlyUsage(
+            from: context.hourlyTotals,
+            provider: .grok,
+            pricing: pricing
         ))
     }
 
@@ -214,7 +222,8 @@ enum GrokCostScanner {
         var windows = ScanWindows(
             period: payload.period,
             lifetime: payload.lifetime,
-            cutoff: session.cutoff
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
         )
         let attribution = Self.attribution(for: file.url)
         let calendar = Calendar.current
@@ -245,15 +254,17 @@ enum GrokCostScanner {
         payload.period = windows.period
         payload.lifetime = windows.lifetime
 
-        session.setGrokRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: read.committedOffset,
                 stamp: file.stamp,
                 cutoff: session.cutoff,
+                hourlyCutoff: session.hourlyCutoff,
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .grok
         )
         return payload
     }
@@ -265,32 +276,22 @@ enum GrokCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<GrokFileTotals>? {
-        guard var record = session.grokRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
+        guard var record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .grok),
+            file: file,
+            cutoff: session.cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
+        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
+        if record.hourlyCutoff < session.hourlyCutoff {
+            record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.payload.lifetime.hourlyTotals = record.payload.lifetime.hourlyTotals.filter {
+                $0.key >= session.hourlyCutoff
+            }
+            record.hourlyCutoff = session.hourlyCutoff
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        let lifetime = record.payload.lifetime
-        if lifetime.eventKeys.isEmpty || lifetime.latestDate < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = CostScanWindowContext(
-                earliestDate: Date(),
-                latestDate: session.cutoff
-            )
-        } else if lifetime.earliestDate >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-        } else {
-            // The file straddles the cutoff and only its individual records know
-            // where. Only files that actually straddle pay for the window moving.
-            return nil
-        }
-        record.cutoff = session.cutoff
         return record
     }
 
@@ -431,6 +432,9 @@ enum GrokCostScanner {
             """
         let keys = CostScanEventKeys(
             day: calendar.startOfDay(for: timestamp),
+            hour: timestamp >= windows.hourlyCutoff
+                ? CostScanHourBucket.start(for: timestamp, calendar: calendar)
+                : nil,
             model: CostScanValues.displayModelName(event.model),
             origin: CostScanValues.displayOriginName(Self.originName),
             project: event.projectID

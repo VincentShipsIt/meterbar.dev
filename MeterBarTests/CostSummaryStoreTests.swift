@@ -35,6 +35,7 @@ final class CostSummaryStoreTests: XCTestCase {
         XCTAssertEqual(migrated.summary.dailyUsage.count, 1)
         XCTAssertNil(migrated.summary.dailyUsage[0].modelBreakdowns)
         XCTAssertNil(migrated.summary.dailyUsage[0].projectBreakdowns)
+        XCTAssertNil(migrated.summary.hourlyUsage)
         XCTAssertTrue(
             migrated.summary.needsMissingDailyUsageRefresh(
                 days: 30,
@@ -85,6 +86,38 @@ final class CostSummaryStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.summary.dailyUsage.first?.inputTokens, 10)
         XCTAssertEqual(loaded.summary.dailyUsage.first?.modelBreakdowns?.count, 0)
+        XCTAssertNil(loaded.summary.hourlyUsage)
+    }
+
+    func testCurrentCacheRoundTripsHourlyUsageWithoutChangingTheDateCodec() throws {
+        let currentURL = tempDirectory.appendingPathComponent("cost-summary-v2.json")
+        let legacyURL = tempDirectory.appendingPathComponent("cost-summary-v1.json")
+        let hour = Date(timeIntervalSince1970: 1_750_000_000)
+        let current = CostSummaryCache(
+            summary: CostSummary(
+                costs: [],
+                totalCostUSD: 0,
+                totalTokens: 0,
+                periodDays: 30,
+                hourlyUsage: [
+                    HourlyTokenUsage(
+                        date: hour,
+                        provider: .codexCli,
+                        inputTokens: 10,
+                        outputTokens: 2,
+                        cacheReadTokens: 1,
+                        estimatedCostUSD: 0.25
+                    ),
+                ]
+            ),
+            lastScanDate: hour
+        )
+
+        try CostSummaryStore.save(current, to: currentURL)
+        let loaded = try XCTUnwrap(CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL))
+
+        XCTAssertEqual(loaded.summary.hourlyUsage?.first?.date, hour)
+        XCTAssertEqual(loaded.summary.hourlyUsage?.first?.provider, .codexCli)
     }
 
     private func legacyPayload(inputTokens: Int = 10) throws -> Data {

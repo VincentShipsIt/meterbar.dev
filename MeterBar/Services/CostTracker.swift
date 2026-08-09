@@ -102,16 +102,21 @@ class CostTracker: ObservableObject {
         }
     }
 
-    /// Quietly backfills a legacy cache's missing lifetime snapshot or missing
-    /// daily rows when Overview/Costs opens, without the visible "Scanning" UI
-    /// a manual scan shows.
+    /// Quietly backfills a legacy cache's missing lifetime snapshot, daily
+    /// rows, or hourly rows when Overview/Costs opens, without the visible
+    /// "Scanning" UI a manual scan shows.
     func refreshMissingDaysInBackground(days: Int = 30) async {
         guard !demoMode else { return }
         let shouldStart = await MainActor.run {
+            let hasEnabledCostScanProvider = Self.hasEnabledCostScanProvider(
+                in: providerVisibilityStore.enabledServices
+            )
             guard !isRefreshInProgress,
                   let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
                   visibleSummary.lifetime == nil
-                    || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate) else {
+                    || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate)
+                    || (hasEnabledCostScanProvider
+                        && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate)) else {
                 return false
             }
             isRefreshingMissingDays = true
@@ -125,6 +130,13 @@ class CostTracker: ObservableObject {
             apply(scan)
             isRefreshingMissingDays = false
         }
+    }
+
+    /// Hourly rows come from local log scanners, not from providers whose
+    /// history is accumulated only by polling. Without this gate a
+    /// Cursor/OpenRouter-only setup would run a fruitless full scan each day.
+    static func hasEnabledCostScanProvider(in enabledServices: Set<ServiceType>) -> Bool {
+        CostScanProvider.allCases.contains { enabledServices.contains($0.service) }
     }
 
     /// Publishes one refresh's result, and records it as authoritative only when
@@ -185,7 +197,9 @@ class CostTracker: ObservableObject {
         // spend was written to, and disabling an account hides its quota gauge
         // without unspending what it already cost.
         let grokAccounts = GrokAccountStore.shared.accounts
-        let cutoff = CostWindow.start(days: days)
+        let scanTime = Date()
+        let cutoff = CostWindow.start(days: days, now: scanTime)
+        let hourlyCutoff = CostWindow.start(days: 7, now: scanTime)
         let store = CostScanCacheStore.applicationSupport
         // Read once, outside the slice loop: polling providers contribute no
         // bytes, so their rows are identical in every slice and re-reading the
@@ -199,6 +213,7 @@ class CostTracker: ObservableObject {
             let slice = try? await CostScanExecutor.run { token in
                 let session = CostScanSession(
                     cutoff: cutoff,
+                    hourlyCutoff: hourlyCutoff,
                     options: .default,
                     store: store,
                     token: token

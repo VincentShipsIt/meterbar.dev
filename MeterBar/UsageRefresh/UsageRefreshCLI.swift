@@ -54,16 +54,11 @@ public enum UsageRefreshCLI {
     }
 
     static func makeLock() -> WakeLock {
-        WakeLock(lockURL: lockURL(), legacyLockURLs: [], holderKind: .cli)
+        UsageRefreshLock.make(holderKind: .cli)
     }
 
     static func lockURL() -> URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: "\(ServiceSupport.realHomeDirectory())/Library/Application Support")
-        return support
-            .appendingPathComponent("MeterBar", isDirectory: true)
-            .appendingPathComponent("usage-refresh", isDirectory: true)
-            .appendingPathComponent("refresh.lock")
+        UsageRefreshLock.lockURL()
     }
 
     @MainActor
@@ -78,7 +73,8 @@ public enum UsageRefreshCLI {
             providerVisibilityStore: ProviderVisibilityStore(hiddenServices: configuration.hiddenServices),
             sharedStore: sharedStore,
             cacheDefaults: UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier) ?? .standard,
-            schedulesAutoRefresh: false
+            schedulesAutoRefresh: false,
+            refreshLockMode: .externallyOwned
         )
     }
 

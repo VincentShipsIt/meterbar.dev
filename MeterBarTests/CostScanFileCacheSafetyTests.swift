@@ -82,7 +82,7 @@ final class CostScanFileCacheSafetyTests: XCTestCase {
     }
 
     func testVersionedSaveRemovesSupersededSiblings() throws {
-        let oldClaude = directory.appendingPathComponent("cost-scan-claude-v1.json")
+        let oldClaude = directory.appendingPathComponent("cost-scan-claude-v3.json")
         let oldCodex = directory.appendingPathComponent("cost-scan-codex-v2.json")
         try Data("old".utf8).write(to: oldClaude)
         try Data("other-provider".utf8).write(to: oldCodex)
@@ -97,6 +97,16 @@ final class CostScanFileCacheSafetyTests: XCTestCase {
                 atPath: directory.appendingPathComponent(CostScanCacheStore.claudeFileName).path
             )
         )
+    }
+
+    func testHourlyUpgradeReadsFromAFreshV4Artifact() throws {
+        let oldURL = directory.appendingPathComponent("cost-scan-claude-v3.json")
+        try CostScanCacheStore.saveClaude(makeCache(), to: oldURL)
+        let store = CostScanCacheStore(directory: directory)
+
+        XCTAssertEqual(CostScanFileCache<ClaudeFileTotals>.currentSchemaVersion, 4)
+        XCTAssertEqual(CostScanCacheStore.claudeFileName, "cost-scan-claude-v4.json")
+        XCTAssertTrue(store.loadClaude().records.isEmpty)
     }
 
     // MARK: - Persistence failures

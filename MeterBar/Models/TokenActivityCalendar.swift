@@ -323,3 +323,255 @@ struct TokenActivityCalendar {
         return (0..<weekdayCount).map { symbols[($0 + offset) % weekdayCount] }
     }
 }
+
+// MARK: - Hour × day grid
+
+/// Stable identity for one local day/hour coordinate. The hour component is
+/// explicit so daylight-saving transitions still render exactly 24 columns;
+/// repeated fallback hours aggregate into their shared local-hour column.
+struct TokenActivityHourKey: Hashable {
+    let day: Date
+    let hour: Int
+}
+
+/// One cell in the trailing-seven-day hourly activity grid.
+struct TokenActivityHour: Identifiable, Equatable {
+    var id: TokenActivityHourKey { TokenActivityHourKey(day: day, hour: hour) }
+
+    let day: Date
+    let hour: Int
+    let totalTokens: Int
+    let estimatedCostUSD: Double
+    let providers: [TokenActivityProviderTotal]
+    let level: Int
+
+    var hasUsage: Bool { totalTokens > 0 }
+
+    var accessibilityLabel: String { header }
+
+    var accessibilityValue: String {
+        guard hasUsage else { return "No tracked usage" }
+
+        var parts = [
+            "\(UsageFormat.tokens(totalTokens)) tokens",
+            UsageFormat.cost(estimatedCostUSD),
+            "intensity \(level) of \(TokenActivityIntensityScale.bandCount)",
+        ]
+        parts.append(contentsOf: providers.map {
+            "\($0.provider.displayName) \(UsageFormat.tokens($0.tokens)), \(UsageFormat.cost($0.costUSD))"
+        })
+        return parts.joined(separator: ", ")
+    }
+
+    var detailLine: String {
+        guard hasUsage else { return "\(header) · No tracked usage" }
+
+        var parts = ["\(UsageFormat.tokens(totalTokens)) tokens", UsageFormat.cost(estimatedCostUSD)]
+        parts.append(contentsOf: providers.map {
+            "\($0.provider.displayName) \(UsageFormat.tokens($0.tokens))"
+        })
+        return "\(header) · \(parts.joined(separator: " · "))"
+    }
+
+    var tooltip: String {
+        guard hasUsage else { return "\(header)\nNo tracked usage" }
+
+        var lines = [header, "\(UsageFormat.tokens(totalTokens)) tokens", UsageFormat.cost(estimatedCostUSD)]
+        if !providers.isEmpty {
+            lines.append("")
+            lines.append(contentsOf: providers.map {
+                "\($0.provider.displayName): \(UsageFormat.tokens($0.tokens)) · \(UsageFormat.cost($0.costUSD))"
+            })
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var header: String {
+        "\(DashboardDateFormat.medium(day)) at \(String(format: "%02d:00", hour))"
+    }
+}
+
+/// One day row, oldest to newest, with a stable cell for each local hour 0–23.
+struct TokenActivityHourDay: Identifiable, Equatable {
+    var id: Date { date }
+    let date: Date
+    let hours: [TokenActivityHour]
+}
+
+/// Pure 7 × 24 model derived once before SwiftUI hover/focus updates begin.
+struct TokenActivityHourlyCalendar {
+    static let dayCount = 7
+    static let hourCount = 24
+
+    let startDate: Date
+    let endDate: Date
+    let days: [TokenActivityHourDay]
+    let hours: [TokenActivityHour]
+    let scale: TokenActivityIntensityScale
+    /// First local day represented by a retained hourly row. The grid still
+    /// renders all seven rows, but days before this date are layout, not proof
+    /// that MeterBar retained a full week of history.
+    let coverageStartDate: Date?
+
+    private let hoursByKey: [TokenActivityHourKey: TokenActivityHour]
+    private let calendar: Calendar
+
+    init(
+        hourlyUsage: [HourlyTokenUsage],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        let today = calendar.startOfDay(for: now)
+        let startDate = Self.day(today, offsetBy: -(Self.dayCount - 1), calendar: calendar)
+        let rows = hourlyUsage.filter { row in
+            let day = calendar.startOfDay(for: row.date)
+            return day >= startDate && day <= today
+        }
+        let coverageStartDate = rows.map { calendar.startOfDay(for: $0.date) }.min()
+        let rowsByKey = Dictionary(grouping: rows) { row in
+            TokenActivityHourKey(
+                day: calendar.startOfDay(for: row.date),
+                hour: calendar.component(.hour, from: row.date)
+            )
+        }
+        let coordinates = (0..<Self.dayCount).flatMap { dayOffset in
+            let day = Self.day(startDate, offsetBy: dayOffset, calendar: calendar)
+            return (0..<Self.hourCount).map { TokenActivityHourKey(day: day, hour: $0) }
+        }
+        let totals = coordinates.map { key in
+            let providers = Self.providerTotals(for: rowsByKey[key] ?? [])
+            return (
+                key: key,
+                tokens: providers.reduce(0) { $0 + $1.tokens },
+                cost: providers.reduce(0) { $0 + $1.costUSD },
+                providers: providers
+            )
+        }
+        let scale = TokenActivityIntensityScale(dailyTotals: totals.map(\.tokens))
+        let hours = totals.map { total in
+            TokenActivityHour(
+                day: total.key.day,
+                hour: total.key.hour,
+                totalTokens: total.tokens,
+                estimatedCostUSD: total.cost,
+                providers: total.providers,
+                level: scale.level(for: total.tokens)
+            )
+        }
+        let hoursByKey = Dictionary(uniqueKeysWithValues: hours.map { ($0.id, $0) })
+        let days = (0..<Self.dayCount).map { dayOffset in
+            let day = Self.day(startDate, offsetBy: dayOffset, calendar: calendar)
+            return TokenActivityHourDay(
+                date: day,
+                hours: (0..<Self.hourCount).compactMap {
+                    hoursByKey[TokenActivityHourKey(day: day, hour: $0)]
+                }
+            )
+        }
+
+        self.startDate = startDate
+        self.endDate = today
+        self.days = days
+        self.hours = hours
+        self.scale = scale
+        self.coverageStartDate = coverageStartDate
+        self.hoursByKey = hoursByKey
+        self.calendar = calendar
+    }
+
+    func hour(at date: Date) -> TokenActivityHour? {
+        hoursByKey[TokenActivityHourKey(
+            day: calendar.startOfDay(for: date),
+            hour: calendar.component(.hour, from: date)
+        )]
+    }
+
+    func hour(for key: TokenActivityHourKey) -> TokenActivityHour? { hoursByKey[key] }
+
+    var activeHours: [TokenActivityHour] { hours.filter(\.hasUsage) }
+
+    var totalTokens: Int { hours.reduce(0) { $0 + $1.totalTokens } }
+
+    var totalCostUSD: Double { hours.reduce(0) { $0 + $1.estimatedCostUSD } }
+
+    var busiestHour: TokenActivityHour? { activeHours.max { $0.totalTokens < $1.totalTokens } }
+
+    var coverageSummary: String? {
+        guard let coverageStartDate else { return nil }
+        let distance = calendar.dateComponents([.day], from: coverageStartDate, to: endDate).day ?? 0
+        let tracked = min(Self.dayCount, max(1, distance + 1))
+        return "\(tracked) day\(tracked == 1 ? "" : "s") tracked"
+    }
+
+    var overviewLine: String {
+        guard let busiestHour else { return "No tracked usage in this window." }
+
+        return [
+            "\(UsageFormat.tokens(totalTokens)) tokens",
+            UsageFormat.cost(totalCostUSD),
+            "Busiest \(DashboardDateFormat.medium(busiestHour.day)) at "
+                + String(format: "%02d:00", busiestHour.hour)
+                + " (\(UsageFormat.tokens(busiestHour.totalTokens)))",
+        ].joined(separator: " · ")
+    }
+
+    private static func day(_ date: Date, offsetBy days: Int, calendar: Calendar) -> Date {
+        guard let shifted = calendar.date(byAdding: .day, value: days, to: date) else { return date }
+        return calendar.startOfDay(for: shifted)
+    }
+
+    private static func providerTotals(for rows: [HourlyTokenUsage]) -> [TokenActivityProviderTotal] {
+        Dictionary(grouping: rows, by: \.provider)
+            .map { provider, rows in
+                TokenActivityProviderTotal(
+                    provider: provider,
+                    tokens: rows.reduce(0) { $0 + max(0, $1.totalTokens) },
+                    costUSD: rows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) }
+                )
+            }
+            .filter { $0.tokens > 0 || $0.costUSD > 0 }
+            .sorted {
+                if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
+                if $0.costUSD != $1.costUSD { return $0.costUSD > $1.costUSD }
+                return $0.provider.displayName < $1.provider.displayName
+            }
+    }
+}
+
+/// Selects the hourly seven-day grid when the new cache field is populated,
+/// otherwise preserving the existing calendar (including the two-week legacy
+/// fallback). Both derived models are built here, never in a hover-driven body.
+struct TokenActivityGrid {
+    let daily: TokenActivityCalendar?
+    let hourly: TokenActivityHourlyCalendar?
+
+    init(
+        summary: CostSummary?,
+        windowSelection: CostWindowSelection,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        if windowSelection == .week,
+           let hourlyUsage = summary?.hourlyUsage,
+           !hourlyUsage.isEmpty {
+            daily = nil
+            hourly = TokenActivityHourlyCalendar(
+                hourlyUsage: hourlyUsage,
+                now: now,
+                calendar: calendar
+            )
+        } else {
+            daily = TokenActivityCalendar(
+                summary: summary,
+                weeks: windowSelection.fallbackActivityWeeks,
+                now: now,
+                calendar: calendar
+            )
+            hourly = nil
+        }
+    }
+
+    var hasHistory: Bool { hourly != nil || daily?.hasHistory == true }
+
+    var coverageSummary: String? { hourly?.coverageSummary ?? daily?.coverageSummary }
+}

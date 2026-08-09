@@ -64,6 +64,27 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 86_400)
     }
 
+    func testWeeklyKeyLimitMapsToNextUTCWeekReset() throws {
+        let credits = try decodeCredits(#"{"data":{"total_credits":20,"total_usage":5}}"#)
+        let key = try decodeKey(
+            #"{"data":{"limit":10,"limit_reset":"weekly","limit_remaining":4,"usage":6,"is_free_tier":false}}"#
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
+
+        let metrics = OpenRouterService.map(
+            credits: credits.data,
+            key: key.data,
+            now: date(2026, 7, 15, 16),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(metrics.sessionLimit?.resetTime, date(2026, 7, 20))
+        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 604_800)
+    }
+
     // MARK: - Poll observations
 
     /// OpenRouter denominates `usage` and `usage_daily` in dollars, so the
