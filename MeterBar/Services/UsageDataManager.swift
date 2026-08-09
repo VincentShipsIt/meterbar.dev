@@ -124,6 +124,8 @@ class UsageDataManager: ObservableObject {
     private let grokAccountStore: GrokAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
     private let parseHealthStore: ProviderParseHealthStore
+    private let refreshLockMode: UsageRefreshLockMode
+    private let refreshLockFactory: @Sendable () -> WakeLock
 
     /// Where polled running counters are accumulated into a dated series.
     ///
@@ -174,6 +176,10 @@ class UsageDataManager: ObservableObject {
         cacheDefaults: UserDefaults = .standard,
         parseHealthStore: ProviderParseHealthStore? = nil,
         schedulesAutoRefresh: Bool = true,
+        refreshLockMode: UsageRefreshLockMode = .acquirePerRefresh,
+        refreshLockFactory: @escaping @Sendable () -> WakeLock = {
+            UsageRefreshLock.make(holderKind: .app)
+        },
         adaptiveNow: @escaping @Sendable () -> Date = { Date() },
         adaptivePowerState: @escaping @Sendable () -> AdaptiveRefreshPowerState = {
             .current
@@ -194,6 +200,8 @@ class UsageDataManager: ObservableObject {
         self.preferences = preferences
         self.cacheDefaults = cacheDefaults
         self.parseHealthStore = parseHealthStore ?? .shared
+        self.refreshLockMode = refreshLockMode
+        self.refreshLockFactory = refreshLockFactory
         self.adaptiveNow = adaptiveNow
         self.adaptivePowerState = adaptivePowerState
         adaptiveRefreshEngine = AdaptiveRefreshCadenceEngine(now: adaptiveNow)
@@ -261,22 +269,18 @@ class UsageDataManager: ObservableObject {
         }
         defer { rescheduleAdaptiveRefreshIfNeeded() }
         guard !isLoading else {
-            return UsageRefreshReport(
-                startedAt: startedAt,
-                finishedAt: Date(),
-                outcomes: ServiceType.allCases.map {
-                    ProviderRefreshOutcome(
-                        provider: $0,
-                        state: .skipped,
-                        reason: providerVisibilityStore.isEnabled($0)
-                            ? "Another refresh is already running."
-                            : Self.disabledReason,
-                        servedFromCache: metrics[$0] != nil,
-                        lastUpdated: metrics[$0]?.lastUpdated
-                    )
-                }
-            )
+            return skippedRefreshReport(startedAt: startedAt, enabledReason: "Another refresh is already running.")
         }
+
+        let refreshLock: WakeLock?
+        switch await acquireRefreshLock() {
+        case let .acquired(lock):
+            refreshLock = lock
+        case let .skipped(reason):
+            return skippedRefreshReport(startedAt: startedAt, enabledReason: reason)
+        }
+        defer { refreshLock?.release() }
+
         isLoading = true
         defer { isLoading = false }
         lastError = nil
@@ -400,6 +404,54 @@ class UsageDataManager: ObservableObject {
     private static let demoModeReason = "Demo mode is showing sample data."
     private static let notSignedInReason = "No readable credentials for this provider."
     private static let noEnabledAccountsReason = "No enabled accounts for this provider."
+    private static let refreshContendedReason = "Another MeterBar refresh is already running."
+    private static let refreshLockUnavailableReason = "The shared MeterBar refresh lock is unavailable."
+
+    private enum RefreshLockLease {
+        case acquired(WakeLock?)
+        case skipped(reason: String)
+    }
+
+    /// `WakeLock.acquire()` includes filesystem work. Keep that work off the
+    /// main actor even though `LOCK_NB` guarantees it never waits for a holder.
+    private func acquireRefreshLock() async -> RefreshLockLease {
+        guard refreshLockMode == .acquirePerRefresh else { return .acquired(nil) }
+        let makeLock = refreshLockFactory
+        let (lock, acquisition) = await Task.detached(priority: .userInitiated) {
+            let lock = makeLock()
+            return (lock, lock.acquire())
+        }.value
+
+        switch acquisition {
+        case .acquired:
+            return .acquired(lock)
+        case .contended:
+            AppLog.usage.info("Skipping provider refresh because the shared refresh lock is held.")
+            return .skipped(reason: Self.refreshContendedReason)
+        case let .legacyHeld(guidance):
+            AppLog.usage.error("Skipping provider refresh because a legacy lock is held: \(guidance)")
+            return .skipped(reason: Self.refreshLockUnavailableReason)
+        case let .unavailable(reason):
+            AppLog.usage.error("Skipping provider refresh because the lock is unavailable: \(reason)")
+            return .skipped(reason: Self.refreshLockUnavailableReason)
+        }
+    }
+
+    private func skippedRefreshReport(startedAt: Date, enabledReason: String) -> UsageRefreshReport {
+        UsageRefreshReport(
+            startedAt: startedAt,
+            finishedAt: Date(),
+            outcomes: ServiceType.allCases.map {
+                ProviderRefreshOutcome(
+                    provider: $0,
+                    state: .skipped,
+                    reason: providerVisibilityStore.isEnabled($0) ? enabledReason : Self.disabledReason,
+                    servedFromCache: metrics[$0] != nil,
+                    lastUpdated: metrics[$0]?.lastUpdated
+                )
+            }
+        )
+    }
 
     private func claudeCodeSkipReason(hasEnabledAccount: Bool) -> String {
         if !providerVisibilityStore.isEnabled(.claudeCode) { return Self.disabledReason }
@@ -564,6 +616,8 @@ class UsageDataManager: ObservableObject {
         lastMeterBarInteractionAt = adaptiveNow()
         defer { rescheduleAdaptiveRefreshIfNeeded() }
         guard !isLoading else { return }
+        guard case let .acquired(refreshLock) = await acquireRefreshLock() else { return }
+        defer { refreshLock?.release() }
         isLoading = true
         defer { isLoading = false }
         lastError = nil
@@ -642,6 +696,8 @@ class UsageDataManager: ObservableObject {
               let account = claudeCodeAccountStore.enabledAccounts.first(where: { $0.id == id }) else {
             return
         }
+        guard case let .acquired(refreshLock) = await acquireRefreshLock() else { return }
+        defer { refreshLock?.release() }
 
         isLoading = true
         defer { isLoading = false }

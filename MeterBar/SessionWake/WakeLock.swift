@@ -35,7 +35,7 @@ nonisolated struct WakeLockHolder: Codable, Equatable, Sendable {
 /// The holder writes a JSON descriptor so a contender can say who is running.
 nonisolated final class WakeLock: @unchecked Sendable {
     /// The outcome of trying to acquire the shared lock.
-    enum Acquisition: Equatable {
+    enum Acquisition: Equatable, Sendable {
         case acquired
         /// Held by another MeterBar/CLI holder; `holder` is present when its
         /// descriptor could be read from the lock file.
