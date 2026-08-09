@@ -125,6 +125,33 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshots.map(\.title), ["Claude"])
     }
 
+    func testRenamedSoleDefaultAccountsUseConfiguredNames() {
+        let codex = CodexAccount(
+            id: CodexAccount.defaultID,
+            name: "Codex Work",
+            homeDirectory: nil
+        )
+        let claude = ClaudeCodeAccount(
+            id: ClaudeCodeAccount.defaultID,
+            name: "Claude Personal",
+            configDirectory: nil
+        )
+        let grok = GrokAccount(
+            id: GrokAccount.defaultID,
+            name: "Grok Studio",
+            homeDirectory: nil
+        )
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            codexAccounts: [codex],
+            grokAccounts: [grok],
+            claudeAccounts: [claude],
+            enabledServices: [.codexCli, .claudeCode, .grok]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Codex Work", "Claude Personal", "Grok Studio"])
+    }
+
     func testMultipleClaudeAccountsUseAccountNames() {
         let work = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
         let accounts = [ClaudeCodeAccount.defaultAccount, work]
