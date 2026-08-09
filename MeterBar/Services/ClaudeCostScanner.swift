@@ -313,7 +313,7 @@ enum ClaudeCostScanner {
         // spent, so `live` is every transcript that exists — safe to prune
         // against on a partial refresh. Without it, deleted transcripts would
         // keep contributing their totals forever.
-        session.retainClaude(keys: live)
+        session.retain(keys: live, provider: .claude)
         return windows
     }
 
@@ -402,7 +402,7 @@ enum ClaudeCostScanner {
             session.noteDeferred(.claude)
         }
 
-        session.setClaudeRecord(
+        session.setRecord(
             CostScanFileRecord(
                 offset: read.committedOffset,
                 stamp: file.stamp,
@@ -410,7 +410,8 @@ enum ClaudeCostScanner {
                 isComplete: read.reachedEndOfFile,
                 payload: payload
             ),
-            for: file.cacheKey
+            for: file.cacheKey,
+            provider: .claude
         )
         return Self.windows(payload, cutoff: session.cutoff)
     }
@@ -422,35 +423,13 @@ enum ClaudeCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CostScanFileRecord<ClaudeFileTotals>? {
-        guard var record = session.claudeRecord(for: file.cacheKey) else { return nil }
-        guard record.offset <= UInt64(file.size) else { return nil }
-        if record.isComplete, record.stamp.size == file.size {
-            guard record.stamp.matches(file.stamp) else { return nil }
-        } else {
-            guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
+        CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .claude),
+            file: file,
+            cutoff: session.cutoff
+        ) { payload, cutoff in
+            payload.rebasePeriod(to: cutoff)
         }
-        guard record.cutoff != session.cutoff else { return record }
-
-        // The period window slides every day; lifetime totals never expire. So
-        // the only question is whether the cached period tally can be rebased
-        // without re-reading the file.
-        let lifetime = record.payload.lifetime
-        if (lifetime.latest ?? .distantPast) < session.cutoff {
-            // Every event predates the new window.
-            record.payload.period = ClaudeSessionTotals()
-            record.payload.periodKeys = []
-        } else if (lifetime.earliest ?? .distantFuture) >= session.cutoff {
-            // Every event falls inside it.
-            record.payload.period = lifetime
-            record.payload.periodKeys = record.payload.lifetimeKeys
-        } else {
-            // The file straddles the cutoff and only its individual events know
-            // where. Re-read it — but only files that actually straddle pay.
-            return nil
-        }
-        record.cutoff = session.cutoff
-        return record
     }
 
     nonisolated private static func windows(
