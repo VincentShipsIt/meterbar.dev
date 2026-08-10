@@ -39,7 +39,6 @@ class CodexCliLocalService: ObservableObject {
     /// own presentation and for callers that predate multi-account Codex; every
     /// per-account question goes through `accountAccess` instead.
     @Published private(set) var hasAccess: Bool = false
-    @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
 
     /// Last observed auth result per Codex profile, keyed by account id.
@@ -49,6 +48,16 @@ class CodexCliLocalService: ObservableObject {
     /// disabled. Probing is a file read plus a JSON/JWT decode, so results are
     /// cached here rather than recomputed on every render.
     @Published private(set) var accountAccess: [UUID: Bool] = [:]
+
+    /// Last fetch failure per Codex profile, keyed by account id.
+    ///
+    /// `UsageDataManager` fans usage fetches out across every enabled profile
+    /// concurrently, so a single shared error would end up describing whichever
+    /// profile happened to finish last — a signed-out secondary profile's
+    /// "Not authenticated" shown beside a healthy default, or a real default
+    /// failure blanked by a later success. Keying by account keeps each fetch
+    /// speaking only for itself.
+    @Published private(set) var accountErrors: [UUID: ServiceError] = [:]
 
     /// Defaults reproduce the production singleton; tests inject a fixture
     /// auth-file provider.
@@ -190,6 +199,13 @@ class CodexCliLocalService: ObservableObject {
         )
     }
 
+    /// Provider-level error across the supplied profiles, in the order given —
+    /// normally `CodexAccountStore.shared.enabledAccounts`, so the default
+    /// profile's failure is the one the UI reports.
+    func firstError(for accounts: [CodexAccount]) -> ServiceError? {
+        accounts.lazy.compactMap { self.accountErrors[$0.id] }.first
+    }
+
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics(account: CodexAccount = .defaultAccount) async throws -> UsageMetrics {
@@ -202,7 +218,7 @@ class CodexCliLocalService: ObservableObject {
         guard let token = auth.token else {
             let error = ServiceError.notAuthenticated
             await MainActor.run {
-                self.lastError = error
+                self.accountErrors[account.id] = error
                 self.record(false, for: account)
             }
             throw error
@@ -229,7 +245,7 @@ class CodexCliLocalService: ObservableObject {
             let usageResponse = try decoder.decode(CodexCliUsageResponse.self, from: data)
 
             await MainActor.run {
-                self.lastError = nil
+                self.accountErrors.removeValue(forKey: account.id)
                 self.record(true, for: account)
                 if account.isDefault {
                     self.subscriptionType = usageResponse.planType
@@ -244,7 +260,7 @@ class CodexCliLocalService: ObservableObject {
             let serviceError = ServiceSupport.serviceError(from: error)
             AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
             await MainActor.run {
-                self.lastError = serviceError
+                self.accountErrors[account.id] = serviceError
                 if case .notAuthenticated = serviceError {
                     self.record(false, for: account)
                 }
