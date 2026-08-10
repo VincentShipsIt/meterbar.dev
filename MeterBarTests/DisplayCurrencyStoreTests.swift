@@ -1,121 +1,20 @@
 import XCTest
 @testable import MeterBar
 
-/// Unit tests for the UserDefaults-backed manual and automatic conversion
-/// modes, with locale, clock, and networking injected.
+/// Unit tests for the UserDefaults-backed USD/EUR choice, with clock and
+/// networking injected so no test depends on the live ECB feed.
 final class DisplayCurrencyStoreTests: XCTestCase {
-    func testDefaultsToNoConversionWhenNothingHasBeenSaved() {
+    func testDefaultsToUSDWithNoConversion() {
         withIsolatedDefaults { defaults in
             let store = DisplayCurrencyStore(userDefaults: defaults)
 
+            XCTAssertEqual(store.selection, .usd)
             XCTAssertNil(store.currency)
-            XCTAssertTrue(store.isAutomatic)
+            XCTAssertEqual(defaults.string(forKey: StorageKeys.displayCurrencySelection), "USD")
         }
     }
 
-    func testSetPersistsCodeRateAndAnEnteredAtTimestamp() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-
-            store.set(code: "eur", rate: 0.92)
-
-            guard let currency = store.currency else {
-                return XCTFail("Expected the manual currency to be saved")
-            }
-            XCTAssertEqual(currency.code, "EUR")
-            XCTAssertEqual(currency.unitsPerUSD, 0.92, accuracy: 0.0001)
-            XCTAssertEqual(currency.source, .manual)
-            XCTAssertFalse(store.isAutomatic)
-            XCTAssertLessThan(abs(currency.enteredAt.timeIntervalSinceNow), 5)
-
-            let reloaded = DisplayCurrencyStore(userDefaults: defaults)
-            XCTAssertEqual(reloaded.currency, currency)
-        }
-    }
-
-    func testSetTrimsAndUppercasesTheCode() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-
-            store.set(code: "  jpy  ", rate: 150)
-
-            XCTAssertEqual(store.currency?.code, "JPY")
-        }
-    }
-
-    func testSetRejectsANonPositiveRateAndClearsAnyExistingConversion() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-            store.set(code: "EUR", rate: 0.92)
-
-            store.set(code: "EUR", rate: 0)
-
-            XCTAssertNil(store.currency)
-            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
-        }
-    }
-
-    func testSetRejectsANonFiniteRateAndClearsAnyExistingConversion() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-            store.set(code: "EUR", rate: 0.92)
-
-            // Infinity satisfies `rate > 0`, so without an explicit finite
-            // check it would persist and turn every converted total into "inf".
-            store.set(code: "EUR", rate: .infinity)
-
-            XCTAssertNil(store.currency)
-            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
-        }
-    }
-
-    func testLoadIgnoresAPersistedNonFiniteRate() {
-        withIsolatedDefaults { defaults in
-            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
-            defaults.set(Double.infinity, forKey: StorageKeys.displayCurrencyRate)
-            defaults.set(Date(), forKey: StorageKeys.displayCurrencyEnteredAt)
-
-            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
-        }
-    }
-
-    func testSetRejectsAnEmptyOrBlankCode() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-
-            store.set(code: "   ", rate: 0.92)
-
-            XCTAssertNil(store.currency)
-        }
-    }
-
-    func testClearRemovesAPersistedConversion() {
-        withIsolatedDefaults { defaults in
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-            store.set(code: "EUR", rate: 0.92)
-
-            store.clear()
-
-            XCTAssertNil(store.currency)
-            XCTAssertFalse(store.isAutomatic)
-            XCTAssertNil(DisplayCurrencyStore(userDefaults: defaults).currency)
-        }
-    }
-
-    func testExistingSavedRateMigratesAsManualWithoutAutomaticReplacement() {
-        withIsolatedDefaults { defaults in
-            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
-            defaults.set(0.92, forKey: StorageKeys.displayCurrencyRate)
-            defaults.set(Date(timeIntervalSince1970: 1_784_000_000), forKey: StorageKeys.displayCurrencyEnteredAt)
-
-            let store = DisplayCurrencyStore(userDefaults: defaults)
-
-            XCTAssertEqual(store.currency?.source, .manual)
-            XCTAssertFalse(store.isAutomatic)
-        }
-    }
-
-    func testAutomaticRefreshDetectsLocaleFetchesAndPersistsOfficialRate() async {
+    func testSelectingEURFetchesAndPersistsOfficialRate() async {
         await withIsolatedDefaults { defaults in
             let now = Date(timeIntervalSince1970: 1_786_000_000)
             let referenceDate = Date(timeIntervalSince1970: 1_785_888_000)
@@ -130,26 +29,101 @@ final class DisplayCurrencyStoreTests: XCTestCase {
                         referenceDate: referenceDate
                     )
                 },
-                localeCurrencyCode: { "eur" },
                 now: { now }
             )
 
+            store.setSelection(.eur)
             await store.refreshAutomaticCurrency()
 
             XCTAssertEqual(requestedCodes, ["EUR"])
+            XCTAssertEqual(store.selection, .eur)
             XCTAssertEqual(store.currency?.code, "EUR")
             XCTAssertEqual(store.currency?.unitsPerUSD ?? 0, 0.8645, accuracy: 0.000_001)
             XCTAssertEqual(store.currency?.enteredAt, referenceDate)
             XCTAssertEqual(store.currency?.source, .europeanCentralBank)
-            XCTAssertTrue(defaults.bool(forKey: StorageKeys.displayCurrencyAutomatic))
+            XCTAssertEqual(defaults.string(forKey: StorageKeys.displayCurrencySelection), "EUR")
 
             let reloaded = DisplayCurrencyStore(userDefaults: defaults)
+            XCTAssertEqual(reloaded.selection, .eur)
             XCTAssertEqual(reloaded.currency, store.currency)
-            XCTAssertTrue(reloaded.isAutomatic)
         }
     }
 
-    func testFreshAutomaticCacheDoesNotFetchAgain() async {
+    func testEURSelectionRejectsQuoteForAnotherCurrency() async {
+        await withIsolatedDefaults { defaults in
+            let store = DisplayCurrencyStore(
+                userDefaults: defaults,
+                fetchAutomaticRate: { _ in
+                    DisplayCurrencyRateQuote(
+                        code: "GBP",
+                        unitsPerUSD: 0.78,
+                        referenceDate: Date(timeIntervalSince1970: 1_785_888_000)
+                    )
+                }
+            )
+
+            store.setSelection(.eur)
+            await store.refreshAutomaticCurrency()
+
+            XCTAssertEqual(store.selection, .eur)
+            XCTAssertNil(store.currency)
+            XCTAssertNotNil(store.automaticRateError)
+            XCTAssertNil(defaults.string(forKey: StorageKeys.displayCurrencyCode))
+            XCTAssertNil(defaults.object(forKey: StorageKeys.displayCurrencyLastRefreshAt))
+        }
+    }
+
+    func testSelectingUSDClearsConversionAndDoesNotFetch() async {
+        await withIsolatedDefaults { defaults in
+            var fetchCount = 0
+            let store = DisplayCurrencyStore(
+                userDefaults: defaults,
+                fetchAutomaticRate: { code in
+                    fetchCount += 1
+                    return DisplayCurrencyRateQuote(code: code, unitsPerUSD: 0.86, referenceDate: Date())
+                }
+            )
+            store.setSelection(.eur)
+            await store.refreshAutomaticCurrency()
+            XCTAssertNotNil(store.currency)
+
+            store.setSelection(.usd)
+            await store.refreshAutomaticCurrency(force: true)
+
+            XCTAssertEqual(fetchCount, 1)
+            XCTAssertEqual(store.selection, .usd)
+            XCTAssertNil(store.currency)
+            XCTAssertNil(defaults.string(forKey: StorageKeys.displayCurrencyCode))
+        }
+    }
+
+    func testLegacyEURRateMigratesToUSDDefault() {
+        withIsolatedDefaults { defaults in
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
+            defaults.set(0.92, forKey: StorageKeys.displayCurrencyRate)
+            defaults.set(Date(timeIntervalSince1970: 1_784_000_000), forKey: StorageKeys.displayCurrencyEnteredAt)
+
+            let store = DisplayCurrencyStore(userDefaults: defaults)
+
+            XCTAssertEqual(store.selection, .usd)
+            XCTAssertNil(store.currency)
+        }
+    }
+
+    func testLegacyNonEURRateMigratesToUSDWithoutConversion() {
+        withIsolatedDefaults { defaults in
+            defaults.set("GBP", forKey: StorageKeys.displayCurrencyCode)
+            defaults.set(0.78, forKey: StorageKeys.displayCurrencyRate)
+            defaults.set(Date(timeIntervalSince1970: 1_784_000_000), forKey: StorageKeys.displayCurrencyEnteredAt)
+
+            let store = DisplayCurrencyStore(userDefaults: defaults)
+
+            XCTAssertEqual(store.selection, .usd)
+            XCTAssertNil(store.currency)
+        }
+    }
+
+    func testFreshEURCacheDoesNotFetchAgain() async {
         await withIsolatedDefaults { defaults in
             let now = Date(timeIntervalSince1970: 1_786_000_000)
             var fetchCount = 0
@@ -159,10 +133,10 @@ final class DisplayCurrencyStoreTests: XCTestCase {
                     fetchCount += 1
                     return DisplayCurrencyRateQuote(code: code, unitsPerUSD: 0.86, referenceDate: now)
                 },
-                localeCurrencyCode: { "EUR" },
                 now: { now }
             )
 
+            store.setSelection(.eur)
             await store.refreshAutomaticCurrency()
             await store.refreshAutomaticCurrency()
 
@@ -170,16 +144,22 @@ final class DisplayCurrencyStoreTests: XCTestCase {
         }
     }
 
-    func testAutomaticFailureKeepsLastSavedRate() async {
+    func testEURRefreshFailureKeepsLastSavedRate() async {
         await withIsolatedDefaults { defaults in
+            let now = Date(timeIntervalSince1970: 1_786_000_000)
+            var shouldFail = false
             let store = DisplayCurrencyStore(
                 userDefaults: defaults,
-                fetchAutomaticRate: { _ in throw URLError(.notConnectedToInternet) },
-                localeCurrencyCode: { "EUR" }
+                fetchAutomaticRate: { code in
+                    if shouldFail { throw URLError(.notConnectedToInternet) }
+                    return DisplayCurrencyRateQuote(code: code, unitsPerUSD: 0.91, referenceDate: now)
+                },
+                now: { now }
             )
-            store.set(code: "EUR", rate: 0.91)
+            store.setSelection(.eur)
+            await store.refreshAutomaticCurrency()
             let saved = store.currency
-            store.setAutomaticEnabled(true)
+            shouldFail = true
 
             await store.refreshAutomaticCurrency(force: true)
 
@@ -188,23 +168,40 @@ final class DisplayCurrencyStoreTests: XCTestCase {
         }
     }
 
-    func testUSDAutomaticModeUsesIdentityWithoutNetwork() async {
+    func testSwitchingToUSDDuringFetchDoesNotRestoreEUR() async {
         await withIsolatedDefaults { defaults in
-            var didFetch = false
+            let fetchStarted = expectation(description: "EUR fetch started")
             let store = DisplayCurrencyStore(
                 userDefaults: defaults,
                 fetchAutomaticRate: { code in
-                    didFetch = true
-                    throw DisplayCurrencyRateError.unsupportedCurrency(code)
-                },
-                localeCurrencyCode: { "USD" }
+                    fetchStarted.fulfill()
+                    try await Task.sleep(for: .milliseconds(50))
+                    return DisplayCurrencyRateQuote(code: code, unitsPerUSD: 0.9, referenceDate: Date())
+                }
             )
+            store.setSelection(.eur)
 
-            await store.refreshAutomaticCurrency()
+            let refresh = Task { await store.refreshAutomaticCurrency() }
+            await fulfillment(of: [fetchStarted], timeout: 1)
+            store.setSelection(.usd)
+            await refresh.value
 
-            XCTAssertFalse(didFetch)
-            XCTAssertEqual(store.currency?.unitsPerUSD, 1)
-            XCTAssertEqual(store.currency?.source, .system)
+            XCTAssertEqual(store.selection, .usd)
+            XCTAssertNil(store.currency)
+        }
+    }
+
+    func testLoadIgnoresPersistedNonFiniteEURRate() {
+        withIsolatedDefaults { defaults in
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencySelection)
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
+            defaults.set(Double.infinity, forKey: StorageKeys.displayCurrencyRate)
+            defaults.set(Date(), forKey: StorageKeys.displayCurrencyEnteredAt)
+
+            let store = DisplayCurrencyStore(userDefaults: defaults)
+
+            XCTAssertEqual(store.selection, .eur)
+            XCTAssertNil(store.currency)
         }
     }
 

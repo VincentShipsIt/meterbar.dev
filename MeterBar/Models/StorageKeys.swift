@@ -161,6 +161,8 @@ nonisolated enum StorageKeys {
 
     // MARK: - Display Currency (#270)
 
+    /// `DisplayCurrencySelection` raw value. Missing or unknown means USD.
+    static let displayCurrencySelection = "DisplayCurrencySelection"
     /// Display currency code/label. Presentation only — stored and exported
     /// cost data always stays USD.
     static let displayCurrencyCode = "DisplayCurrencyCode"
@@ -170,7 +172,7 @@ nonisolated enum StorageKeys {
     static let displayCurrencyEnteredAt = "DisplayCurrencyEnteredAt"
     /// `DisplayCurrencySource` raw value. Missing migrates to `.manual`.
     static let displayCurrencySource = "DisplayCurrencySource"
-    /// Whether the app should detect the Mac's currency and refresh its rate.
+    /// Legacy automatic-mode flag retained for migration from 1.8.35.
     static let displayCurrencyAutomatic = "DisplayCurrencyAutomatic"
     /// Last successful automatic refresh, used to cap fetches at once per day.
     static let displayCurrencyLastRefreshAt = "DisplayCurrencyLastRefreshAt"

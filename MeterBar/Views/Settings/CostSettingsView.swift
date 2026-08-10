@@ -410,8 +410,6 @@ struct CostSettingsView: View {
     @StateObject private var displayCurrencyStore = DisplayCurrencyStore.shared
 
     @State private var periodMode: CostPeriodMode = .last30Days
-    @State private var currencyCodeInput: String = ""
-    @State private var currencyRateInput: String = ""
 
     private var visibleCostSummary: CostSummary? {
         costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
@@ -510,36 +508,37 @@ struct CostSettingsView: View {
         .accessibilityIdentifier("cost-period-picker")
     }
 
-    /// Presentation-only currency preference. Automatic mode uses the Mac's
-    /// region currency and the ECB's daily reference feed; manual entry remains
-    /// available for unsupported currencies. Stored/exported data stays USD.
+    /// Presentation-only currency preference. USD is the default; EUR uses
+    /// the ECB's daily reference feed. Stored/exported data stays USD.
     private var displayCurrencySection: some View {
         SettingsPanelSection(title: "Display Currency", systemImage: "banknote", color: MeterBarTheme.warning) {
             Text("Converts totals for display only. Stored and exported cost data always stays USD.")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            SettingsRowView(title: "Automatic rate") {
-                HStack(spacing: 8) {
-                    if displayCurrencyStore.isRefreshingAutomaticRate {
-                        ProgressView()
-                            .controlSize(.small)
+            SettingsRowView(title: "Currency") {
+                Picker("Display currency", selection: displayCurrencyBinding) {
+                    ForEach(DisplayCurrencySelection.allCases) { selection in
+                        Text(selection.title).tag(selection)
                     }
-                    Toggle("Automatic rate", isOn: automaticCurrencyBinding)
-                        .labelsHidden()
-                        .accessibilityIdentifier("display-currency-automatic-toggle")
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .accessibilityIdentifier("display-currency-picker")
             }
 
-            if displayCurrencyStore.isAutomatic {
-                Text("Uses the currency in macOS Region settings and ECB reference rates, refreshed daily.")
+            if displayCurrencyStore.selection == .eur {
+                Text("EUR totals use the ECB reference rate, refreshed daily. The last successful rate works offline.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                SettingsRowView(title: "Currency") {
+                SettingsRowView(title: "EUR rate") {
                     HStack(spacing: 10) {
-                        Text(displayCurrencyStore.detectedCurrencyCode ?? "Not configured")
-                            .foregroundStyle(.secondary)
+                        if displayCurrencyStore.isRefreshingAutomaticRate {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
 
                         Button("Refresh Now") {
                             refreshAutomaticCurrency(force: true)
@@ -553,50 +552,6 @@ struct CostSettingsView: View {
                 if let error = displayCurrencyStore.automaticRateError {
                     SettingsNotice(text: error, color: MeterBarTheme.warning)
                 }
-            } else {
-                Text("Enter a manual rate only if you do not want to use the currency from your Mac's region.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                SettingsRowView(title: "Currency code") {
-                    TextField("e.g. EUR", text: $currencyCodeInput)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("display-currency-code-field")
-                }
-
-                SettingsRowView(title: "Units per 1 USD") {
-                    TextField("e.g. 0.92", text: $currencyRateInput)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("display-currency-rate-field")
-                }
-
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-
-                    Button("Save Manual Rate") {
-                        guard let rate = parsedCurrencyRate else { return }
-                        displayCurrencyStore.set(code: currencyCodeInput, rate: rate)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(
-                        currencyCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || parsedCurrencyRate == nil
-                    )
-                    .accessibilityIdentifier("display-currency-save-button")
-                }
-            }
-
-            if displayCurrencyStore.currency != nil {
-                HStack {
-                    Spacer(minLength: 0)
-                    Button("Show USD", role: .destructive) {
-                        displayCurrencyStore.clear()
-                        currencyCodeInput = ""
-                        currencyRateInput = ""
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("display-currency-clear-button")
-                }
             }
 
             if let currency = displayCurrencyStore.currency {
@@ -604,43 +559,25 @@ struct CostSettingsView: View {
             }
         }
         .onAppear {
-            syncCurrencyInputsFromStore()
             refreshAutomaticCurrency()
         }
     }
 
-    private var automaticCurrencyBinding: Binding<Bool> {
+    private var displayCurrencyBinding: Binding<DisplayCurrencySelection> {
         Binding(
-            get: { displayCurrencyStore.isAutomatic },
-            set: { enabled in
-                displayCurrencyStore.setAutomaticEnabled(enabled)
-                if enabled {
+            get: { displayCurrencyStore.selection },
+            set: { selection in
+                displayCurrencyStore.setSelection(selection)
+                if selection == .eur {
                     refreshAutomaticCurrency(force: true)
-                } else {
-                    syncCurrencyInputsFromStore()
                 }
             }
         )
     }
 
-    /// `Double("inf")` and `Double("nan")` both parse, so plain
-    /// `Double(_:) != nil` would enable Save for a rate that can only render
-    /// as "inf". The store rejects those too; this keeps the button honest.
-    private var parsedCurrencyRate: Double? {
-        guard let rate = Double(currencyRateInput), rate > 0, rate.isFinite else { return nil }
-        return rate
-    }
-
-    private func syncCurrencyInputsFromStore() {
-        guard let currency = displayCurrencyStore.currency else { return }
-        currencyCodeInput = currency.code
-        currencyRateInput = String(currency.unitsPerUSD)
-    }
-
     private func refreshAutomaticCurrency(force: Bool = false) {
         Task {
             await displayCurrencyStore.refreshAutomaticCurrency(force: force)
-            syncCurrencyInputsFromStore()
         }
     }
 
