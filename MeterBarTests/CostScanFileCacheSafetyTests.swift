@@ -43,6 +43,35 @@ final class CostScanFileCacheSafetyTests: XCTestCase {
         XCTAssertFalse(before.isSameFile(as: after))
     }
 
+    /// The branch `testAtomicReplacementWithSameSizeAndMtimeChangesFileIdentity`
+    /// skips over on volumes without file identifiers, pinned down directly.
+    ///
+    /// A missing identifier is a gap in what the volume reports, not evidence of
+    /// a different file, so `matches` falls back to size and mtime alone and
+    /// resumption stays available. `isSameFile` makes the opposite call: it
+    /// gates resuming a *changed* file, where guessing wrong means appending
+    /// another file's events to this one's tally, so it demands proof.
+    func testStampComparisonsWithoutFileIdentifiersFavorReuseButRefuseResumption() {
+        let anonymous = CostScanFileStamp(size: 4, modified: 1_780_000_000, fileID: nil)
+        let identified = CostScanFileStamp(size: 4, modified: 1_780_000_000, fileID: 42)
+        let grown = CostScanFileStamp(size: 8, modified: 1_780_000_000, fileID: nil)
+        let touched = CostScanFileStamp(size: 4, modified: 1_780_000_001, fileID: nil)
+
+        XCTAssertTrue(anonymous.matches(anonymous))
+        // One side reporting an identifier is not a mismatch: the other side
+        // never claimed a different one.
+        XCTAssertTrue(anonymous.matches(identified))
+        XCTAssertTrue(identified.matches(anonymous))
+        // Size and mtime still decide on their own.
+        XCTAssertFalse(anonymous.matches(grown))
+        XCTAssertFalse(anonymous.matches(touched))
+
+        XCTAssertFalse(anonymous.isSameFile(as: anonymous))
+        XCTAssertFalse(anonymous.isSameFile(as: identified))
+        XCTAssertFalse(identified.isSameFile(as: anonymous))
+        XCTAssertTrue(identified.isSameFile(as: identified))
+    }
+
     func testCacheRejectsParserAndTimeZoneMismatches() throws {
         let url = directory.appendingPathComponent(CostScanCacheStore.claudeFileName)
         try CostScanCacheStore.saveClaude(makeCache(), to: url)

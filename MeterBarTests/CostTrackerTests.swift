@@ -1222,7 +1222,7 @@ final class CostTrackerTests: XCTestCase {
 
         let files = CodexCostScanner.distinctRollouts(
             in: CodexCostScanner.rolloutDirectories(in: root)
-        )
+        ).files
 
         XCTAssertEqual(
             files.map(\.url.standardizedFileURL.path),
