@@ -8,7 +8,7 @@ import MeterBarShared
 /// and only `doctor` said anything when the filter matched nothing. Sharing the
 /// selection — and the message — keeps a typo from reading like "this provider
 /// has no quota data".
-public nonisolated enum CLIProviderFilter {
+nonisolated public enum CLIProviderFilter {
     /// Printed by both commands when `--provider` excludes everything.
     public static let noMatchesMessage = "No matching providers."
 

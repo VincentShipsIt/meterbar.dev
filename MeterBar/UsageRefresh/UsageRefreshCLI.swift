@@ -5,15 +5,15 @@ import MeterBarShared
 public enum UsageRefreshCLI {
     // Read from nonisolated parsing and cleanup code, so they cannot inherit
     // the package's MainActor default isolation.
-    public nonisolated static let defaultTimeout: TimeInterval = 60
-    public nonisolated static let minimumTimeout: TimeInterval = 1
-    public nonisolated static let maximumTimeout: TimeInterval = 600
+    nonisolated public static let defaultTimeout: TimeInterval = 60
+    nonisolated public static let minimumTimeout: TimeInterval = 1
+    nonisolated public static let maximumTimeout: TimeInterval = 600
     /// Ceiling on how long a caller waits for an over-running refresh to let go
     /// of the cross-process lock. The JSON is already on standard output by
     /// then, so this only bounds how long the process lingers.
-    public nonisolated static let maximumCleanupWait: TimeInterval = 5
+    nonisolated public static let maximumCleanupWait: TimeInterval = 5
 
-    public nonisolated struct Result: Sendable {
+    nonisolated public struct Result: Sendable {
         public let jsonOutput: String
         public let summaryLine: String
         public let message: String?
@@ -67,7 +67,7 @@ public enum UsageRefreshCLI {
     /// The CLI hands over the text unparsed so a malformed value is reported by
     /// the same JSON contract as every other refresh outcome, instead of by
     /// ArgumentParser's pre-`run()` usage error. See `RefreshTimeout`.
-    public nonisolated enum TimeoutSource: Equatable, Sendable {
+    nonisolated public enum TimeoutSource: Equatable, Sendable {
         case text(String?)
         case resolved(TimeInterval)
 
@@ -79,7 +79,7 @@ public enum UsageRefreshCLI {
         }
     }
 
-    public nonisolated struct Request: Sendable {
+    nonisolated public struct Request: Sendable {
         public let timeout: TimeoutSource
         public let shouldCancel: @Sendable () -> Bool
 
