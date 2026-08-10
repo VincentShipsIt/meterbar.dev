@@ -515,7 +515,12 @@ nonisolated public struct CostSummary: Codable, Sendable {
             periodDays: periodDays,
             dailyUsage: visibleDailyUsage,
             hourlyUsage: visibleHourlyUsage,
-            lifetime: lifetime?.filtered(to: enabledServices)
+            lifetime: lifetime?.filtered(to: enabledServices),
+            // Provenance describes which rate entries priced the scan, not a
+            // provider subset, so it is forwarded unfiltered. Dropping it here
+            // would strand every dashboard consumer — they all filter first —
+            // on `ModelPricing.tableProvenance`'s static date (issue #339).
+            pricing: pricing
         )
     }
 }
