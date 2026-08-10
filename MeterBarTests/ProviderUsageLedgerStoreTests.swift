@@ -92,6 +92,51 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
         XCTAssertEqual(loaded.timeZoneIdentifier, TimeZone.current.identifier)
     }
 
+    /// One unreadable entry costs that provider's history, never the file's.
+    ///
+    /// `ProviderUsageLedgerEntry.provider` is a closed `ServiceType`, so a raw
+    /// value this build does not know — a payload written by a newer version, a
+    /// provider since removed — fails that entry's decode. Failing the entry
+    /// used to fail the array, which failed the ledger, which returned an empty
+    /// one and re-baselined from the next poll. Unlike the scan caches there is
+    /// nothing to re-read: neither Cursor nor OpenRouter will re-serve a day
+    /// once it has passed, so the surviving providers' days must survive.
+    func testUnknownProviderDropsOnlyThatEntryNotTheWholeLedger() throws {
+        let url = directory.appendingPathComponent(ProviderUsageLedgerStore.fileName)
+        let saved = makeLedger()
+        try ProviderUsageLedgerStore.save(saved, to: url)
+
+        try rewriteEntries(url) { entry in
+            var entry = entry
+            if entry["provider"] as? String == ServiceType.cursor.rawValue {
+                entry["provider"] = "Fusion"
+            }
+            return entry
+        }
+
+        let loaded = ProviderUsageLedgerStore.load(from: url)
+
+        XCTAssertEqual(loaded.entries.map(\.provider), [.openRouter])
+        XCTAssertEqual(loaded.entries.first, saved.entry(for: .openRouter))
+        XCTAssertTrue(loaded.dailySeries(for: .cursor).isEmpty)
+    }
+
+    /// A structurally broken entry degrades the same way an unknown provider
+    /// does — it drops alone.
+    func testMalformedEntryDropsOnlyThatEntry() throws {
+        let url = directory.appendingPathComponent(ProviderUsageLedgerStore.fileName)
+        let saved = makeLedger()
+        try ProviderUsageLedgerStore.save(saved, to: url)
+
+        try rewriteEntries(url) { entry in
+            entry["provider"] as? String == ServiceType.openRouter.rawValue
+                ? ["totally": "wrong shape"]
+                : entry
+        }
+
+        XCTAssertEqual(ProviderUsageLedgerStore.load(from: url).entries.map(\.provider), [.cursor])
+    }
+
     /// Truncated or hand-edited JSON must not crash the poll that reads it.
     func testCorruptPayloadLoadsAnEmptyLedger() throws {
         let url = directory.appendingPathComponent(ProviderUsageLedgerStore.fileName)
@@ -168,6 +213,13 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
         at date: Date
     ) -> ProviderUsageObservation {
         ProviderUsageObservation(provider: provider, unit: unit, runningTotal: total, observedAt: date)
+    }
+
+    private func rewriteEntries(_ url: URL, _ mutate: ([String: Any]) -> [String: Any]) throws {
+        try rewrite(url) { object in
+            guard let entries = object["entries"] as? [[String: Any]] else { return }
+            object["entries"] = entries.map(mutate)
+        }
     }
 
     private func rewrite(_ url: URL, _ mutate: (inout [String: Any]) -> Void) throws {

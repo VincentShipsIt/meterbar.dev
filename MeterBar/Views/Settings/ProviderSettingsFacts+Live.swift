@@ -71,11 +71,12 @@ extension ProviderSettingsFacts {
         error: String?
     ) {
         let service = CodexCliLocalService.shared
+        let accounts = CodexAccountStore.shared.enabledAccounts
         return (
-            service.hasAccess(in: CodexAccountStore.shared.enabledAccounts),
+            service.hasAccess(in: accounts),
             service.subscriptionType,
             nil,
-            service.lastError?.localizedDescription
+            service.firstError(for: accounts)?.localizedDescription
         )
     }
 

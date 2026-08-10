@@ -91,6 +91,49 @@ final class SharedDataStoreTests: XCTestCase {
         XCTAssertEqual(loaded.map { $0.metrics.sessionLimit?.used }, [30, 90])
     }
 
+    /// One snapshot this build cannot read must not erase every account's widget
+    /// data.
+    ///
+    /// `AccountUsageSnapshot.metrics.service` is a closed `ServiceType`. A raw
+    /// value written by a newer app version — or left behind by a provider since
+    /// removed — fails that snapshot's decode, and a single non-tolerant decode
+    /// of the array turned that into an empty widget for every account. The
+    /// provider-keyed cache next door has tolerated this since `MetricsCodec`;
+    /// the account cache must too.
+    func testUnknownAccountServiceDropsOnlySnapshotNotEveryAccount() throws {
+        let store = SharedDataStore(directoryOverride: tempDirectory) {}
+        let healthy = AccountUsageSnapshot(
+            id: CodexAccount.defaultID,
+            name: "Personal",
+            metrics: MetricsFixtures.codexCli()
+        )
+        store.saveAccountMetrics([healthy])
+        store.flushPendingWrites()
+
+        try prependSnapshotWithUnknownService()
+
+        let loaded = store.loadAccountMetrics()
+
+        XCTAssertEqual(loaded.map(\.name), ["Personal"])
+        XCTAssertEqual(loaded.first?.metrics.sessionLimit?.used, healthy.metrics.sessionLimit?.used)
+    }
+
+    /// A structurally broken snapshot degrades the same way an unknown provider
+    /// does: it drops, the rest survive.
+    func testMalformedAccountSnapshotDropsOnlyThatEntry() throws {
+        let store = SharedDataStore(directoryOverride: tempDirectory) {}
+        store.saveAccountMetrics([
+            AccountUsageSnapshot(id: UUID(), name: "Work", metrics: MetricsFixtures.codexCli())
+        ])
+        store.flushPendingWrites()
+
+        try rewriteAccountMetrics { snapshots in
+            [["totally": "wrong shape"]] + snapshots
+        }
+
+        XCTAssertEqual(store.loadAccountMetrics().map(\.name), ["Work"])
+    }
+
     func testSharedMetricsLocationPrefersEntitledContainer() {
         let entitled = URL(fileURLWithPath: "/entitled/group", isDirectory: true)
         let resolved = SharedMetricsStore.resolvedContainerURL(
@@ -125,5 +168,30 @@ final class SharedDataStoreTests: XCTestCase {
         )
 
         XCTAssertNil(resolved)
+    }
+
+    // MARK: - Helpers
+
+    /// Copies the stored snapshot and stamps the copy with a `ServiceType` raw
+    /// value this build does not know, reproducing a cache written by a newer
+    /// app version.
+    private func prependSnapshotWithUnknownService() throws {
+        try rewriteAccountMetrics { snapshots in
+            guard var future = snapshots.first,
+                  var metrics = future["metrics"] as? [String: Any] else { return snapshots }
+            metrics["service"] = "Fusion"
+            future["metrics"] = metrics
+            future["name"] = "Future"
+            return [future] + snapshots
+        }
+    }
+
+    private func rewriteAccountMetrics(_ mutate: ([[String: Any]]) -> [[String: Any]]) throws {
+        let url = tempDirectory
+            .appendingPathComponent("\(SharedMetricsStore.accountMetricsKey).json")
+        let snapshots = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]]
+        )
+        try JSONSerialization.data(withJSONObject: mutate(snapshots)).write(to: url)
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Single owner of the `[ServiceType: UsageMetrics]` ⇄ JSON wire format shared
+/// Single owner of the cached-usage ⇄ JSON wire formats — provider-keyed
+/// `[ServiceType: UsageMetrics]` and the account-scoped `[AccountUsageSnapshot]` — shared
 /// by the app's UserDefaults cache, the app-group file read by the widget and
 /// CLI, and any future consumer. Previously this mapping was re-implemented in
 /// four places (UsageDataManager, SharedDataStore, the widget, the CLI).
@@ -30,14 +31,22 @@ public enum MetricsCodec {
             result[service] = metrics
         }
     }
-}
 
-/// Wraps a decodable value so one bad element degrades to `nil` instead of
-/// failing the containing collection's decode.
-private struct FailableBox<T: Decodable>: Decodable {
-    let value: T?
+    public static func encodeAccounts(_ snapshots: [AccountUsageSnapshot]) -> Data? {
+        try? JSONEncoder().encode(snapshots)
+    }
 
-    init(from decoder: Decoder) throws {
-        value = try? T(from: decoder)
+    /// Decodes the account-scoped cache with the same per-entry tolerance the
+    /// provider-keyed cache has.
+    ///
+    /// One snapshot whose `service` raw value this build does not know — a cache
+    /// written by a newer version, a provider since removed, a half-written
+    /// array — drops alone. Failing the array here would blank the widget for
+    /// every account, not just the unreadable one.
+    public static func decodeAccounts(_ data: Data) -> [AccountUsageSnapshot] {
+        guard let boxed = try? JSONDecoder().decode([FailableBox<AccountUsageSnapshot>].self, from: data) else {
+            return []
+        }
+        return boxed.compactMap(\.value)
     }
 }
