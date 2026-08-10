@@ -193,6 +193,58 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
+    /// The panel's height is measured from its hosted content, so anything added
+    /// to it grows the window. Seven bars is the reason the size was chosen over
+    /// ``DailyUsageChart``'s thirty, and this pins that it stays a strip: 600pt
+    /// is comfortably inside the visible frame of the smallest display MeterBar
+    /// runs on (1280×800), so the panel never has to fall back to its scrolling
+    /// variant just because the chart is present.
+    func testTheSevenDayStripKeepsThePanelWithinASmallScreen() {
+        let content = MenuBarProviderDetailContent(
+            snapshot: snapshot(),
+            dailyUsage: ProviderDailyUsageSeries(
+                service: .codexCli,
+                dailyUsage: (0..<7).map { offset in
+                    DailyTokenUsage(
+                        date: Date().addingTimeInterval(Double(-offset) * 86_400),
+                        provider: .codexCli,
+                        inputTokens: 900_000,
+                        outputTokens: 0,
+                        cacheReadTokens: 0,
+                        estimatedCostUSD: 12
+                    )
+                }
+            )
+        )
+        let host = NSHostingView(
+            rootView: content.frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThan(host.fittingSize.height, 600)
+    }
+
+    /// The whole point of the change: hovering has to return something the card
+    /// could not already show. If the strip ever stops rendering, the panel
+    /// silently goes back to being a wider copy of the card.
+    func testTheStripAddsHeightTheCardCopyDidNotHave() {
+        let plain = NSHostingView(
+            rootView: MenuBarProviderDetailContent(snapshot: snapshot())
+                .frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        let charted = NSHostingView(
+            rootView: MenuBarProviderDetailContent(
+                snapshot: snapshot(),
+                dailyUsage: ProviderDailyUsageSeries(service: .codexCli, dailyUsage: [])
+            )
+            .frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        plain.layoutSubtreeIfNeeded()
+        charted.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(charted.fittingSize.height, plain.fittingSize.height)
+    }
+
     func testHeaderRendersWithAndWithoutTheDisclosureChevron() {
         for showsChevron in [true, false] {
             let header = ProviderCardHeader(snapshot: snapshot(), showsDisclosureChevron: showsChevron)

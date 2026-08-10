@@ -23,15 +23,24 @@ struct DailyUsageChart: View {
     self.days = Self.buildDays(from: dailyUsage, daysToShow: daysToShow)
   }
 
-  private static let providerOrder: [ServiceType] = [.claudeCode, .codexCli, .cursor]
+  // Derived from the enum rather than listed by hand. The hand-written list
+  // stopped at three providers, so Grok and OpenRouter rows were bucketed into
+  // nothing and drew as empty columns — a silent zero, not an error. Internal
+  // (not private) so `DailyUsageChartBucketingTests` can pin it.
+  static let providerOrder: [ServiceType] = ServiceType.allCases.sorted {
+    $0.sortOrder < $1.sortOrder
+  }
 
-  private static func buildDays(
+  // `now`/`calendar` are injected so the bucketing is testable without the test
+  // straddling local midnight. Production always passes the defaults.
+  static func buildDays(
     from dailyUsage: [DailyTokenUsage],
-    daysToShow: Int
+    daysToShow: Int,
+    now: Date = Date(),
+    calendar: Calendar = .current
   ) -> [DailyUsageDay] {
-    let calendar = Calendar.current
     let normalizedDaysToShow = max(1, daysToShow)
-    let endDate = calendar.startOfDay(for: Date())
+    let endDate = calendar.startOfDay(for: now)
     let startDate =
       calendar.date(byAdding: .day, value: -(normalizedDaysToShow - 1), to: endDate) ?? endDate
     let grouped = Dictionary(grouping: dailyUsage) { calendar.startOfDay(for: $0.date) }

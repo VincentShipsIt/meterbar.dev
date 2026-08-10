@@ -21,6 +21,10 @@ struct MenuBarView: View {
   @StateObject private var providerVisibility = ProviderVisibilityStore.shared
   @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
   @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
+  // Only read for the hover panel's seven-day strip. Safe to hold here: the
+  // tracker's initializer just rehydrates the cached summary and ledger from
+  // disk — observing it never starts a scan.
+  @StateObject private var costTracker = CostTracker.shared
 
   @State private var contentHeight: CGFloat = 320
   @State private var expandedDetailID: String?
@@ -59,6 +63,34 @@ struct MenuBarView: View {
     }
   }
 
+  /// The provider cards the popover draws.
+  ///
+  /// Lifted out of `mainColumn` so the hover handler can read the same list the
+  /// body drew: a Claude/Codex/Grok user with several accounts gets one card per
+  /// account, and the detail panel has to know that to caption its chart
+  /// honestly — the cost cache has no account dimension, so its figures cover
+  /// every account at once.
+  private var snapshots: [ProviderSnapshot] {
+    ProviderSnapshotBuilder.snapshots(
+      ProviderSnapshotBuilder.Input(
+        metrics: dataManager.metrics,
+        codexAccounts: codexAccountStore.accounts,
+        codexAccountMetrics: dataManager.codexAccountMetrics,
+        codexAccountAccess: codexCliService.accountAccess,
+        grokAccounts: grokAccountStore.accounts,
+        grokAccountMetrics: dataManager.grokAccountMetrics,
+        claudeAccounts: claudeAccountStore.accounts,
+        claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+        enabledServices: providerVisibility.enabledServices,
+        claudeAccountStates: dataManager.claudeCodeAccountStates,
+        claudeCodeHasAccess: claudeCodeService.hasAccess,
+        codexCliHasAccess: codexCliService.hasAccess,
+        cursorHasAccess: cursorService.hasAccess,
+        openRouterHasAccess: openRouterService.hasAccess,
+        grokHasAccess: grokService.hasAccess
+      ))
+  }
+
   private var mainColumn: some View {
     VStack(spacing: 0) {
       popoverHeader
@@ -68,24 +100,7 @@ struct MenuBarView: View {
       ScrollView {
         VStack(spacing: 10) {
           PopoverOverviewPanel(
-            snapshots: ProviderSnapshotBuilder.snapshots(
-              ProviderSnapshotBuilder.Input(
-                metrics: dataManager.metrics,
-                codexAccounts: codexAccountStore.accounts,
-                codexAccountMetrics: dataManager.codexAccountMetrics,
-                codexAccountAccess: codexCliService.accountAccess,
-                grokAccounts: grokAccountStore.accounts,
-                grokAccountMetrics: dataManager.grokAccountMetrics,
-                claudeAccounts: claudeAccountStore.accounts,
-                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-                enabledServices: providerVisibility.enabledServices,
-                claudeAccountStates: dataManager.claudeCodeAccountStates,
-                claudeCodeHasAccess: claudeCodeService.hasAccess,
-                codexCliHasAccess: codexCliService.hasAccess,
-                cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess,
-                grokHasAccess: grokService.hasAccess
-              )),
+            snapshots: snapshots,
             openDashboard: openDashboard,
             openStatusDetail: openStatusDetail,
             openProviderOverview: openProviderDetail,
@@ -222,8 +237,28 @@ struct MenuBarView: View {
   private func openProviderDetail(_ snapshot: ProviderSnapshot) {
     presentDetail(
       id: snapshot.id,
-      content: AnyView(MenuBarProviderDetailContent(snapshot: snapshot))
+      content: AnyView(
+        MenuBarProviderDetailContent(
+          snapshot: snapshot,
+          // Bucketed here, at hover time, rather than inside the panel: the
+          // panel's `body` re-runs on every hover tick, and it is hosted in
+          // tests that must not stand up the cost scanner.
+          dailyUsage: ProviderDailyUsageSeries.make(
+            service: snapshot.service,
+            dailyUsage: costTracker.costSummary?.dailyUsage ?? [],
+            ledger: costTracker.usageLedger,
+            accountCount: accountCardCount(for: snapshot.service)
+          )
+        )
+      )
     )
+  }
+
+  /// How many cards the popover is currently drawing for one provider. Anything
+  /// above one means the panel's figures are the provider's total, not this
+  /// card's account, which the chart says out loud rather than implying.
+  private func accountCardCount(for service: ServiceType) -> Int {
+    snapshots.filter { $0.service == service }.count
   }
 
   /// Provider-card hover owns the detail panel together with the detail panel's
