@@ -61,17 +61,24 @@ enum ProviderCardPresentation {
             && !collapsesToLoginRow(snapshot: snapshot, now: now)
     }
 
-    /// Reset credits are a Codex CLI concept. `didConsumeResetCredit` suppresses
-    /// the action for the rest of the card's lifetime: the snapshot's credit
-    /// count is only refreshed on the next poll, so without it a spent credit
-    /// stays offered and invites a double redemption.
+    /// Reset credits are a Codex CLI concept. The eligibility rule already hides
+    /// the action once the provider reports no credits left, but the count it
+    /// reads is only as fresh as the last poll: a redemption whose follow-up
+    /// refetch failed leaves the snapshot still claiming the spent credit is
+    /// there. `hasPendingConsumption` covers exactly that window — see
+    /// `CodexResetCreditConsumptionStore`, which drops the record as soon as
+    /// newer metrics arrive.
+    ///
+    /// It is deliberately not a permanent latch. An account can bank several
+    /// credits, and once refreshed numbers land the count is authoritative, so
+    /// the action must come back for the next one.
     static func showsResetCreditAction(
         snapshot: ProviderSnapshot,
-        didConsumeResetCredit: Bool,
+        hasPendingConsumption: Bool,
         isAuthenticated: Bool,
         hasResolvedAccount: Bool
     ) -> Bool {
-        guard snapshot.service == .codexCli, !didConsumeResetCredit else { return false }
+        guard snapshot.service == .codexCli, !hasPendingConsumption else { return false }
         return CodexResetCreditEligibility.isEligible(
             isBlocked: snapshot.hasExhaustedLimit,
             availableCredits: snapshot.resetCreditsAvailable,

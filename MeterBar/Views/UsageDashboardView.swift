@@ -346,20 +346,11 @@ struct UsageDashboardView: View {
                 // was designed at popover width, and stretching its gauges
                 // across the whole detail pane read as one washed-out column.
                 // The focused provider is first in the list, so it lands top-left.
-                HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
-                    let columns = DashboardOverviewSection.masonryColumns(
-                        orderedProviderSnapshotsForLimits,
-                        columnCount: 2
-                    )
-                    ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
-                            ForEach(column) { snapshot in
-                                // The one provider card, shared with the popover, so
-                                // the two surfaces cannot drift.
-                                ProviderStatusCard(snapshot: snapshot)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                ProviderMasonryLayout(columnCount: 2, spacing: MeterBarTheme.Spacing.sm) {
+                    ForEach(orderedProviderSnapshotsForLimits) { snapshot in
+                        // The one provider card, shared with the popover, so
+                        // the two surfaces cannot drift.
+                        ProviderStatusCard(snapshot: snapshot)
                     }
                 }
                 .frame(maxWidth: .infinity)

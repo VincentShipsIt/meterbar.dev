@@ -119,19 +119,22 @@ enum GrokCostScanner {
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
         var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
-        var live: Set<String> = []
+        var coverage = CostScanCorpusCoverage()
 
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
-            for file in CostScanCorpus.transcripts(in: root) {
-                guard live.insert(file.cacheKey).inserted else { continue }
+            let listing = CostScanCorpus.listing(in: root)
+            coverage.add(listing)
+
+            for file in listing.files {
+                guard coverage.keep(file.cacheKey) else { continue }
                 guard let totals = Self.totals(for: file, session: session) else { continue }
                 windows.period.merge(totals.period)
                 windows.lifetime.merge(totals.lifetime)
             }
         }
 
-        session.retain(keys: live, provider: .grok)
+        session.retain(coverage: coverage, provider: .grok)
         return windows
     }
 

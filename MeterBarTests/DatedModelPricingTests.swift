@@ -206,4 +206,56 @@ final class DatedModelPricingTests: XCTestCase {
         XCTAssertEqual(ModelPricing.tableProvenance.eventsBeforeFirstEntry, 0)
         XCTAssertEqual(ModelPricing.tableProvenance.label, "Rates verified 2026-07-02")
     }
+
+    /// Every dashboard consumer filters the summary to the enabled services
+    /// before rendering, so dropping provenance in `filtered(to:)` would mean no
+    /// view ever sees the live scan's dates — the "Rates verified" label would
+    /// silently fall back to the shipped table and `diagnosticNote` could never
+    /// surface. Provenance describes the whole scan, not a provider subset, so
+    /// it must survive filtering unchanged.
+    func testFilteringSummaryKeepsTheScanPricingProvenance() {
+        let provenance = PricingProvenance(
+            verificationDates: ["2026-01-05", "2026-07-02"],
+            eventsBeforeFirstEntry: 4
+        )
+        let summary = CostSummary(
+            costs: [tokenCost(provider: .claudeCode), tokenCost(provider: .codexCli)],
+            totalCostUSD: 2.50,
+            totalTokens: 240,
+            periodDays: 30,
+            pricing: provenance
+        )
+
+        let filtered = summary.filtered(to: [.codexCli])
+
+        XCTAssertEqual(filtered.costs.map(\.provider), [.codexCli])
+        XCTAssertEqual(filtered.pricing, summary.pricing)
+        XCTAssertEqual(filtered.pricing?.eventsBeforeFirstEntry, 4)
+        XCTAssertNotNil(filtered.pricing?.diagnosticNote)
+    }
+
+    func testFilteringSummaryWithoutProvenanceStaysNil() {
+        let summary = CostSummary(
+            costs: [tokenCost(provider: .claudeCode)],
+            totalCostUSD: 1.25,
+            totalTokens: 120,
+            periodDays: 30
+        )
+
+        XCTAssertNil(summary.filtered(to: [.claudeCode]).pricing)
+    }
+
+    private func tokenCost(provider: ServiceType) -> TokenCost {
+        TokenCost(
+            provider: provider,
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1.25,
+            sessionCount: 1,
+            periodStart: firstEffective,
+            periodEnd: secondEffective
+        )
+    }
 }

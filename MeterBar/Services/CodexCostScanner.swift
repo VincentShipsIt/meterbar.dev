@@ -165,20 +165,30 @@ enum CodexCostScanner {
     /// copy found last, which is the one under `sessions/` that may still grow.
     ///
     /// The result is re-sorted rather than returned in discovery order.
-    /// `CostScanCorpus.transcripts` only orders within one directory, and
+    /// `CostScanCorpus.listing` only orders within one directory, and
     /// `archived_sessions` is enumerated first, so discovery order would put
     /// every archived rollout ahead of every live one — handing a slice's whole
     /// budget to the oldest conversations on disk. The comparator is the
     /// corpus's own, so a rollout's position does not depend on which directory
     /// its surviving copy came from.
-    nonisolated static func distinctRollouts(in directories: [URL]) -> [CostScanFile] {
+    ///
+    /// A directory that is missing or non-local is a complete answer, not a
+    /// failed walk: `archived_sessions/` routinely does not exist, and treating
+    /// that as incomplete would disable pruning forever.
+    nonisolated static func distinctRollouts(in directories: [URL]) -> CostScanCorpusListing {
         var chosen: [String: CostScanFile] = [:]
         var seen: Set<String> = []
+        var unreadableKeys: Set<String> = []
+        var isComplete = true
 
         for directory in directories {
             guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
 
-            for file in CostScanCorpus.transcripts(in: directory) {
+            let listing = CostScanCorpus.listing(in: directory)
+            unreadableKeys.formUnion(listing.unreadableKeys)
+            isComplete = isComplete && listing.isComplete
+
+            for file in listing.files {
                 guard seen.insert(file.cacheKey).inserted else { continue }
                 let sessionID = Self.rolloutSessionID(for: file.url)
                 guard let incumbent = chosen[sessionID] else {
@@ -188,9 +198,13 @@ enum CodexCostScanner {
                 if file.size >= incumbent.size { chosen[sessionID] = file }
             }
         }
-        return chosen.values.sorted {
-            $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
-        }
+        return CostScanCorpusListing(
+            files: chosen.values.sorted {
+                $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
+            },
+            unreadableKeys: unreadableKeys,
+            isComplete: isComplete
+        )
     }
 
     // swiftlint:disable contains_over_range_nil_comparison
@@ -312,11 +326,12 @@ enum CodexCostScanner {
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
         var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
-        let files = Self.distinctRollouts(in: directories)
-        var live: Set<String> = []
+        let listing = Self.distinctRollouts(in: directories)
+        var coverage = CostScanCorpusCoverage()
+        coverage.add(listing)
 
-        for file in files {
-            live.insert(file.cacheKey)
+        for file in listing.files {
+            coverage.keep(file.cacheKey)
             guard let totals = Self.totals(for: file, session: session) else { continue }
             guard Self.fold(totals, into: &windows) else {
                 // This rollout shares only *some* of its events with one already
@@ -336,7 +351,10 @@ enum CodexCostScanner {
             }
         }
 
-        session.retain(keys: live, provider: .codex)
+        // The duplicate copy of a rollout that lost the size comparison is
+        // deliberately absent here: only the winner is ever read, so the loser
+        // has no progress worth keeping.
+        session.retain(coverage: coverage, provider: .codex)
         return windows
     }
 

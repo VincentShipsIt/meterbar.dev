@@ -75,7 +75,7 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
 
     func saveAccountMetrics(_ snapshots: [AccountUsageSnapshot]) {
         guard let fileURL = accountMetricsFileURL,
-              let data = try? JSONEncoder().encode(snapshots) else {
+              let data = MetricsCodec.encodeAccounts(snapshots) else {
             AppLog.storage.error("Failed to prepare shared account metrics")
             return
         }
@@ -107,9 +107,8 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
     public func loadAccountMetrics() -> [AccountUsageSnapshot] {
         guard directoryOverride == nil else {
             guard let fileURL = accountMetricsFileURL,
-                  let data = try? Data(contentsOf: fileURL),
-                  let decoded = try? JSONDecoder().decode([AccountUsageSnapshot].self, from: data) else { return [] }
-            return decoded
+                  let data = try? Data(contentsOf: fileURL) else { return [] }
+            return MetricsCodec.decodeAccounts(data)
         }
         return SharedMetricsStore.loadAccountMetrics()
     }
