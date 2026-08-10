@@ -1,6 +1,6 @@
 import Foundation
-import MeterBarShared
 import XCTest
+@testable import MeterBarShared
 
 final class WidgetPreferencesStoreTests: XCTestCase {
     private var suiteName: String!
@@ -216,6 +216,115 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         let decoded = try JSONDecoder().decode(WidgetPreferences.self, from: legacyData)
 
         XCTAssertEqual(decoded, .defaults)
+    }
+
+    /// An enum case this build does not know degrades that one field, never the
+    /// whole preference set.
+    ///
+    /// The app and the widget extension read the same App Group value, so the
+    /// two sides are only ever as aligned as the user's last update let them be.
+    /// `decodeIfPresent` tolerates a *missing* key; a present key holding a
+    /// future raw value still threw, the store's `try?` swallowed it into
+    /// `.defaults`, and the next `update(_:)` wrote that reset back to disk —
+    /// turning a one-field skew into a silent wipe of every preference.
+    func testUnknownEnumCaseDegradesOnlyTheUnrecognizedField() throws {
+        let account = WidgetAccountIdentifier.account(service: .claudeCode, id: UUID())
+        var written = WidgetPreferences.defaults
+        written.accountSelection = .explicit([account])
+        written.displayMode = .remaining
+        written.visibleQuotaWindows = [.weekly, .session]
+        written.showsResetTime = true
+        written.accountOrdering = .urgency
+
+        let data = try encoded(written) { object in
+            object["accountOrdering"] = "leastRecentlyUsed"
+            object["visibleQuotaWindows"] = [
+                WidgetQuotaWindow.weekly.rawValue,
+                "monthlyRollup"
+            ]
+        }
+
+        let decoded = try JSONDecoder().decode(WidgetPreferences.self, from: data)
+
+        XCTAssertEqual(decoded.accountSelection.explicitIdentifiers, [account])
+        XCTAssertEqual(decoded.displayMode, .remaining)
+        XCTAssertEqual(decoded.visibleQuotaWindows, [.weekly])
+        XCTAssertTrue(decoded.showsResetTime)
+        XCTAssertEqual(decoded.accountOrdering, WidgetPreferences.defaults.accountOrdering)
+    }
+
+    /// An unknown display mode falls back to the default; every other field the
+    /// user chose is still theirs.
+    func testUnknownDisplayModeFallsBackWithoutDiscardingOtherPreferences() throws {
+        var written = WidgetPreferences.defaults
+        written.displayMode = .remaining
+        written.showsFreshness = true
+        written.accountOrdering = .urgency
+
+        let data = try encoded(written) { $0["displayMode"] = "perAccountAverage" }
+
+        let decoded = try JSONDecoder().decode(WidgetPreferences.self, from: data)
+
+        XCTAssertEqual(decoded.displayMode, WidgetPreferences.defaults.displayMode)
+        XCTAssertTrue(decoded.showsFreshness)
+        XCTAssertEqual(decoded.accountOrdering, .urgency)
+    }
+
+    /// An unknown selection mode must not throw away the identifiers stored
+    /// beside it — the selection is the one field here the user typed by hand.
+    /// Identifiers present imply an explicit selection; none imply `.all`.
+    func testUnknownAccountSelectionModeKeepsTheStoredIdentifiers() throws {
+        let account = WidgetAccountIdentifier.account(service: .codexCli, id: UUID())
+        var written = WidgetPreferences.defaults
+        written.accountSelection = .explicit([account])
+
+        let data = try encoded(written) { object in
+            guard var selection = object["accountSelection"] as? [String: Any] else { return }
+            selection["mode"] = "urgentOnly"
+            object["accountSelection"] = selection
+        }
+
+        let decoded = try JSONDecoder().decode(WidgetPreferences.self, from: data)
+
+        XCTAssertEqual(decoded.accountSelection.mode, .explicit)
+        XCTAssertEqual(decoded.accountSelection.explicitIdentifiers, [account])
+    }
+
+    /// The store must not reset on a future enum case, and the next mutation
+    /// must persist the preferences that survived rather than the wipe.
+    func testStoredPreferencesSurviveAFutureEnumCaseAcrossTheNextUpdate() throws {
+        var written = WidgetPreferences.defaults
+        written.displayMode = .remaining
+        written.showsFreshness = true
+        written.accountOrdering = .urgency
+        let data = try encoded(written) { $0["accountOrdering"] = "leastRecentlyUsed" }
+        defaults.set(data, forKey: WidgetPreferencesStore.storageKey)
+
+        let store = makeStore()
+
+        XCTAssertEqual(store.preferences.displayMode, .remaining)
+        XCTAssertTrue(store.preferences.showsFreshness)
+        XCTAssertEqual(store.preferences.accountOrdering, WidgetPreferences.defaults.accountOrdering)
+
+        store.setShowsResetTime(true)
+        let reloaded = makeStore()
+
+        XCTAssertEqual(reloaded.preferences.displayMode, .remaining)
+        XCTAssertTrue(reloaded.preferences.showsFreshness)
+        XCTAssertTrue(reloaded.preferences.showsResetTime)
+    }
+
+    /// Re-encodes a known-good value and edits the JSON, so the fixture can
+    /// never drift from the real wire format.
+    private func encoded(
+        _ preferences: WidgetPreferences,
+        _ mutate: (inout [String: Any]) -> Void
+    ) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as? [String: Any]
+        )
+        mutate(&object)
+        return try JSONSerialization.data(withJSONObject: object)
     }
 
     private func makeStore() -> WidgetPreferencesStore {

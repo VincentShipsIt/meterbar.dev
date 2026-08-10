@@ -79,12 +79,15 @@ public enum SharedMetricsStore {
         return MetricsCodec.decode(data)
     }
 
+    /// Decode the cached account snapshots, tolerating a missing file or
+    /// malformed entries the same way `loadMetrics` does (an unknown service
+    /// raw value drops that snapshot, not every account — see
+    /// `MetricsCodec.decodeAccounts`).
     public static func loadAccountMetrics() -> [AccountUsageSnapshot] {
         guard let accountMetricsFileURL,
-              let data = try? Data(contentsOf: accountMetricsFileURL),
-              let decoded = try? JSONDecoder().decode([AccountUsageSnapshot].self, from: data) else {
+              let data = try? Data(contentsOf: accountMetricsFileURL) else {
             return []
         }
-        return decoded
+        return MetricsCodec.decodeAccounts(data)
     }
 }

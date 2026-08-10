@@ -284,6 +284,15 @@ enum ClaudeCostScanner {
     /// freshly-read files plus every previously-cached one. The number on screen
     /// improves monotonically as the slices land instead of appearing all at
     /// once after a 70-second freeze.
+    ///
+    /// Cache-key dedup only catches the *same* file reached twice. A *copy* —
+    /// a sync client's conflict file, a restored backup, a project directory
+    /// duplicated by hand — is a different path holding the same events, and
+    /// `deduplicationKey` returns the same `messageID:requestID` for it in
+    /// either directory. So each file's totals are folded in the way Codex
+    /// folds a rollout: merged whole when its keys are new, dropped when they
+    /// are all already counted, and re-read event by event when they only
+    /// partly overlap.
     nonisolated static func scanRoots(
         _ roots: [URL],
         session: CostScanSession
@@ -293,36 +302,126 @@ enum ClaudeCostScanner {
             lifetime: ClaudeSessionTotals(),
             cutoff: session.cutoff
         )
-        var live: Set<String> = []
+        var coverage = CostScanCorpusCoverage()
 
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
 
-            for file in CostScanCorpus.transcripts(in: root) {
+            let listing = CostScanCorpus.listing(in: root)
+            coverage.add(listing)
+
+            for file in listing.files {
                 // `projectRoots` can name the same directory twice (an account's
                 // configured path is often just `~/.claude`), and the cache is
                 // keyed by standardized path — counting a file once per root
                 // would double its spend.
-                guard live.insert(file.cacheKey).inserted else { continue }
+                guard coverage.keep(file.cacheKey) else { continue }
 
                 let projectID = CostProjectAttribution.claudeProjectID(
                     forTranscriptURL: file.url,
                     root: root
                 )
-                guard let file = Self.totals(for: file, projectID: projectID, session: session) else {
+                guard let totals = Self.totals(for: file, projectID: projectID, session: session) else {
                     continue
                 }
-                windows.period.merge(file.period)
-                windows.lifetime.merge(file.lifetime)
+                guard Self.fold(totals, into: &windows) else {
+                    // This file shares only *some* of its events with one
+                    // already folded in — a stale copy holding a prefix of the
+                    // live transcript. Aggregates cannot be de-overlapped after
+                    // the fact, so it goes back through the event-level path.
+                    Self.foldByEvent(file, projectID: projectID, session: session, windows: &windows)
+                    continue
+                }
             }
         }
 
         // Enumeration always runs to completion even when the read budget is
-        // spent, so `live` is every transcript that exists — safe to prune
-        // against on a partial refresh. Without it, deleted transcripts would
-        // keep contributing their totals forever.
-        session.retain(keys: live, provider: .claude)
+        // spent, so a partial refresh is still safe to prune against — the
+        // budget limits reads, not the walk. Without pruning, deleted
+        // transcripts would keep contributing their totals forever. `coverage`
+        // withholds the prune when the walk itself came up short.
+        session.retain(coverage: coverage, provider: .claude)
         return windows
+    }
+
+    /// Merges one transcript's aggregates in, if that can be done without
+    /// double-counting.
+    ///
+    /// - Returns: `false` when the file's events partly overlap what is already
+    ///   folded in, which is the one case aggregates cannot express — the
+    ///   caller has to fall back to ``foldByEvent(_:projectID:session:windows:)``.
+    nonisolated private static func fold(
+        _ totals: ScanWindows<ClaudeSessionTotals>,
+        into windows: inout ScanWindows<ClaudeSessionTotals>
+    ) -> Bool {
+        // Period keys are a subset of lifetime keys by construction (every
+        // in-window event is also a lifetime event), so the lifetime test
+        // answers for both windows.
+        let keys = totals.lifetime.eventKeys
+        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
+            windows.period.merge(totals.period)
+            windows.lifetime.merge(totals.lifetime)
+            return true
+        }
+        // Every event is already counted: a duplicated transcript with nothing
+        // new in it.
+        return keys.isSubset(of: windows.lifetime.eventKeys)
+    }
+
+    /// Re-reads a partly-overlapping transcript from byte zero and folds in only
+    /// the events no other file has contributed yet.
+    ///
+    /// The cache is deliberately left alone. Its record describes this file on
+    /// its own, which stays correct; what is not cacheable is the overlap, since
+    /// which copy got read first can change between refreshes.
+    nonisolated private static func foldByEvent(
+        _ file: CostScanFile,
+        projectID: String,
+        session: CostScanSession,
+        windows: inout ScanWindows<ClaudeSessionTotals>
+    ) {
+        let allowance = session.budget.allowance
+        guard allowance > 0 else {
+            session.noteDeferred(.claude)
+            return
+        }
+
+        var request = FileLineReadRequest()
+        request.maxBytes = allowance
+
+        var periodKeyed: [String: ClaudeUsageEvent] = [:]
+        var lifetimeKeyed: [String: ClaudeUsageEvent] = [:]
+        var truncation = CostScanTruncationTally()
+
+        let read = FileLineReader.readLines(in: file.url, request: request) { line, _ in
+            let event = Self.usageEvent(from: line, url: file.url)
+            truncation.note(line, recovered: event != nil)
+            guard let event else { return }
+
+            let key = event.deduplicationKey(projectID: projectID)
+            guard !windows.lifetime.eventKeys.contains(key) else { return }
+            lifetimeKeyed[key] = event
+            if event.timestamp >= session.cutoff, !windows.period.eventKeys.contains(key) {
+                periodKeyed[key] = event
+            }
+        }
+
+        truncation.log(url: file.url)
+
+        guard let read else { return }
+        session.budget.consume(read.bytesRead)
+        if !read.reachedEndOfFile { session.noteDeferred(.claude) }
+
+        windows.period.merge(Self.tally(
+            keyed: periodKeyed,
+            projectID: projectID,
+            hourlyCutoff: session.hourlyCutoff
+        ))
+        windows.lifetime.merge(Self.tally(
+            keyed: lifetimeKeyed,
+            projectID: projectID,
+            hourlyCutoff: session.hourlyCutoff
+        ))
     }
 
     /// One transcript's contribution: cached, resumed, or skipped.
@@ -374,10 +473,10 @@ enum ClaudeCostScanner {
             // already folded into `payload`, and its bytes are behind the
             // committed offset. Within a single pass the last copy still
             // wins, exactly as a cold scan does.
-            if !payload.lifetimeKeys.contains(key) {
+            if !payload.lifetime.eventKeys.contains(key) {
                 lifetimeKeyed[key] = event
             }
-            if event.timestamp >= session.cutoff, !payload.periodKeys.contains(key) {
+            if event.timestamp >= session.cutoff, !payload.period.eventKeys.contains(key) {
                 periodKeyed[key] = event
             }
         }
@@ -406,17 +505,12 @@ enum ClaudeCostScanner {
         payload.period.sessions = payload.period.hasUsage ? 1 : 0
         payload.lifetime.sessions = payload.lifetime.hasUsage ? 1 : 0
 
-        if read.reachedEndOfFile {
-            // Dedup keys only matter while a read can resume mid-file. Keeping
-            // ~10k files' worth of them on disk forever would cost more to load
-            // than the scan they save.
-            payload.periodKeys = []
-            payload.lifetimeKeys = []
-        } else {
-            payload.periodKeys.formUnion(periodKeyed.keys)
-            payload.lifetimeKeys.formUnion(lifetimeKeyed.keys)
-            session.noteDeferred(.claude)
-        }
+        // The keys ride inside the two windows, so they persist past EOF rather
+        // than being cleared at it. That costs roughly a megabyte on a nine-
+        // megabyte artifact for a thousand-transcript corpus, and it buys the
+        // cross-file check in `fold` — which needs the keys of files the cache
+        // returns without reading, not just of files read this pass.
+        if !read.reachedEndOfFile { session.noteDeferred(.claude) }
 
         session.setRecord(
             CostScanFileRecord(
@@ -474,6 +568,7 @@ enum ClaudeCostScanner {
         hourlyCutoff: Date = .distantPast
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
+        totals.eventKeys = Set(keyed.keys)
         let events = keyed.keys.sorted().compactMap { keyed[$0] }
         // Resolving the current calendar is not free, and it cannot change
         // mid-fold.

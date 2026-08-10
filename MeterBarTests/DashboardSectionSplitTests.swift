@@ -233,7 +233,7 @@ final class DashboardSectionSplitTests: XCTestCase {
     /// columns themselves pack independently, which is the point of the
     /// masonry: a short card no longer pads itself out to a tall neighbour.
     func testMasonryColumnsDealCardsAcrossColumnsInReadingOrder() {
-        let columns = DashboardOverviewSection.masonryColumns(Array(0..<5), columnCount: 2)
+        let columns = ProviderMasonryLayout.columns(Array(0..<5), columnCount: 2)
 
         XCTAssertEqual(columns, [[0, 2, 4], [1, 3]])
     }
@@ -241,7 +241,7 @@ final class DashboardSectionSplitTests: XCTestCase {
     /// Column counts never differ by more than one, so no column runs long
     /// enough to reintroduce the ragged bottom edge.
     func testMasonryColumnsStayBalancedWithinOneCard() {
-        let columns = DashboardOverviewSection.masonryColumns(Array(0..<7), columnCount: 3)
+        let columns = ProviderMasonryLayout.columns(Array(0..<7), columnCount: 3)
 
         let counts = columns.map(\.count)
         XCTAssertEqual(counts, [3, 2, 2])
@@ -251,7 +251,7 @@ final class DashboardSectionSplitTests: XCTestCase {
     /// A single provider must still occupy one column's width rather than
     /// stretching across the page, so empty trailing columns are preserved.
     func testMasonryColumnsKeepEmptyTrailingColumnsForWidth() {
-        let columns = DashboardOverviewSection.masonryColumns([0], columnCount: 2)
+        let columns = ProviderMasonryLayout.columns([0], columnCount: 2)
 
         XCTAssertEqual(columns.count, 2)
         XCTAssertEqual(columns[0], [0])
@@ -259,7 +259,71 @@ final class DashboardSectionSplitTests: XCTestCase {
     }
 
     func testMasonryColumnsClampsNonPositiveColumnCounts() {
-        XCTAssertEqual(DashboardOverviewSection.masonryColumns([1, 2], columnCount: 0), [[1, 2]])
+        XCTAssertEqual(ProviderMasonryLayout.columns([1, 2], columnCount: 0), [[1, 2]])
+    }
+
+    // MARK: - Overview masonry placement
+
+    /// The columns used to be real `VStack`s, which made a card's SwiftUI
+    /// identity depend on which column it was dealt into — a membership change
+    /// anywhere in the list moved cards across columns and discarded their
+    /// `@State`. Placement is geometry now, from one container, so the same
+    /// deal has to come out of the frames instead: even indices stacked down
+    /// the left column, odd down the right, each column packing independently.
+    func testMasonryFramesStackEachColumnIndependently() {
+        let frames = ProviderMasonryLayout.frames(
+            heights: [100, 30, 40, 20, 60],
+            containerWidth: 210,
+            columnCount: 2,
+            spacing: 10
+        )
+
+        XCTAssertEqual(frames.map(\.origin.x), [0, 110, 0, 110, 0])
+        // Left column stacks 100, 40, 60 with a gutter after each. The right
+        // column packs on its own, so index 3 sits directly under index 1's 30
+        // rather than being pushed down by the tall card beside it.
+        XCTAssertEqual(frames.map(\.origin.y), [0, 0, 110, 40, 160])
+    }
+
+    /// Each card gets exactly one column's width; the gutters come out of the
+    /// container, not out of the cards.
+    func testMasonryFramesSplitTheContainerWidthMinusGutters() {
+        let frames = ProviderMasonryLayout.frames(
+            heights: [10, 10, 10],
+            containerWidth: 320,
+            columnCount: 3,
+            spacing: 16
+        )
+
+        XCTAssertEqual(frames.map(\.width), [96, 96, 96])
+        XCTAssertEqual(frames.map(\.origin.x), [0, 112, 224])
+    }
+
+    /// The section is as tall as its tallest column — the short column must not
+    /// pad the layout out to a ragged bottom edge.
+    func testMasonryHeightIsTheTallestColumn() {
+        let frames = ProviderMasonryLayout.frames(
+            heights: [100, 30, 40],
+            containerWidth: 210,
+            columnCount: 2,
+            spacing: 10
+        )
+
+        XCTAssertEqual(ProviderMasonryLayout.totalHeight(of: frames), 150)
+    }
+
+    /// A single card still occupies one column rather than stretching across
+    /// the page, matching the empty-trailing-column rule above.
+    func testMasonryFramesKeepASingleCardAtColumnWidth() {
+        let frames = ProviderMasonryLayout.frames(
+            heights: [42],
+            containerWidth: 210,
+            columnCount: 2,
+            spacing: 10
+        )
+
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames[0], CGRect(x: 0, y: 0, width: 100, height: 42))
     }
 
     // MARK: - Week-row date labels
