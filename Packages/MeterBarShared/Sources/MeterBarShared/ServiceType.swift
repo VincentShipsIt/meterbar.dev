@@ -79,6 +79,27 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the provider's CLI writes per-session logs on disk that MeterBar
+    /// can scan into a dated token series.
+    ///
+    /// The dividing line behind every "where does this provider's history come
+    /// from" decision. Claude, Codex and Grok write session logs, so their
+    /// history is re-readable and a scan can rebuild it. Cursor and OpenRouter
+    /// publish a single running counter and nothing else, so their only dated
+    /// series is the one `ProviderUsageLedger` accumulates from MeterBar's own
+    /// polls — which also means it cannot be backfilled.
+    ///
+    /// Centralized here for the same reason as `weeklyQuotaTitle`: the cost
+    /// scanners, the usage manager and the popover each encode this split, and
+    /// a chart that picks the wrong source draws an empty week rather than an
+    /// error.
+    public var writesLocalTokenLogs: Bool {
+        switch self {
+        case .claudeCode, .codexCli, .grok: return true
+        case .cursor, .openRouter: return false
+        }
+    }
+
     /// Display title for the third ("code review") quota window. For Claude
     /// Code this window is model-scoped: it echoes the parsed model label
     /// (e.g. "Fable", "Sonnet"), falling back to a neutral "Model" when no

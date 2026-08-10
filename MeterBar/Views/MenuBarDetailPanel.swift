@@ -228,10 +228,21 @@ enum MeterBarMenuDetailPanelLayout {
 struct MenuBarProviderDetailContent: View {
   let snapshot: ProviderSnapshot
 
+  /// The hovered provider's trailing week, passed in already bucketed.
+  ///
+  /// A plain value rather than a `CostTracker` lookup, matching
+  /// ``TokenActivityCard``: this panel is hosted directly in
+  /// `MenuBarDetailPanelLayoutTests`, and reaching for the scanner singleton
+  /// would drag it into every one of those tests. `nil` means the caller has no
+  /// series to offer, and the panel simply omits the strip — which is what the
+  /// layout tests exercise.
+  let dailyUsage: ProviderDailyUsageSeries?
+
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
-  init(snapshot: ProviderSnapshot) {
+  init(snapshot: ProviderSnapshot, dailyUsage: ProviderDailyUsageSeries? = nil) {
     self.snapshot = snapshot
+    self.dailyUsage = dailyUsage
   }
 
   private var detailLimits: [SnapshotLimit] {
@@ -302,6 +313,14 @@ struct MenuBarProviderDetailContent: View {
       let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
       if badges.hasContent {
         badges
+      }
+
+      if let dailyUsage {
+        // Last, and separated by a little extra space rather than a rule: the
+        // rows above are the window the card already summarised, and this is the
+        // week behind it. Reading top-to-bottom is now → recent past.
+        ProviderDailyUsageSparkline(series: dailyUsage, accentColor: snapshot.accentColor)
+          .padding(.top, MeterBarTheme.Spacing.xxs)
       }
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
