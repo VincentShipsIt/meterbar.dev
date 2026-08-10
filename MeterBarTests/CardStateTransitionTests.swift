@@ -132,6 +132,48 @@ final class CardStateTransitionTests: XCTestCase {
         )
     }
 
+    // MARK: - Overview masonry build smoke
+
+    /// The overview's provider grid moved from nested per-column `VStack`s to a
+    /// single `ProviderMasonryLayout` container so a card keeps its identity —
+    /// and its in-flight redemption state — when the snapshot list changes
+    /// underneath it. An odd count exercises the uneven-columns path.
+    func testOverviewSectionRendersTheProviderMasonry() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [
+                    .codexCli: makeMetrics(service: .codexCli, weekly: 10),
+                    .cursor: makeMetrics(service: .cursor, weekly: 30),
+                    .grok: makeMetrics(service: .grok, weekly: 80)
+                ],
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [:],
+                enabledServices: [.codexCli, .cursor, .grok]
+            )
+        )
+        XCTAssertEqual(snapshots.count % 2, 1, "fixture must be odd to leave one column short")
+
+        assertRenders(
+            DashboardOverviewSection(
+                snapshots: snapshots,
+                tightestLimit: nil,
+                costSummary: nil,
+                onSelectProvider: { _ in }
+            )
+        )
+
+        // Empty is the other structural state: no cards, no columns to place.
+        assertRenders(
+            DashboardOverviewSection(
+                snapshots: [],
+                tightestLimit: nil,
+                costSummary: nil,
+                onSelectProvider: { _ in }
+            ),
+            minHeight: 0
+        )
+    }
+
     // MARK: - OptimizeInsightsView build smoke
 
     func testOptimizeInsightsViewBuilds() {

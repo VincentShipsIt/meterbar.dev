@@ -479,9 +479,12 @@ struct ProviderSettingsView: View {
                                 + "Files and Claude login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 claudeAccountStore.setEnabled(isEnabled, for: account.id)
-                                SessionWakeSettingsStore.shared.reconcileAccounts(
+                                // Session Wake keeps Claude on its own reconcile
+                                // path; the shared pass only owns the Codex one.
+                                sessionWakeSettings.reconcileAccounts(
                                     available: claudeAccountStore.enabledAccounts.map(\.id)
                                 )
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onSave: { name, configDirectory in
@@ -493,9 +496,7 @@ struct ProviderSettingsView: View {
                             },
                             onRemove: {
                                 claudeAccountStore.removeAccount(id: account.id)
-                                MenuBarAccountSelectionStore.shared.forget(
-                                    MenuBarAccountKey.make(service: .claudeCode, accountID: account.id)
-                                )
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onRefresh: { refreshClaudeAccount(account) },
@@ -597,7 +598,7 @@ struct ProviderSettingsView: View {
                                 guard codexAccountStore.setEnabled(isEnabled, for: account.id) == .updated else {
                                     return
                                 }
-                                reconcileCodexAccountSelections()
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onSave: { name, homeDirectory in
@@ -610,7 +611,7 @@ struct ProviderSettingsView: View {
                             },
                             onRemove: {
                                 guard codexAccountStore.removeAccount(id: account.id) == .updated else { return }
-                                reconcileCodexAccountSelections()
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onMoveUp: { moveCodexAccount(at: index, down: false) },
@@ -839,6 +840,7 @@ struct ProviderSettingsView: View {
                                 + "Files and Grok login data are not deleted.",
                             onEnabledChange: { isEnabled in
                                 grokAccountStore.setEnabled(isEnabled, for: account.id)
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onSave: { name, homeDirectory in
@@ -851,9 +853,7 @@ struct ProviderSettingsView: View {
                             },
                             onRemove: {
                                 grokAccountStore.removeAccount(id: account.id)
-                                MenuBarAccountSelectionStore.shared.forget(
-                                    MenuBarAccountKey.make(service: .grok, accountID: account.id)
-                                )
+                                reconcileProviderAccountSelections()
                                 Task { await dataManager.refreshAll() }
                             },
                             onMoveUp: { moveGrokAccount(at: index, down: false) },
@@ -882,9 +882,10 @@ struct ProviderSettingsView: View {
             get: { providerVisibility.isEnabled(service) },
             set: { isEnabled in
                 providerVisibility.set(service, isEnabled: isEnabled)
-                if service == .codexCli {
-                    reconcileCodexAccountSelections()
-                }
+                // Untracking any account-aware provider strands its selections
+                // exactly the way disabling one of its accounts does, so this
+                // runs for every provider rather than Codex alone.
+                reconcileProviderAccountSelections()
                 Task {
                     await dataManager.refreshAll()
                 }
@@ -974,9 +975,15 @@ struct ProviderSettingsView: View {
     }
 
     /// Keep every account-scoped consumer on the same enabled identity set after
-    /// a Codex disable or delete. Session Wake clears and disarms rather than
-    /// silently retargeting; menu-bar and widget preferences prune stale keys.
-    private func reconcileCodexAccountSelections() {
+    /// any provider disable, delete, or untrack. Session Wake clears and disarms
+    /// rather than silently retargeting; menu-bar and widget preferences prune
+    /// stale keys.
+    ///
+    /// The projection covers all three account-aware providers in one pass, so
+    /// every call site gets the same result regardless of which provider was
+    /// mutated — Claude and Grok call sites used to skip it, which left a
+    /// disabled account holding one of the four status-item slots.
+    private func reconcileProviderAccountSelections() {
         ProviderAccountSelectionReconciler.apply(
             ProviderAccountSelectionAvailability(
                 claudeAccounts: claudeAccountStore.accounts,

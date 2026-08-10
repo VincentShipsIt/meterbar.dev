@@ -15,9 +15,12 @@ struct ProviderStatusCard: View {
     @StateObject private var codexService = CodexCliLocalService.shared
     @StateObject private var codexAccounts = CodexAccountStore.shared
     @StateObject private var dataManager = UsageDataManager.shared
+    // Session-scoped rather than per-card `@State`: this card's identity is not
+    // stable across dashboard re-deals, and losing the record re-offers a credit
+    // that was already spent.
+    @StateObject private var resetCreditConsumptions = CodexResetCreditConsumptionStore.shared
     @State private var isCodexAuthenticated = false
     @State private var isConsumingResetCredit = false
-    @State private var didConsumeResetCredit = false
     @State private var showingResetCreditConfirmation = false
     @State private var resetCreditAlertTitle = ProviderCardResetCreditOutcome.failureTitle
     @State private var resetCreditAlertMessage: String?
@@ -255,7 +258,10 @@ struct ProviderStatusCard: View {
     private var showsResetCreditAction: Bool {
         ProviderCardPresentation.showsResetCreditAction(
             snapshot: snapshot,
-            didConsumeResetCredit: didConsumeResetCredit,
+            hasPendingConsumption: resetCreditConsumptions.hasPendingConsumption(
+                accountID: snapshot.accountID,
+                snapshotUpdatedAt: snapshot.updatedAt
+            ),
             isAuthenticated: isCodexAuthenticated,
             hasResolvedAccount: codexAccount != nil
         )
@@ -287,9 +293,17 @@ struct ProviderStatusCard: View {
         Task {
             do {
                 let result = try await codexService.consumeResetCredit(account: codexAccount)
-                didConsumeResetCredit = true
                 if let refreshedMetrics = result.refreshedMetrics {
+                    // Post-spend numbers straight from the provider: the card is
+                    // about to show the real remaining balance, so eligibility
+                    // alone decides whether another banked credit stays offered.
+                    resetCreditConsumptions.clear(accountID: codexAccount.id)
                     dataManager.applyCodexResetCreditRefresh(refreshedMetrics, accountID: codexAccount.id)
+                } else {
+                    // The credit is gone but the count on screen predates the
+                    // spend. Suppress the action until a later fetch proves the
+                    // balance, or the next press spends a second credit.
+                    resetCreditConsumptions.markConsumed(accountID: codexAccount.id)
                 }
                 if let alert = ProviderCardResetCreditOutcome.alert(for: result) {
                     present(alert)

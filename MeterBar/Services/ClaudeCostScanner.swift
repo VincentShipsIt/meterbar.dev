@@ -302,17 +302,20 @@ enum ClaudeCostScanner {
             lifetime: ClaudeSessionTotals(),
             cutoff: session.cutoff
         )
-        var live: Set<String> = []
+        var coverage = CostScanCorpusCoverage()
 
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
 
-            for file in CostScanCorpus.transcripts(in: root) {
+            let listing = CostScanCorpus.listing(in: root)
+            coverage.add(listing)
+
+            for file in listing.files {
                 // `projectRoots` can name the same directory twice (an account's
                 // configured path is often just `~/.claude`), and the cache is
                 // keyed by standardized path — counting a file once per root
                 // would double its spend.
-                guard live.insert(file.cacheKey).inserted else { continue }
+                guard coverage.keep(file.cacheKey) else { continue }
 
                 let projectID = CostProjectAttribution.claudeProjectID(
                     forTranscriptURL: file.url,
@@ -333,10 +336,11 @@ enum ClaudeCostScanner {
         }
 
         // Enumeration always runs to completion even when the read budget is
-        // spent, so `live` is every transcript that exists — safe to prune
-        // against on a partial refresh. Without it, deleted transcripts would
-        // keep contributing their totals forever.
-        session.retain(keys: live, provider: .claude)
+        // spent, so a partial refresh is still safe to prune against — the
+        // budget limits reads, not the walk. Without pruning, deleted
+        // transcripts would keep contributing their totals forever. `coverage`
+        // withholds the prune when the walk itself came up short.
+        session.retain(coverage: coverage, provider: .claude)
         return windows
     }
 
