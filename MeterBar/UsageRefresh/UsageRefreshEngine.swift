@@ -26,22 +26,33 @@ nonisolated struct UsageRefreshEngine {
         self.shouldCancel = shouldCancel
     }
 
-    func run() async -> RefreshCLIResponse {
+    /// A finished run plus, when work outlived the deadline, the task that
+    /// still owns the cross-process lock.
+    struct RunOutcome {
+        let response: RefreshCLIResponse
+        /// Non-nil only after a timeout or cancellation left the refresh in
+        /// flight. The lock is released when this finishes, so a caller that
+        /// intends to exit should await it — bounded — rather than rely on the
+        /// kernel dropping the `flock` at process death.
+        let pendingCleanup: Task<Void, Never>?
+    }
+
+    func run() async -> RunOutcome {
         switch lock.acquire() {
         case .acquired:
             break
         case let .contended(holder):
             let who = holder.map { " (\($0.shortDescription))" } ?? ""
-            return response(
+            return settled(
                 outcome: .alreadyRunning,
                 duration: 0,
                 outcomes: [],
                 message: "Another MeterBar refresh\(who) is already running; no providers were contacted."
             )
         case let .legacyHeld(guidance):
-            return response(outcome: .alreadyRunning, duration: 0, outcomes: [], message: guidance)
+            return settled(outcome: .alreadyRunning, duration: 0, outcomes: [], message: guidance)
         case let .unavailable(reason):
-            return response(
+            return settled(
                 outcome: .refreshFailed,
                 duration: 0,
                 outcomes: [],
@@ -71,7 +82,7 @@ nonisolated struct UsageRefreshEngine {
         case let .completed(report):
             completionObserver.cancel()
             lock.release()
-            return response(
+            return settled(
                 outcome: outcome(for: report),
                 duration: report.duration,
                 outcomes: report.outcomes,
@@ -82,21 +93,27 @@ nonisolated struct UsageRefreshEngine {
             refreshTask.cancel()
 
             // A cooperative provider normally ends immediately. If it does not,
-            // retain the cross-process lock until the in-flight work really
-            // stops, while allowing the bounded CLI response to return now.
-            Task {
+            // the cross-process lock stays held until the in-flight work really
+            // stops, while the bounded CLI response returns now. The handle is
+            // returned rather than fired and forgotten: the caller decides how
+            // long to wait for it before exiting.
+            let lock = lock
+            let cleanup = Task {
                 _ = await refreshTask.value
                 lock.release()
             }
 
             let timedOut = race == .timedOut
-            return response(
-                outcome: timedOut ? .timedOut : .cancellation,
-                duration: Date().timeIntervalSince(startedAt),
-                outcomes: [],
-                message: timedOut
-                    ? "Refresh did not finish within \(Int(timeout))s; cached metrics remain available."
-                    : "Refresh cancelled; cached metrics remain available."
+            return RunOutcome(
+                response: response(
+                    outcome: timedOut ? .timedOut : .cancellation,
+                    duration: Date().timeIntervalSince(startedAt),
+                    outcomes: [],
+                    message: timedOut
+                        ? "Refresh did not finish within \(Int(timeout))s; cached metrics remain available."
+                        : "Refresh cancelled; cached metrics remain available."
+                ),
+                pendingCleanup: cleanup
             )
         }
     }
@@ -118,6 +135,20 @@ nonisolated struct UsageRefreshEngine {
         let names = failed.map(\.provider.displayName).sorted().joined(separator: ", ")
         return "\(failed.count) provider(s) failed to refresh (\(names)); "
             + "\(preserved) kept last-known-good metrics."
+    }
+
+    /// A run that owes the caller nothing: either the lock was never taken or
+    /// it has already been released.
+    private func settled(
+        outcome: RefreshCLIOutcome,
+        duration: TimeInterval,
+        outcomes: [ProviderRefreshOutcome],
+        message: String?
+    ) -> RunOutcome {
+        RunOutcome(
+            response: response(outcome: outcome, duration: duration, outcomes: outcomes, message: message),
+            pendingCleanup: nil
+        )
     }
 
     private func response(
