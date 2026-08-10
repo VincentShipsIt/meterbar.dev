@@ -19,10 +19,13 @@ import MeterBarShared
 ///   that scanner parks events until a later line declares one. A Grok
 ///   `turn_completed` names its own model inside `modelUsage`, so every record
 ///   is attributable the moment it is read.
-/// * **No overlap fallback.** Codex stores the same rollout under both
-///   `sessions/` and `archived_sessions/`; Grok writes each session exactly
-///   once, and every dedup key carries its session ID, so two files cannot
-///   describe the same event. A plain `merge` is sufficient.
+///
+/// It does keep Codex's overlap fallback. Grok writes each session exactly
+/// once, but nothing keeps a *copy* of that file off disk: sync clients leave
+/// conflict copies, backups get restored into the tree, and `CostScanCorpus`
+/// matches every `.jsonl` under the root. Because the dedup key carries the
+/// session ID from the payload rather than from the path, a copy produces
+/// identical keys — so a blind `merge` would bill it twice.
 enum GrokCostScanner {
     /// USD per unit of `costUsdTicks`.
     ///
@@ -114,6 +117,11 @@ enum GrokCostScanner {
     /// Roots can overlap — two accounts pointed at one home, or `GROK_HOME` set
     /// to the default — so files are deduplicated by cache key the way the
     /// Claude scanner deduplicates its project roots.
+    ///
+    /// Cache-key dedup only catches the *same* file reached twice. Two distinct
+    /// files describing the same session — a sync conflict copy, a restored
+    /// backup — are caught one level down, by folding each file's tally against
+    /// the events already counted.
     nonisolated static func scanRoots(
         _ roots: [URL],
         session: CostScanSession
@@ -126,13 +134,81 @@ enum GrokCostScanner {
             for file in CostScanCorpus.transcripts(in: root) {
                 guard live.insert(file.cacheKey).inserted else { continue }
                 guard let totals = Self.totals(for: file, session: session) else { continue }
-                windows.period.merge(totals.period)
-                windows.lifetime.merge(totals.lifetime)
+                guard Self.fold(totals, into: &windows) else {
+                    // This file shares only *some* of its events with one
+                    // already folded in — a stale copy holding a prefix of the
+                    // live session. Aggregates cannot be de-overlapped after
+                    // the fact, so it goes back through the event-level path,
+                    // where `apply` drops each duplicate against `eventKeys`.
+                    Self.foldByEvent(file, session: session, windows: &windows)
+                    continue
+                }
             }
         }
 
         session.retain(keys: live, provider: .grok)
         return windows
+    }
+
+    /// Adds one file's tally to the shared windows.
+    ///
+    /// - Returns: `false` when the file's events partly overlap what is already
+    ///   counted, which no aggregate merge can resolve — the caller has to
+    ///   re-read that file event by event.
+    nonisolated private static func fold(
+        _ totals: GrokFileTotals,
+        into windows: inout ScanWindows<CostScanWindowContext>
+    ) -> Bool {
+        // Period keys are a subset of lifetime keys by construction (every
+        // in-window event is also a lifetime event), so the lifetime test
+        // answers for both windows.
+        let keys = totals.lifetime.eventKeys
+        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
+            windows.period.merge(totals.period)
+            windows.lifetime.merge(totals.lifetime)
+            return true
+        }
+        // Every event is already counted: a duplicated session with nothing new.
+        return keys.isSubset(of: windows.lifetime.eventKeys)
+    }
+
+    /// Streams one file straight into the shared windows, under the same budget
+    /// every other read answers to.
+    ///
+    /// The per-file cache is deliberately left alone. This read starts at byte
+    /// zero and produces no tally of its own, so there is nothing here a later
+    /// slice could resume from — the record `totals(for:session:)` already
+    /// committed stays the file's cached state.
+    nonisolated private static func foldByEvent(
+        _ file: CostScanFile,
+        session: CostScanSession,
+        windows: inout ScanWindows<CostScanWindowContext>
+    ) {
+        let allowance = session.budget.allowance
+        guard allowance > 0 else {
+            session.noteDeferred(.grok)
+            return
+        }
+
+        let attribution = Self.attribution(for: file.url)
+        let calendar = Calendar.current
+        var truncation = CostScanTruncationTally()
+        var request = FileLineReadRequest()
+        request.maxBytes = allowance
+
+        let read = FileLineReader.readLines(in: file.url, request: request) { readerLine, _ in
+            // swiftlint:disable:next contains_over_range_nil_comparison
+            guard readerLine.bytes.range(of: Self.turnCompletedMarker) != nil else { return }
+            let event = Self.usageEvent(from: readerLine.bytes, attribution: attribution)
+            truncation.note(readerLine, recovered: event != nil)
+            guard let event else { return }
+            Self.apply(event, windows: &windows, calendar: calendar)
+        }
+        truncation.log(url: file.url)
+
+        guard let read else { return }
+        session.budget.consume(read.bytesRead)
+        if !read.reachedEndOfFile { session.noteDeferred(.grok) }
     }
 
     /// The window's totals as a published cost row plus its daily rows.

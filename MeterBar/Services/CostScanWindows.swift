@@ -141,6 +141,16 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
     /// Which dated rate entries priced these events, and how many predated the
     /// table entirely (issue #339).
     var pricing = PricingProvenance()
+    /// The `messageID:requestID` keys these totals were built from — the same
+    /// role `eventKeys` plays in ``CostScanWindowContext``, and the reason a
+    /// merge can tell "another transcript" from "the same transcript again".
+    ///
+    /// Two things depend on it. Within a file it is the first-wins guard across
+    /// a resume boundary: an event behind the committed offset is already
+    /// tallied, so a later slice must drop its duplicate. Across files it is
+    /// what lets ``ClaudeCostScanner`` refuse a sync conflict copy or a restored
+    /// backup instead of billing its events twice.
+    var eventKeys: Set<String> = []
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
@@ -149,6 +159,10 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
     /// Folds one file's totals in. Empty files are skipped so they never inflate
     /// `sessions`.
     mutating func merge(_ other: ClaudeSessionTotals) {
+        // Ahead of the usage guard: a slice that read only non-usage lines
+        // still has to leave its keys behind, or the next slice would re-count
+        // an event it has already passed.
+        eventKeys.formUnion(other.eventKeys)
         guard other.hasUsage else { return }
 
         input += other.input

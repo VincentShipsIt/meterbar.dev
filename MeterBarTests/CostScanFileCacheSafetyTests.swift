@@ -99,13 +99,13 @@ final class CostScanFileCacheSafetyTests: XCTestCase {
         )
     }
 
-    func testHourlyUpgradeReadsFromAFreshV4Artifact() throws {
-        let oldURL = directory.appendingPathComponent("cost-scan-claude-v3.json")
+    func testDedupKeyUpgradeReadsFromAFreshV5Artifact() throws {
+        let oldURL = directory.appendingPathComponent("cost-scan-claude-v4.json")
         try CostScanCacheStore.saveClaude(makeCache(), to: oldURL)
         let store = CostScanCacheStore(directory: directory)
 
-        XCTAssertEqual(CostScanFileCache<ClaudeFileTotals>.currentSchemaVersion, 4)
-        XCTAssertEqual(CostScanCacheStore.claudeFileName, "cost-scan-claude-v4.json")
+        XCTAssertEqual(CostScanFileCache<ClaudeFileTotals>.currentSchemaVersion, 5)
+        XCTAssertEqual(CostScanCacheStore.claudeFileName, "cost-scan-claude-v5.json")
         XCTAssertTrue(store.loadClaude().records.isEmpty)
     }
 

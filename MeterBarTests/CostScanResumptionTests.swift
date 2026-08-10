@@ -36,7 +36,7 @@ final class CostScanResumptionTests: XCTestCase {
         let file = makeFile(size: 100)
         var record = makeRecord(stamp: file.stamp)
         record.cutoff = currentCutoff
-        record.payload.periodKeys = ["unchanged"]
+        record.payload.period.eventKeys = ["unchanged"]
         var didRebase = false
 
         let result = CostScanResumption.resumableRecord(
@@ -49,7 +49,7 @@ final class CostScanResumptionTests: XCTestCase {
         }
 
         XCTAssertFalse(didRebase)
-        XCTAssertEqual(try XCTUnwrap(result).payload.periodKeys, ["unchanged"])
+        XCTAssertEqual(try XCTUnwrap(result).payload.period.eventKeys, ["unchanged"])
     }
 
     func testWindowPayloadRebaseClearsPeriodWhenEveryEventPredatesCutoff() throws {
@@ -131,24 +131,24 @@ final class CostScanResumptionTests: XCTestCase {
     func testClaudeRebasePreservesItsSeparatePeriodAndLifetimeKeySemantics() throws {
         var beforePayload = ClaudeFileTotals()
         beforePayload.period.input = 10
-        beforePayload.periodKeys = ["stale-period"]
+        beforePayload.period.eventKeys = ["stale-period"]
         beforePayload.lifetime.latest = currentCutoff.addingTimeInterval(-100)
-        beforePayload.lifetimeKeys = ["old"]
+        beforePayload.lifetime.eventKeys = ["old"]
 
         let beforeResult = try XCTUnwrap(resumableRecord(makeRecord(payload: beforePayload)))
         XCTAssertFalse(beforeResult.payload.period.hasUsage)
-        XCTAssertTrue(beforeResult.payload.periodKeys.isEmpty)
-        XCTAssertEqual(beforeResult.payload.lifetimeKeys, ["old"])
+        XCTAssertTrue(beforeResult.payload.period.eventKeys.isEmpty)
+        XCTAssertEqual(beforeResult.payload.lifetime.eventKeys, ["old"])
 
         var insidePayload = ClaudeFileTotals()
         insidePayload.lifetime.input = 25
         insidePayload.lifetime.earliest = currentCutoff.addingTimeInterval(100)
         insidePayload.lifetime.latest = currentCutoff.addingTimeInterval(200)
-        insidePayload.lifetimeKeys = ["current"]
+        insidePayload.lifetime.eventKeys = ["current"]
 
         let insideResult = try XCTUnwrap(resumableRecord(makeRecord(payload: insidePayload)))
         XCTAssertEqual(insideResult.payload.period.input, 25)
-        XCTAssertEqual(insideResult.payload.periodKeys, ["current"])
+        XCTAssertEqual(insideResult.payload.period.eventKeys, ["current"])
     }
 
     private func resumableRecord<Payload: CostScanPeriodRebasable>(

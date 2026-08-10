@@ -1524,6 +1524,125 @@ final class CostTrackerTests: XCTestCase {
 
     // MARK: - Budgeted, resumable corpus scan
 
+    /// One event copied into a second project directory — a sync conflict copy,
+    /// a restored backup, a project folder duplicated under a new path — must
+    /// be billed once. `messageID:requestID` identifies the event globally, so
+    /// the second file adds nothing no matter which project it lands under.
+    func testClaudeScanCountsAnEventCopiedIntoASecondProjectOnce() throws {
+        let root = try makeTranscriptRoot()
+        let line = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z",
+            messageID: "msg_a",
+            requestID: "req_a",
+            input: 100,
+            output: 10
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha"),
+            name: "session.jsonl",
+            modifiedAgo: 0,
+            lines: [line]
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha-conflict"),
+            name: "session.jsonl",
+            modifiedAgo: 60,
+            lines: [line]
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.scanRoots(
+            [root],
+            session: CostScanSession(cutoff: cutoff, options: .unlimited)
+        )
+
+        XCTAssertEqual(windows.period.input, 100)
+        XCTAssertEqual(windows.period.output, 10)
+        XCTAssertEqual(windows.period.sessions, 1)
+        XCTAssertEqual(windows.lifetime.input, 100)
+    }
+
+    /// The harder half: a stale copy holds a prefix of the live transcript, so
+    /// the two overlap without either containing the other. No aggregate merge
+    /// can resolve that — the union has to be assembled event by event.
+    func testClaudeScanCountsTheUnionOfPartiallyOverlappingCopiesOnce() throws {
+        let root = try makeTranscriptRoot()
+        let shared = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z",
+            messageID: "msg_a",
+            requestID: "req_a",
+            input: 100,
+            output: 10
+        )
+        let onlyInLive = eventLine(
+            timestamp: "2026-07-01T11:00:00.000Z",
+            messageID: "msg_b",
+            requestID: "req_b",
+            input: 7,
+            output: 3
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha"),
+            name: "session.jsonl",
+            modifiedAgo: 0,
+            lines: [shared, onlyInLive]
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha-conflict"),
+            name: "session.jsonl",
+            modifiedAgo: 60,
+            lines: [shared]
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+
+        let windows = ClaudeCostScanner.scanRoots(
+            [root],
+            session: CostScanSession(cutoff: cutoff, options: .unlimited)
+        )
+
+        XCTAssertEqual(windows.period.input, 107)
+        XCTAssertEqual(windows.period.output, 13)
+        XCTAssertEqual(windows.lifetime.input, 107)
+    }
+
+    /// The overlap guard reads its key sets off the per-file cache, so a warm
+    /// refresh — every file answered from disk, not a single byte re-read —
+    /// has to reject the copy exactly as the cold scan did.
+    func testClaudeScanRejectsACopiedEventOnAWarmCachedRefresh() throws {
+        let root = try makeTranscriptRoot()
+        let line = eventLine(
+            timestamp: "2026-07-01T10:00:00.000Z",
+            messageID: "msg_a",
+            requestID: "req_a",
+            input: 100,
+            output: 10
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha"),
+            name: "session.jsonl",
+            modifiedAgo: 0,
+            lines: [line]
+        )
+        try writeTranscript(
+            in: try makeProjectDirectory(in: root, named: "-Users-me-alpha-conflict"),
+            name: "session.jsonl",
+            modifiedAgo: 60,
+            lines: [line]
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let cold = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: cold)
+        XCTAssertEqual(cold.persist(), .persisted)
+
+        let warm = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        let windows = ClaudeCostScanner.scanRoots([root], session: warm)
+
+        XCTAssertEqual(windows.period.input, 100)
+        XCTAssertEqual(windows.lifetime.input, 100)
+    }
+
     func testBudgetedClaudeScanMatchesWholeFileForDuplicateUnkeyedEvents() throws {
         let root = try makeTranscriptRoot()
         let line = eventLine(
@@ -2217,6 +2336,15 @@ final class CostTrackerTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         return root
+    }
+
+    /// One project folder under a transcript root, named the way Claude Code
+    /// encodes them, so `CostProjectAttribution` derives a distinct project ID
+    /// per directory.
+    private func makeProjectDirectory(in root: URL, named name: String) throws -> URL {
+        let directory = root.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     private func makeScanCacheStore() throws -> CostScanCacheStore {
