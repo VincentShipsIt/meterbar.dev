@@ -40,9 +40,11 @@ nonisolated enum StatusLimitProbeRequestBuilder {
         var requests: [StatusLimitProbeRequest] = []
 
         if visibility.isEnabled(.claudeCode) {
-            for account in ClaudeCodeAccountStore.shared.enabledAccounts {
+            let enabledAccounts = ClaudeCodeAccountStore.shared.enabledAccounts
+            for account in enabledAccounts {
                 guard let accountMetrics = claudeMetrics(
                     for: account,
+                    enabledAccountCount: enabledAccounts.count,
                     accountMetrics: UsageDataManager.shared.claudeCodeAccountMetrics,
                     providerMetrics: metrics[.claudeCode]
                 ) else { continue }
@@ -182,19 +184,31 @@ nonisolated enum StatusLimitProbeRequestBuilder {
     }
 
     /// Per-account metrics win; the provider-wide snapshot only backs the
-    /// default account, which is the one that reads `~/.claude`.
+    /// default account — which is the one that reads `~/.claude` — while it is
+    /// the *only* enabled one and no per-account metrics exist at all. Without
+    /// that guard a multi-profile setup double-counts: `UsageDataManager`'s
+    /// `representativeClaudeCodeMetrics` borrows an arbitrary enabled account's
+    /// snapshot when the default account's fetch failed with no cache, and the
+    /// borrowed numbers would then reach the menu bar under the default
+    /// account's identity. Same rule as Codex and Grok below.
     static func claudeMetrics(
         for account: ClaudeCodeAccount,
+        enabledAccountCount: Int,
         accountMetrics: [UUID: UsageMetrics],
         providerMetrics: UsageMetrics?
     ) -> UsageMetrics? {
-        accountMetrics[account.id] ?? (account.isDefault ? providerMetrics : nil)
+        let fallbackMetrics = account.isDefault
+            && enabledAccountCount == 1
+            && accountMetrics.isEmpty
+            ? providerMetrics
+            : nil
+        return accountMetrics[account.id] ?? fallbackMetrics
     }
 
-    /// Codex is stricter than Claude: the provider-wide snapshot only backs the
-    /// default account while it is the *only* enabled one and no per-account
-    /// metrics exist at all, so a multi-profile setup never double-counts the
-    /// default profile's quota.
+    /// Codex follows the same cache-identity rule as Claude: the provider-wide
+    /// snapshot only backs the default account while it is the *only* enabled
+    /// one and no per-account metrics exist at all, so a multi-profile setup
+    /// never double-counts the default profile's quota.
     static func codexMetrics(
         for account: CodexAccount,
         enabledAccountCount: Int,
