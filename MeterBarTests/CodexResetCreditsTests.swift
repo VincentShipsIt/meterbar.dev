@@ -143,6 +143,149 @@ final class CodexResetCreditsTests: XCTestCase {
         ))
     }
 
+    // MARK: - Post-redemption action visibility
+
+    /// Baseline: a blocked account with banked credits offers the action.
+    func testActionIsOfferedForABlockedCardWithBankedCredits() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+
+        XCTAssertTrue(showsAction(blockedSnapshot(accountID: accountID), store: store))
+    }
+
+    /// A redemption whose follow-up refetch failed leaves the snapshot quoting
+    /// the pre-spend count. Offering the action against that count is the
+    /// double-spend: the next press redeems a second, real credit.
+    func testActionIsSuppressedWhileASpentCreditIsUnconfirmed() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+        let snapshot = blockedSnapshot(accountID: accountID)
+
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+
+        XCTAssertFalse(showsAction(snapshot, store: store))
+    }
+
+    /// Regression, dashboard card churn: the guard used to be per-card `@State`,
+    /// so a card that changed masonry column mid-poll came back with the spent
+    /// credit re-offered. Keyed by account, the record outlives any card.
+    func testSuppressionSurvivesACardBeingRebuilt() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+
+        // A freshly constructed snapshot for the same account — what a torn-down
+        // and re-created card evaluates against.
+        let rebuilt = blockedSnapshot(accountID: accountID)
+        XCTAssertFalse(showsAction(rebuilt, store: store))
+    }
+
+    /// Spending one account's credit must not disarm another account's button.
+    func testSuppressionIsScopedToTheRedeemingAccount() {
+        let store = CodexResetCreditConsumptionStore()
+        let spender = UUID()
+        let bystander = UUID()
+
+        store.markConsumed(accountID: spender, at: MetricsFixtures.referenceDate)
+
+        XCTAssertTrue(showsAction(blockedSnapshot(accountID: bystander), store: store))
+    }
+
+    /// The suppression covers a stale count, not the account. Once a poll
+    /// delivers metrics fetched after the spend, that count is authoritative and
+    /// eligibility alone decides — an account with a second banked credit gets
+    /// its button back.
+    func testSuppressionLiftsOnceNewerMetricsArrive() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+
+        let polled = blockedSnapshot(
+            accountID: accountID,
+            resetCreditsAvailable: 1,
+            updatedAt: MetricsFixtures.referenceDate.addingTimeInterval(60)
+        )
+        XCTAssertTrue(showsAction(polled, store: store))
+    }
+
+    /// The redemption's own refresh is the fastest newer-metrics path, and the
+    /// card clears the record explicitly rather than waiting for a poll. With a
+    /// credit still banked the action must come straight back — this is the
+    /// stuck-button bug the permanent latch caused.
+    func testClearingAfterARefreshRestoresTheActionForARemainingCredit() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+        store.clear(accountID: accountID)
+
+        XCTAssertTrue(showsAction(blockedSnapshot(accountID: accountID, resetCreditsAvailable: 1), store: store))
+    }
+
+    /// The mirror case: refreshed numbers showing the last credit spent must
+    /// leave nothing to press, via the eligibility rule rather than the guard.
+    func testSpendingTheLastCreditHidesTheActionOnRefreshedNumbers() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+
+        store.clear(accountID: accountID)
+
+        XCTAssertFalse(showsAction(blockedSnapshot(accountID: accountID, resetCreditsAvailable: 0), store: store))
+    }
+
+    // MARK: - Consumption store
+
+    /// A card with no cached metrics has no count that could postdate the spend,
+    /// so it can never clear the record on its own.
+    func testUndatedSnapshotNeverSupersedesARecordedSpend() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+
+        XCTAssertTrue(store.hasPendingConsumption(accountID: accountID, snapshotUpdatedAt: nil))
+    }
+
+    /// Metrics that predate the spend describe the world before it happened.
+    func testOlderMetricsDoNotSupersedeARecordedSpend() {
+        let store = CodexResetCreditConsumptionStore()
+        let accountID = UUID()
+        store.markConsumed(accountID: accountID, at: MetricsFixtures.referenceDate)
+
+        XCTAssertTrue(store.hasPendingConsumption(
+            accountID: accountID,
+            snapshotUpdatedAt: MetricsFixtures.referenceDate.addingTimeInterval(-60)
+        ))
+        // A fetch that completed at the same instant proves nothing either.
+        XCTAssertTrue(store.hasPendingConsumption(
+            accountID: accountID,
+            snapshotUpdatedAt: MetricsFixtures.referenceDate
+        ))
+    }
+
+    /// Snapshots without an account id (the shared non-account providers) can
+    /// never match a record, and must not read as pending.
+    func testAccountlessSnapshotsHaveNoPendingConsumption() {
+        let store = CodexResetCreditConsumptionStore()
+        store.markConsumed(accountID: UUID(), at: MetricsFixtures.referenceDate)
+
+        XCTAssertFalse(store.hasPendingConsumption(accountID: nil, snapshotUpdatedAt: nil))
+    }
+
+    func testClearAllDropsEveryRecordedSpend() {
+        let store = CodexResetCreditConsumptionStore()
+        let first = UUID()
+        let second = UUID()
+        store.markConsumed(accountID: first, at: MetricsFixtures.referenceDate)
+        store.markConsumed(accountID: second, at: MetricsFixtures.referenceDate)
+
+        store.clearAll()
+
+        XCTAssertFalse(store.hasPendingConsumption(accountID: first, snapshotUpdatedAt: nil))
+        XCTAssertFalse(store.hasPendingConsumption(accountID: second, snapshotUpdatedAt: nil))
+    }
+
     // MARK: - Confirmation copy
 
     func testConfirmationNamesTheTargetAccount() {
@@ -394,6 +537,47 @@ final class CodexResetCreditsTests: XCTestCase {
             body.append(buffer, count: count)
         }
         return body
+    }
+
+    /// A Codex card in the only state that offers the reset action: a weekly
+    /// window at its limit with credits still banked.
+    private func blockedSnapshot(
+        accountID: UUID,
+        resetCreditsAvailable: Int? = 2,
+        updatedAt: Date = MetricsFixtures.referenceDate
+    ) -> ProviderSnapshot {
+        let metrics = UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(
+                used: 100,
+                total: 100,
+                resetTime: updatedAt.addingTimeInterval(24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600
+            ),
+            resetCreditsAvailable: resetCreditsAvailable,
+            lastUpdated: updatedAt
+        )
+        return ProviderSnapshotBuilder.snapshot(
+            title: "Codex CLI",
+            service: .codexCli,
+            metrics: metrics,
+            emptyDetail: "No data",
+            accountID: accountID
+        )
+    }
+
+    /// The presentation rule as the card asks it: authenticated, account
+    /// resolved, with the store answering the pending-spend question.
+    private func showsAction(_ snapshot: ProviderSnapshot, store: CodexResetCreditConsumptionStore) -> Bool {
+        ProviderCardPresentation.showsResetCreditAction(
+            snapshot: snapshot,
+            hasPendingConsumption: store.hasPendingConsumption(
+                accountID: snapshot.accountID,
+                snapshotUpdatedAt: snapshot.updatedAt
+            ),
+            isAuthenticated: true,
+            hasResolvedAccount: true
+        )
     }
 
     /// One available credit, the shape the GET endpoint returns.

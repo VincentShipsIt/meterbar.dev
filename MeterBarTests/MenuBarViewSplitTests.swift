@@ -161,7 +161,7 @@ final class ProviderCardPresentationTests: XCTestCase {
         XCTAssertTrue(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
-                didConsumeResetCredit: false,
+                hasPendingConsumption: false,
                 isAuthenticated: true,
                 hasResolvedAccount: true
             )
@@ -169,16 +169,16 @@ final class ProviderCardPresentationTests: XCTestCase {
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
-                didConsumeResetCredit: true,
+                hasPendingConsumption: true,
                 isAuthenticated: true,
                 hasResolvedAccount: true
             ),
-            "a credit already spent in this session must not be offered again"
+            "a credit spent but not yet reflected in this count must not be offered again"
         )
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
-                didConsumeResetCredit: false,
+                hasPendingConsumption: false,
                 isAuthenticated: false,
                 hasResolvedAccount: true
             )
@@ -186,7 +186,7 @@ final class ProviderCardPresentationTests: XCTestCase {
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: snapshot(used: 100, resetCreditsAvailable: 0),
-                didConsumeResetCredit: false,
+                hasPendingConsumption: false,
                 isAuthenticated: true,
                 hasResolvedAccount: true
             )
@@ -194,7 +194,7 @@ final class ProviderCardPresentationTests: XCTestCase {
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: snapshot(used: 100, resetCreditsAvailable: 1, service: .claudeCode),
-                didConsumeResetCredit: false,
+                hasPendingConsumption: false,
                 isAuthenticated: true,
                 hasResolvedAccount: true
             ),
@@ -203,7 +203,7 @@ final class ProviderCardPresentationTests: XCTestCase {
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(
                 snapshot: exhausted,
-                didConsumeResetCredit: false,
+                hasPendingConsumption: false,
                 isAuthenticated: true,
                 hasResolvedAccount: false
             ),

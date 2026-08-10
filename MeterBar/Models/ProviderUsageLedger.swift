@@ -177,6 +177,29 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
         self.entries = entries
     }
 
+    /// Decodes entries tolerantly so one unreadable provider costs only that
+    /// provider's history.
+    ///
+    /// `ProviderUsageLedgerEntry.provider` is a closed `ServiceType`: a raw value
+    /// written by a newer build, or a provider since removed, throws. Under the
+    /// synthesized decoder that threw the array, which threw the ledger, which
+    /// `ProviderUsageLedgerStore.load` turned into an empty one — discarding
+    /// every other provider's days. Nothing re-serves them: Cursor and
+    /// OpenRouter publish a running counter and no history, so a dropped day is
+    /// gone permanently.
+    ///
+    /// `schemaVersion` and `timeZoneIdentifier` stay strict. A payload missing
+    /// them is not a ledger this build can reason about, and the store already
+    /// drops on a version mismatch rather than half-decoding a changed shape.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        timeZoneIdentifier = try container.decode(String.self, forKey: .timeZoneIdentifier)
+        entries = try container
+            .decode([FailableBox<ProviderUsageLedgerEntry>].self, forKey: .entries)
+            .compactMap(\.value)
+    }
+
     // MARK: - Reading
 
     func entry(for provider: ServiceType) -> ProviderUsageLedgerEntry? {

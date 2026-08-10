@@ -7,7 +7,7 @@ import XCTest
 final class CostScanCorpusTests: XCTestCase {
     // MARK: - Claude
 
-    func testClaudeDeduplicationIsPerFileAndPerWindow() throws {
+    func testClaudeDeduplicationIsPerWindowAndSpansFiles() throws {
         let root = try makeClaudeProjectsRoot()
         let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-15T00:00:00Z"))
 
@@ -18,10 +18,28 @@ final class CostScanCorpusTests: XCTestCase {
             claudeEventLine(timestamp: "2026-06-14T23:59:00.000Z", input: 100, output: 50),
             claudeEventLine(timestamp: "2026-06-15T00:01:00.000Z", input: 100, output: 50)
         ])
-        // A duplicate of the same key in a *different* file: Claude dedups per
-        // file, so this is a second billed event.
-        try writeClaudeTranscript(in: root, project: "www/other", name: "copy.jsonl", lines: [
-            claudeEventLine(timestamp: "2026-06-16T00:01:00.000Z", input: 100, output: 50)
+        // A different event in a different project: billed, obviously.
+        try writeClaudeTranscript(in: root, project: "www/other", name: "fresh.jsonl", lines: [
+            claudeEventLine(
+                timestamp: "2026-06-16T00:01:00.000Z",
+                messageID: "msg_2",
+                requestID: "req_2",
+                input: 100,
+                output: 50
+            )
+        ])
+        // That same event again, under a project directory someone restored
+        // from a backup. A `messageID:requestID` pair is unique to one API
+        // call, so a second file carrying it is a copy, not a second charge —
+        // whichever of the two the enumerator happens to reach first.
+        try writeClaudeTranscript(in: root, project: "www/other-backup", name: "fresh.jsonl", lines: [
+            claudeEventLine(
+                timestamp: "2026-06-16T00:01:00.000Z",
+                messageID: "msg_2",
+                requestID: "req_2",
+                input: 100,
+                output: 50
+            )
         ])
 
         let windows = ClaudeCostScanner.scanRoots([root], session: makeSession(cutoff: cutoff))
@@ -136,6 +154,66 @@ final class CostScanCorpusTests: XCTestCase {
         XCTAssertEqual(windows.period.totals.output, 500)
         XCTAssertEqual(windows.lifetime.totals.input, 1_077)
         XCTAssertEqual(windows.lifetime.totals.output, 533)
+    }
+
+    /// Codex's dedup key is `timestamp-session-input-cached-output-reasoning`.
+    /// It deliberately carries no model, origin, or project, and that is what
+    /// makes the deferred back-fill safe: an event parked before its rollout
+    /// declared a model is replayed later with that model filled in, and a
+    /// budgeted slice that ends with events still parked rolls its committed
+    /// offset back so the *next* refresh re-reads them. Both replay the same
+    /// underlying charge under different attribution, and the key has to see
+    /// through that or the event gets billed twice.
+    ///
+    /// The fixture is the extreme version: the same event in two rollouts, one
+    /// of which never names a model, so the two readers attribute it
+    /// differently. If attribution ever enters the key this test doubles.
+    func testCodexDeduplicationIgnoresAttributionSoBackfilledModelsCannotDoubleCount() throws {
+        let directory = try makeTemporaryDirectory(named: "CodexRollouts")
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-15T00:00:00Z"))
+
+        try writeCodexRollout(in: directory, path: "a-attributed.jsonl", lines: [
+            codexTokenLine(timestamp: "2026-06-16T10:00:00Z")
+        ])
+        try writeCodexRollout(in: directory, path: "b-unattributed.jsonl", lines: [
+            codexTokenLine(timestamp: "2026-06-16T10:00:00Z", model: nil)
+        ])
+
+        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
+
+        XCTAssertEqual(windows.lifetime.totals.input, 1_000)
+        XCTAssertEqual(windows.lifetime.totals.output, 500)
+        // First-event-wins, so the charge keeps the attribution of whichever
+        // reader got there first — and the unattributed replay adds no second
+        // "unknown" row alongside it.
+        XCTAssertEqual(Set(windows.lifetime.models.keys), ["gpt-5.5"])
+    }
+
+    /// The accepted cost of the attribution-free key above: two genuinely
+    /// distinct events that land in the same millisecond, in the same session,
+    /// with identical token counts are indistinguishable to it, so the second
+    /// is dropped and the spend is under-reported. In practice that needs a
+    /// mid-session model switch whose two turns bill identically to the token
+    /// — rare enough to be worth less than the double-count the key prevents.
+    ///
+    /// This test pins the trade-off rather than endorsing the number: it exists
+    /// so that widening the key is a deliberate edit here, made together with a
+    /// proof that the deferred path still dedups, and never a silent one.
+    func testCodexDeduplicationCollapsesASameMillisecondModelSwitchByDesign() throws {
+        let directory = try makeTemporaryDirectory(named: "CodexRollouts")
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-15T00:00:00Z"))
+
+        try writeCodexRollout(in: directory, path: "switch.jsonl", lines: [
+            codexTokenLine(timestamp: "2026-06-16T10:00:00Z", model: "gpt-5.5"),
+            codexTokenLine(timestamp: "2026-06-16T10:00:00Z", model: "gpt-5.5-codex")
+        ])
+
+        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
+
+        XCTAssertEqual(windows.lifetime.totals.input, 1_000)
+        XCTAssertEqual(Set(windows.lifetime.models.keys), ["gpt-5.5"])
     }
 
     func testCodexScanSurvivesUnreadableAndMalformedRollouts() throws {
@@ -285,18 +363,21 @@ extension CostScanCorpusTests {
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
-    /// A `token_count` event that names its own model.
+    /// A `token_count` event that names its own model, or — with `model: nil` —
+    /// one that names no model at all, the shape that sends an event down the
+    /// deferred back-fill path.
     private func codexTokenLine(
         timestamp: String,
         conversationID: String = "conv-1",
-        model: String = "gpt-5.5",
+        model: String? = "gpt-5.5",
         input: Int = 1_000,
         output: Int = 500
     ) -> String {
-        """
+        let modelPart = model.map { "\"model\": \"\($0)\", " } ?? ""
+        return """
         {"timestamp": "\(timestamp)", "payload": {"type": "token_count", \
         "rate_limits": {"conversation_id": "\(conversationID)"}, \
-        "info": {"model": "\(model)", "last_token_usage": \
+        "info": {\(modelPart)"last_token_usage": \
         {"input_tokens": \(input), "output_tokens": \(output), \
         "cached_input_tokens": 200, "reasoning_output_tokens": 50}}}}
         """

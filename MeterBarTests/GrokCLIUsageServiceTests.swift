@@ -439,6 +439,38 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertEqual(workMetrics.weeklyLimit?.used, 73)
     }
 
+    /// Profiles are fetched concurrently, so the recorded error has to stay
+    /// keyed to the profile that produced it — a default-profile success that
+    /// lands afterwards must not blank a signed-out profile's error.
+    func testDefaultProfileSuccessKeepsASecondaryProfilesError() async throws {
+        let work = GrokAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/grok-work")
+        let defaultResult = try decodeResult(
+            #"{"config":{"creditUsagePercent":11},"subscription_tier":"Default"}"#
+        )
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { $0.isDefault },
+            billingResultProvider: { _, _ in defaultResult }
+        )
+
+        do {
+            _ = try await service.fetchUsageMetrics(account: work)
+            XCTFail("Expected the signed-out work profile to fail")
+        } catch {
+            XCTAssertEqual(
+                (error as? ServiceError)?.localizedDescription,
+                ServiceError.notAuthenticated.localizedDescription
+            )
+        }
+        _ = try await service.fetchUsageMetrics(account: .defaultAccount)
+
+        XCTAssertEqual(
+            service.firstError(for: [work])?.localizedDescription,
+            ServiceError.notAuthenticated.localizedDescription
+        )
+        XCTAssertNil(service.firstError(for: [.defaultAccount]))
+    }
+
     func testReplayedTranscriptDecodesBillingResult() throws {
         let result = try GrokBillingRPC.result(
             replaying: transcript(

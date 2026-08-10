@@ -152,6 +152,24 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Prunes against a completed walk of the provider's roots, and against
+    /// nothing at all when part of the corpus could not be listed.
+    ///
+    /// Absence only means deletion when the walk saw everything. An unreadable
+    /// directory hides live transcripts, and dropping their records throws away
+    /// resumable offsets — the refresh undercounts and the next one re-reads the
+    /// files end to end. Skipping the prune leaves the cache a little stale
+    /// instead, which the next complete walk cleans up.
+    func retain<Payload>(coverage: CostScanCorpusCoverage, provider: CostScanCacheKey<Payload>) {
+        guard coverage.isComplete else {
+            AppLog.cost.notice(
+                "\(provider.provider.logName, privacy: .public) corpus listing incomplete; skipping cache prune"
+            )
+            return
+        }
+        retain(keys: coverage.retainedKeys, provider: provider)
+    }
+
     func retainClaude(keys: Set<String>) {
         retain(keys: keys, provider: .claude)
     }

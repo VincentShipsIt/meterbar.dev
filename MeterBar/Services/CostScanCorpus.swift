@@ -43,13 +43,67 @@ nonisolated struct CostScanFile: Sendable {
     var size: Int { stamp.size }
     var modified: Date { Date(timeIntervalSince1970: stamp.modified) }
 
-    /// The per-file cache key. Standardized so `/tmp/...` and `/private/tmp/...`
-    /// resolve to one entry rather than two half-read ones.
-    var cacheKey: String { url.standardizedFileURL.path }
+    var cacheKey: String { CostScanCorpus.cacheKey(for: url) }
+}
+
+/// The result of walking one provider root: the transcripts the walk could
+/// stamp, plus what it could *not* see.
+///
+/// Callers prune their cache against the keys a walk produced, so a walk has to
+/// say how much of the tree it actually covered. Silently dropping an entry
+/// makes a live transcript indistinguishable from a deleted one, and pruning
+/// against that discards its resumable offset.
+nonisolated struct CostScanCorpusListing: Sendable {
+    /// Stamped regular files, newest modification date first.
+    let files: [CostScanFile]
+    /// Cache keys for `.jsonl` files the walk listed but could not stamp. They
+    /// exist; this lookup simply failed. They keep their cache records and are
+    /// retried on the next refresh.
+    let unreadableKeys: Set<String>
+    /// `false` when part of the tree was never walked — an unreadable
+    /// directory, or an enumerator that could not be created. Nothing may be
+    /// pruned against a listing that is not complete.
+    let isComplete: Bool
+
+    static let empty = CostScanCorpusListing(files: [], unreadableKeys: [], isComplete: true)
+}
+
+/// Accumulates listings across the several roots one provider scans, and the
+/// keys the scan actually visited, into the single retention set the session
+/// prunes against.
+nonisolated struct CostScanCorpusCoverage {
+    /// Keys the scan reached. Doubles as the dedup set for overlapping roots.
+    private var scanned: Set<String> = []
+    /// Kept separately from `scanned`: one root failing to stat a path says
+    /// nothing about a sibling root that reads it fine, so an unreadable key
+    /// must never make the file look already-visited.
+    private var unreadable: Set<String> = []
+    private(set) var isComplete = true
+
+    /// Everything the provider's cache is allowed to keep.
+    var retainedKeys: Set<String> { scanned.union(unreadable) }
+
+    mutating func add(_ listing: CostScanCorpusListing) {
+        unreadable.formUnion(listing.unreadableKeys)
+        isComplete = isComplete && listing.isComplete
+    }
+
+    /// Records a key as visited.
+    ///
+    /// - Returns: `false` when this scan already visited the key, so callers can
+    ///   skip transcripts reached twice through overlapping roots.
+    @discardableResult
+    mutating func keep(_ key: String) -> Bool {
+        scanned.insert(key).inserted
+    }
 }
 
 /// Enumerates the `.jsonl` transcripts under a provider root, newest first.
 nonisolated enum CostScanCorpus {
+    /// The per-file cache key. Standardized so `/tmp/...` and `/private/tmp/...`
+    /// resolve to one entry rather than two half-read ones.
+    static func cacheKey(for url: URL) -> String { url.standardizedFileURL.path }
+
     /// Newest modification date first.
     ///
     /// Ordering is what makes a budgeted refresh useful rather than arbitrary.
@@ -58,19 +112,46 @@ nonisolated enum CostScanCorpus {
     /// first makes the number on screen correct after the first pass, while the
     /// older archive (which only moves the lifetime total) catches up over
     /// subsequent refreshes.
-    static func transcripts(in root: URL) -> [CostScanFile] {
+    ///
+    /// - Parameter stamp: injectable so tests can fail one lookup inside an
+    ///   otherwise healthy tree. A stat race cannot be staged on a real file
+    ///   system. Production callers use the default.
+    static func listing(
+        in root: URL,
+        stamp: (URL) -> CostScanFileStamp? = { CostScanFileStamp.read(at: $0) }
+    ) -> CostScanCorpusListing {
         let keys: [URLResourceKey] = [.isRegularFileKey]
+        // A subtree the walk cannot descend into still holds transcripts. The
+        // handler keeps the walk going — the rest of the corpus is worth
+        // scanning — but the listing can no longer claim to be the whole truth.
+        let walk = WalkStatus()
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: { _, _ in
+                walk.markIncomplete()
+                return true
+            }
+        ) else {
+            return CostScanCorpusListing(files: [], unreadableKeys: [], isComplete: false)
+        }
 
         var files: [CostScanFile] = []
+        var unreadableKeys: Set<String> = []
         for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            guard let values = try? url.resourceValues(forKeys: Set(keys)),
-                  values.isRegularFile == true,
-                  let stamp = CostScanFileStamp.read(at: url) else { continue }
+            // A directory or dangling symlink named `*.jsonl` is a definite
+            // answer, not a failed lookup: it is not a transcript and never was,
+            // so it must stay prunable rather than pin a phantom cache key.
+            guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
+                unreadableKeys.insert(cacheKey(for: url))
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
+            guard let stamp = stamp(url) else {
+                unreadableKeys.insert(cacheKey(for: url))
+                continue
+            }
             files.append(
                 CostScanFile(
                     url: url,
@@ -81,8 +162,31 @@ nonisolated enum CostScanCorpus {
 
         // Path breaks ties so a corpus written in one burst still enumerates
         // deterministically — otherwise a budgeted test would be a coin flip.
-        return files.sorted {
-            $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
+        return CostScanCorpusListing(
+            files: files.sorted {
+                $0.modified == $1.modified ? $0.url.path < $1.url.path : $0.modified > $1.modified
+            },
+            unreadableKeys: unreadableKeys,
+            isComplete: walk.isComplete
+        )
+    }
+
+    /// The enumerator's error handler outlives this call's stack frame, so the
+    /// flag it sets cannot be a captured local.
+    private final class WalkStatus: @unchecked Sendable {
+        private let lock = NSLock()
+        private var incomplete = false
+
+        var isComplete: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return !incomplete
+        }
+
+        func markIncomplete() {
+            lock.lock()
+            incomplete = true
+            lock.unlock()
         }
     }
 }
