@@ -556,9 +556,12 @@ empty (no metrics yet, or no cost scan yet), the endpoint returns `200` with the
 `Content-Type: application/json; charset=utf-8`. Responses are never cached by clients or
 intermediaries.
 
-**Rate limiting.** Requests are bounded to `--max-requests-per-second` (default 5) per server
-instance; requests beyond that return `429` with the standard error envelope (`too_many_requests`).
-A malformed HTTP request returns `400` (`bad_request`).
+**Rate limiting.** Requests are bounded to `--max-requests-per-second` (default 5) **per client
+address**; requests beyond that return `429` with the standard error envelope (`too_many_requests`).
+The budget is charged before a request is parsed or authenticated, so keying it by source is what
+keeps an unauthenticated burst — the risk `--allow-remote` introduces — from consuming the token
+holder's allowance. A local client still sees exactly the documented default: every loopback caller
+shares the `127.0.0.1` bucket. A malformed HTTP request returns `400` (`bad_request`).
 
 **Lifecycle.** `meterbar serve` runs until it receives `SIGINT` or `SIGTERM` (for example, Ctrl-C),
 at which point it stops accepting new connections, closes its listening socket, and exits cleanly.

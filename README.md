@@ -277,7 +277,8 @@ The endpoint is **read-only** — it serves the cache and never triggers a provi
 refresh or mutates state. It binds to loopback only unless you pass
 `--allow-remote`, requires a bearer token on every request (generated and printed
 once at startup if you do not supply `--token`), and rate-limits to 5 requests
-per second by default.
+per second per client address by default, so one noisy caller cannot starve
+another.
 
 `--allow-remote` exposes a **plaintext HTTP** listener on your network. The
 bearer token and cached usage/cost data are not encrypted in transit, so use it
