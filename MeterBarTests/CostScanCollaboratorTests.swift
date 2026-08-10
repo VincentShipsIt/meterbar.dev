@@ -658,17 +658,23 @@ final class CostScanCollaboratorTests: XCTestCase {
         // Only `.jsonl` transcripts participate in the scan.
         try writeCorpusFile(in: root, name: "notes.txt", bytes: 10, modified: now)
 
-        let files = CostScanCorpus.transcripts(in: root)
+        let files = CostScanCorpus.listing(in: root).files
 
         XCTAssertEqual(files.map { $0.url.lastPathComponent }, ["newest.jsonl", "middle.jsonl", "oldest.jsonl"])
         XCTAssertEqual(files.first?.size, 10)
     }
 
-    func testCorpusOfAMissingDirectoryIsEmpty() {
+    /// A root that is not there yields nothing, and says so: the walk never
+    /// happened, so its emptiness is no evidence that the cached transcripts
+    /// were deleted.
+    func testCorpusOfAMissingDirectoryIsEmptyAndIncomplete() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("CostScanCorpus-missing-\(UUID().uuidString)", isDirectory: true)
 
-        XCTAssertTrue(CostScanCorpus.transcripts(in: missing).isEmpty)
+        let listing = CostScanCorpus.listing(in: missing)
+
+        XCTAssertTrue(listing.files.isEmpty)
+        XCTAssertFalse(listing.isComplete)
     }
 
     // MARK: - CostScanExecutor
