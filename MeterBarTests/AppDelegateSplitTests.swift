@@ -275,6 +275,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
         let resolved = StatusLimitProbeRequestBuilder.claudeMetrics(
             for: account,
+            enabledAccountCount: 1,
             accountMetrics: [account.id: accountMetrics],
             providerMetrics: providerMetrics
         )
@@ -287,6 +288,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
         let defaultResolved = StatusLimitProbeRequestBuilder.claudeMetrics(
             for: .defaultAccount,
+            enabledAccountCount: 1,
             accountMetrics: [:],
             providerMetrics: providerMetrics
         )
@@ -295,9 +297,62 @@ final class AppDelegateSplitTests: XCTestCase {
         let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
         XCTAssertNil(StatusLimitProbeRequestBuilder.claudeMetrics(
             for: custom,
+            enabledAccountCount: 1,
             accountMetrics: [:],
             providerMetrics: providerMetrics
         ))
+    }
+
+    func testClaudeMetricsFallsBackOnlyForASoleDefaultAccountWithoutAccountData() {
+        let providerMetrics = MetricsFixtures.claudeCode(sessionUsedPercent: 90)
+
+        // A second enabled account means the provider-level snapshot is no
+        // longer unambiguously the default account's: `UsageDataManager`
+        // borrows an arbitrary enabled account's metrics when the default
+        // account's own fetch produced nothing.
+        XCTAssertNil(StatusLimitProbeRequestBuilder.claudeMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 2,
+            accountMetrics: [:],
+            providerMetrics: providerMetrics
+        ))
+
+        // Any account-level data at all wins over the fallback.
+        XCTAssertNil(StatusLimitProbeRequestBuilder.claudeMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 1,
+            accountMetrics: [UUID(): MetricsFixtures.claudeCode(sessionUsedPercent: 20)],
+            providerMetrics: providerMetrics
+        ))
+    }
+
+    /// The upstream shape of the bug: the default account's fetch failed with no
+    /// cache while a custom account succeeded, so the provider snapshot is the
+    /// *custom* account's numbers. The default account must not emit a probe
+    /// request carrying them under its own identity.
+    func testClaudeDefaultAccountGetsNoMetricsWhenOnlyAnotherAccountHasData() {
+        let custom = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
+        let customMetrics = MetricsFixtures.claudeCode(sessionUsedPercent: 90)
+        let accountMetrics = [custom.id: customMetrics]
+        // `representativeClaudeCodeMetrics` hands the custom account's snapshot
+        // up as the provider-wide one when the default account has no entry.
+        let providerMetrics = customMetrics
+
+        XCTAssertNil(StatusLimitProbeRequestBuilder.claudeMetrics(
+            for: .defaultAccount,
+            enabledAccountCount: 2,
+            accountMetrics: accountMetrics,
+            providerMetrics: providerMetrics
+        ))
+        XCTAssertEqual(
+            StatusLimitProbeRequestBuilder.claudeMetrics(
+                for: custom,
+                enabledAccountCount: 2,
+                accountMetrics: accountMetrics,
+                providerMetrics: providerMetrics
+            )?.sessionLimit?.used,
+            90
+        )
     }
 
     func testCodexMetricsFallsBackOnlyForASoleDefaultAccountWithoutAccountData() {
