@@ -894,6 +894,16 @@ enum CodexCostScanner {
         // Use whole-millisecond precision for the dedup key so equivalent events
         // produce a stable, collision-resistant string (raw Double formatting can
         // vary and risks both false matches and false misses).
+        //
+        // Model, origin, and project are deliberately absent. The deferred
+        // back-fill replays a parked event once its rollout finally names a
+        // model, and a budgeted slice that ends with events still parked rolls
+        // its offset back so the next refresh re-reads them — both hand the same
+        // charge to `apply` twice under different attribution, and only an
+        // attribution-free key sees through it. The price is that two distinct
+        // same-millisecond events with identical counts collapse into one.
+        // `CostScanCorpusTests` pins both halves; widen this key only with a
+        // proof that the deferred path still dedups.
         let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
         let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
         let keys = CostScanEventKeys(

@@ -250,6 +250,48 @@ final class GrokCostScannerTests: XCTestCase {
         XCTAssertEqual(cost.inputTokens, 100)
     }
 
+    /// A session directory copied by a sync client — Dropbox/iCloud conflict
+    /// copies, a restored backup, a `cp -r` of `sessions/` — puts the same
+    /// events in two `.jsonl` files. `CostScanCorpus` matches every `.jsonl`
+    /// under the root, so both are read; the dedup key carries the session ID
+    /// from the *payload*, so both files produce identical keys and the second
+    /// must add nothing.
+    func testDuplicatedSessionDirectoryIsCountedOnce() throws {
+        let root = try makeSessionsRoot()
+        let line = turnCompleted(at: Date(), input: 100, cachedRead: 0, output: 10, reasoning: 0, ticks: 1_000_000)
+        try writeUpdates(in: root, project: "www/meterbar", session: "session-a", lines: [line])
+        try writeUpdates(in: root, project: "www/meterbar", session: "session-a-conflict", lines: [line])
+
+        let cost = try XCTUnwrap(scanCost(roots: [root], days: 30))
+
+        XCTAssertEqual(cost.inputTokens, 100)
+        XCTAssertEqual(cost.outputTokens, 10)
+        XCTAssertEqual(cost.sessionCount, 1)
+    }
+
+    /// The harder half: a stale copy holds a prefix of the live file, so the
+    /// two overlap without either containing the other. No aggregate merge can
+    /// resolve that — the union has to be assembled event by event.
+    func testPartiallyOverlappingCopiesCountTheirUnionOnce() throws {
+        let root = try makeSessionsRoot()
+        let now = Date()
+        let shared = turnCompleted(at: now.addingTimeInterval(-120), input: 100, cachedRead: 0, output: 10, reasoning: 0, ticks: 1_000_000)
+        let onlyInLive = turnCompleted(at: now, input: 200, cachedRead: 0, output: 20, reasoning: 0, ticks: 2_000_000)
+        try writeUpdates(in: root, project: "www/meterbar", session: "session-a", lines: [shared])
+        try writeUpdates(
+            in: root,
+            project: "www/meterbar",
+            session: "session-a-conflict",
+            lines: [shared, onlyInLive]
+        )
+
+        let cost = try XCTUnwrap(scanCost(roots: [root], days: 30))
+
+        XCTAssertEqual(cost.inputTokens, 300)
+        XCTAssertEqual(cost.outputTokens, 30)
+        XCTAssertEqual(cost.sessionCount, 1)
+    }
+
     // MARK: - Windowing
 
     /// The period window is the visible 30-day chart; the lifetime window is the
