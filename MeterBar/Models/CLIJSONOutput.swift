@@ -255,21 +255,21 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     }
 
     /// Presentation-only currency conversion of `totalCostUSD` (issue #270).
-    /// `source` is always `"manual"`: the CLI never persists or fetches a
-    /// rate, so every emission is a fresh, explicit `--currency`/`--rate` pair
-    /// the caller typed for this one invocation — never a cached snapshot.
+    /// CLI-created values remain `manual`; the field also keeps the model
+    /// honest if an app-generated automatic value is encoded in tests.
     private struct DisplayCurrencyJSON: Encodable {
         let code: String
         let unitsPerUSD: Double
         let enteredAt: Date
         let totalCostConverted: Double
-        let source = "manual"
+        let source: String
 
         init(_ currency: DisplayCurrency, totalCostUSD: Double) {
             code = currency.code
             unitsPerUSD = currency.unitsPerUSD
             enteredAt = currency.enteredAt
             totalCostConverted = currency.convert(usd: totalCostUSD)
+            source = currency.source.rawValue
         }
     }
 
