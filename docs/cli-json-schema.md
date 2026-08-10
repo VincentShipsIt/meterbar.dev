@@ -372,6 +372,37 @@ Exit codes are stable for scripting: `0` success, `10` already running, `11` tim
 `12` partial provider failure, `13` complete/configuration failure, and `130` cancellation.
 Non-success JSON remains on standard output; optional human diagnostics use standard error.
 
+A rejected `--timeout` adds an `error` object with a stable `code`, plus the `flag` and `value`
+that were rejected, and reports `refreshFailed` (exit `13`). It is a refresh document like any
+other, so a script parses one shape whether the input or the provider was at fault:
+
+```json
+{
+  "schemaVersion": 1,
+  "outcome": "refreshFailed",
+  "collectedAt": "2026-07-20T17:00:00Z",
+  "durationSeconds": 0,
+  "providers": [],
+  "cache": { "providerCount": 2, "lastUpdated": "2026-07-20T16:45:00Z", "ageSeconds": 900, "isStale": false },
+  "error": {
+    "code": "invalid_timeout",
+    "message": "Invalid --timeout value 'abc'. Expected 1...600 seconds.",
+    "flag": "--timeout",
+    "value": "abc"
+  },
+  "message": "Invalid --timeout value 'abc'. Expected 1...600 seconds."
+}
+```
+
+The stable version 1 refresh error code is `invalid_timeout`; `--timeout` accepts `1`–`600`
+seconds. Malformed input never exits `EX_USAGE` (`64`) and never puts non-JSON on standard output.
+
+`SIGINT` and `SIGTERM` cancel the refresh cooperatively rather than killing the process: in-flight
+provider work stops, the document is still written to standard output, and the command exits `130`
+(`cancellation`). Once that document is out, an over-running refresh is given a bounded grace
+period to release the cross-process refresh lock before the process exits, so a later `meterbar
+refresh` is not answered `alreadyRunning` by an abandoned holder.
+
 ## Guard
 
 ```sh
@@ -469,6 +500,11 @@ Exit codes are stable for scripting:
 The freshness bound is two hours, shared with the provider parse-health model. A snapshot older
 than that is `dataUnavailable` rather than a stale pass. Non-success JSON stays on standard output;
 the human-readable reason uses standard error.
+
+`SIGINT` and `SIGTERM` end a `--refresh` window early instead of killing the process. Guard then
+evaluates the cached snapshot exactly as it would after a refresh that simply failed, and exits
+with one of the codes above — guard has no cancellation code, because an interrupted guard still
+has an answer. Without `--refresh` there is no window to interrupt.
 
 ## Doctor
 

@@ -13,27 +13,27 @@ struct Refresh: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Emit only the versioned JSON response on stdout.")
     var json: Bool = false
 
+    // Taken as text, not Double: ArgumentParser's own conversion runs before
+    // validate() and before run(), so a malformed value would exit EX_USAGE
+    // with no JSON document — neither the code nor the output the refresh
+    // contract promises. `meterbar guard` takes its thresholds as text for the
+    // same reason.
     @Option(name: .shortAndLong, help: "Seconds to wait before giving up on the refresh.")
-    var timeout: Double = UsageRefreshCLI.defaultTimeout
-
-    func validate() throws {
-        guard timeout >= UsageRefreshCLI.minimumTimeout, timeout <= UsageRefreshCLI.maximumTimeout else {
-            throw ValidationError(
-                "--timeout must be between \(Int(UsageRefreshCLI.minimumTimeout)) "
-                    + "and \(Int(UsageRefreshCLI.maximumTimeout)) seconds."
-            )
-        }
-    }
+    var timeout: String?
 
     func run() async throws {
         let cancelBox = RefreshCancelBox()
-        let signalSource = installSignalHandler(cancelBox)
-        defer { signalSource.cancel() }
+        let signalSources = installSignalHandlers(cancelBox)
+        defer { signalSources.forEach { $0.cancel() } }
 
         let result = await UsageRefreshCLI.run(
-            UsageRefreshCLI.Request(timeout: timeout, shouldCancel: { cancelBox.isCancelled })
+            UsageRefreshCLI.Request(timeoutText: timeout, shouldCancel: { cancelBox.isCancelled })
         )
         emit(result)
+        // The response is already out; wait — bounded — for an over-running
+        // refresh to release the cross-process lock rather than leaving it to
+        // process teardown.
+        await result.awaitPendingCleanup()
         throw ExitCode(result.exitCode)
     }
 
@@ -49,12 +49,17 @@ struct Refresh: AsyncParsableCommand {
         }
     }
 
-    private func installSignalHandler(_ box: RefreshCancelBox) -> DispatchSourceSignal {
-        signal(SIGINT, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-        source.setEventHandler { box.cancel() }
-        source.resume()
-        return source
+    /// SIGTERM as well as SIGINT: a refresh started by a script or a timeout
+    /// wrapper is far more likely to be terminated than interrupted, and both
+    /// must still produce the documented JSON and exit code.
+    private func installSignalHandlers(_ box: RefreshCancelBox) -> [DispatchSourceSignal] {
+        [SIGINT, SIGTERM].map { signalNumber in
+            signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .global())
+            source.setEventHandler { box.cancel() }
+            source.resume()
+            return source
+        }
     }
 }
 

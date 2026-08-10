@@ -33,6 +33,10 @@ nonisolated public enum QuotaGuardCLI {
         /// Raw `--refresh-timeout` text, parsed in the core for the same reason
         /// as `minRemaining`. `nil` means `defaultRefreshTimeout`.
         public let refreshTimeout: String?
+        /// Polled by `--refresh` so SIGINT/SIGTERM ends the refresh window
+        /// cooperatively. Guard still evaluates the cached snapshot afterwards
+        /// and exits with a documented guard code.
+        public let shouldCancel: @Sendable () -> Bool
 
         public init(
             provider: String = defaultProvider,
@@ -40,7 +44,8 @@ nonisolated public enum QuotaGuardCLI {
             minRemaining: String? = nil,
             configDirectory: String? = nil,
             refresh: Bool = false,
-            refreshTimeout: String? = nil
+            refreshTimeout: String? = nil,
+            shouldCancel: @escaping @Sendable () -> Bool = { false }
         ) {
             self.provider = provider
             self.window = window
@@ -48,6 +53,7 @@ nonisolated public enum QuotaGuardCLI {
             self.configDirectory = configDirectory
             self.refresh = refresh
             self.refreshTimeout = refreshTimeout
+            self.shouldCancel = shouldCancel
         }
     }
 
@@ -72,7 +78,10 @@ nonisolated public enum QuotaGuardCLI {
         if request.refresh {
             // A failed refresh is not itself a guard failure: the cached
             // snapshot is still evaluated below, and reports its own staleness.
-            await performRefresh(timeout: target.refreshTimeout)
+            await performRefresh(
+                timeout: target.refreshTimeout,
+                shouldCancel: request.shouldCancel
+            )
         }
 
         return result(from: evaluate(target: target))
@@ -81,8 +90,17 @@ nonisolated public enum QuotaGuardCLI {
     /// One bounded refresh through the coordinator the app and `meterbar
     /// refresh` share, so `--refresh` cannot start a second concurrent poll.
     @MainActor
-    private static func performRefresh(timeout: TimeInterval) async {
-        _ = await UsageRefreshCLI.run(UsageRefreshCLI.Request(timeout: timeout))
+    private static func performRefresh(
+        timeout: TimeInterval,
+        shouldCancel: @escaping @Sendable () -> Bool
+    ) async {
+        let result = await UsageRefreshCLI.run(
+            UsageRefreshCLI.Request(timeout: timeout, shouldCancel: shouldCancel)
+        )
+        // Guard keeps running after the refresh, so it must not leave the
+        // cross-process lock held by an abandoned task while it evaluates the
+        // snapshot and exits.
+        await result.awaitPendingCleanup()
     }
 
     private static func evaluate(target: QuotaGuardTarget) -> QuotaGuardEvaluation {

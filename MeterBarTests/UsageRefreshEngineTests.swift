@@ -25,7 +25,7 @@ final class UsageRefreshEngineTests: XCTestCase {
         let response = await makeEngine(
             refresh: { report },
             cache: [.codexCli: metric(service: .codexCli, lastUpdated: now)]
-        ).run()
+        ).run().response
 
         XCTAssertEqual(response.outcome, .success)
         let object = try jsonObject(response)
@@ -42,7 +42,7 @@ final class UsageRefreshEngineTests: XCTestCase {
             ProviderRefreshOutcome(provider: .cursor, state: .refreshed),
             ProviderRefreshOutcome(provider: .codexCli, state: .failed, servedFromCache: true)
         ])
-        let response = await makeEngine(refresh: { report }).run()
+        let response = await makeEngine(refresh: { report }).run().response
 
         XCTAssertEqual(response.outcome, .partialFailure)
         XCTAssertEqual(response.message?.contains("1 kept last-known-good"), true)
@@ -52,13 +52,13 @@ final class UsageRefreshEngineTests: XCTestCase {
         let report = makeReport([
             ProviderRefreshOutcome(provider: .cursor, state: .failed)
         ])
-        let response = await makeEngine(refresh: { report }).run()
+        let response = await makeEngine(refresh: { report }).run().response
 
         XCTAssertEqual(response.outcome, .refreshFailed)
         XCTAssertEqual(response.outcome.exitCode, 13)
     }
 
-    func testTimeoutReturnsBeforeUncooperativeRefreshAndKeepsLockHeld() async {
+    func testTimeoutReturnsBeforeUncooperativeRefreshAndKeepsLockHeld() async throws {
         let suspended = SuspendedRefresh()
         let lockURL = tempDirectory.appendingPathComponent("refresh.lock")
         let engine = makeEngine(
@@ -68,9 +68,16 @@ final class UsageRefreshEngineTests: XCTestCase {
         )
 
         let startedAt = Date()
-        let response = await engine.run()
-        XCTAssertEqual(response.outcome, .timedOut)
+        let outcome = await engine.run()
+        XCTAssertEqual(outcome.response.outcome, .timedOut)
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 0.5)
+
+        // The lock is released by the handed-back cleanup task, not by process
+        // death: a caller that keeps running must be able to await it.
+        let cleanup = try XCTUnwrap(
+            outcome.pendingCleanup,
+            "a timeout with work still in flight must hand back a cleanup handle"
+        )
 
         let contender = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
         guard case .contended = contender.acquire() else {
@@ -78,12 +85,62 @@ final class UsageRefreshEngineTests: XCTestCase {
         }
 
         await suspended.resume(makeReport([]))
-        for _ in 0..<100 {
-            if contender.acquire() == .acquired { break }
-            try? await Task.sleep(nanoseconds: 2_000_000)
-        }
+        await cleanup.value
         XCTAssertEqual(contender.acquire(), .acquired)
         contender.release()
+    }
+
+    func testCompletedRefreshNeedsNoCleanupBecauseTheLockIsAlreadyReleased() async {
+        let lockURL = tempDirectory.appendingPathComponent("refresh.lock")
+        let outcome = await makeEngine(lockURL: lockURL, refresh: { self.makeReport([]) }).run()
+
+        XCTAssertNil(outcome.pendingCleanup)
+        let contender = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
+        XCTAssertEqual(contender.acquire(), .acquired)
+        contender.release()
+    }
+
+    func testCooperativeCancellationReportsTheDocumentedCancellationOutcome() async {
+        let suspended = SuspendedRefresh()
+        let outcome = await makeEngine(
+            timeout: 10,
+            refresh: { await suspended.wait() },
+            shouldCancel: { true }
+        ).run()
+
+        XCTAssertEqual(outcome.response.outcome, .cancellation)
+        XCTAssertEqual(outcome.response.outcome.exitCode, 130)
+        await suspended.resume(makeReport([]))
+        await outcome.pendingCleanup?.value
+    }
+
+    /// The CLI emits its JSON before waiting, so the wait must be bounded: an
+    /// uncooperative provider cannot hold the process open indefinitely.
+    func testAwaitPendingCleanupGivesUpAtItsCeiling() async {
+        let stuck = Task<Void, Never> { try? await Task.sleep(nanoseconds: 30_000_000_000) }
+        defer { stuck.cancel() }
+        let result = UsageRefreshCLI.Result(
+            jsonOutput: "{}",
+            summaryLine: "",
+            message: nil,
+            exitCode: 0,
+            pendingCleanup: stuck
+        )
+
+        let startedAt = Date()
+        await result.awaitPendingCleanup(timeout: 0.05)
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 2)
+    }
+
+    func testAwaitPendingCleanupReturnsImmediatelyWhenNothingIsInFlight() async {
+        let result = UsageRefreshCLI.Result(
+            jsonOutput: "{}",
+            summaryLine: "",
+            message: nil,
+            exitCode: 0,
+            pendingCleanup: nil
+        )
+        await result.awaitPendingCleanup(timeout: 30)
     }
 
     func testConcurrentRefreshFailsSafelyWithoutFetching() async {
@@ -99,7 +156,7 @@ final class UsageRefreshEngineTests: XCTestCase {
                 fetchCount.increment()
                 return self.makeReport([])
             }
-        ).run()
+        ).run().response
 
         XCTAssertEqual(response.outcome, .alreadyRunning)
         XCTAssertEqual(fetchCount.value, 0)
@@ -110,7 +167,7 @@ final class UsageRefreshEngineTests: XCTestCase {
         let response = await makeEngine(
             refresh: { self.makeReport([]) },
             cache: [.cursor: metric(service: .cursor, lastUpdated: staleDate)]
-        ).run()
+        ).run().response
         let object = try jsonObject(response)
         let cache = try XCTUnwrap(object["cache"] as? [String: Any])
 
@@ -131,7 +188,8 @@ final class UsageRefreshEngineTests: XCTestCase {
         lockURL: URL? = nil,
         timeout: TimeInterval = 1,
         refresh: @escaping UsageRefreshEngine.RefreshOperation,
-        cache: [ServiceType: UsageMetrics] = [:]
+        cache: [ServiceType: UsageMetrics] = [:],
+        shouldCancel: @escaping @Sendable () -> Bool = { false }
     ) -> UsageRefreshEngine {
         UsageRefreshEngine(
             lock: WakeLock(
@@ -141,7 +199,8 @@ final class UsageRefreshEngineTests: XCTestCase {
             ),
             timeout: timeout,
             refresh: refresh,
-            cacheSnapshot: { cache }
+            cacheSnapshot: { cache },
+            shouldCancel: shouldCancel
         )
     }
 
