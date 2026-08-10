@@ -197,7 +197,18 @@ struct UsageBar: View {
         clampedRemainingPercentage <= 0 || pace?.isExhausted == true
     }
 
-    private var tooltipText: String? {
+    /// Opacity of the deficit / reserve bands. They stay slightly translucent so
+    /// the accent reads through and the bar still looks like one bar.
+    static let bandOpacity: Double = 0.86
+    /// Opacity of the marker casing — enough to separate the core from whatever
+    /// it overlays without turning into a hard white/black slab.
+    static let markerCasingOpacity: Double = 0.9
+
+    /// The bar's only textual explanation of the overlay: the popover renders
+    /// `LimitRow` at `.compact` density, whose footer is reset-only, so the pace
+    /// labels never appear next to it. Kept internal (not private) so the tests
+    /// can assert both bands are spelled out here.
+    var tooltipText: String? {
         guard let pace else {
             return isExhausted ? "Out of quota\nActual: 100% used\nLeft: 0%" : nil
         }
@@ -215,6 +226,8 @@ struct UsageBar: View {
             lines.append("Quota is exhausted until the reset window opens.")
         } else if pace.stage == .deficit {
             lines.append("Red is quota you should still have at this pace.")
+        } else if pace.stage == .reserve {
+            lines.append("Green is quota you have beyond this pace.")
         }
 
         if let rightLabel = pace.rightLabel(context: paceContext) {
@@ -242,29 +255,53 @@ struct UsageBar: View {
                         .frame(width: 2, height: 13)
                         .offset(x: max(0, proxy.size.width - 2), y: 1)
                 } else if let pace, pace.stage != .onPace {
-                    let expectedRemainingPercent = max(0, 100 - min(max(pace.expectedUsedPercent, 0), 100))
-                    let expectedX = proxy.size.width * expectedRemainingPercent / 100
-                    let actualX = proxy.size.width * clampedRemainingPercentage / 100
+                    let geometry = BarGeometry(
+                        width: proxy.size.width,
+                        usedPercentage: usedPercentage,
+                        pace: pace
+                    )
 
                     ZStack(alignment: .leading) {
                         Rectangle()
                             .fill(accentColor)
-                            .frame(width: actualX, height: 7)
+                            .frame(width: geometry.fillWidth, height: 7)
 
-                        if pace.stage == .deficit {
+                        // Both stages get the same band, on opposite sides of the
+                        // marker: deficit paints the empty track you should still
+                        // have, reserve paints the part of the fill you're ahead
+                        // by. Reserve overlays the accent, so its tint is picked
+                        // for luminance contrast rather than hue — see
+                        // `MeterBarTheme.reserveBand`.
+                        if let band = geometry.band {
                             Rectangle()
-                                .fill(MeterBarTheme.danger.opacity(0.86))
-                                .frame(width: max(0, expectedX - actualX), height: 7)
-                                .offset(x: actualX)
+                                .fill(bandColor(for: band.kind).opacity(Self.bandOpacity))
+                                .frame(width: band.width, height: 7)
+                                .offset(x: band.x)
                         }
                     }
+                    // The band is positioned with `.offset`, which doesn't grow
+                    // the stack, so the painted width has to be stated or the
+                    // capsule clips a deficit band off the end of the fill.
+                    .frame(width: geometry.paintedWidth, alignment: .leading)
                     .clipShape(Capsule())
                     .offset(y: 4)
 
-                    RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
-                        .fill(markerColor(for: pace))
-                        .frame(width: 2, height: 13)
-                        .offset(x: min(max(0, expectedX - 1), max(0, proxy.size.width - 2)), y: 1)
+                    if let markerX = geometry.markerX {
+                        // The marker sits inside the fill whenever the user is
+                        // ahead of pace, so the colored core alone can vanish
+                        // against the accent. A casing on each side gives it an
+                        // edge on any background; the core keeps carrying the
+                        // green/red meaning.
+                        RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
+                            .fill(MeterBarTheme.paceMarkerCasing.opacity(Self.markerCasingOpacity))
+                            .frame(width: BarGeometry.markerWidth, height: 13)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: MeterBarTheme.Radius.small)
+                                    .fill(markerColor(for: pace))
+                                    .frame(width: BarGeometry.markerCoreWidth, height: 13)
+                            }
+                            .offset(x: markerX, y: 1)
+                    }
                 } else {
                     Rectangle()
                         .fill(accentColor)
@@ -292,6 +329,92 @@ struct UsageBar: View {
             return MeterBarTheme.success
         case .deficit:
             return MeterBarTheme.danger
+        }
+    }
+
+    private func bandColor(for kind: BarGeometry.Band.Kind) -> Color {
+        switch kind {
+        case .reserve:
+            return MeterBarTheme.reserveBand
+        case .deficit:
+            return MeterBarTheme.danger
+        }
+    }
+}
+
+extension UsageBar {
+    /// Pure layout math for the off-pace bar — no SwiftUI, so every stage is
+    /// directly testable (the same reason `LimitRow.RowContent` exists).
+    ///
+    /// Everything is measured from the left in "quota left" space, because the
+    /// colored fill is what's *left*, not what's used: the fill runs from 0 to
+    /// `fillWidth`, and the marker sits where the fill would end if usage were
+    /// exactly on pace. The two are on opposite sides of each other depending on
+    /// the stage, which is what the band spans.
+    struct BarGeometry: Equatable {
+        /// Full width of the marker including its casing.
+        static let markerWidth: CGFloat = 4
+        /// Width of the marker's colored (green/red) core.
+        static let markerCoreWidth: CGFloat = 2
+
+        struct Band: Equatable {
+            enum Kind: Equatable {
+                /// Ahead of pace — spans the marker to the fill's edge, over the accent.
+                case reserve
+                /// Behind pace — spans the fill's edge to the marker, over the empty track.
+                case deficit
+            }
+
+            let kind: Kind
+            let x: CGFloat
+            let width: CGFloat
+        }
+
+        /// Width of the accent fill: the quota still left.
+        let fillWidth: CGFloat
+        /// Width of everything painted on the track — the fill plus a deficit
+        /// band hanging off its end. The band is drawn with `.offset`, which
+        /// doesn't grow a layout, so the stack needs this width explicitly or the
+        /// capsule clip cuts the band off entirely.
+        let paintedWidth: CGFloat
+        /// The off-pace band, or `nil` on pace / with no pace at all.
+        let band: Band?
+        /// Leading edge of the marker, clamped inside the bar. `nil` when no band.
+        let markerX: CGFloat?
+
+        init(width: CGFloat, usedPercentage: Double, pace: UsagePace?) {
+            let width = max(0, width)
+            let usedPercent = min(max(usedPercentage, 0), 100)
+            fillWidth = width * (100 - usedPercent) / 100
+
+            guard let pace, pace.stage != .onPace else {
+                paintedWidth = fillWidth
+                band = nil
+                markerX = nil
+                return
+            }
+
+            let expectedRemainingPercent = max(0, 100 - min(max(pace.expectedUsedPercent, 0), 100))
+            let expectedX = width * expectedRemainingPercent / 100
+
+            switch pace.stage {
+            case .deficit:
+                // Less left than expected, so the fill stops short of the marker
+                // and the band continues the bar out to it.
+                band = Band(kind: .deficit, x: fillWidth, width: max(0, expectedX - fillWidth))
+            case .reserve:
+                // More left than expected, so the fill overshoots the marker and
+                // the band covers the overshoot, inside the fill.
+                band = Band(kind: .reserve, x: expectedX, width: max(0, fillWidth - expectedX))
+            case .onPace:
+                band = nil
+            }
+
+            paintedWidth = max(fillWidth, (band?.x ?? 0) + (band?.width ?? 0))
+
+            // Center the marker on the expected position, then keep it whole
+            // inside the bar so it never hangs off either cap.
+            markerX = min(max(0, expectedX - Self.markerWidth / 2), max(0, width - Self.markerWidth))
         }
     }
 }
