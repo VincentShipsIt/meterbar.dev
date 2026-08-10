@@ -63,7 +63,7 @@ by itself once a limit resets.
 
 - **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded
 - **Optimize Tab**: See where tokens actually go, and which provider has the most headroom right now
-- **Display Currency**: Show costs in your own currency at a rate you enter (Settings → Costs)
+- **Display Currency**: Automatically show costs in your Mac's regional currency using daily ECB reference rates, with an offline cache and manual fallback (Settings → Costs)
 
 ### Scripting
 
@@ -233,8 +233,11 @@ corpus each time. Nothing is uploaded; the numbers are derived entirely from
 files already on your disk.
 
 Set a **Display Currency** under **Settings → Costs** to show totals in a
-currency other than USD, using a conversion rate you enter yourself. MeterBar
-does not fetch exchange rates.
+currency other than USD. MeterBar detects the currency from your Mac's Region
+settings, refreshes the official ECB reference rate daily, and keeps the last
+successful quote offline. Manual rates remain available for currencies the ECB
+does not publish. The automatic refresh sends no usage or cost data; it only
+requests the ECB's public daily rate feed.
 
 ## CLI Tool
 

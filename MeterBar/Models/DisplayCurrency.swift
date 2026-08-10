@@ -1,29 +1,37 @@
 import Foundation
 
-/// A user-supplied, presentation-only currency conversion for cost views and
-/// the CLI (issue #270). MeterBar NEVER fetches a live exchange rate — the
-/// rate is exactly what the user typed, and every converted figure must show
-/// both the rate and the date it was entered so it can't be mistaken for a
-/// live quote. Stored and exported cost data (JSON, daily usage, breakdowns)
-/// always stays USD; this type only affects what is rendered on screen.
-nonisolated public struct DisplayCurrency: Equatable, Sendable {
-    /// Free-form currency code/label the user types (e.g. "EUR", "JPY",
-    /// "credits"). Not validated against ISO 4217 or any live list — MeterBar
-    /// has no way to look one up without a network call, which is explicitly
-    /// out of scope for this feature.
-    public let code: String
-    /// User-supplied units of `code` per 1 USD. `convert` treats a
-    /// non-positive rate as an identity fallback; the store that persists
-    /// this value is responsible for rejecting one before it's saved.
-    public let unitsPerUSD: Double
-    /// When the user entered this rate — shown alongside every converted
-    /// figure so it reads as a manual snapshot, never a live quote.
-    public let enteredAt: Date
+nonisolated public enum DisplayCurrencySource: String, Equatable, Sendable {
+    case manual
+    case europeanCentralBank = "ecb"
+    case system
+}
 
-    public init(code: String, unitsPerUSD: Double, enteredAt: Date) {
+/// A presentation-only currency conversion for cost views and the CLI.
+/// Stored and exported cost data (JSON, daily usage, breakdowns) always stays
+/// USD; this type only affects what is rendered on screen. App-generated
+/// conversions carry their official reference date, while CLI conversions
+/// remain explicit manual snapshots.
+nonisolated public struct DisplayCurrency: Equatable, Sendable {
+    /// ISO currency code for automatic rates, or the user's free-form label
+    /// for a manual conversion.
+    public let code: String
+    /// Units of `code` per 1 USD. `convert` treats a non-positive rate as an
+    /// identity fallback; the store rejects one before it is saved.
+    public let unitsPerUSD: Double
+    /// Manual entry time or the official reference date for an automatic rate.
+    public let enteredAt: Date
+    public let source: DisplayCurrencySource
+
+    public init(
+        code: String,
+        unitsPerUSD: Double,
+        enteredAt: Date,
+        source: DisplayCurrencySource = .manual
+    ) {
         self.code = code
         self.unitsPerUSD = unitsPerUSD
         self.enteredAt = enteredAt
+        self.source = source
     }
 
     /// Converts a USD amount to `code`, rounded to 2 decimal places (the same
@@ -44,11 +52,31 @@ nonisolated public struct DisplayCurrency: Equatable, Sendable {
         return formatter
     }()
 
-    /// Disclosure text shown next to every converted figure, e.g.
-    /// "1 USD = 0.92 EUR, entered 2026-07-20" — the fixed pairing of rate and
-    /// entry date that keeps a converted number from reading as a live quote.
+    /// ECB dates are calendar dates, parsed at midnight UTC. Formatting them
+    /// in a negative local offset would otherwise display the previous day.
+    private static let referenceDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// Disclosure text shown next to every converted figure. Automatic quotes
+    /// name their source and reference day; manual snapshots retain the entry
+    /// date so neither can be mistaken for a transaction-grade live quote.
     public var disclosureText: String {
-        "1 USD = \(formattedRate) \(code), entered \(Self.enteredAtFormatter.string(from: enteredAt))"
+        switch source {
+        case .manual:
+            let day = Self.enteredAtFormatter.string(from: enteredAt)
+            return "1 USD = \(formattedRate) \(code), entered \(day)"
+        case .europeanCentralBank:
+            let day = Self.referenceDateFormatter.string(from: enteredAt)
+            return "1 USD = \(formattedRate) \(code), ECB reference rate \(day)"
+        case .system:
+            return "1 USD = \(formattedRate) \(code), from Mac region settings"
+        }
     }
 
     /// Trims insignificant trailing zeros (e.g. `150` not `150.0000`,

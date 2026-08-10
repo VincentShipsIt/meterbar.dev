@@ -161,14 +161,17 @@ nonisolated enum StorageKeys {
 
     // MARK: - Display Currency (#270)
 
-    /// User-typed currency code/label (e.g. "EUR"). Presentation only — stored
-    /// and exported cost data always stays USD. Missing means "no conversion,
-    /// show USD" — the default.
+    /// Display currency code/label. Presentation only — stored and exported
+    /// cost data always stays USD.
     static let displayCurrencyCode = "DisplayCurrencyCode"
-    /// User-supplied units of `displayCurrencyCode` per 1 USD. MeterBar never
-    /// fetches this from a live/network source.
+    /// Units of `displayCurrencyCode` per 1 USD.
     static let displayCurrencyRate = "DisplayCurrencyRate"
-    /// When the user entered the rate above. Shown next to every converted
-    /// figure so it can never be mistaken for a live quote.
+    /// Manual entry time or official reference date for the saved rate.
     static let displayCurrencyEnteredAt = "DisplayCurrencyEnteredAt"
+    /// `DisplayCurrencySource` raw value. Missing migrates to `.manual`.
+    static let displayCurrencySource = "DisplayCurrencySource"
+    /// Whether the app should detect the Mac's currency and refresh its rate.
+    static let displayCurrencyAutomatic = "DisplayCurrencyAutomatic"
+    /// Last successful automatic refresh, used to cap fetches at once per day.
+    static let displayCurrencyLastRefreshAt = "DisplayCurrencyLastRefreshAt"
 }
