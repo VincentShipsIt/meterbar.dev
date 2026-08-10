@@ -93,11 +93,14 @@ final class DisplayCurrencyStore: ObservableObject {
         do {
             let quote = try await fetchAutomaticRate(code)
             guard selection == .eur else { return }
-            guard quote.unitsPerUSD > 0, quote.unitsPerUSD.isFinite else {
+            let normalizedCode = quote.code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard normalizedCode == code,
+                  quote.unitsPerUSD > 0,
+                  quote.unitsPerUSD.isFinite else {
                 throw DisplayCurrencyRateError.invalidPayload
             }
             let next = DisplayCurrency(
-                code: quote.code,
+                code: normalizedCode,
                 unitsPerUSD: quote.unitsPerUSD,
                 enteredAt: quote.referenceDate,
                 source: .europeanCentralBank

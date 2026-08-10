@@ -49,6 +49,30 @@ final class DisplayCurrencyStoreTests: XCTestCase {
         }
     }
 
+    func testEURSelectionRejectsQuoteForAnotherCurrency() async {
+        await withIsolatedDefaults { defaults in
+            let store = DisplayCurrencyStore(
+                userDefaults: defaults,
+                fetchAutomaticRate: { _ in
+                    DisplayCurrencyRateQuote(
+                        code: "GBP",
+                        unitsPerUSD: 0.78,
+                        referenceDate: Date(timeIntervalSince1970: 1_785_888_000)
+                    )
+                }
+            )
+
+            store.setSelection(.eur)
+            await store.refreshAutomaticCurrency()
+
+            XCTAssertEqual(store.selection, .eur)
+            XCTAssertNil(store.currency)
+            XCTAssertNotNil(store.automaticRateError)
+            XCTAssertNil(defaults.string(forKey: StorageKeys.displayCurrencyCode))
+            XCTAssertNil(defaults.object(forKey: StorageKeys.displayCurrencyLastRefreshAt))
+        }
+    }
+
     func testSelectingUSDClearsConversionAndDoesNotFetch() async {
         await withIsolatedDefaults { defaults in
             var fetchCount = 0
