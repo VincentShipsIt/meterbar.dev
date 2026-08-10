@@ -10,8 +10,12 @@ final class GrokCLIUsageService: ObservableObject {
     nonisolated static let shared = GrokCLIUsageService()
 
     @Published private(set) var hasAccess = false
-    @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
+
+    /// Last fetch failure per Grok profile, keyed by account id. Profiles are
+    /// fetched concurrently, so there is deliberately no provider-wide error
+    /// property: a shared one would describe whichever profile finished last.
+    /// Read it through `firstError(for:)`.
     @Published private(set) var accountErrors: [UUID: ServiceError] = [:]
 
     nonisolated private let binaryPathProvider: @Sendable () -> String?
@@ -65,7 +69,6 @@ final class GrokCLIUsageService: ObservableObject {
             if account.isDefault {
                 hasAccess = false
             }
-            lastError = error
             throw error
         }
 
@@ -77,12 +80,10 @@ final class GrokCLIUsageService: ObservableObject {
                 hasAccess = true
                 subscriptionType = result.subscriptionTier
             }
-            lastError = accountErrors.values.first
             return metrics
         } catch {
             let serviceError = Self.serviceError(from: error)
             accountErrors[account.id] = serviceError
-            lastError = serviceError
             if account.isDefault, case .notAuthenticated = serviceError {
                 hasAccess = false
                 subscriptionType = nil

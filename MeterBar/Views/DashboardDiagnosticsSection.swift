@@ -30,6 +30,7 @@ struct DashboardDiagnosticsSection: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
+    @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
@@ -125,7 +126,7 @@ struct DashboardDiagnosticsSection: View {
         let errors = DiagnosticsRunner.refreshErrors(
             claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
             claudeError: claudeCodeService.lastError,
-            codexError: codexCliService.lastError,
+            codexError: codexCliService.firstError(for: codexAccountStore.enabledAccounts),
             cursorError: cursorService.lastError,
             openRouterError: openRouterService.lastError,
             grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
