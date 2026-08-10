@@ -68,6 +68,28 @@ public struct WidgetAccountSelection: Codable, Equatable, Sendable {
     public var explicitIdentifiers: Set<WidgetAccountIdentifier> {
         Set(accountIdentifiers)
     }
+
+    /// Keeps the stored identifiers when the mode is a case this build does not
+    /// know.
+    ///
+    /// A newer app version writing a future selection mode into the shared App
+    /// Group must not cost the user the accounts they picked, so an unreadable
+    /// mode degrades to `.explicit` whenever identifiers survived — and to
+    /// `.all` only when there was nothing to keep, which is what `.all` already
+    /// means.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let identifiers = (container.decodeTolerantly(
+            [FailableBox<WidgetAccountIdentifier>].self,
+            forKey: .accountIdentifiers
+        ) ?? []).compactMap(\.value)
+        let mode = container.decodeCaseTolerantly(
+            WidgetAccountSelectionMode.self,
+            forKey: .mode
+        ) ?? (identifiers.isEmpty ? .all : .explicit)
+
+        self.init(mode: mode, accountIdentifiers: identifiers)
+    }
 }
 
 public enum WidgetUsageDisplayMode: String, Codable, CaseIterable, Sendable {
@@ -128,36 +150,64 @@ public struct WidgetPreferences: Codable, Equatable, Sendable {
         self.preservesLegacyOpenRouterBalance = preservesLegacyOpenRouterBalance
     }
 
+    /// Decodes field by field so an unreadable one degrades alone.
+    ///
+    /// Tolerating only *missing* keys was enough while the app and the widget
+    /// extension always shipped together, but they read this value out of the
+    /// same App Group across versions. A key that is present carrying an enum
+    /// case this build does not know used to throw, the store's `try?` then
+    /// fell back to `.defaults`, and the next `update(_:)` wrote that fallback
+    /// over the user's real settings. So every field is read independently: a
+    /// value this build cannot recognize costs that field its default and
+    /// nothing else, and unknown quota windows are simply not shown.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        accountSelection = try container.decodeIfPresent(
+        accountSelection = container.decodeTolerantly(
             WidgetAccountSelection.self,
             forKey: .accountSelection
         ) ?? Self.defaults.accountSelection
-        displayMode = try container.decodeIfPresent(
+        displayMode = container.decodeCaseTolerantly(
             WidgetUsageDisplayMode.self,
             forKey: .displayMode
         ) ?? Self.defaults.displayMode
-        visibleQuotaWindows = try container.decodeIfPresent(
-            Set<WidgetQuotaWindow>.self,
-            forKey: .visibleQuotaWindows
-        ) ?? Self.defaults.visibleQuotaWindows
-        showsResetTime = try container.decodeIfPresent(
+        let rawWindows = container.decodeTolerantly([String].self, forKey: .visibleQuotaWindows)
+        visibleQuotaWindows = rawWindows
+            .map { Set($0.compactMap(WidgetQuotaWindow.init(rawValue:))) }
+            ?? Self.defaults.visibleQuotaWindows
+        showsResetTime = container.decodeTolerantly(
             Bool.self,
             forKey: .showsResetTime
         ) ?? Self.defaults.showsResetTime
-        showsFreshness = try container.decodeIfPresent(
+        showsFreshness = container.decodeTolerantly(
             Bool.self,
             forKey: .showsFreshness
         ) ?? Self.defaults.showsFreshness
-        accountOrdering = try container.decodeIfPresent(
+        accountOrdering = container.decodeCaseTolerantly(
             WidgetAccountOrdering.self,
             forKey: .accountOrdering
         ) ?? Self.defaults.accountOrdering
-        preservesLegacyOpenRouterBalance = try container.decodeIfPresent(
+        preservesLegacyOpenRouterBalance = container.decodeTolerantly(
             Bool.self,
             forKey: .preservesLegacyOpenRouterBalance
         ) ?? Self.defaults.preservesLegacyOpenRouterBalance
+    }
+}
+
+private extension KeyedDecodingContainer {
+    /// Decodes a value, treating one this build cannot read as absent so the
+    /// caller can substitute its own default.
+    func decodeTolerantly<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        guard let value = try? decodeIfPresent(T.self, forKey: key) else { return nil }
+        return value
+    }
+
+    /// Decodes an enum through its raw value so a case written by a different
+    /// app version degrades to `nil` instead of failing the whole payload.
+    func decodeCaseTolerantly<T: RawRepresentable>(
+        _ type: T.Type,
+        forKey key: Key
+    ) -> T? where T.RawValue: Decodable {
+        decodeTolerantly(T.RawValue.self, forKey: key).flatMap(T.init(rawValue:))
     }
 }
 
@@ -243,7 +293,9 @@ public final class WidgetPreferencesStore: ObservableObject {
 
     @Published public private(set) var preferences: WidgetPreferences
 
-    private static let storageKey = "WidgetPreferences"
+    /// Internal rather than private so a test can plant a payload written by a
+    /// different app version at the exact key the store reads.
+    static let storageKey = "WidgetPreferences"
 
     private let userDefaults: UserDefaults
     private let reloadTimelines: () -> Void
