@@ -1,10 +1,8 @@
 import XCTest
 @testable import MeterBar
 
-/// Unit tests for `DisplayCurrency` — the presentation-only, user-supplied
-/// conversion behind issue #270. MeterBar never fetches a live exchange rate;
-/// these tests pin down the rounding rule and the disclosure text that keeps
-/// a converted figure from being mistaken for a live quote.
+/// Unit tests for the presentation-only conversion model. These pin down the
+/// rounding rule and source-aware disclosure text.
 final class DisplayCurrencyTests: XCTestCase {
     private let enteredAt = Date(timeIntervalSince1970: 1_784_000_000)
 
@@ -13,6 +11,15 @@ final class DisplayCurrencyTests: XCTestCase {
     private var enteredAtDayString: String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: enteredAt)
+    }
+
+    private var referenceDateDayString: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: enteredAt)
     }
@@ -59,6 +66,31 @@ final class DisplayCurrencyTests: XCTestCase {
         let currency = DisplayCurrency(code: "EUR", unitsPerUSD: 0.92, enteredAt: enteredAt)
 
         XCTAssertEqual(currency.disclosureText, "1 USD = 0.92 EUR, entered \(enteredAtDayString)")
+    }
+
+    func testAutomaticDisclosureNamesECBAndItsReferenceDate() {
+        let currency = DisplayCurrency(
+            code: "EUR",
+            unitsPerUSD: 0.92,
+            enteredAt: enteredAt,
+            source: .europeanCentralBank
+        )
+
+        XCTAssertEqual(
+            currency.disclosureText,
+            "1 USD = 0.92 EUR, ECB reference rate \(referenceDateDayString)"
+        )
+    }
+
+    func testSystemIdentityDisclosureNamesMacRegionSettings() {
+        let currency = DisplayCurrency(
+            code: "USD",
+            unitsPerUSD: 1,
+            enteredAt: enteredAt,
+            source: .system
+        )
+
+        XCTAssertEqual(currency.disclosureText, "1 USD = 1 USD, from Mac region settings")
     }
 
     func testConvertTreatsANonFiniteRateAsAnIdentityFallback() {
