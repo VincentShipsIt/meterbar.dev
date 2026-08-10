@@ -1,5 +1,19 @@
 import Foundation
 
+nonisolated enum DisplayCurrencySelection: String, CaseIterable, Identifiable, Sendable {
+    case usd = "USD"
+    case eur = "EUR"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .usd: "USD — US Dollar"
+        case .eur: "EUR — Euro"
+        }
+    }
+}
+
 nonisolated public enum DisplayCurrencySource: String, Equatable, Sendable {
     case manual
     case europeanCentralBank = "ecb"

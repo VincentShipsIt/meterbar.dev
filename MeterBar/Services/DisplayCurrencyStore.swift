@@ -1,56 +1,52 @@
 import Combine
 import Foundation
 
-/// Persists the optional presentation-only currency conversion.
+/// Persists the presentation-only USD/EUR choice.
 ///
-/// Automatic mode detects the currency configured in macOS Region settings,
-/// refreshes it from the ECB at most once per day, and keeps the last
-/// successful quote for offline use. Manual mode remains available for a
-/// currency the ECB does not publish. Stored and exported cost data stays USD.
+/// USD is the default and needs no conversion. EUR refreshes from the ECB at
+/// most once per day and keeps the last successful quote for offline use.
+/// Stored and exported cost data always stays USD.
 final class DisplayCurrencyStore: ObservableObject {
     static let shared = DisplayCurrencyStore()
 
     @Published private(set) var currency: DisplayCurrency?
-    @Published private(set) var isAutomatic: Bool
+    @Published private(set) var selection: DisplayCurrencySelection
     @Published private(set) var isRefreshingAutomaticRate = false
     @Published private(set) var automaticRateError: String?
-
-    var detectedCurrencyCode: String? {
-        Self.normalizedCode(localeCurrencyCode())
-    }
 
     private static let automaticRefreshInterval: TimeInterval = 24 * 60 * 60
 
     private let userDefaults: UserDefaults
     private let fetchAutomaticRate: (String) async throws -> DisplayCurrencyRateQuote
-    private let localeCurrencyCode: () -> String?
     private let now: () -> Date
 
-    /// Internal seams keep locale, time, networking, and persistence fully
+    /// Internal seams keep time, networking, and persistence fully
     /// deterministic in tests. Production uses the official ECB client.
     init(
         userDefaults: UserDefaults = .standard,
         fetchAutomaticRate: ((String) async throws -> DisplayCurrencyRateQuote)? = nil,
-        localeCurrencyCode: @escaping () -> String? = { Locale.autoupdatingCurrent.currency?.identifier },
         now: @escaping () -> Date = Date.init
     ) {
         self.userDefaults = userDefaults
         self.fetchAutomaticRate = fetchAutomaticRate ?? { code in
             try await DisplayCurrencyRateClient().fetchRate(for: code)
         }
-        self.localeCurrencyCode = localeCurrencyCode
         self.now = now
         currency = nil
-        isAutomatic = false
+        selection = .usd
         load()
 
-        if userDefaults.object(forKey: StorageKeys.displayCurrencyAutomatic) != nil {
-            isAutomatic = userDefaults.bool(forKey: StorageKeys.displayCurrencyAutomatic)
-        } else {
-            // Preserve an existing manual conversion during migration. Fresh
-            // installs have no conversion and opt into the useful default.
-            isAutomatic = currency == nil
+        if let saved = userDefaults.string(forKey: StorageKeys.displayCurrencySelection)
+            .flatMap(DisplayCurrencySelection.init(rawValue:)) {
+            selection = saved
         }
+
+        if selection == .usd {
+            clearSavedRate()
+        } else if currency?.code != DisplayCurrencySelection.eur.rawValue {
+            currency = nil
+        }
+        userDefaults.set(selection.rawValue, forKey: StorageKeys.displayCurrencySelection)
     }
 
     /// Read-only projection used by CLI-oriented call sites and tests.
@@ -59,51 +55,30 @@ final class DisplayCurrencyStore: ObservableObject {
         fetchAutomaticRate = { code in
             throw DisplayCurrencyRateError.unsupportedCurrency(code)
         }
-        localeCurrencyCode = { nil }
         now = Date.init
         self.currency = currency
-        isAutomatic = false
+        selection = currency?.code == DisplayCurrencySelection.eur.rawValue ? .eur : .usd
     }
 
-    /// Saves an explicit manual rate and disables background replacement.
-    func set(code: String, rate: Double) {
-        let trimmedCode = Self.normalizedCode(code) ?? ""
-        guard !trimmedCode.isEmpty, rate > 0, rate.isFinite else {
-            clear()
-            return
+    func setSelection(_ nextSelection: DisplayCurrencySelection) {
+        selection = nextSelection
+        automaticRateError = nil
+        userDefaults.set(nextSelection.rawValue, forKey: StorageKeys.displayCurrencySelection)
+
+        if nextSelection == .usd {
+            clearSavedRate()
         }
-        let next = DisplayCurrency(
-            code: trimmedCode,
-            unitsPerUSD: rate,
-            enteredAt: now(),
-            source: .manual
-        )
-        isAutomatic = false
-        automaticRateError = nil
-        userDefaults.set(false, forKey: StorageKeys.displayCurrencyAutomatic)
-        userDefaults.removeObject(forKey: StorageKeys.displayCurrencyLastRefreshAt)
-        currency = next
-        persist(next)
     }
 
-    func setAutomaticEnabled(_ enabled: Bool) {
-        isAutomatic = enabled
-        automaticRateError = nil
-        userDefaults.set(enabled, forKey: StorageKeys.displayCurrencyAutomatic)
-    }
-
-    /// Refreshes only when automatic mode is enabled and the cached fetch is
-    /// stale, unless the user explicitly requested `force` from Settings.
+    /// Refreshes EUR only when its cached quote is stale, unless the user
+    /// explicitly requested `force` from Settings.
     /// Failures never discard the last-known-good quote.
     func refreshAutomaticCurrency(force: Bool = false) async {
-        guard isAutomatic, !isRefreshingAutomaticRate else { return }
-        guard let code = detectedCurrencyCode else {
-            automaticRateError = "Choose a currency in macOS Region settings or enter a manual rate."
-            return
-        }
+        guard selection == .eur, !isRefreshingAutomaticRate else { return }
+        let code = DisplayCurrencySelection.eur.rawValue
 
         let refreshDate = userDefaults.object(forKey: StorageKeys.displayCurrencyLastRefreshAt) as? Date
-        let cacheMatches = currency?.code == code && currency?.source != .manual
+        let cacheMatches = currency?.code == code
         if !force,
            cacheMatches,
            let refreshDate,
@@ -116,30 +91,20 @@ final class DisplayCurrencyStore: ObservableObject {
         defer { isRefreshingAutomaticRate = false }
 
         do {
-            let next: DisplayCurrency
-            if code == "USD" {
-                next = DisplayCurrency(
-                    code: "USD",
-                    unitsPerUSD: 1,
-                    enteredAt: now(),
-                    source: .system
-                )
-            } else {
-                let quote = try await fetchAutomaticRate(code)
-                guard quote.unitsPerUSD > 0, quote.unitsPerUSD.isFinite else {
-                    throw DisplayCurrencyRateError.invalidPayload
-                }
-                next = DisplayCurrency(
-                    code: quote.code,
-                    unitsPerUSD: quote.unitsPerUSD,
-                    enteredAt: quote.referenceDate,
-                    source: .europeanCentralBank
-                )
+            let quote = try await fetchAutomaticRate(code)
+            guard selection == .eur else { return }
+            guard quote.unitsPerUSD > 0, quote.unitsPerUSD.isFinite else {
+                throw DisplayCurrencyRateError.invalidPayload
             }
+            let next = DisplayCurrency(
+                code: quote.code,
+                unitsPerUSD: quote.unitsPerUSD,
+                enteredAt: quote.referenceDate,
+                source: .europeanCentralBank
+            )
 
             currency = next
             persist(next)
-            userDefaults.set(true, forKey: StorageKeys.displayCurrencyAutomatic)
             userDefaults.set(now(), forKey: StorageKeys.displayCurrencyLastRefreshAt)
         } catch let error as DisplayCurrencyRateError {
             automaticRateError = error.localizedDescription + offlineFallbackSuffix
@@ -148,13 +113,9 @@ final class DisplayCurrencyStore: ObservableObject {
         }
     }
 
-    /// Removes the saved conversion and disables automatic mode so choosing
-    /// "Show USD" remains stable across view appearances.
-    func clear() {
+    private func clearSavedRate() {
         currency = nil
-        isAutomatic = false
         automaticRateError = nil
-        userDefaults.set(false, forKey: StorageKeys.displayCurrencyAutomatic)
         userDefaults.removeObject(forKey: StorageKeys.displayCurrencyCode)
         userDefaults.removeObject(forKey: StorageKeys.displayCurrencyRate)
         userDefaults.removeObject(forKey: StorageKeys.displayCurrencyEnteredAt)
@@ -163,13 +124,10 @@ final class DisplayCurrencyStore: ObservableObject {
     }
 
     private var offlineFallbackSuffix: String {
-        currency == nil ? " Enter a manual rate instead." : " The last saved rate is still in use."
-    }
-
-    private static func normalizedCode(_ code: String?) -> String? {
-        guard let code else { return nil }
-        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return normalized.isEmpty ? nil : normalized
+        if currency == nil {
+            return " Totals remain in USD until a EUR rate is available."
+        }
+        return " The last saved rate is still in use."
     }
 
     private func persist(_ currency: DisplayCurrency) {
@@ -181,7 +139,7 @@ final class DisplayCurrencyStore: ObservableObject {
 
     private func load() {
         guard
-            let code = Self.normalizedCode(userDefaults.string(forKey: StorageKeys.displayCurrencyCode)),
+            let code = userDefaults.string(forKey: StorageKeys.displayCurrencyCode)?.uppercased(),
             userDefaults.object(forKey: StorageKeys.displayCurrencyRate) != nil
         else {
             currency = nil
