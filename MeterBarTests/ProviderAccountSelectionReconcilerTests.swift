@@ -113,12 +113,111 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
         XCTAssertEqual(sessionWake.wakeCodexAccountID, codexCustomID)
     }
 
+    // MARK: - Claude and Grok parity (issue #410)
+
+    /// The Codex handlers reconciled on every enable/disable/delete; Claude's and
+    /// Grok's did not, so a disabled Claude profile kept its status-item slot:
+    /// `MenuBarAccountItemPlanner` drops the vanished key while `select()` still
+    /// counts it against `itemLimit`, and the slot cannot be reused until the
+    /// user reselects by hand or relaunches.
+    func testApplyPrunesDisabledClaudeSelectionAndFreesItsStatusItemSlot() throws {
+        let menuBarSelection = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        try fillEverySlot(of: menuBarSelection, lastKey: claudeCustomKey)
+
+        apply(makeAvailability(claudeCustomEnabled: false), menuBarSelection: menuBarSelection)
+
+        XCTAssertFalse(menuBarSelection.selectedAccountKeys.contains(claudeCustomKey))
+        XCTAssertEqual(menuBarSelection.select(grokDefaultKey), .updated)
+    }
+
+    func testApplyPrunesDisabledGrokSelectionAndFreesItsStatusItemSlot() throws {
+        let menuBarSelection = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        try fillEverySlot(of: menuBarSelection, lastKey: grokCustomKey)
+
+        apply(makeAvailability(grokCustomEnabled: false), menuBarSelection: menuBarSelection)
+
+        XCTAssertFalse(menuBarSelection.selectedAccountKeys.contains(grokCustomKey))
+        XCTAssertEqual(menuBarSelection.select(grokDefaultKey), .updated)
+    }
+
+    /// Deleting an account removes it from the store, so the same pass that
+    /// handles a disable also has to clear the switcher binding — otherwise the
+    /// merged status item stays pointed at an account that no longer exists.
+    func testApplyPrunesDeletedClaudeAccountFromSelectionAndMergedKey() throws {
+        let menuBarSelection = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        menuBarSelection.select(claudeCustomKey)
+        menuBarSelection.select(grokDefaultKey)
+        menuBarSelection.setMergedAccountKey(claudeCustomKey)
+
+        apply(makeAvailability(claudeAccountsIncludeCustom: false), menuBarSelection: menuBarSelection)
+
+        XCTAssertEqual(menuBarSelection.selectedAccountKeys, [grokDefaultKey])
+        XCTAssertNil(menuBarSelection.mergedAccountKey)
+    }
+
+    func testApplyPrunesDeletedGrokAccountFromSelectionAndMergedKey() throws {
+        let menuBarSelection = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        menuBarSelection.select(grokCustomKey)
+        menuBarSelection.select(claudeDefaultKey)
+        menuBarSelection.setMergedAccountKey(grokCustomKey)
+
+        apply(makeAvailability(grokAccountsIncludeCustom: false), menuBarSelection: menuBarSelection)
+
+        XCTAssertEqual(menuBarSelection.selectedAccountKeys, [claudeDefaultKey])
+        XCTAssertNil(menuBarSelection.mergedAccountKey)
+    }
+
+    /// Untracking a whole provider leaks exactly like disabling one of its
+    /// accounts: `providerEnabledBinding` used to reconcile for Codex only.
+    func testApplyPrunesEveryProfileOfAnUntrackedProvider() throws {
+        let menuBarSelection = MenuBarAccountSelectionStore(userDefaults: try XCTUnwrap(defaults))
+        menuBarSelection.select(claudeDefaultKey)
+        menuBarSelection.select(claudeCustomKey)
+        menuBarSelection.select(grokDefaultKey)
+
+        apply(
+            makeAvailability(enabledServices: [.codexCli, .grok]),
+            menuBarSelection: menuBarSelection
+        )
+
+        XCTAssertEqual(menuBarSelection.selectedAccountKeys, [grokDefaultKey])
+    }
+
+    func testApplyPrunesExplicitWidgetSelectionForDisabledClaudeProfile() throws {
+        let widgetPreferences = WidgetPreferencesStore(
+            userDefaults: try XCTUnwrap(defaults),
+            reloadTimelines: {}
+        )
+        widgetPreferences.setSelectedAccounts([claudeCustomWidgetID, grokDefaultWidgetID])
+
+        apply(makeAvailability(claudeCustomEnabled: false), widgetPreferences: widgetPreferences)
+
+        XCTAssertEqual(
+            widgetPreferences.preferences.accountSelection.explicitIdentifiers,
+            [grokDefaultWidgetID]
+        )
+    }
+
+    /// Session Wake keeps Claude and Codex on separate reconcile paths
+    /// (`reconcileAccounts` vs `reconcileCodexAccounts`); the shared reconciler
+    /// owns only the Codex one, so a Claude wake target must survive it.
+    func testApplyLeavesClaudeSessionWakeTargetToItsOwnReconcilePath() throws {
+        let sessionWake = SessionWakeSettingsStore(userDefaults: try XCTUnwrap(defaults))
+        sessionWake.setWakeAccountID(claudeCustomID)
+
+        apply(makeAvailability(claudeCustomEnabled: false), sessionWakeSettings: sessionWake)
+
+        XCTAssertEqual(sessionWake.wakeAccountID, claudeCustomID)
+    }
+
     // MARK: Private
 
     private var suiteName: String!
     private var defaults: UserDefaults!
 
     private let codexCustomID = UUID()
+    private let claudeCustomID = UUID()
+    private let grokCustomID = UUID()
 
     private var codexDefaultKey: String {
         MenuBarAccountKey.make(service: .codexCli, accountID: CodexAccount.defaultID)
@@ -136,6 +235,14 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
         MenuBarAccountKey.make(service: .claudeCode, accountID: ClaudeCodeAccount.defaultID)
     }
 
+    private var claudeCustomKey: String {
+        MenuBarAccountKey.make(service: .claudeCode, accountID: claudeCustomID)
+    }
+
+    private var grokCustomKey: String {
+        MenuBarAccountKey.make(service: .grok, accountID: grokCustomID)
+    }
+
     private var codexCustomWidgetID: WidgetAccountIdentifier {
         .account(service: .codexCli, id: codexCustomID)
     }
@@ -148,12 +255,59 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
         .account(service: .claudeCode, id: ClaudeCodeAccount.defaultID)
     }
 
+    private var claudeCustomWidgetID: WidgetAccountIdentifier {
+        .account(service: .claudeCode, id: claudeCustomID)
+    }
+
+    /// Occupies every status-item slot, ending on `lastKey`, so a test can prove
+    /// the cap actually blocks a further selection before reconciliation runs.
+    ///
+    /// The filler keys all stay available across the reconcile under test, so the
+    /// freed slot can only have come from `lastKey` being pruned — not from the
+    /// filler evaporating too.
+    private func fillEverySlot(
+        of store: MenuBarAccountSelectionStore,
+        lastKey: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let filler = [claudeDefaultKey, codexDefaultKey, codexCustomKey]
+        XCTAssertEqual(
+            filler.count + 1,
+            store.itemLimit,
+            "filler no longer fills the cap exactly; the reuse assertion would be vacuous",
+            file: file,
+            line: line
+        )
+        for key in filler + [lastKey] {
+            XCTAssertEqual(store.select(key), .updated, file: file, line: line)
+        }
+        XCTAssertEqual(
+            store.select(grokDefaultKey),
+            .rejectedLimit(store.itemLimit),
+            "the cap must be reached before reconciliation frees a slot",
+            file: file,
+            line: line
+        )
+    }
+
     private func makeAvailability(
         codexCustomEnabled: Bool = true,
+        claudeCustomEnabled: Bool = true,
+        grokCustomEnabled: Bool = true,
+        claudeAccountsIncludeCustom: Bool = true,
+        grokAccountsIncludeCustom: Bool = true,
         enabledServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok]
     ) -> ProviderAccountSelectionAvailability {
         ProviderAccountSelectionAvailability(
-            claudeAccounts: [.defaultAccount],
+            claudeAccounts: [.defaultAccount] + (claudeAccountsIncludeCustom ? [
+                ClaudeCodeAccount(
+                    id: claudeCustomID,
+                    name: "Work",
+                    configDirectory: "/tmp/claude-work",
+                    isEnabled: claudeCustomEnabled
+                )
+            ] : []),
             codexAccounts: [
                 .defaultAccount,
                 CodexAccount(
@@ -163,7 +317,14 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
                     isEnabled: codexCustomEnabled
                 )
             ],
-            grokAccounts: [.defaultAccount],
+            grokAccounts: [.defaultAccount] + (grokAccountsIncludeCustom ? [
+                GrokAccount(
+                    id: grokCustomID,
+                    name: "Work",
+                    homeDirectory: "/tmp/grok-work",
+                    isEnabled: grokCustomEnabled
+                )
+            ] : []),
             enabledServices: enabledServices
         )
     }
