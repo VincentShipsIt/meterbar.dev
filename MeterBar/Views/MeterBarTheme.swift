@@ -217,6 +217,33 @@ enum MeterBarTheme {
   static let warning = Color(nsColor: .systemOrange)
   static let danger = Color(nsColor: .systemRed)
 
+  // MARK: - Pace overlay (drawn *over* a provider accent, so contrast is by luminance)
+
+  /// The "ahead of pace" band in ``UsageBar``, mirroring the red deficit band.
+  /// It sits on top of the accent fill rather than on the empty track, so plain
+  /// ``success`` is unusable: Cursor (34,150,92) and OpenAI (16,163,127) are
+  /// already green, and a green-on-green band disappears. Both steps are
+  /// therefore *lighter* than every accent in their appearance — a mid mint over
+  /// the mid-dark light accents, a near-white mint over the pastel dark ones —
+  /// which also keeps the band distinct from the track on its other edge, so the
+  /// fill's end stays readable. `UsageBarContrastTests` pins the margin.
+  static let reserveBand = Color.adaptive(
+    light: NSColor(srgbRed: 115 / 255, green: 209 / 255, blue: 143 / 255, alpha: 1),
+    dark: NSColor(srgbRed: 184 / 255, green: 250 / 255, blue: 204 / 255, alpha: 1),
+    lightHighContrast: NSColor(srgbRed: 146 / 255, green: 232 / 255, blue: 172 / 255, alpha: 1),
+    darkHighContrast: NSColor(srgbRed: 208 / 255, green: 255 / 255, blue: 222 / 255, alpha: 1)
+  )
+
+  /// Casing drawn on both sides of the pace marker's colored core. The marker
+  /// lands *inside* the fill whenever the user is ahead of pace, so the core
+  /// alone has no guaranteed contrast against the accent underneath it; the
+  /// casing supplies it in the one direction every accent leaves open — light on
+  /// the dark light-appearance accents, dark on the pale dark-appearance ones.
+  static let paceMarkerCasing = Color.adaptive(
+    light: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1),
+    dark: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+  )
+
   static let glassCardStroke = Color.adaptive(
     light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.08),
     dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10),
