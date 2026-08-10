@@ -266,4 +266,175 @@ final class CodexCliLocalServiceTests: XCTestCase {
             "auth-file read ran on the main thread — blocking I/O must hop off main"
         )
     }
+
+    // MARK: - Per-account error attribution
+
+    /// `UsageDataManager` fans usage fetches out across every enabled Codex
+    /// profile concurrently, so a fetch may only ever record its own profile's
+    /// outcome: a shared `lastError` would leave whichever profile finished last
+    /// speaking for all of them.
+
+    private final class StubURLProtocol: URLProtocol {
+        static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+        override func startLoading() {
+            guard let handler = Self.handler else {
+                client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+                return
+            }
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+        }
+
+        override func stopLoading() {}
+    }
+
+    override func tearDown() {
+        StubURLProtocol.handler = nil
+        super.tearDown()
+    }
+
+    private func makeStubSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    /// Smallest body the usage decoder accepts — the window math has its own
+    /// fixtures above, these tests only care about success vs failure.
+    private static let usageBody = Data(#"{"plan_type":"plus","rate_limit":null}"#.utf8)
+
+    /// Serves 200 to the profiles named in `succeeding` and `failureStatus` to
+    /// everyone else, keyed by the per-profile `ChatGPT-Account-Id` header.
+    private func stubUsage(succeeding: Set<String>, failureStatus: Int) {
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let accountID = request.value(forHTTPHeaderField: "ChatGPT-Account-Id") ?? ""
+            let succeeds = succeeding.contains(accountID)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: url,
+                    statusCode: succeeds ? 200 : failureStatus,
+                    httpVersion: nil,
+                    headerFields: nil
+                )
+            )
+            return (response, succeeds ? Self.usageBody : Data())
+        }
+    }
+
+    @MainActor
+    func testConcurrentFetchesAttributeFailuresToTheOwningAccount() async {
+        let token = makeJWT(exp: futureExp)
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        // Only the default profile is signed in; the work profile has no auth
+        // file, so its fetch fails while the default profile's succeeds.
+        let service = CodexCliLocalService(
+            accountAuthFileDataProvider: { account in
+                account.isDefault
+                    ? self.authFileJSON(accessToken: token, accountId: "account-default")
+                    : nil
+            },
+            urlSession: makeStubSession()
+        )
+        stubUsage(succeeding: ["account-default"], failureStatus: 500)
+        await Task.yield() // let the init-time detached checkAccess drain first
+
+        async let defaultFetch = try? await service.fetchUsageMetrics(account: .defaultAccount)
+        async let workFetch = try? await service.fetchUsageMetrics(account: work)
+        let (defaultMetrics, workMetrics) = await (defaultFetch, workFetch)
+
+        XCTAssertNotNil(defaultMetrics, "the signed-in default profile should have fetched usage")
+        XCTAssertNil(workMetrics, "the signed-out work profile should have failed")
+        XCTAssertEqual(
+            service.firstError(for: [work])?.localizedDescription,
+            ServiceError.notAuthenticated.localizedDescription
+        )
+        XCTAssertNil(
+            service.firstError(for: [.defaultAccount]),
+            "the default profile succeeded — it must not inherit the work profile's error"
+        )
+    }
+
+    @MainActor
+    func testDefaultAccountSuccessDoesNotClearASecondaryAccountsError() async throws {
+        let token = makeJWT(exp: futureExp)
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let service = CodexCliLocalService(
+            accountAuthFileDataProvider: { account in
+                self.authFileJSON(
+                    accessToken: token,
+                    accountId: account.isDefault ? "account-default" : "account-work"
+                )
+            },
+            urlSession: makeStubSession()
+        )
+        stubUsage(succeeding: ["account-default"], failureStatus: 500)
+        await Task.yield()
+
+        // The secondary profile fails first and the default profile succeeds
+        // afterwards — the interleaving that used to blank the shared error.
+        do {
+            _ = try await service.fetchUsageMetrics(account: work)
+            XCTFail("Expected the stubbed HTTP 500 to fail the work profile")
+        } catch {
+            XCTAssertEqual((error as? ServiceError)?.localizedDescription, "HTTP 500")
+        }
+        _ = try await service.fetchUsageMetrics(account: .defaultAccount)
+
+        XCTAssertEqual(
+            service.firstError(for: [work])?.localizedDescription,
+            "HTTP 500",
+            "a later success on another profile must not clear this profile's error"
+        )
+        XCTAssertNil(service.firstError(for: [.defaultAccount]))
+        XCTAssertEqual(service.firstError(for: [.defaultAccount, work])?.localizedDescription, "HTTP 500")
+    }
+
+    @MainActor
+    func testRecoveringAccountClearsOnlyItsOwnError() async throws {
+        let token = makeJWT(exp: futureExp)
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let personal = CodexAccount(id: UUID(), name: "Personal", homeDirectory: "/tmp/codex-personal")
+        let service = CodexCliLocalService(
+            accountAuthFileDataProvider: { account in
+                self.authFileJSON(
+                    accessToken: token,
+                    accountId: account.id == work.id ? "account-work" : "account-personal"
+                )
+            },
+            urlSession: makeStubSession()
+        )
+        stubUsage(succeeding: [], failureStatus: 500)
+        await Task.yield()
+
+        for account in [work, personal] {
+            do {
+                _ = try await service.fetchUsageMetrics(account: account)
+                XCTFail("Expected the stubbed HTTP 500 to fail \(account.name)")
+            } catch {
+                // expected
+            }
+        }
+
+        // Only the work profile recovers.
+        stubUsage(succeeding: ["account-work"], failureStatus: 500)
+        _ = try await service.fetchUsageMetrics(account: work)
+
+        XCTAssertNil(service.firstError(for: [work]), "the recovered profile's error should be cleared")
+        XCTAssertEqual(
+            service.firstError(for: [personal])?.localizedDescription,
+            "HTTP 500",
+            "one profile recovering must not clear another profile's error"
+        )
+    }
 }

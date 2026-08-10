@@ -37,25 +37,6 @@ struct DashboardOverviewSection: View {
         return ("No data", "Waiting for provider refresh", nil)
     }
 
-    /// Deals items round-robin across `columnCount` independent columns.
-    ///
-    /// `LazyVGrid` locks every card in a row to the tallest card in that row, so
-    /// a provider with two quota windows left a block of dead space beside a
-    /// provider with four. Columns that flow on their own pack tight instead.
-    /// Round-robin keeps reading order running left-to-right across each row
-    /// and keeps the columns balanced to within one card.
-    ///
-    /// Internal (not private) so the ordering and balance can be unit-tested
-    /// without hosting the page.
-    nonisolated static func masonryColumns<Element>(_ items: [Element], columnCount: Int) -> [[Element]] {
-        let count = max(1, columnCount)
-        var columns = [[Element]](repeating: [], count: count)
-        for (index, item) in items.enumerated() {
-            columns[index % count].append(item)
-        }
-        return columns
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             OverviewSummaryStrip(
@@ -65,21 +46,20 @@ struct DashboardOverviewSection: View {
                 formattedTokens: UsageFormat.tokens(costSummary?.totalTokens ?? 0)
             )
 
-            HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
-                let columns = Self.masonryColumns(snapshots, columnCount: Self.masonryColumnCount)
-                ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                    VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
-                        ForEach(column) { snapshot in
-                            // Same shared provider card as the popover and the
-                            // Limits page; tapping it jumps to that provider in
-                            // Limits.
-                            ProviderStatusCard(
-                                snapshot: snapshot,
-                                onSelect: { onSelectProvider(snapshot.id) }
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            // One container, one ForEach: the layout decides which column each
+            // card lands in, so a card keeps its identity — and any in-flight
+            // state — when the snapshot list changes underneath it.
+            ProviderMasonryLayout(
+                columnCount: Self.masonryColumnCount,
+                spacing: MeterBarTheme.Spacing.sm
+            ) {
+                ForEach(snapshots) { snapshot in
+                    // Same shared provider card as the popover and the Limits
+                    // page; tapping it jumps to that provider in Limits.
+                    ProviderStatusCard(
+                        snapshot: snapshot,
+                        onSelect: { onSelectProvider(snapshot.id) }
+                    )
                 }
             }
             .frame(maxWidth: .infinity)

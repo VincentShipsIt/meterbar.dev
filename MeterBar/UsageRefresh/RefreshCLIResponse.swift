@@ -12,6 +12,9 @@ nonisolated public struct RefreshCLIResponse: CLIJSONDocument {
     private let providers: [Provider]
     private let cache: Cache
     let message: String?
+    /// Present only when a caller-supplied input was rejected. Same shape as
+    /// the guard error object so one consumer can read both commands.
+    private let error: ErrorDetail?
 
     var summaryLine: String {
         let counts = [ProviderRefreshState.refreshed, .failed, .skipped]
@@ -26,7 +29,8 @@ nonisolated public struct RefreshCLIResponse: CLIJSONDocument {
         durationSeconds: Double,
         outcomes: [ProviderRefreshOutcome],
         cachedMetrics: [ServiceType: UsageMetrics],
-        message: String? = nil
+        message: String? = nil,
+        failure: RefreshCLIFailure? = nil
     ) {
         self.outcome = outcome
         self.collectedAt = collectedAt
@@ -36,6 +40,40 @@ nonisolated public struct RefreshCLIResponse: CLIJSONDocument {
             .map(Provider.init(outcome:))
         cache = Cache(metrics: cachedMetrics, now: collectedAt)
         self.message = message
+        error = failure.map(ErrorDetail.init(failure:))
+    }
+
+    /// A rejected `--timeout`: no provider was contacted, so the document
+    /// carries the failure rather than an empty provider list that would read
+    /// like a refresh that found nothing to do.
+    init(
+        failure: RefreshCLIFailure,
+        collectedAt: Date,
+        cachedMetrics: [ServiceType: UsageMetrics]
+    ) {
+        self.init(
+            outcome: .refreshFailed,
+            collectedAt: collectedAt,
+            durationSeconds: 0,
+            outcomes: [],
+            cachedMetrics: cachedMetrics,
+            message: failure.message,
+            failure: failure
+        )
+    }
+
+    private struct ErrorDetail: Encodable {
+        let code: String
+        let message: String
+        let flag: String?
+        let value: String?
+
+        init(failure: RefreshCLIFailure) {
+            code = failure.code
+            message = failure.message
+            flag = failure.flag
+            value = failure.value
+        }
     }
 
     private struct Provider: Encodable {

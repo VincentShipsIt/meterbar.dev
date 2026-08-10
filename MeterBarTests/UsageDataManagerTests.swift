@@ -1167,7 +1167,7 @@ final class UsageDataManagerTests: XCTestCase {
             cacheSnapshot: { [:] }
         )
 
-        let response = await engine.run()
+        let response = await engine.run().response
 
         XCTAssertEqual(response.outcome, .success)
         XCTAssertEqual(cursor.fetchCount, 1)

@@ -102,15 +102,7 @@ struct Usage: ParsableCommand {
             return
         }
 
-        let filtered: [ServiceType: UsageMetrics]
-        if let provider = provider?.lowercased() {
-            filtered = metrics.filter {
-                $0.key.rawValue.lowercased().contains(provider)
-                    || $0.key.displayName.lowercased().contains(provider)
-            }
-        } else {
-            filtered = metrics
-        }
+        let filtered = CLIProviderFilter.apply(provider, to: metrics)
 
         if json {
             try emitJSON(UsageCLIJSONResponse(metrics: filtered))
@@ -124,6 +116,15 @@ struct Usage: ParsableCommand {
         print("│             MeterBar Usage              │")
         print("╰─────────────────────────────────────────╯")
         print()
+
+        // A `--provider` typo used to print the header and nothing else, which
+        // reads like "this provider has no quota data". Say what happened, the
+        // way `meterbar doctor` already does — and distinguish a typo from a
+        // real provider the cache simply has not seen yet.
+        if metrics.isEmpty {
+            print(CLIProviderFilter.emptyReportMessage(for: provider))
+            return
+        }
 
         for (service, metric) in metrics.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             print("▸ \(service.displayName)")
@@ -452,13 +453,7 @@ struct Doctor: ParsableCommand {
     }
 
     private func matchingProviders() -> Set<ServiceType> {
-        guard let needle = provider?.lowercased() else {
-            return Set(ServiceType.allCases)
-        }
-        return Set(ServiceType.allCases.filter {
-            $0.rawValue.lowercased().contains(needle)
-                || $0.displayName.lowercased().contains(needle)
-        })
+        CLIProviderFilter.select(provider)
     }
 
     private func printJSON(_ reports: [ProviderReadiness]) throws {
@@ -486,7 +481,7 @@ struct Doctor: ParsableCommand {
         print()
 
         if reports.isEmpty {
-            print("No matching providers.")
+            print(CLIProviderFilter.noMatchesMessage)
             return
         }
 

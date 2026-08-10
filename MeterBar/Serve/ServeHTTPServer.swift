@@ -26,13 +26,22 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
         public let dataSource: ServeRouter.DataSource
         public let requestTimeout: TimeInterval
 
+        /// Rate-limit bucket a connection is charged to, derived from the
+        /// accepted descriptor. Injectable only so tests can drive a
+        /// loopback-only listener as if requests came from several hosts;
+        /// nothing on the CLI surface exposes it.
+        public let sourceKey: @Sendable (Int32) -> String
+
         public init(
             host: String,
             port: UInt16,
             token: String,
             maxRequestsPerSecond: Int,
             dataSource: ServeRouter.DataSource,
-            requestTimeout: TimeInterval = ServeHTTPServer.defaultRequestTimeout
+            requestTimeout: TimeInterval = ServeHTTPServer.defaultRequestTimeout,
+            // A closure rather than an unapplied `peerAddress(of:)` reference,
+            // which is not itself `@Sendable` under strict concurrency.
+            sourceKey: @escaping @Sendable (Int32) -> String = { ServeHTTPServer.peerAddress(of: $0) }
         ) {
             self.host = host
             self.port = port
@@ -40,6 +49,7 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
             self.maxRequestsPerSecond = maxRequestsPerSecond
             self.dataSource = dataSource
             self.requestTimeout = requestTimeout
+            self.sourceKey = sourceKey
         }
     }
 
@@ -163,7 +173,7 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
                 continue
             }
 
-            configureTimeouts(clientFD)
+            configureSocketOptions(clientFD)
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 self?.handle(connection: clientFD)
             }
@@ -178,16 +188,64 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
             || code == EWOULDBLOCK || code == EMFILE || code == ENFILE
     }
 
-    private func configureTimeouts(_ fd: Int32) {
+    private func configureSocketOptions(_ fd: Int32) {
         var timeout = timeval(tv_sec: Self.socketPollSeconds, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        // Without this, a peer that vanishes mid-response turns a `write` into
+        // SIGPIPE, whose default disposition kills the whole process rather
+        // than failing the one connection.
+        var noSigPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
     }
+
+    /// The address a connection is charged to. Falls back to a shared key
+    /// rather than a per-connection one when `getpeername` fails: an
+    /// unidentifiable caller must not get an uncounted request.
+    public static func peerAddress(of fd: Int32) -> String {
+        var storage = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let result = withUnsafeMutablePointer(to: &storage) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                getpeername(fd, sockaddrPointer, &length)
+            }
+        }
+        guard result == 0 else { return unknownSourceKey }
+
+        let family = Int32(storage.ss_family)
+        var text = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        let converted: UnsafePointer<CChar>? = withUnsafePointer(to: &storage) { pointer in
+            switch family {
+            case AF_INET:
+                return pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { ipv4 in
+                    var address = ipv4.pointee.sin_addr
+                    return inet_ntop(AF_INET, &address, &text, socklen_t(text.count))
+                }
+            case AF_INET6:
+                return pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { ipv6 in
+                    var address = ipv6.pointee.sin6_addr
+                    return inet_ntop(AF_INET6, &address, &text, socklen_t(text.count))
+                }
+            default:
+                return nil
+            }
+        }
+        guard converted != nil else { return unknownSourceKey }
+        return String(cString: text)
+    }
+
+    /// Deliberately one shared bucket, not a unique key per unidentified
+    /// connection — the latter would hand every such caller a full budget.
+    private static let unknownSourceKey = "unknown"
 
     private func handle(connection fd: Int32) {
         defer { Darwin.close(fd) }
 
-        guard rateLimiter.allow() else {
+        // Charged before parsing, so an invalid or unauthenticated request
+        // still costs its sender. Keyed by source so that cost lands on the
+        // sender alone and can't starve the token holder (ServeRateLimiter).
+        guard rateLimiter.allow(source: configuration.sourceKey(fd)) else {
             write(response: ServeRouter.tooManyRequestsResponse(), to: fd)
             return
         }
@@ -202,17 +260,35 @@ nonisolated public final class ServeHTTPServer: @unchecked Sendable {
         write(response: response, to: fd)
     }
 
-    private func write(response: ServeHTTPResponse, to fd: Int32) {
+    /// Bounded by its own deadline for the same reason `readRequest` is:
+    /// `SO_SNDTIMEO` bounds one `write`, not the drain. A client that stops
+    /// reading part-way through a large `/cost` body makes the next `write`
+    /// fail with `EAGAIN`, and giving up there would hand the caller a
+    /// truncated document under a correct `Content-Length` — a corruption only
+    /// a parse would reveal. Retry until the deadline instead.
+    @discardableResult
+    private func write(response: ServeHTTPResponse, to fd: Int32) -> Bool {
         let data = Self.serialize(response)
-        data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+        let deadline = Date().addingTimeInterval(configuration.requestTimeout)
+        return data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Bool in
             var remaining = buffer.count
             var pointer = buffer.baseAddress
             while remaining > 0, let base = pointer {
+                guard Date() < deadline else { return false }
+
                 let written = Darwin.write(fd, base, remaining)
-                guard written > 0 else { return }
-                remaining -= written
-                pointer = base + written
+                if written > 0 {
+                    remaining -= written
+                    pointer = base + written
+                    continue
+                }
+
+                // 0 can't make progress and anything other than a blocked or
+                // interrupted write is fatal for this connection; both leave
+                // the peer with a short body it will detect via Content-Length.
+                guard written < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR else { return false }
             }
+            return true
         }
     }
 

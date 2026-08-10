@@ -64,11 +64,14 @@ nonisolated protocol CostScanPeriodRebasable: Codable, Sendable {
 
 /// Every transcript's record, keyed by standardized path.
 nonisolated struct CostScanFileCache<Payload: Codable & Sendable>: Codable, Sendable {
-    /// Version 4 adds trailing-seven-day hourly accumulators. This private
-    /// disposable cache intentionally invalidates v3 so the upgrade's first
+    /// Version 5 moves Claude's dedup keys out of the two top-level `periodKeys`
+    /// / `lifetimeKeys` sets and into `eventKeys` on each window, where they
+    /// survive EOF and can be checked across files. Version 4 added
+    /// trailing-seven-day hourly accumulators. This private disposable cache
+    /// intentionally invalidates the previous version so the upgrade's first
     /// background refresh re-reads source events instead of trusting offsets
-    /// whose payload has no hourly totals.
-    static var currentSchemaVersion: Int { 4 }
+    /// whose payload predates the change.
+    static var currentSchemaVersion: Int { 5 }
 
     var schemaVersion = CostScanFileCache.currentSchemaVersion
     var parserVersion = CostScanValues.costCacheParserVersion
@@ -312,22 +315,15 @@ nonisolated enum CostScanCacheStoreError: LocalizedError {
     }
 }
 
-/// One Claude transcript's tally, plus the dedup state a resumed read needs.
+/// One Claude transcript's tally.
+///
+/// The dedup state a resumed read needs lives on the windows themselves, as
+/// `ClaudeSessionTotals.eventKeys` — same shape Codex and Grok get from
+/// `CostScanWindowContext.eventKeys`, and the reason those keys can also answer
+/// "have I already counted this event from a *different* file?".
 nonisolated struct ClaudeFileTotals: Codable, Sendable {
     var period = ClaudeSessionTotals()
     var lifetime = ClaudeSessionTotals()
-
-    /// `messageID:requestID` keys already folded into each window.
-    ///
-    /// Kept only while the file is still being read. Within a single pass the
-    /// scanner keeps the *last* event for a duplicate key; across a resume
-    /// boundary the earlier slice is already tallied, so a duplicate that
-    /// arrives in a later slice is dropped instead — first-wins. The two differ
-    /// only when a transcript repeats a key with different token counts, which
-    /// Claude Code does not do; both are one-copy-counted, which is the property
-    /// that matters.
-    var periodKeys: Set<String> = []
-    var lifetimeKeys: Set<String> = []
 }
 
 /// One Codex rollout's tally, plus the attribution state carried across slices.
@@ -368,13 +364,12 @@ nonisolated extension ClaudeFileTotals: CostScanPeriodRebasable {
         // the only question is whether the cached period tally can be rebased
         // without re-reading the file.
         if (lifetime.latest ?? .distantPast) < cutoff {
-            // Every event predates the new window.
+            // Every event predates the new window. Its keys go with it: they
+            // describe what the period tally counted, and it now counts nothing.
             period = ClaudeSessionTotals()
-            periodKeys = []
         } else if (lifetime.earliest ?? .distantFuture) >= cutoff {
             // Every event falls inside it.
             period = lifetime
-            periodKeys = lifetimeKeys
         } else {
             // The file straddles the cutoff and only its individual events know
             // where. Re-read it — but only files that actually straddle pay.
