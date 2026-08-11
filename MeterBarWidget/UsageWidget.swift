@@ -17,7 +17,7 @@ extension UsageStatus {
 // MARK: - Widget
 
 struct UsageWidget: Widget {
-    let kind: String = "UsageWidget"
+    let kind: String = MeterBarWidgetKind.usage
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: UsageWidgetProvider()) { entry in

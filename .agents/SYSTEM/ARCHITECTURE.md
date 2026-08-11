@@ -54,7 +54,7 @@ meterbar/
 │   ├── Views/                # MenuBarView, SettingsView, UsageDashboardView,
 │   │                         # MeterBarTheme, RefreshingIcon
 │   └── Resources/, Assets.xcassets, Info.plist, MeterBar.entitlements
-├── MeterBarWidget/           # Widget extension (UsageWidget kind "UsageWidget")
+├── MeterBarWidget/           # Widget extension (Usage + Burn Down kinds)
 ├── MeterBarCLI/              # `meterbar` CLI package
 ├── MeterBarTests/            # XCTest suite (runs via `swift test`)
 ├── scripts/                  # Bun/Playwright asset generators, check-coverage.sh
@@ -100,6 +100,8 @@ On the first launch, `FirstRunOnboardingStore` auto-opens the menu panel and sho
 ## Widget & CLI data contract
 
 The app, widget, and CLI consume the canonical `ServiceType`, `UsageLimit`, and `UsageMetrics` definitions from `Packages/MeterBarShared`. The app-group JSON contract is locked by `CachedMetricsContractTests` and `CachedMetricsReplicaContractTests` so fields and date encoding cannot silently drift across targets.
+
+The widget bundle preserves the original `UsageWidget` (small, medium, large) and also registers the distinct `BurnDownWidget` (small, medium). Both read the same `WidgetPreferences` provider/account/window selection. The shared `WidgetBurnDownPlanner` uses `UsageLimit.pace()` to choose projected exhaustion versus reset, suppresses projections for stale or estimated data, and provides a bounded one-to-fifteen-minute WidgetKit reload policy around meaningful countdown boundaries.
 
 Dates in the shared JSON use `JSONEncoder`/`JSONDecoder` **default** strategies (seconds since 2001-01-01 reference date). Changing either side's date strategy breaks widget + CLI decode.
 

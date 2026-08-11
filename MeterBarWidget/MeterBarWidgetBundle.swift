@@ -12,5 +12,6 @@ import SwiftUI
 struct MeterBarWidgetBundle: WidgetBundle {
     var body: some Widget {
         UsageWidget()
+        BurnDownWidget()
     }
 }

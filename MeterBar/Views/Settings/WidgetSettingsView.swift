@@ -179,18 +179,21 @@ struct WidgetSettingsPreviewData {
             sessionLimit: UsageLimit(
                 used: max(10, used - 12),
                 total: 100,
-                resetTime: now.addingTimeInterval(90 * 60)
+                resetTime: now.addingTimeInterval(90 * 60),
+                windowSeconds: 5 * 60 * 60
             ),
             weeklyLimit: UsageLimit(
                 used: used,
                 total: 100,
-                resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)
+                resetTime: now.addingTimeInterval(3 * 24 * 60 * 60),
+                windowSeconds: 7 * 24 * 60 * 60
             ),
             codeReviewLimit: service == .claudeCode
                 ? UsageLimit(
                     used: min(92, used + 8),
                     total: 100,
-                    resetTime: now.addingTimeInterval(5 * 24 * 60 * 60)
+                    resetTime: now.addingTimeInterval(5 * 24 * 60 * 60),
+                    windowSeconds: 7 * 24 * 60 * 60
                 )
                 : nil,
             lastUpdated: now
@@ -393,8 +396,12 @@ struct WidgetSettingsView: View {
                 color: .primary
             )
             SettingsNotice(
-                text: "2. Search for MeterBar, choose Small, Medium, or Large, then drag it into place.",
+                text: "2. Search for MeterBar, choose Usage or Burn Down, then drag a supported size into place.",
                 color: .primary
+            )
+            SettingsNotice(
+                text: "Usage supports Small, Medium, and Large. Burn Down supports Small and Medium.",
+                color: .secondary
             )
             SettingsNotice(
                 text: "macOS owns widget placement; MeterBar cannot add or move widgets for you.",
@@ -545,11 +552,24 @@ struct WidgetSettingsPreviewGallery: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Usage")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 12) {
                 preview(for: .small)
                 preview(for: .medium)
             }
             preview(for: .large)
+
+            Text("Burn Down")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                burnDownPreview(for: .small)
+                burnDownPreview(for: .medium)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -572,6 +592,141 @@ struct WidgetSettingsPreviewGallery: View {
                 appearance: appearance
             )
         }
+    }
+
+    private func burnDownPreview(for family: WidgetPresentationFamily) -> some View {
+        let presentation = WidgetBurnDownPlanner.makePresentation(
+            metrics: data.metrics,
+            accountMetrics: data.accountMetrics,
+            preferences: preferences,
+            family: family,
+            now: Date()
+        )
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(family.settingsTitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            WidgetSettingsBurnDownPreviewSurface(
+                family: family,
+                presentation: presentation,
+                appearance: appearance
+            )
+        }
+    }
+}
+
+struct WidgetSettingsBurnDownPreviewSurface: View {
+    let family: WidgetPresentationFamily
+    let presentation: WidgetBurnDownPresentation
+    let appearance: WidgetSettingsPreviewAppearance
+
+    private var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: metrics.stackSpacing) {
+            if let emptyState = presentation.emptyState {
+                Spacer()
+                Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
+                Text(emptyState.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text(emptyState.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else if family == .small {
+                if let row = presentation.rows.first {
+                    WidgetSettingsBurnDownPreviewRow(row: row, family: family)
+                }
+                overflow
+            } else {
+                HStack(alignment: .top, spacing: metrics.stackSpacing) {
+                    ForEach(presentation.rows) { row in
+                        WidgetSettingsBurnDownPreviewRow(row: row, family: family)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if row.id != presentation.rows.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                overflow
+            }
+        }
+        .padding(metrics.contentPadding)
+        .frame(
+            width: family.previewSize.width,
+            height: family.previewSize.height,
+            alignment: .topLeading
+        )
+        .background(appearance.background)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.primary.opacity(0.10), lineWidth: 1)
+        }
+        .environment(\.colorScheme, appearance.colorScheme)
+        .saturation(appearance == .grayscale ? 0 : 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(family.settingsTitle) burn down widget preview")
+    }
+
+    @ViewBuilder private var overflow: some View {
+        if presentation.hiddenRowCount > 0 {
+            Label(
+                "+\(presentation.hiddenRowCount) more",
+                systemImage: "ellipsis.circle"
+            )
+            .font(.system(size: metrics.captionSize))
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct WidgetSettingsBurnDownPreviewRow: View {
+    let row: WidgetBurnDownRow
+    let family: WidgetPresentationFamily
+
+    private var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: metrics.rowSpacing + 2) {
+            HStack(spacing: metrics.rowSpacing * 2) {
+                ProviderLogoView(
+                    kind: .forService(row.service),
+                    size: metrics.iconSize,
+                    foregroundColor: .primary
+                )
+                Text(row.accountName)
+                    .font(.system(size: metrics.titleSize, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: metrics.rowSpacing)
+            }
+            Text(row.countdownTitle)
+                .font(.system(size: metrics.captionSize, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(row.countdownText)
+                .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+            Label(row.stageText, systemImage: row.stage.previewSymbolName)
+                .font(.system(size: metrics.captionSize, weight: .semibold))
+                .foregroundStyle(stageColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text("\(row.quotaTitle) · \(row.row.limit?.percentLeftText ?? "Unavailable")")
+                .font(.system(size: metrics.captionSize))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.accountName)
+        .accessibilityValue(row.accessibilityValueText)
+    }
+
+    private var stageColor: Color {
+        row.isExhausted ? MeterBarTheme.danger : row.stage.previewColor
     }
 }
 
@@ -831,6 +986,32 @@ private extension WidgetAccountOrdering {
         switch self {
         case .provider: return "Provider"
         case .urgency: return "Urgency"
+        }
+    }
+}
+
+private extension WidgetBurnDownStage {
+    var previewColor: Color {
+        switch self {
+        case .onPace, .unavailable:
+            return .secondary
+        case .reserve:
+            return MeterBarTheme.success
+        case .deficit:
+            return MeterBarTheme.warning
+        }
+    }
+
+    var previewSymbolName: String {
+        switch self {
+        case .onPace:
+            return "equal.circle.fill"
+        case .reserve:
+            return "arrow.down.right.circle.fill"
+        case .deficit:
+            return "arrow.up.right.circle.fill"
+        case .unavailable:
+            return "questionmark.circle"
         }
     }
 }
