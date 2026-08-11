@@ -1,0 +1,375 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "duration.less_than_one_minute" : {
+      "comment" : "Compact duration shorter than one minute.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<1m"
+          }
+        }
+      }
+    },
+    "quota.amount_left" : {
+      "comment" : "Formatted currency amount remaining.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ left"
+          }
+        }
+      }
+    },
+    "quota.amount_spent" : {
+      "comment" : "Formatted currency amount already spent.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ spent"
+          }
+        }
+      }
+    },
+    "quota.estimated" : {
+      "comment" : "Badge on a quota total derived by MeterBar rather than reported by a provider.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated"
+          }
+        }
+      }
+    },
+    "quota.estimated_label" : {
+      "comment" : "VoiceOver quota title. The variable is the quota window name.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, estimated"
+          }
+        }
+      }
+    },
+    "quota.out" : {
+      "comment" : "Quota is exhausted.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Out"
+          }
+        }
+      }
+    },
+    "quota.paired_value" : {
+      "comment" : "VoiceOver quota summary. The first variable is remaining or out; the second is used or spent.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "quota.percent_left" : {
+      "comment" : "Quota percentage remaining. The variable is a whole-number percentage.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% left"
+          }
+        }
+      }
+    },
+    "quota.percent_left.estimated" : {
+      "comment" : "Approximate quota percentage remaining. The variable is a whole-number percentage.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~%lld%% left"
+          }
+        }
+      }
+    },
+    "quota.percent_used" : {
+      "comment" : "Quota percentage used. The variable is a whole-number percentage.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% used"
+          }
+        }
+      }
+    },
+    "quota.percent_used.estimated" : {
+      "comment" : "Approximate quota percentage used. The variable is a whole-number percentage.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~%lld%% used"
+          }
+        }
+      }
+    },
+    "quota.title.account_credits" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account credits"
+          }
+        }
+      }
+    },
+    "quota.title.code_review" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code Review"
+          }
+        }
+      }
+    },
+    "quota.title.key_limit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key limit"
+          }
+        }
+      }
+    },
+    "quota.title.model" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model"
+          }
+        }
+      }
+    },
+    "quota.title.monthly" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monthly"
+          }
+        }
+      }
+    },
+    "quota.title.session" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session"
+          }
+        }
+      }
+    },
+    "quota.title.weekly" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly"
+          }
+        }
+      }
+    },
+    "reset.at" : {
+      "comment" : "Reset clock time. The variable is a localized time.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resets at %@"
+          }
+        }
+      }
+    },
+    "reset.counter_at" : {
+      "comment" : "Condensed reset time. The variable is a localized clock time.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "at %@"
+          }
+        }
+      }
+    },
+    "reset.counter_in" : {
+      "comment" : "Condensed reset countdown. The variable is a localized duration.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "in %@"
+          }
+        }
+      }
+    },
+    "reset.due" : {
+      "comment" : "Reset is due now.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset due"
+          }
+        }
+      }
+    },
+    "reset.due_now" : {
+      "comment" : "Reset is due now.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "due now"
+          }
+        }
+      }
+    },
+    "reset.exhausted_detail" : {
+      "comment" : "Blocking quota detail. The variable is the number of exhausted limits.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Usage is unavailable until this limit resets."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Usage resumes after %lld exhausted limits reset."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reset.exhausted_limits" : {
+      "comment" : "Blocking quota title. The variable is the number of exhausted limits.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Limit exhausted"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld limits exhausted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reset.in" : {
+      "comment" : "Reset countdown. The variable is a localized duration.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resets in %@"
+          }
+        }
+      }
+    },
+    "reset.time_unavailable" : {
+      "comment" : "Shown when a provider has not reported a reset time.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset time unavailable"
+          }
+        }
+      }
+    },
+    "reset.titled_at" : {
+      "comment" : "Reset clock time. The first variable is the quota title; the second is a localized time.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ resets at %2$@"
+          }
+        }
+      }
+    },
+    "reset.titled_due" : {
+      "comment" : "Reset countdown that is due. The variable is the quota window title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ reset due"
+          }
+        }
+      }
+    },
+    "reset.titled_in" : {
+      "comment" : "Reset countdown. The first variable is the quota title; the second is a duration.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ reset in %2$@"
+          }
+        }
+      }
+    },
+    "reset.unavailable_until_reported" : {
+      "comment" : "Detail shown when an exhausted quota has no known reset time.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage is unavailable until the reset is reported."
+          }
+        }
+      }
+    },
+    "reset.window_reset" : {
+      "comment" : "Blocking quota title. The variable is the localized quota-window title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ reset"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
