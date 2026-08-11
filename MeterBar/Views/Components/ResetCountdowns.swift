@@ -83,17 +83,51 @@ struct ResetCountdownLabel: View {
         timeZone: TimeZone = .current
     ) -> String? {
         guard let resetTime = limit.resetTime,
-              let countdown = limit.resetCountdownText(now: now) else { return nil }
-        if countdown == "now" {
-            return title.map { "\($0) reset due" } ?? "Reset due"
+              let seconds = limit.secondsUntilReset(now: now) else { return nil }
+        if seconds <= 0 {
+            if let title {
+                return String(
+                    localized: "reset.titled_due",
+                    defaultValue: "\(title) reset due",
+                    comment: "Reset countdown that is due. The variable is the quota window title."
+                )
+            }
+            return String(localized: "reset.due", defaultValue: "Reset due", comment: "Reset is due now.")
         }
 
         switch format {
         case .countdown:
-            return title.map { "\($0) reset in \(countdown)" } ?? "Resets in \(countdown)"
+            let countdown = LocalizedUsageFormat.countdown(seconds: seconds, locale: locale)
+            if let title {
+                return String(
+                    localized: "reset.titled_in",
+                    defaultValue: "\(title) reset in \(countdown)",
+                    locale: locale,
+                    comment: "Reset countdown. The first variable is the quota title; the second is a duration."
+                )
+            }
+            return String(
+                localized: "reset.in",
+                defaultValue: "Resets in \(countdown)",
+                locale: locale,
+                comment: "Reset countdown. The variable is a localized duration."
+            )
         case .clock:
             let clock = formattedClockTime(resetTime, locale: locale, timeZone: timeZone)
-            return title.map { "\($0) resets at \(clock)" } ?? "Resets at \(clock)"
+            if let title {
+                return String(
+                    localized: "reset.titled_at",
+                    defaultValue: "\(title) resets at \(clock)",
+                    locale: locale,
+                    comment: "Reset clock time. The first variable is the quota title; the second is a localized time."
+                )
+            }
+            return String(
+                localized: "reset.at",
+                defaultValue: "Resets at \(clock)",
+                locale: locale,
+                comment: "Reset clock time. The variable is a localized time."
+            )
         }
     }
 
@@ -257,17 +291,31 @@ struct BlockingLimitResetCounter: View {
 
     static func titleText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {
         if let window {
-            return "\(window.title) reset"
+            return String(
+                localized: "reset.window_reset",
+                defaultValue: "\(window.title) reset",
+                comment: "Blocking quota title. The variable is the localized quota-window title."
+            )
         }
 
         let exhaustedCount = windows.filter { $0.limit.isAtLimit }.count
-        return exhaustedCount > 1 ? "Limits exhausted" : "Limit exhausted"
+        return String(
+            localized: "reset.exhausted_limits",
+            defaultValue: "\(exhaustedCount) limits exhausted",
+            comment: "Blocking quota title. The variable is the number of exhausted limits."
+        )
     }
 
     /// Returned whenever no reset instant is known. Callers that can omit the
     /// countdown entirely compare against this rather than re-deriving the
     /// "is there anything to count down to?" test from the window.
-    static let unavailableCounterText = "Reset time unavailable"
+    static var unavailableCounterText: String {
+        String(
+            localized: "reset.time_unavailable",
+            defaultValue: "Reset time unavailable",
+            comment: "Shown when a provider has not reported a reset time."
+        )
+    }
 
     static func counterText(
         for window: ResetCountdownWindow?,
@@ -277,32 +325,50 @@ struct BlockingLimitResetCounter: View {
         timeZone: TimeZone = .current
     ) -> String {
         guard let window,
-              let countdown = window.limit.resetCountdownText(now: now) else {
+              let seconds = window.limit.secondsUntilReset(now: now) else {
             return unavailableCounterText
         }
 
-        if countdown == "now" {
-            return "due now"
+        if seconds <= 0 {
+            return String(localized: "reset.due_now", defaultValue: "due now", comment: "Reset is due now.")
         }
 
         switch format {
         case .countdown:
-            return "in \(countdown)"
+            let countdown = LocalizedUsageFormat.countdown(seconds: seconds, locale: locale)
+            return String(
+                localized: "reset.counter_in",
+                defaultValue: "in \(countdown)",
+                locale: locale,
+                comment: "Condensed reset countdown. The variable is a localized duration."
+            )
         case .clock:
             guard let resetTime = window.limit.resetTime else { return unavailableCounterText }
-            return "at \(ResetCountdownLabel.formattedClockTime(resetTime, locale: locale, timeZone: timeZone))"
+            let clock = ResetCountdownLabel.formattedClockTime(resetTime, locale: locale, timeZone: timeZone)
+            return String(
+                localized: "reset.counter_at",
+                defaultValue: "at \(clock)",
+                locale: locale,
+                comment: "Condensed reset time. The variable is a localized clock time."
+            )
         }
     }
 
     static func detailText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {
         guard window != nil else {
-            return "Usage is unavailable until the reset is reported."
+            return String(
+                localized: "reset.unavailable_until_reported",
+                defaultValue: "Usage is unavailable until the reset is reported.",
+                comment: "Detail shown when an exhausted quota has no known reset time."
+            )
         }
 
         let exhaustedCount = windows.filter { $0.limit.isAtLimit }.count
-        return exhaustedCount > 1
-            ? "Usage resumes after exhausted limits reset."
-            : "Usage is unavailable until this limit resets."
+        return String(
+            localized: "reset.exhausted_detail",
+            defaultValue: "Usage resumes after \(exhaustedCount) exhausted limits reset.",
+            comment: "Blocking quota detail. The variable is the number of exhausted limits."
+        )
     }
 }
 

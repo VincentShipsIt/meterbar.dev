@@ -35,8 +35,8 @@ struct LimitRow: View {
     /// deliberately density-independent — the popover, detail panel, and
     /// dashboard must all speak an identical reading. Exposed so tests can assert
     /// the wiring per density without a rendered-view accessibility harness.
-    var accessibilityLabelText: String { limit.accessibilityLabel }
-    var accessibilityValueText: String { limit.accessibilityValue }
+    var accessibilityLabelText: String { limit.localizedAccessibilityLabel }
+    var accessibilityValueText: String { limit.localizedAccessibilityValue }
 
     // Every surface that draws a `LimitRow` already sits inside a card, so the
     // row never draws one of its own. The detail panel used to, which is exactly
@@ -61,7 +61,7 @@ struct LimitRow: View {
 
     private var header: some View {
         HStack(spacing: density.headerSpacing) {
-            Text(limit.title)
+            Text(limit.localizedTitle)
                 .font(density.titleFont)
                 .fontWeight(density.titleWeight)
                 .foregroundColor(density.titleColor)
@@ -87,7 +87,10 @@ struct LimitRow: View {
     /// user's text-size setting. Kept behind the density so all three surfaces
     /// render it through one code path.
     private var estimatedTag: some View {
-        Text("Estimated")
+        Text(
+            "quota.estimated",
+            comment: "Badge on a quota total derived by MeterBar rather than reported by a provider."
+        )
             .font(density.estimatedFont)
             .fontWeight(.semibold)
             .foregroundColor(.secondary)
@@ -98,7 +101,7 @@ struct LimitRow: View {
         case .resetOnly:
             if content.showsReset {
                 ResetCountdownLabel(
-                    title: limit.title,
+                    title: limit.localizedTitle,
                     limit: limit.usageLimit,
                     font: density.resetFont,
                     foregroundColor: .secondary,
@@ -178,9 +181,11 @@ extension LimitRow {
             switch limit.valueStyle {
             case .currency:
                 let remaining = max(0, limit.usageLimit.total - limit.usageLimit.used)
-                return "\(UsageFormat.cost(remaining)) left"
+                return LocalizedUsageFormat.amountLeft(UsageFormat.cost(remaining))
             case .quota:
-                return (isOut && !isEstimated) ? "Out" : limit.usageLimit.percentLeftText
+                return (isOut && !isEstimated)
+                    ? LocalizedUsageFormat.out()
+                    : LocalizedUsageFormat.percentLeft(limit.usageLimit)
             }
         }
 
@@ -193,9 +198,9 @@ extension LimitRow {
         var usedText: String {
             switch limit.valueStyle {
             case .currency:
-                return "\(UsageFormat.cost(limit.usageLimit.used)) spent"
+                return LocalizedUsageFormat.amountSpent(UsageFormat.cost(limit.usageLimit.used))
             case .quota:
-                return limit.usageLimit.usedPercentageText
+                return LocalizedUsageFormat.percentUsed(limit.usageLimit)
             }
         }
     }
