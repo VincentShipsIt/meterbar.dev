@@ -395,14 +395,15 @@ final class SessionWakeControllerTests: XCTestCase {
     }
 
     func testDifferentPIDLifetimeLockHolderStillReportsContention() throws {
-        let lockURL = testLockURL()
+        let lockDirectory = testLockURL().deletingLastPathComponent()
+            .appendingPathComponent("spawned-holder-\(UUID().uuidString)", isDirectory: true)
+        let lockURL = lockDirectory.appendingPathComponent("watcher.lock")
+        defer { try? FileManager.default.removeItem(at: lockDirectory) }
         let holder = try SpawnedWakeLockHolder(lockURL: lockURL)
         defer { holder.release() }
-        poll {
-            guard let data = try? Data(contentsOf: lockURL),
-                  let record = try? JSONDecoder().decode(WakeLockHolder.self, from: data) else { return false }
-            return record.pid == holder.pid
-        }
+        let data = try Data(contentsOf: lockURL)
+        let record = try JSONDecoder().decode(WakeLockHolder.self, from: data)
+        XCTAssertEqual(record.pid, holder.pid)
         XCTAssertNotEqual(holder.pid, getpid())
 
         let store = armedStore()
@@ -414,7 +415,7 @@ final class SessionWakeControllerTests: XCTestCase {
             accounts: ClaudeCodeAccountStore(userDefaults: defaults),
             rescanInterval: 3_600,
             makeWatcher: { _, _, onState in FakeWatcher(recorder: recorder, onState: onState) },
-            makeLifetimeLock: lifetimeLockFactory()
+            makeLifetimeLock: { WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .app) }
         )
 
         controller.activate()
@@ -763,8 +764,14 @@ nonisolated private final class SpawnedWakeLockHolder {
     private var isReleased = false
 
     init(lockURL: URL) throws {
+        try FileManager.default.createDirectory(
+            at: lockURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         let process = Process()
         let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [
             "-c",
@@ -775,14 +782,25 @@ nonisolated private final class SpawnedWakeLockHolder {
                 json.dump({"kind": "agent", "pid": os.getpid(), "host": socket.gethostname(), \
                     "startedAtEpoch": time.time()}, lock_file)
                 lock_file.flush()
+                sys.stdout.buffer.write(bytes([1]))
+                sys.stdout.buffer.flush()
                 sys.stdin.buffer.read(1)
             """,
             lockURL.path,
         ]
         process.standardInput = input
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardOutput = output
+        process.standardError = error
         try process.run()
+        let ready = output.fileHandleForReading.readData(ofLength: 1)
+        guard ready == Data([1]) else {
+            process.waitUntilExit()
+            let stderr = error.fileHandleForReading.readDataToEndOfFile()
+            throw SpawnedWakeLockHolderError.failed(
+                status: process.terminationStatus,
+                stderr: String(data: stderr, encoding: .utf8) ?? "unreadable stderr"
+            )
+        }
 
         self.process = process
         self.input = input
@@ -792,13 +810,26 @@ nonisolated private final class SpawnedWakeLockHolder {
     func release() {
         guard !isReleased else { return }
         isReleased = true
-        try? input.fileHandleForWriting.write(contentsOf: Data([1]))
+        if process.isRunning {
+            try? input.fileHandleForWriting.write(contentsOf: Data([1]))
+        }
         try? input.fileHandleForWriting.close()
         process.waitUntilExit()
     }
 
     deinit {
         release()
+    }
+}
+
+nonisolated private enum SpawnedWakeLockHolderError: LocalizedError {
+    case failed(status: Int32, stderr: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .failed(status, stderr):
+            "spawned wake-lock holder exited with status \(status): \(stderr)"
+        }
     }
 }
 

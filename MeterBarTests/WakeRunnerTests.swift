@@ -405,6 +405,26 @@ final class WakeRunnerTests: XCTestCase {
         XCTAssertTrue(data.isEmpty, "released lock left a stale holder descriptor")
     }
 
+    func testUnlockedStaleDescriptorWithReusedPIDIsRecoverable() throws {
+        let url = tempDir.appendingPathComponent("stale-reused-pid.lock")
+        let stale = WakeLockHolder(
+            kind: .agent,
+            pid: getpid(),
+            host: "previous-holder",
+            startedAtEpoch: 1
+        )
+        try JSONEncoder().encode(stale).write(to: url)
+
+        let lock = WakeLock(lockURL: url, legacyLockURLs: [])
+        XCTAssertEqual(lock.acquire(), .acquired)
+        defer { lock.release() }
+
+        let current = try JSONDecoder().decode(WakeLockHolder.self, from: Data(contentsOf: url))
+        XCTAssertEqual(current.kind, .app)
+        XCTAssertEqual(current.pid, getpid())
+        XCTAssertGreaterThan(current.startedAtEpoch, stale.startedAtEpoch)
+    }
+
     func testLockDirectoryCreationFailureIsUnavailableNotContended() {
         // The lock's parent path runs through a regular file, so the private
         // directory cannot be created. That is an environment failure, not
