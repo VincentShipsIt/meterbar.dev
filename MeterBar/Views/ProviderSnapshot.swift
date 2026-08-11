@@ -75,7 +75,7 @@ struct ProviderSnapshot: Identifiable {
         blockingLimits.map {
             ResetCountdownWindow(
                 id: "\(id)-\($0.title)",
-                title: $0.title,
+                title: $0.localizedTitle,
                 limit: $0.usageLimit
             )
         }
@@ -189,6 +189,35 @@ struct SnapshotLimit: Identifiable {
         usageLimit.isEstimated ? "\(title), estimated" : title
     }
 
+    /// App-target projection for standard quota-window copy. Parsed model
+    /// labels are provider data and remain verbatim.
+    var localizedTitle: String {
+        switch (kind, title) {
+        case (.session, "Key limit"):
+            return String(localized: "quota.title.key_limit", defaultValue: "Key limit")
+        case (.session, "Session"):
+            return String(localized: "quota.title.session", defaultValue: "Session")
+        case (.weekly, "Account credits"):
+            return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
+        case (.weekly, "Monthly"):
+            return String(localized: "quota.title.monthly", defaultValue: "Monthly")
+        case (.weekly, "Weekly"):
+            return String(localized: "quota.title.weekly", defaultValue: "Weekly")
+        case (.codeReview, "Code Review"):
+            return String(localized: "quota.title.code_review", defaultValue: "Code Review")
+        case (.codeReview, "Model"):
+            return String(localized: "quota.title.model", defaultValue: "Model")
+        default:
+            return title
+        }
+    }
+
+    /// Localized equivalent used by UI surfaces. The English property above is
+    /// retained for existing non-UI callers and compatibility tests.
+    var localizedAccessibilityLabel: String {
+        usageLimit.isEstimated ? LocalizedUsageFormat.estimatedLabel(localizedTitle) : localizedTitle
+    }
+
     /// VoiceOver value for a quota window: how much is left and how much is
     /// used/spent, mirroring the trailing value + used-value copy the rows
     /// render. Currency-style limits (OpenRouter key/credit balances) speak
@@ -200,6 +229,21 @@ struct SnapshotLimit: Identifiable {
         }
         let trailing = (isOut && !usageLimit.isEstimated) ? "Out" : usageLimit.percentLeftText
         return "\(trailing), \(usageLimit.usedPercentageText)"
+    }
+
+    /// Localized equivalent used by app views and VoiceOver.
+    var localizedAccessibilityValue: String {
+        if valueStyle == .currency {
+            let left = LocalizedUsageFormat.amountLeft(
+                UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
+            )
+            let spent = LocalizedUsageFormat.amountSpent(UsageFormat.cost(usageLimit.used))
+            return LocalizedUsageFormat.pairedValue(left, spent)
+        }
+        let trailing = (isOut && !usageLimit.isEstimated)
+            ? LocalizedUsageFormat.out()
+            : LocalizedUsageFormat.percentLeft(usageLimit)
+        return LocalizedUsageFormat.pairedValue(trailing, LocalizedUsageFormat.percentUsed(usageLimit))
     }
 }
 

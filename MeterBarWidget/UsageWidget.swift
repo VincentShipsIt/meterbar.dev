@@ -24,7 +24,7 @@ struct UsageWidget: Widget {
             UsageWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("MeterBar")
-        .description("Track your AI coding assistant usage limits")
+        .description("widget.description")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -203,7 +203,7 @@ struct WidgetGlanceRow: View {
                     .lineLimit(1)
                 Spacer(minLength: metrics.rowSpacing)
                 WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
-                Text(row.summaryText)
+                Text(WidgetLocalizedContent.summaryText(for: row))
                     .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -215,7 +215,7 @@ struct WidgetGlanceRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue(row.accessibilityValueText)
+        .accessibilityValue(WidgetLocalizedContent.accessibilityValue(for: row))
     }
 }
 
@@ -236,7 +236,7 @@ struct WidgetGlanceHero: View {
                 WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
             }
 
-            Text(row.summaryText)
+            Text(WidgetLocalizedContent.summaryText(for: row))
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -247,7 +247,7 @@ struct WidgetGlanceHero: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue(row.accessibilityValueText)
+        .accessibilityValue(WidgetLocalizedContent.accessibilityValue(for: row))
     }
 }
 
@@ -268,14 +268,14 @@ struct WidgetGlanceRail: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer(minLength: metrics.rowSpacing)
-                        Text(row.compactSummaryText)
+                        Text(WidgetLocalizedContent.compactSummaryText(for: row))
                             .font(.system(size: metrics.captionSize, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(row.usageStatus?.color ?? .secondary)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(row.accountName)
-                    .accessibilityValue(row.compactAccessibilityValueText)
+                    .accessibilityValue(WidgetLocalizedContent.accessibilityValue(for: row, compact: true))
                 }
             }
         }
@@ -320,7 +320,7 @@ struct WidgetGlanceCaption: View {
 
     var body: some View {
         HStack(spacing: size / 2) {
-            Text(row.quotaTitle)
+            Text(WidgetLocalizedContent.quotaTitle(for: row))
             if let resetTime = row.resetTime {
                 Label {
                     Text(resetTime, style: .relative)
@@ -369,7 +369,7 @@ struct WidgetHealthIndicator: View {
     /// `WidgetDataHealth`, so they cannot end up describing one state two ways.
     /// A healthy row draws no glyph, so it never reaches this.
     private var label: String {
-        health.accessibilityDescription ?? ""
+        WidgetLocalizedContent.healthDescription(health) ?? ""
     }
 }
 
@@ -379,10 +379,10 @@ struct WidgetOverflowView: View {
 
     var body: some View {
         if hiddenRowCount > 0 {
-            Label("+\(hiddenRowCount) more", systemImage: "ellipsis.circle")
+            Label(LocalizedUsageFormat.moreRows(hiddenRowCount), systemImage: "ellipsis.circle")
                 .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("\(hiddenRowCount) more usage rows")
+                .accessibilityLabel(LocalizedUsageFormat.moreUsageRows(hiddenRowCount))
         }
     }
 }
@@ -398,10 +398,10 @@ struct WidgetEmptyStateView: View {
                     .font(.title2)
                     .foregroundStyle(state == .noSelection ? Color.secondary : Color.orange)
             }
-            Text(state.title)
+            Text(WidgetLocalizedContent.emptyTitle(state))
                 .font(.caption)
                 .bold()
-            Text(state.detail)
+            Text(WidgetLocalizedContent.emptyDetail(state))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(compact ? .leading : .center)
