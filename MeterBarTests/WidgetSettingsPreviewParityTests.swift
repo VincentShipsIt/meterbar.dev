@@ -111,6 +111,40 @@ final class WidgetSettingsPreviewParityTests: XCTestCase {
         }
     }
 
+    func testBurnDownPreviewRendersSupportedFamiliesInLightAndDark() {
+        for family in [WidgetPresentationFamily.small, .medium] {
+            let burnDown = WidgetBurnDownPlanner.makePresentation(
+                metrics: [
+                    .claudeCode: UsageMetrics(
+                        service: .claudeCode,
+                        weeklyLimit: UsageLimit(
+                            used: 72,
+                            total: 100,
+                            resetTime: now.addingTimeInterval(2.5 * 24 * 60 * 60),
+                            windowSeconds: 7 * 24 * 60 * 60
+                        ),
+                        lastUpdated: now
+                    )
+                ],
+                accountMetrics: [],
+                preferences: .defaults,
+                family: family,
+                now: now
+            )
+            for appearance in [WidgetSettingsPreviewAppearance.light, .dark] {
+                let host = NSHostingView(
+                    rootView: WidgetSettingsBurnDownPreviewSurface(
+                        family: family,
+                        presentation: burnDown,
+                        appearance: appearance
+                    )
+                )
+                host.layoutSubtreeIfNeeded()
+                XCTAssertGreaterThan(host.fittingSize.height, 0, "\(family) \(appearance)")
+            }
+        }
+    }
+
     // MARK: - Fixtures
 
     private func presentation(family: WidgetPresentationFamily) -> WidgetPresentation {

@@ -122,7 +122,9 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
     private static func reloadWidgetTimelines() {
         #if canImport(WidgetKit)
         if #available(macOS 11.0, *) {
-            WidgetCenter.shared.reloadTimelines(ofKind: "UsageWidget")
+            for kind in MeterBarWidgetKind.all {
+                WidgetCenter.shared.reloadTimelines(ofKind: kind)
+            }
         }
         #endif
     }

@@ -373,7 +373,9 @@ public final class WidgetPreferencesStore: ObservableObject {
 
     private static func reloadWidgetTimelines() {
         #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadTimelines(ofKind: "UsageWidget")
+        for kind in MeterBarWidgetKind.all {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
         #endif
     }
 }

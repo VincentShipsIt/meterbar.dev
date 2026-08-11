@@ -232,3 +232,11 @@ each state:
       the remaining providers rather than going fully empty.
 - [ ] **Reload** — change the refresh interval or force a refresh in the app and
       confirm the widget updates (via `WidgetCenter.reloadTimelines`).
+- [ ] **Burn Down** — add the small and medium Burn Down widgets; confirm reserve,
+      on-pace, deficit, projected-empty, and reset countdown states use the same
+      account/window selections as Usage.
+- [ ] **Burn Down health** — verify stale cached data keeps the reset countdown but
+      does not claim a projected exhaustion, and unavailable selections remain
+      visibly unavailable.
+- [ ] **Appearances** — verify Usage and Burn Down in light and dark appearances;
+      labels, provider marks, pace color, and VoiceOver values remain legible.

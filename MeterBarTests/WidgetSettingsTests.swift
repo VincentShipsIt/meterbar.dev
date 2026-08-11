@@ -115,6 +115,18 @@ final class WidgetSettingsTests: XCTestCase {
             XCTAssertNil(presentation.emptyState, "\(family)")
             XCTAssertEqual(presentation.rows.first?.displayMode, .remaining, "\(family)")
         }
+
+        for family in [WidgetPresentationFamily.small, .medium] {
+            let presentation = WidgetBurnDownPlanner.makePresentation(
+                metrics: data.metrics,
+                accountMetrics: data.accountMetrics,
+                preferences: preferences,
+                family: family,
+                now: Date(timeIntervalSinceReferenceDate: 1_000_000)
+            )
+            XCTAssertFalse(presentation.rows.isEmpty, "\(family)")
+            XCTAssertTrue(presentation.rows.allSatisfy { $0.stage != .unavailable }, "\(family)")
+        }
     }
 
     func testWidgetSettingsAndAllPreviewAppearancesRender() {
