@@ -15,13 +15,9 @@
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/App%20Store-Coming%20Soon-lightgrey?logo=app-store" alt="App Store Coming Soon">
-</p>
-
 ---
 
-> **Note**: MeterBar is currently in active development. The app is not yet available on the Mac App Store but will be published soon. For now, you can build from source or download pre-built binaries from the Releases page.
+> MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
 A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
 OpenRouter, and Grok usage at a glance — then tells you which provider still has

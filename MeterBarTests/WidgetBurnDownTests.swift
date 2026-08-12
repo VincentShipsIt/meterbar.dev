@@ -5,6 +5,48 @@ final class WidgetBurnDownTests: XCTestCase {
     private let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
     private let windowSeconds: TimeInterval = 5 * 60 * 60
 
+    func testBurnDownLocalizedCopyUsesStructuredFieldsNotPlannerEnglish() {
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownTitle(.projectedExhaustion, locale: Locale(identifier: "en")),
+            "Projected empty in"
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownTitle(.reset, locale: Locale(identifier: "en")),
+            "Resets in"
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownTitle(.unavailable, locale: Locale(identifier: "en")),
+            "Countdown"
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownStageText(
+                stage: .unavailable,
+                health: .stale,
+                fallback: "ignored",
+                locale: Locale(identifier: "en")
+            ),
+            "Stale data"
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownStageText(
+                stage: .unavailable,
+                health: .unavailable,
+                fallback: "ignored",
+                locale: Locale(identifier: "en")
+            ),
+            "Usage unavailable"
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownStageText(
+                stage: .unavailable,
+                health: .healthy,
+                fallback: "ignored",
+                locale: Locale(identifier: "en")
+            ),
+            "Pace unavailable"
+        )
+    }
+
     func testBurnDownUsesADistinctStableWidgetKind() {
         XCTAssertEqual(MeterBarWidgetKind.usage, "UsageWidget")
         XCTAssertEqual(MeterBarWidgetKind.burnDown, "BurnDownWidget")

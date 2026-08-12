@@ -701,21 +701,30 @@ struct WidgetSettingsBurnDownPreviewRow: View {
                     .lineLimit(1)
                 Spacer(minLength: metrics.rowSpacing)
             }
-            Text(row.countdownTitle)
+            Text(LocalizedUsageFormat.burnDownCountdownTitle(row.countdownKind))
                 .font(.system(size: metrics.captionSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Text(row.countdownText)
+            Text(row.countdownKind == .unavailable || row.countdownText == "Unavailable"
+                 ? LocalizedUsageFormat.unavailable()
+                 : row.countdownText)
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
-            Label(row.stageText, systemImage: row.stage.previewSymbolName)
+            Label(
+                LocalizedUsageFormat.burnDownStageText(
+                    stage: row.stage,
+                    health: row.health,
+                    fallback: row.stageText
+                ),
+                systemImage: row.stage.previewSymbolName
+            )
                 .font(.system(size: metrics.captionSize, weight: .semibold))
                 .foregroundStyle(stageColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-            Text("\(row.quotaTitle) · \(row.row.limit?.percentLeftText ?? "Unavailable")")
+            Text("\(row.quotaTitle) · \(quotaLeftText)")
                 .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -723,6 +732,11 @@ struct WidgetSettingsBurnDownPreviewRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accountName)
         .accessibilityValue(row.accessibilityValueText)
+    }
+
+    private var quotaLeftText: String {
+        row.row.limit.map { LocalizedUsageFormat.percentLeft($0) }
+            ?? LocalizedUsageFormat.unavailable()
     }
 
     private var stageColor: Color {

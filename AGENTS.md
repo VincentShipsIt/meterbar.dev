@@ -1,23 +1,17 @@
 # MeterBar
 
-This file provides entry points for AI agents.
+This file is the agent entry point.
 
-## Documentation
+## Start here
 
-All documentation is in `.agents/`:
-- `.agents/README.md` - Navigation hub
-- `.agents/SYSTEM/RULES.md` - Coding standards
-- `.agents/SYSTEM/ARCHITECTURE.md` - What is actually implemented
-- `.agents/sessions/` - Session history (one file per day, gitignored/local-only)
-- `.agents/docs/DEFERRED_WORK.md` - Known tech debt with pickup instructions
-- `docs/audits/` - Audit reports (start with `00-repo-map.md`)
+Read [`.agents/memory/MEMORY.md`](.agents/memory/MEMORY.md), then only the topic file for the task.
 
-## Quick Start
-
-Read `.agents/SYSTEM/ai/SESSION-QUICK-START.md` before starting work.
-
-## Build/test notes
+## Commands
 
 - Tests: `swift test` at repo root (requires full Xcode — Command Line Tools lack XCTest)
-- App build: `xcodebuild -project MeterBar.xcodeproj -scheme MeterBar build`
+- App: `xcodebuild -project MeterBar.xcodeproj -scheme MeterBar build`
 - CLI: `cd MeterBarCLI && swift build`
+
+## Sessions
+
+`.agents/sessions/YYYY-MM-DD.md` — local-only, gitignored. This repo is public. Durable decisions go in `.agents/memory/decisions.md`. Delivery state goes on the GitHub issue or PR. Never `git add -f` a session file.

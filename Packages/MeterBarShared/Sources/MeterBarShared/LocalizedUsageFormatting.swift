@@ -179,4 +179,88 @@ public enum LocalizedUsageFormat {
             comment: "VoiceOver widget overflow label. The variable is the hidden usage-row count."
         )
     }
+
+    public static func burnDownCountdownTitle(
+        _ kind: WidgetBurnDownCountdownKind,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        switch kind {
+        case .projectedExhaustion:
+            return String(
+                localized: "burndown.projected_empty",
+                defaultValue: "Projected empty in",
+                bundle: bundle,
+                locale: locale,
+                comment: "Burn-down widget heading above a projected exhaustion countdown."
+            )
+        case .reset:
+            return String(
+                localized: "burndown.resets_in",
+                defaultValue: "Resets in",
+                bundle: bundle,
+                locale: locale,
+                comment: "Burn-down widget heading above a quota-reset countdown."
+            )
+        case .unavailable:
+            return String(
+                localized: "burndown.countdown",
+                defaultValue: "Countdown",
+                bundle: bundle,
+                locale: locale,
+                comment: "Burn-down widget heading when no countdown target is available."
+            )
+        }
+    }
+
+    public static func burnDownStageText(
+        stage: WidgetBurnDownStage,
+        health: WidgetDataHealth,
+        fallback: String,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        switch health {
+        case .stale:
+            return String(
+                localized: "burndown.stale",
+                defaultValue: "Stale data",
+                bundle: bundle,
+                locale: locale,
+                comment: "Burn-down widget stage when the cached snapshot is stale."
+            )
+        case .unavailable:
+            return String(
+                localized: "burndown.usage_unavailable",
+                defaultValue: "Usage unavailable",
+                bundle: bundle,
+                locale: locale,
+                comment: "Burn-down widget stage when no quota is available."
+            )
+        case .healthy:
+            if stage == .unavailable {
+                return String(
+                    localized: "burndown.pace_unavailable",
+                    defaultValue: "Pace unavailable",
+                    bundle: bundle,
+                    locale: locale,
+                    comment: "Burn-down widget stage when pace cannot be computed from a healthy snapshot."
+                )
+            }
+            return fallback
+        }
+    }
+
+    public static func unavailable(
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        String(
+            localized: "widget.unavailable",
+            defaultValue: "Unavailable",
+            bundle: bundle,
+            locale: locale,
+            comment: "Generic unavailable placeholder."
+        )
+    }
 }
