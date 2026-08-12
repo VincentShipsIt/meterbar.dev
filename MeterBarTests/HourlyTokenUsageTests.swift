@@ -154,6 +154,37 @@ final class HourlyTokenUsageTests: XCTestCase {
         XCTAssertEqual(filtered.hourlyUsage?.map(\.provider), [.codexCli])
     }
 
+    func testMissingEnabledLogProviderTriggersAQuietRescan() {
+        let claudeOnly = makeSummary(hourlyUsage: [
+            hourlyUsage(at: now, provider: .claudeCode),
+        ])
+        XCTAssertTrue(
+            claudeOnly.needsMissingEnabledProviderRefresh(
+                enabledServices: [.claudeCode, .grok],
+                lastScanDate: now.addingTimeInterval(-86_400),
+                now: now,
+                calendar: calendar
+            )
+        )
+        XCTAssertFalse(
+            claudeOnly.needsMissingEnabledProviderRefresh(
+                enabledServices: [.claudeCode],
+                lastScanDate: now.addingTimeInterval(-86_400),
+                now: now,
+                calendar: calendar
+            )
+        )
+        XCTAssertFalse(
+            claudeOnly.needsMissingEnabledProviderRefresh(
+                enabledServices: [.claudeCode, .grok],
+                lastScanDate: now,
+                now: now,
+                calendar: calendar
+            ),
+            "A completed scan today is authoritative even when Grok contributed no rows"
+        )
+    }
+
     func testHourlyBackfillOnlyRunsForEnabledLogScanners() {
         XCTAssertFalse(CostTracker.hasEnabledCostScanProvider(in: [.cursor, .openRouter]))
         XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.claudeCode]))

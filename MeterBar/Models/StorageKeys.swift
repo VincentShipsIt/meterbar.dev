@@ -155,7 +155,7 @@ nonisolated enum StorageKeys {
     /// reads `sessionWakeEventHooks` once, then this key becomes authoritative.
     static let quotaEventIntegrations = "QuotaEventIntegrationsV1"
 
-    /// `CostWindowSelection` raw value (7 or 30): the Costs page reporting
+    /// `CostWindowSelection` raw value (7, 30, or -1 for month-to-date): the Costs page reporting
     /// window. Missing or unknown means the 30-day view.
     static let costsWindowDays = "CostsWindowDays"
 

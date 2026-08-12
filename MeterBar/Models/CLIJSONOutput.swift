@@ -102,6 +102,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     private let lastScannedAt: Date
     private let period: Period
     private let providers: [Provider]
+    /// Provider-independent model rollup. `nil` when no selected provider has
+    /// complete model attribution. Additive for version 1.
+    private let models: [ModelBreakdown]?
     private let totalCostUSD: Double
     private let totalTokens: Int
     /// Presentation-only conversion of `totalCostUSD` (issue #270). `nil`
@@ -165,12 +168,33 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = cache.summary.totalTokens
         }
 
+        models = Self.rolledUpModels(from: providers)
+
         // Captured into a local first: referencing `self.totalCostUSD` directly
         // inside the closure below would require `self` before every stored
         // property (including `self.displayCurrency` itself) is initialized.
         let finalTotalCostUSD = totalCostUSD
         self.displayCurrency = displayCurrency.map { DisplayCurrencyJSON($0, totalCostUSD: finalTotalCostUSD) }
         pricing = cache.summary.pricing.flatMap(PricingJSON.init(provenance:))
+    }
+
+    private static func rolledUpModels(from providers: [Provider]) -> [ModelBreakdown]? {
+        let slices = providers.compactMap(\.modelBreakdowns)
+        guard slices.count == providers.count, !slices.isEmpty else { return nil }
+        var totals: [String: ModelBreakdown] = [:]
+        for slice in slices.flatMap({ $0 }) {
+            if var existing = totals[slice.name] {
+                existing.merge(slice)
+                totals[slice.name] = existing
+            } else {
+                totals[slice.name] = slice
+            }
+        }
+        let rolled = totals.values.sorted {
+            if $0.estimatedCostUSD == $1.estimatedCostUSD { return $0.name < $1.name }
+            return $0.estimatedCostUSD > $1.estimatedCostUSD
+        }
+        return rolled.isEmpty ? nil : rolled
     }
 
     private struct PricingJSON: Encodable {
@@ -303,13 +327,13 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
 
     private struct ModelBreakdown: Encodable {
         let name: String
-        let inputTokens: Int
-        let outputTokens: Int
-        let cacheCreationTokens: Int
-        let cacheReadTokens: Int
-        let totalTokens: Int
-        let estimatedCostUSD: Double
-        let sessionCount: Int
+        var inputTokens: Int
+        var outputTokens: Int
+        var cacheCreationTokens: Int
+        var cacheReadTokens: Int
+        var totalTokens: Int
+        var estimatedCostUSD: Double
+        var sessionCount: Int
 
         init(_ breakdown: TokenUsageBreakdown) {
             name = breakdown.name
@@ -320,6 +344,16 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             totalTokens = breakdown.totalTokens
             estimatedCostUSD = breakdown.estimatedCostUSD
             sessionCount = breakdown.sessionCount
+        }
+
+        mutating func merge(_ other: ModelBreakdown) {
+            inputTokens += other.inputTokens
+            outputTokens += other.outputTokens
+            cacheCreationTokens += other.cacheCreationTokens
+            cacheReadTokens += other.cacheReadTokens
+            totalTokens += other.totalTokens
+            estimatedCostUSD += other.estimatedCostUSD
+            sessionCount += other.sessionCount
         }
     }
 }

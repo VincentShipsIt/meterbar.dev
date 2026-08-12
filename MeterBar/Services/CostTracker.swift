@@ -111,12 +111,21 @@ class CostTracker: ObservableObject {
             let hasEnabledCostScanProvider = Self.hasEnabledCostScanProvider(
                 in: providerVisibilityStore.enabledServices
             )
-            guard !isRefreshInProgress,
-                  let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
+            guard !isRefreshInProgress else { return false }
+            if costSummary == nil {
+                guard hasEnabledCostScanProvider else { return false }
+                isRefreshingMissingDays = true
+                return true
+            }
+            guard let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
                   visibleSummary.lifetime == nil
                     || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate)
                     || (hasEnabledCostScanProvider
-                        && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate)) else {
+                        && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate))
+                    || visibleSummary.needsMissingEnabledProviderRefresh(
+                        enabledServices: providerVisibilityStore.enabledServices,
+                        lastScanDate: lastScanDate
+                    ) else {
                 return false
             }
             isRefreshingMissingDays = true

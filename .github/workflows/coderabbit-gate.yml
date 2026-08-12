@@ -1,0 +1,83 @@
+name: CodeRabbit gate
+
+# CodeRabbit's own check reports `pass` when the run was rate-limited and no
+# review happened. That is the dangerous direction. This job re-reads the
+# CodeRabbit check-run output and fails if the review did not actually occur.
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  checks: read
+  pull-requests: read
+
+jobs:
+  coderabbit-gate:
+    name: coderabbit-gate
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fail when CodeRabbit did not review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # CodeRabbit posts after CI starts. Poll briefly; if it never
+          # appears, skip rather than fail closed on every PR.
+          for _ in 1 2 3 4 5 6; do
+            payload="$(gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate)"
+            count="$(printf '%s' "$payload" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("check_runs",[])))')"
+            if [ "$count" != "0" ]; then
+              break
+            fi
+            sleep 20
+          done
+
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+
+          repo = os.environ["REPO"]
+          sha = os.environ["SHA"]
+          token = os.environ["GH_TOKEN"]
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/commits/{sha}/check-runs?per_page=100",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(req) as response:
+              data = json.load(response)
+
+          runs = [
+              run for run in data.get("check_runs", [])
+              if "coderabbit" in (run.get("name") or "").lower()
+              or "coderabbit" in ((run.get("app") or {}).get("slug") or "").lower()
+          ]
+          if not runs:
+              print("No CodeRabbit check-run on this SHA — skipping gate.")
+              sys.exit(0)
+
+          blocked = False
+          for run in runs:
+              name = run.get("name")
+              conclusion = run.get("conclusion")
+              output = run.get("output") or {}
+              text = " ".join(
+                  part for part in [output.get("title"), output.get("summary"), output.get("text")]
+                  if part
+              ).lower()
+              print(f"CodeRabbit check {name!r} conclusion={conclusion} title={output.get('title')!r}")
+              if "rate limited" in text or "review rate limited" in text:
+                  print(f"::error::CodeRabbit reported a rate-limited review as {conclusion}. That is not a review.")
+                  blocked = True
+              if "no review" in text and conclusion == "success":
+                  print("::error::CodeRabbit succeeded without reviewing.")
+                  blocked = True
+          sys.exit(1 if blocked else 0)
+          PY

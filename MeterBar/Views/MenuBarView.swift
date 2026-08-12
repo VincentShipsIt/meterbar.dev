@@ -49,6 +49,13 @@ struct MenuBarView: View {
     .onAppear {
       notifyContentSize()
     }
+    .task {
+      // The hover strip reads the cached scan. A Claude/Codex-only cache
+      // looks complete, so Costs-page backfill never runs and Grok stays
+      // empty until the user hits Scan. Kick that backfill when the menu
+      // opens instead of making them find the Costs page.
+      await costTracker.refreshMissingDaysInBackground()
+    }
     .onDisappear {
       expandedDetailID = nil
       MeterBarMenuDetailPanel.shared.dismiss()
@@ -248,7 +255,8 @@ struct MenuBarView: View {
             dailyUsage: costTracker.costSummary?.dailyUsage ?? [],
             ledger: costTracker.usageLedger,
             accountCount: accountCardCount(for: snapshot.service)
-          )
+          ),
+          isRefreshingUsage: costTracker.isRefreshingMissingDays || costTracker.isScanning
         )
       )
     )

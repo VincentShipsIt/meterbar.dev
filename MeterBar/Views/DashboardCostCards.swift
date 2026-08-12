@@ -50,7 +50,7 @@ struct CostOverviewStatusCard: View {
     guard windowSelection != .month else {
       return (summary.formattedTotalCost, formattedTokens, summary.costs.count)
     }
-    let window = summary.dailyCostWindow(lastDays: windowSelection.days)
+    let window = windowSelection.costWindow(from: summary)
     return (
       UsageFormat.cost(window.totalCostUSD),
       UsageFormat.tokens(window.totalTokens),

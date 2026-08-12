@@ -191,9 +191,10 @@ struct CostSpendCharts: View {
     /// `modelPoints` is already sorted by descending spend, so a prefix *is*
     /// the top of the list. The heading total always reports every model.
     private var displayedModelPoints: [CostModelSpendPoint] {
-        showsAllModels
-            ? presentation.modelPoints
-            : Array(presentation.modelPoints.prefix(Self.compactModelLimit))
+        let points = presentation.crossProviderModelPoints
+        return showsAllModels
+            ? points
+            : Array(points.prefix(Self.compactModelLimit))
     }
 
     /// Legend/scale providers come from the rows actually drawn, so the

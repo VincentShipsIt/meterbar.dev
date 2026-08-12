@@ -417,6 +417,36 @@ nonisolated public struct CostSummary: Codable, Sendable {
         return hourlyUsage?.isEmpty != false
     }
 
+    /// True when an enabled local-log provider has no row in this cache.
+    ///
+    /// Adding Grok (or any later log scanner) must not wait for the user to
+    /// open Costs and hit Scan. A Claude/Codex-only cache can look complete
+    /// to `needsMissingDailyUsageRefresh` while the popover sparkline for the
+    /// new provider stays empty. A completed scan today stays authoritative so
+    /// a provider with genuinely no logs does not rescan on every hover.
+    func needsMissingEnabledProviderRefresh(
+        enabledServices: Set<ServiceType>,
+        lastScanDate: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        let enabledScanServices = Set(
+            CostScanProvider.allCases
+                .map(\.service)
+                .filter(enabledServices.contains)
+        )
+        guard !enabledScanServices.isEmpty else { return false }
+
+        let today = calendar.startOfDay(for: now)
+        if let lastScanDate,
+           calendar.startOfDay(for: lastScanDate) >= today {
+            return false
+        }
+
+        let present = Set(costs.map(\.provider))
+        return enabledScanServices.contains { !present.contains($0) }
+    }
+
     /// Aggregates the cached daily rows into per-provider totals over the last
     /// `days` calendar days (inclusive of today). Pure and rescan-free: it reads
     /// only `dailyUsage`, so it can report input/output/cache-read tokens and

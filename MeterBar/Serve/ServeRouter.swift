@@ -86,10 +86,14 @@ nonisolated public enum ServeRouter {
             )
         }
 
-        // Mirrors `meterbar cost --days`: an invalid or non-positive value is
-        // ignored rather than rejected, falling back to the full cached summary.
-        let days = query["days"].flatMap(Int.init).flatMap { $0 >= 1 ? $0 : nil }
-        return jsonResponse(CostCLIJSONResponse(cache: cache, days: days))
+        // Mirrors `meterbar cost --days` / `--month-to-date`. An invalid or
+        // non-positive `days` is ignored. `monthToDate` wins when both appear,
+        // matching the DTO; the CLI rejects the combination at parse time.
+        let monthToDate = ["1", "true", "yes"].contains(query["monthToDate"]?.lowercased())
+        let days = monthToDate
+            ? nil
+            : query["days"].flatMap(Int.init).flatMap { $0 >= 1 ? $0 : nil }
+        return jsonResponse(CostCLIJSONResponse(cache: cache, days: days, monthToDate: monthToDate))
     }
 
     // MARK: Response construction
