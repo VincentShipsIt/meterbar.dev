@@ -243,6 +243,11 @@ struct OptimizeInsightsView: View {
         return (selection.subtitle, "None", "no tokens recorded in the last 30 days")
       }
       return (selection.subtitle, UsageFormat.tokens(tokens30Day), "tokens in the last 30 days")
+    case .monthToDate:
+      guard tokens30Day > 0 else {
+        return (selection.subtitle, "None", "no tokens recorded this month")
+      }
+      return (selection.subtitle, UsageFormat.tokens(tokens30Day), "tokens in the cached month-to-date window")
     }
   }
 
@@ -288,7 +293,7 @@ struct OptimizeInsightsView: View {
     // (and the window tile), matching the Costs page's pattern.
     DashboardCard(title: "Token Burn", trailing: windowSelection.subtitle) {
       if let summary = visibleSummary, !summary.dailyUsage.isEmpty {
-        DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: windowSelection.days)
+        DailyUsageChart(dailyUsage: summary.dailyUsage, daysToShow: max(1, windowSelection.dayCount()))
           .frame(height: 200)
       } else {
         Text("No daily token history yet.")

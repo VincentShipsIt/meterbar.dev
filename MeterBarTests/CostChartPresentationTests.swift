@@ -159,6 +159,10 @@ final class CostChartPresentationTests: XCTestCase {
 
         XCTAssertEqual(Set(presentation.modelPoints.map(\.chartLabel)).count, 2)
         XCTAssertTrue(presentation.modelPoints.allSatisfy { $0.chartLabel.contains($0.provider.displayName) })
+        XCTAssertEqual(presentation.crossProviderModelPoints.count, 1)
+        XCTAssertEqual(presentation.crossProviderModelPoints.first?.model, "shared-model")
+        XCTAssertEqual(presentation.crossProviderModelPoints.first?.chartLabel, "shared-model")
+        XCTAssertEqual(presentation.crossProviderModelPoints.first?.costUSD ?? 0, 3, accuracy: 0.001)
     }
 
     func testSevenDayWindowDerivesModelSpendFromAttributedDailyRows() {

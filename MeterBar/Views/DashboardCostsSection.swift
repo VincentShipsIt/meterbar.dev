@@ -84,14 +84,14 @@ struct DashboardCostsSection: View {
             // would read as "measured nothing".
             let polledUsage = PolledRequestSeriesPresentation(
                 ledger: costTracker.usageLedger,
-                requestedDays: windowSelection.days
+                requestedDays: windowSelection.dayCount()
             )
             if !polledUsage.isEmpty {
                 PolledUsageCard(presentation: polledUsage)
             }
 
             if let summary, !summary.dailyUsage.isEmpty {
-                let windowStart = CostWindow.start(days: windowSelection.days)
+                let windowStart = windowSelection.startDate()
                 let windowRows = summary.dailyUsage.filter { $0.date >= windowStart }
                 if !windowRows.isEmpty {
                     DashboardCard(title: "Daily Details", trailing: windowSelection.subtitle) {
@@ -101,16 +101,15 @@ struct DashboardCostsSection: View {
             }
 
             if let summary, !summary.costs.isEmpty {
-                // In the 7-day window the per-provider cards re-cut to the same
-                // days as every chart above; a provider with no spend inside
-                // the window drops out instead of showing 30-day numbers under
-                // a 7-day heading.
-                let weekWindow = windowSelection == .week
-                    ? summary.dailyCostWindow(lastDays: windowSelection.days)
-                    : nil
+                // Narrower windows re-cut provider cards to the same days as
+                // the charts. A provider with no spend inside the window drops
+                // out instead of showing 30-day numbers under a 7-day heading.
+                let narrowedWindow = windowSelection == .month
+                    ? nil
+                    : windowSelection.costWindow(from: summary)
                 ForEach(summary.costs) { cost in
-                    let providerWindow = weekWindow?.providers.first { $0.provider == cost.provider }
-                    if weekWindow == nil || providerWindow != nil {
+                    let providerWindow = narrowedWindow?.providers.first { $0.provider == cost.provider }
+                    if narrowedWindow == nil || providerWindow != nil {
                         ProviderCostBreakdown(
                             cost: cost,
                             quotaSnapshot: quotaSnapshot(cost.provider),
@@ -181,7 +180,8 @@ struct DashboardCostsSection: View {
                 if let summary {
                     let presentation = CostChartPresentation(
                         summary: summary,
-                        requestedDays: windowSelection.days
+                        requestedDays: windowSelection.dayCount(),
+                        windowStart: windowSelection.startDate()
                     )
                     ZStack {
                         if presentation.hasSpend {

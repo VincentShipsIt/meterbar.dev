@@ -235,6 +235,17 @@ final class ServeRouterTests: XCTestCase {
         XCTAssertEqual(response.body, expected)
     }
 
+    func testCostEndpointHonorsMonthToDateQueryLikeTheCLI() throws {
+        let response = ServeRouter.handle(
+            request(path: "/cost", query: ["monthToDate": "true"], token: token),
+            token: token,
+            dataSource: makeDataSource()
+        )
+
+        let expected = try CostCLIJSONResponse(cache: costCache, monthToDate: true).jsonData()
+        XCTAssertEqual(response.body, expected)
+    }
+
     func testCostEndpointIgnoresNonPositiveDaysQuery() throws {
         let response = ServeRouter.handle(
             request(path: "/cost", query: ["days": "0"], token: token),

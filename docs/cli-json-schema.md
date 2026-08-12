@@ -116,6 +116,12 @@ family (no rescan, and mutually exclusive with `--days`). `period.kind` distingu
 period shapes: `"days"`, `"monthToDate"`, or omitted entirely for the full, unwindowed summary (the
 version 1 fixture above never sets it, so that response is byte-for-byte unchanged).
 
+`models` is a provider-independent rollup of the same model name across providers.
+It is omitted when any selected provider lacks complete model attribution.
+
+`meterbar serve` `GET /cost` accepts the same windows as query parameters:
+`?days=7` and `?monthToDate=true`. Combining them prefers month-to-date.
+
 ```json
 {
   "schemaVersion": 1,

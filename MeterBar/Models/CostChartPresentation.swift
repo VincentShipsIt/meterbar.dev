@@ -30,16 +30,23 @@ nonisolated struct CostChartPresentation: Sendable {
     init(
         summary: CostSummary,
         requestedDays: Int = CostChartPresentation.defaultRequestedDays,
+        windowStart: Date? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) {
-        let normalizedDays = max(1, requestedDays)
         let today = calendar.startOfDay(for: now)
-        let startDate = CostWindow.start(
-            days: normalizedDays,
-            now: now,
-            calendar: calendar
+        let startDate = calendar.startOfDay(
+            for: windowStart ?? CostWindow.start(
+                days: max(1, requestedDays),
+                now: now,
+                calendar: calendar
+            )
         )
+        let spannedDays = max(
+            1,
+            (calendar.dateComponents([.day], from: startDate, to: today).day ?? 0) + 1
+        )
+        let normalizedDays = windowStart == nil ? max(1, requestedDays) : spannedDays
         let windowRows = summary.dailyUsage.filter { row in
             let day = calendar.startOfDay(for: row.date)
             return day >= startDate && day <= today
@@ -145,6 +152,28 @@ nonisolated struct CostChartPresentation: Sendable {
 
     var modelWindowMatchesRequested: Bool {
         modelWindowDays == requestedDays
+    }
+
+    /// Same models as `modelPoints`, folded across providers so one name is
+    /// one bar. Provider-disambiguated labels stay on `modelPoints` for
+    /// drill-down; the chart uses this rollup.
+    var crossProviderModelPoints: [CostModelSpendPoint] {
+        Dictionary(grouping: modelPoints, by: \.model)
+            .compactMap { name, points -> CostModelSpendPoint? in
+                let total = points.reduce(0) { $0 + $1.costUSD }
+                guard total > 0 else { return nil }
+                let owner = points.sorted { $0.provider.rawValue < $1.provider.rawValue }[0]
+                return CostModelSpendPoint(
+                    provider: owner.provider,
+                    model: name,
+                    chartLabel: name,
+                    costUSD: total
+                )
+            }
+            .sorted {
+                if $0.costUSD == $1.costUSD { return $0.model < $1.model }
+                return $0.costUSD > $1.costUSD
+            }
     }
 
     /// Model points for a window narrower than the scan, cut from the daily
