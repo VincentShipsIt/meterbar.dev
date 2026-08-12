@@ -30,7 +30,9 @@ nonisolated enum CostWindowSelection: Int, CaseIterable, Identifiable {
             return rawValue
         case .monthToDate:
             let start = Self.monthStart(now: now, calendar: calendar)
-            return max(1, (calendar.dateComponents([.day], from: start, to: calendar.startOfDay(for: now)).day ?? 0) + 1)
+            let today = calendar.startOfDay(for: now)
+            let elapsed = calendar.dateComponents([.day], from: start, to: today).day ?? 0
+            return max(1, elapsed + 1)
         }
     }
 
