@@ -724,7 +724,7 @@ struct WidgetSettingsBurnDownPreviewRow: View {
                 .foregroundStyle(stageColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-            Text("\(row.quotaTitle) · \(row.row.limit.map { LocalizedUsageFormat.percentLeft($0) } ?? LocalizedUsageFormat.unavailable())")
+            Text("\(row.quotaTitle) · \(quotaLeftText)")
                 .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -732,6 +732,11 @@ struct WidgetSettingsBurnDownPreviewRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accountName)
         .accessibilityValue(row.accessibilityValueText)
+    }
+
+    private var quotaLeftText: String {
+        row.row.limit.map { LocalizedUsageFormat.percentLeft($0) }
+            ?? LocalizedUsageFormat.unavailable()
     }
 
     private var stageColor: Color {
