@@ -25,3 +25,4 @@
 - [ ] I updated relevant documentation or explained why no documentation change is needed.
 - [ ] I documented migrations, release steps, or external configuration changes, or marked them not applicable.
 - [ ] I did not include secrets, credentials, personal data, customer data, or generated build output.
+- [ ] If CodeRabbit says "Review rate limited", I re-requested review before merge. A green CodeRabbit tick is not a review in that case.
