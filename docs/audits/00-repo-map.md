@@ -1,5 +1,9 @@
 # 00 — Repo Map: MeterBar
 
+> **Superseded 2026-08-12.** Historical snapshot only. Do not treat this file as current architecture.
+> Live map: `.agents/memory/MEMORY.md` and `architecture.md`.
+> Since this audit: `MeterBarShared` shipped, CI tests/lint are hard gates, views were split, releases are notarized, and the 2026-08-08 bug batch (#374–#386, #422) landed.
+
 **Audit date:** 2026-07-02
 **Scope:** Full repository (201 tracked files, ~10,800 lines of Swift across app + widget + CLI + tests)
 **Method:** Every claim below was verified by reading the actual file; paths are cited inline. Nothing was inferred from filenames alone. No code was changed.

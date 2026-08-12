@@ -5,7 +5,7 @@ import MeterBarShared
 /// Contract tests for the provider response models.
 ///
 /// Every endpoint MeterBar consumes is undocumented/reverse-engineered
-/// (see docs/audits/00-repo-map.md, risk R1). These fixtures lock the decode
+/// (see .agents/memory/providers.md, residual risk R1). These fixtures lock the decode
 /// assumptions so an accidental model change fails loudly here instead of
 /// silently blanking a provider card at runtime. When a provider changes its
 /// payload for real, update the fixture together with the model.

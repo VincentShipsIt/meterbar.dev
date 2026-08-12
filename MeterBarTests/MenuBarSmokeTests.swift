@@ -13,7 +13,7 @@ import XCTest
 /// This is the deterministic, credential-free equivalent of an XCUITest launch
 /// flow: full XCUITest UI automation needs a signed .app + a UITest target run
 /// via `xcodebuild`, which the SwiftPM CI (and credential-less daily run) cannot
-/// drive. See `.agents/docs/TESTING.md` for the manual UI/widget QA checklist.
+/// drive. Widget and menu-bar QA is covered by the widget contract tests and required CI.
 @MainActor
 final class MenuBarSmokeTests: XCTestCase {
     /// Controllable single-account provider (Codex / Cursor stand-in).

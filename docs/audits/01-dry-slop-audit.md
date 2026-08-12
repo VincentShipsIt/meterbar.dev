@@ -1,5 +1,7 @@
 # DRY / Slop Audit — MeterBar
 
+> **Superseded 2026-08-12.** Historical snapshot only. Clusters A–G were largely closed by `MeterBarShared`, `QuotaBands`, CLI cost parity, and the 2026-08-09 DRY batch (#383–#385). Live leftovers: `.agents/memory/deferred.md`.
+
 **Date:** 2026-07-02
 **Scope:** Entire repo — `MeterBar/` (app), `MeterBarWidget/`, `MeterBarCLI/`, `MeterBarTests/`, `scripts/`, `.github/workflows/`, docs and repo hygiene (~13k source lines).
 **Method:** Every source file cited below was read in full this session; every dead-code claim was verified by repo-wide reference grep. No code was modified.
