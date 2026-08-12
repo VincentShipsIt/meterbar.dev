@@ -1,22 +1,88 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "count.more_rows" : {
-      "comment" : "Widget overflow label. The variable is the hidden row count.",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "+%lld more"
+  "sourceLanguage": "en",
+  "strings": {
+    "burndown.countdown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Countdown"
+          }
+        }
+      },
+      "comment": "Burn-down widget heading when no countdown target is available."
+    },
+    "burndown.pace_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pace unavailable"
+          }
+        }
+      },
+      "comment": "Burn-down widget stage when pace cannot be computed from a healthy snapshot."
+    },
+    "burndown.projected_empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projected empty in"
+          }
+        }
+      },
+      "comment": "Burn-down widget heading above a projected exhaustion countdown."
+    },
+    "burndown.resets_in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resets in"
+          }
+        }
+      },
+      "comment": "Burn-down widget heading above a quota-reset countdown."
+    },
+    "burndown.stale": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stale data"
+          }
+        }
+      },
+      "comment": "Burn-down widget stage when the cached snapshot is stale."
+    },
+    "burndown.usage_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage unavailable"
+          }
+        }
+      },
+      "comment": "Burn-down widget stage when no quota is available."
+    },
+    "count.more_rows": {
+      "comment": "Widget overflow label. The variable is the hidden row count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "+%lld more"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
                 }
               }
             }
@@ -24,22 +90,22 @@
         }
       }
     },
-    "count.more_usage_rows" : {
-      "comment" : "VoiceOver widget overflow label. The variable is the hidden usage-row count.",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld more usage row"
+    "count.more_usage_rows": {
+      "comment": "VoiceOver widget overflow label. The variable is the hidden usage-row count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more usage row"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld more usage rows"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more usage rows"
                 }
               }
             }
@@ -47,223 +113,245 @@
         }
       }
     },
-    "quota.amount_left" : {
-      "comment" : "Formatted currency amount remaining.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ left"
+    "quota.amount_left": {
+      "comment": "Formatted currency amount remaining.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ left"
           }
         }
       }
     },
-    "quota.amount_spent" : {
-      "comment" : "Formatted currency amount already spent.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ spent"
+    "quota.amount_spent": {
+      "comment": "Formatted currency amount already spent.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ spent"
           }
         }
       }
     },
-    "quota.percent_left" : {
-      "comment" : "Quota percentage remaining. The variable is a whole-number percentage.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld%% left"
+    "quota.percent_left": {
+      "comment": "Quota percentage remaining. The variable is a whole-number percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% left"
           }
         }
       }
     },
-    "quota.percent_left.estimated" : {
-      "comment" : "Approximate quota percentage remaining. The variable is a whole-number percentage.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "~%lld%% left"
+    "quota.percent_left.estimated": {
+      "comment": "Approximate quota percentage remaining. The variable is a whole-number percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "~%lld%% left"
           }
         }
       }
     },
-    "quota.percent_used" : {
-      "comment" : "Quota percentage used. The variable is a whole-number percentage.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld%% used"
+    "quota.percent_used": {
+      "comment": "Quota percentage used. The variable is a whole-number percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% used"
           }
         }
       }
     },
-    "quota.percent_used.estimated" : {
-      "comment" : "Approximate quota percentage used. The variable is a whole-number percentage.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "~%lld%% used"
+    "quota.percent_used.estimated": {
+      "comment": "Approximate quota percentage used. The variable is a whole-number percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "~%lld%% used"
           }
         }
       }
     },
-    "widget.description" : {
-      "comment" : "Widget Gallery description.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Track your AI coding assistant usage limits"
+    "widget.burndown.description": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "See whether quota will last and count down to exhaustion or reset"
+          }
+        }
+      },
+      "comment": "Widget Gallery description for the burn-down family."
+    },
+    "widget.burndown.name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar Burn Down"
+          }
+        }
+      },
+      "comment": "Widget Gallery display name for the burn-down family."
+    },
+    "widget.description": {
+      "comment": "Widget Gallery description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Track your AI coding assistant usage limits"
           }
         }
       }
     },
-    "widget.empty.choose_detail" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select accounts and quota windows in MeterBar Settings."
+    "widget.empty.choose_detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select accounts and quota windows in MeterBar Settings."
           }
         }
       }
     },
-    "widget.empty.choose_title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose usage to show"
+    "widget.empty.choose_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose usage to show"
           }
         }
       }
     },
-    "widget.empty.unavailable_detail" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open MeterBar to refresh provider usage."
+    "widget.empty.unavailable_detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open MeterBar to refresh provider usage."
           }
         }
       }
     },
-    "widget.empty.unavailable_title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Usage unavailable"
+    "widget.empty.unavailable_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage unavailable"
           }
         }
       }
     },
-    "widget.health.stale" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stale usage data"
+    "widget.health.stale": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stale usage data"
           }
         }
       }
     },
-    "widget.health.unavailable" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Usage unavailable"
+    "widget.health.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage unavailable"
           }
         }
       }
     },
-    "widget.quota.account_credits" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Account credits"
+    "widget.quota.account_credits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account credits"
           }
         }
       }
     },
-    "widget.quota.code_review" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Code Review"
+    "widget.quota.code_review": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code Review"
           }
         }
       }
     },
-    "widget.quota.key_limit" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Key limit"
+    "widget.quota.key_limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key limit"
           }
         }
       }
     },
-    "widget.quota.model" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Model"
+    "widget.quota.model": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
           }
         }
       }
     },
-    "widget.quota.monthly" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Monthly"
+    "widget.quota.monthly": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monthly"
           }
         }
       }
     },
-    "widget.quota.session" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Session"
+    "widget.quota.session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session"
           }
         }
       }
     },
-    "widget.quota.weekly" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Weekly"
+    "widget.quota.weekly": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly"
           }
         }
       }
     },
-    "widget.unavailable" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unavailable"
+    "widget.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }

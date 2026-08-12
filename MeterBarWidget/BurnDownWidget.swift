@@ -9,8 +9,10 @@ struct BurnDownWidget: Widget {
         StaticConfiguration(kind: kind, provider: BurnDownWidgetProvider()) { entry in
             BurnDownWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("MeterBar Burn Down")
-        .description("See whether quota will last and count down to exhaustion or reset")
+        .configurationDisplayName(
+            String(localized: "widget.burndown.name", defaultValue: "MeterBar Burn Down")
+        )
+        .description("widget.burndown.description")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -176,24 +178,24 @@ struct BurnDownWidgetRowView: View {
                 WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
             }
 
-            Text(row.countdownTitle)
+            Text(WidgetLocalizedContent.burnDownCountdownTitle(for: row))
                 .font(.system(size: metrics.captionSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
             countdown
 
-            Label(row.stageText, systemImage: row.stage.symbolName)
+            Label(WidgetLocalizedContent.burnDownStageText(for: row), systemImage: row.stage.symbolName)
                 .font(.system(size: metrics.captionSize, weight: .semibold))
                 .foregroundStyle(stageColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
 
             HStack(spacing: metrics.rowSpacing) {
-                Text(row.quotaTitle)
+                Text(WidgetLocalizedContent.quotaTitle(for: row.row))
                 if let limit = row.row.limit {
                     Text("·")
-                    Text(limit.percentLeftText)
+                    Text(LocalizedUsageFormat.percentLeft(limit))
                 }
             }
             .font(.system(size: metrics.captionSize))
@@ -202,7 +204,7 @@ struct BurnDownWidgetRowView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue(row.accessibilityValueText)
+        .accessibilityValue(WidgetLocalizedContent.burnDownAccessibilityValue(for: row))
     }
 
     private var stageColor: Color {
@@ -217,7 +219,7 @@ struct BurnDownWidgetRowView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
         } else {
-            Text(row.countdownText)
+            Text(WidgetLocalizedContent.burnDownCountdownText(for: row))
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)

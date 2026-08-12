@@ -100,4 +100,36 @@ enum WidgetLocalizedContent {
             )
         }
     }
+
+    static func burnDownCountdownTitle(for row: WidgetBurnDownRow) -> String {
+        LocalizedUsageFormat.burnDownCountdownTitle(row.countdownKind)
+    }
+
+    static func burnDownStageText(for row: WidgetBurnDownRow) -> String {
+        LocalizedUsageFormat.burnDownStageText(
+            stage: row.stage,
+            health: row.health,
+            fallback: row.stageText
+        )
+    }
+
+    static func burnDownCountdownText(for row: WidgetBurnDownRow) -> String {
+        if row.countdownKind == .unavailable || row.countdownText == "Unavailable" {
+            return LocalizedUsageFormat.unavailable()
+        }
+        return row.countdownText
+    }
+
+    static func burnDownAccessibilityValue(for row: WidgetBurnDownRow) -> String {
+        var phrases = [
+            quotaTitle(for: row.row),
+            burnDownStageText(for: row),
+            "\(burnDownCountdownTitle(for: row)) \(burnDownCountdownText(for: row))",
+        ]
+        if let health = healthDescription(row.health),
+           !phrases.contains(health) {
+            phrases.append(health)
+        }
+        return phrases.joined(separator: ", ")
+    }
 }

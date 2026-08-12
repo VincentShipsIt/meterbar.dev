@@ -50,7 +50,25 @@ final class LocalizationResourceContractTests: XCTestCase {
             "widget.quota.session",
             "count.more_rows",
             "count.more_usage_rows",
+            "widget.burndown.name",
+            "widget.burndown.description",
+            "burndown.projected_empty",
+            "burndown.resets_in",
+            "burndown.countdown",
+            "burndown.stale",
+            "burndown.pace_unavailable",
+            "burndown.usage_unavailable",
         ].allSatisfy(widgetKeys.contains))
+
+        let appKeysAfterBurnDown = Set(try strings(in: loadCatalog(at: appCatalogURL)).keys)
+        XCTAssertTrue([
+            "burndown.projected_empty",
+            "burndown.resets_in",
+            "burndown.countdown",
+            "burndown.stale",
+            "burndown.pace_unavailable",
+            "burndown.usage_unavailable",
+        ].allSatisfy(appKeysAfterBurnDown.contains))
     }
 
     func testCountStringsCarryEnglishOneAndOtherPluralRules() throws {
