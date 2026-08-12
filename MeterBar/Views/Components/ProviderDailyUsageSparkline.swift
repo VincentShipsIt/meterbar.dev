@@ -20,6 +20,7 @@ import SwiftUI
 struct ProviderDailyUsageSparkline: View {
     let series: ProviderDailyUsageSeries
     let accentColor: Color
+    var isRefreshing: Bool = false
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -130,11 +131,15 @@ struct ProviderDailyUsageSparkline: View {
     /// waiting, because there is no history to fetch — see
     /// ``ProviderUsageLedger``.
     private var emptyTitle: String {
-        series.service.writesLocalTokenLogs ? "No token history yet" : "No usage recorded yet"
+        if isRefreshing { return "Loading history" }
+        return series.service.writesLocalTokenLogs ? "No token history yet" : "No usage recorded yet"
     }
 
     private var emptyMessage: String {
-        series.service.writesLocalTokenLogs
+        if isRefreshing {
+            return "Reading \(series.service.shortName)'s local session logs."
+        }
+        return series.service.writesLocalTokenLogs
             ? "Run a cost scan to load \(series.service.shortName)'s daily usage."
             : "\(series.service.shortName) publishes no history, so MeterBar builds this from its own refreshes."
     }

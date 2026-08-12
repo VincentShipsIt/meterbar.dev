@@ -237,12 +237,18 @@ struct MenuBarProviderDetailContent: View {
   /// series to offer, and the panel simply omits the strip — which is what the
   /// layout tests exercise.
   let dailyUsage: ProviderDailyUsageSeries?
+  let isRefreshingUsage: Bool
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
-  init(snapshot: ProviderSnapshot, dailyUsage: ProviderDailyUsageSeries? = nil) {
+  init(
+    snapshot: ProviderSnapshot,
+    dailyUsage: ProviderDailyUsageSeries? = nil,
+    isRefreshingUsage: Bool = false
+  ) {
     self.snapshot = snapshot
     self.dailyUsage = dailyUsage
+    self.isRefreshingUsage = isRefreshingUsage
   }
 
   private var detailLimits: [SnapshotLimit] {
@@ -319,7 +325,11 @@ struct MenuBarProviderDetailContent: View {
         // Last, and separated by a little extra space rather than a rule: the
         // rows above are the window the card already summarised, and this is the
         // week behind it. Reading top-to-bottom is now → recent past.
-        ProviderDailyUsageSparkline(series: dailyUsage, accentColor: snapshot.accentColor)
+        ProviderDailyUsageSparkline(
+          series: dailyUsage,
+          accentColor: snapshot.accentColor,
+          isRefreshing: isRefreshingUsage
+        )
           .padding(.top, MeterBarTheme.Spacing.xxs)
       }
     }
