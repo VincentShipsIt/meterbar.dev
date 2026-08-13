@@ -61,15 +61,13 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public let freshnessDate: Date?
 
     public var quotaTitle: String {
-        switch (service, quotaWindow) {
-        case (.openRouter, .session):
-            return "Key limit"
-        case (_, .codeReview):
+        switch quotaWindow {
+        case .codeReview:
             return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
-        case (_, .session):
-            return "Session"
-        case (_, .weekly):
-            return service.weeklyQuotaTitle
+        case .session:
+            return service.sessionQuotaTitle(limitTotal: limit?.total)
+        case .weekly:
+            return service.weeklyQuotaTitle(limitTotal: limit?.total)
         }
     }
 

@@ -350,4 +350,45 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         XCTAssertFalse(ServiceType.cursor.writesLocalTokenLogs)
         XCTAssertFalse(ServiceType.openRouter.writesLocalTokenLogs)
     }
+
+    func testRequestHeaderTotalDoesNotRepeatTheUnitNoun() {
+        var ledger = ProviderUsageLedger()
+        ledger.record(
+            ProviderUsageObservation(
+                provider: .cursor,
+                unit: .requests,
+                runningTotal: 10,
+                observedAt: day(-1)
+            ),
+            calendar: calendar
+        )
+        ledger.record(
+            ProviderUsageObservation(
+                provider: .cursor,
+                unit: .requests,
+                runningTotal: 31_268,
+                observedAt: day(0)
+            ),
+            calendar: calendar
+        )
+
+        let series = ProviderDailyUsageSeries(
+            service: .cursor,
+            ledger: ledger,
+            dayCount: 7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(series.formattedTotal, "31258 requests")
+        XCTAssertEqual(series.headerTotalText, "31258 requests")
+        XCTAssertFalse(series.headerTotalText.contains("requests requests"))
+    }
+
+    func testTokenHeaderTotalKeepsTheUnitNoun() {
+        let series = tokenSeries([tokenRow(0, tokens: 1_200)])
+
+        XCTAssertEqual(series.headerTotalText, "\(series.formattedTotal) tokens")
+        XCTAssertTrue(series.headerTotalText.hasSuffix("tokens"))
+    }
 }

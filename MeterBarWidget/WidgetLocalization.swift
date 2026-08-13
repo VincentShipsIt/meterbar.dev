@@ -12,12 +12,18 @@ enum WidgetLocalizedContent {
         case (.claudeCode, .codeReview):
             return row.modelLimitLabel
                 ?? String(localized: "widget.quota.model", defaultValue: "Model")
+        case (.cursor, .codeReview):
+            return String(localized: "widget.quota.on_demand", defaultValue: "On-demand")
         case (_, .codeReview):
             return String(localized: "widget.quota.code_review", defaultValue: "Code Review")
+        case (.cursor, .session) where row.limit.map({ ServiceType.isCursorIncludedPool(total: $0.total) }) == true:
+            return String(localized: "widget.quota.cursor_models", defaultValue: "Cursor Models")
         case (_, .session):
             return String(localized: "widget.quota.session", defaultValue: "Session")
         case (.openRouter, .weekly):
             return String(localized: "widget.quota.account_credits", defaultValue: "Account credits")
+        case (.cursor, .weekly) where row.limit.map({ ServiceType.isCursorIncludedPool(total: $0.total) }) == true:
+            return String(localized: "widget.quota.other_models", defaultValue: "Other Models")
         case (.cursor, .weekly):
             return String(localized: "widget.quota.monthly", defaultValue: "Monthly")
         case (_, .weekly):

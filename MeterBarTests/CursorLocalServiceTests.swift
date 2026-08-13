@@ -268,6 +268,84 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
     }
 
+    func testMapSummaryUsesAutoAndApiPercentsAsTwoIncludedPools() throws {
+        let json = """
+        {
+          "billingCycleEnd": "2026-09-10T00:00:00Z",
+          "membershipType": "ultra",
+          "individualUsage": {
+            "plan": {
+              "used": 495,
+              "limit": 500,
+              "autoPercentUsed": 4,
+              "apiPercentUsed": 64,
+              "totalPercentUsed": 99
+            },
+            "onDemand": { "used": 0, "limit": 0, "enabled": false }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.sessionLimit?.total, 100)
+        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 100)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
+        XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertNotEqual(metrics.overallStatus, .critical)
+    }
+
+    func testMapSummaryIgnoresTotalPercentUsedInFavorOfTheTwoPools() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 495, "limit": 500, "autoPercentUsed": 4, "apiPercentUsed": 64, "totalPercentUsed": 99 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertNotEqual(metrics.weeklyLimit?.used, 99)
+        XCTAssertNotEqual(metrics.weeklyLimit?.used, 495)
+    }
+
+    func testMapSummaryMovesOnDemandToTheThirdWindowWhenPercentPoolsArePresent() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64, "used": 10, "limit": 500 },
+            "onDemand": { "used": 12, "limit": 40, "enabled": true }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 12)
+        XCTAssertEqual(metrics.codeReviewLimit?.total, 40)
+        XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, false)
+    }
+
+    func testMapSummaryZeroPercentIsARealEmptyPoolNotAMissingField() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 0, "apiPercentUsed": 0 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 0)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 0)
+        XCTAssertEqual(metrics.sessionLimit?.total, 100)
+        XCTAssertEqual(metrics.weeklyLimit?.total, 100)
+    }
+
     // MARK: - Poll observations
 
     /// The single most important assertion about Cursor in this codebase.
@@ -367,6 +445,23 @@ final class CursorLocalServiceTests: XCTestCase {
 
         XCTAssertEqual(observation.runningTotal, 0)
         XCTAssertEqual(observation.unit, .requests)
+    }
+
+    func testTwoPoolPercentPayloadYieldsNoRequestObservation() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": {
+              "used": 495,
+              "limit": 500,
+              "autoPercentUsed": 4,
+              "apiPercentUsed": 64
+            }
+          }
+        }
+        """
+
+        XCTAssertNil(CursorLocalService.observation(try decodeSummary(json), at: Date()))
     }
 
     // MARK: - JWT userId extraction

@@ -97,7 +97,8 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Fable")
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Sonnet"), "Sonnet")
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: nil), "Model")
-        for service in ServiceType.allCases where service != .claudeCode {
+        XCTAssertEqual(ServiceType.cursor.codeReviewQuotaTitle(modelLimitLabel: nil), "On-demand")
+        for service in ServiceType.allCases where service != .claudeCode && service != .cursor {
             XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Code Review")
             XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: nil), "Code Review")
         }
@@ -109,8 +110,23 @@ final class ServiceTypeTests: XCTestCase {
     func testWeeklyQuotaTitle() {
         XCTAssertEqual(ServiceType.openRouter.weeklyQuotaTitle, "Account credits")
         XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle, "Monthly")
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitle(limitTotal: ServiceType.cursorIncludedPoolTotal),
+            "Other Models"
+        )
+        XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle(limitTotal: 500), "Monthly")
         for service in ServiceType.allCases where service != .openRouter && service != .cursor {
             XCTAssertEqual(service.weeklyQuotaTitle, "Weekly")
         }
+    }
+
+    func testSessionQuotaTitle() {
+        XCTAssertEqual(ServiceType.openRouter.sessionQuotaTitle(limitTotal: nil), "Key limit")
+        XCTAssertEqual(ServiceType.cursor.sessionQuotaTitle(limitTotal: 20), "Session")
+        XCTAssertEqual(
+            ServiceType.cursor.sessionQuotaTitle(limitTotal: ServiceType.cursorIncludedPoolTotal),
+            "Cursor Models"
+        )
+        XCTAssertEqual(ServiceType.claudeCode.sessionQuotaTitle(limitTotal: 100), "Session")
     }
 }

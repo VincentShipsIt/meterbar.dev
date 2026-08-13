@@ -68,9 +68,7 @@ struct ProviderDailyUsageSparkline: View {
             Spacer(minLength: MeterBarTheme.Spacing.sm)
 
             if series.hasHistory {
-                // The unit noun follows the metric, so a Cursor request count can
-                // never be printed as though it were money.
-                Text("\(series.formattedTotal) \(series.metric.summaryNoun)")
+                Text(series.headerTotalText)
                     .font(.caption2.monospacedDigit())
                     .foregroundColor(.secondary)
             }

@@ -59,13 +59,23 @@ struct ProviderSnapshot: Identifiable {
     /// Session/weekly windows that can block normal provider usage. Secondary
     /// model/code-review quotas remain visible but must not collapse the entire
     /// provider card or claim the provider is unavailable.
-    var blockingLimits: [SnapshotLimit] {
+        var blockingLimits: [SnapshotLimit] {
         guard extraUsage?.state != .on else { return [] }
-        return limits.filter {
+        let exhausted = limits.filter {
             $0.isProviderBlocking
                 && !$0.usageLimit.isEstimated
                 && $0.usageLimit.isAtLimit
         }
+        if service == .cursor {
+            let pools = limits.filter(\.isProviderBlocking)
+            // Spillover: emptying Cursor Models still leaves Other Models, and
+            // the reverse. Collapse the card only when every included pool is
+            // gone. A lone legacy monthly bar still blocks on its own.
+            if pools.count >= 2 {
+                return exhausted.count == pools.count ? exhausted : []
+            }
+        }
+        return exhausted
     }
 
     /// Reset windows used by blocking-state UI. Filtering here prevents a
@@ -197,14 +207,20 @@ struct SnapshotLimit: Identifiable {
             return String(localized: "quota.title.key_limit", defaultValue: "Key limit")
         case (.session, "Session"):
             return String(localized: "quota.title.session", defaultValue: "Session")
+        case (.session, "Cursor Models"):
+            return String(localized: "quota.title.cursor_models", defaultValue: "Cursor Models")
         case (.weekly, "Account credits"):
             return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
+        case (.weekly, "Other Models"):
+            return String(localized: "quota.title.other_models", defaultValue: "Other Models")
         case (.weekly, "Monthly"):
             return String(localized: "quota.title.monthly", defaultValue: "Monthly")
         case (.weekly, "Weekly"):
             return String(localized: "quota.title.weekly", defaultValue: "Weekly")
         case (.codeReview, "Code Review"):
             return String(localized: "quota.title.code_review", defaultValue: "Code Review")
+        case (.codeReview, "On-demand"):
+            return String(localized: "quota.title.on_demand", defaultValue: "On-demand")
         case (.codeReview, "Model"):
             return String(localized: "quota.title.model", defaultValue: "Model")
         default:
@@ -417,7 +433,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "session",
                 kind: .session,
-                title: service == .openRouter ? "Key limit" : "Session",
+                title: service.sessionQuotaTitle(limitTotal: session.total),
                 usageLimit: session,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))
@@ -426,7 +442,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "weekly",
                 kind: .weekly,
-                title: service.weeklyQuotaTitle,
+                title: service.weeklyQuotaTitle(limitTotal: weekly.total),
                 usageLimit: weekly,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))

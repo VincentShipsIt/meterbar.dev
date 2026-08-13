@@ -143,9 +143,14 @@ struct NotificationDecider {
             let bandRank = band.severityRank
             let quotaDisplayName = quotaKind.displayName(
                 for: metrics.service,
-                modelLimitLabel: metrics.modelLimitLabel
+                modelLimitLabel: metrics.modelLimitLabel,
+                limitTotal: limit.total
             )
-            let blocksProvider = quotaKind != .codeReview && metrics.extraUsage?.state != .on
+            let blocksProvider = Self.blocksProvider(
+                service: metrics.service,
+                quotaKind: quotaKind,
+                metrics: metrics
+            )
 
             if bandRank >= criticalRank {
                 // Preserve the warning key while critical. Otherwise falling
@@ -224,18 +229,42 @@ struct NotificationDecider {
         case weekly
         case codeReview
 
-        func displayName(for service: ServiceType, modelLimitLabel: String?) -> String {
+        func displayName(
+            for service: ServiceType,
+            modelLimitLabel: String?,
+            limitTotal: Double? = nil
+        ) -> String {
             switch self {
             case .session:
-                return service == .openRouter ? "Key Limit" : "Session"
+                // Notification copy is Title Case for OpenRouter's key cap.
+                return service == .openRouter
+                    ? "Key Limit"
+                    : service.sessionQuotaTitle(limitTotal: limitTotal)
             case .weekly:
-                // Notification copy is Title Case, so OpenRouter keeps its own
-                // spelling; every other provider (including Cursor's monthly
-                // billing cycle) reads from the shared window title.
-                return service == .openRouter ? "Account Credits" : service.weeklyQuotaTitle
+                return service == .openRouter
+                    ? "Account Credits"
+                    : service.weeklyQuotaTitle(limitTotal: limitTotal)
             case .codeReview:
                 return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
             }
         }
+    }
+
+    /// Whether exhausting this window prevents normal use of the provider.
+    /// Cursor's two included pools spill over into each other, so a single
+    /// empty pool is not a hard stop unless the other is empty too.
+    private static func blocksProvider(
+        service: ServiceType,
+        quotaKind: QuotaKind,
+        metrics: UsageMetrics
+    ) -> Bool {
+        if metrics.extraUsage?.state == .on { return false }
+        if quotaKind == .codeReview { return false }
+        if service == .cursor {
+            let sessionOut = metrics.sessionLimit?.isAtLimit == true
+            let weeklyOut = metrics.weeklyLimit?.isAtLimit == true
+            return sessionOut && weeklyOut
+        }
+        return true
     }
 }

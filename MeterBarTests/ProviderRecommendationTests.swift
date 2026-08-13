@@ -46,7 +46,7 @@ final class ProviderRecommendationTests: XCTestCase {
 
         XCTAssertEqual(
             recommendation.rows.map(\.windowTitle),
-            ["Account credits", "Monthly", "Key limit"]
+            ["Account credits", "Other Models", "Key limit"]
         )
     }
 
@@ -255,7 +255,7 @@ final class ProviderRecommendationTests: XCTestCase {
         XCTAssertEqual(recommendation.top?.id, "solo")
         XCTAssertFalse(recommendation.isEmpty)
         XCTAssertFalse(recommendation.isFullyExhausted)
-        XCTAssertEqual(recommendation.top?.summary, "Cursor — 82% left on Monthly, resets in 3d")
+        XCTAssertEqual(recommendation.top?.summary, "Cursor — 82% left on Other Models, resets in 3d")
     }
 
     func testHeadlineNamesTheTopPickAndItsNumbers() {
@@ -263,7 +263,7 @@ final class ProviderRecommendationTests: XCTestCase {
             makeCandidate(id: "solo", service: .cursor, weekly: limit(used: 18, resetIn: 3 * 86_400))
         ])
 
-        XCTAssertEqual(recommendation.headline, "Use Cursor next — 82% left on monthly, resets in 3d")
+        XCTAssertEqual(recommendation.headline, "Use Cursor next — 82% left on other models, resets in 3d")
     }
 
     func testHeadlineSaysSoWhenEveryWindowIsSpent() {
