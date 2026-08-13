@@ -245,6 +245,7 @@ class CostTracker: ObservableObject {
         await MainActor.run {
             scanProgress = CostScanProgress(windowDays: days)
         }
+        let progressBridge = CostScanProgressBridge(tracker: self)
 
         for _ in 0..<Self.maxScanSlices {
             let slice = try? await CostScanExecutor.run { token in
@@ -255,6 +256,7 @@ class CostTracker: ObservableObject {
                     store: store,
                     token: token
                 )
+                session.observeProgress(windowDays: days, progressBridge.publish)
                 let scan = CostSummaryBuilder.makeScan(
                     days: days,
                     enabledProviders: enabledProviders,
@@ -361,6 +363,22 @@ class CostTracker: ObservableObject {
             try CostSummaryStore.save(CostSummaryCache(summary: costSummary, lastScanDate: lastScanDate))
         } catch {
             AppLog.cost.error("Failed to save cost summary cache: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+/// Hops listing/read milestones off the scan queue onto the main actor so the
+/// Costs banner updates during a single-slice refresh.
+nonisolated final class CostScanProgressBridge: @unchecked Sendable {
+    private weak var tracker: CostTracker?
+
+    init(tracker: CostTracker) {
+        self.tracker = tracker
+    }
+
+    func publish(_ progress: CostScanProgress) {
+        DispatchQueue.main.async { [weak tracker] in
+            tracker?.scanProgress = progress
         }
     }
 }

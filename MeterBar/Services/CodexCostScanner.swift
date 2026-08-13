@@ -325,8 +325,8 @@ enum CodexCostScanner {
 
         for file in listing.files {
             coverage.keep(file.cacheKey)
-            session.noteProcessedFile()
             guard let totals = Self.totals(for: file, session: session) else { continue }
+            session.noteProcessedFile()
             guard Self.fold(totals, into: &windows) else {
                 // This rollout shares only *some* of its events with one already
                 // folded in. Aggregates cannot be de-overlapped after the fact,

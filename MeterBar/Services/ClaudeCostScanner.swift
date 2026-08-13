@@ -317,7 +317,6 @@ enum ClaudeCostScanner {
                 // keyed by standardized path — counting a file once per root
                 // would double its spend.
                 guard coverage.keep(file.cacheKey) else { continue }
-                session.noteProcessedFile()
 
                 let projectID = CostProjectAttribution.claudeProjectID(
                     forTranscriptURL: file.url,
@@ -326,6 +325,7 @@ enum ClaudeCostScanner {
                 guard let totals = Self.totals(for: file, projectID: projectID, session: session) else {
                     continue
                 }
+                session.noteProcessedFile()
                 guard Self.fold(totals, into: &windows) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the

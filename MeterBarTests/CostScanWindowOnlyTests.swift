@@ -152,6 +152,60 @@ final class CostScanWindowOnlyTests: XCTestCase {
         XCTAssertTrue(progress.detailText.contains("Older archives are not scanned"))
     }
 
+    func testUnreadFilesAreNotCountedAsProcessed() throws {
+        let root = try makeCorpusDirectory()
+        let newest = try writeClaudeTranscript(
+            in: root,
+            name: "newest.jsonl",
+            messageID: "new",
+            modifiedAgo: 0
+        )
+        try writeClaudeTranscript(
+            in: root,
+            name: "oldest.jsonl",
+            messageID: "old",
+            modifiedAgo: 60
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: try fileSize(newest),
+            wallClock: nil
+        )
+        let session = CostScanSession(cutoff: cutoff, options: budget)
+
+        _ = ClaudeCostScanner.scanRoots([root], session: session)
+        let progress = session.progress(windowDays: 30)
+
+        XCTAssertFalse(session.isComplete)
+        XCTAssertEqual(progress.listedFiles, 2)
+        XCTAssertEqual(progress.processedFiles, 1)
+        XCTAssertEqual(try XCTUnwrap(progress.fraction), 0.5, accuracy: 0.000_001)
+        XCTAssertFalse(progress.isComplete)
+    }
+
+    func testListingEmitsProgressBeforeAnyFileIsProcessed() throws {
+        let root = try makeCorpusDirectory()
+        try writeClaudeTranscript(in: root, name: "a.jsonl", messageID: "a", modifiedAgo: 0)
+        try writeClaudeTranscript(in: root, name: "b.jsonl", messageID: "b", modifiedAgo: 1)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let seen = CostScanProgressLog()
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+        session.observeProgress(windowDays: 30, seen.append)
+
+        _ = ClaudeCostScanner.scanRoots([root], session: session)
+
+        let first = try XCTUnwrap(seen.snapshots.first)
+        XCTAssertEqual(first.listedFiles, 2)
+        XCTAssertEqual(first.processedFiles, 0)
+        XCTAssertGreaterThan(first.listedBytes, 0)
+        XCTAssertFalse(first.isComplete)
+
+        let last = try XCTUnwrap(seen.snapshots.last)
+        XCTAssertEqual(last.processedFiles, 2)
+        XCTAssertTrue(last.isComplete)
+    }
+
     // MARK: - Fixtures
 
     private func makeCorpusDirectory() throws -> URL {
@@ -166,5 +220,50 @@ final class CostScanWindowOnlyTests: XCTestCase {
         let url = root.appendingPathComponent(name)
         try Data(repeating: UInt8(ascii: "x"), count: bytes).write(to: url)
         try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+    }
+
+    @discardableResult
+    private func writeClaudeTranscript(
+        in root: URL,
+        name: String,
+        messageID: String,
+        modifiedAgo: TimeInterval
+    ) throws -> URL {
+        let line = """
+        {"timestamp": "2026-07-01T10:00:00.000Z", "requestId": "req_\(messageID)", \
+        "message": {"id": "msg_\(messageID)", "model": "claude-sonnet-4-5", \
+        "usage": {"input_tokens": 100, "output_tokens": 10, \
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}
+        """
+        let url = root.appendingPathComponent(name)
+        try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-modifiedAgo)],
+            ofItemAtPath: url.path
+        )
+        return url
+    }
+
+    private func fileSize(_ url: URL) throws -> Int {
+        try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    }
+}
+
+/// Lock-guarded so a progress handler running on the scan queue can record
+/// snapshots without tripping Sendable checking.
+private final class CostScanProgressLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [CostScanProgress] = []
+
+    var snapshots: [CostScanProgress] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+
+    func append(_ progress: CostScanProgress) {
+        lock.lock()
+        values.append(progress)
+        lock.unlock()
     }
 }

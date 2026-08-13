@@ -142,8 +142,8 @@ enum GrokCostScanner {
 
             for file in listing.files {
                 guard coverage.keep(file.cacheKey) else { continue }
-                session.noteProcessedFile()
                 guard let totals = Self.totals(for: file, session: session) else { continue }
+                session.noteProcessedFile()
                 guard Self.fold(totals, into: &windows) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the

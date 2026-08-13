@@ -44,6 +44,9 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     private var listedFiles = 0
     private var listedBytes: Int64 = 0
     private var processedFiles = 0
+    private var lastEmittedProcessed = 0
+    private var progressWindowDays = 30
+    private var onProgress: (@Sendable (CostScanProgress) -> Void)?
 
     init(
         cutoff: Date,
@@ -111,31 +114,60 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Publishes listing and read milestones while the slice is still running,
+    /// so a one-slice refresh can show file count and bytes instead of a blank
+    /// "Listing…" banner that disappears when the scan ends.
+    func observeProgress(
+        windowDays: Int,
+        _ handler: @escaping @Sendable (CostScanProgress) -> Void
+    ) {
+        lock.lock()
+        progressWindowDays = windowDays
+        onProgress = handler
+        lock.unlock()
+    }
+
     /// Records the files this refresh actually intends to open — the
     /// mtime-filtered listing, not the whole provider home.
     func noteListing(_ listing: CostScanCorpusListing) {
         lock.lock()
         listedFiles += listing.files.count
         listedBytes += listing.files.reduce(0) { $0 + Int64($1.size) }
+        let snapshot = snapshotLocked()
+        let handler = onProgress
         lock.unlock()
+        handler?(snapshot)
     }
 
+    /// Count only files this slice actually finished — a cache hit or a read.
+    /// Files skipped because the budget ran out stay uncounted so the banner
+    /// cannot report 100% on an incomplete refresh.
     func noteProcessedFile() {
         lock.lock()
         processedFiles += 1
+        let shouldEmit = processedFiles == listedFiles
+            || processedFiles - lastEmittedProcessed >= 8
+        if shouldEmit { lastEmittedProcessed = processedFiles }
+        let snapshot = shouldEmit ? snapshotLocked() : nil
+        let handler = onProgress
         lock.unlock()
+        if let snapshot { handler?(snapshot) }
     }
 
     func progress(windowDays: Int) -> CostScanProgress {
         lock.lock()
         defer { lock.unlock() }
-        return CostScanProgress(
-            windowDays: windowDays,
+        return snapshotLocked(windowDays: windowDays)
+    }
+
+    private func snapshotLocked(windowDays: Int? = nil) -> CostScanProgress {
+        CostScanProgress(
+            windowDays: windowDays ?? progressWindowDays,
             listedFiles: listedFiles,
             listedBytes: listedBytes,
             processedFiles: processedFiles,
             bytesRead: budget.bytesRead,
-            isComplete: deferred.isEmpty
+            isComplete: deferred.isEmpty && processedFiles == listedFiles
         )
     }
 
