@@ -261,6 +261,31 @@ a project lands in an explicit `unknown` row rather than being dropped or guesse
 sanitized before they ever reach the cache or this JSON — no full home-directory paths — and
 MeterBar never persists branch names, remotes, prompt content, or credentials to derive them.
 
+### Session breakdown
+
+Each provider may also carry `sessionBreakdowns`: one row per local session (Codex conversation id,
+Claude transcript stem, Grok session id). Project rows nest the same sessions under
+`projectBreakdowns[].sessionBreakdowns`. The field is omitted when empty. Identifiers are stable
+local stems — never working directories, prompts, credentials, branch names, or git remotes.
+
+```json
+{
+  "sessionBreakdowns": [
+    {
+      "name": "aabbccdd-1111-2222-3333-444444444444",
+      "inputTokens": 1000,
+      "outputTokens": 250,
+      "cacheCreationTokens": 50,
+      "cacheReadTokens": 500,
+      "totalTokens": 1800,
+      "estimatedCostUSD": 1.25,
+      "sessionCount": 3,
+      "modelBreakdowns": []
+    }
+  ]
+}
+```
+
 ### Display currency
 
 `--currency CODE --rate N` (both required together) adds a top-level `displayCurrency` object

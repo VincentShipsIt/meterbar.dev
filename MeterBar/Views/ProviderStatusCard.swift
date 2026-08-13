@@ -14,12 +14,14 @@ struct ProviderStatusCard: View {
     private var reduceMotion
     @StateObject private var codexService = CodexCliLocalService.shared
     @StateObject private var codexAccounts = CodexAccountStore.shared
+    @StateObject private var grokService = GrokCLIUsageService.shared
+    @StateObject private var grokAccounts = GrokAccountStore.shared
     @StateObject private var dataManager = UsageDataManager.shared
     // Session-scoped rather than per-card `@State`: this card's identity is not
     // stable across dashboard re-deals, and losing the record re-offers a credit
     // that was already spent.
     @StateObject private var resetCreditConsumptions = CodexResetCreditConsumptionStore.shared
-    @State private var isCodexAuthenticated = false
+    @State private var isResetCreditAuthenticated = false
     @State private var isConsumingResetCredit = false
     @State private var showingResetCreditConfirmation = false
     @State private var resetCreditAlertTitle = ProviderCardResetCreditOutcome.failureTitle
@@ -53,7 +55,7 @@ struct ProviderStatusCard: View {
         selectableCard
             .providerCardContextMenu(ProviderCardCommands.standard(snapshot: snapshot))
             .task(id: snapshot.updatedAt) {
-                await refreshCodexAuthenticationState()
+                await refreshResetCreditAuthenticationState()
             }
             .confirmationDialog(
                 CodexResetCreditConfirmation.title(accountName: resetCreditAccountName),
@@ -262,8 +264,8 @@ struct ProviderStatusCard: View {
                 accountID: snapshot.accountID,
                 snapshotUpdatedAt: snapshot.updatedAt
             ),
-            isAuthenticated: isCodexAuthenticated,
-            hasResolvedAccount: codexAccount != nil
+            isAuthenticated: isResetCreditAuthenticated,
+            hasResolvedAccount: resetCreditAccountID != nil
         )
     }
 
@@ -272,46 +274,78 @@ struct ProviderStatusCard: View {
         return codexAccounts.accounts.first { $0.id == accountID }
     }
 
-    /// The profile name the redemption will hit — the same label Settings shows,
-    /// so a multi-account popover confirms which `CODEX_HOME` is being spent.
-    private var resetCreditAccountName: String {
-        codexAccount?.name ?? snapshot.title
+    private var grokAccount: GrokAccount? {
+        guard snapshot.service == .grok, let accountID = snapshot.accountID else { return nil }
+        return grokAccounts.accounts.first { $0.id == accountID }
     }
 
-    private func refreshCodexAuthenticationState() async {
-        guard let codexAccount else {
-            isCodexAuthenticated = false
+    private var resetCreditAccountID: UUID? {
+        if snapshot.service == .codexCli { return codexAccount?.id }
+        if snapshot.service == .grok { return grokAccount?.id }
+        return nil
+    }
+
+    /// The profile name the redemption will hit — the same label Settings shows,
+    /// so a multi-account popover confirms which home directory is being spent.
+    private var resetCreditAccountName: String {
+        if snapshot.service == .codexCli { return codexAccount?.name ?? snapshot.title }
+        if snapshot.service == .grok { return grokAccount?.name ?? snapshot.title }
+        return snapshot.title
+    }
+
+    private func refreshResetCreditAuthenticationState() async {
+        if let codexAccount {
+            isResetCreditAuthenticated = await codexService.canAccess(account: codexAccount)
             return
         }
-        isCodexAuthenticated = await codexService.canAccess(account: codexAccount)
+        if let grokAccount {
+            isResetCreditAuthenticated = grokService.canAccess(account: grokAccount)
+            return
+        }
+        isResetCreditAuthenticated = false
     }
 
     private func consumeResetCredit() {
-        guard let codexAccount, !isConsumingResetCredit else { return }
+        guard resetCreditAccountID != nil, !isConsumingResetCredit else { return }
         isConsumingResetCredit = true
 
         Task {
             do {
-                let result = try await codexService.consumeResetCredit(account: codexAccount)
-                if let refreshedMetrics = result.refreshedMetrics {
-                    // Post-spend numbers straight from the provider: the card is
-                    // about to show the real remaining balance, so eligibility
-                    // alone decides whether another banked credit stays offered.
-                    resetCreditConsumptions.clear(accountID: codexAccount.id)
-                    dataManager.applyCodexResetCreditRefresh(refreshedMetrics, accountID: codexAccount.id)
-                } else {
-                    // The credit is gone but the count on screen predates the
-                    // spend. Suppress the action until a later fetch proves the
-                    // balance, or the next press spends a second credit.
-                    resetCreditConsumptions.markConsumed(accountID: codexAccount.id)
-                }
-                if let alert = ProviderCardResetCreditOutcome.alert(for: result) {
-                    present(alert)
+                if snapshot.service == .codexCli, let codexAccount {
+                    try await consumeCodexResetCredit(account: codexAccount)
+                } else if snapshot.service == .grok, let grokAccount {
+                    try await consumeGrokResetCredit(account: grokAccount)
                 }
             } catch {
                 present(ProviderCardResetCreditOutcome.alert(for: error))
             }
             isConsumingResetCredit = false
+        }
+    }
+
+    private func consumeCodexResetCredit(account: CodexAccount) async throws {
+        let result = try await codexService.consumeResetCredit(account: account)
+        if let refreshedMetrics = result.refreshedMetrics {
+            resetCreditConsumptions.clear(accountID: account.id)
+            dataManager.applyCodexResetCreditRefresh(refreshedMetrics, accountID: account.id)
+        } else {
+            resetCreditConsumptions.markConsumed(accountID: account.id)
+        }
+        if let alert = ProviderCardResetCreditOutcome.alert(for: result) {
+            present(alert)
+        }
+    }
+
+    private func consumeGrokResetCredit(account: GrokAccount) async throws {
+        let result = try await grokService.consumeResetCredit(account: account)
+        if let refreshedMetrics = result.refreshedMetrics {
+            resetCreditConsumptions.clear(accountID: account.id)
+            dataManager.applyGrokResetCreditRefresh(refreshedMetrics, accountID: account.id)
+        } else {
+            resetCreditConsumptions.markConsumed(accountID: account.id)
+        }
+        if let alert = ProviderCardResetCreditOutcome.alert(for: result) {
+            present(alert)
         }
     }
 

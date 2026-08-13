@@ -51,7 +51,8 @@ nonisolated enum ProviderUsageCostBuilder {
             // a list of sessions. Zero states that plainly.
             sessionCount: 0,
             periodStart: periodStart,
-            periodEnd: periodEnd
+            periodEnd: periodEnd,
+            sessionBreakdowns: []
         )
 
         let daily = days.map { day in
@@ -63,7 +64,8 @@ nonisolated enum ProviderUsageCostBuilder {
                 cacheReadTokens: 0,
                 estimatedCostUSD: day.amount,
                 modelBreakdowns: [],
-                projectBreakdowns: []
+                projectBreakdowns: [],
+                sessionBreakdowns: []
             )
         }
 

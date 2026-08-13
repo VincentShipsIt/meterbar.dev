@@ -97,6 +97,7 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         for row in built.1 {
             XCTAssertEqual(row.modelBreakdowns?.count, 0)
             XCTAssertEqual(row.projectBreakdowns?.count, 0)
+            XCTAssertEqual(row.sessionBreakdowns?.count, 0)
         }
 
         let summary = CostSummary(

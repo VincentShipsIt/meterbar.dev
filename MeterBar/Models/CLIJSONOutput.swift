@@ -244,6 +244,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
         /// the scan found nothing to attribute, so consumers can tell "not
         /// available here" apart from "everything landed in one project".
         let projectBreakdowns: [ProjectBreakdown]?
+        /// Per-session rollup (issue #391). Omitted when empty so version-1
+        /// fixtures stay byte-stable.
+        let sessionBreakdowns: [SessionBreakdown]?
 
         init(cost: TokenCost) {
             provider = cost.provider.cliIdentifier
@@ -261,6 +264,9 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             projectBreakdowns = cost.projectBreakdowns.isEmpty
                 ? nil
                 : cost.projectBreakdowns.map(ProjectBreakdown.init)
+            sessionBreakdowns = cost.sessionBreakdowns.isEmpty
+                ? nil
+                : cost.sessionBreakdowns.map(SessionBreakdown.init)
         }
 
         init(total: ProviderDailyTotal) {
@@ -275,6 +281,7 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             sessionCount = nil
             modelBreakdowns = total.modelBreakdowns?.map(ModelBreakdown.init)
             projectBreakdowns = total.projectBreakdowns?.map(ProjectBreakdown.init)
+            sessionBreakdowns = total.sessionBreakdowns?.map(SessionBreakdown.init)
         }
     }
 
@@ -302,6 +309,37 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
     /// than encoding `TokenUsageBreakdown` directly, so the CLI JSON surface
     /// stays independent of that type's internal shape.
     private struct ProjectBreakdown: Encodable {
+        let name: String
+        let inputTokens: Int
+        let outputTokens: Int
+        let cacheCreationTokens: Int
+        let cacheReadTokens: Int
+        let totalTokens: Int
+        let estimatedCostUSD: Double
+        let sessionCount: Int
+        let modelBreakdowns: [ModelBreakdown]
+        let sessionBreakdowns: [SessionBreakdown]?
+
+        init(_ breakdown: TokenUsageBreakdown) {
+            name = breakdown.name
+            inputTokens = breakdown.inputTokens
+            outputTokens = breakdown.outputTokens
+            cacheCreationTokens = breakdown.cacheCreationTokens
+            cacheReadTokens = breakdown.cacheReadTokens
+            totalTokens = breakdown.totalTokens
+            estimatedCostUSD = breakdown.estimatedCostUSD
+            sessionCount = breakdown.sessionCount
+            modelBreakdowns = breakdown.modelBreakdowns.map(ModelBreakdown.init)
+            sessionBreakdowns = breakdown.sessionBreakdowns.isEmpty
+                ? nil
+                : breakdown.sessionBreakdowns.map(SessionBreakdown.init)
+        }
+    }
+
+    /// One session rollup row (issue #391). `name` is a stable local identifier
+    /// — a conversation UUID or transcript stem — never a path, prompt, or git
+    /// remote.
+    private struct SessionBreakdown: Encodable {
         let name: String
         let inputTokens: Int
         let outputTokens: Int

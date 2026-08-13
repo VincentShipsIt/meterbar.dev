@@ -46,6 +46,8 @@ enum TokenUsageAggregator {
         modelsByDay: [Date: [String: TokenAccumulator]] = [:],
         projectsByDay: [Date: [String: TokenAccumulator]] = [:],
         projectModelsByDay: [Date: [String: [String: TokenAccumulator]]] = [:],
+        projectSessionsByDay: [Date: [String: [String: TokenAccumulator]]] = [:],
+        projectSessionModelsByDay: [Date: [String: [String: [String: TokenAccumulator]]]] = [:],
         pricingAt: ((String?, Date) -> TokenPricing)? = nil
     ) -> [DailyTokenUsage] {
         dailyTotals.map { day, tokens in
@@ -61,6 +63,17 @@ enum TokenUsageAggregator {
                     cacheRead: tokens.cacheRead,
                     pricing: dayPricing
                 )
+            let projectRows = projectsByDay[day].map {
+                makeProjectBreakdowns(
+                    from: $0,
+                    modelsByProject: projectModelsByDay[day] ?? [:],
+                    sessionsByProject: projectSessionsByDay[day] ?? [:],
+                    sessionModelsByProject: projectSessionModelsByDay[day] ?? [:],
+                    provider: provider,
+                    pricing: dayPricing,
+                    pricingForName: pricingForName
+                )
+            }
             return DailyTokenUsage(
                 date: day,
                 provider: provider,
@@ -76,10 +89,11 @@ enum TokenUsageAggregator {
                         pricingForName: pricingForName
                     )
                 },
-                projectBreakdowns: projectsByDay[day].map {
-                    makeProjectBreakdowns(
-                        from: $0,
-                        modelsByProject: projectModelsByDay[day] ?? [:],
+                projectBreakdowns: projectRows,
+                sessionBreakdowns: projectSessionsByDay[day].map {
+                    makeSessionBreakdowns(
+                        from: flattenSessions($0),
+                        modelsBySession: flattenSessionModels(projectSessionModelsByDay[day] ?? [:]),
                         provider: provider,
                         pricing: dayPricing,
                         pricingForName: pricingForName
@@ -138,6 +152,8 @@ enum TokenUsageAggregator {
     nonisolated static func makeProjectBreakdowns(
         from projectTotals: [String: TokenAccumulator],
         modelsByProject: [String: [String: TokenAccumulator]],
+        sessionsByProject: [String: [String: TokenAccumulator]] = [:],
+        sessionModelsByProject: [String: [String: [String: TokenAccumulator]]] = [:],
         provider: ServiceType,
         pricing: TokenPricing,
         pricingForName: ((String) -> TokenPricing)? = nil
@@ -154,8 +170,60 @@ enum TokenUsageAggregator {
                 sessionCount: row.sessionCount,
                 modelBreakdowns: modelsByProject[row.name].map {
                     makeBreakdowns(from: $0, provider: provider, pricing: pricing, pricingForName: pricingForName)
+                } ?? [],
+                sessionBreakdowns: makeSessionBreakdowns(
+                    from: sessionsByProject[row.name] ?? [:],
+                    modelsBySession: sessionModelsByProject[row.name] ?? [:],
+                    provider: provider,
+                    pricing: pricing,
+                    pricingForName: pricingForName
+                )
+            )
+        }
+    }
+
+    /// Per-session rows, each carrying its own nested per-model slice (issue #391).
+    nonisolated static func makeSessionBreakdowns(
+        from sessionTotals: [String: TokenAccumulator],
+        modelsBySession: [String: [String: TokenAccumulator]],
+        provider: ServiceType,
+        pricing: TokenPricing,
+        pricingForName: ((String) -> TokenPricing)? = nil
+    ) -> [TokenUsageBreakdown] {
+        makeBreakdowns(from: sessionTotals, provider: provider, pricing: pricing).map { row in
+            TokenUsageBreakdown(
+                provider: row.provider,
+                name: row.name,
+                inputTokens: row.inputTokens,
+                outputTokens: row.outputTokens,
+                cacheCreationTokens: row.cacheCreationTokens,
+                cacheReadTokens: row.cacheReadTokens,
+                estimatedCostUSD: row.estimatedCostUSD,
+                sessionCount: row.sessionCount,
+                modelBreakdowns: modelsBySession[row.name].map {
+                    makeBreakdowns(from: $0, provider: provider, pricing: pricing, pricingForName: pricingForName)
                 } ?? []
             )
         }
+    }
+
+    nonisolated static func flattenSessions(
+        _ projectSessions: [String: [String: TokenAccumulator]]
+    ) -> [String: TokenAccumulator] {
+        var flattened: [String: TokenAccumulator] = [:]
+        for (_, sessions) in projectSessions {
+            CostScanNestedMerge.accumulators(&flattened, sessions)
+        }
+        return flattened
+    }
+
+    nonisolated static func flattenSessionModels(
+        _ projectSessionModels: [String: [String: [String: TokenAccumulator]]]
+    ) -> [String: [String: TokenAccumulator]] {
+        var flattened: [String: [String: TokenAccumulator]] = [:]
+        for (_, sessions) in projectSessionModels {
+            CostScanNestedMerge.keyedAccumulators(&flattened, sessions)
+        }
+        return flattened
     }
 }

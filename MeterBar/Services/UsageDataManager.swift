@@ -753,6 +753,18 @@ class UsageDataManager: ObservableObject {
         publishMetrics()
     }
 
+    /// Installs the post-redemption Grok usage response into the same caches
+    /// used by the popover, dashboard, widget, and CLI.
+    func applyGrokResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
+        guard !demoMode else { return }
+        grokAccountMetrics[accountID] = refreshedMetrics
+        if let representative = representativeGrokMetrics(from: grokAccountMetrics) {
+            metrics[.grok] = representative
+        }
+        lastError = nil
+        publishMetrics()
+    }
+
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
         // The account fetchers report their first failure instead of writing

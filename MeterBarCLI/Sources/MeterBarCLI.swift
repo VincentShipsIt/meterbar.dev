@@ -369,6 +369,12 @@ struct Cost: ParsableCommand {
                 for project in projects.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD }) {
                     print("    - \(project.name): \(costText(project.estimatedCostUSD, currency: currency))"
                         + " (\(project.sessionCount) event\(project.sessionCount == 1 ? "" : "s"))")
+                    let sessions = project.sessionBreakdowns
+                        .sorted { $0.estimatedCostUSD > $1.estimatedCostUSD }
+                    for session in sessions {
+                        print("      session \(session.name): "
+                            + "\(costText(session.estimatedCostUSD, currency: currency))")
+                    }
                 }
             }
             print()
@@ -410,6 +416,12 @@ struct Cost: ParsableCommand {
                 for project in cost.projectBreakdowns.sorted(by: { $0.estimatedCostUSD > $1.estimatedCostUSD }) {
                     print("    - \(project.name): \(costText(project.estimatedCostUSD, currency: currency))"
                         + " (\(project.sessionCount) session\(project.sessionCount == 1 ? "" : "s"))")
+                    let sessions = project.sessionBreakdowns
+                        .sorted { $0.estimatedCostUSD > $1.estimatedCostUSD }
+                    for session in sessions {
+                        print("      session \(session.name): "
+                            + "\(costText(session.estimatedCostUSD, currency: currency))")
+                    }
                 }
             }
             print()

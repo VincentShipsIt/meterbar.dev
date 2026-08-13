@@ -863,6 +863,84 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(Array(context.originTotals.keys), ["Codex CLI"])
     }
 
+    func testScanCodexRolloutsNamesModelFromThreadSettingsWhenTurnContextIsMissing() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z", input: 100),
+            """
+            {"timestamp": "2026-06-15T10:00:01Z", "type": "event_msg", "payload": \
+            {"type": "thread_settings_applied", "thread_settings": {"model": "gpt-5.6-sol"}}}
+            """
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
+        XCTAssertNil(context.modelTotals["Unknown model"])
+    }
+
+    func testScanCodexRolloutsNamesModelFromNestedTurnContextWhenTopLevelModelIsMissing() throws {
+        let dir = try writeCodexArchive(lines: [
+            """
+            {"timestamp": "2026-06-15T09:59:30Z", "type": "turn_context", "payload": \
+            {"collaboration_mode": {"settings": {"model": "gpt-5.6-luna"}}}}
+            """,
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z", input: 7)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.modelTotals["gpt-5.6-luna"]?.input, 7)
+        XCTAssertNil(context.modelTotals["Unknown model"])
+    }
+
+    func testScanCodexRolloutsAggregatesPerSessionRowsThatReconcileToTheProject() throws {
+        let home = ServiceSupport.realHomeDirectory()
+        let cwd = "\(home)/www/meterbardev"
+        let dir = try writeCodexArchive(lines: [
+            codexSessionMetaLineWithCwd(timestamp: "2026-06-15T09:59:00Z", cwd: cwd),
+            codexTurnContextLine(timestamp: "2026-06-15T09:59:30Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "conv-a", input: 100, cached: 0),
+            codexUsageLine(timestamp: "2026-06-15T10:01:00Z", conversationID: "conv-a", input: 50, cached: 0)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.projectSessions["www/meterbardev"]?["conv-a"]?.input, 150)
+        XCTAssertEqual(context.projectTotals["www/meterbardev"]?.input, 150)
+
+        let (cost, dailyRows, _) = try XCTUnwrap(CodexCostScanner.makeCost(from: context))
+        XCTAssertEqual(cost.sessionBreakdowns.map(\.name), ["conv-a"])
+        XCTAssertEqual(cost.sessionBreakdowns.first?.inputTokens, 150)
+        XCTAssertEqual(
+            cost.sessionBreakdowns.first?.estimatedCostUSD ?? -1,
+            cost.projectBreakdowns.first?.estimatedCostUSD ?? -2,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(cost.projectBreakdowns.first?.sessionBreakdowns.first?.name, "conv-a")
+        XCTAssertEqual(dailyRows.first?.sessionBreakdowns?.first?.name, "conv-a")
+    }
+
+    func testScanCodexRolloutsDedupsReplayedSessionEvents() throws {
+        let dir = try writeCodexArchive(lines: [
+            codexTurnContextLine(timestamp: "2026-06-15T09:59:30Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "conv-a", input: 100, cached: 0),
+            codexUsageLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "conv-a", input: 100, cached: 0)
+        ])
+        let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
+        var context = makeContext(cutoff: cutoff)
+
+        CostScanFixtureScan.codexRollouts(in: dir, since: cutoff, context: &context)
+
+        XCTAssertEqual(context.projectSessions[CostProjectAttribution.unknownProjectID]?["conv-a"]?.input, 100)
+        XCTAssertEqual(context.totals.input, 100)
+    }
+
     func testScanCodexRolloutsPrefersEventModelOverTurnContext() throws {
         // Older rollouts stamped the model onto the event itself; when both are
         // present the event wins because it is the more specific record.

@@ -24,6 +24,8 @@ final class GrokCLIUsageService: ObservableObject {
     nonisolated private let billingResultProvider: @Sendable (String, String) async throws -> GrokBillingResult
     nonisolated private let authFileDataProvider: @Sendable (GrokAccount) -> Data?
     nonisolated private let remainingResetsProvider: @Sendable (String) async -> Int?
+    nonisolated private let resetTokensProvider: @Sendable (String) async -> [GrokResetCredits.Token]
+    nonisolated private let consumeResetProvider: @Sendable (String, String) async throws -> Void
 
     init(
         binaryPathProvider: @escaping @Sendable () -> String? = {
@@ -43,6 +45,12 @@ final class GrokCLIUsageService: ObservableObject {
         },
         remainingResetsProvider: @escaping @Sendable (String) async -> Int? = { token in
             try? await GrokResetCreditsRPC.fetchAvailableCount(accessToken: token)
+        },
+        resetTokensProvider: @escaping @Sendable (String) async -> [GrokResetCredits.Token] = { token in
+            (try? await GrokResetCreditsRPC.fetchSnapshot(accessToken: token))?.tokens ?? []
+        },
+        consumeResetProvider: @escaping @Sendable (String, String) async throws -> Void = { token, tokenID in
+            try await GrokResetCreditsRPC.consume(tokenID: tokenID, accessToken: token)
         }
     ) {
         self.binaryPathProvider = binaryPathProvider
@@ -50,6 +58,8 @@ final class GrokCLIUsageService: ObservableObject {
         self.billingResultProvider = billingResultProvider
         self.authFileDataProvider = authFileDataProvider
         self.remainingResetsProvider = remainingResetsProvider
+        self.resetTokensProvider = resetTokensProvider
+        self.consumeResetProvider = consumeResetProvider
         Task.detached(priority: .utility) { [weak self] in
             self?.checkAccess()
         }
@@ -111,6 +121,43 @@ final class GrokCLIUsageService: ObservableObject {
                 "Grok profile usage fetch failed: \(serviceError.localizedDescription, privacy: .public)"
             )
             throw serviceError
+        }
+    }
+
+    /// Consumes one banked Grok usage-limit reset for `account`, then immediately
+    /// re-fetches usage. The POST is sent once; the provider owns replay
+    /// protection for that token id.
+    func consumeResetCredit(account: GrokAccount = .defaultAccount) async throws -> GrokResetCreditConsumption {
+        guard let accessToken = GrokResetCredits.accessToken(from: authFileDataProvider(account)) else {
+            throw ServiceError.notAuthenticated
+        }
+
+        let tokens = await resetTokensProvider(accessToken)
+        let now = Date()
+        guard let token = tokens.first(where: { candidate in
+            guard let expiresAt = candidate.expiresAt else { return true }
+            return expiresAt > now
+        }) else {
+            throw GrokResetCreditError.noAvailableCredit
+        }
+
+        do {
+            try await consumeResetProvider(accessToken, token.tokenID)
+        } catch {
+            throw GrokResetCreditError.requestFailed
+        }
+
+        do {
+            let refreshedMetrics = try await fetchUsageMetrics(account: account)
+            return GrokResetCreditConsumption(
+                refreshedMetrics: refreshedMetrics,
+                usageRefreshErrorDescription: nil
+            )
+        } catch {
+            return GrokResetCreditConsumption(
+                refreshedMetrics: nil,
+                usageRefreshErrorDescription: ServiceSupport.safeErrorMessage(for: error)
+            )
         }
     }
 
@@ -211,6 +258,44 @@ final class GrokCLIUsageService: ObservableObject {
         case .commandFailed:
             return .apiError(GrokRefreshFailure.requestFailed.message)
         }
+    }
+}
+
+public struct GrokResetCreditConsumption {
+    public let refreshedMetrics: UsageMetrics?
+    public let usageRefreshErrorDescription: String?
+}
+
+public enum GrokResetCreditError: LocalizedError, Equatable, Sendable {
+    case noAvailableCredit
+    case requestFailed
+
+    public var errorDescription: String? {
+        switch self {
+        case .noAvailableCredit:
+            return "No Grok usage reset is available. Refresh usage and try again."
+        case .requestFailed:
+            return "Grok returned an unexpected reset response."
+        }
+    }
+}
+
+/// Public seam used by the bundled `meterbar reset-credit --provider grok`
+/// command without exposing the app's internal account-store model to the CLI.
+public enum GrokResetCreditAPI {
+    public static func consume(grokHome: String? = nil) async throws -> GrokResetCreditConsumption {
+        let trimmedHome = grokHome?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let account: GrokAccount
+        if let trimmedHome, !trimmedHome.isEmpty {
+            account = GrokAccount(
+                id: UUID(),
+                name: "CLI reset-credit account",
+                homeDirectory: (trimmedHome as NSString).standardizingPath
+            )
+        } else {
+            account = .defaultAccount
+        }
+        return try await GrokCLIUsageService.shared.consumeResetCredit(account: account)
     }
 }
 

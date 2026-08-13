@@ -61,13 +61,13 @@ enum ProviderCardPresentation {
             && !collapsesToLoginRow(snapshot: snapshot, now: now)
     }
 
-    /// Reset credits are a Codex CLI concept. The eligibility rule already hides
-    /// the action once the provider reports no credits left, but the count it
-    /// reads is only as fresh as the last poll: a redemption whose follow-up
-    /// refetch failed leaves the snapshot still claiming the spent credit is
-    /// there. `hasPendingConsumption` covers exactly that window — see
-    /// `CodexResetCreditConsumptionStore`, which drops the record as soon as
-    /// newer metrics arrive.
+    /// Reset credits are banked usage-window resets on Codex CLI and Grok.
+    /// The eligibility rule already hides the action once the provider reports
+    /// no credits left, but the count it reads is only as fresh as the last
+    /// poll: a redemption whose follow-up refetch failed leaves the snapshot
+    /// still claiming the spent credit is there. `hasPendingConsumption` covers
+    /// exactly that window — see `CodexResetCreditConsumptionStore`, which drops
+    /// the record as soon as newer metrics arrive.
     ///
     /// It is deliberately not a permanent latch. An account can bank several
     /// credits, and once refreshed numbers land the count is authoritative, so
@@ -78,7 +78,9 @@ enum ProviderCardPresentation {
         isAuthenticated: Bool,
         hasResolvedAccount: Bool
     ) -> Bool {
-        guard snapshot.service == .codexCli, !hasPendingConsumption else { return false }
+        guard snapshot.service == .codexCli || snapshot.service == .grok, !hasPendingConsumption else {
+            return false
+        }
         return CodexResetCreditEligibility.isEligible(
             isBlocked: snapshot.hasExhaustedLimit,
             availableCredits: snapshot.resetCreditsAvailable,
