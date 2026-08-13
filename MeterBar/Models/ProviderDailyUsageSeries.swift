@@ -233,6 +233,21 @@ struct ProviderDailyUsageSeries: Equatable {
 
     var formattedTotal: String { metric.formatted(totalValue) }
 
+    /// Trailing total on the hover-panel header.
+    ///
+    /// `formattedTotal` already includes the unit noun for `.requests`
+    /// ("31,258 requests"), so appending `summaryNoun` printed
+    /// "requests requests". Dollars and compact token counts still need the
+    /// noun because those formatters emit just `$1.20` / `1.2K`.
+    var headerTotalText: String {
+        switch metric {
+        case .requests:
+            return formattedTotal
+        case .tokens, .usd:
+            return "\(formattedTotal) \(metric.summaryNoun)"
+        }
+    }
+
     var accessibilityLabel: String {
         "\(service.shortName) usage for the last \(days.count) days"
     }

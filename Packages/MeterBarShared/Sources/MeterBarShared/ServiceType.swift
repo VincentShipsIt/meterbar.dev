@@ -104,12 +104,43 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Code this window is model-scoped: it echoes the parsed model label
     /// (e.g. "Fable", "Sonnet"), falling back to a neutral "Model" when no
     /// label is available — never a hardcoded model name, since the label
-    /// changes across CLI releases. Every other provider shows "Code Review".
+    /// changes across CLI releases. Cursor's third window is on-demand spend.
+    /// Every other provider shows "Code Review".
     /// Centralized here because the popover, dashboard, widget, and
     /// notification copy previously each spelled out this rule — and
     /// historically did so with inverted defaults.
     public func codeReviewQuotaTitle(modelLimitLabel: String?) -> String {
-        self == .claudeCode ? (modelLimitLabel ?? "Model") : "Code Review"
+        switch self {
+        case .claudeCode: return modelLimitLabel ?? "Model"
+        case .cursor: return "On-demand"
+        case .codexCli, .openRouter, .grok: return "Code Review"
+        }
+    }
+
+    /// Cursor's dashboard reports each included pool as a percentage of 100
+    /// (`autoPercentUsed` / `apiPercentUsed`), not as a request count. Limits
+    /// mapped from those fields use this denominator so the popover, widget,
+    /// and notifications can tell a percent pool from the legacy request quota.
+    public static let cursorIncludedPoolTotal: Double = 100
+
+    public static func isCursorIncludedPool(total: Double) -> Bool {
+        abs(total - cursorIncludedPoolTotal) < 0.000_001
+    }
+
+    /// Display title for the short ("session") quota window. OpenRouter's is a
+    /// key spend cap. Cursor's is the **Cursor Models** pool when the payload
+    /// used the percent-of-100 shape, and "Session" for the legacy on-demand
+    /// mapping.
+    public func sessionQuotaTitle(limitTotal: Double?) -> String {
+        switch self {
+        case .openRouter: return "Key limit"
+        case .cursor:
+            if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
+                return "Cursor Models"
+            }
+            return "Session"
+        case .claudeCode, .codexCli, .grok: return "Session"
+        }
     }
 
     /// Display title for the long ("weekly") quota window. The shared window id
@@ -118,11 +149,21 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// balance rather than a window at all. Centralized here for the same reason
     /// as `codeReviewQuotaTitle` — the popover, widget, and CLI each used to
     /// spell out the OpenRouter exception inline.
-    public var weeklyQuotaTitle: String {
+    ///
+    /// Pass `limitTotal` when the concrete window is known: Cursor's percent
+    /// pools title as **Other Models**, matching the dashboard; a request-count
+    /// billing-cycle quota stays **Monthly**.
+    public func weeklyQuotaTitle(limitTotal: Double?) -> String {
         switch self {
         case .openRouter: return "Account credits"
-        case .cursor: return "Monthly"
+        case .cursor:
+            if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
+                return "Other Models"
+            }
+            return "Monthly"
         case .claudeCode, .codexCli, .grok: return "Weekly"
         }
     }
+
+    public var weeklyQuotaTitle: String { weeklyQuotaTitle(limitTotal: nil) }
 }

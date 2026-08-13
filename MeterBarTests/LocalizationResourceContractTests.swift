@@ -36,6 +36,8 @@ final class LocalizationResourceContractTests: XCTestCase {
             "quota.amount_spent",
             "quota.title.session",
             "quota.title.weekly",
+            "quota.title.cursor_models",
+            "quota.title.other_models",
             "reset.titled_in",
             "reset.window_reset",
             "reset.exhausted_limits",

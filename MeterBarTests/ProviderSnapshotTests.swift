@@ -378,16 +378,78 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
     }
 
-    // Cursor's long window resets with `billingCycleEnd`, so it is labelled by
-    // its real cadence instead of borrowing the shared "Weekly" copy.
-    func testCursorLongWindowUsesMonthlyLabel() {
+    // Cursor's long window resets with `billingCycleEnd`. Percent-of-100 pools
+    // match the dashboard's Cursor Models / Other Models bars; a request-count
+    // grant keeps the legacy Monthly / Session labels.
+    func testCursorPercentPoolsUseDashboardTitles() {
         let limits = ProviderSnapshotBuilder.limits(
-            for: makeMetrics(service: .cursor, session: 10, weekly: 20),
+            for: makeMetrics(service: .cursor, session: 4, weekly: 64),
             service: .cursor
         )
 
-        XCTAssertEqual(limits.map(\.title), ["Session", "Monthly"])
+        XCTAssertEqual(limits.map(\.title), ["Cursor Models", "Other Models"])
         XCTAssertEqual(limits.map(\.id), ["session", "weekly"])
+    }
+
+    func testCursorLegacyRequestQuotaKeepsMonthlyLabel() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertEqual(limits.map(\.title), ["Monthly"])
+    }
+
+    func testCursorLegacyOnDemandKeepsSessionAndMonthlyLabels() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 4, total: 20, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertEqual(limits.map(\.title), ["Session", "Monthly"])
+    }
+
+    func testCursorOnDemandWindowIsTitledOnDemand() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertEqual(limits.map(\.title), ["Cursor Models", "Other Models", "On-demand"])
+    }
+
+    func testCursorSinglePoolExhaustionDoesNotCollapseTheCard() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: makeMetrics(service: .cursor, session: 4, weekly: 100),
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.band, .exhausted)
+        XCTAssertFalse(snapshot.hasExhaustedLimit)
+        XCTAssertFalse(snapshot.hasExhaustedWeeklyLimit)
+        XCTAssertTrue(snapshot.blockingLimits.isEmpty)
+        XCTAssertEqual(snapshot.detailLimits.map(\.id), ["session", "weekly"])
+    }
+
+    func testCursorBothPoolsExhaustedBlocksTheProvider() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: makeMetrics(service: .cursor, session: 100, weekly: 100),
+            emptyDetail: ""
+        )
+
+        XCTAssertTrue(snapshot.hasExhaustedLimit)
+        XCTAssertTrue(snapshot.hasExhaustedWeeklyLimit)
+        XCTAssertEqual(Set(snapshot.blockingLimits.map(\.kind)), [.session, .weekly])
     }
 
     func testPaceContextComesFromKindNotTitle() {

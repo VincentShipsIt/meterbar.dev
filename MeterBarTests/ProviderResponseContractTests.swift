@@ -146,6 +146,30 @@ final class ProviderResponseContractTests: XCTestCase {
         XCTAssertEqual(breakdown.total, 750)
     }
 
+    func testCursorTwoPoolPercentFieldsDecode() throws {
+        let json = #"""
+        {
+          "membershipType": "ultra",
+          "individualUsage": {
+            "plan": {
+              "used": 495,
+              "limit": 500,
+              "autoPercentUsed": 4,
+              "apiPercentUsed": 64.5,
+              "totalPercentUsed": 99
+            }
+          }
+        }
+        """#
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
+        let plan = try XCTUnwrap(response.individualUsage?.plan)
+        XCTAssertEqual(plan.autoPercentUsed, 4)
+        XCTAssertEqual(plan.apiPercentUsed, 64.5)
+        XCTAssertEqual(plan.totalPercentUsed, 99)
+        XCTAssertEqual(plan.used, 495)
+    }
+
     func testCursorSparseResponseDecodes() throws {
         // Every field is optional; an empty object must not throw.
         let data = try XCTUnwrap("{}".data(using: .utf8))

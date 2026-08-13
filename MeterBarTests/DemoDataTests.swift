@@ -89,7 +89,7 @@ final class DemoDataTests: XCTestCase {
         let metrics = DemoData.metrics(now: now)
 
         XCTAssertEqual(metrics[.codexCli]?.resetCreditsAvailable, 2)
-        // Cursor mirrors the real dollar-denominated mapping: no window seconds,
+        // Cursor mirrors the real percent-pool mapping: no window seconds,
         // so no pace label is ever produced.
         XCTAssertNil(metrics[.cursor]?.sessionLimit?.pace(now: now))
         XCTAssertNil(metrics[.cursor]?.weeklyLimit?.pace(now: now))

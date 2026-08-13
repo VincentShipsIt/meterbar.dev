@@ -74,13 +74,22 @@ public enum DemoData {
         )
     }
 
-    /// Cursor: dollar-denominated plan + on-demand balances, both green. No
-    /// window seconds (matching the real Cursor mapping), so no pace label.
+    /// Cursor: two included percent pools, both green. No window seconds
+    /// (matching the real Cursor mapping), so no pace label.
     private static func cursor(now: Date) -> UsageMetrics {
-        UsageMetrics(
+        let reset = now.addingTimeInterval(28 * 24 * 3_600)
+        return UsageMetrics(
             service: .cursor,
-            sessionLimit: UsageLimit(used: 2, total: 20, resetTime: nil),
-            weeklyLimit: UsageLimit(used: 205, total: 500, resetTime: nil),
+            sessionLimit: UsageLimit(
+                used: 18,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: reset
+            ),
+            weeklyLimit: UsageLimit(
+                used: 42,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: reset
+            ),
             lastUpdated: now
         )
     }

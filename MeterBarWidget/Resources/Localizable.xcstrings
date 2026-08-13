@@ -292,6 +292,17 @@
         }
       }
     },
+    "widget.quota.cursor_models": {
+      "comment": "Cursor included-usage pool for Cursor Grok and Composer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cursor Models"
+          }
+        }
+      }
+    },
     "widget.quota.key_limit": {
       "localizations": {
         "en": {
@@ -318,6 +329,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Monthly"
+          }
+        }
+      }
+    },
+    "widget.quota.on_demand": {
+      "comment": "Cursor on-demand spend beyond included pools.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-demand"
+          }
+        }
+      }
+    },
+    "widget.quota.other_models": {
+      "comment": "Cursor included-usage pool for third-party API models.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other Models"
           }
         }
       }

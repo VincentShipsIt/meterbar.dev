@@ -281,6 +281,11 @@ class CursorLocalService: ObservableObject {
     /// `ProviderUsageLedger.dailyUSDSeries(for:)` and surfaces as a request
     /// series instead.
     ///
+    /// Two-pool percent payloads (`autoPercentUsed` / `apiPercentUsed`) are the
+    /// dashboard's included-usage bars, not a running request counter.
+    /// Differencing `plan.used` across that shape change produced a phantom
+    /// multi-thousand "request" spike, so those payloads yield no observation.
+    ///
     /// On-demand usage is billed and counted separately, so it is deliberately
     /// not summed in: the total would then be in neither unit. No token counts
     /// ride along either — the endpoint reports none.
@@ -298,7 +303,11 @@ class CursorLocalService: ObservableObject {
         _ summaryData: CursorUsageSummaryResponse,
         at observedAt: Date
     ) -> ProviderUsageObservation? {
-        guard let used = selectedUsage(from: summaryData).plan?.used else { return nil }
+        let plan = selectedUsage(from: summaryData).plan
+        if plan?.autoPercentUsed != nil, plan?.apiPercentUsed != nil {
+            return nil
+        }
+        guard let used = plan?.used else { return nil }
         return ProviderUsageObservation(
             provider: .cursor,
             unit: .requests,
@@ -315,15 +324,22 @@ class CursorLocalService: ObservableObject {
 
     /// Maps a decoded Cursor usage-summary response onto the shared
     /// `UsageMetrics` shape. Pure and side-effect-free so it can be fixture-tested
-    /// without the network or Cursor's SQLite DB: individual-first plan (falling
-    /// back to team) → billing-cycle (long-window) limit, enabled on-demand usage
-    /// from that same shape → session limit. The plan denominator comes from the
-    /// server (`plan.limit`, else `plan.breakdown`, else the legacy flat
-    /// `plan.total`); only when the selected shape carries none of those is the
-    /// assumed quota substituted and flagged `isEstimated`. When on-demand has
-    /// no explicit limit a headroom estimate is used.
+    /// without the network or Cursor's SQLite DB.
+    ///
+    /// Current dashboard shape: `plan.autoPercentUsed` (Cursor Models) and
+    /// `plan.apiPercentUsed` (Other Models) are the two included pools. Those
+    /// land on `sessionLimit` / `weeklyLimit` as percentages of 100 so the
+    /// popover can draw the same two bars the dashboard does. Enabled on-demand
+    /// spend, when present, is the third window (`codeReviewLimit`) — it must
+    /// not occupy the session slot, which would hide Cursor Models.
+    ///
+    /// Legacy payloads omit the percent fields. They keep the previous mapping:
+    /// `plan.used` / server quota as the monthly request window, on-demand as
+    /// the session window. The plan denominator comes from the server
+    /// (`plan.limit`, else `plan.breakdown`, else the legacy flat `plan.total`);
+    /// only when the selected shape carries none of those is the assumed quota
+    /// substituted and flagged `isEstimated`.
     static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
-        // Parse billing cycle end date for reset time
         var resetTime: Date?
         if let billingEnd = summaryData.billingCycleEnd {
             resetTime = FlexibleISO8601.date(from: billingEnd)
@@ -331,6 +347,16 @@ class CursorLocalService: ObservableObject {
 
         let usage = selectedUsage(from: summaryData)
         let plan = usage.plan
+
+        if let autoPercent = plan?.autoPercentUsed, let apiPercent = plan?.apiPercentUsed {
+            return UsageMetrics(
+                service: .cursor,
+                sessionLimit: percentPoolLimit(autoPercent, resetTime: resetTime),
+                weeklyLimit: percentPoolLimit(apiPercent, resetTime: resetTime),
+                codeReviewLimit: onDemandLimit(from: usage.onDemand, resetTime: resetTime)
+            )
+        }
+
         let planUsed = Double(plan?.used ?? 0)
         let serverQuota = plan?.serverQuota
         let planTotalIsEstimated = serverQuota == nil
@@ -338,34 +364,44 @@ class CursorLocalService: ObservableObject {
 
         // Billing-cycle window. Named `weeklyLimit` after the shared long-window
         // slot, not its cadence: it resets at `billingCycleEnd`, which is why
-        // `ServiceType.cursor` titles this window "Monthly".
-        let weeklyLimit = UsageLimit(
-            used: planUsed,
-            total: planTotal,
-            resetTime: resetTime,
-            isEstimated: planTotalIsEstimated
-        )
-
-        // On-demand usage as secondary metric if enabled
-        var sessionLimit: UsageLimit?
-        if let onDemand = usage.onDemand, onDemand.enabled == true {
-            let onDemandUsed = Double(onDemand.used ?? 0)
-            let onDemandLimit = Double(onDemand.limit ?? 0)
-            if onDemandUsed > 0 || onDemandLimit > 0 {
-                sessionLimit = UsageLimit(
-                    used: onDemandUsed,
-                    total: onDemandLimit > 0 ? onDemandLimit : onDemandUsed * onDemandHeadroomMultiplier,
-                    resetTime: resetTime,
-                    isEstimated: onDemandLimit <= 0
-                )
-            }
-        }
-
+        // the legacy title for this window is "Monthly".
         return UsageMetrics(
             service: .cursor,
-            sessionLimit: sessionLimit,
-            weeklyLimit: weeklyLimit,
+            sessionLimit: onDemandLimit(from: usage.onDemand, resetTime: resetTime),
+            weeklyLimit: UsageLimit(
+                used: planUsed,
+                total: planTotal,
+                resetTime: resetTime,
+                isEstimated: planTotalIsEstimated
+            ),
             codeReviewLimit: nil
+        )
+    }
+
+    /// One included pool as the dashboard draws it: `used` is already a
+    /// 0…100 percent, so the denominator is 100 rather than a request grant.
+    private static func percentPoolLimit(_ percentUsed: Double, resetTime: Date?) -> UsageLimit {
+        UsageLimit(
+            used: max(0, percentUsed),
+            total: ServiceType.cursorIncludedPoolTotal,
+            resetTime: resetTime,
+            isEstimated: false
+        )
+    }
+
+    private static func onDemandLimit(
+        from onDemand: CursorOnDemandUsage?,
+        resetTime: Date?
+    ) -> UsageLimit? {
+        guard let onDemand, onDemand.enabled == true else { return nil }
+        let onDemandUsed = Double(onDemand.used ?? 0)
+        let onDemandLimit = Double(onDemand.limit ?? 0)
+        guard onDemandUsed > 0 || onDemandLimit > 0 else { return nil }
+        return UsageLimit(
+            used: onDemandUsed,
+            total: onDemandLimit > 0 ? onDemandLimit : onDemandUsed * onDemandHeadroomMultiplier,
+            resetTime: resetTime,
+            isEstimated: onDemandLimit <= 0
         )
     }
 
@@ -470,6 +506,14 @@ nonisolated struct CursorPlanUsage: Decodable {
     let included: Int?
     let bonus: Int?
     let total: Int?
+    /// Included **Cursor Models** pool, 0…100, as the dashboard's first bar.
+    let autoPercentUsed: Double?
+    /// Included **Other Models** (API) pool, 0…100, as the dashboard's second bar.
+    let apiPercentUsed: Double?
+    /// Combined included-usage percent. Not mapped — the dashboard draws the
+    /// two pools separately, and folding them into one bar is what made MeterBar
+    /// disagree with Cursor's own UI.
+    let totalPercentUsed: Double?
 
     /// Quota the dashboard divides by, in precedence order: the enforced
     /// `limit`, then the nested grant, then the legacy flat `total`. Returns
