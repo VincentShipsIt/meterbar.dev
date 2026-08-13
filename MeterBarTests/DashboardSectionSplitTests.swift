@@ -129,9 +129,9 @@ final class DashboardSectionSplitTests: XCTestCase {
     }
 
     /// The estimate card's subtitle names the window and nothing else: refresh
-    /// state belongs on the trailing edge, matching "Lifetime Local Cost" and
-    /// the spend card rather than replacing the card's own caption. The window
-    /// now follows the page's 7/30-day toggle.
+    /// state belongs on the trailing edge, matching the spend card rather than
+    /// replacing the card's own caption. The window follows the page's 7/30-day
+    /// toggle.
     func testCostOverviewSubtitleIsWindowOnlyAndStatusMatchesTheOtherCards() {
         XCTAssertEqual(CostWindowSelection.month.subtitle, "Last 30 days")
         XCTAssertEqual(CostWindowSelection.week.subtitle, "Last 7 days")

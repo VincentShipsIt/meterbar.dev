@@ -307,8 +307,9 @@ enum ClaudeCostScanner {
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
 
-            let listing = CostScanCorpus.listing(in: root)
+            let listing = CostScanCorpus.listing(in: root, modifiedSince: session.listingCutoff)
             coverage.add(listing)
+            session.noteListing(listing)
 
             for file in listing.files {
                 // `projectRoots` can name the same directory twice (an account's
@@ -316,6 +317,7 @@ enum ClaudeCostScanner {
                 // keyed by standardized path — counting a file once per root
                 // would double its spend.
                 guard coverage.keep(file.cacheKey) else { continue }
+                session.noteProcessedFile()
 
                 let projectID = CostProjectAttribution.claudeProjectID(
                     forTranscriptURL: file.url,

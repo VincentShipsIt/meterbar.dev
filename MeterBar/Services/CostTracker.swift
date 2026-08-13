@@ -16,6 +16,8 @@ class CostTracker: ObservableObject {
     @Published var isScanning: Bool = false
     @Published var isRefreshingMissingDays: Bool = false
     @Published var lastScanDate: Date?
+    /// What this refresh listed and how far it has got. `nil` when idle.
+    @Published var scanProgress: CostScanProgress?
 
     /// Polled running counters, accumulated into a dated series.
     ///
@@ -98,34 +100,27 @@ class CostTracker: ObservableObject {
         return await MainActor.run {
             apply(scan)
             isScanning = false
+            scanProgress = nil
             return scan?.isComplete == true ? .completed : .partial
         }
     }
 
-    /// Quietly backfills a legacy cache's missing lifetime snapshot, daily
-    /// rows, or hourly rows when Overview/Costs opens, without the visible
-    /// "Scanning" UI a manual scan shows.
+    /// Quietly backfills missing daily or hourly rows when Overview/Costs
+    /// opens, without the visible "Scanning" UI a manual scan shows.
+    ///
+    /// A missing lifetime snapshot is not a reason to rescan. Lifetime is no
+    /// longer published; treating `lifetime == nil` as incomplete was what
+    /// walked multi-gigabyte archives on every Costs open.
     func refreshMissingDaysInBackground(days: Int = 30) async {
         guard !demoMode else { return }
         let shouldStart = await MainActor.run {
-            let hasEnabledCostScanProvider = Self.hasEnabledCostScanProvider(
-                in: providerVisibilityStore.enabledServices
-            )
             guard !isRefreshInProgress else { return false }
-            if costSummary == nil {
-                guard hasEnabledCostScanProvider else { return false }
-                isRefreshingMissingDays = true
-                return true
-            }
-            guard let visibleSummary = costSummary?.filtered(to: providerVisibilityStore.enabledServices),
-                  visibleSummary.lifetime == nil
-                    || visibleSummary.needsMissingDailyUsageRefresh(days: days, lastScanDate: lastScanDate)
-                    || (hasEnabledCostScanProvider
-                        && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate))
-                    || visibleSummary.needsMissingEnabledProviderRefresh(
-                        enabledServices: providerVisibilityStore.enabledServices,
-                        lastScanDate: lastScanDate
-                    ) else {
+            guard Self.needsBackgroundRefresh(
+                summary: costSummary,
+                lastScanDate: lastScanDate,
+                enabledServices: providerVisibilityStore.enabledServices,
+                days: days
+            ) else {
                 return false
             }
             isRefreshingMissingDays = true
@@ -138,7 +133,37 @@ class CostTracker: ObservableObject {
         await MainActor.run {
             apply(scan)
             isRefreshingMissingDays = false
+            scanProgress = nil
         }
+    }
+
+    /// Whether opening Costs should start a windowed backfill.
+    ///
+    /// Extracted so the "lifetime is gone on purpose" rule is unit-testable
+    /// without constructing a full tracker.
+    static func needsBackgroundRefresh(
+        summary: CostSummary?,
+        lastScanDate: Date?,
+        enabledServices: Set<ServiceType>,
+        days: Int,
+        now: Date = Date()
+    ) -> Bool {
+        let hasEnabled = hasEnabledCostScanProvider(in: enabledServices)
+        guard let summary else { return hasEnabled }
+
+        let visibleSummary = summary.filtered(to: enabledServices)
+        return visibleSummary.needsMissingDailyUsageRefresh(
+            days: days,
+            lastScanDate: lastScanDate,
+            now: now
+        )
+            || (hasEnabled
+                && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate, now: now))
+            || visibleSummary.needsMissingEnabledProviderRefresh(
+                enabledServices: enabledServices,
+                lastScanDate: lastScanDate,
+                now: now
+            )
     }
 
     /// Hourly rows come from local log scanners, not from providers whose
@@ -174,8 +199,8 @@ class CostTracker: ObservableObject {
     /// Backstop against a refresh that never reports completion.
     ///
     /// Every slice that defers work has, by construction, spent budget reading
-    /// bytes — so the loop terminates on its own after ~20 slices on a cold
-    /// 10 GB corpus. This bound only exists so a corrupted cache or a
+    /// bytes — so the loop terminates on its own after a few slices of a
+    /// windowed corpus. This bound only exists so a corrupted cache or a
     /// pathological transcript cannot pin the scan queue indefinitely; hitting
     /// it costs nothing but a later refresh finishing the remainder.
     private static let maxScanSlices = 64
@@ -217,6 +242,9 @@ class CostTracker: ObservableObject {
         refreshUsageLedger()
         let usageLedger = usageLedger
         var latest: CostSummaryBuilder.CostSummaryScan?
+        await MainActor.run {
+            scanProgress = CostScanProgress(windowDays: days)
+        }
 
         for _ in 0..<Self.maxScanSlices {
             let slice = try? await CostScanExecutor.run { token in
@@ -238,17 +266,26 @@ class CostTracker: ObservableObject {
                 // Persist even when the slice was cut short: offsets commit on
                 // line boundaries, so partial progress is exactly what the next
                 // slice needs to resume from.
-                return ScanSlice(scan: scan, persistence: session.persist())
+                return ScanSlice(
+                    scan: scan,
+                    persistence: session.persist(),
+                    progress: session.progress(windowDays: days)
+                )
             }
             // Cancelled. Whatever earlier slices published stands, and the
             // offsets they committed are already on disk.
             guard let slice else { break }
 
             latest = slice.scan
+            await MainActor.run {
+                scanProgress = slice.progress
+                // Publish the partial total so the number on screen improves with
+                // every slice instead of only when the last one lands.
+                if !slice.scan.isComplete {
+                    costSummary = slice.scan.summary
+                }
+            }
             if slice.scan.isComplete { break }
-            // Publish the partial total so the number on screen improves with
-            // every slice instead of only when the last one lands.
-            await MainActor.run { costSummary = slice.scan.summary }
 
             guard Self.shouldRunAnotherSlice(after: slice.scan, persistence: slice.persistence) else {
                 Self.logStoppedScan(slice)
@@ -264,6 +301,7 @@ class CostTracker: ObservableObject {
     private struct ScanSlice: Sendable {
         let scan: CostSummaryBuilder.CostSummaryScan
         let persistence: CostScanPersistReport
+        let progress: CostScanProgress
     }
 
     /// Whether another slice can improve on the one that just finished.

@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-13
 status: active
 ---
 
@@ -19,7 +19,9 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 
 ## Cost scan
 
-`CostTracker` scans `~/.claude*/projects/**/*.jsonl` and Codex `$CODEX_HOME/archived_sessions` **and** `$CODEX_HOME/sessions`, plus `$CODEX_HOME/logs_2.sqlite`. Codex `token_count` events carry neither model nor front end — the scanner streams each rollout and forwards the last `turn_context` model and opening `session_meta` originator. The two Codex directories are deduped by event content, not filename.
+`CostTracker` scans local transcripts for the visible 7/30-day window only. Lifetime totals are not published — filling them meant walking multi-gigabyte archives. Quota APIs (Claude OAuth usage, Codex wham, Cursor, OpenRouter credits, Grok ACP) feed the gauges; they do not carry per-model 30-day spend, so the chart still reads logs.
+
+Listing filters: mtime newer than `cutoff - 36h`, Grok `updates.jsonl` only. Codex reads `$CODEX_HOME/sessions` and recent `archived_sessions`; it does **not** open `logs_2.sqlite` for the default scan. Codex `token_count` events carry neither model nor front end — the scanner streams each rollout and forwards the last `turn_context` model and opening `session_meta` originator. The two Codex directories are deduped by session id, keeping the larger copy.
 
 Admin keys live in keychain service `dev.meterbar.app`, with reads migrating `dev.shipshit.meterbar` and `com.agenticindiedev.quotaguard`. Removals delete all three.
 

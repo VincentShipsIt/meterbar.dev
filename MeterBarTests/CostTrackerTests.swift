@@ -408,9 +408,7 @@ final class CostTrackerTests: XCTestCase {
     // MARK: - Codex rollout scan
 
     /// Writes a `.jsonl` into an `archived_sessions` directory and returns that
-    /// directory (the argument `CostScanFixtureScan.codexRollouts` expects). Every file is
-    /// read regardless of its modification date, so the lifetime window sees
-    /// pre-cutoff lines too.
+    /// directory (the argument `CostScanFixtureScan.codexRollouts` expects).
     private func writeCodexArchive(lines: [String]) throws -> URL {
         let root = try makeCodexHome()
         let dir = root.appendingPathComponent("archived_sessions", isDirectory: true)
@@ -448,7 +446,7 @@ final class CostTrackerTests: XCTestCase {
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         if let modifiedAgo {
             try FileManager.default.setAttributes(
-                [.modificationDate: Date(timeIntervalSince1970: 1_780_000_000 - modifiedAgo)],
+                [.modificationDate: Date().addingTimeInterval(-modifiedAgo)],
                 ofItemAtPath: url.path
             )
         }
@@ -2370,7 +2368,7 @@ final class CostTrackerTests: XCTestCase {
         let url = root.appendingPathComponent(name)
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
-            [.modificationDate: Date(timeIntervalSince1970: 1_780_000_000 - modifiedAgo)],
+            [.modificationDate: Date().addingTimeInterval(-modifiedAgo)],
             ofItemAtPath: url.path
         )
         return url

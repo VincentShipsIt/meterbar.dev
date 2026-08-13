@@ -109,15 +109,21 @@ nonisolated enum CostScanCorpus {
     /// Ordering is what makes a budgeted refresh useful rather than arbitrary.
     /// The visible summary is a 30-day window, and the transcripts that fall in
     /// it are exactly the recently-written ones — so spending the budget newest
-    /// first makes the number on screen correct after the first pass, while the
-    /// older archive (which only moves the lifetime total) catches up over
-    /// subsequent refreshes.
+    /// first makes the number on screen correct after the first pass.
     ///
+    /// - Parameter modifiedSince: when set, files whose last write is older than
+    ///   this date are not opened. A file that has not been touched cannot hold
+    ///   a new in-window event, so walking a multi-gigabyte archive for lifetime
+    ///   totals is skipped at the listing layer.
+    /// - Parameter fileNames: when set, only transcripts whose last path
+    ///   component is in the set are kept (`updates.jsonl` for Grok).
     /// - Parameter stamp: injectable so tests can fail one lookup inside an
     ///   otherwise healthy tree. A stat race cannot be staged on a real file
     ///   system. Production callers use the default.
     static func listing(
         in root: URL,
+        modifiedSince: Date? = nil,
+        fileNames: Set<String>? = nil,
         stamp: (URL) -> CostScanFileStamp? = { CostScanFileStamp.read(at: $0) }
     ) -> CostScanCorpusListing {
         let keys: [URLResourceKey] = [.isRegularFileKey]
@@ -140,6 +146,9 @@ nonisolated enum CostScanCorpus {
         var files: [CostScanFile] = []
         var unreadableKeys: Set<String> = []
         for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            if let fileNames, !fileNames.contains(url.lastPathComponent) {
+                continue
+            }
             // A directory or dangling symlink named `*.jsonl` is a definite
             // answer, not a failed lookup: it is not a transcript and never was,
             // so it must stay prunable rather than pin a phantom cache key.
@@ -150,6 +159,9 @@ nonisolated enum CostScanCorpus {
             guard values.isRegularFile == true else { continue }
             guard let stamp = stamp(url) else {
                 unreadableKeys.insert(cacheKey(for: url))
+                continue
+            }
+            if let modifiedSince, stamp.modified < modifiedSince.timeIntervalSince1970 {
                 continue
             }
             files.append(

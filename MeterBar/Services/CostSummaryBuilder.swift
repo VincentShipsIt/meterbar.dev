@@ -36,9 +36,8 @@ enum CostSummaryBuilder {
     /// complete-as-of-what-has-been-read from the very first slice rather than
     /// only after the last one.
     ///
-    /// One traversal fills both windows. The lifetime scan reads a strict
-    /// superset of the period scan, so running it separately would mean reading
-    /// every transcript twice for the same numbers.
+    /// The published summary is the visible period only. Lifetime totals used
+    /// to force a walk of every archived transcript; they are no longer filled.
     ///
     /// `enabledProviders` replaces what used to be one `Bool` per provider: with
     /// three corpora that shape had grown to three flags whose order at the call
@@ -71,17 +70,13 @@ enum CostSummaryBuilder {
             let roots = claudeProjectRoots ?? ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
             let claude = ClaudeCostScanner.scanRoots(roots, session: session)
             scan.period.append(ClaudeCostScanner.makeCost(from: claude.period, windowStart: session.cutoff))
-            scan.lifetime.append(ClaudeCostScanner.makeCost(from: claude.lifetime, windowStart: .distantPast))
             scan.period.record(claude.period.pricing)
-            scan.lifetime.record(claude.lifetime.pricing)
         }
 
         if enabledProviders.contains(.codex) {
             let codex = CodexCostScanner.scanSessions(session: session)
             scan.period.append(CodexCostScanner.makeCost(from: codex.period))
-            scan.lifetime.append(CodexCostScanner.makeCost(from: codex.lifetime))
             scan.period.record(codex.period.pricing)
-            scan.lifetime.record(codex.lifetime.pricing)
         }
 
         // No `record(...)` pass: Grok bills each turn itself, so its rows are
@@ -90,7 +85,6 @@ enum CostSummaryBuilder {
             let roots = GrokCostScanner.sessionRoots(accounts: grokAccounts)
             let grok = GrokCostScanner.scanRoots(roots, session: session)
             scan.period.append(GrokCostScanner.makeCost(from: grok.period))
-            scan.lifetime.append(GrokCostScanner.makeCost(from: grok.lifetime))
         }
 
         // No pricing pass either: these totals arrive already denominated in
@@ -106,19 +100,12 @@ enum CostSummaryBuilder {
                     windowStart: session.cutoff
                 )
             )
-            scan.lifetime.append(
-                ProviderUsageCostBuilder.makeCost(
-                    from: usageLedger,
-                    provider: provider,
-                    windowStart: .distantPast
-                )
-            )
         }
 
         // Events older than every entry in the table were priced at the oldest
         // known rate — a documented guess, so say so rather than let it pass as
         // a verified figure (issue #339).
-        if let note = scan.lifetime.pricing.diagnosticNote {
+        if let note = scan.period.pricing.diagnosticNote {
             AppLog.cost.warning("Pricing table gap: \(note, privacy: .public)")
         }
 
@@ -134,7 +121,7 @@ enum CostSummaryBuilder {
                     if lhs.date != rhs.date { return lhs.date < rhs.date }
                     return lhs.provider.rawValue < rhs.provider.rawValue
                 },
-                lifetime: LifetimeCostSummary(costs: scan.lifetime.costs),
+                lifetime: nil,
                 pricing: scan.period.pricing.isEmpty ? nil : scan.period.pricing
             ),
             deferredProviders: session.deferredProviders

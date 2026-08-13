@@ -46,27 +46,17 @@ struct DashboardCostsSection: View {
         VStack(alignment: .leading, spacing: 14) {
             windowPicker
 
-            // The two headline figures answer the same question over different
-            // windows, so they read as a pair. `maxHeight: .infinity` on both,
-            // with the row fixed to its intrinsic height, stretches the shorter
-            // card to the taller one instead of leaving it ending mid-air.
-            HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
-                CostOverviewStatusCard(
-                    summary: summary,
-                    isScanning: costTracker.isScanning,
-                    isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
-                    formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0),
-                    windowSelection: windowSelection
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                LifetimeCostSummaryCard(
-                    summary: summary?.lifetime,
-                    isScanning: costTracker.isRefreshInProgress
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if costTracker.isRefreshInProgress, let progress = costTracker.scanProgress {
+                CostScanScopeBanner(progress: progress)
             }
-            .fixedSize(horizontal: false, vertical: true)
+
+            CostOverviewStatusCard(
+                summary: summary,
+                isScanning: costTracker.isScanning,
+                isRefreshingMissingDays: costTracker.isRefreshingMissingDays,
+                formattedTokens: UsageFormat.tokens(summary?.totalTokens ?? 0),
+                windowSelection: windowSelection
+            )
 
             costTrendCard
 
@@ -196,11 +186,14 @@ struct DashboardCostsSection: View {
                         }
 
                         if costTracker.isScanning {
-                            CostScanProgressBadge(compact: false)
+                            CostScanProgressBadge(
+                                compact: false,
+                                progress: costTracker.scanProgress
+                            )
                         }
                     }
                 } else if costTracker.isScanning {
-                    CostScanLoadingChart(compact: false)
+                    CostScanLoadingChart(compact: false, progress: costTracker.scanProgress)
                         .frame(height: 220)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {

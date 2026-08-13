@@ -175,7 +175,10 @@ enum CodexCostScanner {
     /// A directory that is missing or non-local is a complete answer, not a
     /// failed walk: `archived_sessions/` routinely does not exist, and treating
     /// that as incomplete would disable pruning forever.
-    nonisolated static func distinctRollouts(in directories: [URL]) -> CostScanCorpusListing {
+    nonisolated static func distinctRollouts(
+        in directories: [URL],
+        modifiedSince: Date? = nil
+    ) -> CostScanCorpusListing {
         var chosen: [String: CostScanFile] = [:]
         var seen: Set<String> = []
         var unreadableKeys: Set<String> = []
@@ -184,7 +187,7 @@ enum CodexCostScanner {
         for directory in directories {
             guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
 
-            let listing = CostScanCorpus.listing(in: directory)
+            let listing = CostScanCorpus.listing(in: directory, modifiedSince: modifiedSince)
             unreadableKeys.formUnion(listing.unreadableKeys)
             isComplete = isComplete && listing.isComplete
 
@@ -297,26 +300,15 @@ enum CodexCostScanner {
 
     // MARK: - Budgeted, resumable scan
 
-    /// Rollouts and the flat SQLite log, read under `session`'s budget.
+    /// Rollouts under `session`'s budget. The multi-gigabyte `logs_2.sqlite`
+    /// store is a recent-session fallback the windowed scan does not need —
+    /// live `sessions/` rollouts already carry the last 30 days.
     nonisolated static func scanSessions(session: CostScanSession) -> ScanWindows<CostScanWindowContext> {
         let codexDir = URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
-        var windows = Self.scanRollouts(
+        return Self.scanRollouts(
             directories: Self.rolloutDirectories(in: codexDir),
             session: session
         )
-        // Rollouts are the authoritative lifetime corpus. The SQLite store is
-        // only a recent-session fallback, and it must not escape the slice
-        // budget: a modern Codex database can be multiple gigabytes even when
-        // it contains no usage telemetry at all. Read it once, after the
-        // resumable rollout pass has completed, instead of once per slice.
-        if session.isComplete {
-            Self.scanSQLiteLogs(
-                database: codexDir.appendingPathComponent("logs_2.sqlite"),
-                since: session.cutoff,
-                windows: &windows
-            )
-        }
-        return windows
     }
 
     /// Walks `directories` newest rollout first, reading only bytes appended
@@ -326,12 +318,14 @@ enum CodexCostScanner {
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
         var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
-        let listing = Self.distinctRollouts(in: directories)
+        let listing = Self.distinctRollouts(in: directories, modifiedSince: session.listingCutoff)
         var coverage = CostScanCorpusCoverage()
         coverage.add(listing)
+        session.noteListing(listing)
 
         for file in listing.files {
             coverage.keep(file.cacheKey)
+            session.noteProcessedFile()
             guard let totals = Self.totals(for: file, session: session) else { continue }
             guard Self.fold(totals, into: &windows) else {
                 // This rollout shares only *some* of its events with one already
