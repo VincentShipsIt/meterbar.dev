@@ -65,6 +65,37 @@ final class GrokResetCreditsTests: XCTestCase {
         XCTAssertEqual(GrokResetCreditsRPC.grpcStatusForTesting(failed), 12)
     }
 
+    /// Live 2026-08-13 probe: `RedeemReset` with a fake token id returned HTTP 200,
+    /// an empty body, and `grpc-status: 9` (FAILED_PRECONDITION) on the response
+    /// header. Treating a missing trailer as OK would spend-or-succeed incorrectly.
+    func testRedeemStatusReadsGrpcStatusFromHTTPHeadersWhenTheBodyHasNoTrailer() {
+        XCTAssertEqual(
+            GrokResetCreditsRPC.grpcStatusForTesting(Data(), headers: ["grpc-status": "9"]),
+            9
+        )
+        XCTAssertEqual(
+            GrokResetCreditsRPC.grpcStatusForTesting(Data(), headers: ["Grpc-Status": "0"]),
+            0
+        )
+        XCTAssertFalse(
+            GrokResetCreditsRPC.consumeSucceededForTesting(Data(), headers: ["grpc-status": "9"])
+        )
+        XCTAssertTrue(
+            GrokResetCreditsRPC.consumeSucceededForTesting(Data(), headers: ["grpc-status": "0"])
+        )
+        XCTAssertFalse(GrokResetCreditsRPC.consumeSucceededForTesting(Data(), headers: [:]))
+    }
+
+    func testRedeemStatusPrefersTheTrailerFrameOverHTTPHeaders() {
+        let unimplemented = Data([
+            0x80, 0x00, 0x00, 0x00, 0x10
+        ] + Array("grpc-status: 12\r\n".utf8))
+        XCTAssertEqual(
+            GrokResetCreditsRPC.grpcStatusForTesting(unimplemented, headers: ["grpc-status": "0"]),
+            12
+        )
+    }
+
     func testAccessTokenIsReadFromTheCachedLoginWithoutRequiringAJWTShape() {
         let data = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token","auth_mode":"oidc"}}"#.utf8)
 

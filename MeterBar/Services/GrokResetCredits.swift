@@ -73,8 +73,10 @@ nonisolated enum GrokResetCreditsRPC {
         string: "https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets"
     )!
 
-    /// Redeem the named reset token. Sibling of GetRemainingResets; grok.com
-    /// Settings labels this control "Redeem".
+    /// Redeem the named reset token. Live-probed 2026-08-13: this method is
+    /// implemented. A fake token id returns HTTP 200 + `grpc-status: 9`
+    /// (FAILED_PRECONDITION) on the response header with an empty body and
+    /// does not spend a real reset.
     static let redeemResetURL = URL(
         string: "https://grok.com/prod_mc_billing.ConsumerUiSvc/RedeemReset"
     )!
@@ -87,7 +89,7 @@ nonisolated enum GrokResetCreditsRPC {
         session: URLSession = ServiceSupport.session,
         now: Date = Date()
     ) async throws -> GrokResetCredits.Snapshot {
-        let data = try await post(
+        let (data, _) = try await post(
             url: remainingResetsURL,
             accessToken: accessToken,
             body: emptyRequest,
@@ -109,14 +111,17 @@ nonisolated enum GrokResetCreditsRPC {
         accessToken: String,
         session: URLSession = ServiceSupport.session
     ) async throws {
-        let data = try await post(
+        let (data, http) = try await post(
             url: redeemResetURL,
             accessToken: accessToken,
             body: GrpcWeb.frame(Proto.encodeTokenID(tokenID)),
             session: session
         )
-        let status = GrpcWeb.status(in: data) ?? 0
-        guard status == 0 else { throw Error.requestFailed }
+        // Live RedeemReset puts grpc-status on the HTTP header and may send
+        // an empty body. A missing trailer is not success.
+        guard GrpcWeb.status(body: data, headers: http.allHeaderFields) == 0 else {
+            throw Error.requestFailed
+        }
     }
 
     /// Test seam: production callers go through `consume`.
@@ -124,8 +129,12 @@ nonisolated enum GrokResetCreditsRPC {
         GrpcWeb.frame(Proto.encodeTokenID(tokenID))
     }
 
-    static func grpcStatusForTesting(_ data: Data) -> Int? {
-        GrpcWeb.status(in: data)
+    static func grpcStatusForTesting(_ data: Data, headers: [AnyHashable: Any] = [:]) -> Int? {
+        GrpcWeb.status(body: data, headers: headers)
+    }
+
+    static func consumeSucceededForTesting(_ data: Data, headers: [AnyHashable: Any]) -> Bool {
+        GrpcWeb.status(body: data, headers: headers) == 0
     }
 
     private static func post(
@@ -133,7 +142,7 @@ nonisolated enum GrokResetCreditsRPC {
         accessToken: String,
         body: Data,
         session: URLSession
-    ) async throws -> Data {
+    ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -146,7 +155,7 @@ nonisolated enum GrokResetCreditsRPC {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw Error.requestFailed
         }
-        return data
+        return (data, http)
     }
 }
 
@@ -184,6 +193,10 @@ private enum GrpcWeb {
         return message
     }
 
+    static func status(body: Data, headers: [AnyHashable: Any]) -> Int? {
+        status(in: body) ?? headerStatus(headers)
+    }
+
     static func status(in data: Data) -> Int? {
         var offset = 0
         while offset + 5 <= data.count {
@@ -208,6 +221,24 @@ private enum GrpcWeb {
                     continue
                 }
                 return code
+            }
+        }
+        return nil
+    }
+
+    /// grpc-web may put `grpc-status` on the HTTP response when the body has
+    /// no trailer frame. Header names are compared case-insensitively.
+    private static func headerStatus(_ headers: [AnyHashable: Any]) -> Int? {
+        for (key, value) in headers {
+            guard String(describing: key).caseInsensitiveCompare("grpc-status") == .orderedSame else {
+                continue
+            }
+            if let code = value as? Int { return code }
+            if let text = value as? String {
+                return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            if let text = value as? NSString {
+                return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         }
         return nil

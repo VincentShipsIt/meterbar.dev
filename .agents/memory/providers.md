@@ -23,7 +23,7 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 
 Listing filters: mtime newer than `cutoff - 36h`, Grok `updates.jsonl` only. Codex reads `$CODEX_HOME/sessions` and recent `archived_sessions`; it does **not** open `logs_2.sqlite` for the default scan. Codex `token_count` events carry neither model nor front end — the scanner streams each file and carries `turn_context.model`, nested `collaboration_mode.settings.model`, `thread_settings.model`, and `world_state.state.model`. Tokens emitted before the first model in the same file are back-filled. The two Codex directories are deduped by session id, keeping the larger copy. Per-session cost rows (issue #391) fold from the same scan into `sessionBreakdowns`.
 
-Grok usage-limit resets: fetch `GetRemainingResets`, redeem via `RedeemReset` with the token id after explicit confirmation. Same unofficial class as Codex wham consume.
+Grok usage-limit resets: fetch `GetRemainingResets`, redeem via `RedeemReset` with the token id after explicit confirmation. Same unofficial class as Codex wham consume. Live 2026-08-13: `RedeemReset` is implemented; a fake token id returns `grpc-status: 9` (FAILED_PRECONDITION) on the HTTP header with an empty body and does not spend a real reset. Consume must read that header — a missing trailer is not success.
 
 Admin keys live in keychain service `dev.meterbar.app`, with reads migrating `dev.shipshit.meterbar` and `com.agenticindiedev.quotaguard`. Removals delete all three.
 
