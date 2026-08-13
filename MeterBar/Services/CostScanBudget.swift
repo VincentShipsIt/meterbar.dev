@@ -2,10 +2,9 @@ import Foundation
 
 /// How much a single refresh is allowed to read.
 ///
-/// A cold corpus is ~10 GB; reading all of it in one pass is the 70-second
-/// freeze this budget exists to prevent. A refresh instead takes a bounded bite
-/// of whatever is still unread, persists its byte offsets, and leaves the rest
-/// for the next pass.
+/// The listing is already windowed (mtime + 36h slack), so a typical refresh
+/// is hundreds of megabytes, not the multi-gigabyte archive. The budget still
+/// exists so one pathological transcript cannot freeze the popover.
 nonisolated struct CostScanBudgetOptions: Sendable {
     /// 256 MiB. Caps the damage one pathological transcript can do: without it a
     /// single multi-gigabyte `.jsonl` would consume an entire refresh and starve
@@ -15,9 +14,8 @@ nonisolated struct CostScanBudgetOptions: Sendable {
 
     /// 512 MiB. The whole-refresh ceiling, and the knob that actually sets the
     /// slice length — roughly a second of warm sequential reads on an internal
-    /// SSD, and ~20 slices to walk a 10 GB corpus from cold. Raising it makes a
-    /// cold start converge in fewer passes at the cost of a longer stretch with
-    /// the scan queue busy.
+    /// SSD. Raising it makes a cold start converge in fewer passes at the cost
+    /// of a longer stretch with the scan queue busy.
     var maxNewBytesPerRefresh: Int
 
     /// Wall-clock ceiling, in seconds. Bytes are a poor proxy for time on a

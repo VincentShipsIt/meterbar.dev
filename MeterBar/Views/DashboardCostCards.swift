@@ -66,11 +66,7 @@ struct CostOverviewStatusCard: View {
   }
 
   var body: some View {
-    // `maxHeight: .infinity` lets the card *surface* stretch to the paired
-    // Lifetime card's height — the section already offers the row height, but
-    // without this the tile kept its intrinsic size and the shorter card ended
-    // mid-air beside the taller one.
-    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight, maxHeight: .infinity) {
+    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight) {
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .center, spacing: 9) {
           Image(systemName: "dollarsign.circle.fill")
@@ -168,96 +164,11 @@ struct CostOverviewStatusCard: View {
   }
 }
 
-struct LifetimeCostSummaryCard: View {
-  let summary: LifetimeCostSummary?
-  let isScanning: Bool
-
-  var body: some View {
-    // Same stretch as the estimate card — both surfaces must end on the same
-    // baseline whichever one is intrinsically taller.
-    DashboardTile(minHeight: CostHeadlineCardMetrics.minimumHeight, maxHeight: .infinity) {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(alignment: .center, spacing: 9) {
-          Image(systemName: "clock.arrow.circlepath")
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundStyle(MeterBarTheme.appAccent)
-            .accessibilityHidden(true)
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Lifetime Local Cost")
-              .font(.headline)
-              .fontWeight(.semibold)
-            Text("All available history")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          Spacer()
-          DashboardCardCaption(text: trackedDateRange)
-        }
-
-        if let summary, summary.hasBillableHistory {
-          CostHeadlineAmount(summary.formattedTotalCost)
-
-          ForEach(summary.providers) { provider in
-            HStack(spacing: 10) {
-              ProviderTitle(
-                title: provider.provider.displayName,
-                logoKind: .forService(provider.provider),
-                color: MeterBarTheme.accent(for: provider.provider),
-                font: .subheadline
-              )
-              Spacer()
-              Text(provider.formattedCost)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(provider.provider.displayName)
-            .accessibilityValue(provider.formattedCost)
-          }
-        } else if isScanning {
-          HStack(spacing: 10) {
-            ProgressView()
-              .controlSize(.small)
-            Text("Scanning all available local history…")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-          }
-        } else if summary == nil {
-          EmptyStateCard(
-            systemImage: "magnifyingglass",
-            title: "Lifetime scan needed",
-            message: "Run a local scan to calculate lifetime cost from available history."
-          )
-        } else {
-          EmptyStateCard(
-            systemImage: "clock.arrow.circlepath",
-            title: "No lifetime cost",
-            message: "No billable history was found for any enabled provider."
-          )
-        }
-      }
-    }
-  }
-
-  private var trackedDateRange: String? {
-    guard let firstDate = summary?.firstTrackedDate,
-          let lastDate = summary?.lastTrackedDate else {
-      return nil
-    }
-
-    let first = firstDate.formatted(date: .abbreviated, time: .omitted)
-    let last = lastDate.formatted(date: .abbreviated, time: .omitted)
-    return first == last ? first : "\(first) – \(last)"
-  }
-}
-
 private enum CostHeadlineCardMetrics {
   static let minimumHeight: CGFloat = 180
 }
 
-/// One typography contract for the two headline cost cards. Keeping the font,
-/// scaling, and digit treatment in one view prevents the 30-day and lifetime
-/// amounts from drifting apart again.
+/// One typography contract for the headline cost amount.
 private struct CostHeadlineAmount: View {
   let value: String
 
@@ -282,8 +193,49 @@ private struct CostHeadlineAmount: View {
 /// the empty slot reads as "working on it" rather than "nothing here." Contrast
 /// with `CostScanProgressBadge`, which is a small overlay used when a scan
 /// refreshes data that is *already* on screen.
+struct CostScanScopeBanner: View {
+  let progress: CostScanProgress
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        ProgressView()
+          .controlSize(.small)
+        Text(progress.statusText)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .lineLimit(2)
+        Spacer(minLength: 8)
+        Text("Last \(progress.windowDays) days")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      if let fraction = progress.fraction {
+        ProgressView(value: fraction)
+          .progressViewStyle(.linear)
+      }
+
+      Label(progress.detailText, systemImage: progress.isLargeCorpus ? "exclamationmark.triangle.fill" : "info.circle")
+        .font(.caption)
+        .foregroundStyle(progress.isLargeCorpus ? Color.orange : Color.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
+        .fill(progress.isLargeCorpus ? Color.orange.opacity(0.12) : Color.primary.opacity(0.05))
+    )
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(progress.statusText)
+    .accessibilityValue(progress.detailText)
+  }
+}
+
 struct CostScanLoadingChart: View {
   let compact: Bool
+  var progress: CostScanProgress?
 
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
@@ -307,11 +259,12 @@ struct CostScanLoadingChart: View {
           HStack(spacing: 8) {
             ProgressView()
               .controlSize(.small)
-            Text("Scanning local logs")
+            Text(progress?.statusText ?? "Scanning local logs")
               .font(compact ? .caption : .subheadline)
               .fontWeight(.semibold)
+              .lineLimit(2)
             Spacer()
-            Text("30 days")
+            Text(progress.map { "\($0.windowDays) days" } ?? "30 days")
               .font(.caption)
               .foregroundColor(.secondary)
           }
@@ -355,9 +308,10 @@ struct CostScanLoadingChart: View {
           .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium))
 
           if !compact {
-            Text("Parsing Claude and Codex sessions")
+            Text(progress?.detailText ?? "Parsing session files from the last 30 days")
               .font(.caption)
               .foregroundColor(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
           }
         }
         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -372,6 +326,7 @@ struct CostScanLoadingChart: View {
 /// which takes over the whole area when there is nothing to show yet.
 struct CostScanProgressBadge: View {
   let compact: Bool
+  var progress: CostScanProgress?
 
   var body: some View {
     VStack {
@@ -379,9 +334,10 @@ struct CostScanProgressBadge: View {
         HStack(spacing: 8) {
           ProgressView()
             .controlSize(.small)
-          Text(compact ? "Scanning..." : "Updating local scan")
+          Text(progress?.statusText ?? (compact ? "Scanning..." : "Updating local scan"))
             .font(.caption)
             .fontWeight(.semibold)
+            .lineLimit(2)
         }
         .padding(.horizontal, compact ? 9 : 11)
         .padding(.vertical, compact ? 6 : 8)

@@ -24,6 +24,14 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     /// Start of the seven-calendar-day hour buckets retained by this refresh.
     let hourlyCutoff: Date
 
+    /// Slack before `cutoff` so a file whose last write is just outside the
+    /// visible window is still opened. Clock skew, timezone edges, and Codex
+    /// archive copies that land a few hours late all fit inside a day and a half.
+    static let listingSlack: TimeInterval = 36 * 60 * 60
+
+    /// Files last written before this date cannot hold an in-window event.
+    var listingCutoff: Date { cutoff.addingTimeInterval(-Self.listingSlack) }
+
     let budget: CostScanBudget
 
     private let store: CostScanCacheStore?
@@ -33,6 +41,12 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     fileprivate var grokCache: CostScanFileCache<GrokFileTotals>
     private var dirtyProviders: Set<CostScanProvider> = []
     private var deferred: Set<CostScanProvider> = []
+    private var listedFiles = 0
+    private var listedBytes: Int64 = 0
+    private var processedFiles = 0
+    private var lastEmittedProcessed = 0
+    private var progressWindowDays = 30
+    private var onProgress: (@Sendable (CostScanProgress) -> Void)?
 
     init(
         cutoff: Date,
@@ -98,6 +112,63 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         lock.lock()
         deferred.insert(provider)
         lock.unlock()
+    }
+
+    /// Publishes listing and read milestones while the slice is still running,
+    /// so a one-slice refresh can show file count and bytes instead of a blank
+    /// "Listing…" banner that disappears when the scan ends.
+    func observeProgress(
+        windowDays: Int,
+        _ handler: @escaping @Sendable (CostScanProgress) -> Void
+    ) {
+        lock.lock()
+        progressWindowDays = windowDays
+        onProgress = handler
+        lock.unlock()
+    }
+
+    /// Records the files this refresh actually intends to open — the
+    /// mtime-filtered listing, not the whole provider home.
+    func noteListing(_ listing: CostScanCorpusListing) {
+        lock.lock()
+        listedFiles += listing.files.count
+        listedBytes += listing.files.reduce(0) { $0 + Int64($1.size) }
+        let snapshot = snapshotLocked()
+        let handler = onProgress
+        lock.unlock()
+        handler?(snapshot)
+    }
+
+    /// Count only files this slice actually finished — a cache hit or a read.
+    /// Files skipped because the budget ran out stay uncounted so the banner
+    /// cannot report 100% on an incomplete refresh.
+    func noteProcessedFile() {
+        lock.lock()
+        processedFiles += 1
+        let shouldEmit = processedFiles == listedFiles
+            || processedFiles - lastEmittedProcessed >= 8
+        if shouldEmit { lastEmittedProcessed = processedFiles }
+        let snapshot = shouldEmit ? snapshotLocked() : nil
+        let handler = onProgress
+        lock.unlock()
+        if let snapshot { handler?(snapshot) }
+    }
+
+    func progress(windowDays: Int) -> CostScanProgress {
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshotLocked(windowDays: windowDays)
+    }
+
+    private func snapshotLocked(windowDays: Int? = nil) -> CostScanProgress {
+        CostScanProgress(
+            windowDays: windowDays ?? progressWindowDays,
+            listedFiles: listedFiles,
+            listedBytes: listedBytes,
+            processedFiles: processedFiles,
+            bytesRead: budget.bytesRead,
+            isComplete: deferred.isEmpty && processedFiles == listedFiles
+        )
     }
 
     func record<Payload>(

@@ -21,11 +21,12 @@ import MeterBarShared
 ///   is attributable the moment it is read.
 ///
 /// It does keep Codex's overlap fallback. Grok writes each session exactly
-/// once, but nothing keeps a *copy* of that file off disk: sync clients leave
-/// conflict copies, backups get restored into the tree, and `CostScanCorpus`
-/// matches every `.jsonl` under the root. Because the dedup key carries the
-/// session ID from the payload rather than from the path, a copy produces
-/// identical keys — so a blind `merge` would bill it twice.
+/// once, but nothing keeps a *copy* of `updates.jsonl` off disk: sync clients
+/// leave conflict copies and backups get restored into the tree. The listing
+/// only opens `updates.jsonl` (the rest of the session log has no usage).
+/// Because the dedup key carries the session ID from the payload rather than
+/// from the path, a copy produces identical keys — so a blind `merge` would
+/// bill it twice.
 enum GrokCostScanner {
     /// USD per unit of `costUsdTicks`.
     ///
@@ -131,12 +132,18 @@ enum GrokCostScanner {
 
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
-            let listing = CostScanCorpus.listing(in: root)
+            let listing = CostScanCorpus.listing(
+                in: root,
+                modifiedSince: session.listingCutoff,
+                fileNames: ["updates.jsonl"]
+            )
             coverage.add(listing)
+            session.noteListing(listing)
 
             for file in listing.files {
                 guard coverage.keep(file.cacheKey) else { continue }
                 guard let totals = Self.totals(for: file, session: session) else { continue }
+                session.noteProcessedFile()
                 guard Self.fold(totals, into: &windows) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the

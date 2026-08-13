@@ -27,19 +27,12 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
         }
 
         try render(width: 1000, name: "1-headline-row", into: outputDir) {
-            HStack(alignment: .top, spacing: MeterBarTheme.Spacing.sm) {
-                CostOverviewStatusCard(
-                    summary: summary,
-                    isScanning: false,
-                    isRefreshingMissingDays: false,
-                    formattedTokens: UsageFormat.tokens(summary.totalTokens)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                LifetimeCostSummaryCard(summary: summary.lifetime, isScanning: false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+            CostOverviewStatusCard(
+                summary: summary,
+                isScanning: false,
+                isRefreshingMissingDays: false,
+                formattedTokens: UsageFormat.tokens(summary.totalTokens)
+            )
         }
 
         try render(width: 1000, name: "2-spend-charts", into: outputDir) {

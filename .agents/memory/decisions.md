@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-13
 status: active
 ---
 
@@ -34,3 +34,7 @@ Live ADRs only.
 ## Availability-biased cache
 
 **Accepted.** Fetch failures keep the last good metrics. Blanking the UI on a transport error is worse than showing slightly stale numbers with health dimming.
+
+## Cost scan is the visible window only
+
+**Accepted 2026-08-13.** Quota APIs do not replace 30-day per-model spend. The local scan lists files by mtime (`cutoff - 36h`) and publishes period totals only. Lifetime is kept on `CostSummary` for cache decode and is no longer filled or shown. Codex `logs_2.sqlite` is not opened for the default scan. The Costs page shows listed file count and bytes while a refresh runs.

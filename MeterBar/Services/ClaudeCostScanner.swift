@@ -307,8 +307,9 @@ enum ClaudeCostScanner {
         for root in roots {
             guard CostScanFileSystem.isLocalDirectory(root) else { continue }
 
-            let listing = CostScanCorpus.listing(in: root)
+            let listing = CostScanCorpus.listing(in: root, modifiedSince: session.listingCutoff)
             coverage.add(listing)
+            session.noteListing(listing)
 
             for file in listing.files {
                 // `projectRoots` can name the same directory twice (an account's
@@ -324,6 +325,7 @@ enum ClaudeCostScanner {
                 guard let totals = Self.totals(for: file, projectID: projectID, session: session) else {
                     continue
                 }
+                session.noteProcessedFile()
                 guard Self.fold(totals, into: &windows) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the

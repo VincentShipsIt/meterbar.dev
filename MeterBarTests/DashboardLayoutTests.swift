@@ -66,7 +66,7 @@ final class DashboardLayoutTests: XCTestCase {
 
     // MARK: - Cost headline cards
 
-    func testLoadedCostHeadlineCardsUseTheSameCompactHeight() {
+    func testLoadedCostOverviewCardStaysCompact() {
         let start = Date(timeIntervalSince1970: 1_765_324_800)
         let end = Date(timeIntervalSince1970: 1_786_003_200)
         let cost = TokenCost(
@@ -84,8 +84,7 @@ final class DashboardLayoutTests: XCTestCase {
             costs: [cost],
             totalCostUSD: cost.estimatedCostUSD,
             totalTokens: cost.totalTokens,
-            periodDays: 30,
-            lifetime: LifetimeCostSummary(costs: [cost])
+            periodDays: 30
         )
         let overview = CostOverviewStatusCard(
             summary: summary,
@@ -93,20 +92,25 @@ final class DashboardLayoutTests: XCTestCase {
             isRefreshingMissingDays: false,
             formattedTokens: UsageFormat.tokens(summary.totalTokens)
         )
-        let lifetime = LifetimeCostSummaryCard(summary: summary.lifetime, isScanning: false)
 
         let overviewHost = NSHostingView(rootView: overview.frame(width: 380))
-        let lifetimeHost = NSHostingView(rootView: lifetime.frame(width: 380))
         overviewHost.layoutSubtreeIfNeeded()
-        lifetimeHost.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(
-            overviewHost.fittingSize.height,
-            lifetimeHost.fittingSize.height,
-            accuracy: 0.5,
-            "30-day and lifetime surfaces must end on the same baseline"
-        )
         XCTAssertLessThan(overviewHost.fittingSize.height, 220)
+    }
+
+    func testScanScopeBannerBuildsWithALargeCorpusWarning() {
+        var progress = CostScanProgress(windowDays: 30)
+        progress.listedFiles = 80
+        progress.listedBytes = CostScanProgress.largeCorpusBytes
+        progress.processedFiles = 10
+
+        let banner = CostScanScopeBanner(progress: progress)
+        let host = NSHostingView(rootView: banner.frame(width: 760))
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
+        XCTAssertTrue(progress.isLargeCorpus)
     }
 
     // MARK: - Provider card context-menu commands

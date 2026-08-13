@@ -197,7 +197,7 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         XCTAssertEqual(scan.summary.totalCostUSD, 4, accuracy: 0.000_001)
         XCTAssertEqual(scan.summary.totalTokens, 0)
         XCTAssertEqual(scan.summary.dailyUsage.map(\.provider), [.openRouter])
-        XCTAssertEqual(scan.summary.lifetime?.providers.map(\.provider), [.openRouter])
+        XCTAssertNil(scan.summary.lifetime)
     }
 
     /// The default keeps every existing call site — and the scanners' own

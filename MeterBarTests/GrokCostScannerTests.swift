@@ -252,10 +252,9 @@ final class GrokCostScannerTests: XCTestCase {
 
     /// A session directory copied by a sync client — Dropbox/iCloud conflict
     /// copies, a restored backup, a `cp -r` of `sessions/` — puts the same
-    /// events in two `.jsonl` files. `CostScanCorpus` matches every `.jsonl`
-    /// under the root, so both are read; the dedup key carries the session ID
-    /// from the *payload*, so both files produce identical keys and the second
-    /// must add nothing.
+    /// events in two `updates.jsonl` files. Both are read; the dedup key carries
+    /// the session ID from the *payload*, so both files produce identical keys
+    /// and the second must add nothing.
     func testDuplicatedSessionDirectoryIsCountedOnce() throws {
         let root = try makeSessionsRoot()
         let line = turnCompleted(at: Date(), input: 100, cachedRead: 0, output: 10, reasoning: 0, ticks: 1_000_000)
@@ -548,7 +547,7 @@ final class GrokCostScannerTests: XCTestCase {
 
         XCTAssertEqual(enabled.summary.costs.map(\.provider), [.grok])
         XCTAssertEqual(enabled.summary.dailyUsage.map(\.provider), [.grok])
-        XCTAssertEqual(enabled.summary.lifetime?.providers.map(\.provider), [.grok])
+        XCTAssertNil(enabled.summary.lifetime)
         XCTAssertTrue(disabled.summary.costs.isEmpty)
     }
 
