@@ -429,7 +429,9 @@ final class GrokCLIUsageServiceTests: XCTestCase {
             authAvailableProvider: { _ in true },
             billingResultProvider: { _, grokHome in
                 grokHome == "/tmp/grok-work" ? workResult : defaultResult
-            }
+            },
+            authFileDataProvider: { _ in nil },
+            remainingResetsProvider: { _ in nil }
         )
 
         let defaultMetrics = try await service.fetchUsageMetrics(account: .defaultAccount)
@@ -450,7 +452,9 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         let service = GrokCLIUsageService(
             binaryPathProvider: { "/usr/local/bin/grok" },
             authAvailableProvider: { $0.isDefault },
-            billingResultProvider: { _, _ in defaultResult }
+            billingResultProvider: { _, _ in defaultResult },
+            authFileDataProvider: { _ in nil },
+            remainingResetsProvider: { _ in nil }
         )
 
         do {

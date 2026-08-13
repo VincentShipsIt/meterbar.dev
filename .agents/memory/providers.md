@@ -13,7 +13,7 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 | Codex CLI | `.codexCli` | `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`) → `https://chatgpt.com/backend-api/wham/usage`. Exhausted accounts can spend a banked reset credit after explicit confirmation. |
 | Cursor | `.cursor` | Session JWT from Cursor `state.vscdb` → `https://cursor.com/api/usage-summary`. If the API omits totals, the UI uses an assumed 500-request default — treat as an estimate. |
 | OpenRouter | `.openRouter` | User API key in Keychain → documented `/api/v1/credits` and `/api/v1/key`. |
-| Grok | `.grok` | On by default (opt-out). Official Grok Build CLI ACP stdio; maps `_x.ai/billing`. MeterBar checks `$GROK_HOME/auth.json` exists; it never opens or logs the token. |
+| Grok | `.grok` | On by default (opt-out). Official Grok Build CLI ACP stdio maps `_x.ai/billing` for the weekly gauge. Usage-limit resets (Redeem) come from unofficial grok.com `ConsumerUiSvc/GetRemainingResets` using the cached OIDC token in `$GROK_HOME/auth.json` — same class as Codex wham. The token is not logged. |
 | Claude admin | `.claude` | User Anthropic Admin key → `/v1/organizations/usage_report/messages` (50-page cap). |
 | OpenAI admin | `.openai` | User OpenAI Admin key → `/v1/organization/usage/completions` (50-page cap). |
 

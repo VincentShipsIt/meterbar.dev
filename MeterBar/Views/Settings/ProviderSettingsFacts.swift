@@ -46,7 +46,7 @@ struct ProviderSettingsFacts {
         case .openRouter:
             "OpenRouter credits + key APIs"
         case .grok:
-            "Grok Build ACP billing"
+            "Grok Build ACP billing + usage reset API"
         }
     }
 

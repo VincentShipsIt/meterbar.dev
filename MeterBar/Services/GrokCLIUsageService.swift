@@ -4,8 +4,9 @@ import MeterBarShared
 import os
 
 /// Reads Grok Build subscription usage through the CLI's official ACP stdio
-/// extension. MeterBar asks the CLI to authenticate with its cached login and
-/// never opens, decodes, logs, or persists `$GROK_HOME/auth.json`.
+/// extension for weekly quota, then (like Codex) reads the cached OIDC token
+/// from `$GROK_HOME/auth.json` only to ask grok.com how many usage-limit resets
+/// remain. The token is used for that request and is never logged.
 final class GrokCLIUsageService: ObservableObject {
     nonisolated static let shared = GrokCLIUsageService()
 
@@ -21,6 +22,8 @@ final class GrokCLIUsageService: ObservableObject {
     nonisolated private let binaryPathProvider: @Sendable () -> String?
     nonisolated private let authAvailableProvider: @Sendable (GrokAccount) -> Bool
     nonisolated private let billingResultProvider: @Sendable (String, String) async throws -> GrokBillingResult
+    nonisolated private let authFileDataProvider: @Sendable (GrokAccount) -> Data?
+    nonisolated private let remainingResetsProvider: @Sendable (String) async -> Int?
 
     init(
         binaryPathProvider: @escaping @Sendable () -> String? = {
@@ -33,11 +36,20 @@ final class GrokCLIUsageService: ObservableObject {
         },
         billingResultProvider: @escaping @Sendable (String, String) async throws -> GrokBillingResult = {
             try await GrokBillingRPC.fetch(binaryPath: $0, grokHome: $1)
+        },
+        authFileDataProvider: @escaping @Sendable (GrokAccount) -> Data? = { account in
+            let path = GrokHomeDirectory.authFilePath(for: account)
+            return FileManager.default.contents(atPath: path)
+        },
+        remainingResetsProvider: @escaping @Sendable (String) async -> Int? = { token in
+            try? await GrokResetCreditsRPC.fetchAvailableCount(accessToken: token)
         }
     ) {
         self.binaryPathProvider = binaryPathProvider
         self.authAvailableProvider = authAvailableProvider
         self.billingResultProvider = billingResultProvider
+        self.authFileDataProvider = authFileDataProvider
+        self.remainingResetsProvider = remainingResetsProvider
         Task.detached(priority: .utility) { [weak self] in
             self?.checkAccess()
         }
@@ -74,7 +86,14 @@ final class GrokCLIUsageService: ObservableObject {
 
         do {
             let result = try await billingResultProvider(binaryPath, GrokHomeDirectory.path(for: account))
-            let metrics = try Self.map(result)
+            var metrics = try Self.map(result)
+            // Billing first: the CLI authenticate step refreshes the OIDC
+            // token on disk. Reset fetch is best-effort — a 401 or parse
+            // miss must not blank the weekly gauge.
+            if let token = GrokResetCredits.accessToken(from: authFileDataProvider(account)),
+               let resetCount = await remainingResetsProvider(token) {
+                metrics = metrics.withResetCreditsAvailable(resetCount)
+            }
             accountErrors.removeValue(forKey: account.id)
             if account.isDefault {
                 hasAccess = true

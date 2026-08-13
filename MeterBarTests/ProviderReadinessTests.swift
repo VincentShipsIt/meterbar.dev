@@ -45,8 +45,8 @@ final class ProviderReadinessTests: XCTestCase {
     }
 
     func testGrokUnreadableCachedLoginIsDistinctFromMissingOne() {
-        // Presence only — MeterBar must never open `~/.grok/auth.json`, so an
-        // existing-but-unreadable file still has to produce its own advice.
+        // Presence is still enough for readiness: weekly quota goes through the
+        // CLI. An existing-but-unreadable file must produce its own advice.
         let unreadable = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: false)
         )
