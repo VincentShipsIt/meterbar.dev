@@ -69,6 +69,26 @@ nonisolated struct CostProjectPresentation: Equatable {
     private static let generatedWorktreeIDLength = 6
 }
 
+/// Human-readable session identity for Costs UI. Scanner IDs stay lossless in
+/// the cache and JSON; this projection shortens a UUID-like stem for display.
+nonisolated struct CostSessionPresentation: Equatable {
+    let title: String
+    let detail: String?
+
+    init(identifier: String, projectIdentifier: String? = nil) {
+        let compact = identifier.replacingOccurrences(of: "-", with: "")
+        let short = compact.count > 8 ? String(compact.prefix(8)) : identifier
+        title = identifier == CostSessionAttribution.unknownSessionID
+            ? "Unknown session"
+            : "Session \(short)"
+        if let projectIdentifier, projectIdentifier != CostProjectAttribution.unknownProjectID {
+            detail = CostProjectPresentation(identifier: projectIdentifier).title
+        } else {
+            detail = nil
+        }
+    }
+}
+
 /// Renders one cost-summary period — the rolling 30-day window or the
 /// calendar month-to-date window — plus its per-provider project/worktree
 /// rollup and, when set, a converted-currency caption (issue #270). A pure
@@ -339,17 +359,22 @@ private struct CostProjectBreakdownRow: View {
 
     var body: some View {
         DisclosureGroup {
-            ForEach(project.modelBreakdowns) { model in
-                HStack {
-                    Text(model.name)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    Text(model.formattedCost)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(project.modelBreakdowns) { model in
+                    HStack {
+                        Text(model.name)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text(model.formattedCost)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, MeterBarTheme.Spacing.lg)
                 }
-                .padding(.leading, MeterBarTheme.Spacing.lg)
+                ForEach(project.sessionBreakdowns) { session in
+                    CostSessionBreakdownRow(session: session, currency: currency)
+                }
             }
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -387,6 +412,63 @@ private struct CostProjectBreakdownRow: View {
             }
         }
         .accessibilityIdentifier("project-breakdown-\(project.name)")
+    }
+}
+
+private struct CostSessionBreakdownRow: View {
+    let session: TokenUsageBreakdown
+    let currency: DisplayCurrency?
+
+    private var presentation: CostSessionPresentation {
+        CostSessionPresentation(identifier: session.name)
+    }
+
+    var body: some View {
+        DisclosureGroup {
+            ForEach(session.modelBreakdowns) { model in
+                HStack {
+                    Text(model.name)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(model.formattedCost)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, MeterBarTheme.Spacing.lg)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "text.alignleft")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.title)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    if let detail = presentation.detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(session.formattedCost)
+                        .font(.caption.monospacedDigit())
+                        .fontWeight(.semibold)
+                    if let currency {
+                        Text("≈ \(currency.formattedConverted(usd: session.estimatedCostUSD))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("session-breakdown-\(session.name)")
     }
 }
 

@@ -21,6 +21,8 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
     /// paths. Defaults to `[]` so existing call sites that don't group by
     /// project — and the CLI JSON fixture tests — see no shape change.
     public var projectBreakdowns: [TokenUsageBreakdown]
+    /// Per-session rollup (issue #391). Additive: omitted from older caches.
+    public var sessionBreakdowns: [TokenUsageBreakdown]
 
     public init(
         provider: ServiceType,
@@ -34,7 +36,8 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         periodEnd: Date,
         modelBreakdowns: [TokenUsageBreakdown] = [],
         originBreakdowns: [TokenUsageBreakdown] = [],
-        projectBreakdowns: [TokenUsageBreakdown] = []
+        projectBreakdowns: [TokenUsageBreakdown] = [],
+        sessionBreakdowns: [TokenUsageBreakdown] = []
     ) {
         self.provider = provider
         self.inputTokens = inputTokens
@@ -48,6 +51,7 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         self.modelBreakdowns = modelBreakdowns
         self.originBreakdowns = originBreakdowns
         self.projectBreakdowns = projectBreakdowns
+        self.sessionBreakdowns = sessionBreakdowns
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +76,10 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         projectBreakdowns = try container.decodeIfPresent(
             [TokenUsageBreakdown].self,
             forKey: .projectBreakdowns
+        ) ?? []
+        sessionBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .sessionBreakdowns
         ) ?? []
     }
 
@@ -104,6 +112,10 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
     /// every other breakdown (model, origin) defaults to `[]` so existing
     /// call sites and the CLI JSON fixtures are unaffected.
     public let modelBreakdowns: [TokenUsageBreakdown]
+    /// Nested per-session slice of this row's spend (issue #391). Populated
+    /// for project rollup rows; session rows themselves leave this empty and
+    /// put their models in `modelBreakdowns`.
+    public let sessionBreakdowns: [TokenUsageBreakdown]
 
     public init(
         provider: ServiceType,
@@ -114,7 +126,8 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         sessionCount: Int,
-        modelBreakdowns: [TokenUsageBreakdown] = []
+        modelBreakdowns: [TokenUsageBreakdown] = [],
+        sessionBreakdowns: [TokenUsageBreakdown] = []
     ) {
         self.provider = provider
         self.name = name
@@ -125,6 +138,7 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         self.estimatedCostUSD = estimatedCostUSD
         self.sessionCount = sessionCount
         self.modelBreakdowns = modelBreakdowns
+        self.sessionBreakdowns = sessionBreakdowns
     }
 
     public init(from decoder: Decoder) throws {
@@ -140,6 +154,10 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         modelBreakdowns = try container.decodeIfPresent(
             [TokenUsageBreakdown].self,
             forKey: .modelBreakdowns
+        ) ?? []
+        sessionBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .sessionBreakdowns
         ) ?? []
     }
 
@@ -173,6 +191,10 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     /// Project names have already passed through `CostProjectAttribution`;
     /// raw paths are never persisted here.
     public let projectBreakdowns: [TokenUsageBreakdown]?
+    /// Day × session attribution nested under each project (issue #391).
+    /// `nil` means the row predates session rows; an empty array means a
+    /// scan ran but found none.
+    public let sessionBreakdowns: [TokenUsageBreakdown]?
 
     public init(
         date: Date,
@@ -182,7 +204,8 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
-        projectBreakdowns: [TokenUsageBreakdown]? = nil
+        projectBreakdowns: [TokenUsageBreakdown]? = nil,
+        sessionBreakdowns: [TokenUsageBreakdown]? = nil
     ) {
         self.date = date
         self.provider = provider
@@ -192,6 +215,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.estimatedCostUSD = estimatedCostUSD
         self.modelBreakdowns = modelBreakdowns
         self.projectBreakdowns = projectBreakdowns
+        self.sessionBreakdowns = sessionBreakdowns
     }
 
     public var totalTokens: Int {
@@ -375,7 +399,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         guard !costs.isEmpty, totalTokens > 0 else { return false }
         guard !dailyUsage.isEmpty else { return true }
         guard dailyUsage.allSatisfy({
-            $0.modelBreakdowns != nil && $0.projectBreakdowns != nil
+            $0.modelBreakdowns != nil && $0.projectBreakdowns != nil && $0.sessionBreakdowns != nil
         }) else {
             return true
         }
@@ -476,6 +500,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
             .map { provider, rows in
                 let hasCompleteModels = rows.allSatisfy { $0.modelBreakdowns != nil }
                 let hasCompleteProjects = rows.allSatisfy { $0.projectBreakdowns != nil }
+                let hasCompleteSessions = rows.allSatisfy { $0.sessionBreakdowns != nil }
                 return ProviderDailyTotal(
                     provider: provider,
                     inputTokens: rows.reduce(0) { $0 + $1.inputTokens },
@@ -487,6 +512,9 @@ nonisolated public struct CostSummary: Codable, Sendable {
                         : nil,
                     projectBreakdowns: hasCompleteProjects
                         ? TokenUsageBreakdownAggregation.merge(rows.flatMap { $0.projectBreakdowns ?? [] })
+                        : nil,
+                    sessionBreakdowns: hasCompleteSessions
+                        ? TokenUsageBreakdownAggregation.merge(rows.flatMap { $0.sessionBreakdowns ?? [] })
                         : nil
                 )
             }
@@ -572,6 +600,9 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
     /// `nil` when any included row predates cache v2; otherwise the project
     /// rollup (with nested models) over exactly the same days.
     public let projectBreakdowns: [TokenUsageBreakdown]?
+    /// `nil` when any included row predates session attribution; otherwise the
+    /// session rollup over exactly the same days (issue #391).
+    public let sessionBreakdowns: [TokenUsageBreakdown]?
 
     public init(
         provider: ServiceType,
@@ -580,7 +611,8 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
-        projectBreakdowns: [TokenUsageBreakdown]? = nil
+        projectBreakdowns: [TokenUsageBreakdown]? = nil,
+        sessionBreakdowns: [TokenUsageBreakdown]? = nil
     ) {
         self.provider = provider
         self.inputTokens = inputTokens
@@ -589,6 +621,7 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
         self.estimatedCostUSD = estimatedCostUSD
         self.modelBreakdowns = modelBreakdowns
         self.projectBreakdowns = projectBreakdowns
+        self.sessionBreakdowns = sessionBreakdowns
     }
 
     /// Daily rows omit cache-creation tokens, so this is input + output + cache-read.
@@ -658,7 +691,8 @@ nonisolated private enum TokenUsageBreakdownAggregation {
                 cacheReadTokens: (existing?.cacheReadTokens ?? 0) + row.cacheReadTokens,
                 estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + row.estimatedCostUSD,
                 sessionCount: (existing?.sessionCount ?? 0) + row.sessionCount,
-                modelBreakdowns: merge((existing?.modelBreakdowns ?? []) + row.modelBreakdowns)
+                modelBreakdowns: merge((existing?.modelBreakdowns ?? []) + row.modelBreakdowns),
+                sessionBreakdowns: merge((existing?.sessionBreakdowns ?? []) + row.sessionBreakdowns)
             )
         }
 

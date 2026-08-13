@@ -65,6 +65,12 @@ nonisolated protocol CostScanBreakdowns {
     var origins: [String: TokenAccumulator] { get set }
     var projects: [String: TokenAccumulator] { get set }
     var projectModels: [String: [String: TokenAccumulator]] { get set }
+    /// Per-project session rows (issue #391). Nested so a session that somehow
+    /// splits across projects still reconciles to each parent project total.
+    var projectSessions: [String: [String: TokenAccumulator]] { get set }
+    var projectSessionModels: [String: [String: [String: TokenAccumulator]]] { get set }
+    var dailyProjectSessions: [Date: [String: [String: TokenAccumulator]]] { get set }
+    var dailyProjectSessionModels: [Date: [String: [String: [String: TokenAccumulator]]]] { get set }
 }
 
 /// Which bucket of each breakdown one event lands in.
@@ -75,6 +81,10 @@ nonisolated struct CostScanEventKeys {
     let model: String
     let origin: String
     let project: String
+    /// Path-free session stem (issue #391). Every event belongs to exactly one
+    /// session row; `CostSessionAttribution.unknownSessionID` is the explicit
+    /// bucket when the transcript has no usable identity.
+    let session: String
 }
 
 /// One event's contribution, already in the units the breakdowns store. The
@@ -104,6 +114,19 @@ nonisolated extension CostScanBreakdowns {
         origins[keys.origin, default: TokenAccumulator()].add(event)
         projects[keys.project, default: TokenAccumulator()].add(event)
         projectModels[keys.project, default: [:]][keys.model, default: TokenAccumulator()].add(event)
+        projectSessions[keys.project, default: [:]][keys.session, default: TokenAccumulator()].add(event)
+        projectSessionModels[keys.project, default: [:]][keys.session, default: [:]][
+            keys.model,
+            default: TokenAccumulator()
+        ].add(event)
+        dailyProjectSessions[keys.day, default: [:]][keys.project, default: [:]][
+            keys.session,
+            default: TokenAccumulator()
+        ].add(event)
+        dailyProjectSessionModels[keys.day, default: [:]][keys.project, default: [:]][keys.session, default: [:]][
+            keys.model,
+            default: TokenAccumulator()
+        ].add(event)
     }
 }
 
@@ -138,6 +161,11 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
     /// Nested per-project, per-model totals powering the "drill-down to model
     /// breakdown" view under each project's rollup row.
     var projectModels: [String: [String: TokenAccumulator]] = [:]
+    /// Per-project session rows plus each session's model slice (issue #391).
+    var projectSessions: [String: [String: TokenAccumulator]] = [:]
+    var projectSessionModels: [String: [String: [String: TokenAccumulator]]] = [:]
+    var dailyProjectSessions: [Date: [String: [String: TokenAccumulator]]] = [:]
+    var dailyProjectSessionModels: [Date: [String: [String: [String: TokenAccumulator]]]] = [:]
     /// Which dated rate entries priced these events, and how many predated the
     /// table entirely (issue #339).
     var pricing = PricingProvenance()
@@ -212,6 +240,13 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
                 projectModels[project, default: [:]][model, default: TokenAccumulator()].merge(tokens)
             }
         }
+        CostScanNestedMerge.keyedAccumulators(&projectSessions, other.projectSessions)
+        CostScanNestedMerge.doublyKeyedAccumulators(&projectSessionModels, other.projectSessionModels)
+        CostScanNestedMerge.dailyKeyedAccumulators(&dailyProjectSessions, other.dailyProjectSessions)
+        CostScanNestedMerge.dailyDoublyKeyedAccumulators(
+            &dailyProjectSessionModels,
+            other.dailyProjectSessionModels
+        )
 
         pricing.merge(other.pricing)
         earliest = Self.earlier(earliest, other.earliest)
@@ -281,6 +316,10 @@ nonisolated struct CostScanWindowContext: Sendable, Codable {
     /// see the matching fields on `ClaudeSessionTotals` (issue #270).
     var projectTotals: [String: TokenAccumulator] = [:]
     var projectModelTotals: [String: [String: TokenAccumulator]] = [:]
+    var projectSessions: [String: [String: TokenAccumulator]] = [:]
+    var projectSessionModels: [String: [String: [String: TokenAccumulator]]] = [:]
+    var dailyProjectSessions: [Date: [String: [String: TokenAccumulator]]] = [:]
+    var dailyProjectSessionModels: [Date: [String: [String: [String: TokenAccumulator]]]] = [:]
     var eventKeys: Set<String> = []
     var sessionIDs: Set<String> = []
     /// Which dated rate entries priced these events (issue #339).
@@ -338,6 +377,13 @@ nonisolated struct CostScanWindowContext: Sendable, Codable {
                 projectModelTotals[project, default: [:]][model, default: TokenAccumulator()].merge(tokens)
             }
         }
+        CostScanNestedMerge.keyedAccumulators(&projectSessions, other.projectSessions)
+        CostScanNestedMerge.doublyKeyedAccumulators(&projectSessionModels, other.projectSessionModels)
+        CostScanNestedMerge.dailyKeyedAccumulators(&dailyProjectSessions, other.dailyProjectSessions)
+        CostScanNestedMerge.dailyDoublyKeyedAccumulators(
+            &dailyProjectSessionModels,
+            other.dailyProjectSessionModels
+        )
 
         eventKeys.formUnion(other.eventKeys)
         sessionIDs.formUnion(other.sessionIDs)
@@ -397,6 +443,54 @@ nonisolated extension CostScanWindowContext: CostScanBreakdowns {
     var projectModels: [String: [String: TokenAccumulator]] {
         get { projectModelTotals }
         _modify { yield &projectModelTotals }
+    }
+}
+
+/// Nested `TokenAccumulator` dictionary merges used by both scan payloads.
+nonisolated enum CostScanNestedMerge {
+    static func accumulators(
+        _ target: inout [String: TokenAccumulator],
+        _ other: [String: TokenAccumulator]
+    ) {
+        for (key, tokens) in other {
+            target[key, default: TokenAccumulator()].merge(tokens)
+        }
+    }
+
+    static func keyedAccumulators(
+        _ target: inout [String: [String: TokenAccumulator]],
+        _ other: [String: [String: TokenAccumulator]]
+    ) {
+        for (key, inner) in other {
+            accumulators(&target[key, default: [:]], inner)
+        }
+    }
+
+    static func doublyKeyedAccumulators(
+        _ target: inout [String: [String: [String: TokenAccumulator]]],
+        _ other: [String: [String: [String: TokenAccumulator]]]
+    ) {
+        for (key, inner) in other {
+            keyedAccumulators(&target[key, default: [:]], inner)
+        }
+    }
+
+    static func dailyKeyedAccumulators(
+        _ target: inout [Date: [String: [String: TokenAccumulator]]],
+        _ other: [Date: [String: [String: TokenAccumulator]]]
+    ) {
+        for (day, inner) in other {
+            keyedAccumulators(&target[day, default: [:]], inner)
+        }
+    }
+
+    static func dailyDoublyKeyedAccumulators(
+        _ target: inout [Date: [String: [String: [String: TokenAccumulator]]]],
+        _ other: [Date: [String: [String: [String: TokenAccumulator]]]]
+    ) {
+        for (day, inner) in other {
+            doublyKeyedAccumulators(&target[day, default: [:]], inner)
+        }
     }
 }
 

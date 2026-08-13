@@ -208,6 +208,75 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(nestedModels.first?["name"] as? String, "claude-opus-5")
     }
 
+    func testCostResponseIncludesSessionBreakdownsWhenPresent() throws {
+        let session = TokenUsageBreakdown(
+            provider: .codexCli,
+            name: "conv-a",
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheCreationTokens: 50,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 1.25,
+            sessionCount: 3,
+            modelBreakdowns: [
+                TokenUsageBreakdown(
+                    provider: .codexCli,
+                    name: "gpt-5.6-sol",
+                    inputTokens: 1_000,
+                    outputTokens: 250,
+                    cacheCreationTokens: 50,
+                    cacheReadTokens: 500,
+                    estimatedCostUSD: 1.25,
+                    sessionCount: 3
+                )
+            ]
+        )
+        let cost = TokenCost(
+            provider: .codexCli,
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheCreationTokens: 50,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 1.25,
+            sessionCount: 1,
+            periodStart: referenceDate,
+            periodEnd: referenceDate,
+            projectBreakdowns: [
+                TokenUsageBreakdown(
+                    provider: .codexCli,
+                    name: "www/meterbardev",
+                    inputTokens: 1_000,
+                    outputTokens: 250,
+                    cacheCreationTokens: 50,
+                    cacheReadTokens: 500,
+                    estimatedCostUSD: 1.25,
+                    sessionCount: 3,
+                    sessionBreakdowns: [session]
+                )
+            ],
+            sessionBreakdowns: [session]
+        )
+        let cache = CostSummaryCache(
+            summary: CostSummary(
+                costs: [cost],
+                totalCostUSD: 1.25,
+                totalTokens: 1_800,
+                periodDays: 30
+            ),
+            lastScanDate: referenceDate
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: CostCLIJSONResponse(cache: cache).jsonData()) as? [String: Any]
+        )
+        let provider = try XCTUnwrap((object["providers"] as? [[String: Any]])?.first)
+        let sessions = try XCTUnwrap(provider["sessionBreakdowns"] as? [[String: Any]])
+        XCTAssertEqual(sessions.first?["name"] as? String, "conv-a")
+        let projects = try XCTUnwrap(provider["projectBreakdowns"] as? [[String: Any]])
+        let nested = try XCTUnwrap(projects.first?["sessionBreakdowns"] as? [[String: Any]])
+        XCTAssertEqual(nested.first?["name"] as? String, "conv-a")
+        XCTAssertFalse((sessions.first?["name"] as? String ?? "").contains("/"))
+    }
+
     func testCostResponseOmitsProjectBreakdownsWhenNoneAreScannedButIncludesThemWhenPresent() throws {
         let costWithoutProjects = TokenCost(
             provider: .claudeCode,

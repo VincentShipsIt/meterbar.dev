@@ -44,6 +44,27 @@ final class GrokResetCreditsTests: XCTestCase {
         XCTAssertEqual(resets.availableCount, 0)
     }
 
+    func testRedeemRequestEncodesTheTokenIDAsField10() {
+        let framed = GrokResetCreditsRPC.encodeTokenIDForTesting("restok_vpYDqo")
+        // grpc-web uncompressed frame + protobuf string field 10.
+        XCTAssertEqual(framed[0], 0x00)
+        let payload = framed.dropFirst(5)
+        XCTAssertEqual(Array(payload.prefix(2)), [0x52, 0x0D])
+        XCTAssertEqual(String(bytes: payload.dropFirst(2), encoding: .utf8), "restok_vpYDqo")
+    }
+
+    func testGrpcWebTrailerStatusIsReadFromTheTrailerFrame() {
+        let ok = Data([
+            0x80, 0x00, 0x00, 0x00, 0x0F
+        ] + Array("grpc-status: 0\r\n".utf8))
+        XCTAssertEqual(GrokResetCreditsRPC.grpcStatusForTesting(ok), 0)
+
+        let failed = Data([
+            0x80, 0x00, 0x00, 0x00, 0x10
+        ] + Array("grpc-status: 12\r\n".utf8))
+        XCTAssertEqual(GrokResetCreditsRPC.grpcStatusForTesting(failed), 12)
+    }
+
     func testAccessTokenIsReadFromTheCachedLoginWithoutRequiringAJWTShape() {
         let data = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token","auth_mode":"oidc"}}"#.utf8)
 
@@ -111,5 +132,66 @@ final class GrokResetCreditsTests: XCTestCase {
         let failedMetrics = try await failed.fetchUsageMetrics()
         XCTAssertEqual(failedMetrics.weeklyLimit?.used, 16)
         XCTAssertNil(failedMetrics.resetCreditsAvailable)
+    }
+
+    func testConsumeRedeemsTheFirstUnexpiredTokenAndRefreshesUsage() async throws {
+        let billing = try JSONDecoder().decode(
+            GrokBillingResult.self,
+            from: Data(#"{"config":{"creditUsagePercent":16,"billingPeriodStart":"2026-08-12T15:05:27Z","billingPeriodEnd":"2026-08-19T15:05:27Z"}}"#.utf8)
+        )
+        let auth = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token"}}"#.utf8)
+        let expires = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-12T00:00:00Z"))
+        let expired = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        var consumed: (String, String)?
+
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in true },
+            billingResultProvider: { _, _ in billing },
+            authFileDataProvider: { _ in auth },
+            remainingResetsProvider: { _ in 0 },
+            resetTokensProvider: { token in
+                XCTAssertEqual(token, "cached-access-token")
+                return [
+                    GrokResetCredits.Token(tokenID: "restok_old", validFrom: nil, expiresAt: expired),
+                    GrokResetCredits.Token(tokenID: "restok_live", validFrom: nil, expiresAt: expires)
+                ]
+            },
+            consumeResetProvider: { token, tokenID in
+                consumed = (token, tokenID)
+            }
+        )
+
+        let result = try await service.consumeResetCredit()
+        XCTAssertEqual(consumed?.0, "cached-access-token")
+        XCTAssertEqual(consumed?.1, "restok_live")
+        XCTAssertEqual(result.refreshedMetrics?.weeklyLimit?.used, 16)
+        XCTAssertNil(result.usageRefreshErrorDescription)
+    }
+
+    func testConsumeThrowsWhenNoUnexpiredTokenRemains() async throws {
+        let billing = try JSONDecoder().decode(
+            GrokBillingResult.self,
+            from: Data(#"{"config":{"creditUsagePercent":16,"billingPeriodStart":"2026-08-12T15:05:27Z","billingPeriodEnd":"2026-08-19T15:05:27Z"}}"#.utf8)
+        )
+        let auth = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token"}}"#.utf8)
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in true },
+            billingResultProvider: { _, _ in billing },
+            authFileDataProvider: { _ in auth },
+            remainingResetsProvider: { _ in 0 },
+            resetTokensProvider: { _ in [] },
+            consumeResetProvider: { _, _ in
+                XCTFail("must not redeem without a token")
+            }
+        )
+
+        do {
+            _ = try await service.consumeResetCredit()
+            XCTFail("expected noAvailableCredit")
+        } catch let error as GrokResetCreditError {
+            XCTAssertEqual(error, .noAvailableCredit)
+        }
     }
 }

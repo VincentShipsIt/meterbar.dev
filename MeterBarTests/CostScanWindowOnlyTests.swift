@@ -97,7 +97,8 @@ final class CostScanWindowOnlyTests: XCTestCase {
                     cacheReadTokens: 0,
                     estimatedCostUSD: 1,
                     modelBreakdowns: [],
-                    projectBreakdowns: []
+                    projectBreakdowns: [],
+                    sessionBreakdowns: []
                 )
             ],
             hourlyUsage: [],

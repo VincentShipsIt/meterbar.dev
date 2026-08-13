@@ -262,6 +262,14 @@ enum GrokCostScanner {
             projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
                 from: context.projectTotals,
                 modelsByProject: context.projectModelTotals,
+                sessionsByProject: context.projectSessions,
+                sessionModelsByProject: context.projectSessionModels,
+                provider: .grok,
+                pricing: pricing
+            ),
+            sessionBreakdowns: TokenUsageAggregator.makeSessionBreakdowns(
+                from: TokenUsageAggregator.flattenSessions(context.projectSessions),
+                modelsBySession: TokenUsageAggregator.flattenSessionModels(context.projectSessionModels),
                 provider: .grok,
                 pricing: pricing
             )
@@ -271,7 +279,9 @@ enum GrokCostScanner {
             pricing: pricing,
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
-            projectModelsByDay: context.dailyProjectModelTotals
+            projectModelsByDay: context.dailyProjectModelTotals,
+            projectSessionsByDay: context.dailyProjectSessions,
+            projectSessionModelsByDay: context.dailyProjectSessionModels
         ), TokenUsageAggregator.makeHourlyUsage(
             from: context.hourlyTotals,
             provider: .grok,
@@ -523,7 +533,8 @@ enum GrokCostScanner {
                 : nil,
             model: CostScanValues.displayModelName(event.model),
             origin: CostScanValues.displayOriginName(Self.originName),
-            project: event.projectID
+            project: event.projectID,
+            session: CostSessionAttribution.sanitize(sessionID)
         )
         let breakdown = CostScanEventTotals(
             input: freshInput,

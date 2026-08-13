@@ -107,6 +107,15 @@ enum CodexCostScanner {
             projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
                 from: context.projectTotals,
                 modelsByProject: context.projectModelTotals,
+                sessionsByProject: context.projectSessions,
+                sessionModelsByProject: context.projectSessionModels,
+                provider: .codexCli,
+                pricing: pricing,
+                pricingForName: { pricingAt($0, windowEnd) }
+            ),
+            sessionBreakdowns: TokenUsageAggregator.makeSessionBreakdowns(
+                from: TokenUsageAggregator.flattenSessions(context.projectSessions),
+                modelsBySession: TokenUsageAggregator.flattenSessionModels(context.projectSessionModels),
                 provider: .codexCli,
                 pricing: pricing,
                 pricingForName: { pricingAt($0, windowEnd) }
@@ -118,6 +127,8 @@ enum CodexCostScanner {
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
             projectModelsByDay: context.dailyProjectModelTotals,
+            projectSessionsByDay: context.dailyProjectSessions,
+            projectSessionModelsByDay: context.dailyProjectSessionModels,
             pricingAt: pricingAt
         ), TokenUsageAggregator.makeHourlyUsage(
             from: context.hourlyTotals,
@@ -221,6 +232,8 @@ enum CodexCostScanner {
     /// `token_count` line lacks. Cheap enough to run on every non-usage line.
     nonisolated private static let turnContextMarker = Data("\"turn_context\"".utf8)
     nonisolated private static let sessionMetaMarker = Data("\"session_meta\"".utf8)
+    nonisolated private static let threadSettingsMarker = Data("\"thread_settings\"".utf8)
+    nonisolated private static let worldStateMarker = Data("\"world_state\"".utf8)
 
     /// Turns one rollout into the usage events it contributes, in the order the
     /// scan applies them.
@@ -588,21 +601,49 @@ enum CodexCostScanner {
     }
 
     /// Picks up the model/originator carried by the non-usage rollout events.
+    ///
+    /// `token_count` names no model. The usual source is `turn_context.model`;
+    /// when that field is missing, the same file still often names the model on
+    /// `thread_settings`, nested `collaboration_mode.settings.model`, or
+    /// `world_state.state.model`.
     nonisolated private static func updateRolloutContext(
         _ rollout: inout CodexRolloutContext,
         from line: Data
     ) {
         if line.range(of: Self.turnContextMarker) != nil {
             guard let payload = Self.eventPayload(in: line, type: "turn_context") else { return }
-            rollout.turnModel = (payload["model"] as? String) ?? rollout.turnModel
+            rollout.turnModel = Self.modelString(in: payload, path: ["model"])
+                ?? Self.modelString(in: payload, path: ["collaboration_mode", "settings", "model"])
+                ?? rollout.turnModel
         } else if line.range(of: Self.sessionMetaMarker) != nil {
             guard let payload = Self.eventPayload(in: line, type: "session_meta") else { return }
             // `model` is null on every rollout observed so far, but read it
             // anyway so pre-turn events get named the day Codex populates it.
-            rollout.sessionModel = (payload["model"] as? String) ?? rollout.sessionModel
+            rollout.sessionModel = Self.modelString(in: payload, path: ["model"]) ?? rollout.sessionModel
             rollout.originator = (payload["originator"] as? String) ?? rollout.originator
             rollout.cwd = (payload["cwd"] as? String) ?? rollout.cwd
+        } else if line.range(of: Self.threadSettingsMarker) != nil {
+            guard let payload = Self.eventPayload(in: line, type: "event_msg") else { return }
+            let settings = (payload["thread_settings"] as? [String: Any]) ?? payload
+            rollout.sessionModel = Self.modelString(in: settings, path: ["model"])
+                ?? Self.modelString(in: settings, path: ["collaboration_mode", "settings", "model"])
+                ?? rollout.sessionModel
+        } else if line.range(of: Self.worldStateMarker) != nil {
+            guard let payload = Self.eventPayload(in: line, type: "world_state") else { return }
+            let state = (payload["state"] as? [String: Any]) ?? payload
+            rollout.sessionModel = Self.modelString(in: state, path: ["model"]) ?? rollout.sessionModel
         }
+    }
+
+    nonisolated private static func modelString(in object: [String: Any], path: [String]) -> String? {
+        var current: Any = object
+        for key in path {
+            guard let nested = current as? [String: Any], let next = nested[key] else { return nil }
+            current = next
+        }
+        guard let value = current as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
     // swiftlint:enable contains_over_range_nil_comparison
 
@@ -907,7 +948,8 @@ enum CodexCostScanner {
                 : nil,
             model: CostScanValues.displayModelName(event.attribution.modelName),
             origin: CostScanValues.displayOriginName(event.attribution.originName),
-            project: event.attribution.projectID
+            project: event.attribution.projectID,
+            session: CostSessionAttribution.sanitize(sessionID)
         )
 
         // Price the event at the rate in effect when it was recorded (issue

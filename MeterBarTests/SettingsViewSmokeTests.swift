@@ -284,6 +284,15 @@ final class SettingsViewSmokeTests: XCTestCase {
         XCTAssertEqual(presentation.detail, "No working directory recorded")
     }
 
+    func testCostSessionPresentationShortensIdentifiers() {
+        let presentation = CostSessionPresentation(
+            identifier: "aabbccdd-1111-2222-3333-444444444444",
+            projectIdentifier: "www/meterbardev"
+        )
+        XCTAssertEqual(presentation.title, "Session aabbccdd")
+        XCTAssertEqual(presentation.detail, "meterbardev")
+    }
+
     func testCostSettingsViewRendersDisplayCurrencySectionAlongsideCostTracking() {
         // Hosts the real tab (real singletons, like testGlassCostScanAndRefreshCTAsStillRender
         // above) so a broken Display Currency section or period picker fails to compile/layout

@@ -48,6 +48,14 @@ enum ClaudeCostScanner {
             projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
                 from: totals.projects,
                 modelsByProject: totals.projectModels,
+                sessionsByProject: totals.projectSessions,
+                sessionModelsByProject: totals.projectSessionModels,
+                provider: .claudeCode,
+                pricing: pricing
+            ),
+            sessionBreakdowns: TokenUsageAggregator.makeSessionBreakdowns(
+                from: TokenUsageAggregator.flattenSessions(totals.projectSessions),
+                modelsBySession: TokenUsageAggregator.flattenSessionModels(totals.projectSessionModels),
                 provider: .claudeCode,
                 pricing: pricing
             )
@@ -57,7 +65,9 @@ enum ClaudeCostScanner {
             pricing: pricing,
             modelsByDay: totals.dailyModels,
             projectsByDay: totals.dailyProjects,
-            projectModelsByDay: totals.dailyProjectModels
+            projectModelsByDay: totals.dailyProjectModels,
+            projectSessionsByDay: totals.dailyProjectSessions,
+            projectSessionModelsByDay: totals.dailyProjectSessionModels
         ), TokenUsageAggregator.makeHourlyUsage(
             from: totals.hourly,
             provider: .claudeCode,
@@ -171,12 +181,14 @@ enum ClaudeCostScanner {
             period: Self.tally(
                 keyed: periodKeyed,
                 projectID: projectID,
-                hourlyCutoff: hourlyCutoff
+                hourlyCutoff: hourlyCutoff,
+                sessionID: CostSessionAttribution.stableID(from: url)
             ),
             lifetime: Self.tally(
                 keyed: lifetimeKeyed,
                 projectID: projectID,
-                hourlyCutoff: hourlyCutoff
+                hourlyCutoff: hourlyCutoff,
+                sessionID: CostSessionAttribution.stableID(from: url)
             ),
             cutoff: cutoffDate,
             hourlyCutoff: hourlyCutoff
@@ -417,12 +429,14 @@ enum ClaudeCostScanner {
         windows.period.merge(Self.tally(
             keyed: periodKeyed,
             projectID: projectID,
-            hourlyCutoff: session.hourlyCutoff
+            hourlyCutoff: session.hourlyCutoff,
+            sessionID: CostSessionAttribution.stableID(from: file.url)
         ))
         windows.lifetime.merge(Self.tally(
             keyed: lifetimeKeyed,
             projectID: projectID,
-            hourlyCutoff: session.hourlyCutoff
+            hourlyCutoff: session.hourlyCutoff,
+            sessionID: CostSessionAttribution.stableID(from: file.url)
         ))
     }
 
@@ -495,12 +509,14 @@ enum ClaudeCostScanner {
         payload.period.merge(Self.tally(
             keyed: periodKeyed,
             projectID: projectID,
-            hourlyCutoff: session.hourlyCutoff
+            hourlyCutoff: session.hourlyCutoff,
+            sessionID: CostSessionAttribution.stableID(from: file.url)
         ))
         payload.lifetime.merge(Self.tally(
             keyed: lifetimeKeyed,
             projectID: projectID,
-            hourlyCutoff: session.hourlyCutoff
+            hourlyCutoff: session.hourlyCutoff,
+            sessionID: CostSessionAttribution.stableID(from: file.url)
         ))
         // `merge` sums `sessions`, but one transcript is one session however
         // many slices it took to read.
@@ -567,7 +583,8 @@ enum ClaudeCostScanner {
     nonisolated private static func tally(
         keyed: [String: ClaudeUsageEvent],
         projectID: String,
-        hourlyCutoff: Date = .distantPast
+        hourlyCutoff: Date = .distantPast,
+        sessionID: String
     ) -> ClaudeSessionTotals {
         var totals = ClaudeSessionTotals()
         totals.eventKeys = Set(keyed.keys)
@@ -612,7 +629,8 @@ enum ClaudeCostScanner {
                         : nil,
                     model: CostScanValues.displayModelName(event.model),
                     origin: event.origin,
-                    project: projectID
+                    project: projectID,
+                    session: sessionID
                 )
             )
         }

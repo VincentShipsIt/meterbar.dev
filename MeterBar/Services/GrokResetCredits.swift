@@ -73,35 +73,97 @@ nonisolated enum GrokResetCreditsRPC {
         string: "https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets"
     )!
 
+    /// Redeem the named reset token. Sibling of GetRemainingResets; grok.com
+    /// Settings labels this control "Redeem".
+    static let redeemResetURL = URL(
+        string: "https://grok.com/prod_mc_billing.ConsumerUiSvc/RedeemReset"
+    )!
+
     /// Empty protobuf framed as one uncompressed grpc-web data frame.
     static let emptyRequest = Data([0x00, 0x00, 0x00, 0x00, 0x00])
+
+    static func fetchSnapshot(
+        accessToken: String,
+        session: URLSession = ServiceSupport.session,
+        now: Date = Date()
+    ) async throws -> GrokResetCredits.Snapshot {
+        let data = try await post(
+            url: remainingResetsURL,
+            accessToken: accessToken,
+            body: emptyRequest,
+            session: session
+        )
+        return try GrokResetCredits.decode(grpcWeb: data, now: now)
+    }
 
     static func fetchAvailableCount(
         accessToken: String,
         session: URLSession = ServiceSupport.session,
         now: Date = Date()
     ) async throws -> Int {
-        var request = URLRequest(url: remainingResetsURL)
+        try await fetchSnapshot(accessToken: accessToken, session: session, now: now).availableCount
+    }
+
+    static func consume(
+        tokenID: String,
+        accessToken: String,
+        session: URLSession = ServiceSupport.session
+    ) async throws {
+        let data = try await post(
+            url: redeemResetURL,
+            accessToken: accessToken,
+            body: GrpcWeb.frame(Proto.encodeTokenID(tokenID)),
+            session: session
+        )
+        let status = GrpcWeb.status(in: data) ?? 0
+        guard status == 0 else { throw Error.requestFailed }
+    }
+
+    /// Test seam: production callers go through `consume`.
+    static func encodeTokenIDForTesting(_ tokenID: String) -> Data {
+        GrpcWeb.frame(Proto.encodeTokenID(tokenID))
+    }
+
+    static func grpcStatusForTesting(_ data: Data) -> Int? {
+        GrpcWeb.status(in: data)
+    }
+
+    private static func post(
+        url: URL,
+        accessToken: String,
+        body: Data,
+        session: URLSession
+    ) async throws -> Data {
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/grpc-web+proto", forHTTPHeaderField: "Content-Type")
         request.setValue("1", forHTTPHeaderField: "X-Grpc-Web")
         request.setValue("https://grok.com", forHTTPHeaderField: "Origin")
-        request.httpBody = emptyRequest
+        request.httpBody = body
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw Error.requestFailed
         }
-        return try GrokResetCredits.decode(grpcWeb: data, now: now).availableCount
+        return data
     }
 }
 
 // MARK: - grpc-web + proto
 
 /// grpc-web: 1 flag byte + 4-byte big-endian length + payload. The high bit on
-/// the flag marks a trailer frame (`grpc-status: 0`), which we skip.
+/// the flag marks a trailer frame (`grpc-status: 0`), which we skip for the
+/// message and read for the status code.
 private enum GrpcWeb {
+    static func frame(_ message: Data) -> Data {
+        var framed = Data([0x00])
+        var length = UInt32(message.count).bigEndian
+        withUnsafeBytes(of: length) { framed.append(contentsOf: $0) }
+        framed.append(message)
+        return framed
+    }
+
     static func unprefixedMessage(in data: Data) -> Data? {
         var offset = 0
         var message: Data?
@@ -120,6 +182,35 @@ private enum GrpcWeb {
             }
         }
         return message
+    }
+
+    static func status(in data: Data) -> Int? {
+        var offset = 0
+        while offset + 5 <= data.count {
+            let flags = data[offset]
+            let length = Int(data[offset + 1]) << 24
+                | Int(data[offset + 2]) << 16
+                | Int(data[offset + 3]) << 8
+                | Int(data[offset + 4])
+            offset += 5
+            guard offset + length <= data.count else { return nil }
+            let payload = data.subdata(in: offset..<(offset + length))
+            offset += length
+            guard flags & 0x80 != 0,
+                  let text = String(data: payload, encoding: .utf8) else {
+                continue
+            }
+            for line in text.split(whereSeparator: \.isNewline) {
+                let parts = line.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2,
+                      parts[0].trimmingCharacters(in: .whitespaces) == "grpc-status",
+                      let code = Int(parts[1].trimmingCharacters(in: .whitespaces)) else {
+                    continue
+                }
+                return code
+            }
+        }
+        return nil
     }
 }
 
@@ -145,6 +236,15 @@ private enum Proto {
             guard field == tokensField else { return nil }
             return token(in: value)
         }
+    }
+
+    /// `ConsumerRedeemResetReq { string token_id = 10; }` framed by the caller.
+    static func encodeTokenID(_ tokenID: String) -> Data {
+        let utf8 = Data(tokenID.utf8)
+        var payload = encodeVarint(UInt64((tokenIDField << 3) | 2))
+        payload.append(encodeVarint(UInt64(utf8.count)))
+        payload.append(utf8)
+        return payload
     }
 
     private static func token(in message: Data) -> GrokResetCredits.Token? {
@@ -213,6 +313,17 @@ private enum Proto {
             }
         }
         return result
+    }
+
+    private static func encodeVarint(_ value: UInt64) -> Data {
+        var value = value
+        var data = Data()
+        while value >= 0x80 {
+            data.append(UInt8(value & 0x7F) | 0x80)
+            value >>= 7
+        }
+        data.append(UInt8(value))
+        return data
     }
 
     private static func varint(_ data: Data) -> UInt64? {

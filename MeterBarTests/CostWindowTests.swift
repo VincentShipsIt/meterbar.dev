@@ -23,7 +23,8 @@ final class CostWindowTests: XCTestCase {
         cacheRead: Int,
         cost: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
-        projectBreakdowns: [TokenUsageBreakdown]? = nil
+        projectBreakdowns: [TokenUsageBreakdown]? = nil,
+        sessionBreakdowns: [TokenUsageBreakdown]? = nil
     ) -> DailyTokenUsage {
         let today = calendar.startOfDay(for: now)
         let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
@@ -35,7 +36,8 @@ final class CostWindowTests: XCTestCase {
             cacheReadTokens: cacheRead,
             estimatedCostUSD: cost,
             modelBreakdowns: modelBreakdowns,
-            projectBreakdowns: projectBreakdowns
+            projectBreakdowns: projectBreakdowns,
+            sessionBreakdowns: sessionBreakdowns
         )
     }
 

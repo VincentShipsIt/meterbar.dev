@@ -198,7 +198,15 @@ final class ProviderCardPresentationTests: XCTestCase {
                 isAuthenticated: true,
                 hasResolvedAccount: true
             ),
-            "reset credits are a Codex CLI concept only"
+            "reset credits are Codex CLI and Grok only"
+        )
+        XCTAssertTrue(
+            ProviderCardPresentation.showsResetCreditAction(
+                snapshot: snapshot(used: 100, resetCreditsAvailable: 1, service: .grok),
+                hasPendingConsumption: false,
+                isAuthenticated: true,
+                hasResolvedAccount: true
+            )
         )
         XCTAssertFalse(
             ProviderCardPresentation.showsResetCreditAction(

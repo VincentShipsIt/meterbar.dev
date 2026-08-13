@@ -10,7 +10,6 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 ## Still open on the board
 
 - **#387** — Costs dashboard month-to-date picker, provider-independent model rollup, `cost --json` top-level rollup, serve `/cost` MTD.
-- **#391** — per-session Codex cost rows (project tables already shipped).
 - **#389** / **#427** / **#428** / **#429** — next providers (Kimi, Z.ai/GLM, Copilot).
 - **#433** — burn-down widget strings into the widget catalog (this branch).
 - **#434** — CodeRabbit rate-limit must not report pass.
