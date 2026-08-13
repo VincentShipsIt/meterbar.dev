@@ -48,7 +48,8 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     public let modelLimitLabel: String?
     public let extraUsage: ExtraUsageStatus?
     /// Number of banked rate-limit resets the account can trigger on demand.
-    /// Codex-only (OpenAI "reset credits"); `nil` for providers/accounts without the feature.
+    /// Codex (OpenAI reset credits) and Grok (usage-limit reset tokens). `nil`
+    /// when the provider did not report the feature.
     public let resetCreditsAvailable: Int?
     public let lastUpdated: Date
 
@@ -93,6 +94,22 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
         self.lastUpdated = lastUpdated
+    }
+
+    /// Returns a copy with the given reset-credit count, preserving identity,
+    /// limits, extra usage, and timestamp.
+    public func withResetCreditsAvailable(_ count: Int?) -> UsageMetrics {
+        UsageMetrics(
+            id: id,
+            service: service,
+            sessionLimit: sessionLimit,
+            weeklyLimit: weeklyLimit,
+            codeReviewLimit: codeReviewLimit,
+            modelLimitLabel: modelLimitLabel,
+            extraUsage: extraUsage,
+            resetCreditsAvailable: count,
+            lastUpdated: lastUpdated
+        )
     }
 
     /// Returns a copy with the given extra-usage status, preserving identity, limits,

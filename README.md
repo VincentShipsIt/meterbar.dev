@@ -147,7 +147,7 @@ open MeterBar.xcodeproj
 1. Install [Grok Build](https://x.ai/cli)
 2. Log in: `grok login`
 3. Enable Grok under **Settings → General → Tracked Providers**
-4. MeterBar asks the official CLI for billing data over ACP; it does not read or store the cached token
+4. MeterBar asks the official CLI for weekly billing over ACP. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
 
 To track more than one Grok Build account, give each CLI login a distinct
 `GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
@@ -305,19 +305,19 @@ claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
 ~/Library/Application Support/Cursor/  # Cursor local DB
-$GROK_HOME/auth.json     # Grok CLI login presence only; defaults to ~/.grok
+$GROK_HOME/auth.json     # Grok CLI login (weekly quota via ACP; resets via grok.com)
 ```
 
 It then uses the respective local source or API to fetch current usage data:
 - Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
-- Grok: official `grok agent --no-leader stdio` ACP billing response, scoped per profile with `GROK_HOME`
+- Grok: official `grok agent` ACP `_x.ai/billing` for the weekly gauge; grok.com `ConsumerUiSvc/GetRemainingResets` for usage-limit resets
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
 - Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).
 - Cursor: Local SQLite queries
 
-**No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The unscoped default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch); Grok authentication remains inside the official CLI process.
+**No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The unscoped default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch). Grok weekly quota still goes through the official CLI; the cached login token is used only for usage-limit resets and is never logged.
 
 ## Privacy & Security
 
