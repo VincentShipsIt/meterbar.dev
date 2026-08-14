@@ -112,6 +112,24 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertEqual(navigation.selectedSection, .costs, "settings mode must not lose the page underneath")
     }
 
+    func testLimitsKeepsDisplayOrderWhenAProviderIsFocused() {
+        let snapshots = [
+            snapshot(id: "claude", title: "Claude", service: .claudeCode),
+            snapshot(id: "codex", title: "Codex", service: .codexCli),
+            snapshot(id: "cursor", title: "Cursor", service: .cursor)
+        ]
+
+        XCTAssertEqual(
+            DashboardLimitsLayout.orderedSnapshots(snapshots, focusedProviderID: "cursor").map(\.id),
+            snapshots.map(\.id)
+        )
+        XCTAssertNotEqual(
+            DashboardLimitsLayout.orderedSnapshots(snapshots, focusedProviderID: "cursor").first?.id,
+            "cursor",
+            "clicking an Overview card must not pin that provider to the top-left of Limits"
+        )
+    }
+
     // MARK: - Trailing status strings
 
     func testCostRefreshStatusPrefersScanningOverTheMissingDayTopUp() {
@@ -603,7 +621,11 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0, file: file, line: line)
     }
 
-    private func snapshot() -> ProviderSnapshot {
+    private func snapshot(
+        id: String = "codex",
+        title: String = "Codex",
+        service: ServiceType = .codexCli
+    ) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: 40,
             total: 100,
@@ -611,9 +633,9 @@ final class DashboardSectionSplitTests: XCTestCase {
             windowSeconds: 604_800
         )
         return ProviderSnapshot(
-            id: "codex",
-            title: "Codex",
-            service: .codexCli,
+            id: id,
+            title: title,
+            service: service,
             updatedAt: Date(),
             limits: [
                 SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
