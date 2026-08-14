@@ -77,7 +77,7 @@ final class ProviderSnapshotTests: XCTestCase {
 
     // MARK: - Ordering and inclusion
 
-    func testDisplayOrderIsCodexClaudeCursorOpenRouterGrok() {
+    func testDisplayOrderIsAlphabeticalByVisibleLabels() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
@@ -88,8 +88,51 @@ final class ProviderSnapshotTests: XCTestCase {
             ]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .cursor, .openRouter, .grok])
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Claude", "Cursor", "OpenRouter", "Grok"])
+        XCTAssertEqual(
+            snapshots.map(\.service),
+            [.claudeCode, .codexCli, .cursor, .grok, .openRouter]
+        )
+        XCTAssertEqual(snapshots.map(\.title), ["Claude", "Codex", "Cursor", "Grok", "OpenRouter"])
+    }
+
+    /// Two accounts on one subscription stay adjacent even when their labels
+    /// would otherwise split around another provider. The group sits where its
+    /// earliest label belongs, then labels inside the group are alphabetical.
+    func testDisplayOrderGroupsSubscriptionTypeThenSortsLabelsAlphabetically() {
+        let personal = ClaudeCodeAccount(id: UUID(), name: "Personal", configDirectory: "/tmp/personal")
+        let work = ClaudeCodeAccount(id: UUID(), name: "Work", configDirectory: "/tmp/work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [
+                .codexCli: makeMetrics(service: .codexCli, weekly: 10),
+                .cursor: makeMetrics(service: .cursor, weekly: 30)
+            ],
+            claudeAccounts: [work, personal],
+            claudeAccountMetrics: [
+                work.id: makeMetrics(service: .claudeCode, weekly: 20),
+                personal.id: makeMetrics(service: .claudeCode, weekly: 40)
+            ],
+            enabledServices: [.codexCli, .claudeCode, .cursor]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Cursor", "Personal", "Work"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .cursor, .claudeCode, .claudeCode])
+    }
+
+    func testDisplayOrderKeepsSameProviderAccountsTogetherWhenLabelsWouldOtherwiseSplit() {
+        let alpha = ClaudeCodeAccount(id: UUID(), name: "alpha", configDirectory: "/tmp/alpha")
+        let zLab = ClaudeCodeAccount(id: UUID(), name: "z-lab", configDirectory: "/tmp/z")
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.codexCli: makeMetrics(service: .codexCli, weekly: 10)],
+            claudeAccounts: [zLab, alpha],
+            claudeAccountMetrics: [
+                zLab.id: makeMetrics(service: .claudeCode, weekly: 20),
+                alpha.id: makeMetrics(service: .claudeCode, weekly: 40)
+            ],
+            enabledServices: [.codexCli, .claudeCode]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.title), ["alpha", "z-lab", "Codex"])
+        XCTAssertEqual(snapshots.map(\.service), [.claudeCode, .claudeCode, .codexCli])
     }
 
     func testDisabledProvidersAreExcluded() {
@@ -149,7 +192,7 @@ final class ProviderSnapshotTests: XCTestCase {
             enabledServices: [.codexCli, .claudeCode, .grok]
         ))
 
-        XCTAssertEqual(snapshots.map(\.title), ["Codex Work", "Claude Personal", "Grok Studio"])
+        XCTAssertEqual(snapshots.map(\.title), ["Claude Personal", "Codex Work", "Grok Studio"])
     }
 
     func testMultipleClaudeAccountsUseAccountNames() {

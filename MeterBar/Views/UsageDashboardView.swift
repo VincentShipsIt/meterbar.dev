@@ -5,6 +5,18 @@ import SwiftUI
 // pages are fed. Each page lives in its own `Dashboard*Section` file (C1 split);
 // the navigation types live in `DashboardNavigation.swift`.
 
+/// Limits card order. Focus is for scrolling, not ranking — pinning the
+/// selected provider reshuffled Overview vs Limits every time a card was
+/// clicked.
+enum DashboardLimitsLayout {
+    static func orderedSnapshots(
+        _ snapshots: [ProviderSnapshot],
+        focusedProviderID _: ProviderSnapshot.ID?
+    ) -> [ProviderSnapshot] {
+        snapshots
+    }
+}
+
 struct UsageDashboardView: View {
     private static let detailHorizontalPadding = MeterBarTheme.Spacing.xxl
 
@@ -233,35 +245,43 @@ struct UsageDashboardView: View {
 
     private var detailContent: some View {
         GeometryReader { viewport in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if navigation.isShowingSettings {
-                        settingsSectionContent
-                    } else {
-                        monitoringSectionContent(viewportWidth: viewport.size.width)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if navigation.isShowingSettings {
+                            settingsSectionContent
+                        } else {
+                            monitoringSectionContent(
+                                viewportWidth: viewport.size.width,
+                                scrollProxy: proxy
+                            )
+                        }
                     }
+                    .padding(.horizontal, Self.detailHorizontalPadding)
+                    .padding(.top, MeterBarTheme.Spacing.md)
+                    .padding(.bottom, MeterBarTheme.Spacing.xxl)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, Self.detailHorizontalPadding)
-                .padding(.top, MeterBarTheme.Spacing.md)
-                .padding(.bottom, MeterBarTheme.Spacing.xxl)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollContentBackground(.hidden)
+                .scrollEdgeEffectHidden(for: .top)
+                .background {
+                    // This is one continuous surface through the titlebar. The toolbar
+                    // still owns the refresh/settings controls, but paints no separate
+                    // background band and adds no scroll-edge fade.
+                    MeterBarDetailBackground()
+                }
+                .navigationTitle("")
+                .navigationSubtitle("")
             }
-            .scrollContentBackground(.hidden)
-            .scrollEdgeEffectHidden(for: .top)
-            .background {
-                // This is one continuous surface through the titlebar. The toolbar
-                // still owns the refresh/settings controls, but paints no separate
-                // background band and adds no scroll-edge fade.
-                MeterBarDetailBackground()
-            }
-            .navigationTitle("")
-            .navigationSubtitle("")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
-    private func monitoringSectionContent(viewportWidth: CGFloat) -> some View {
+    private func monitoringSectionContent(
+        viewportWidth: CGFloat,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
         switch activeSection {
         case .overview:
             DashboardOverviewSection(
@@ -273,7 +293,7 @@ struct UsageDashboardView: View {
                 }
             )
         case .limits:
-            limitsContent
+            limitsContent(scrollProxy: scrollProxy)
         case .status:
             DashboardStatusSection()
         case .costs:
@@ -333,7 +353,7 @@ struct UsageDashboardView: View {
         }
     }
 
-    private var limitsContent: some View {
+    private func limitsContent(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if providerSnapshots.isEmpty {
                 DashboardCard(title: "No Quota Windows") {
@@ -342,21 +362,35 @@ struct UsageDashboardView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                // Same two-column masonry as Overview: the shared provider card
-                // was designed at popover width, and stretching its gauges
-                // across the whole detail pane read as one washed-out column.
-                // The focused provider is first in the list, so it lands top-left.
+                // Same two-column masonry as Overview. Clicking a card from
+                // Overview still focuses it (scroll), but the grid order stays
+                // subscription-then-label so cards do not jump around.
                 ProviderMasonryLayout(columnCount: 2, spacing: MeterBarTheme.Spacing.sm) {
-                    ForEach(orderedProviderSnapshotsForLimits) { snapshot in
+                    ForEach(DashboardLimitsLayout.orderedSnapshots(
+                        providerSnapshots,
+                        focusedProviderID: navigation.focusedProviderID
+                    )) { snapshot in
                         // The one provider card, shared with the popover, so
                         // the two surfaces cannot drift.
                         ProviderStatusCard(snapshot: snapshot)
+                            .id(snapshot.id)
                     }
                 }
                 .frame(maxWidth: .infinity)
+                .onAppear {
+                    scrollToFocusedProvider(using: scrollProxy)
+                }
+                .onChange(of: navigation.focusedProviderID) { _, _ in
+                    scrollToFocusedProvider(using: scrollProxy)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func scrollToFocusedProvider(using proxy: ScrollViewProxy) {
+        guard let focusedProviderID = navigation.focusedProviderID else { return }
+        proxy.scrollTo(focusedProviderID, anchor: .top)
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
@@ -386,15 +420,6 @@ struct UsageDashboardView: View {
             openRouterHasAccess: openRouterService.hasAccess,
             grokHasAccess: grokService.hasAccess
         ))
-    }
-
-    private var orderedProviderSnapshotsForLimits: [ProviderSnapshot] {
-        guard let focusedProviderID = navigation.focusedProviderID else {
-            return providerSnapshots
-        }
-        let focused = providerSnapshots.filter { $0.id == focusedProviderID }
-        guard !focused.isEmpty else { return providerSnapshots }
-        return focused + providerSnapshots.filter { $0.id != focusedProviderID }
     }
 
     /// The snapshot for a provider in the Costs panel — prefers an exhausted

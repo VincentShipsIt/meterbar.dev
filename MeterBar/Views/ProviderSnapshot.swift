@@ -287,10 +287,12 @@ enum ProviderSnapshotBuilder {
         var grokHasAccess: Bool = false
     }
 
-    /// Builds the provider cards in display order (Codex, Claude accounts,
-    /// Cursor, OpenRouter, Grok). Providers without metrics are included with an empty-state
-    /// detail so the popover can render a "waiting / log in" card; the
-    /// dashboard filters those out via `hasMetrics`.
+    /// Builds the provider cards. Emission order follows each store; the
+    /// returned array is then sorted for display: same subscription stays
+    /// together, groups sit at their earliest label, labels inside a group
+    /// are alphabetical. Providers without metrics are included with an
+    /// empty-state detail so the popover can render a "waiting / log in"
+    /// card; the dashboard filters those out via `hasMetrics`.
     static func snapshots(_ input: Input) -> [ProviderSnapshot] {
         var result: [ProviderSnapshot] = []
 
@@ -397,7 +399,44 @@ enum ProviderSnapshotBuilder {
             }
         }
 
-        return result
+        return orderedForDisplay(result)
+    }
+
+    /// Stable card order for the popover, Overview, and Limits.
+    ///
+    /// Group by subscription so two Claude (or Codex, or Grok) accounts stay
+    /// adjacent. Place each group where its alphabetically-earliest label
+    /// belongs, then sort labels inside the group. Focus/selection must not
+    /// call this with a different ranking — clicking a card scrolls to it.
+    static func orderedForDisplay(_ snapshots: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        let groupKeyByService: [ServiceType: String] = Dictionary(
+            grouping: snapshots,
+            by: \.service
+        ).mapValues { group in
+            group.map(\.title).min { lhs, rhs in
+                lhs.localizedStandardCompare(rhs) == .orderedAscending
+            } ?? ""
+        }
+
+        return snapshots.sorted { lhs, rhs in
+            let lhsGroup = groupKeyByService[lhs.service] ?? lhs.title
+            let rhsGroup = groupKeyByService[rhs.service] ?? rhs.title
+            let groupOrder = lhsGroup.localizedStandardCompare(rhsGroup)
+            if groupOrder != .orderedSame {
+                return groupOrder == .orderedAscending
+            }
+            if lhs.service != rhs.service {
+                let typeOrder = lhs.service.shortName.localizedStandardCompare(rhs.service.shortName)
+                if typeOrder != .orderedSame {
+                    return typeOrder == .orderedAscending
+                }
+            }
+            let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
+            if titleOrder != .orderedSame {
+                return titleOrder == .orderedAscending
+            }
+            return lhs.id < rhs.id
+        }
     }
 
     static func snapshot(
