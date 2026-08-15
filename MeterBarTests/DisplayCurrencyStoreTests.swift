@@ -205,6 +205,25 @@ final class DisplayCurrencyStoreTests: XCTestCase {
         }
     }
 
+    /// The short-lived `system` source never reached a tagged release, but a
+    /// build run between #425 and #426 could have persisted its raw value, so
+    /// an unrecognized source must load as `.manual` rather than drop the rate.
+    func testLoadMapsAnUnrecognizedPersistedSourceToManual() {
+        withIsolatedDefaults { defaults in
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencySelection)
+            defaults.set("EUR", forKey: StorageKeys.displayCurrencyCode)
+            defaults.set(0.92, forKey: StorageKeys.displayCurrencyRate)
+            defaults.set(Date(timeIntervalSince1970: 1_784_000_000), forKey: StorageKeys.displayCurrencyEnteredAt)
+            defaults.set("system", forKey: StorageKeys.displayCurrencySource)
+
+            let store = DisplayCurrencyStore(userDefaults: defaults)
+
+            XCTAssertEqual(store.selection, .eur)
+            XCTAssertEqual(store.currency?.code, "EUR")
+            XCTAssertEqual(store.currency?.source, .manual)
+        }
+    }
+
     private func withIsolatedDefaults(_ body: (UserDefaults) -> Void) {
         let suiteName = "DisplayCurrencyStoreTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
