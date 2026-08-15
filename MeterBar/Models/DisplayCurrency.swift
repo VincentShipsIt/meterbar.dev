@@ -17,7 +17,6 @@ nonisolated enum DisplayCurrencySelection: String, CaseIterable, Identifiable, S
 nonisolated public enum DisplayCurrencySource: String, Equatable, Sendable {
     case manual
     case europeanCentralBank = "ecb"
-    case system
 }
 
 /// A presentation-only currency conversion for cost views and the CLI.
@@ -88,8 +87,6 @@ nonisolated public struct DisplayCurrency: Equatable, Sendable {
         case .europeanCentralBank:
             let day = Self.referenceDateFormatter.string(from: enteredAt)
             return "1 USD = \(formattedRate) \(code), ECB reference rate \(day)"
-        case .system:
-            return "1 USD = \(formattedRate) \(code), from Mac region settings"
         }
     }
 
