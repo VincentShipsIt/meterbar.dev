@@ -147,7 +147,7 @@ final class CostScanCorpusTests: XCTestCase {
         try writeCodexRollout(in: directory, path: "c.jsonl", lines: [old])
         try writeCodexRollout(in: directory, path: "d.jsonl", lines: [old])
 
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
 
         XCTAssertEqual(windows.period.totals.input, 1_000)
@@ -179,7 +179,7 @@ final class CostScanCorpusTests: XCTestCase {
             codexTokenLine(timestamp: "2026-06-16T10:00:00Z", model: nil)
         ])
 
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
 
         XCTAssertEqual(windows.lifetime.totals.input, 1_000)
@@ -209,7 +209,7 @@ final class CostScanCorpusTests: XCTestCase {
             codexTokenLine(timestamp: "2026-06-16T10:00:00Z", model: "gpt-5.5-codex")
         ])
 
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
 
         XCTAssertEqual(windows.lifetime.totals.input, 1_000)
@@ -234,7 +234,7 @@ final class CostScanCorpusTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
 
         XCTAssertEqual(windows.lifetime.totals.input, 1_000)
@@ -261,7 +261,7 @@ final class CostScanCorpusTests: XCTestCase {
             codexTokenLine(timestamp: "2026-06-15T11:00:00Z", conversationID: "conv-0", input: 5, output: 5)
         ])
 
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
 
         XCTAssertEqual(windows.lifetime.sessionIDs.count, 5)
@@ -278,7 +278,7 @@ final class CostScanCorpusTests: XCTestCase {
             codexTokenLine(timestamp: "2025-06-14T11:00:00Z", conversationID: "b", input: 200),
         ])
 
-        var windows = CodexCostScanner.scanWindows(cutoff: periodCutoff, hourlyCutoff: hourlyCutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: periodCutoff, hourlyCutoff: hourlyCutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &windows)
         let rows = try XCTUnwrap(CodexCostScanner.makeCost(from: windows.period)?.2)
 

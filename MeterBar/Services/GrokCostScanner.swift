@@ -71,20 +71,6 @@ enum GrokCostScanner {
     /// skipping `JSONSerialization` on the rest is what keeps the scan cheap.
     nonisolated private static let turnCompletedMarker = Data("\"turn_completed\"".utf8)
 
-    /// Seeds both windows: `earliestDate` starts at now and only decreases,
-    /// `latestDate` starts at the window floor and only increases.
-    nonisolated static func scanWindows(
-        cutoff: Date,
-        hourlyCutoff: Date = .distantPast
-    ) -> ScanWindows<CostScanWindowContext> {
-        ScanWindows(
-            period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
-            lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
-            cutoff: cutoff,
-            hourlyCutoff: hourlyCutoff
-        )
-    }
-
     /// The `sessions` directories to scan, one per Grok home.
     ///
     /// Resolution goes through `GrokHomeDirectory` rather than a literal
@@ -127,7 +113,10 @@ enum GrokCostScanner {
         _ roots: [URL],
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
-        var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
+        var windows = CostScanWindowContext.scanWindows(
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
+        )
         var coverage = CostScanCorpusCoverage()
 
         for root in roots {
@@ -144,7 +133,7 @@ enum GrokCostScanner {
                 guard coverage.keep(file.cacheKey) else { continue }
                 guard let totals = Self.totals(for: file, session: session) else { continue }
                 session.noteProcessedFile()
-                guard Self.fold(totals, into: &windows) else {
+                guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the
                     // live session. Aggregates cannot be de-overlapped after
@@ -158,28 +147,6 @@ enum GrokCostScanner {
 
         session.retain(coverage: coverage, provider: .grok)
         return windows
-    }
-
-    /// Adds one file's tally to the shared windows.
-    ///
-    /// - Returns: `false` when the file's events partly overlap what is already
-    ///   counted, which no aggregate merge can resolve — the caller has to
-    ///   re-read that file event by event.
-    nonisolated private static func fold(
-        _ totals: GrokFileTotals,
-        into windows: inout ScanWindows<CostScanWindowContext>
-    ) -> Bool {
-        // Period keys are a subset of lifetime keys by construction (every
-        // in-window event is also a lifetime event), so the lifetime test
-        // answers for both windows.
-        let keys = totals.lifetime.eventKeys
-        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
-            windows.period.merge(totals.period)
-            windows.lifetime.merge(totals.lifetime)
-            return true
-        }
-        // Every event is already counted: a duplicated session with nothing new.
-        return keys.isSubset(of: windows.lifetime.eventKeys)
     }
 
     /// Streams one file straight into the shared windows, under the same budget
@@ -301,7 +268,12 @@ enum GrokCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> GrokFileTotals? {
-        let record = Self.resumableRecord(for: file, session: session)
+        let record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .grok),
+            file: file,
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
+        )
 
         // Nothing appended since the last pass.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
@@ -365,32 +337,6 @@ enum GrokCostScanner {
         return payload
     }
 
-    /// The cached entry to resume from, rebased onto this refresh's cutoff.
-    ///
-    /// - Returns: `nil` when the file has to be re-read from byte zero.
-    nonisolated private static func resumableRecord(
-        for file: CostScanFile,
-        session: CostScanSession
-    ) -> CostScanFileRecord<GrokFileTotals>? {
-        guard var record = CostScanResumption.resumableRecord(
-            existing: session.record(for: file.cacheKey, provider: .grok),
-            file: file,
-            cutoff: session.cutoff,
-            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
-        ) else { return nil }
-        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
-        if record.hourlyCutoff < session.hourlyCutoff {
-            record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
-                $0.key >= session.hourlyCutoff
-            }
-            record.payload.lifetime.hourlyTotals = record.payload.lifetime.hourlyTotals.filter {
-                $0.key >= session.hourlyCutoff
-            }
-            record.hourlyCutoff = session.hourlyCutoff
-        }
-        return record
-    }
-
     /// Project and fallback session identity, both derived from where the file
     /// lives: `<root>/<percent-encoded project path>/<session uuid>/updates.jsonl`.
     ///
@@ -405,20 +351,6 @@ enum GrokCostScanner {
             ),
             fallbackSessionID: sessionDirectory.lastPathComponent
         )
-    }
-
-    /// Whole milliseconds since the epoch, or `nil` when the value cannot be
-    /// expressed as one. `Int(_:)` traps on a `Double` outside `Int`'s range and
-    /// `isFinite` does not rule that out — `1e300` is finite, and its
-    /// millisecond value (~1e303) crashed the scan on the way into the dedup
-    /// key. Unlike Codex, whose timestamps arrive as bounded ISO-8601 strings,
-    /// Grok logs a raw JSON number, so any file on disk can carry one.
-    nonisolated private static func millisecondsSinceEpoch(_ seconds: Double) -> Int? {
-        let milliseconds = (seconds * 1000).rounded()
-        guard milliseconds.isFinite,
-              milliseconds >= Double(Int.min),
-              milliseconds < Double(Int.max) else { return nil }
-        return Int(milliseconds)
     }
 
     /// One `turn_completed` line's usage, or `nil` for every other line.
@@ -440,7 +372,7 @@ enum GrokCostScanner {
               let method = envelope["method"] as? String,
               method.hasSuffix("session/update"),
               let seconds = (envelope["timestamp"] as? NSNumber)?.doubleValue,
-              Self.millisecondsSinceEpoch(seconds) != nil,
+              CostScanValues.millisecondsSinceEpoch(seconds) != nil,
               let params = envelope["params"] as? [String: Any],
               let update = params["update"] as? [String: Any],
               update["sessionUpdate"] as? String == "turn_completed",
@@ -516,16 +448,15 @@ enum GrokCostScanner {
         let freshInput = max(0, event.input - event.cached)
         let cost = Double(event.ticks) * Self.usdPerCostTick
 
-        // Whole-millisecond precision, matching the Codex key, so equivalent
-        // records produce a stable string rather than a formatted Double.
-        // Parsing already rejected timestamps that cannot be expressed this way;
-        // converting through the same helper keeps the conversion trap-free
-        // rather than relying on that guarantee holding at a distance.
-        guard let timestampMillis = Self.millisecondsSinceEpoch(timestamp.timeIntervalSince1970) else { return }
-        let key = """
-            \(timestampMillis)-\(sessionID)-\(event.input)-\(event.cached)-\
-            \(event.output)-\(event.reasoning)-\(event.ticks)
-            """
+        // The shared Codex/Grok key, with the cost ticks appended. Parsing
+        // already rejected timestamps that cannot be expressed in whole
+        // milliseconds; going back through the same helper keeps the conversion
+        // trap-free rather than relying on that guarantee holding at a distance.
+        guard let key = CostScanValues.deduplicationKey(
+            timestamp: timestamp,
+            sessionID: sessionID,
+            counts: [event.input, event.cached, event.output, event.reasoning, event.ticks]
+        ) else { return }
         let keys = CostScanEventKeys(
             day: calendar.startOfDay(for: timestamp),
             hour: timestamp >= windows.hourlyCutoff
