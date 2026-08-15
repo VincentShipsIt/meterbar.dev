@@ -330,6 +330,96 @@ final class CostScanCollaboratorTests: XCTestCase {
         XCTAssertTrue(appB.modelBreakdowns.isEmpty)
     }
 
+    func testFlattenSessionsKeepsUnambiguousIdsBare() {
+        let flattened = TokenUsageAggregator.flattenSessions([
+            "app-a": ["conv-a": totals(input: 10, output: 0, cacheRead: 0, cost: 1)],
+            "app-b": ["conv-b": totals(input: 20, output: 0, cacheRead: 0, cost: 2)]
+        ])
+
+        // A session id that belongs to exactly one project stays addressable by
+        // the raw conversation id consumers already index on.
+        XCTAssertEqual(Set(flattened.keys), ["conv-a", "conv-b"])
+        XCTAssertEqual(flattened["conv-a"]?.input, 10)
+        XCTAssertEqual(flattened["conv-b"]?.input, 20)
+    }
+
+    func testFlattenSessionsQualifiesIdsSharedByMoreThanOneProject() {
+        let flattened = TokenUsageAggregator.flattenSessions([
+            "app-a": [
+                "shared": totals(input: 10, output: 0, cacheRead: 0, cost: 1),
+                "solo-a": totals(input: 1, output: 0, cacheRead: 0)
+            ],
+            "app-b": ["shared": totals(input: 200, output: 0, cacheRead: 0, cost: 2)]
+        ])
+
+        // Same id under two projects is two different conversations; merging
+        // them would report one row with nobody's totals.
+        XCTAssertEqual(Set(flattened.keys), ["app-a/shared", "app-b/shared", "solo-a"])
+        XCTAssertEqual(flattened["app-a/shared"]?.input, 10)
+        XCTAssertEqual(flattened["app-b/shared"]?.input, 200)
+        XCTAssertEqual(flattened["app-a/shared"]?.estimatedCostUSD ?? -1, 1, accuracy: 0.0001)
+        XCTAssertEqual(flattened["app-b/shared"]?.estimatedCostUSD ?? -1, 2, accuracy: 0.0001)
+    }
+
+    func testFlattenSessionsQualifiesTheUnknownFallbackEvenForASingleProject() {
+        let unknown = CostSessionAttribution.unknownSessionID
+        let flattened = TokenUsageAggregator.flattenSessions([
+            "app-a": [unknown: totals(input: 10, output: 0, cacheRead: 0)]
+        ])
+
+        // "unknown" is a fallback bucket, not an identity: qualify it always so
+        // the key stays stable on the day a second project also falls back.
+        XCTAssertEqual(Set(flattened.keys), ["app-a/\(unknown)"])
+        XCTAssertEqual(flattened["app-a/\(unknown)"]?.input, 10)
+    }
+
+    func testFlattenSessionModelsQualifiesInLockstepWithFlattenSessions() {
+        let projectSessionModels: [String: [String: [String: TokenAccumulator]]] = [
+            "app-a": ["shared": ["opus": totals(input: 10, output: 0, cacheRead: 0)]],
+            "app-b": ["shared": ["haiku": totals(input: 200, output: 0, cacheRead: 0)]]
+        ]
+
+        let flattened = TokenUsageAggregator.flattenSessionModels(projectSessionModels)
+
+        // `makeSessionBreakdowns` looks the model slice up by the session row's
+        // name, so both maps have to agree on when a key is qualified.
+        XCTAssertEqual(Set(flattened.keys), ["app-a/shared", "app-b/shared"])
+        XCTAssertEqual(flattened["app-a/shared"]?["opus"]?.input, 10)
+        XCTAssertEqual(flattened["app-b/shared"]?["haiku"]?.input, 200)
+    }
+
+    func testDailyUsageSplitsCollidingSessionIdsIntoDistinctFlattenedRows() throws {
+        let day = try XCTUnwrap(FlexibleISO8601.date(from: "2026-07-01T00:00:00Z"))
+        let rows = TokenUsageAggregator.makeDailyUsage(
+            from: [day: totals(input: 210, output: 0, cacheRead: 0, cost: 3)],
+            provider: .claudeCode,
+            pricing: ModelPricing.claude(for: nil),
+            projectsByDay: [day: [
+                "app-a": totals(input: 10, output: 0, cacheRead: 0, cost: 1),
+                "app-b": totals(input: 200, output: 0, cacheRead: 0, cost: 2)
+            ]],
+            projectSessionsByDay: [day: [
+                "app-a": ["shared": totals(input: 10, output: 0, cacheRead: 0, cost: 1)],
+                "app-b": ["shared": totals(input: 200, output: 0, cacheRead: 0, cost: 2)]
+            ]],
+            projectSessionModelsByDay: [day: [
+                "app-a": ["shared": ["opus": totals(input: 10, output: 0, cacheRead: 0, cost: 1)]],
+                "app-b": ["shared": ["haiku": totals(input: 200, output: 0, cacheRead: 0, cost: 2)]]
+            ]]
+        )
+
+        let sessions = try XCTUnwrap(rows.first?.sessionBreakdowns)
+        XCTAssertEqual(sessions.map(\.name), ["app-b/shared", "app-a/shared"])
+        XCTAssertEqual(sessions.reduce(0) { $0 + $1.inputTokens }, 210)
+        XCTAssertEqual(sessions.first { $0.name == "app-a/shared" }?.modelBreakdowns.map(\.name), ["opus"])
+        XCTAssertEqual(sessions.first { $0.name == "app-b/shared" }?.modelBreakdowns.map(\.name), ["haiku"])
+
+        // The per-project nested rows keep the bare id — they are already
+        // namespaced by their parent project row.
+        let projects = try XCTUnwrap(rows.first?.projectBreakdowns)
+        XCTAssertEqual(projects.first { $0.name == "app-a" }?.sessionBreakdowns.map(\.name), ["shared"])
+    }
+
     // MARK: - ClaudeCostScanner
 
     func testProjectsURLAppendsProjectsUnlessAlreadyPresent() {
