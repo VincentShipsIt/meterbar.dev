@@ -114,6 +114,58 @@ final class LocalizationResourceContractTests: XCTestCase {
         }
     }
 
+    /// The app-side mirror of the widget contract above. The popover switches
+    /// over the same routing key, so a case without an app key would ship
+    /// English into every locale.
+    func testAppCatalogCoversEveryQuotaTitleRoutingKey() throws {
+        let appKeys = Set(try strings(in: loadCatalog(at: appCatalogURL)).keys)
+        for key in Self.appQuotaTitleCatalogKeys.map(\.catalogKey) {
+            XCTAssertTrue(appKeys.contains(key), "\(key) missing from the app catalog")
+        }
+    }
+
+    /// Every routing key resolves a real catalog entry rather than falling back
+    /// to hardcoded English.
+    ///
+    /// The SwiftPM test target excludes `MeterBar/Resources`, so
+    /// `String(localized:)` here returns its `defaultValue`; comparing that
+    /// against the shipped catalog's English value is what proves the key is
+    /// present and still says the same words. Rename or delete a key in either
+    /// place and this fails instead of silently degrading to English at runtime.
+    func testLocalizedQuotaTitleResolvesAnAppCatalogEntryForEveryRoutingKey() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+
+        for (routingKey, catalogKey) in Self.appQuotaTitleCatalogKeys {
+            // Deliberately built with one fixed kind: localization routes off
+            // the shared key alone, never off the window it happened to fill.
+            let limit = SnapshotLimit(
+                id: "quota",
+                kind: .session,
+                quotaTitleKey: routingKey,
+                usageLimit: UsageLimit(used: 4, total: 100, resetTime: nil)
+            )
+            let catalogEnglish = try englishValue(for: catalogKey, in: appStrings)
+
+            XCTAssertEqual(limit.localizedTitle, catalogEnglish, catalogKey)
+            XCTAssertEqual(routingKey.englishTitle, catalogEnglish, catalogKey)
+        }
+    }
+
+    /// One app catalog key per `ServiceType.QuotaTitleKey` case, spelled out so
+    /// a new case has to be given words before it can ship.
+    private static let appQuotaTitleCatalogKeys: [(routingKey: ServiceType.QuotaTitleKey, catalogKey: String)] = [
+        (.keyLimit, "quota.title.key_limit"),
+        (.model(label: nil), "quota.title.model"),
+        (.onDemand, "quota.title.on_demand"),
+        (.codeReview, "quota.title.code_review"),
+        (.cursorModels, "quota.title.cursor_models"),
+        (.session, "quota.title.session"),
+        (.accountCredits, "quota.title.account_credits"),
+        (.otherModels, "quota.title.other_models"),
+        (.monthly, "quota.title.monthly"),
+        (.weekly, "quota.title.weekly"),
+    ]
+
     func testCountStringsCarryEnglishOneAndOtherPluralRules() throws {
         try assertPluralRules(
             keys: ["reset.exhausted_limits", "reset.exhausted_detail"],

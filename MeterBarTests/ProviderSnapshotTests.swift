@@ -386,6 +386,106 @@ final class ProviderSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: - Quota title routing
+
+    /// The shared routing key each `(service, window, total)` triple resolves
+    /// to, spelled out independently of `ServiceType` so a routing change has to
+    /// be made deliberately in both places. Mirrors the widget-side table in
+    /// `WidgetPresentationTests`.
+    private func expectedQuotaTitleKey(
+        service: ServiceType,
+        kind: SnapshotLimit.Kind,
+        limitTotal: Double,
+        modelLimitLabel: String?
+    ) -> ServiceType.QuotaTitleKey {
+        let isIncludedPool = ServiceType.isCursorIncludedPool(total: limitTotal)
+        switch kind {
+        case .session:
+            switch service {
+            case .openRouter: return .keyLimit
+            case .cursor: return isIncludedPool ? .cursorModels : .session
+            case .claudeCode, .codexCli, .grok: return .session
+            }
+        case .weekly:
+            switch service {
+            case .openRouter: return .accountCredits
+            case .cursor: return isIncludedPool ? .otherModels : .monthly
+            case .claudeCode, .codexCli, .grok: return .weekly
+            }
+        case .codeReview:
+            switch service {
+            case .claudeCode: return .model(label: modelLimitLabel)
+            case .cursor: return .onDemand
+            case .codexCli, .openRouter, .grok: return .codeReview
+            }
+        }
+    }
+
+    /// Every built limit carries the shared routing key, and its English title
+    /// stays that key's English words. Localization switches over the key, so a
+    /// limit whose key disagreed with the routing would translate as some other
+    /// window without any English-language symptom.
+    func testBuiltLimitsCarryTheSharedQuotaTitleRoutingKey() {
+        for service in ServiceType.allCases {
+            for total in [ServiceType.cursorIncludedPoolTotal, 500] {
+                let metrics = UsageMetrics(
+                    service: service,
+                    sessionLimit: UsageLimit(used: 4, total: total, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: 64, total: total, resetTime: nil),
+                    codeReviewLimit: UsageLimit(used: 12, total: total, resetTime: nil),
+                    modelLimitLabel: service == .claudeCode ? "Fable" : nil
+                )
+                let limits = ProviderSnapshotBuilder.limits(for: metrics, service: service)
+                XCTAssertEqual(limits.count, 3, "\(service) total \(total)")
+
+                for limit in limits {
+                    let expected = expectedQuotaTitleKey(
+                        service: service,
+                        kind: limit.kind,
+                        limitTotal: total,
+                        modelLimitLabel: metrics.modelLimitLabel
+                    )
+                    let context = "\(service) \(limit.id) total \(total)"
+                    XCTAssertEqual(limit.quotaTitleKey, expected, context)
+                    XCTAssertEqual(limit.title, expected.englishTitle, context)
+                }
+            }
+        }
+    }
+
+    /// The parsed Claude model label is provider data: it stays verbatim in the
+    /// English title and in the localized one, and only a missing label falls
+    /// back to translated "Model" copy.
+    func testClaudeModelWindowKeepsTheParsedLabelVerbatim() {
+        let labeled = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .claudeCode, codeReview: 10, modelLimitLabel: "Fable"),
+            service: .claudeCode
+        )
+        XCTAssertEqual(labeled.map(\.quotaTitleKey), [.model(label: "Fable")])
+        XCTAssertEqual(labeled.map(\.localizedTitle), ["Fable"])
+
+        let unlabeled = ProviderSnapshotBuilder.limits(
+            for: makeMetrics(service: .claudeCode, codeReview: 10),
+            service: .claudeCode
+        )
+        XCTAssertEqual(unlabeled.map(\.quotaTitleKey), [.model(label: nil)])
+    }
+
+    /// Copy handed in directly — pseudo-localized layout fixtures, previews —
+    /// is not routed, so it renders verbatim instead of being string-matched
+    /// back onto a quota window.
+    func testDirectlyTitledLimitIsNotRoutedThroughTheCatalog() {
+        let limit = SnapshotLimit(
+            id: "credits",
+            kind: .weekly,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 4, total: 10, resetTime: nil)
+        )
+
+        XCTAssertNil(limit.quotaTitleKey)
+        XCTAssertEqual(limit.localizedTitle, "Credits")
+    }
+
     // MARK: - Limits
 
     func testThirdLimitUsesReportedClaudeModelLabelAndCodeReviewForCodex() {
