@@ -338,7 +338,7 @@ enum ClaudeCostScanner {
                     continue
                 }
                 session.noteProcessedFile()
-                guard Self.fold(totals, into: &windows) else {
+                guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the
                     // live transcript. Aggregates cannot be de-overlapped after
@@ -356,30 +356,6 @@ enum ClaudeCostScanner {
         // withholds the prune when the walk itself came up short.
         session.retain(coverage: coverage, provider: .claude)
         return windows
-    }
-
-    /// Merges one transcript's aggregates in, if that can be done without
-    /// double-counting.
-    ///
-    /// - Returns: `false` when the file's events partly overlap what is already
-    ///   folded in, which is the one case aggregates cannot express — the
-    ///   caller has to fall back to ``foldByEvent(_:projectID:session:windows:)``.
-    nonisolated private static func fold(
-        _ totals: ScanWindows<ClaudeSessionTotals>,
-        into windows: inout ScanWindows<ClaudeSessionTotals>
-    ) -> Bool {
-        // Period keys are a subset of lifetime keys by construction (every
-        // in-window event is also a lifetime event), so the lifetime test
-        // answers for both windows.
-        let keys = totals.lifetime.eventKeys
-        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
-            windows.period.merge(totals.period)
-            windows.lifetime.merge(totals.lifetime)
-            return true
-        }
-        // Every event is already counted: a duplicated transcript with nothing
-        // new in it.
-        return keys.isSubset(of: windows.lifetime.eventKeys)
     }
 
     /// Re-reads a partly-overlapping transcript from byte zero and folds in only
@@ -449,7 +425,12 @@ enum ClaudeCostScanner {
         projectID: String,
         session: CostScanSession
     ) -> ScanWindows<ClaudeSessionTotals>? {
-        let record = Self.resumableRecord(for: file, session: session)
+        let record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .claude),
+            file: file,
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
+        )
 
         // Nothing appended since the last pass. This is the steady state once
         // the corpus is warm, and it is why a refresh costs almost no I/O.
@@ -543,28 +524,6 @@ enum ClaudeCostScanner {
             provider: .claude
         )
         return Self.windows(payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
-    }
-
-    /// The cached entry to resume from, rebased onto this refresh's cutoff.
-    ///
-    /// - Returns: `nil` when the file has to be re-read from byte zero.
-    nonisolated private static func resumableRecord(
-        for file: CostScanFile,
-        session: CostScanSession
-    ) -> CostScanFileRecord<ClaudeFileTotals>? {
-        guard var record = CostScanResumption.resumableRecord(
-            existing: session.record(for: file.cacheKey, provider: .claude),
-            file: file,
-            cutoff: session.cutoff,
-            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
-        ) else { return nil }
-        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
-        if record.hourlyCutoff < session.hourlyCutoff {
-            record.payload.period.hourly = record.payload.period.hourly.filter { $0.key >= session.hourlyCutoff }
-            record.payload.lifetime.hourly = record.payload.lifetime.hourly.filter { $0.key >= session.hourlyCutoff }
-            record.hourlyCutoff = session.hourlyCutoff
-        }
-        return record
     }
 
     nonisolated private static func windows(

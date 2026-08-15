@@ -26,22 +26,6 @@ enum CodexCostScanner {
         return result
     }()
 
-    /// Seeds both windows the way the two separate scans used to seed themselves:
-    /// `earliestDate` starts at now and only decreases, `latestDate` starts at the
-    /// window floor (the cutoff for the period, `.distantPast` for lifetime) and
-    /// only increases.
-    nonisolated static func scanWindows(
-        cutoff: Date,
-        hourlyCutoff: Date = .distantPast
-    ) -> ScanWindows<CostScanWindowContext> {
-        ScanWindows(
-            period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
-            lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
-            cutoff: cutoff,
-            hourlyCutoff: hourlyCutoff
-        )
-    }
-
     /// The rate card in effect for `model` at `timestamp`. Every Codex price
     /// resolution goes through the shared table so the app, the widget, and the
     /// CLI cannot drift apart (issues #130 and #339).
@@ -330,7 +314,10 @@ enum CodexCostScanner {
         directories: [URL],
         session: CostScanSession
     ) -> ScanWindows<CostScanWindowContext> {
-        var windows = Self.scanWindows(cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
+        var windows = CostScanWindowContext.scanWindows(
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
+        )
         let listing = Self.distinctRollouts(in: directories, modifiedSince: session.listingCutoff)
         var coverage = CostScanCorpusCoverage()
         coverage.add(listing)
@@ -340,7 +327,7 @@ enum CodexCostScanner {
             coverage.keep(file.cacheKey)
             guard let totals = Self.totals(for: file, session: session) else { continue }
             session.noteProcessedFile()
-            guard Self.fold(totals, into: &windows) else {
+            guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                 // This rollout shares only *some* of its events with one already
                 // folded in. Aggregates cannot be de-overlapped after the fact,
                 // so the file goes back through the event-level path, where
@@ -377,7 +364,12 @@ enum CodexCostScanner {
         for file: CostScanFile,
         session: CostScanSession
     ) -> CodexFileTotals? {
-        let record = Self.resumableRecord(for: file, session: session)
+        let record = CostScanResumption.resumableRecord(
+            existing: session.record(for: file.cacheKey, provider: .codex),
+            file: file,
+            cutoff: session.cutoff,
+            hourlyCutoff: session.hourlyCutoff
+        )
 
         // Nothing appended since the last pass.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
@@ -550,54 +542,6 @@ enum CodexCostScanner {
             // letting the next slice read the file again.
             session.noteDeferred(.codex)
         }
-    }
-
-    /// Adds one rollout's tally to the shared windows.
-    ///
-    /// - Returns: `false` when the file's events partly overlap what is already
-    ///   counted, which no aggregate merge can resolve — the caller has to
-    ///   re-read that file event by event.
-    nonisolated private static func fold(
-        _ totals: CodexFileTotals,
-        into windows: inout ScanWindows<CostScanWindowContext>
-    ) -> Bool {
-        // Period keys are a subset of lifetime keys by construction (every
-        // in-window event is also a lifetime event), so the lifetime test
-        // answers for both windows.
-        let keys = totals.lifetime.eventKeys
-        if keys.isDisjoint(with: windows.lifetime.eventKeys) {
-            windows.period.merge(totals.period)
-            windows.lifetime.merge(totals.lifetime)
-            return true
-        }
-        // Every event is already counted: a duplicated rollout with nothing new.
-        return keys.isSubset(of: windows.lifetime.eventKeys)
-    }
-
-    /// The cached entry to resume from, rebased onto this refresh's cutoff.
-    ///
-    /// - Returns: `nil` when the rollout has to be re-read from byte zero.
-    nonisolated private static func resumableRecord(
-        for file: CostScanFile,
-        session: CostScanSession
-    ) -> CostScanFileRecord<CodexFileTotals>? {
-        guard var record = CostScanResumption.resumableRecord(
-            existing: session.record(for: file.cacheKey, provider: .codex),
-            file: file,
-            cutoff: session.cutoff,
-            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
-        ) else { return nil }
-        guard record.hourlyCutoff <= session.hourlyCutoff else { return nil }
-        if record.hourlyCutoff < session.hourlyCutoff {
-            record.payload.period.hourlyTotals = record.payload.period.hourlyTotals.filter {
-                $0.key >= session.hourlyCutoff
-            }
-            record.payload.lifetime.hourlyTotals = record.payload.lifetime.hourlyTotals.filter {
-                $0.key >= session.hourlyCutoff
-            }
-            record.hourlyCutoff = session.hourlyCutoff
-        }
-        return record
     }
 
     /// Picks up the model/originator carried by the non-usage rollout events.
@@ -926,21 +870,14 @@ enum CodexCostScanner {
         let output = event.output
         let reasoning = event.reasoning
 
-        // Use whole-millisecond precision for the dedup key so equivalent events
-        // produce a stable, collision-resistant string (raw Double formatting can
-        // vary and risks both false matches and false misses).
-        //
-        // Model, origin, and project are deliberately absent. The deferred
-        // back-fill replays a parked event once its rollout finally names a
-        // model, and a budgeted slice that ends with events still parked rolls
-        // its offset back so the next refresh re-reads them — both hand the same
-        // charge to `apply` twice under different attribution, and only an
-        // attribution-free key sees through it. The price is that two distinct
-        // same-millisecond events with identical counts collapse into one.
-        // `CostScanCorpusTests` pins both halves; widen this key only with a
-        // proof that the deferred path still dedups.
-        let timestampMillis = Int((timestamp.timeIntervalSince1970 * 1000).rounded())
-        let key = "\(timestampMillis)-\(sessionID)-\(input)-\(cached)-\(output)-\(reasoning)"
+        // Attribution-free by design; see `CostScanValues.deduplicationKey`. A
+        // timestamp that cannot be expressed in whole milliseconds means a
+        // corrupt record, so the event is dropped rather than counted.
+        guard let key = CostScanValues.deduplicationKey(
+            timestamp: timestamp,
+            sessionID: sessionID,
+            counts: [input, cached, output, reasoning]
+        ) else { return }
         let keys = CostScanEventKeys(
             day: calendar.startOfDay(for: timestamp),
             hour: timestamp >= windows.hourlyCutoff
