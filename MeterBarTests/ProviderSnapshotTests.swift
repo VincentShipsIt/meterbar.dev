@@ -575,11 +575,77 @@ final class ProviderSnapshotTests: XCTestCase {
             emptyDetail: ""
         )
 
-        XCTAssertEqual(snapshot.band, .exhausted)
+        // Spillover: the header must reflect the pool that still has room, not
+        // the one that ran dry — Cursor is only "Out" when both are gone.
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .session)
+        XCTAssertEqual(snapshot.band, .healthy)
         XCTAssertFalse(snapshot.hasExhaustedLimit)
         XCTAssertFalse(snapshot.hasExhaustedWeeklyLimit)
         XCTAssertTrue(snapshot.blockingLimits.isEmpty)
         XCTAssertEqual(snapshot.detailLimits.map(\.id), ["session", "weekly"])
+    }
+
+    func testCursorOtherModelsExhaustedStillReadsCursorModelsHeadroom() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: makeMetrics(service: .cursor, session: 27, weekly: 100),
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .session)
+        XCTAssertEqual(snapshot.primaryLimit?.percentLeft, 73)
+        XCTAssertEqual(snapshot.band, .healthy)
+        XCTAssertFalse(snapshot.hasExhaustedLimit)
+    }
+
+    func testCursorSpilloverBandTracksTheRoomiestPool() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: makeMetrics(service: .cursor, session: 100, weekly: 92),
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .weekly)
+        XCTAssertEqual(snapshot.band, .critical)
+        XCTAssertFalse(snapshot.hasExhaustedLimit)
+    }
+
+    func testCursorLegacySinglePoolStillUsesTightestWindow() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: makeMetrics(service: .cursor, weekly: 100),
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.band, .exhausted)
+        XCTAssertTrue(snapshot.hasExhaustedLimit)
+    }
+
+    func testCursorLegacyTwoWindowsKeepTheTightestWindowRule() {
+        // Legacy Cursor payloads map an on-demand session limit plus a
+        // request-count monthly quota — two provider-blocking windows that do
+        // not share a budget, so neither spills into the other. Only the
+        // percent-of-100 included pools do.
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 5, total: 50, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 500, total: 500, resetTime: nil),
+            codeReviewLimit: nil
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Cursor",
+            service: .cursor,
+            metrics: metrics,
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .weekly)
+        XCTAssertEqual(snapshot.band, .exhausted)
+        XCTAssertTrue(snapshot.hasExhaustedLimit)
+        XCTAssertEqual(snapshot.blockingLimits.map(\.kind), [.weekly])
     }
 
     func testCursorBothPoolsExhaustedBlocksTheProvider() {
@@ -590,6 +656,7 @@ final class ProviderSnapshotTests: XCTestCase {
             emptyDetail: ""
         )
 
+        XCTAssertEqual(snapshot.band, .exhausted)
         XCTAssertTrue(snapshot.hasExhaustedLimit)
         XCTAssertTrue(snapshot.hasExhaustedWeeklyLimit)
         XCTAssertEqual(Set(snapshot.blockingLimits.map(\.kind)), [.session, .weekly])
