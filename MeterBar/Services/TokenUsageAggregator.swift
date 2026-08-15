@@ -246,7 +246,7 @@ enum TokenUsageAggregator {
     /// (never an identity, and qualifying it unconditionally keeps the key
     /// stable across days rather than only on days two projects both fall back)
     /// plus any id recorded under more than one project.
-    private nonisolated static func ambiguousSessionIDs<Value>(
+    nonisolated private static func ambiguousSessionIDs<Value>(
         in projectSessions: [String: [String: Value]]
     ) -> Set<String> {
         var seen: Set<String> = []
@@ -259,7 +259,7 @@ enum TokenUsageAggregator {
         return ambiguous
     }
 
-    private nonisolated static func qualifyKeys<Value>(
+    nonisolated private static func qualifyKeys<Value>(
         _ sessions: [String: Value],
         project: String,
         ambiguous: Set<String>
