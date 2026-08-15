@@ -112,75 +112,8 @@ struct Usage: ParsableCommand {
     }
 
     private func printText(_ metrics: [ServiceType: UsageMetrics]) {
-        print("╭─────────────────────────────────────────╮")
-        print("│             MeterBar Usage              │")
-        print("╰─────────────────────────────────────────╯")
-        print()
-
-        // A `--provider` typo used to print the header and nothing else, which
-        // reads like "this provider has no quota data". Say what happened, the
-        // way `meterbar doctor` already does — and distinguish a typo from a
-        // real provider the cache simply has not seen yet.
-        if metrics.isEmpty {
-            print(CLIProviderFilter.emptyReportMessage(for: provider))
-            return
-        }
-
-        for (service, metric) in metrics.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            print("▸ \(service.displayName)")
-
-            if let session = metric.sessionLimit {
-                printLimit(
-                    service == .openRouter ? "  Key limit" : "  Session",
-                    session,
-                    currency: service == .openRouter
-                )
-            }
-            if let weekly = metric.weeklyLimit {
-                printLimit(
-                    "  \(service.weeklyQuotaTitle)",
-                    weekly,
-                    currency: service == .openRouter
-                )
-            }
-            if let codeReview = metric.codeReviewLimit {
-                let label = service == .claudeCode ? (metric.modelLimitLabel ?? "Model") : "Code Review"
-                printLimit("  \(label)", codeReview)
-            }
-            print()
-        }
-    }
-
-    private func printLimit(_ label: String, _ limit: UsageLimit, currency: Bool = false) {
-        let percent = limit.percentage
-        let bar = progressBar(percent: percent, width: 20)
-        let status = statusEmoji(for: limit)
-
-        print("\(label): \(bar) \(currency ? String(format: "%.0f%%", percent) : limit.percentageText) \(status)")
-        if currency {
-            print("    \(UsageFormat.cost(limit.used)) spent / \(UsageFormat.cost(limit.total)) credits")
-        } else {
-            let estimateDetail = limit.isEstimated ? " (estimated limit)" : ""
-            print("    \(Int(limit.used))/\(Int(limit.total)) used\(estimateDetail)")
-        }
-        if let reset = limit.resetTime {
-            print("    Resets: \(UsageFormat.relative(reset))")
-        }
-    }
-
-    private func progressBar(percent: Double, width: Int) -> String {
-        let filled = Int((percent / 100) * Double(width))
-        let empty = width - filled
-        return "[" + String(repeating: "█", count: filled) + String(repeating: "░", count: empty) + "]"
-    }
-
-    /// Same severity bands as the app (previously the CLI warned at 50% used
-    /// while the app warned at 75%).
-    private func statusEmoji(for limit: UsageLimit) -> String {
-        switch QuotaBand.forLimit(limit) {
-        case .healthy: return "✓"
-        case .tight: return "⚠"
-        case .critical, .exhausted: return "✗"
+        for line in CLIUsageTextReport.lines(for: metrics, filter: provider) {
+            print(line)
         }
     }
 }
