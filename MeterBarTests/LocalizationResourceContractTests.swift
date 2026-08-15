@@ -73,6 +73,47 @@ final class LocalizationResourceContractTests: XCTestCase {
         ].allSatisfy(appKeysAfterBurnDown.contains))
     }
 
+    /// The Settings preview draws the widget's empty states from the app bundle,
+    /// so both catalogs have to carry the same four keys with the same English
+    /// words. Translated only on one side, the preview would contradict the
+    /// widget it is previewing.
+    func testWidgetEmptyStateCopyIsCarriedByBothCatalogsWithMatchingEnglish() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let widgetStrings = try strings(in: loadCatalog(at: widgetCatalogURL))
+
+        for key in [
+            "widget.empty.choose_title",
+            "widget.empty.choose_detail",
+            "widget.empty.unavailable_title",
+            "widget.empty.unavailable_detail",
+        ] {
+            let appValue = try englishValue(for: key, in: appStrings)
+            let widgetValue = try englishValue(for: key, in: widgetStrings)
+            XCTAssertEqual(appValue, widgetValue, "\(key) must read identically in both bundles")
+        }
+    }
+
+    /// One key per `ServiceType.QuotaTitleKey` case. The shared routing decides
+    /// which case applies; the widget catalog only supplies its words, so a new
+    /// case without a key would silently ship English.
+    func testWidgetCatalogCoversEveryQuotaTitleRoutingKey() throws {
+        let widgetKeys = Set(try strings(in: loadCatalog(at: widgetCatalogURL)).keys)
+        for key in [
+            "widget.quota.key_limit",
+            "widget.quota.model",
+            "widget.quota.on_demand",
+            "widget.quota.code_review",
+            "widget.quota.cursor_models",
+            "widget.quota.session",
+            "widget.quota.account_credits",
+            "widget.quota.other_models",
+            "widget.quota.monthly",
+            "widget.quota.weekly",
+        ] {
+            XCTAssertTrue(widgetKeys.contains(key), "\(key) missing from the widget catalog")
+        }
+    }
+
     func testCountStringsCarryEnglishOneAndOtherPluralRules() throws {
         try assertPluralRules(
             keys: ["reset.exhausted_limits", "reset.exhausted_detail"],
@@ -117,6 +158,14 @@ final class LocalizationResourceContractTests: XCTestCase {
 
     private func strings(in catalog: [String: Any]) throws -> [String: Any] {
         try XCTUnwrap(catalog["strings"] as? [String: Any])
+    }
+
+    private func englishValue(for key: String, in catalogStrings: [String: Any]) throws -> String {
+        let entry = try XCTUnwrap(catalogStrings[key] as? [String: Any], key)
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any], key)
+        let english = try XCTUnwrap(localizations["en"] as? [String: Any], key)
+        let unit = try XCTUnwrap(english["stringUnit"] as? [String: Any], key)
+        return try XCTUnwrap(unit["value"] as? String, key)
     }
 
     private func assertPluralRules(keys: [String], catalogURL: URL) throws {

@@ -100,6 +100,49 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Which quota-window title a `(service, window, limit)` triple resolves to,
+    /// separated from the English words it resolves *into*.
+    ///
+    /// The routing below is the single decision — the OpenRouter exceptions, the
+    /// Cursor included-pool split, Claude Code's model-scoped third window. The
+    /// widget extension has to say the same thing in the user's language, and
+    /// re-deriving "which title applies" from `(service, quotaWindow)` on its own
+    /// side is how the two answers drift apart. It switches over this key
+    /// instead, so a routing change lands in one place and the localized title
+    /// follows.
+    public enum QuotaTitleKey: Equatable, Sendable {
+        case keyLimit
+        case session
+        case cursorModels
+        case accountCredits
+        case otherModels
+        case monthly
+        case weekly
+        case codeReview
+        case onDemand
+        /// Claude Code's model-scoped window. The parsed label is provider data
+        /// and stays verbatim in every locale; `nil` falls back to translated
+        /// "Model" copy.
+        case model(label: String?)
+
+        /// The English source copy. The bundled CLI and every non-UI caller read
+        /// their titles from here, so this stays the definition of the words.
+        public var englishTitle: String {
+            switch self {
+            case .keyLimit: return "Key limit"
+            case .session: return "Session"
+            case .cursorModels: return "Cursor Models"
+            case .accountCredits: return "Account credits"
+            case .otherModels: return "Other Models"
+            case .monthly: return "Monthly"
+            case .weekly: return "Weekly"
+            case .codeReview: return "Code Review"
+            case .onDemand: return "On-demand"
+            case let .model(label): return label ?? "Model"
+            }
+        }
+    }
+
     /// Display title for the third ("code review") quota window. For Claude
     /// Code this window is model-scoped: it echoes the parsed model label
     /// (e.g. "Fable", "Sonnet"), falling back to a neutral "Model" when no
@@ -110,10 +153,14 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// notification copy previously each spelled out this rule — and
     /// historically did so with inverted defaults.
     public func codeReviewQuotaTitle(modelLimitLabel: String?) -> String {
+        codeReviewQuotaTitleKey(modelLimitLabel: modelLimitLabel).englishTitle
+    }
+
+    public func codeReviewQuotaTitleKey(modelLimitLabel: String?) -> QuotaTitleKey {
         switch self {
-        case .claudeCode: return modelLimitLabel ?? "Model"
-        case .cursor: return "On-demand"
-        case .codexCli, .openRouter, .grok: return "Code Review"
+        case .claudeCode: return .model(label: modelLimitLabel)
+        case .cursor: return .onDemand
+        case .codexCli, .openRouter, .grok: return .codeReview
         }
     }
 
@@ -132,14 +179,18 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// used the percent-of-100 shape, and "Session" for the legacy on-demand
     /// mapping.
     public func sessionQuotaTitle(limitTotal: Double?) -> String {
+        sessionQuotaTitleKey(limitTotal: limitTotal).englishTitle
+    }
+
+    public func sessionQuotaTitleKey(limitTotal: Double?) -> QuotaTitleKey {
         switch self {
-        case .openRouter: return "Key limit"
+        case .openRouter: return .keyLimit
         case .cursor:
             if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-                return "Cursor Models"
+                return .cursorModels
             }
-            return "Session"
-        case .claudeCode, .codexCli, .grok: return "Session"
+            return .session
+        case .claudeCode, .codexCli, .grok: return .session
         }
     }
 
@@ -154,14 +205,18 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// pools title as **Other Models**, matching the dashboard; a request-count
     /// billing-cycle quota stays **Monthly**.
     public func weeklyQuotaTitle(limitTotal: Double?) -> String {
+        weeklyQuotaTitleKey(limitTotal: limitTotal).englishTitle
+    }
+
+    public func weeklyQuotaTitleKey(limitTotal: Double?) -> QuotaTitleKey {
         switch self {
-        case .openRouter: return "Account credits"
+        case .openRouter: return .accountCredits
         case .cursor:
             if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-                return "Other Models"
+                return .otherModels
             }
-            return "Monthly"
-        case .claudeCode, .codexCli, .grok: return "Weekly"
+            return .monthly
+        case .claudeCode, .codexCli, .grok: return .weekly
         }
     }
 
