@@ -1,6 +1,4 @@
 import ArgumentParser
-import Darwin
-import Dispatch
 import Foundation
 import MeterBar
 
@@ -50,8 +48,13 @@ struct Guard: AsyncParsableCommand {
     var refreshTimeout: String?
 
     func run() async throws {
-        let cancellation = GuardCancellation()
-        let signalSources = installSignalHandlers(cancellation)
+        // `--refresh` can hold the process for up to ten minutes. Without these,
+        // Ctrl-C or a `timeout(1)` wrapper killed guard mid-window with no JSON
+        // and an exit code outside the documented set. Cancelling ends the
+        // refresh early; guard still evaluates the cached snapshot and exits
+        // 0/10/11/12/13 — consistent with a refresh that simply failed.
+        let cancellation = CLICancellationFlag()
+        let signalSources = CLISignalHandlers.install(cancelling: cancellation)
         defer { signalSources.forEach { $0.cancel() } }
 
         let result = await QuotaGuardCLI.run(
@@ -69,21 +72,6 @@ struct Guard: AsyncParsableCommand {
         throw ExitCode(result.exitCode)
     }
 
-    /// `--refresh` can hold the process for up to ten minutes. Without these,
-    /// Ctrl-C or a `timeout(1)` wrapper killed guard mid-window with no JSON
-    /// and an exit code outside the documented set. Cancelling ends the refresh
-    /// early; guard still evaluates the cached snapshot and exits 0/10/11/12/13
-    /// — consistent with a refresh that simply failed.
-    private func installSignalHandlers(_ cancellation: GuardCancellation) -> [DispatchSourceSignal] {
-        [SIGINT, SIGTERM].map { signalNumber in
-            signal(signalNumber, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .global())
-            source.setEventHandler { cancellation.cancel() }
-            source.resume()
-            return source
-        }
-    }
-
     private func emit(_ result: QuotaGuardCLI.Result) {
         if json {
             print(result.jsonOutput)
@@ -94,23 +82,6 @@ struct Guard: AsyncParsableCommand {
             var stderr = GuardStandardError()
             Swift.print(message, to: &stderr)
         }
-    }
-}
-
-private final class GuardCancellation: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-
-    var isCancelled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return cancelled
-    }
-
-    func cancel() {
-        lock.lock()
-        cancelled = true
-        lock.unlock()
     }
 }
 

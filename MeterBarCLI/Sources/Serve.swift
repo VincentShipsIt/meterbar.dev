@@ -1,6 +1,4 @@
 import ArgumentParser
-import Darwin
-import Dispatch
 import Foundation
 import MeterBar
 
@@ -84,8 +82,8 @@ struct Serve: AsyncParsableCommand {
             )
         }
 
-        let cancellation = ServeCancellation()
-        let signalSources = installSignalHandlers(cancellation)
+        let cancellation = CLICancellationFlag()
+        let signalSources = CLISignalHandlers.install(cancelling: cancellation)
         defer { signalSources.forEach { $0.cancel() } }
 
         let request = ServeCLI.Request(
@@ -142,32 +140,5 @@ struct Serve: AsyncParsableCommand {
         case .blankEnvironment:
             return "METERBAR_SERVE_TOKEN must not be blank. Unset it to have a token generated."
         }
-    }
-
-    private func installSignalHandlers(_ cancellation: ServeCancellation) -> [DispatchSourceSignal] {
-        [SIGINT, SIGTERM].map { signalNumber in
-            signal(signalNumber, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .global())
-            source.setEventHandler { cancellation.cancel() }
-            source.resume()
-            return source
-        }
-    }
-}
-
-private final class ServeCancellation: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-
-    var isCancelled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return cancelled
-    }
-
-    func cancel() {
-        lock.lock()
-        cancelled = true
-        lock.unlock()
     }
 }
