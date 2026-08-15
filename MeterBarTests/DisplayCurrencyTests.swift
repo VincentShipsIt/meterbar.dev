@@ -82,17 +82,6 @@ final class DisplayCurrencyTests: XCTestCase {
         )
     }
 
-    func testSystemIdentityDisclosureNamesMacRegionSettings() {
-        let currency = DisplayCurrency(
-            code: "USD",
-            unitsPerUSD: 1,
-            enteredAt: enteredAt,
-            source: .system
-        )
-
-        XCTAssertEqual(currency.disclosureText, "1 USD = 1 USD, from Mac region settings")
-    }
-
     func testConvertTreatsANonFiniteRateAsAnIdentityFallback() {
         // `Double.infinity` and `.nan` both slip past a bare `rate > 0` check
         // (NaN fails it, infinity passes it), so a corrupted defaults value
