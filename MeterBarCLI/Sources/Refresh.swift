@@ -1,6 +1,4 @@
 import ArgumentParser
-import Darwin
-import Dispatch
 import Foundation
 import MeterBar
 
@@ -22,8 +20,11 @@ struct Refresh: AsyncParsableCommand {
     var timeout: String?
 
     func run() async throws {
-        let cancelBox = RefreshCancelBox()
-        let signalSources = installSignalHandlers(cancelBox)
+        // SIGTERM as well as SIGINT: a refresh started by a script or a timeout
+        // wrapper is far more likely to be terminated than interrupted, and
+        // both must still produce the documented JSON and exit code.
+        let cancelBox = CLICancellationFlag()
+        let signalSources = CLISignalHandlers.install(cancelling: cancelBox)
         defer { signalSources.forEach { $0.cancel() } }
 
         let result = await UsageRefreshCLI.run(
@@ -47,32 +48,6 @@ struct Refresh: AsyncParsableCommand {
             var stderr = RefreshStandardError()
             Swift.print(message, to: &stderr)
         }
-    }
-
-    /// SIGTERM as well as SIGINT: a refresh started by a script or a timeout
-    /// wrapper is far more likely to be terminated than interrupted, and both
-    /// must still produce the documented JSON and exit code.
-    private func installSignalHandlers(_ box: RefreshCancelBox) -> [DispatchSourceSignal] {
-        [SIGINT, SIGTERM].map { signalNumber in
-            signal(signalNumber, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .global())
-            source.setEventHandler { box.cancel() }
-            source.resume()
-            return source
-        }
-    }
-}
-
-private final class RefreshCancelBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-
-    var isCancelled: Bool {
-        lock.withLock { cancelled }
-    }
-
-    func cancel() {
-        lock.withLock { cancelled = true }
     }
 }
 
