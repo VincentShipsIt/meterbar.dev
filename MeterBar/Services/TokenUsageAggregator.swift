@@ -207,23 +207,68 @@ enum TokenUsageAggregator {
         }
     }
 
+    /// Session ids are only unique inside their own project, so flattening the
+    /// nested map by raw id merged two unrelated conversations into one row —
+    /// and always merged every project's `unknown` fallback bucket. Ids that
+    /// stay unambiguous keep the bare conversation id consumers index on; the
+    /// rest are qualified as `"<project>/<session>"`.
     nonisolated static func flattenSessions(
         _ projectSessions: [String: [String: TokenAccumulator]]
     ) -> [String: TokenAccumulator] {
         var flattened: [String: TokenAccumulator] = [:]
-        for (_, sessions) in projectSessions {
-            CostScanNestedMerge.accumulators(&flattened, sessions)
+        let ambiguous = ambiguousSessionIDs(in: projectSessions)
+        for (project, sessions) in projectSessions {
+            CostScanNestedMerge.accumulators(
+                &flattened,
+                qualifyKeys(sessions, project: project, ambiguous: ambiguous)
+            )
         }
         return flattened
     }
 
+    /// Qualified in lockstep with `flattenSessions`: `makeSessionBreakdowns`
+    /// looks each row's model slice up by the session row's own name.
     nonisolated static func flattenSessionModels(
         _ projectSessionModels: [String: [String: [String: TokenAccumulator]]]
     ) -> [String: [String: TokenAccumulator]] {
         var flattened: [String: [String: TokenAccumulator]] = [:]
-        for (_, sessions) in projectSessionModels {
-            CostScanNestedMerge.keyedAccumulators(&flattened, sessions)
+        let ambiguous = ambiguousSessionIDs(in: projectSessionModels)
+        for (project, sessions) in projectSessionModels {
+            CostScanNestedMerge.keyedAccumulators(
+                &flattened,
+                qualifyKeys(sessions, project: project, ambiguous: ambiguous)
+            )
         }
         return flattened
+    }
+
+    /// Ids that cannot stand alone in a flattened map: the `unknown` fallback
+    /// (never an identity, and qualifying it unconditionally keeps the key
+    /// stable across days rather than only on days two projects both fall back)
+    /// plus any id recorded under more than one project.
+    private nonisolated static func ambiguousSessionIDs<Value>(
+        in projectSessions: [String: [String: Value]]
+    ) -> Set<String> {
+        var seen: Set<String> = []
+        var ambiguous: Set<String> = [CostSessionAttribution.unknownSessionID]
+        for (_, sessions) in projectSessions {
+            for id in sessions.keys where !seen.insert(id).inserted {
+                ambiguous.insert(id)
+            }
+        }
+        return ambiguous
+    }
+
+    private nonisolated static func qualifyKeys<Value>(
+        _ sessions: [String: Value],
+        project: String,
+        ambiguous: Set<String>
+    ) -> [String: Value] {
+        guard sessions.keys.contains(where: ambiguous.contains) else { return sessions }
+        return Dictionary(
+            uniqueKeysWithValues: sessions.map { id, value in
+                (ambiguous.contains(id) ? "\(project)/\(id)" : id, value)
+            }
+        )
     }
 }

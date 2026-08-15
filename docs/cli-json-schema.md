@@ -268,6 +268,12 @@ Claude transcript stem, Grok session id). Project rows nest the same sessions un
 `projectBreakdowns[].sessionBreakdowns`. The field is omitted when empty. Identifiers are stable
 local stems — never working directories, prompts, credentials, branch names, or git remotes.
 
+Session ids are only unique within their own project, so the provider-level list qualifies any name
+that would otherwise be ambiguous as `"<project>/<session>"`: the `unknown` fallback bucket always,
+and any id recorded under more than one project. Every other row keeps the bare session id. Rows
+nested under `projectBreakdowns[]` are already scoped by their parent project and always use the bare
+id. Match on the trailing path component if you want to pair a provider-level row with its project.
+
 ```json
 {
   "sessionBreakdowns": [
