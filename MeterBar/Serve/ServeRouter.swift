@@ -65,16 +65,9 @@ nonisolated public enum ServeRouter {
             )
         }
 
-        let filtered: [ServiceType: UsageMetrics]
-        if let provider = query["provider"]?.lowercased(), !provider.isEmpty {
-            filtered = metrics.filter {
-                $0.key.rawValue.lowercased().contains(provider)
-                    || $0.key.displayName.lowercased().contains(provider)
-            }
-        } else {
-            filtered = metrics
-        }
-
+        // Same selection as `meterbar usage --provider`, so a padded or blank
+        // needle can't mean one thing over HTTP and another on the CLI.
+        let filtered = CLIProviderFilter.apply(query["provider"], to: metrics)
         return jsonResponse(UsageCLIJSONResponse(metrics: filtered))
     }
 
