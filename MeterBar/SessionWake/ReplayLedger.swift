@@ -94,7 +94,9 @@ actor ReplayLedger {
             let data = try JSONEncoder().encode(order)
             try SecureFileWriter.write(data, to: fileURL)
         } catch {
-            AppLog.wake.error("Failed to persist replay ledger: \(error.localizedDescription, privacy: .public)")
+            AppLog.wake.error(
+                "Failed to persist replay ledger: \(SecureFileWriterError.logDescription(for: error), privacy: .public)"
+            )
         }
     }
 }
