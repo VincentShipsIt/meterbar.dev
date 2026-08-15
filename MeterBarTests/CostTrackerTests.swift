@@ -649,7 +649,7 @@ final class CostTrackerTests: XCTestCase {
             )
         ])
         let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
-        var wholeFile = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var wholeFile = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CostScanFixtureScan.codexRollouts(in: directory, windows: &wholeFile)
 
         let session = CostScanSession(cutoff: cutoff, options: .unlimited)
@@ -1576,7 +1576,7 @@ final class CostTrackerTests: XCTestCase {
             codexTokenLine(timestamp: "2026-06-15T10:00:00Z", conversationID: "new", input: 100)
         ])
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
 
         CostScanFixtureScan.codexRollouts(in: dir, windows: &windows)
 
@@ -1590,7 +1590,7 @@ final class CostTrackerTests: XCTestCase {
         let line = codexTokenLine(timestamp: "2026-06-15T10:00:00Z")
         let dir = try writeCodexArchive(lines: [line, line])
         let cutoff = FlexibleISO8601.date(from: "2026-01-01T00:00:00Z")!
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
 
         CostScanFixtureScan.codexRollouts(in: dir, windows: &windows)
 

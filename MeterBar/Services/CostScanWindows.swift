@@ -71,6 +71,14 @@ nonisolated protocol CostScanBreakdowns {
     var projectSessionModels: [String: [String: [String: TokenAccumulator]]] { get set }
     var dailyProjectSessions: [Date: [String: [String: TokenAccumulator]]] { get set }
     var dailyProjectSessionModels: [Date: [String: [String: [String: TokenAccumulator]]]] { get set }
+
+    /// Dedup keys for every event already folded in. What makes a whole-window
+    /// merge decidable: without them there is no way to tell a file that adds
+    /// new spend from one that restates spend already counted.
+    var eventKeys: Set<String> { get }
+
+    /// Folds another window of the same shape in wholesale, keys included.
+    mutating func merge(_ other: Self)
 }
 
 /// Which bucket of each breakdown one event lands in.
@@ -127,6 +135,32 @@ nonisolated extension CostScanBreakdowns {
             keys.model,
             default: TokenAccumulator()
         ].add(event)
+    }
+}
+
+nonisolated extension ScanWindows where Totals: CostScanBreakdowns {
+    /// Merges one file's cached aggregates into the shared windows, if that can
+    /// be done without double-counting.
+    ///
+    /// Shared by all three scans: the decision is the same whether the file is a
+    /// Claude transcript, a Codex rollout, or a Grok session, and only the
+    /// caller's fallback differs.
+    ///
+    /// - Returns: `false` when the file's events *partly* overlap what is
+    ///   already folded in, which is the one case aggregates cannot express —
+    ///   the caller has to re-read that file event by event.
+    mutating func fold(period incomingPeriod: Totals, lifetime incomingLifetime: Totals) -> Bool {
+        // Period keys are a subset of lifetime keys by construction (every
+        // in-window event is also a lifetime event), so the lifetime test
+        // answers for both windows.
+        let keys = incomingLifetime.eventKeys
+        if keys.isDisjoint(with: lifetime.eventKeys) {
+            period.merge(incomingPeriod)
+            lifetime.merge(incomingLifetime)
+            return true
+        }
+        // Every event is already counted: a duplicated file with nothing new.
+        return keys.isSubset(of: lifetime.eventKeys)
     }
 }
 
@@ -389,6 +423,26 @@ nonisolated struct CostScanWindowContext: Sendable, Codable {
         sessionIDs.formUnion(other.sessionIDs)
         earliestDate = min(earliestDate, other.earliestDate)
         latestDate = max(latestDate, other.latestDate)
+    }
+
+    /// Seeds both windows the way the Codex and Grok scans each used to seed
+    /// themselves: `earliestDate` starts at now and only decreases, `latestDate`
+    /// starts at the window floor (the cutoff for the period, `.distantPast` for
+    /// lifetime) and only increases.
+    ///
+    /// A static on the window type rather than on either scanner: the two copies
+    /// were byte-identical, and a scanner-owned factory is what let them drift
+    /// apart unnoticed in the first place.
+    static func scanWindows(
+        cutoff: Date,
+        hourlyCutoff: Date = .distantPast
+    ) -> ScanWindows<CostScanWindowContext> {
+        ScanWindows(
+            period: CostScanWindowContext(earliestDate: Date(), latestDate: cutoff),
+            lifetime: CostScanWindowContext(earliestDate: Date(), latestDate: .distantPast),
+            cutoff: cutoff,
+            hourlyCutoff: hourlyCutoff
+        )
     }
 }
 
