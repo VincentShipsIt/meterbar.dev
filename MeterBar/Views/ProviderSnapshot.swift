@@ -154,6 +154,11 @@ struct SnapshotLimit: Identifiable {
     let id: String
     let kind: Kind
     let title: String
+    /// Which quota-window title the builder routed this limit to, or `nil` when
+    /// the copy was handed in directly (previews, layout fixtures). Localization
+    /// switches over this instead of over `title`, so renaming the English words
+    /// cannot silently drop a locale back to English.
+    let quotaTitleKey: ServiceType.QuotaTitleKey?
     let usageLimit: UsageLimit
     let valueStyle: ValueStyle
 
@@ -162,10 +167,29 @@ struct SnapshotLimit: Identifiable {
         case currency
     }
 
+    /// Routed construction: the shared key decides both the English words and
+    /// the translated ones, so the two cannot disagree.
+    init(
+        id: String,
+        kind: Kind,
+        quotaTitleKey: ServiceType.QuotaTitleKey,
+        usageLimit: UsageLimit,
+        valueStyle: ValueStyle = .quota
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = quotaTitleKey.englishTitle
+        self.quotaTitleKey = quotaTitleKey
+        self.usageLimit = usageLimit
+        self.valueStyle = valueStyle
+    }
+
+    /// Verbatim construction for copy that is not a routed quota window.
     init(id: String, kind: Kind, title: String, usageLimit: UsageLimit, valueStyle: ValueStyle = .quota) {
         self.id = id
         self.kind = kind
         self.title = title
+        self.quotaTitleKey = nil
         self.usageLimit = usageLimit
         self.valueStyle = valueStyle
     }
@@ -201,30 +225,37 @@ struct SnapshotLimit: Identifiable {
 
     /// App-target projection for standard quota-window copy. Parsed model
     /// labels are provider data and remain verbatim.
+    ///
+    /// Which title applies — the OpenRouter exceptions, Cursor's included-pool
+    /// split, Claude Code's model window — is decided once in `ServiceType`.
+    /// This switch only supplies the app bundle's words for that decision, the
+    /// same way `WidgetLocalizedContent.quotaTitle(for:)` supplies the widget
+    /// bundle's. Matching on the English `title` instead would mean a rename in
+    /// `ServiceType` quietly shipped English to every locale.
     var localizedTitle: String {
-        switch (kind, title) {
-        case (.session, "Key limit"):
+        guard let quotaTitleKey else { return title }
+        switch quotaTitleKey {
+        case .keyLimit:
             return String(localized: "quota.title.key_limit", defaultValue: "Key limit")
-        case (.session, "Session"):
-            return String(localized: "quota.title.session", defaultValue: "Session")
-        case (.session, "Cursor Models"):
-            return String(localized: "quota.title.cursor_models", defaultValue: "Cursor Models")
-        case (.weekly, "Account credits"):
-            return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
-        case (.weekly, "Other Models"):
-            return String(localized: "quota.title.other_models", defaultValue: "Other Models")
-        case (.weekly, "Monthly"):
-            return String(localized: "quota.title.monthly", defaultValue: "Monthly")
-        case (.weekly, "Weekly"):
-            return String(localized: "quota.title.weekly", defaultValue: "Weekly")
-        case (.codeReview, "Code Review"):
-            return String(localized: "quota.title.code_review", defaultValue: "Code Review")
-        case (.codeReview, "On-demand"):
+        case let .model(label):
+            return label
+                ?? String(localized: "quota.title.model", defaultValue: "Model")
+        case .onDemand:
             return String(localized: "quota.title.on_demand", defaultValue: "On-demand")
-        case (.codeReview, "Model"):
-            return String(localized: "quota.title.model", defaultValue: "Model")
-        default:
-            return title
+        case .codeReview:
+            return String(localized: "quota.title.code_review", defaultValue: "Code Review")
+        case .cursorModels:
+            return String(localized: "quota.title.cursor_models", defaultValue: "Cursor Models")
+        case .session:
+            return String(localized: "quota.title.session", defaultValue: "Session")
+        case .accountCredits:
+            return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
+        case .otherModels:
+            return String(localized: "quota.title.other_models", defaultValue: "Other Models")
+        case .monthly:
+            return String(localized: "quota.title.monthly", defaultValue: "Monthly")
+        case .weekly:
+            return String(localized: "quota.title.weekly", defaultValue: "Weekly")
         }
     }
 
@@ -472,7 +503,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "session",
                 kind: .session,
-                title: service.sessionQuotaTitle(limitTotal: session.total),
+                quotaTitleKey: service.sessionQuotaTitleKey(limitTotal: session.total),
                 usageLimit: session,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))
@@ -481,7 +512,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "weekly",
                 kind: .weekly,
-                title: service.weeklyQuotaTitle(limitTotal: weekly.total),
+                quotaTitleKey: service.weeklyQuotaTitleKey(limitTotal: weekly.total),
                 usageLimit: weekly,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))
@@ -493,7 +524,7 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "codeReview",
                 kind: .codeReview,
-                title: service.codeReviewQuotaTitle(modelLimitLabel: metrics.modelLimitLabel),
+                quotaTitleKey: service.codeReviewQuotaTitleKey(modelLimitLabel: metrics.modelLimitLabel),
                 usageLimit: codeReview
             ))
         }
