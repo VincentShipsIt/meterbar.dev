@@ -469,6 +469,50 @@
         }
       }
     },
+    "widget.empty.choose_detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select accounts and quota windows in MeterBar Settings."
+          }
+        }
+      },
+      "comment": "Widget placeholder body telling the reader where to choose what the widget shows."
+    },
+    "widget.empty.choose_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose usage to show"
+          }
+        }
+      },
+      "comment": "Widget placeholder heading when nothing has been selected to display."
+    },
+    "widget.empty.unavailable_detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open MeterBar to refresh provider usage."
+          }
+        }
+      },
+      "comment": "Widget placeholder body telling the reader how to refresh unavailable usage."
+    },
+    "widget.empty.unavailable_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage unavailable"
+          }
+        }
+      },
+      "comment": "Widget placeholder heading when no provider usage could be read."
+    },
     "widget.unavailable": {
       "localizations": {
         "en": {

@@ -622,15 +622,22 @@ struct WidgetSettingsBurnDownPreviewSurface: View {
 
     private var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
 
+    /// The placeholder copy the widget shows for this state, in the reader's
+    /// language — not the shared model's English `title`/`detail`, which would
+    /// leave this preview speaking English beside a translated widget.
+    var emptyStateText: WidgetSettingsPreviewEmptyStateText? {
+        presentation.emptyState.map(WidgetSettingsPreviewEmptyStateText.init)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.stackSpacing) {
-            if let emptyState = presentation.emptyState {
+            if let emptyState = presentation.emptyState, let emptyStateText {
                 Spacer()
                 Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
-                Text(emptyState.title)
+                Text(emptyStateText.title)
                     .font(.caption)
                     .fontWeight(.semibold)
-                Text(emptyState.detail)
+                Text(emptyStateText.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -705,9 +712,7 @@ struct WidgetSettingsBurnDownPreviewRow: View {
                 .font(.system(size: metrics.captionSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Text(row.countdownKind == .unavailable || row.countdownText == "Unavailable"
-                 ? LocalizedUsageFormat.unavailable()
-                 : row.countdownText)
+            Text(countdownText)
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -734,6 +739,16 @@ struct WidgetSettingsBurnDownPreviewRow: View {
         .accessibilityValue(row.accessibilityValueText)
     }
 
+    /// The same countdown value the widget draws, fallback and all — the
+    /// `"Unavailable"` sentinel check lives in `LocalizedUsageFormat` rather
+    /// than being spelled out again here.
+    var countdownText: String {
+        LocalizedUsageFormat.burnDownCountdownText(
+            kind: row.countdownKind,
+            fallback: row.countdownText
+        )
+    }
+
     private var quotaLeftText: String {
         row.row.limit.map { LocalizedUsageFormat.percentLeft($0) }
             ?? LocalizedUsageFormat.unavailable()
@@ -741,6 +756,22 @@ struct WidgetSettingsBurnDownPreviewRow: View {
 
     private var stageColor: Color {
         row.isExhausted ? MeterBarTheme.danger : row.stage.previewColor
+    }
+}
+
+/// The localized placeholder copy both Settings preview surfaces draw.
+///
+/// The widget extension renders its empty state through
+/// `WidgetLocalizedContent`, which resolves against the widget bundle; the app
+/// cannot link that type, so both targets read the same keys through the shared
+/// `LocalizedUsageFormat` helpers instead.
+struct WidgetSettingsPreviewEmptyStateText: Equatable {
+    let title: String
+    let detail: String
+
+    init(_ state: WidgetPresentationEmptyState) {
+        title = LocalizedUsageFormat.widgetEmptyTitle(state)
+        detail = LocalizedUsageFormat.widgetEmptyDetail(state)
     }
 }
 
@@ -763,15 +794,20 @@ struct WidgetSettingsPreviewSurface: View {
     /// rows everywhere else.
     var layout: WidgetGlanceLayout { WidgetGlance.layout(for: presentation, family: family) }
 
+    /// See `WidgetSettingsBurnDownPreviewSurface.emptyStateText`.
+    var emptyStateText: WidgetSettingsPreviewEmptyStateText? {
+        presentation.emptyState.map(WidgetSettingsPreviewEmptyStateText.init)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.stackSpacing) {
-            if let emptyState = presentation.emptyState {
+            if let emptyState = presentation.emptyState, let emptyStateText {
                 Spacer()
                 Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
-                Text(emptyState.title)
+                Text(emptyStateText.title)
                     .font(.caption)
                     .fontWeight(.semibold)
-                Text(emptyState.detail)
+                Text(emptyStateText.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
