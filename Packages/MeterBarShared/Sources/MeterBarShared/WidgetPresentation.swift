@@ -60,15 +60,25 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public let resetTime: Date?
     public let freshnessDate: Date?
 
-    public var quotaTitle: String {
+    /// Which quota title this row resolves to, before any language is chosen.
+    ///
+    /// The widget extension localizes *this*, rather than re-deriving the same
+    /// `(service, quotaWindow, limit)` routing against its own catalog — so a
+    /// change here reaches the localized widget instead of silently diverging
+    /// from it.
+    public var quotaTitleKey: ServiceType.QuotaTitleKey {
         switch quotaWindow {
         case .codeReview:
-            return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
+            return service.codeReviewQuotaTitleKey(modelLimitLabel: modelLimitLabel)
         case .session:
-            return service.sessionQuotaTitle(limitTotal: limit?.total)
+            return service.sessionQuotaTitleKey(limitTotal: limit?.total)
         case .weekly:
-            return service.weeklyQuotaTitle(limitTotal: limit?.total)
+            return service.weeklyQuotaTitleKey(limitTotal: limit?.total)
         }
+    }
+
+    public var quotaTitle: String {
+        quotaTitleKey.englishTitle
     }
 
     public var progressValue: Double? {
