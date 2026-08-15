@@ -362,7 +362,12 @@ class CostTracker: ObservableObject {
         do {
             try CostSummaryStore.save(CostSummaryCache(summary: costSummary, lastScanDate: lastScanDate))
         } catch {
-            AppLog.cost.error("Failed to save cost summary cache: \(error.localizedDescription, privacy: .public)")
+            AppLog.cost.error(
+                """
+                Failed to save cost summary cache: \
+                \(SecureFileWriterError.logDescription(for: error), privacy: .public)
+                """
+            )
         }
     }
 }
