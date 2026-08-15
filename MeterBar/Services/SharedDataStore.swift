@@ -68,7 +68,12 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
                 try SecureFileWriter.write(data, to: fileURL)
                 self?.didWrite()
             } catch {
-                AppLog.storage.error("Failed to save shared metrics: \(error.localizedDescription, privacy: .public)")
+                AppLog.storage.error(
+                    """
+                    Failed to save shared metrics: \
+                    \(SecureFileWriterError.logDescription(for: error), privacy: .public)
+                    """
+                )
             }
         }
     }
@@ -86,7 +91,10 @@ nonisolated public final class SharedDataStore: @unchecked Sendable {
                 self?.didWrite()
             } catch {
                 AppLog.storage.error(
-                    "Failed to save shared account metrics: \(error.localizedDescription, privacy: .public)"
+                    """
+                    Failed to save shared account metrics: \
+                    \(SecureFileWriterError.logDescription(for: error), privacy: .public)
+                    """
                 )
             }
         }

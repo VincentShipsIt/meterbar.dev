@@ -217,6 +217,69 @@ final class SecureFileWriterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), existing)
     }
 
+    // MARK: - Log redaction
+
+    /// `errorDescription` names the file, which is right in front of a human
+    /// holding the URL. A `privacy: .public` log line is a different audience:
+    /// everything this writer touches lives under the user's home directory, so
+    /// a path published to the unified log publishes the account name with it.
+    func testLogDescriptionOmitsTheHomeDirectoryPath() {
+        let path = "/Users/someaccount/Library/Application Support/MeterBar/metrics.json"
+        let cases: [(error: SecureFileWriterError, code: Int32)] = [
+            (.create(code: EACCES, path: path), EACCES),
+            (.write(code: ENOSPC, path: path), ENOSPC),
+            (.replace(code: EACCES, path: path), EACCES)
+        ]
+
+        for (error, code) in cases {
+            XCTAssertTrue(
+                error.localizedDescription.contains(path),
+                "precondition: the human-facing description is the one that names the file"
+            )
+            XCTAssertFalse(error.logDescription.contains(path))
+            XCTAssertFalse(error.logDescription.contains("someaccount"))
+            XCTAssertTrue(
+                error.logDescription.contains(String(cString: strerror(code))),
+                "the errno is the part an operator acts on and must survive"
+            )
+        }
+    }
+
+    /// The catch blocks that log see an opaque `Error`, so the shared entry
+    /// point has to do the narrowing — a call site that reaches for
+    /// `localizedDescription` is exactly the mistake this guards.
+    func testLogDescriptionForRedactsAThrownWriterError() {
+        let url = tempDirectory.appendingPathComponent("occupied")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try SecureFileWriter.write(Data("x".utf8), to: url)) { error in
+            let logged = SecureFileWriterError.logDescription(for: error)
+            XCTAssertFalse(logged.contains(self.tempDirectory.path))
+            XCTAssertFalse(logged.contains("/Users/"))
+            XCTAssertFalse(logged.contains(NSHomeDirectory()))
+            XCTAssertTrue(logged.hasPrefix("replace failed:"))
+        }
+    }
+
+    /// Non-writer errors reach the same catch blocks — a Cocoa write error names
+    /// the file and folder in its own description, and `EncodingError` names the
+    /// transcript path a cache is keyed by. Domain and code name nobody.
+    func testLogDescriptionForFallsBackToDomainAndCodeForOtherErrors() {
+        let error = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteNoPermissionError,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "You don’t have permission to save the file in the folder /Users/someaccount/Library."
+            ]
+        )
+
+        let logged = SecureFileWriterError.logDescription(for: error)
+
+        XCTAssertEqual(logged, "\(NSCocoaErrorDomain) \(NSFileWriteNoPermissionError)")
+        XCTAssertFalse(logged.contains("someaccount"))
+    }
+
     // MARK: - Helpers
 
     private func permissions(of url: URL) throws -> Int {
