@@ -55,11 +55,58 @@ nonisolated enum CostScanResumption {
         record.cutoff = cutoff
         return record
     }
+
+    /// The same validation, plus the trailing-seven-day hourly window every
+    /// provider scan also has to reconcile.
+    ///
+    /// The two cutoffs move independently and are handled differently on
+    /// purpose. The period cutoff slides forward daily and its tally can often
+    /// be *rebased* from lifetime; the hourly boundary only ever needs buckets
+    /// dropped, because an hour that has aged out contributes nothing and no
+    /// event can arrive for it later. A record built against a *later* hourly
+    /// boundary than this refresh wants is unusable in the other direction —
+    /// the buckets it dropped cannot be reconstructed — so it is rejected
+    /// outright rather than trimmed.
+    ///
+    /// - Returns: `nil` when the file has to be re-read from byte zero.
+    static func resumableRecord<Payload: CostScanWindowedPayload>(
+        existing: CostScanFileRecord<Payload>?,
+        file: CostScanFile,
+        cutoff: Date,
+        hourlyCutoff: Date
+    ) -> CostScanFileRecord<Payload>? {
+        guard var record = resumableRecord(
+            existing: existing,
+            file: file,
+            cutoff: cutoff,
+            rebase: { payload, cutoff in payload.rebasePeriod(to: cutoff) }
+        ) else { return nil }
+        guard record.hourlyCutoff <= hourlyCutoff else { return nil }
+        if record.hourlyCutoff < hourlyCutoff {
+            record.payload.period.hourly = record.payload.period.hourly.filter { $0.key >= hourlyCutoff }
+            record.payload.lifetime.hourly = record.payload.lifetime.hourly.filter { $0.key >= hourlyCutoff }
+            record.hourlyCutoff = hourlyCutoff
+        }
+        return record
+    }
 }
 
 /// Provider payload behavior injected into ``CostScanResumption``.
 nonisolated protocol CostScanPeriodRebasable: Codable, Sendable {
     mutating func rebasePeriod(to cutoff: Date) -> Bool
+}
+
+/// A rebasable payload whose two windows are both full breakdown sets.
+///
+/// All three providers store exactly this — a period window and a lifetime
+/// window of the same type — so the hourly trim in ``CostScanResumption`` can
+/// reach `hourly` generically instead of once per scanner. The Claude payload
+/// spells the property `hourly` and the Codex/Grok one spells it
+/// `hourlyTotals`; `CostScanBreakdowns` already forwards between them.
+nonisolated protocol CostScanWindowedPayload: CostScanPeriodRebasable {
+    associatedtype Window: CostScanBreakdowns
+    var period: Window { get set }
+    var lifetime: Window { get set }
 }
 
 /// Every transcript's record, keyed by standardized path.
@@ -354,7 +401,7 @@ nonisolated struct GrokFileTotals: Codable, Sendable {
     }
 }
 
-nonisolated extension ClaudeFileTotals: CostScanPeriodRebasable {
+nonisolated extension ClaudeFileTotals: CostScanWindowedPayload {
     mutating func rebasePeriod(to cutoff: Date) -> Bool {
         // The period window slides every day; lifetime totals never expire. So
         // the only question is whether the cached period tally can be rebased
@@ -376,10 +423,8 @@ nonisolated extension ClaudeFileTotals: CostScanPeriodRebasable {
 }
 
 /// The identical period/lifetime shape shared by Codex and Grok payloads.
-nonisolated protocol CostScanWindowPeriodRebasable: CostScanPeriodRebasable {
-    var period: CostScanWindowContext { get set }
-    var lifetime: CostScanWindowContext { get }
-}
+nonisolated protocol CostScanWindowPeriodRebasable: CostScanWindowedPayload
+    where Window == CostScanWindowContext {}
 
 nonisolated extension CostScanWindowPeriodRebasable {
     mutating func rebasePeriod(to cutoff: Date) -> Bool {

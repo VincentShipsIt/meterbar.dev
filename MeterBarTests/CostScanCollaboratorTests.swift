@@ -471,7 +471,7 @@ final class CostScanCollaboratorTests: XCTestCase {
         }
 
         let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-07-01T00:00:00Z"))
-        var windows = CodexCostScanner.scanWindows(cutoff: cutoff)
+        var windows = CostScanWindowContext.scanWindows(cutoff: cutoff)
         CodexCostScanner.scanSQLiteLogs(database: database, since: cutoff, windows: &windows)
 
         XCTAssertEqual(windows.period.totals.input, 120)

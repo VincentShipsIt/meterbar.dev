@@ -5,6 +5,7 @@ import XCTest
 final class CostScanResumptionTests: XCTestCase {
     private let originalCutoff = Date(timeIntervalSince1970: 1_780_000_000)
     private let currentCutoff = Date(timeIntervalSince1970: 1_781_000_000)
+    private let hourlyCutoff = Date(timeIntervalSince1970: 1_781_100_000)
 
     func testRejectsOffsetBeyondCurrentFileSize() {
         let file = makeFile(size: 100)
@@ -149,6 +150,86 @@ final class CostScanResumptionTests: XCTestCase {
         let insideResult = try XCTUnwrap(resumableRecord(makeRecord(payload: insidePayload)))
         XCTAssertEqual(insideResult.payload.period.input, 25)
         XCTAssertEqual(insideResult.payload.period.eventKeys, ["current"])
+    }
+
+    // MARK: - Hourly window
+
+    /// The hourly boundary only ever moves buckets *out*: an hour that has aged
+    /// out can gain no further events, so the record is trimmed rather than
+    /// discarded.
+    func testHourlyRebaseDropsBucketsBelowTheNewBoundary() throws {
+        let stale = hourlyCutoff.addingTimeInterval(-3_600)
+        let live = hourlyCutoff.addingTimeInterval(3_600)
+        var payload = CodexFileTotals(cutoff: currentCutoff)
+        payload.period.hourlyTotals = [stale: TokenAccumulator(), live: TokenAccumulator()]
+        payload.lifetime.hourlyTotals = [stale: TokenAccumulator(), live: TokenAccumulator()]
+        var record = makeRecord(payload: payload)
+        record.cutoff = currentCutoff
+
+        let result = try XCTUnwrap(resumableRecord(record, hourlyCutoff: hourlyCutoff))
+
+        XCTAssertEqual(Set(result.payload.period.hourlyTotals.keys), [live])
+        XCTAssertEqual(Set(result.payload.lifetime.hourlyTotals.keys), [live])
+        XCTAssertEqual(result.hourlyCutoff, hourlyCutoff)
+    }
+
+    /// A record built against a *later* boundary already dropped buckets this
+    /// refresh still needs, and dropped buckets cannot be reconstructed — so it
+    /// is rejected outright rather than trimmed in the wrong direction.
+    func testHourlyRebaseRejectsRecordBuiltAgainstALaterBoundary() {
+        var payload = CodexFileTotals(cutoff: currentCutoff)
+        payload.lifetime.hourlyTotals = [hourlyCutoff: TokenAccumulator()]
+        var record = makeRecord(payload: payload)
+        record.cutoff = currentCutoff
+        record.hourlyCutoff = hourlyCutoff.addingTimeInterval(3_600)
+
+        XCTAssertNil(resumableRecord(record, hourlyCutoff: hourlyCutoff))
+    }
+
+    func testHourlyRebaseLeavesBucketsAloneWhenTheBoundaryIsUnchanged() throws {
+        let stale = hourlyCutoff.addingTimeInterval(-3_600)
+        var payload = CodexFileTotals(cutoff: currentCutoff)
+        payload.lifetime.hourlyTotals = [stale: TokenAccumulator()]
+        var record = makeRecord(payload: payload)
+        record.cutoff = currentCutoff
+        record.hourlyCutoff = hourlyCutoff
+
+        let result = try XCTUnwrap(resumableRecord(record, hourlyCutoff: hourlyCutoff))
+
+        XCTAssertEqual(Set(result.payload.lifetime.hourlyTotals.keys), [stale])
+    }
+
+    /// Claude spells the same window `hourly` where Codex and Grok spell it
+    /// `hourlyTotals`; both reach the trim through one generic seam.
+    func testClaudeHourlyRebaseSharesTheSameTrim() throws {
+        let stale = hourlyCutoff.addingTimeInterval(-3_600)
+        let live = hourlyCutoff.addingTimeInterval(3_600)
+        var payload = ClaudeFileTotals()
+        payload.period.hourly = [stale: TokenAccumulator(), live: TokenAccumulator()]
+        payload.lifetime.hourly = [stale: TokenAccumulator(), live: TokenAccumulator()]
+        var record = makeRecord(payload: payload)
+        record.cutoff = currentCutoff
+
+        let result = try XCTUnwrap(resumableRecord(record, hourlyCutoff: hourlyCutoff))
+
+        XCTAssertEqual(Set(result.payload.period.hourly.keys), [live])
+        XCTAssertEqual(Set(result.payload.lifetime.hourly.keys), [live])
+    }
+
+    private func resumableRecord<Payload: CostScanWindowedPayload>(
+        _ record: CostScanFileRecord<Payload>,
+        hourlyCutoff: Date
+    ) -> CostScanFileRecord<Payload>? {
+        CostScanResumption.resumableRecord(
+            existing: record,
+            file: makeFile(
+                size: record.stamp.size,
+                modified: record.stamp.modified,
+                fileID: record.stamp.fileID
+            ),
+            cutoff: currentCutoff,
+            hourlyCutoff: hourlyCutoff
+        )
     }
 
     private func resumableRecord<Payload: CostScanPeriodRebasable>(
