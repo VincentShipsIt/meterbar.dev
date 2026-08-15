@@ -1,6 +1,5 @@
 import ArgumentParser
 import Darwin
-import Dispatch
 import Foundation
 import MeterBar
 
@@ -53,9 +52,12 @@ struct Wake: AsyncParsableCommand {
     var yesBypass: Bool = false
 
     func run() async throws {
-        let cancelBox = CancelBox()
-        let signalSource = installSignalHandler(cancelBox)
-        defer { signalSource.cancel() }
+        // SIGINT only: the #99 contract is that Ctrl-C releases the shared lock
+        // and leaves no child process behind. SIGTERM keeps its default
+        // disposition here.
+        let cancelBox = CLICancellationFlag()
+        let signalSources = CLISignalHandlers.install([SIGINT], cancelling: cancelBox)
+        defer { signalSources.forEach { $0.cancel() } }
 
         let request = SessionWakeCLI.Request(
             provider: provider,
@@ -86,22 +88,6 @@ struct Wake: AsyncParsableCommand {
             Swift.print(message, to: &stderr)
         }
     }
-
-    private func installSignalHandler(_ box: CancelBox) -> DispatchSourceSignal {
-        signal(SIGINT, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-        source.setEventHandler { box.cancel() }
-        source.resume()
-        return source
-    }
-}
-
-/// Thread-safe cancellation flag toggled by the SIGINT handler.
-private final class CancelBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
-    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
 }
 
 /// Minimal stderr text stream so diagnostics never contaminate JSON stdout.
