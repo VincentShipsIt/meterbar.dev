@@ -354,11 +354,7 @@ nonisolated enum CostScanCacheStoreError: LocalizedError {
     /// Encoder failures matter here too — the cache is keyed by transcript path,
     /// so `EncodingError`'s own description would name one.
     static func reason(for error: Error) -> String {
-        if let error = error as? SecureFileWriterError {
-            return error.logDescription
-        }
-        let error = error as NSError
-        return "\(error.domain) \(error.code)"
+        SecureFileWriterError.logDescription(for: error)
     }
 }
 

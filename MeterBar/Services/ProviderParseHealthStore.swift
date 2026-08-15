@@ -194,7 +194,10 @@ final class ProviderParseHealthStore: ObservableObject {
                 try SecureFileWriter.write(data, to: sharedFileURL)
             } catch {
                 AppLog.storage.error(
-                    "Failed to save provider health: \(error.localizedDescription, privacy: .public)"
+                    """
+                    Failed to save provider health: \
+                    \(SecureFileWriterError.logDescription(for: error), privacy: .public)
+                    """
                 )
             }
         }
