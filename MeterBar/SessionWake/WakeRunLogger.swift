@@ -47,7 +47,9 @@ nonisolated struct WakeRunLogger: Sendable {
             appendData(line, to: fileURL)
             pruneOldLogs()
         } catch {
-            AppLog.wake.error("Failed to write wake log: \(error.localizedDescription, privacy: .public)")
+            AppLog.wake.error(
+                "Failed to write wake log: \(SecureFileWriterError.logDescription(for: error), privacy: .public)"
+            )
         }
     }
 
