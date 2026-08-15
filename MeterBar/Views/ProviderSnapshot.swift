@@ -46,9 +46,24 @@ struct ProviderSnapshot: Identifiable {
     /// The provider-wide limit closest to exhaustion — what the card's status
     /// reflects. Model-scoped Sonnet/Fable and code-review windows remain
     /// visible on their own rows but do not mean the provider is unavailable.
+    ///
+    /// Cursor's included pools spill over into each other, so the card's status
+    /// follows the pool with the most room: emptying Cursor Models while Other
+    /// Models still has 73% left is not "Out". Only when every pool is gone does
+    /// the roomiest one read exhausted too, and the header agrees with
+    /// `blockingLimits`.
     var primaryLimit: SnapshotLimit? {
         let providerLimits = limits.filter(\.isProviderBlocking)
+        if hasCursorSpilloverPools {
+            return providerLimits.max { $0.percentLeft < $1.percentLeft }
+        }
         return providerLimits.min { $0.percentLeft < $1.percentLeft }
+    }
+
+    /// Two or more included Cursor pools (Cursor Models / Other Models). A lone
+    /// legacy monthly bar has nothing to spill into and keeps the normal rules.
+    private var hasCursorSpilloverPools: Bool {
+        service == .cursor && limits.filter(\.isProviderBlocking).count >= 2
     }
 
     /// Severity band of the primary limit; `nil` when no limits are reported.
@@ -59,21 +74,19 @@ struct ProviderSnapshot: Identifiable {
     /// Session/weekly windows that can block normal provider usage. Secondary
     /// model/code-review quotas remain visible but must not collapse the entire
     /// provider card or claim the provider is unavailable.
-        var blockingLimits: [SnapshotLimit] {
+    var blockingLimits: [SnapshotLimit] {
         guard extraUsage?.state != .on else { return [] }
         let exhausted = limits.filter {
             $0.isProviderBlocking
                 && !$0.usageLimit.isEstimated
                 && $0.usageLimit.isAtLimit
         }
-        if service == .cursor {
-            let pools = limits.filter(\.isProviderBlocking)
+        if hasCursorSpilloverPools {
             // Spillover: emptying Cursor Models still leaves Other Models, and
             // the reverse. Collapse the card only when every included pool is
             // gone. A lone legacy monthly bar still blocks on its own.
-            if pools.count >= 2 {
-                return exhausted.count == pools.count ? exhausted : []
-            }
+            let pools = limits.filter(\.isProviderBlocking)
+            return exhausted.count == pools.count ? exhausted : []
         }
         return exhausted
     }
