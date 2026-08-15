@@ -251,6 +251,26 @@ public enum LocalizedUsageFormat {
         }
     }
 
+    /// The countdown value a burn-down row shows, with the "no target" fallback
+    /// applied.
+    ///
+    /// `WidgetBurnDownRow.countdownText` is locale-neutral shared data, so an
+    /// unavailable countdown arrives as the English sentinel `"Unavailable"` —
+    /// which every renderer then has to recognize before it can translate it.
+    /// Owning that check here is what keeps the widget and the Settings preview
+    /// from disagreeing about when the fallback applies.
+    public static func burnDownCountdownText(
+        kind: WidgetBurnDownCountdownKind,
+        fallback: String,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        if kind == .unavailable || fallback == "Unavailable" {
+            return unavailable(bundle: bundle, locale: locale)
+        }
+        return fallback
+    }
+
     public static func unavailable(
         bundle: Bundle = .main,
         locale: Locale = .current
@@ -262,5 +282,55 @@ public enum LocalizedUsageFormat {
             locale: locale,
             comment: "Generic unavailable placeholder."
         )
+    }
+
+    public static func widgetEmptyTitle(
+        _ state: WidgetPresentationEmptyState,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        switch state {
+        case .noSelection:
+            return String(
+                localized: "widget.empty.choose_title",
+                defaultValue: "Choose usage to show",
+                bundle: bundle,
+                locale: locale,
+                comment: "Widget placeholder heading when nothing has been selected to display."
+            )
+        case .unavailable:
+            return String(
+                localized: "widget.empty.unavailable_title",
+                defaultValue: "Usage unavailable",
+                bundle: bundle,
+                locale: locale,
+                comment: "Widget placeholder heading when no provider usage could be read."
+            )
+        }
+    }
+
+    public static func widgetEmptyDetail(
+        _ state: WidgetPresentationEmptyState,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        switch state {
+        case .noSelection:
+            return String(
+                localized: "widget.empty.choose_detail",
+                defaultValue: "Select accounts and quota windows in MeterBar Settings.",
+                bundle: bundle,
+                locale: locale,
+                comment: "Widget placeholder body telling the reader where to choose what the widget shows."
+            )
+        case .unavailable:
+            return String(
+                localized: "widget.empty.unavailable_detail",
+                defaultValue: "Open MeterBar to refresh provider usage.",
+                bundle: bundle,
+                locale: locale,
+                comment: "Widget placeholder body telling the reader how to refresh unavailable usage."
+            )
+        }
     }
 }
