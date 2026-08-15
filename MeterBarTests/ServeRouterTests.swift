@@ -17,6 +17,16 @@ final class ServeRouterTests: XCTestCase {
         ),
     ]
 
+    /// Two providers whose identifiers and display names diverge, so a
+    /// `?provider=` test can tell an identifier match from a display-name one.
+    private lazy var multiProviderMetrics: [ServiceType: UsageMetrics] = metrics.merging([
+        .codexCli: UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: referenceDate),
+            lastUpdated: referenceDate
+        ),
+    ]) { current, _ in current }
+
     private lazy var costCache = CostSummaryCache(
         summary: CostSummary(
             costs: [
@@ -213,15 +223,37 @@ final class ServeRouterTests: XCTestCase {
         XCTAssertEqual(response.body, expected)
     }
 
-    func testUsageEndpointHonorsProviderQueryFilterLikeTheCLI() throws {
-        let response = ServeRouter.handle(
-            request(path: "/usage", query: ["provider": "codex"], token: token),
-            token: token,
-            dataSource: makeDataSource()
-        )
+    // MARK: `?provider=` parity with `meterbar usage --provider`
 
-        let expected = try UsageCLIJSONResponse(metrics: [:]).jsonData()
-        XCTAssertEqual(response.body, expected, "no codex entry in the fixture, so filtering should yield an empty set")
+    func testUsageEndpointProviderQueryMatchesTheProviderIdentifier() throws {
+        try assertUsageEndpoint(provider: "codex", selects: [.codexCli])
+        try assertUsageEndpoint(provider: "CODEX", selects: [.codexCli])
+    }
+
+    /// Codex's identifier is "Codex CLI" but it is displayed as "OpenAI
+    /// Codex", so "openai" can only match through the display name.
+    func testUsageEndpointProviderQueryMatchesTheDisplayName() throws {
+        try assertUsageEndpoint(provider: "openai", selects: [.codexCli])
+    }
+
+    /// `?provider=%20codex%20` decodes to a padded needle. The CLI trims it,
+    /// so the endpoint has to as well — it used to return an empty set while
+    /// `meterbar usage --provider " codex "` matched Codex.
+    func testUsageEndpointTrimsAPaddedProviderQueryLikeTheCLI() throws {
+        try assertUsageEndpoint(provider: " codex ", selects: [.codexCli])
+        try assertUsageEndpoint(provider: "\tcodex\n", selects: [.codexCli])
+    }
+
+    func testUsageEndpointReturnsAnEmptySetWhenTheProviderQueryMatchesNothing() throws {
+        try assertUsageEndpoint(provider: "clod", selects: [])
+    }
+
+    /// A missing filter selects everything, and a blank one is still no
+    /// filter — the router used to treat "   " as a needle matching nothing.
+    func testUsageEndpointWithoutAProviderQueryReturnsEveryCachedProvider() throws {
+        try assertUsageEndpoint(provider: nil, selects: [.claudeCode, .codexCli])
+        try assertUsageEndpoint(provider: "", selects: [.claudeCode, .codexCli])
+        try assertUsageEndpoint(provider: "   ", selects: [.claudeCode, .codexCli])
     }
 
     func testCostEndpointHonorsDaysQueryLikeTheCLI() throws {
@@ -338,6 +370,31 @@ final class ServeRouterTests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    /// Drives `/usage` against the two-provider fixture and asserts the body
+    /// is byte-identical to the DTO the CLI would emit for `selects`.
+    private func assertUsageEndpoint(
+        provider: String?,
+        selects selected: Set<ServiceType>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let response = ServeRouter.handle(
+            request(
+                path: "/usage",
+                query: provider.map { ["provider": $0] } ?? [:],
+                token: token
+            ),
+            token: token,
+            dataSource: makeDataSource(metrics: multiProviderMetrics)
+        )
+
+        let expectedMetrics = multiProviderMetrics.filter { selected.contains($0.key) }
+        XCTAssertEqual(expectedMetrics.count, selected.count, "fixture is missing \(selected)", file: file, line: line)
+
+        let expected = try UsageCLIJSONResponse(metrics: expectedMetrics).jsonData()
+        XCTAssertEqual(response.body, expected, "provider=\(provider.debugDescription)", file: file, line: line)
+    }
 
     private func assertBodyContainsNoUsageData(_ response: ServeHTTPResponse, file: StaticString = #filePath, line: UInt = #line) {
         guard let body = String(data: response.body, encoding: .utf8) else {
