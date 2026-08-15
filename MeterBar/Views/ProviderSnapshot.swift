@@ -60,10 +60,16 @@ struct ProviderSnapshot: Identifiable {
         return providerLimits.min { $0.percentLeft < $1.percentLeft }
     }
 
-    /// Two or more included Cursor pools (Cursor Models / Other Models). A lone
-    /// legacy monthly bar has nothing to spill into and keeps the normal rules.
+    /// Two or more included Cursor pools (Cursor Models / Other Models). Only the
+    /// percent-of-100 pools spill into each other, so the check is the pool
+    /// denominator, not the window count: a legacy on-demand + monthly pair is
+    /// two blocking windows that do NOT share a budget and keeps the normal
+    /// tightest-window rules, as does a lone monthly bar.
     private var hasCursorSpilloverPools: Bool {
-        service == .cursor && limits.filter(\.isProviderBlocking).count >= 2
+        guard service == .cursor else { return false }
+        let providerLimits = limits.filter(\.isProviderBlocking)
+        return providerLimits.count >= 2
+            && providerLimits.allSatisfy { ServiceType.isCursorIncludedPool(total: $0.usageLimit.total) }
     }
 
     /// Severity band of the primary limit; `nil` when no limits are reported.
