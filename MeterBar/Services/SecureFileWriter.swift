@@ -207,6 +207,24 @@ enum SecureFileWriterError: LocalizedError {
         }
     }
 
+    /// Path-free rendering of *any* error raised while persisting a file.
+    ///
+    /// The single entry point for the catch blocks that log at
+    /// `privacy: .public`: they hold an opaque `Error`, so the narrowing has to
+    /// happen here rather than at each call site — reaching for
+    /// `localizedDescription` there is exactly the leak this exists to prevent.
+    /// A writer error reduces to its errno; anything else — a Cocoa write error
+    /// naming the file it could not save, an `EncodingError` naming the
+    /// transcript path a cache is keyed by — reduces to a domain and code, which
+    /// names nobody.
+    static func logDescription(for error: Error) -> String {
+        if let error = error as? SecureFileWriterError {
+            return error.logDescription
+        }
+        let error = error as NSError
+        return "\(error.domain) \(error.code)"
+    }
+
     private static func describe(_ code: Int32) -> String {
         String(cString: strerror(code))
     }
