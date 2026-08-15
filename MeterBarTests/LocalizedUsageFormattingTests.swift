@@ -61,4 +61,54 @@ final class LocalizedUsageFormattingTests: XCTestCase {
             "<1m"
         )
     }
+
+    /// The English source copy has to stay word-for-word what the locale-neutral
+    /// shared model says, or the Settings preview would change wording the
+    /// moment it started routing through the localized helper.
+    func testWidgetEmptyStateCopyMatchesTheSharedEnglishSource() {
+        for state in [WidgetPresentationEmptyState.noSelection, .unavailable] {
+            XCTAssertEqual(
+                LocalizedUsageFormat.widgetEmptyTitle(state, locale: Locale(identifier: "en")),
+                state.title,
+                "\(state) title"
+            )
+            XCTAssertEqual(
+                LocalizedUsageFormat.widgetEmptyDetail(state, locale: Locale(identifier: "en")),
+                state.detail,
+                "\(state) detail"
+            )
+        }
+    }
+
+    /// `countdownText` arrives from the locale-neutral planner, so an
+    /// unavailable countdown reads as the English sentinel. Recognizing it is
+    /// the formatter's job — every renderer that spelled the check out itself is
+    /// a place the fallback could go missing.
+    func testBurnDownCountdownTextTranslatesTheUnavailableSentinel() {
+        let english = Locale(identifier: "en")
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownText(
+                kind: .unavailable,
+                fallback: "2h 5m",
+                locale: english
+            ),
+            LocalizedUsageFormat.unavailable(locale: english)
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownText(
+                kind: .reset,
+                fallback: "Unavailable",
+                locale: english
+            ),
+            LocalizedUsageFormat.unavailable(locale: english)
+        )
+        XCTAssertEqual(
+            LocalizedUsageFormat.burnDownCountdownText(
+                kind: .reset,
+                fallback: "2h 5m",
+                locale: english
+            ),
+            "2h 5m"
+        )
+    }
 }

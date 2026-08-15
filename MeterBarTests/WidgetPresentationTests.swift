@@ -378,6 +378,85 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertTrue(result.rows.allSatisfy { [.claudeCode, .codexCli, .cursor].contains($0.service) })
     }
 
+    // MARK: - Quota title routing
+
+    /// Which quota title a row shows is one decision with two readers: the app
+    /// and CLI take `quotaTitle`, the widget extension localizes
+    /// `quotaTitleKey`. The extension used to re-derive the routing from
+    /// `(service, quotaWindow)` on its own side, so this pins the two to the
+    /// same answer for every provider, window, and Cursor pool shape.
+    func testQuotaTitleIsDerivedFromTheSharedRoutingKey() {
+        for service in ServiceType.allCases {
+            for total in [ServiceType.cursorIncludedPoolTotal, 500] {
+                for row in allWindowRows(service: service, total: total) {
+                    XCTAssertEqual(
+                        row.quotaTitle,
+                        row.quotaTitleKey.englishTitle,
+                        "\(service) \(row.quotaWindow) total \(total)"
+                    )
+                    XCTAssertEqual(
+                        row.quotaTitleKey,
+                        expectedQuotaTitleKey(
+                            service: service,
+                            window: row.quotaWindow,
+                            total: total
+                        ),
+                        "\(service) \(row.quotaWindow) total \(total)"
+                    )
+                }
+            }
+        }
+    }
+
+    /// The routing table itself, spelled out once so a change to it has to be
+    /// deliberate. Cursor's included pools are the percent-of-100 shape;
+    /// anything else is the legacy request quota.
+    private func expectedQuotaTitleKey(
+        service: ServiceType,
+        window: WidgetQuotaWindow,
+        total: Double
+    ) -> ServiceType.QuotaTitleKey {
+        let isIncludedPool = ServiceType.isCursorIncludedPool(total: total)
+        switch (service, window) {
+        case (.claudeCode, .codeReview): return .model(label: "Fable")
+        case (.cursor, .codeReview): return .onDemand
+        case (_, .codeReview): return .codeReview
+        case (.openRouter, .session): return .keyLimit
+        case (.cursor, .session): return isIncludedPool ? .cursorModels : .session
+        case (_, .session): return .session
+        case (.openRouter, .weekly): return .accountCredits
+        case (.cursor, .weekly): return isIncludedPool ? .otherModels : .monthly
+        case (_, .weekly): return .weekly
+        }
+    }
+
+    /// One row per quota window for a single provider, built through the real
+    /// planner rather than a hand-made row.
+    private func allWindowRows(service: ServiceType, total: Double) -> [WidgetPresentationRow] {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
+        let rows = presentation(
+            metrics: [
+                service: makeMetrics(
+                    service,
+                    sessionUsed: 10,
+                    weeklyUsed: 10,
+                    codeReviewUsed: 10,
+                    total: total,
+                    modelLimitLabel: "Fable"
+                )
+            ],
+            preferences: preferences,
+            family: .large
+        ).rows
+        XCTAssertEqual(
+            Set(rows.map(\.quotaWindow)),
+            Set(WidgetQuotaWindow.allCases),
+            "\(service): every quota window must be represented"
+        )
+        return rows
+    }
+
     private func presentation(
         metrics: [ServiceType: UsageMetrics],
         accountMetrics: [AccountUsageSnapshot] = [],
@@ -400,6 +479,7 @@ final class WidgetPresentationTests: XCTestCase {
         sessionUsed: Double? = nil,
         weeklyUsed: Double? = nil,
         codeReviewUsed: Double? = nil,
+        total: Double = 100,
         modelLimitLabel: String? = nil,
         resetTime: Date? = nil,
         lastUpdated: Date? = nil
@@ -407,13 +487,13 @@ final class WidgetPresentationTests: XCTestCase {
         UsageMetrics(
             service: service,
             sessionLimit: sessionUsed.map {
-                UsageLimit(used: $0, total: 100, resetTime: resetTime)
+                UsageLimit(used: $0, total: total, resetTime: resetTime)
             },
             weeklyLimit: weeklyUsed.map {
-                UsageLimit(used: $0, total: 100, resetTime: resetTime)
+                UsageLimit(used: $0, total: total, resetTime: resetTime)
             },
             codeReviewLimit: codeReviewUsed.map {
-                UsageLimit(used: $0, total: 100, resetTime: resetTime)
+                UsageLimit(used: $0, total: total, resetTime: resetTime)
             },
             modelLimitLabel: modelLimitLabel,
             lastUpdated: lastUpdated ?? now

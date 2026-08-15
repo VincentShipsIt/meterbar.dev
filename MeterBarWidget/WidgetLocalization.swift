@@ -6,27 +6,38 @@ import MeterBarShared
 /// do not accidentally resolve against the widget extension's bundle.
 enum WidgetLocalizedContent {
     static func quotaTitle(for row: WidgetPresentationRow) -> String {
-        switch (row.service, row.quotaWindow) {
-        case (.openRouter, .session):
+        quotaTitle(for: row.quotaTitleKey)
+    }
+
+    /// Translates the shared row's already-decided quota title.
+    ///
+    /// Which title applies — the OpenRouter exceptions, Cursor's included-pool
+    /// split, Claude Code's model window — is decided once in
+    /// `WidgetPresentationRow.quotaTitleKey`. This switch only supplies the
+    /// widget bundle's words for it, so the widget cannot answer a routing
+    /// question differently from the app.
+    static func quotaTitle(for key: ServiceType.QuotaTitleKey) -> String {
+        switch key {
+        case .keyLimit:
             return String(localized: "widget.quota.key_limit", defaultValue: "Key limit")
-        case (.claudeCode, .codeReview):
-            return row.modelLimitLabel
+        case let .model(label):
+            return label
                 ?? String(localized: "widget.quota.model", defaultValue: "Model")
-        case (.cursor, .codeReview):
+        case .onDemand:
             return String(localized: "widget.quota.on_demand", defaultValue: "On-demand")
-        case (_, .codeReview):
+        case .codeReview:
             return String(localized: "widget.quota.code_review", defaultValue: "Code Review")
-        case (.cursor, .session) where row.limit.map({ ServiceType.isCursorIncludedPool(total: $0.total) }) == true:
+        case .cursorModels:
             return String(localized: "widget.quota.cursor_models", defaultValue: "Cursor Models")
-        case (_, .session):
+        case .session:
             return String(localized: "widget.quota.session", defaultValue: "Session")
-        case (.openRouter, .weekly):
+        case .accountCredits:
             return String(localized: "widget.quota.account_credits", defaultValue: "Account credits")
-        case (.cursor, .weekly) where row.limit.map({ ServiceType.isCursorIncludedPool(total: $0.total) }) == true:
+        case .otherModels:
             return String(localized: "widget.quota.other_models", defaultValue: "Other Models")
-        case (.cursor, .weekly):
+        case .monthly:
             return String(localized: "widget.quota.monthly", defaultValue: "Monthly")
-        case (_, .weekly):
+        case .weekly:
             return String(localized: "widget.quota.weekly", defaultValue: "Weekly")
         }
     }
@@ -84,27 +95,11 @@ enum WidgetLocalizedContent {
     }
 
     static func emptyTitle(_ state: WidgetPresentationEmptyState) -> String {
-        switch state {
-        case .noSelection:
-            return String(localized: "widget.empty.choose_title", defaultValue: "Choose usage to show")
-        case .unavailable:
-            return String(localized: "widget.empty.unavailable_title", defaultValue: "Usage unavailable")
-        }
+        LocalizedUsageFormat.widgetEmptyTitle(state)
     }
 
     static func emptyDetail(_ state: WidgetPresentationEmptyState) -> String {
-        switch state {
-        case .noSelection:
-            return String(
-                localized: "widget.empty.choose_detail",
-                defaultValue: "Select accounts and quota windows in MeterBar Settings."
-            )
-        case .unavailable:
-            return String(
-                localized: "widget.empty.unavailable_detail",
-                defaultValue: "Open MeterBar to refresh provider usage."
-            )
-        }
+        LocalizedUsageFormat.widgetEmptyDetail(state)
     }
 
     static func burnDownCountdownTitle(for row: WidgetBurnDownRow) -> String {
@@ -120,10 +115,10 @@ enum WidgetLocalizedContent {
     }
 
     static func burnDownCountdownText(for row: WidgetBurnDownRow) -> String {
-        if row.countdownKind == .unavailable || row.countdownText == "Unavailable" {
-            return LocalizedUsageFormat.unavailable()
-        }
-        return row.countdownText
+        LocalizedUsageFormat.burnDownCountdownText(
+            kind: row.countdownKind,
+            fallback: row.countdownText
+        )
     }
 
     static func burnDownAccessibilityValue(for row: WidgetBurnDownRow) -> String {
