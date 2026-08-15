@@ -220,7 +220,8 @@
             "value": "Select accounts and quota windows in MeterBar Settings."
           }
         }
-      }
+      },
+      "comment": "Widget placeholder body telling the reader where to choose what the widget shows."
     },
     "widget.empty.choose_title": {
       "localizations": {
@@ -230,7 +231,8 @@
             "value": "Choose usage to show"
           }
         }
-      }
+      },
+      "comment": "Widget placeholder heading when nothing has been selected to display."
     },
     "widget.empty.unavailable_detail": {
       "localizations": {
@@ -240,7 +242,8 @@
             "value": "Open MeterBar to refresh provider usage."
           }
         }
-      }
+      },
+      "comment": "Widget placeholder body telling the reader how to refresh unavailable usage."
     },
     "widget.empty.unavailable_title": {
       "localizations": {
@@ -250,7 +253,8 @@
             "value": "Usage unavailable"
           }
         }
-      }
+      },
+      "comment": "Widget placeholder heading when no provider usage could be read."
     },
     "widget.health.stale": {
       "localizations": {

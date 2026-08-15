@@ -145,7 +145,106 @@ final class WidgetSettingsPreviewParityTests: XCTestCase {
         }
     }
 
+    // MARK: - One language
+
+    /// The preview used to print the shared model's hardcoded English `title`
+    /// and `detail` while the widget beside it drew localized copy — so on a
+    /// non-English Mac, Settings advertised a widget in the wrong language.
+    /// Both preview surfaces now read the same keys the extension does.
+    func testPreviewEmptyStatesUseTheLocalizedWidgetCopy() {
+        for state in [WidgetPresentationEmptyState.noSelection, .unavailable] {
+            let expected = WidgetSettingsPreviewEmptyStateText(state)
+            XCTAssertEqual(expected.title, LocalizedUsageFormat.widgetEmptyTitle(state))
+            XCTAssertEqual(expected.detail, LocalizedUsageFormat.widgetEmptyDetail(state))
+
+            let glance = WidgetSettingsPreviewSurface(
+                family: .medium,
+                presentation: emptyPresentation(state),
+                appearance: .light
+            )
+            XCTAssertEqual(glance.presentation.emptyState, state, "\(state) glance fixture")
+            XCTAssertEqual(glance.emptyStateText, expected, "\(state) glance preview")
+
+            let burnDown = WidgetSettingsBurnDownPreviewSurface(
+                family: .medium,
+                presentation: emptyBurnDownPresentation(state),
+                appearance: .light
+            )
+            XCTAssertEqual(burnDown.presentation.emptyState, state, "\(state) burn-down fixture")
+            XCTAssertEqual(burnDown.emptyStateText, expected, "\(state) burn-down preview")
+        }
+    }
+
+    /// The preview inlined the widget's `"Unavailable"` sentinel check instead
+    /// of asking the shared formatter, which is two copies of one rule.
+    func testBurnDownPreviewCountdownMatchesTheSharedFallback() {
+        let cases: [(WidgetBurnDownCountdownKind, String)] = [
+            (.unavailable, "2h 5m"),
+            (.reset, "Unavailable"),
+            (.reset, "2h 5m"),
+            (.projectedExhaustion, "45m")
+        ]
+        for (kind, countdownText) in cases {
+            let preview = WidgetSettingsBurnDownPreviewRow(
+                row: burnDownRow(kind: kind, countdownText: countdownText),
+                family: .medium
+            )
+            XCTAssertEqual(
+                preview.countdownText,
+                LocalizedUsageFormat.burnDownCountdownText(kind: kind, fallback: countdownText),
+                "\(kind) / \(countdownText)"
+            )
+        }
+    }
+
     // MARK: - Fixtures
+
+    /// `.noSelection` comes from an empty quota-window selection, `.unavailable`
+    /// from a selection nothing can fill — the two ways the planner gives up.
+    private func emptyPreferences(_ state: WidgetPresentationEmptyState) -> WidgetPreferences {
+        var preferences = WidgetPreferences.defaults
+        if state == .noSelection {
+            preferences.visibleQuotaWindows = []
+        }
+        return preferences
+    }
+
+    private func emptyPresentation(_ state: WidgetPresentationEmptyState) -> WidgetPresentation {
+        WidgetPresentationPlanner.makePresentation(
+            metrics: [:],
+            accountMetrics: [],
+            preferences: emptyPreferences(state),
+            family: .medium,
+            now: now
+        )
+    }
+
+    private func emptyBurnDownPresentation(
+        _ state: WidgetPresentationEmptyState
+    ) -> WidgetBurnDownPresentation {
+        WidgetBurnDownPlanner.makePresentation(
+            metrics: [:],
+            accountMetrics: [],
+            preferences: emptyPreferences(state),
+            family: .medium,
+            now: now
+        )
+    }
+
+    private func burnDownRow(
+        kind: WidgetBurnDownCountdownKind,
+        countdownText: String
+    ) -> WidgetBurnDownRow {
+        WidgetBurnDownRow(
+            row: firstRow(family: .medium),
+            stage: .onPace,
+            stageText: "On pace",
+            countdownKind: kind,
+            countdownTitle: LocalizedUsageFormat.burnDownCountdownTitle(kind),
+            countdownTarget: nil,
+            countdownText: countdownText
+        )
+    }
 
     private func presentation(family: WidgetPresentationFamily) -> WidgetPresentation {
         WidgetPresentationPlanner.makePresentation(
