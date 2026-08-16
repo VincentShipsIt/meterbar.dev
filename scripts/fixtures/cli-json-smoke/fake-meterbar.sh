@@ -34,7 +34,7 @@ case "$scenario:$command_name" in
   data:doctor)
     echo "fixture diagnostic remains on stderr" >&2
     printf '%s\n' \
-      '[{"provider":"Codex CLI","overall":"pass","healthy":true,"checks":[{"id":"auth","title":"Signed in","level":"pass","detail":"Signed in.","recovery":null}]}]'
+      '[{"provider":"Codex CLI","accountId":"00000000-0000-0000-0000-000000000002","accountName":"Work","overall":"pass","healthy":true,"checks":[{"id":"auth","title":"Signed in","level":"pass","detail":"Signed in.","recovery":null}]}]'
     ;;
   malformed:usage)
     printf '%s\n' 'debug output that contaminates stdout'

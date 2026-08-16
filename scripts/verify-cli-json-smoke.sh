@@ -261,7 +261,9 @@ def validate_doctor(document):
     require(document, "doctor must contain at least one provider report")
     reject_secret_keys(document)
 
-    report_keys = {"provider", "overall", "healthy", "checks"}
+    required_report_keys = {"provider", "overall", "healthy", "checks"}
+    optional_report_keys = {"accountId", "accountName"}
+    allowed_report_keys = required_report_keys | optional_report_keys
     required_check_keys = {"id", "title", "level", "detail"}
     allowed_check_keys = required_check_keys | {"recovery"}
     levels = {"pass", "warn", "fail"}
@@ -269,7 +271,10 @@ def validate_doctor(document):
     for report_index, report in enumerate(document):
         path = f"doctor[{report_index}]"
         require(isinstance(report, dict), f"{path} must be an object")
-        require(set(report) == report_keys, f"{path} fields do not match the redacted DTO")
+        require(
+            required_report_keys <= set(report) <= allowed_report_keys,
+            f"{path} fields do not match the redacted DTO",
+        )
         require(
             isinstance(report["provider"], str) and report["provider"],
             f"{path}.provider must be a non-empty string",
@@ -280,6 +285,12 @@ def validate_doctor(document):
             report["healthy"] == (report["overall"] == "pass"),
             f"{path}.healthy conflicts with overall",
         )
+        for field in optional_report_keys:
+            if field in report:
+                require(
+                    isinstance(report[field], str) and report[field],
+                    f"{path}.{field} must be a non-empty string",
+                )
         require(isinstance(report["checks"], list), f"{path}.checks must be an array")
 
         for check_index, check in enumerate(report["checks"]):
