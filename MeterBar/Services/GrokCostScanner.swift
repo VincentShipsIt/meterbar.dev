@@ -334,7 +334,11 @@ enum GrokCostScanner {
             for: file.cacheKey,
             provider: .grok
         )
-        session.noteProcessedFile()
+        session.noteProcessedFile(
+            consumed: read.reachedEndOfFile,
+            committedOffset: read.committedOffset,
+            fileSize: file.size
+        )
         return payload
     }
 

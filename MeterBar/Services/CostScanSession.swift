@@ -139,9 +139,15 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         handler?(snapshot)
     }
 
-    /// Count a file this slice actually handled — a warm cache hit or a read.
-    /// Files skipped because the budget ran out stay uncounted, even when a
-    /// cached partial payload is reused so the summary does not drop them.
+    /// Count a file only when this slice finished it — a warm complete cache
+    /// hit, or a read that consumed the whole file. Mid-file and skipped files
+    /// still fold their totals into the summary, but stay off `processedFiles`
+    /// so the banner cannot say "1 of 1" for an unfinished file.
+    func noteProcessedFile(consumed reachedEndOfFile: Bool, committedOffset: UInt64, fileSize: Int) {
+        guard reachedEndOfFile || committedOffset >= UInt64(max(0, fileSize)) else { return }
+        noteProcessedFile()
+    }
+
     func noteProcessedFile() {
         lock.lock()
         processedFiles += 1

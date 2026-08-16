@@ -523,7 +523,11 @@ enum ClaudeCostScanner {
             for: file.cacheKey,
             provider: .claude
         )
-        session.noteProcessedFile()
+        session.noteProcessedFile(
+            consumed: read.reachedEndOfFile,
+            committedOffset: read.committedOffset,
+            fileSize: file.size
+        )
         return Self.windows(payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
     }
 

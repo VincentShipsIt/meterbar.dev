@@ -472,7 +472,11 @@ enum CodexCostScanner {
             for: file.cacheKey,
             provider: .codex
         )
-        session.noteProcessedFile()
+        session.noteProcessedFile(
+            consumed: read.reachedEndOfFile,
+            committedOffset: committed,
+            fileSize: file.size
+        )
         return payload
     }
 

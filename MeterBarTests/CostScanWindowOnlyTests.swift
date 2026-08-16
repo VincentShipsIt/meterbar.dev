@@ -224,10 +224,10 @@ final class CostScanWindowOnlyTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(progress.fraction), 1)
     }
 
-    /// A single file the byte budget cannot finish is still a read, so it
-    /// counts as processed — but that must not push `fraction` to 1.0 while
-    /// `isComplete` is false.
-    func testPartialReadDoesNotReportCompleteProgress() throws {
+    /// A single file the byte budget cannot finish is not processed. Counting
+    /// it would make the banner say "Scanning 1 of 1 files" while the only
+    /// file is still open, and force the bar back to 0% via the incomplete cap.
+    func testPartialReadDoesNotReportOneOfOneAsProcessed() throws {
         let root = try makeCorpusDirectory()
         let first = claudeEventLine(messageID: "a")
         let second = claudeEventLine(messageID: "b")
@@ -245,8 +245,10 @@ final class CostScanWindowOnlyTests: XCTestCase {
 
         XCTAssertFalse(session.isComplete)
         XCTAssertEqual(progress.listedFiles, 1)
-        XCTAssertEqual(progress.processedFiles, 1)
+        XCTAssertEqual(progress.processedFiles, 0)
         XCTAssertFalse(progress.isComplete)
+        XCTAssertFalse(progress.statusText.contains("1 of 1"))
+        XCTAssertTrue(progress.statusText.hasPrefix("Scanning 1 files"))
         XCTAssertLessThan(try XCTUnwrap(progress.fraction), 1)
         XCTAssertEqual(windows.period.input, 100)
     }

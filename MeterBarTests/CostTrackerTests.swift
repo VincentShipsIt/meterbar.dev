@@ -1229,8 +1229,9 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(firstWindows.period.totals.input, 100)
         let firstProgress = first.progress(windowDays: 30)
         XCTAssertEqual(firstProgress.listedFiles, 1)
-        XCTAssertEqual(firstProgress.processedFiles, 1)
+        XCTAssertEqual(firstProgress.processedFiles, 0)
         XCTAssertFalse(firstProgress.isComplete)
+        XCTAssertFalse(firstProgress.statusText.contains("1 of 1"))
         XCTAssertLessThan(try XCTUnwrap(firstProgress.fraction), 1)
 
         let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
