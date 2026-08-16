@@ -34,8 +34,53 @@ final class QuotaEventDeliveryTests: XCTestCase {
         XCTAssertTrue(output.contains("METERBAR_BAND=critical"))
         XCTAssertFalse(output.contains("CLAUDE_CONFIG_DIR"))
         XCTAssertFalse(output.contains("CODEX_HOME"))
+        XCTAssertFalse(output.contains("GROK_HOME"))
         XCTAssertFalse(output.localizedCaseInsensitiveContains("api_key"))
         XCTAssertFalse(output.localizedCaseInsensitiveContains("token="))
+    }
+
+    func testGrokLocalHookEnvironmentContainsOnlyTheDocumentedSecretFreeFields() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuotaEventDeliveryTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let runner = QuotaEventLocalHookRunner(
+            runner: WakeEventHookRunner(
+                logger: WakeRunLogger(directory: tempDirectory.appendingPathComponent("logs", isDirectory: true))
+            )
+        )
+        let grokPayload = QuotaEventPayload(
+            provider: .grok,
+            account: QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: "Work"),
+            event: .exhausted,
+            window: .weekly,
+            percentage: 100,
+            band: .exhausted,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let result = await runner.run(
+            configuration: configuration(
+                executable: "/usr/bin/env",
+                arguments: [],
+                webhookURL: "",
+                provider: .grok,
+                accountID: grokPayload.account.id
+            ),
+            payload: grokPayload
+        )
+        let output = try XCTUnwrap(String(bytes: result.stdoutCapture, encoding: .utf8))
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertTrue(output.contains("METERBAR_EVENT=exhausted"))
+        XCTAssertTrue(output.contains("METERBAR_PROVIDER=Grok"))
+        XCTAssertTrue(output.contains("METERBAR_ACCOUNT_ID=\(GrokAccount.defaultID.uuidString)"))
+        XCTAssertTrue(output.contains("METERBAR_ACCOUNT_NAME=Work"))
+        XCTAssertFalse(output.contains("GROK_HOME"))
+        XCTAssertFalse(output.contains("homeDirectory"))
+        XCTAssertFalse(output.contains("/secret/"))
+        XCTAssertFalse(output.localizedCaseInsensitiveContains("token="))
+        XCTAssertFalse(output.contains("auth.json"))
     }
 
     func testOneDeliveryFailureDoesNotBlockOtherChannelsOrLaterEvents() async {
@@ -90,7 +135,9 @@ final class QuotaEventDeliveryTests: XCTestCase {
     private func configuration(
         executable: String,
         arguments: [String],
-        webhookURL: String = ""
+        webhookURL: String = "",
+        provider: ServiceType = .cursor,
+        accountID: String = "account-id"
     ) -> QuotaEventIntegrationConfiguration {
         QuotaEventIntegrationConfiguration(
             localDeliveryEnabled: true,
@@ -99,9 +146,9 @@ final class QuotaEventDeliveryTests: XCTestCase {
             webhookDeliveryEnabled: !webhookURL.isEmpty,
             webhookURLString: webhookURL,
             enabledQuotaEvents: [.critical, .exhausted],
-            enabledProviders: [.cursor],
+            enabledProviders: [provider],
             enabledAccounts: [
-                QuotaEventAccountSelection(provider: .cursor, accountID: "account-id"),
+                QuotaEventAccountSelection(provider: provider, accountID: accountID),
             ],
             enabledWakeEvents: []
         )

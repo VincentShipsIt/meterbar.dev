@@ -17,6 +17,21 @@ nonisolated struct QuotaEventAccountSelection: Codable, Equatable, Hashable, Sen
     init(payload: QuotaEventPayload) {
         self.init(provider: payload.provider, accountID: payload.account.id)
     }
+
+    /// Existing provider-wide Grok opt-ins used `default`. The default Grok
+    /// profile now has a stable UUID, so rewrite that one identifier in place.
+    var normalizedForPersistence: QuotaEventAccountSelection {
+        guard provider == .grok, accountID == "default" else { return self }
+        return QuotaEventAccountSelection(provider: .grok, accountID: GrokAccount.defaultID.uuidString)
+    }
+
+    func matches(_ payload: QuotaEventPayload) -> Bool {
+        guard provider == payload.provider else { return false }
+        if accountID == payload.account.id { return true }
+        return provider == .grok
+            && accountID == "default"
+            && payload.account.id == GrokAccount.defaultID.uuidString
+    }
 }
 
 /// Versioned app-wide outbound integration preferences.
@@ -75,7 +90,13 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
     func includes(_ payload: QuotaEventPayload) -> Bool {
         enabledQuotaEvents.contains(payload.event)
             && enabledProviders.contains(payload.provider)
-            && enabledAccounts.contains(QuotaEventAccountSelection(payload: payload))
+            && enabledAccounts.contains { $0.matches(payload) }
+    }
+
+    func migratingLegacyGrokDefaultSelection() -> QuotaEventIntegrationConfiguration {
+        var updated = self
+        updated.enabledAccounts = Set(enabledAccounts.map(\.normalizedForPersistence))
+        return updated
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -151,7 +172,11 @@ final class QuotaEventSettingsStore: ObservableObject {
         self.userDefaults = userDefaults
         if let data = userDefaults.data(forKey: StorageKeys.quotaEventIntegrations),
            let decoded = try? JSONDecoder().decode(QuotaEventIntegrationConfiguration.self, from: data) {
-            configuration = decoded
+            let migrated = decoded.migratingLegacyGrokDefaultSelection()
+            configuration = migrated
+            if migrated != decoded {
+                persist()
+            }
         } else {
             configuration = Self.migratedConfiguration(from: userDefaults)
             persist()
@@ -226,7 +251,9 @@ final class QuotaEventSettingsStore: ObservableObject {
     }
 
     func setAccountEnabled(_ enabled: Bool, for account: QuotaEventAccountSelection) {
-        guard let updated = updatedSet(configuration.enabledAccounts, value: account, enabled: enabled) else {
+        let normalized = account.normalizedForPersistence
+        let current = Set(configuration.enabledAccounts.map(\.normalizedForPersistence))
+        guard let updated = updatedSet(current, value: normalized, enabled: enabled) else {
             return
         }
         configuration.enabledAccounts = updated

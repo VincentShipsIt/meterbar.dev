@@ -8,6 +8,7 @@ struct QuotaEventSettingsView: View {
     @StateObject private var diagnostics = QuotaEventDiagnosticStore.shared
     @StateObject private var claudeAccounts = ClaudeCodeAccountStore.shared
     @StateObject private var codexAccounts = CodexAccountStore.shared
+    @StateObject private var grokAccounts = GrokAccountStore.shared
 
     @State private var isTestingLocalHook = false
     @State private var testMessage: String?
@@ -227,22 +228,12 @@ struct QuotaEventSettingsView: View {
         }
     }
 
-    private var integrationAccounts: [IntegrationAccount] {
-        let flat = QuotaEventSnapshotCatalog.flatProviders.map {
-            IntegrationAccount(provider: $0, accountID: "default", name: $0.displayName)
-        }
-        let claude = claudeAccounts.accounts.filter(\.isEnabled).map {
-            IntegrationAccount(provider: .claudeCode, accountID: $0.id.uuidString, name: $0.name)
-        }
-        let codex = codexAccounts.accounts.filter(\.isEnabled).map {
-            IntegrationAccount(provider: .codexCli, accountID: $0.id.uuidString, name: $0.name)
-        }
-        return (claude + codex + flat).sorted {
-            if $0.provider.sortOrder != $1.provider.sortOrder {
-                return $0.provider.sortOrder < $1.provider.sortOrder
-            }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+    private var integrationAccounts: [QuotaEventSelectableAccount] {
+        QuotaEventSnapshotCatalog.selectableAccounts(
+            claudeAccounts: claudeAccounts.accounts,
+            codexAccounts: codexAccounts.accounts,
+            grokAccounts: grokAccounts.accounts
+        )
     }
 
     private func eventDetail(_ event: QuotaEventKind) -> String {
@@ -270,17 +261,5 @@ struct QuotaEventSettingsView: View {
             testMessage = result.userMessage
             isTestingLocalHook = false
         }
-    }
-}
-
-private struct IntegrationAccount: Identifiable {
-    let provider: ServiceType
-    let accountID: String
-    let name: String
-
-    var id: String { "\(provider.rawValue):\(accountID)" }
-
-    var selection: QuotaEventAccountSelection {
-        QuotaEventAccountSelection(provider: provider, accountID: accountID)
     }
 }

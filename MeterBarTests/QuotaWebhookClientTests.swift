@@ -138,6 +138,49 @@ final class QuotaWebhookClientTests: XCTestCase {
         XCTAssertEqual(result, .succeeded)
     }
 
+    func testGrokAccountPayloadOmitsHomeTokenAndRawProviderOutput() async throws {
+        let client = makeClient()
+        let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
+        let payload = QuotaEventPayload(
+            provider: .grok,
+            account: QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: "Work"),
+            event: .warning,
+            window: .weekly,
+            percentage: 76,
+            band: .tight,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        StubURLProtocol.handler = { request in
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let text = String(decoding: body, as: UTF8.self)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(
+                Set(object.keys),
+                ["schema_version", "provider", "account", "event", "window", "percentage", "band", "timestamp"]
+            )
+            XCTAssertEqual(object["provider"] as? String, ServiceType.grok.rawValue)
+            let account = try XCTUnwrap(object["account"] as? [String: Any])
+            XCTAssertEqual(Set(account.keys), ["id", "name"])
+            XCTAssertEqual(account["id"] as? String, GrokAccount.defaultID.uuidString)
+            XCTAssertFalse(text.contains("GROK_HOME"))
+            XCTAssertFalse(text.contains("homeDirectory"))
+            XCTAssertFalse(text.contains("/secret/"))
+            XCTAssertFalse(text.localizedCaseInsensitiveContains("token"))
+            XCTAssertFalse(text.contains("auth.json"))
+            XCTAssertFalse(text.contains("_x.ai/billing"))
+            XCTAssertFalse(text.contains("GetRemainingResets"))
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)),
+                Data()
+            )
+        }
+
+        let result = await client.post(payload: payload, to: url)
+        XCTAssertEqual(result, .succeeded)
+    }
+
     func testTransportAndHTTPFailuresReturnSafeNonfatalResultsWithoutResponseBodies() async throws {
         let client = makeClient()
         let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))

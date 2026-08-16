@@ -1,19 +1,41 @@
 import Foundation
 import MeterBarShared
 
+/// One provider/account row the Event Integrations settings can opt into.
+/// Identity is the same UUID-or-`default` contract the webhook payload uses.
+nonisolated struct QuotaEventSelectableAccount: Identifiable, Equatable, Sendable {
+    let provider: ServiceType
+    let accountID: String
+    let name: String
+
+    var id: String { "\(provider.rawValue):\(accountID)" }
+
+    var selection: QuotaEventAccountSelection {
+        QuotaEventAccountSelection(provider: provider, accountID: accountID)
+    }
+}
+
+/// Account-aware inputs for Claude, Codex, and Grok. Flat providers still
+/// arrive through the provider-wide metrics map.
+nonisolated struct QuotaEventAccountInputs: Sendable {
+    var claudeAccounts: [ClaudeCodeAccount] = []
+    var claudeAccountMetrics: [UUID: UsageMetrics] = [:]
+    var codexAccounts: [CodexAccount] = []
+    var codexAccountMetrics: [UUID: UsageMetrics] = [:]
+    var grokAccounts: [GrokAccount] = []
+    var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+}
+
 /// Builds the app-wide provider/account input without ever projecting
 /// credential or filesystem configuration into the event model.
 nonisolated enum QuotaEventSnapshotCatalog {
     static let flatProviders = ServiceType.allCases.filter {
-        $0 != .claudeCode && $0 != .codexCli
+        $0 != .claudeCode && $0 != .codexCli && $0 != .grok
     }
 
     static func snapshots(
         metrics: [ServiceType: UsageMetrics],
-        claudeAccounts: [ClaudeCodeAccount],
-        claudeAccountMetrics: [UUID: UsageMetrics],
-        codexAccounts: [CodexAccount],
-        codexAccountMetrics: [UUID: UsageMetrics],
+        accounts: QuotaEventAccountInputs,
         enabledServices: Set<ServiceType>
     ) -> [QuotaEventSnapshot] {
         var result = flatProviders.compactMap { provider -> QuotaEventSnapshot? in
@@ -29,20 +51,29 @@ nonisolated enum QuotaEventSnapshotCatalog {
 
         result += accountSnapshots(
             provider: .claudeCode,
-            accounts: claudeAccounts.map {
+            accounts: accounts.claudeAccounts.map {
                 AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
             },
-            accountMetrics: claudeAccountMetrics,
+            accountMetrics: accounts.claudeAccountMetrics,
             fallbackMetrics: metrics[.claudeCode],
             enabledServices: enabledServices
         )
         result += accountSnapshots(
             provider: .codexCli,
-            accounts: codexAccounts.map {
+            accounts: accounts.codexAccounts.map {
                 AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
             },
-            accountMetrics: codexAccountMetrics,
+            accountMetrics: accounts.codexAccountMetrics,
             fallbackMetrics: metrics[.codexCli],
+            enabledServices: enabledServices
+        )
+        result += accountSnapshots(
+            provider: .grok,
+            accounts: accounts.grokAccounts.map {
+                AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
+            },
+            accountMetrics: accounts.grokAccountMetrics,
+            fallbackMetrics: metrics[.grok],
             enabledServices: enabledServices
         )
         return result.sorted {
@@ -50,6 +81,43 @@ nonisolated enum QuotaEventSnapshotCatalog {
                 return $0.provider.sortOrder < $1.provider.sortOrder
             }
             return $0.account.name.localizedCaseInsensitiveCompare($1.account.name) == .orderedAscending
+        }
+    }
+
+    static func selectableAccounts(
+        claudeAccounts: [ClaudeCodeAccount],
+        codexAccounts: [CodexAccount],
+        grokAccounts: [GrokAccount]
+    ) -> [QuotaEventSelectableAccount] {
+        let flat = flatProviders.map {
+            QuotaEventSelectableAccount(provider: $0, accountID: "default", name: $0.displayName)
+        }
+        let claude = claudeAccounts.filter(\.isEnabled).map {
+            QuotaEventSelectableAccount(
+                provider: .claudeCode,
+                accountID: $0.id.uuidString,
+                name: $0.name
+            )
+        }
+        let codex = codexAccounts.filter(\.isEnabled).map {
+            QuotaEventSelectableAccount(
+                provider: .codexCli,
+                accountID: $0.id.uuidString,
+                name: $0.name
+            )
+        }
+        let grok = grokAccounts.filter(\.isEnabled).map {
+            QuotaEventSelectableAccount(
+                provider: .grok,
+                accountID: $0.id.uuidString,
+                name: $0.name
+            )
+        }
+        return (claude + codex + grok + flat).sorted {
+            if $0.provider.sortOrder != $1.provider.sortOrder {
+                return $0.provider.sortOrder < $1.provider.sortOrder
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 

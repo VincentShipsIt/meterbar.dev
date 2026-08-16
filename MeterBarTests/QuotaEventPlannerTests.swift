@@ -102,6 +102,87 @@ final class QuotaEventPlannerTests: XCTestCase {
         XCTAssertEqual(events.first?.event, .warning)
     }
 
+    func testGrokProfilesEmitWarningCriticalExhaustedAndRecoveredIndependentlyPerWindow() {
+        var planner = QuotaEventPlanner(debounceInterval: 60)
+        let personal = QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: "Personal")
+        let work = QuotaEventAccount(
+            id: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF",
+            name: "Work"
+        )
+        _ = planner.evaluate(
+            snapshots: [
+                grokSnapshot(account: personal, sessionUsed: 50, weeklyUsed: 50),
+                grokSnapshot(account: work, sessionUsed: 50, weeklyUsed: 50),
+            ],
+            now: start
+        )
+
+        let warning = planner.evaluate(
+            snapshots: [
+                grokSnapshot(account: personal, sessionUsed: 76, weeklyUsed: 50),
+                grokSnapshot(account: work, sessionUsed: 50, weeklyUsed: 50),
+            ],
+            now: start.addingTimeInterval(1)
+        )
+        let critical = planner.evaluate(
+            snapshots: [
+                grokSnapshot(account: personal, sessionUsed: 76, weeklyUsed: 50),
+                grokSnapshot(account: work, sessionUsed: 50, weeklyUsed: 91),
+            ],
+            now: start.addingTimeInterval(2)
+        )
+        let exhausted = planner.evaluate(
+            snapshots: [
+                grokSnapshot(account: personal, sessionUsed: 100, weeklyUsed: 50),
+                grokSnapshot(account: work, sessionUsed: 50, weeklyUsed: 91),
+            ],
+            now: start.addingTimeInterval(3)
+        )
+        let recovered = planner.evaluate(
+            snapshots: [
+                grokSnapshot(account: personal, sessionUsed: 0, weeklyUsed: 50),
+                grokSnapshot(account: work, sessionUsed: 50, weeklyUsed: 91),
+            ],
+            now: start.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(warning.map(\.account), [personal])
+        XCTAssertEqual(warning.map(\.event), [.warning])
+        XCTAssertEqual(warning.map(\.window), [.session])
+        XCTAssertEqual(critical.map(\.account), [work])
+        XCTAssertEqual(critical.map(\.event), [.critical])
+        XCTAssertEqual(critical.map(\.window), [.weekly])
+        XCTAssertEqual(exhausted.map(\.account), [personal])
+        XCTAssertEqual(exhausted.map(\.event), [.exhausted])
+        XCTAssertEqual(exhausted.map(\.window), [.session])
+        XCTAssertEqual(recovered.map(\.account), [personal])
+        XCTAssertEqual(recovered.map(\.event), [.recovered])
+        XCTAssertEqual(recovered.map(\.window), [.session])
+    }
+
+    func testLegacyGrokDefaultNamespaceReprimesToTheAccountIdWithoutReplaying() {
+        var planner = QuotaEventPlanner(debounceInterval: 60)
+        let legacy = QuotaEventAccount(id: "default", name: "Grok")
+        let migrated = QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: GrokAccount.defaultName)
+        _ = planner.evaluate(
+            snapshots: [grokSnapshot(account: legacy, sessionUsed: 91, weeklyUsed: 50)],
+            now: start
+        )
+
+        let afterMigration = planner.evaluate(
+            snapshots: [grokSnapshot(account: migrated, sessionUsed: 91, weeklyUsed: 50)],
+            now: start.addingTimeInterval(1)
+        )
+        let exhausted = planner.evaluate(
+            snapshots: [grokSnapshot(account: migrated, sessionUsed: 100, weeklyUsed: 50)],
+            now: start.addingTimeInterval(2)
+        )
+
+        XCTAssertTrue(afterMigration.isEmpty)
+        XCTAssertEqual(exhausted.map(\.event), [.exhausted])
+        XCTAssertEqual(exhausted.first?.account, migrated)
+    }
+
     func testRemovedAccountNamespaceReprimesInsteadOfReplayingAStaleCrossing() {
         var planner = QuotaEventPlanner(debounceInterval: 60)
         _ = planner.evaluate(
@@ -136,6 +217,31 @@ final class QuotaEventPlannerTests: XCTestCase {
                     used: used,
                     total: 100,
                     resetTime: start.addingTimeInterval(3_600)
+                ),
+                lastUpdated: start
+            )
+        )
+    }
+
+    private func grokSnapshot(
+        account: QuotaEventAccount,
+        sessionUsed: Double,
+        weeklyUsed: Double
+    ) -> QuotaEventSnapshot {
+        QuotaEventSnapshot(
+            provider: .grok,
+            account: account,
+            metrics: UsageMetrics(
+                service: .grok,
+                sessionLimit: UsageLimit(
+                    used: sessionUsed,
+                    total: 100,
+                    resetTime: start.addingTimeInterval(3_600)
+                ),
+                weeklyLimit: UsageLimit(
+                    used: weeklyUsed,
+                    total: 100,
+                    resetTime: start.addingTimeInterval(86_400)
                 ),
                 lastUpdated: start
             )
