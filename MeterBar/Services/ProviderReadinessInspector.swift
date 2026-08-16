@@ -53,6 +53,7 @@ nonisolated public enum ProviderReadinessInspector {
         codexAccounts: [CodexAccount]? = nil,
         codexAuthProbe: ((CodexAccount) -> (exists: Bool, readable: Bool, json: Data?))? = nil,
         grokAccounts: [GrokAccount]? = nil,
+        grokIsCLIInstalled: Bool? = nil,
         grokAuthProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))? = nil,
         parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil,
         cachedMetrics: [ServiceType: UsageMetrics]? = nil,
@@ -108,6 +109,10 @@ nonisolated public enum ProviderReadinessInspector {
                     now: date,
                     accounts: configuredGrokAccounts,
                     accountMetrics: snapshotsByID,
+                    isCLIInstalled: grokIsCLIInstalled ?? CLIBinaryLocator.isAvailable(
+                        command: "grok",
+                        overrideEnvVar: "GROK_CLI_PATH"
+                    ),
                     authProbe: grokAuthProbe
                 )
             }
@@ -186,7 +191,7 @@ nonisolated public enum ProviderReadinessInspector {
             let reports = enabled.map { account in
                 claudeReport(
                     identity: .account(.claudeCode, id: account.id, name: account.name),
-                    refreshError: accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil),
+                    refreshError: accountRefreshErrors[account.id],
                     now: now,
                     cachedMetrics: accountMetrics[account.id],
                     defaultAccountEnabled: account.isDefault,
@@ -286,7 +291,7 @@ nonisolated public enum ProviderReadinessInspector {
         let reports = enabled.map { account in
             codexReport(
                 account: account,
-                refreshError: accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil),
+                refreshError: accountRefreshErrors[account.id],
                 now: now,
                 isCLIInstalled: isCLIInstalled,
                 authProbe: authProbe
@@ -431,9 +436,7 @@ nonisolated public enum ProviderReadinessInspector {
                     isCLIInstalled: isCLIInstalled,
                     authFileExists: probe.exists,
                     authFileReadable: probe.readable,
-                    refreshError: sanitize(
-                        accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil)
-                    )
+                    refreshError: sanitize(accountRefreshErrors[account.id])
                 )
             )
             .withIdentity(.account(.grok, id: account.id, name: account.name))
@@ -513,19 +516,12 @@ nonisolated public enum ProviderReadinessInspector {
     ) -> ProviderReadiness {
         if let accountID = report.identity.accountID {
             let accountMetric = accountMetrics[accountID]
-            let record = health[report.provider]
             return ProviderReadiness(
                 identity: report.identity,
-                checks: reconciledRefreshChecks(
-                    report.checks,
-                    record: record,
-                    metrics: accountMetric ?? metrics[report.provider]
-                ) + [
+                checks: report.checks + [
                     accountParseHealthCheck(
                         report: report,
                         metrics: accountMetric,
-                        record: record,
-                        providerMetrics: metrics[report.provider],
                         now: now
                     ),
                 ]
@@ -547,8 +543,6 @@ nonisolated public enum ProviderReadinessInspector {
     private static func accountParseHealthCheck(
         report: ProviderReadiness,
         metrics: UsageMetrics?,
-        record: ProviderParseHealthRecord?,
-        providerMetrics: UsageMetrics?,
         now: Date
     ) -> ReadinessCheck {
         let title = "Usage data"
@@ -597,7 +591,12 @@ nonisolated public enum ProviderReadinessInspector {
                 recovery: "Refresh the provider and review any new error."
             )
         }
-        return parseHealthCheck(record, metrics: providerMetrics, now: now)
+        return ReadinessCheck(
+            id: ReadinessCheckID.parseHealth,
+            title: title,
+            level: .warn,
+            detail: "No refresh outcome has been recorded yet. \(threshold)"
+        )
     }
 
     private static func isParseFailureDetail(_ detail: String?) -> Bool {

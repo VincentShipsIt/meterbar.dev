@@ -45,18 +45,12 @@ enum DiagnosticsRunner {
     }
 
     static func accountRefreshErrors(
-        claudeDefaultAccountEnabled: Bool,
-        claudeError: ServiceError?,
         claudeAccountErrors: [UUID: ServiceError] = [:],
         codexAccountErrors: [UUID: ServiceError] = [:],
         grokAccountErrors: [UUID: ServiceError] = [:]
     ) -> [ServiceType: [UUID: ServiceError]] {
-        var claude = claudeAccountErrors
-        if claudeDefaultAccountEnabled, let claudeError {
-            claude[ClaudeCodeAccount.defaultID] = claude[ClaudeCodeAccount.defaultID] ?? claudeError
-        }
         var result: [ServiceType: [UUID: ServiceError]] = [:]
-        if !claude.isEmpty { result[.claudeCode] = claude }
+        if !claudeAccountErrors.isEmpty { result[.claudeCode] = claudeAccountErrors }
         if !codexAccountErrors.isEmpty { result[.codexCli] = codexAccountErrors }
         if !grokAccountErrors.isEmpty { result[.grok] = grokAccountErrors }
         return result

@@ -133,9 +133,11 @@ struct DashboardDiagnosticsSection: View {
             grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
         )
         let accountErrors = DiagnosticsRunner.accountRefreshErrors(
-            claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
-            claudeError: claudeCodeService.lastError,
-            claudeAccountErrors: [:],
+            claudeAccountErrors: Dictionary(
+                uniqueKeysWithValues: claudeAccountStore.enabledAccounts.compactMap { account in
+                    claudeCodeService.accountErrors[account.id].map { (account.id, $0) }
+                }
+            ),
             codexAccountErrors: Dictionary(
                 uniqueKeysWithValues: codexAccountStore.enabledAccounts.compactMap { account in
                     codexCliService.accountErrors[account.id].map { (account.id, $0) }

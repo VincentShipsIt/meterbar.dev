@@ -46,6 +46,14 @@ class ClaudeCodeLocalService: ObservableObject {
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var authState: ClaudeCodeAuthState = .unavailable
 
+    /// Last fetch failure per Claude profile, keyed by account id.
+    ///
+    /// `lastError` / `authState` describe only the default profile (they back
+    /// the provider-wide Settings overview). Custom-account failures must not
+    /// overwrite that, and a healthy default must not hide a broken custom
+    /// profile. Read account-scoped errors through `firstError(for:)`.
+    @Published private(set) var accountErrors: [UUID: ServiceError] = [:]
+
     /// The last observed auth/connection state *per account*. `authState` above
     /// describes only the default profile, because it backs the provider-wide
     /// Settings overview; a logged-out secondary profile used to compute its
@@ -202,6 +210,10 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
+    func firstError(for accounts: [ClaudeCodeAccount]) -> ServiceError? {
+        accounts.lazy.compactMap { self.accountErrors[$0.id] }.first
+    }
+
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics(account: ClaudeCodeAccount = .defaultAccount) async throws -> UsageMetrics {
@@ -308,6 +320,7 @@ class ClaudeCodeLocalService: ObservableObject {
                     self.hasAccess = true
                     self.authState = .connected(.oauth)
                 }
+                self.accountErrors.removeValue(forKey: account.id)
                 self.accountAuthStates[account.id] = .connected(.oauth)
             }
             return metrics
@@ -320,6 +333,7 @@ class ClaudeCodeLocalService: ObservableObject {
                 state = .error(serviceError.localizedDescription)
             }
             await MainActor.run {
+                self.accountErrors[account.id] = serviceError
                 self.accountAuthStates[account.id] = state
                 guard publishesSharedState else { return }
                 self.lastError = serviceError
@@ -336,6 +350,7 @@ class ClaudeCodeLocalService: ObservableObject {
         account: ClaudeCodeAccount,
         publishesSharedState: Bool
     ) {
+        accountErrors[account.id] = .notAuthenticated
         accountAuthStates[account.id] = .needsLogin
         guard publishesSharedState else { return }
         lastError = .notAuthenticated
@@ -466,6 +481,7 @@ class ClaudeCodeLocalService: ObservableObject {
                 }
                 // A CLI-only login is still a login, so this succeeds even when
                 // the OAuth step above found no credential.
+                self.accountErrors.removeValue(forKey: account.id)
                 self.accountAuthStates[account.id] = .connected(.cli)
             }
             // The CLI output does not expose the "extra usage" toggle. Only read
@@ -482,6 +498,7 @@ class ClaudeCodeLocalService: ObservableObject {
             // MeterBar rather than as the actionable "run claude login".
             let state = isLoggedOut ? ClaudeCodeAuthState.needsLogin : authState(from: error)
             await MainActor.run {
+                self.accountErrors[account.id] = serviceError
                 self.accountAuthStates[account.id] = state
                 if Self.publishesSharedConnectionState(for: account) {
                     self.lastError = serviceError

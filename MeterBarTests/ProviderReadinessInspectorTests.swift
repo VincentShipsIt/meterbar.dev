@@ -40,14 +40,17 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.grok],
             grokAccounts: [fixtures.healthy, fixtures.missing],
+            grokIsCLIInstalled: true,
             parseHealth: [:],
-            cachedMetrics: [:]
+            cachedMetrics: [:],
+            cachedAccountMetrics: []
         )
         let byID = Dictionary(uniqueKeysWithValues: reports.compactMap { report -> (UUID, ProviderReadiness)? in
             guard let id = report.identity.accountID else { return nil }
             return (id, report)
         })
 
+        XCTAssertEqual(byID[fixtures.healthy.id]?.check(ReadinessCheckID.installed)?.level, .pass)
         XCTAssertEqual(byID[fixtures.healthy.id]?.check(ReadinessCheckID.auth)?.level, .pass)
         XCTAssertEqual(byID[fixtures.missing.id]?.check(ReadinessCheckID.auth)?.level, .fail)
         XCTAssertNotEqual(byID[fixtures.healthy.id]?.overall, .fail)
@@ -69,8 +72,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.grok],
             grokAccounts: [disabledDefault, fixtures.healthy],
+            grokIsCLIInstalled: true,
             parseHealth: [:],
-            cachedMetrics: [:]
+            cachedMetrics: [:],
+            cachedAccountMetrics: []
         )
         let accountIDs = Set(reports.compactMap(\.identity.accountID))
 
@@ -150,6 +155,77 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         )
     }
 
+    func testClaudeCustomFailureDoesNotPoisonAHealthyDefault() {
+        let now = Date(timeIntervalSince1970: 70_000)
+        let customID = UUID()
+        let custom = ClaudeCodeAccount(id: customID, name: "Work", configDirectory: "/tmp/claude-work")
+        let recent = UsageMetrics(service: .claudeCode, lastUpdated: now.addingTimeInterval(-60))
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.claudeCode],
+            refreshErrors: [.claudeCode: .apiError("HTTP 500 <body>")],
+            accountRefreshErrors: [
+                .claudeCode: [customID: .apiError("HTTP 500 <body>")],
+            ],
+            now: now,
+            claudeAccounts: [.defaultAccount, custom],
+            claudeAccountMetrics: [
+                ClaudeCodeAccount.defaultID: recent,
+            ],
+            parseHealth: [
+                .claudeCode: ProviderParseHealthRecord(
+                    provider: .claudeCode,
+                    lastSuccess: now.addingTimeInterval(-60),
+                    lastAttempt: now,
+                    consecutiveFailures: 1,
+                    lastFailureWasShapeMismatch: true
+                ),
+            ],
+            cachedMetrics: [.claudeCode: recent],
+            cachedAccountMetrics: []
+        )
+        let byID = Dictionary(uniqueKeysWithValues: reports.compactMap { report -> (UUID, ProviderReadiness)? in
+            guard let id = report.identity.accountID else { return nil }
+            return (id, report)
+        })
+
+        XCTAssertEqual(byID[ClaudeCodeAccount.defaultID]?.check(ReadinessCheckID.refresh)?.level, .pass)
+        XCTAssertEqual(byID[ClaudeCodeAccount.defaultID]?.check(ReadinessCheckID.parseHealth)?.level, .pass)
+        XCTAssertNotEqual(byID[ClaudeCodeAccount.defaultID]?.overall, .fail)
+        XCTAssertEqual(byID[customID]?.check(ReadinessCheckID.refresh)?.level, .fail)
+    }
+
+    func testClaudeCustomOnlyReportsTheCustomAccountError() {
+        let now = Date(timeIntervalSince1970: 71_000)
+        let customID = UUID()
+        var disabledDefault = ClaudeCodeAccount.defaultAccount
+        disabledDefault.isEnabled = false
+        let custom = ClaudeCodeAccount(id: customID, name: "Work", configDirectory: "/tmp/claude-work")
+        let recent = UsageMetrics(service: .claudeCode, lastUpdated: now.addingTimeInterval(-60))
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.claudeCode],
+            refreshErrors: [.claudeCode: .notAuthenticated],
+            accountRefreshErrors: [
+                .claudeCode: [customID: .notAuthenticated],
+            ],
+            now: now,
+            claudeAccounts: [disabledDefault, custom],
+            claudeAccountMetrics: [customID: recent],
+            parseHealth: [:],
+            cachedMetrics: [:],
+            cachedAccountMetrics: []
+        )
+        let accountIDs = Set(reports.compactMap(\.identity.accountID))
+
+        XCTAssertFalse(accountIDs.contains(ClaudeCodeAccount.defaultID))
+        XCTAssertTrue(accountIDs.contains(customID))
+        XCTAssertEqual(
+            reports.first { $0.identity.accountID == customID }?.check(ReadinessCheckID.refresh)?.level,
+            .fail
+        )
+    }
+
     func testParseHealthAggregationStaysHonestWhenOneAccountSucceedsAndOneFails() {
         let now = Date(timeIntervalSince1970: 80_000)
         let healthyID = UUID()
@@ -165,6 +241,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             ],
             now: now,
             grokAccounts: [healthy, failing],
+            grokIsCLIInstalled: true,
             grokAuthProbe: { _ in (true, true) },
             parseHealth: [
                 .grok: .success(provider: .grok, at: now.addingTimeInterval(-60)),
@@ -196,8 +273,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.grok],
             grokAccounts: [fixtures.healthy, fixtures.missing],
+            grokIsCLIInstalled: true,
             parseHealth: [:],
-            cachedMetrics: [:]
+            cachedMetrics: [:],
+            cachedAccountMetrics: []
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -481,7 +560,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testParseHealthAddsImmediateFormatMismatchCheckWithStalenessThreshold() {
         let now = Date(timeIntervalSince1970: 40_000)
         let record = ProviderParseHealthRecord(
-            provider: .codexCli,
+            provider: .cursor,
             lastSuccess: now.addingTimeInterval(-60),
             lastAttempt: now,
             consecutiveFailures: 1,
@@ -489,10 +568,9 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.codexCli],
+            providers: [.cursor],
             now: now,
-            codexAccounts: [.defaultAccount],
-            parseHealth: [.codexCli: record],
+            parseHealth: [.cursor: record],
             cachedMetrics: [:],
             cachedAccountMetrics: []
         )
@@ -506,20 +584,19 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testFreshPayloadSupersedesOlderParseHealthTimestamp() {
         let now = Date(timeIntervalSince1970: 50_000)
         let record = ProviderParseHealthRecord.success(
-            provider: .codexCli,
+            provider: .cursor,
             at: now.addingTimeInterval(-ProviderParseHealthRecord.staleAfter - 1)
         )
         let metrics = UsageMetrics(
-            service: .codexCli,
+            service: .cursor,
             lastUpdated: now.addingTimeInterval(-60)
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.codexCli],
+            providers: [.cursor],
             now: now,
-            codexAccounts: [.defaultAccount],
-            parseHealth: [.codexCli: record],
-            cachedMetrics: [.codexCli: metrics],
+            parseHealth: [.cursor: record],
+            cachedMetrics: [.cursor: metrics],
             cachedAccountMetrics: []
         )
 
@@ -529,11 +606,11 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testPersistedFailureReplacesContradictoryNoErrorRefreshCheck() {
         let now = Date(timeIntervalSince1970: 60_000)
         let metrics = UsageMetrics(
-            service: .claudeCode,
+            service: .cursor,
             lastUpdated: now.addingTimeInterval(-ProviderParseHealthRecord.staleAfter - 60)
         )
         let record = ProviderParseHealthRecord(
-            provider: .claudeCode,
+            provider: .cursor,
             lastSuccess: metrics.lastUpdated,
             lastAttempt: now.addingTimeInterval(-60),
             consecutiveFailures: 1,
@@ -541,11 +618,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.claudeCode],
+            providers: [.cursor],
             now: now,
-            claudeAccounts: [.defaultAccount],
-            parseHealth: [.claudeCode: record],
-            cachedMetrics: [.claudeCode: metrics],
+            parseHealth: [.cursor: record],
+            cachedMetrics: [.cursor: metrics],
             cachedAccountMetrics: []
         )
         let refresh = reports.first?.check(ReadinessCheckID.refresh)
