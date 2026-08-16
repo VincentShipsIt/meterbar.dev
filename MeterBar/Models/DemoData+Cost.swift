@@ -8,8 +8,8 @@ import MeterBarShared
 /// the shared `DemoData` namespace. `CostTracker` publishes this instead of
 /// scanning real CLI logs when demo mode is active.
 ///
-/// The summary is deliberately **non-alarming** — a ~$205 30-day estimate split
-/// across three providers. Model and origin breakdowns are **fully synthetic**,
+/// The summary is deliberately **non-alarming** — a ~$240 30-day estimate split
+/// across every provider. Model and origin breakdowns are **fully synthetic**,
 /// drawn from `syntheticBreakdownNames` only (public model ids and generic
 /// origin labels), so the model-spend and origin charts render in screenshots
 /// without ever surfacing the owner's real project paths or private routing.
@@ -23,6 +23,7 @@ extension DemoData {
     static let syntheticBreakdownNames: Set<String> = [
         "claude-fable-5", "claude-opus-5", "claude-haiku-4-5",
         "gpt-5.6-sol", "gpt-5.6-luna",
+        "grok-4.5-build", "grok-4.5",
         "Main chat", "Agents", "Code review",
     ]
 
@@ -44,6 +45,10 @@ extension DemoData {
             DemoSplit(name: "gpt-5.6-sol", fraction: 0.72),
             DemoSplit(name: "gpt-5.6-luna", fraction: 0.28),
         ],
+        .grok: [
+            DemoSplit(name: "grok-4.5-build", fraction: 0.74),
+            DemoSplit(name: "grok-4.5", fraction: 0.26),
+        ],
     ]
 
     private static let demoOriginSplits: [ServiceType: [DemoSplit]] = [
@@ -55,6 +60,10 @@ extension DemoData {
         .codexCli: [
             DemoSplit(name: "Main chat", fraction: 0.57),
             DemoSplit(name: "Agents", fraction: 0.43),
+        ],
+        .grok: [
+            DemoSplit(name: "Main chat", fraction: 0.61),
+            DemoSplit(name: "Agents", fraction: 0.39),
         ],
     ]
 
@@ -78,7 +87,7 @@ extension DemoData {
         }
     }
     /// Per-provider 30-day totals (USD) and token magnitudes for the demo cost
-    /// summary. Sums to $204.90 ≈ "$205".
+    /// summary. Sums to $240.10 ≈ "$240".
     private struct DemoProviderCost {
         let provider: ServiceType
         let inputTokens: Int
@@ -117,6 +126,25 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 41.30,
             sessionCount: 54
+        ),
+        DemoProviderCost(
+            provider: .grok,
+            inputTokens: 1_850_000,
+            outputTokens: 610_000,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 22.40,
+            sessionCount: 41
+        ),
+        // OpenRouter is billed in dollars, not tokens, so it contributes cost only.
+        DemoProviderCost(
+            provider: .openRouter,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 12.80,
+            sessionCount: 18
         )
     ]
 

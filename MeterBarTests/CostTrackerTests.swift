@@ -13,7 +13,7 @@ final class CostTrackerTests: XCTestCase {
 
         let summary = tracker.costSummary
         XCTAssertNotNil(summary, "demo mode should publish a summary at construction")
-        XCTAssertEqual(summary?.totalCostUSD ?? 0, 204.90, accuracy: 0.001)
+        XCTAssertEqual(summary?.totalCostUSD ?? 0, 240.10, accuracy: 0.001)
         XCTAssertEqual(summary?.periodDays, 30)
         XCTAssertNil(summary?.lifetime)
         XCTAssertNotNil(tracker.lastScanDate)

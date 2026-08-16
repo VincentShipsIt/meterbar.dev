@@ -29,8 +29,8 @@ nonisolated struct QuotaEventAccountInputs: Sendable {
 /// Builds the app-wide provider/account input without ever projecting
 /// credential or filesystem configuration into the event model.
 nonisolated enum QuotaEventSnapshotCatalog {
-    static let flatProviders = ServiceType.allCases.filter {
-        $0 != .claudeCode && $0 != .codexCli && $0 != .grok
+    static var flatProviders: [ServiceType] {
+        ServiceType.allCases.filter { !$0.hasAccountScopedQuotaEvents }
     }
 
     static func snapshots(

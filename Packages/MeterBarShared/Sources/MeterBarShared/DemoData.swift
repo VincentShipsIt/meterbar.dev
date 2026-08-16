@@ -10,10 +10,11 @@ import Foundation
 ///
 /// Design rules the fixture upholds (each is asserted by `DemoDataTests`):
 ///  - **Generic labels only.** The map is keyed by `ServiceType`, whose display
-///    names ("Claude Code", "OpenAI Codex", "Cursor") are product names, never
-///    the owner's custom account/profile names. The app's demo wiring pairs this
-///    with default-only account stores so provider cards title as "Claude" /
-///    "Codex" / "Cursor" regardless of the real accounts on the machine.
+///    names ("Claude Code", "OpenAI Codex", "Cursor", "OpenRouter", "Grok")
+///    are product names, never the owner's custom account/profile names. The
+///    app's demo wiring pairs this with default-only account stores so
+///    provider cards title as "Claude" / "Codex" / "Cursor" / "OpenRouter" /
+///    "Grok" regardless of the real accounts on the machine.
 ///  - **Mostly comfortable green.** Every quota window sits at ≤75% used
 ///    (`QuotaBand.healthy`) except exactly one.
 ///  - **Exactly one "tight" amber band.** Codex's weekly window sits at 82%
@@ -36,20 +37,23 @@ public enum DemoData {
 
     /// Synthetic provider metrics for demo mode, keyed by service.
     ///
-    /// Covers three providers — Claude Code, Codex CLI, Cursor — which is enough
-    /// to populate the Overview window, the menu-bar panel, and the medium
-    /// widget while staying visually uncluttered.
+    /// Covers every `ServiceType` so demo / regression surfaces can exercise
+    /// Grok and OpenRouter without credentials. Adding a provider is a fixture
+    /// gap the capability parity tests fail on.
     public static func metrics(now: Date = Date()) -> [ServiceType: UsageMetrics] {
         [
             .claudeCode: claudeCode(now: now),
             .codexCli: codexCli(now: now),
-            .cursor: cursor(now: now)
+            .cursor: cursor(now: now),
+            .openRouter: openRouter(now: now),
+            .grok: grok(now: now)
         ]
     }
 
     // MARK: - Providers
 
-    /// Claude Code: all three windows comfortably green.
+    /// Claude Code: all three windows comfortably green. Extra usage is on
+    /// with nothing spent, matching the production extra-usage surface.
     private static func claudeCode(now: Date) -> UsageMetrics {
         UsageMetrics(
             service: .claudeCode,
@@ -57,6 +61,7 @@ public enum DemoData {
             weeklyLimit: weeklyLimit(usedPercent: 58, now: now),
             codeReviewLimit: modelLimit(usedPercent: 34, now: now),
             modelLimitLabel: "Fable",
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$0.00 used"),
             lastUpdated: now
         )
     }
@@ -90,6 +95,39 @@ public enum DemoData {
                 total: ServiceType.cursorIncludedPoolTotal,
                 resetTime: reset
             ),
+            lastUpdated: now
+        )
+    }
+
+    /// OpenRouter: key-limit + account-credits windows matching production
+    /// mapping (`sessionLimit` = key spend cap, `weeklyLimit` = credit
+    /// balance). Dollar amounts stay comfortably green.
+    private static func openRouter(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .openRouter,
+            sessionLimit: UsageLimit(
+                used: 12.80,
+                total: 40,
+                resetTime: now.addingTimeInterval(18 * 24 * 3_600),
+                windowSeconds: 30 * 24 * 3_600
+            ),
+            weeklyLimit: UsageLimit(
+                used: 42,
+                total: 100,
+                resetTime: nil
+            ),
+            lastUpdated: now
+        )
+    }
+
+    /// Grok: a weekly-style window plus extra usage and a banked reset.
+    /// Production often has no session period — do not invent one.
+    private static func grok(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .grok,
+            weeklyLimit: weeklyLimit(usedPercent: 47, now: now),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
+            resetCreditsAvailable: 1,
             lastUpdated: now
         )
     }

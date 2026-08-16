@@ -62,6 +62,14 @@ struct UsageWidgetProvider: TimelineProvider {
                 .claudeCode: UsageMetrics(
                     service: .claudeCode,
                     weeklyLimit: UsageLimit(used: 90, total: 100, resetTime: nil)
+                ),
+                .grok: UsageMetrics(
+                    service: .grok,
+                    weeklyLimit: UsageLimit(used: 47, total: 100, resetTime: nil)
+                ),
+                .openRouter: UsageMetrics(
+                    service: .openRouter,
+                    weeklyLimit: UsageLimit(used: 42, total: 100, resetTime: nil)
                 )
             ],
             accountMetrics: [],

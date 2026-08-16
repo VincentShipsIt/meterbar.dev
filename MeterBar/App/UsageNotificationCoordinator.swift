@@ -43,11 +43,10 @@ final class UsageNotificationCoordinator {
     /// threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
-    /// Providers whose quotas are tracked as a single flat snapshot. Claude Code,
-    /// Codex CLI, and Grok are excluded because they fan out per account and are
-    /// handled by `AccountNotificationPlanner` instead.
+    /// Providers whose quotas are tracked as a single flat snapshot. Account-
+    /// scoped providers fan out through `AccountNotificationPlanner` instead.
     static var flatNotificationServices: [ServiceType] {
-        ServiceType.allCases.filter { $0 != .claudeCode && $0 != .codexCli && $0 != .grok }
+        ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }
     }
 
     func start() {

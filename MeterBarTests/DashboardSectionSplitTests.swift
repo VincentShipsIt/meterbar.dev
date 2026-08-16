@@ -483,14 +483,18 @@ final class DashboardSectionSplitTests: XCTestCase {
     func testEnabledSourceLabelsCoverOnlyTheLogBackedProviders() {
         XCTAssertEqual(
             DashboardShareSection.enabledSourceLabels(for: Set(ServiceType.allCases)),
-            ["Codex logs", "Claude JSONL", "Cursor local state"]
+            ["Claude JSONL", "Codex logs", "Grok JSONL"]
         )
         XCTAssertEqual(
             DashboardShareSection.enabledSourceLabels(for: [.claudeCode]),
             ["Claude JSONL"]
         )
+        XCTAssertEqual(
+            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .grok]),
+            ["Grok JSONL"]
+        )
         XCTAssertTrue(
-            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .grok]).isEmpty,
+            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .cursor]).isEmpty,
             "API-only providers contribute no local log source"
         )
     }

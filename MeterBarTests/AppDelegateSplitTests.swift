@@ -594,11 +594,18 @@ final class AppDelegateSplitTests: XCTestCase {
     func testFlatNotificationServicesExcludeTheAccountAwareProviders() {
         let services = UsageNotificationCoordinator.flatNotificationServices
 
+        XCTAssertEqual(
+            services,
+            ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }
+        )
         XCTAssertFalse(services.contains(.claudeCode))
         XCTAssertFalse(services.contains(.codexCli))
         XCTAssertFalse(services.contains(.grok))
         XCTAssertEqual(services, [.cursor, .openRouter])
-        XCTAssertEqual(services.count, ServiceType.allCases.count - 3)
+        XCTAssertEqual(
+            services.count,
+            ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }.count
+        )
     }
 
     func testAccountNotificationIdentityMapsClaudeCodexAndGrokAccounts() {

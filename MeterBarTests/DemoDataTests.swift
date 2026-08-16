@@ -14,15 +14,15 @@ final class DemoDataTests: XCTestCase {
 
     // MARK: - Coverage & generic labels
 
-    func testCoversThreeProvidersKeyedByGenericServiceType() {
+    func testCoversEveryServiceTypeKeyedByGenericLabels() {
         let metrics = DemoData.metrics(now: now)
 
-        XCTAssertEqual(Set(metrics.keys), [.claudeCode, .codexCli, .cursor])
+        XCTAssertEqual(Set(metrics.keys), Set(ServiceType.allCases))
         // Labels come from the service enum's product display names, never the
         // owner's custom account/profile names.
-        XCTAssertEqual(metrics[.claudeCode]?.service.displayName, "Claude Code")
-        XCTAssertEqual(metrics[.codexCli]?.service.displayName, "OpenAI Codex")
-        XCTAssertEqual(metrics[.cursor]?.service.displayName, "Cursor")
+        for service in ServiceType.allCases {
+            XCTAssertEqual(metrics[service]?.service.displayName, service.displayName)
+        }
         // The one free-text label the fixture sets is a model window name, not a
         // project name.
         XCTAssertEqual(metrics[.claudeCode]?.modelLimitLabel, "Fable")
@@ -30,7 +30,7 @@ final class DemoDataTests: XCTestCase {
 
     func testEveryProviderHasData() {
         let metrics = DemoData.metrics(now: now)
-        for service in [ServiceType.claudeCode, .codexCli, .cursor] {
+        for service in ServiceType.allCases {
             XCTAssertEqual(metrics[service]?.hasData, true, "\(service) should have data")
         }
     }
@@ -89,6 +89,10 @@ final class DemoDataTests: XCTestCase {
         let metrics = DemoData.metrics(now: now)
 
         XCTAssertEqual(metrics[.codexCli]?.resetCreditsAvailable, 2)
+        XCTAssertEqual(metrics[.grok]?.resetCreditsAvailable, 1)
+        XCTAssertNotNil(metrics[.claudeCode]?.extraUsage)
+        XCTAssertNotNil(metrics[.grok]?.extraUsage)
+        XCTAssertNil(metrics[.grok]?.sessionLimit)
         // Cursor mirrors the real percent-pool mapping: no window seconds,
         // so no pace label is ever produced.
         XCTAssertNil(metrics[.cursor]?.sessionLimit?.pace(now: now))
@@ -100,11 +104,11 @@ final class DemoDataTests: XCTestCase {
     func testCostSummaryIsNonAlarmingAndCarriesOnlySyntheticBreakdowns() {
         let summary = DemoData.costSummary(now: now)
 
-        XCTAssertEqual(summary.totalCostUSD, 204.90, accuracy: 0.001, "~$205, deliberately modest")
+        XCTAssertEqual(summary.totalCostUSD, 240.10, accuracy: 0.001, "~$240, deliberately modest")
         XCTAssertEqual(summary.periodDays, 30)
         XCTAssertNil(summary.lifetime)
-        XCTAssertEqual(summary.costs.count, 3)
-        XCTAssertEqual(Set(summary.costs.map(\.provider)), [.claudeCode, .codexCli, .cursor])
+        XCTAssertEqual(summary.costs.count, ServiceType.allCases.count)
+        XCTAssertEqual(Set(summary.costs.map(\.provider)), Set(ServiceType.allCases))
         XCTAssertEqual(
             summary.totalTokens,
             summary.costs.reduce(0) { $0 + $1.totalTokens },
@@ -115,7 +119,7 @@ final class DemoDataTests: XCTestCase {
         // Breakdowns exist so demo screenshots show the model/origin charts —
         // but only from the fixture's fixed synthetic vocabulary. Nothing here
         // may ever look like a real project path or leak private routing.
-        for cost in summary.costs where cost.provider != .cursor {
+        for cost in summary.costs where cost.provider.writesLocalTokenLogs {
             XCTAssertFalse(cost.modelBreakdowns.isEmpty, "\(cost.provider) demo needs model rows")
             XCTAssertFalse(cost.originBreakdowns.isEmpty, "\(cost.provider) demo needs origin rows")
 
@@ -136,9 +140,11 @@ final class DemoDataTests: XCTestCase {
             }
         }
 
-        // Cursor is dollar-billed with no token telemetry; it stays plain.
-        let cursor = summary.costs.first { $0.provider == .cursor }
-        XCTAssertEqual(cursor?.modelBreakdowns.isEmpty, true)
+        // Dollar-billed providers have no token telemetry; they stay plain.
+        for provider in ServiceType.allCases where !provider.writesLocalTokenLogs {
+            let cost = summary.costs.first { $0.provider == provider }
+            XCTAssertEqual(cost?.modelBreakdowns.isEmpty, true, "\(provider)")
+        }
     }
 
     /// Daily rows carry per-model attribution so the 7-day window's model chart
@@ -165,12 +171,13 @@ final class DemoDataTests: XCTestCase {
         let summary = DemoData.costSummary(now: now)
 
         XCTAssertFalse(summary.dailyUsage.isEmpty)
-        // Cursor is billed in dollars (0 tokens) so it contributes cost only and
-        // never appears as a token row.
-        XCTAssertFalse(summary.dailyUsage.contains { $0.provider == .cursor })
-        XCTAssertTrue(summary.dailyUsage.allSatisfy { [.claudeCode, .codexCli].contains($0.provider) })
+        // Dollar-billed providers contribute cost only and never appear as a
+        // token row. Local-log providers fill the daily chart.
+        let tokenProviders = Set(ServiceType.allCases.filter(\.writesLocalTokenLogs))
+        XCTAssertFalse(summary.dailyUsage.contains { !$0.provider.writesLocalTokenLogs })
+        XCTAssertEqual(Set(summary.dailyUsage.map(\.provider)), tokenProviders)
         // One row per token-billed provider per day across the 30-day window.
-        XCTAssertEqual(summary.dailyUsage.count, 30 * 2)
+        XCTAssertEqual(summary.dailyUsage.count, 30 * tokenProviders.count)
     }
 
     func testFixtureIsDeterministicForAGivenClock() {
