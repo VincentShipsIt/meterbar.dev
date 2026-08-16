@@ -49,6 +49,7 @@ nonisolated public enum ProviderReadinessInspector {
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledAccountMetrics: [UsageMetrics] = [],
+        claudeIsCLIInstalled: Bool? = nil,
         claudeCredentialsProbe: ((ClaudeCodeAccount) -> Data?)? = nil,
         codexAccounts: [CodexAccount]? = nil,
         codexAuthProbe: ((CodexAccount) -> (exists: Bool, readable: Bool, json: Data?))? = nil,
@@ -87,6 +88,10 @@ nonisolated public enum ProviderReadinessInspector {
                     cachedMetrics: metrics[.claudeCode],
                     defaultAccountEnabled: claudeDefaultAccountEnabled,
                     enabledAccountMetrics: claudeEnabledAccountMetrics,
+                    isCLIInstalled: claudeIsCLIInstalled ?? CLIBinaryLocator.isAvailable(
+                        command: "claude",
+                        overrideEnvVar: "CLAUDE_CLI_PATH"
+                    ),
                     credentialsProbe: claudeCredentialsProbe
                 )
             },

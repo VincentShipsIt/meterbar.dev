@@ -137,6 +137,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             now: now,
             claudeAccounts: [disabledDefault, custom],
             claudeAccountMetrics: [customID: recent],
+            claudeIsCLIInstalled: true,
             claudeCredentialsProbe: { account in
                 probed.append(account.id)
                 return nil
@@ -172,6 +173,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             claudeAccountMetrics: [
                 ClaudeCodeAccount.defaultID: recent,
             ],
+            claudeIsCLIInstalled: true,
             parseHealth: [
                 .claudeCode: ProviderParseHealthRecord(
                     provider: .claudeCode,
@@ -189,6 +191,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             return (id, report)
         })
 
+        XCTAssertEqual(byID[ClaudeCodeAccount.defaultID]?.check(ReadinessCheckID.installed)?.level, .pass)
         XCTAssertEqual(byID[ClaudeCodeAccount.defaultID]?.check(ReadinessCheckID.refresh)?.level, .pass)
         XCTAssertEqual(byID[ClaudeCodeAccount.defaultID]?.check(ReadinessCheckID.parseHealth)?.level, .pass)
         XCTAssertNotEqual(byID[ClaudeCodeAccount.defaultID]?.overall, .fail)
@@ -212,6 +215,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             now: now,
             claudeAccounts: [disabledDefault, custom],
             claudeAccountMetrics: [customID: recent],
+            claudeIsCLIInstalled: true,
             parseHealth: [:],
             cachedMetrics: [:],
             cachedAccountMetrics: []
@@ -514,6 +518,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             claudeAccountMetrics: [custom.id: recentCustomMetrics],
             claudeDefaultAccountEnabled: false,
             claudeEnabledAccountMetrics: [recentCustomMetrics],
+            claudeIsCLIInstalled: true,
             parseHealth: [:]
         )
 
