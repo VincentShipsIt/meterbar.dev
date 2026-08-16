@@ -168,6 +168,7 @@ struct SnapshotLimit: Identifiable {
         case session
         case weekly
         case codeReview
+        case additional
     }
 
     let id: String
@@ -228,7 +229,19 @@ struct SnapshotLimit: Identifiable {
     /// Pace copy differs for rolling session windows vs weekly/billing windows.
     /// Derived from the limit's kind, not by string-matching the display title.
     var paceContext: PaceLabelContext {
-        kind == .weekly ? .weekly : .session
+        switch kind {
+        case .weekly:
+            return .weekly
+        case .additional:
+            switch usageLimit.periodKind {
+            case .weekly, .monthly, .billing:
+                return .weekly
+            case .session, .daily, .unknown, nil:
+                return .session
+            }
+        case .session, .codeReview:
+            return .session
+        }
     }
 
     // MARK: - Accessibility
@@ -275,6 +288,12 @@ struct SnapshotLimit: Identifiable {
             return String(localized: "quota.title.monthly", defaultValue: "Monthly")
         case .weekly:
             return String(localized: "quota.title.weekly", defaultValue: "Weekly")
+        case .daily:
+            return String(localized: "quota.title.daily", defaultValue: "Daily")
+        case .billingCycle:
+            return String(localized: "quota.title.billing_cycle", defaultValue: "Billing cycle")
+        case .quota:
+            return String(localized: "quota.title.quota", defaultValue: "Quota")
         }
     }
 
@@ -669,7 +688,10 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "session",
                 kind: .session,
-                quotaTitleKey: service.sessionQuotaTitleKey(limitTotal: session.total),
+                quotaTitleKey: service.sessionQuotaTitleKey(
+                    limitTotal: session.total,
+                    periodKind: session.periodKind
+                ),
                 usageLimit: session,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))
@@ -678,7 +700,10 @@ enum ProviderSnapshotBuilder {
             result.append(SnapshotLimit(
                 id: "weekly",
                 kind: .weekly,
-                quotaTitleKey: service.weeklyQuotaTitleKey(limitTotal: weekly.total),
+                quotaTitleKey: service.weeklyQuotaTitleKey(
+                    limitTotal: weekly.total,
+                    periodKind: weekly.periodKind
+                ),
                 usageLimit: weekly,
                 valueStyle: service == .openRouter ? .currency : .quota
             ))
@@ -692,6 +717,14 @@ enum ProviderSnapshotBuilder {
                 kind: .codeReview,
                 quotaTitleKey: service.codeReviewQuotaTitleKey(modelLimitLabel: metrics.modelLimitLabel),
                 usageLimit: codeReview
+            ))
+        }
+        for (index, additional) in metrics.additionalLimits.enumerated() {
+            result.append(SnapshotLimit(
+                id: "additional-\(index)",
+                kind: .additional,
+                quotaTitleKey: service.additionalQuotaTitleKey(for: additional),
+                usageLimit: additional
             ))
         }
         return result

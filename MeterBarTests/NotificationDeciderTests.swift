@@ -433,4 +433,20 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertEqual(result.notifications.first?.key, "Codex CLI-work-account-session-critical")
         XCTAssertEqual(result.notifications.first?.title, "Work (OpenAI Codex) Session Limit Reached")
     }
+
+    func testGrokMonthlyWeeklySlotNotificationIsTitledMonthly() {
+        let result = decider().evaluate(
+            metrics: metrics(
+                service: .grok,
+                weekly: UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .monthly)
+            ),
+            providerEnabled: true,
+            alreadyNotified: [],
+            now: now
+        )
+
+        XCTAssertEqual(result.notifications.first?.quotaDisplayName, "Monthly")
+        XCTAssertEqual(result.notifications.first?.title, "Grok Monthly Limit Reached")
+        XCTAssertFalse(result.notifications.contains { $0.quotaDisplayName == "Weekly" })
+    }
 }

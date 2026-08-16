@@ -1,6 +1,21 @@
 import Foundation
 
 public struct UsageLimit: Codable, Equatable, Sendable {
+    /// The provider-reported cadence of this window, when known.
+    ///
+    /// Distinct from the legacy `sessionLimit` / `weeklyLimit` slot the value
+    /// occupies: a monthly Grok allowance still lives in `weeklyLimit` so older
+    /// readers keep working, but `periodKind` is what titles and CLI identity
+    /// must honor. Missing on payloads written before this field existed.
+    public enum PeriodKind: String, Codable, Equatable, Sendable {
+        case session
+        case daily
+        case weekly
+        case monthly
+        case billing
+        case unknown
+    }
+
     public let used: Double
     public let total: Double
     public let resetTime: Date?
@@ -8,19 +23,22 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     /// True when MeterBar substituted or derived the quota total instead of
     /// receiving it from the provider.
     public let isEstimated: Bool
+    public let periodKind: PeriodKind?
 
     public init(
         used: Double,
         total: Double,
         resetTime: Date?,
         windowSeconds: TimeInterval? = nil,
-        isEstimated: Bool = false
+        isEstimated: Bool = false,
+        periodKind: PeriodKind? = nil
     ) {
         self.used = used
         self.total = total
         self.resetTime = resetTime
         self.windowSeconds = windowSeconds
         self.isEstimated = isEstimated
+        self.periodKind = periodKind
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -29,6 +47,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         case resetTime
         case windowSeconds
         case isEstimated
+        case periodKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -38,6 +57,17 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         resetTime = try container.decodeIfPresent(Date.self, forKey: .resetTime)
         windowSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .windowSeconds)
         isEstimated = try container.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
+        periodKind = try container.decodeIfPresent(PeriodKind.self, forKey: .periodKind)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(used, forKey: .used)
+        try container.encode(total, forKey: .total)
+        try container.encodeIfPresent(resetTime, forKey: .resetTime)
+        try container.encodeIfPresent(windowSeconds, forKey: .windowSeconds)
+        try container.encode(isEstimated, forKey: .isEstimated)
+        try container.encodeIfPresent(periodKind, forKey: .periodKind)
     }
 
     public var rawPercentage: Double {

@@ -198,6 +198,17 @@
         }
       }
     },
+    "quota.title.billing_cycle": {
+      "comment": "Quota window that resets with the provider billing cycle.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing cycle"
+          }
+        }
+      }
+    },
     "quota.title.code_review": {
       "localizations": {
         "en": {
@@ -215,6 +226,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cursor Models"
+          }
+        }
+      }
+    },
+    "quota.title.daily": {
+      "comment": "Quota window that resets each day.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily"
           }
         }
       }
@@ -267,6 +289,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Other Models"
+          }
+        }
+      }
+    },
+    "quota.title.quota": {
+      "comment": "Neutral title for a reported quota whose cadence is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota"
           }
         }
       }
@@ -524,6 +557,17 @@
         }
       }
     },
+    "widget.quota.billing_cycle": {
+      "comment": "Quota title for a provider billing-cycle window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing cycle"
+          }
+        }
+      }
+    },
     "widget.quota.code_review": {
       "comment": "Quota title for a code-review window.",
       "localizations": {
@@ -542,6 +586,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cursor Models"
+          }
+        }
+      }
+    },
+    "widget.quota.daily": {
+      "comment": "Quota title for a daily window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily"
           }
         }
       }
@@ -597,6 +652,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Other Models"
+          }
+        }
+      }
+    },
+    "widget.quota.quota": {
+      "comment": "Neutral title for a reported quota whose cadence is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota"
           }
         }
       }

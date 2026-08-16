@@ -36,7 +36,9 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertNil(metrics.sessionLimit)
         XCTAssertEqual(metrics.weeklyLimit?.used, 73.5)
         XCTAssertEqual(metrics.weeklyLimit?.total, 100)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
         XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 7 * 24 * 60 * 60)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
         XCTAssertEqual(
             metrics.weeklyLimit?.resetTime,
             FlexibleISO8601.date(from: "2026-07-15T15:05:27.877598+00:00")
@@ -79,15 +81,18 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         let session = try XCTUnwrap(metrics.sessionLimit)
         XCTAssertEqual(session.used, 40)
         XCTAssertEqual(session.total, 100)
+        XCTAssertEqual(session.periodKind, .session)
         XCTAssertEqual(session.windowSeconds, 5 * 60 * 60)
         XCTAssertEqual(session.resetTime, FlexibleISO8601.date(from: "2026-07-15T17:00:00Z"))
         XCTAssertNotNil(session.pace(now: now), "A real session window must resolve pace")
 
         let weekly = try XCTUnwrap(metrics.weeklyLimit)
         XCTAssertEqual(weekly.used, 73.5)
+        XCTAssertEqual(weekly.periodKind, .weekly)
         XCTAssertEqual(weekly.windowSeconds, 7 * 24 * 60 * 60)
         XCTAssertEqual(weekly.resetTime, FlexibleISO8601.date(from: "2026-07-15T15:05:27Z"))
         XCTAssertNotNil(weekly.pace(now: now), "A real weekly window must resolve pace")
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
     func testUnknownFieldShapeStillMapsTheUsageItCanRead() throws {
@@ -154,7 +159,9 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         let metrics = try GrokCLIUsageService.map(result, now: Date(timeIntervalSince1970: 1_000))
 
         XCTAssertEqual(metrics.sessionLimit?.used, 12)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .session)
         XCTAssertEqual(metrics.weeklyLimit?.used, 44)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
     }
 
     func testUsageWithoutAnyReadablePercentIsUnknownRatherThanZero() throws {
@@ -292,6 +299,7 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         let metrics = try GrokCLIUsageService.map(result)
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 25, "50 of a 200 allowance is 25%")
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
     }
 
@@ -391,6 +399,167 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.used, 10)
         XCTAssertNotNil(metrics.weeklyLimit?.resetTime)
         XCTAssertEqual(metrics.extraUsage?.state, .unknown)
+    }
+
+    func testMonthlyPeriodOccupiesTheWeeklySlotWithHonestPeriodKind() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "usagePeriods": [
+                  {
+                    "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                    "start": "2026-07-01T00:00:00Z",
+                    "end": "2026-08-01T00:00:00Z",
+                    "usagePercent": 41
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result)
+
+        let weekly = try XCTUnwrap(metrics.weeklyLimit)
+        XCTAssertEqual(weekly.used, 41)
+        XCTAssertEqual(weekly.periodKind, .monthly)
+        XCTAssertEqual(weekly.windowSeconds, 31 * 24 * 60 * 60)
+        XCTAssertEqual(weekly.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testBillingPeriodOccupiesTheWeeklySlotWhenWeeklyIsEmpty() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "usagePeriods": [
+                  {
+                    "type": "USAGE_PERIOD_TYPE_BILLING_CYCLE",
+                    "start": "2026-07-01T00:00:00Z",
+                    "end": "2026-08-01T00:00:00Z",
+                    "usagePercent": 18
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        let weekly = try XCTUnwrap(try GrokCLIUsageService.map(result).weeklyLimit)
+        XCTAssertEqual(weekly.used, 18)
+        XCTAssertEqual(weekly.periodKind, .billing)
+    }
+
+    func testMultipleACPPeriodsAreKeptRatherThanDiscarded() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "usagePeriods": [
+                  {
+                    "type": "USAGE_PERIOD_TYPE_SESSION",
+                    "start": "2026-07-15T12:00:00Z",
+                    "end": "2026-07-15T17:00:00Z",
+                    "usagePercent": 22
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_DAILY",
+                    "start": "2026-07-15T00:00:00Z",
+                    "end": "2026-07-16T00:00:00Z",
+                    "usagePercent": 33
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-07-08T15:05:27Z",
+                    "end": "2026-07-15T15:05:27Z",
+                    "usagePercent": 44
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                    "start": "2026-07-01T00:00:00Z",
+                    "end": "2026-08-01T00:00:00Z",
+                    "usagePercent": 55
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_BILLING_CYCLE",
+                    "start": "2026-06-01T00:00:00Z",
+                    "end": "2026-07-01T00:00:00Z",
+                    "usagePercent": 66
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result)
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 22)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .session)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 44)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.additionalLimits.map(\.used), [33, 55, 66])
+        XCTAssertEqual(
+            metrics.additionalLimits.map(\.periodKind),
+            [.daily, .monthly, .billing]
+        )
+    }
+
+    func testUnknownPeriodTypeWithPercentIsKeptAndWithoutPercentIsSkipped() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "usagePeriods": [
+                  {
+                    "type": "USAGE_PERIOD_TYPE_EXPERIMENTAL_BUCKET",
+                    "usagePercent": 17
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_EXPERIMENTAL_BUCKET"
+                  },
+                  {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-07-08T15:05:27Z",
+                    "end": "2026-07-15T15:05:27Z",
+                    "usagePercent": 40
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result)
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 40)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.additionalLimits.count, 1)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 17)
+        XCTAssertEqual(metrics.additionalLimits.first?.periodKind, .unknown)
+        XCTAssertNil(metrics.additionalLimits.first?.resetTime)
+        XCTAssertNil(metrics.additionalLimits.first?.windowSeconds)
+    }
+
+    func testUnknownPeriodWithoutPercentAndNoOtherReadingIsUnknownRatherThanZero() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "usagePeriods": [
+                  { "type": "USAGE_PERIOD_TYPE_EXPERIMENTAL_BUCKET" }
+                ]
+              }
+            }
+            """
+        )
+
+        XCTAssertThrowsError(try GrokCLIUsageService.map(result)) { error in
+            XCTAssertEqual(error as? GrokBillingRPC.Error, .invalidResponse)
+        }
     }
 
     // MARK: - Transport

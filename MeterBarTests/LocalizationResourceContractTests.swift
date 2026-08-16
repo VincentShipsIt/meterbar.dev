@@ -112,6 +112,9 @@ final class LocalizationResourceContractTests: XCTestCase {
             "widget.quota.other_models",
             "widget.quota.monthly",
             "widget.quota.weekly",
+            "widget.quota.daily",
+            "widget.quota.billing_cycle",
+            "widget.quota.quota",
         ] {
             let appValue = try englishValue(for: key, in: appStrings)
             let widgetValue = try englishValue(for: key, in: widgetStrings)
@@ -135,6 +138,9 @@ final class LocalizationResourceContractTests: XCTestCase {
             "widget.quota.other_models",
             "widget.quota.monthly",
             "widget.quota.weekly",
+            "widget.quota.daily",
+            "widget.quota.billing_cycle",
+            "widget.quota.quota",
         ] {
             XCTAssertTrue(widgetKeys.contains(key), "\(key) missing from the widget catalog")
         }
@@ -190,6 +196,9 @@ final class LocalizationResourceContractTests: XCTestCase {
         (.otherModels, "quota.title.other_models"),
         (.monthly, "quota.title.monthly"),
         (.weekly, "quota.title.weekly"),
+        (.daily, "quota.title.daily"),
+        (.billingCycle, "quota.title.billing_cycle"),
+        (.quota, "quota.title.quota"),
     ]
 
     func testCountStringsCarryEnglishOneAndOtherPluralRules() throws {

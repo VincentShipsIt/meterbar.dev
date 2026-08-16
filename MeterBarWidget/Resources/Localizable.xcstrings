@@ -286,6 +286,17 @@
         }
       }
     },
+    "widget.quota.billing_cycle": {
+      "comment": "Quota window that resets with the provider billing cycle.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing cycle"
+          }
+        }
+      }
+    },
     "widget.quota.code_review": {
       "localizations": {
         "en": {
@@ -303,6 +314,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cursor Models"
+          }
+        }
+      }
+    },
+    "widget.quota.daily": {
+      "comment": "Quota window that resets each day.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily"
           }
         }
       }
@@ -355,6 +377,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Other Models"
+          }
+        }
+      }
+    },
+    "widget.quota.quota": {
+      "comment": "Neutral title for a reported quota whose cadence is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota"
           }
         }
       }

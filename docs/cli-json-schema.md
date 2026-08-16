@@ -59,10 +59,18 @@ Version 1 shape:
 }
 ```
 
-`windows[].kind` is `session`, `weekly`, or `codeReview`. `percentUsed` is clamped to `0...100`
-for display, while `used` and `total` preserve the source values. `percentLeft` and `quotaBand`
-use MeterBar's shared quota rules; `quotaBand` is `healthy`, `tight`, `critical`, or `exhausted`.
-`estimated` identifies totals MeterBar inferred instead of receiving from the provider.
+`windows[].kind` is `session`, `weekly`, or `codeReview` for the three legacy slots. Additional
+reported periods appear as extra windows whose `kind` is the cadence itself: `daily`, `monthly`,
+`billing`, or `unknown`. `percentUsed` is clamped to `0...100` for display, while `used` and
+`total` preserve the source values. `percentLeft` and `quotaBand` use MeterBar's shared quota
+rules; `quotaBand` is `healthy`, `tight`, `critical`, or `exhausted`. `estimated` identifies
+totals MeterBar inferred instead of receiving from the provider.
+
+`windows[].periodKind` is an additive optional field. It names the provider-reported cadence
+(`session`, `daily`, `weekly`, `monthly`, `billing`, `unknown`) even when the row still occupies
+a legacy `kind` such as `weekly`. A monthly Grok allowance therefore stays `kind: "weekly"` for
+existing consumers and adds `"periodKind": "monthly"` so identity is honest. The key is omitted
+when the cache did not record a cadence.
 
 `extraUsage.state` is `on`, `off`, or `unknown`; its optional `detail` is provider-supplied display
 context. `resetCreditsAvailable` is present only when the provider reports banked reset credits.

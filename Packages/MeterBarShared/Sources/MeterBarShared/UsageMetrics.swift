@@ -51,6 +51,12 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     /// Codex (OpenAI reset credits) and Grok (usage-limit reset tokens). `nil`
     /// when the provider did not report the feature.
     public let resetCreditsAvailable: Int?
+    /// Extra readable periods that did not fit the three legacy slots.
+    ///
+    /// A second weekly window, a daily allowance next to session/weekly, or a
+    /// monthly period that arrived after `weeklyLimit` was already filled.
+    /// Missing on older cached payloads; decodes as empty.
+    public let additionalLimits: [UsageLimit]
     public let lastUpdated: Date
 
     public init(
@@ -61,6 +67,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         modelLimitLabel: String? = nil,
         extraUsage: ExtraUsageStatus? = nil,
         resetCreditsAvailable: Int? = nil,
+        additionalLimits: [UsageLimit] = [],
         lastUpdated: Date = Date()
     ) {
         self.id = UUID()
@@ -71,6 +78,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
+        self.additionalLimits = additionalLimits
         self.lastUpdated = lastUpdated
     }
 
@@ -83,6 +91,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         modelLimitLabel: String?,
         extraUsage: ExtraUsageStatus?,
         resetCreditsAvailable: Int?,
+        additionalLimits: [UsageLimit],
         lastUpdated: Date
     ) {
         self.id = id
@@ -93,7 +102,51 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
+        self.additionalLimits = additionalLimits
         self.lastUpdated = lastUpdated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case service
+        case sessionLimit
+        case weeklyLimit
+        case codeReviewLimit
+        case modelLimitLabel
+        case extraUsage
+        case resetCreditsAvailable
+        case additionalLimits
+        case lastUpdated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        service = try container.decode(ServiceType.self, forKey: .service)
+        sessionLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .sessionLimit)
+        weeklyLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .weeklyLimit)
+        codeReviewLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .codeReviewLimit)
+        modelLimitLabel = try container.decodeIfPresent(String.self, forKey: .modelLimitLabel)
+        extraUsage = try container.decodeIfPresent(ExtraUsageStatus.self, forKey: .extraUsage)
+        resetCreditsAvailable = try container.decodeIfPresent(Int.self, forKey: .resetCreditsAvailable)
+        additionalLimits = try container.decodeIfPresent([UsageLimit].self, forKey: .additionalLimits) ?? []
+        lastUpdated = try container.decode(Date.self, forKey: .lastUpdated)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(service, forKey: .service)
+        try container.encodeIfPresent(sessionLimit, forKey: .sessionLimit)
+        try container.encodeIfPresent(weeklyLimit, forKey: .weeklyLimit)
+        try container.encodeIfPresent(codeReviewLimit, forKey: .codeReviewLimit)
+        try container.encodeIfPresent(modelLimitLabel, forKey: .modelLimitLabel)
+        try container.encodeIfPresent(extraUsage, forKey: .extraUsage)
+        try container.encodeIfPresent(resetCreditsAvailable, forKey: .resetCreditsAvailable)
+        if !additionalLimits.isEmpty {
+            try container.encode(additionalLimits, forKey: .additionalLimits)
+        }
+        try container.encode(lastUpdated, forKey: .lastUpdated)
     }
 
     /// Returns a copy with the given reset-credit count, preserving identity,
@@ -108,6 +161,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
             modelLimitLabel: modelLimitLabel,
             extraUsage: extraUsage,
             resetCreditsAvailable: count,
+            additionalLimits: additionalLimits,
             lastUpdated: lastUpdated
         )
     }
@@ -124,6 +178,7 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
             modelLimitLabel: modelLimitLabel,
             extraUsage: status,
             resetCreditsAvailable: resetCreditsAvailable,
+            additionalLimits: additionalLimits,
             lastUpdated: lastUpdated
         )
     }
@@ -147,6 +202,9 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     }
 
     public var hasData: Bool {
-        sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
+        sessionLimit != nil
+            || weeklyLimit != nil
+            || codeReviewLimit != nil
+            || !additionalLimits.isEmpty
     }
 }

@@ -144,7 +144,8 @@ struct NotificationDecider {
             let quotaDisplayName = quotaKind.displayName(
                 for: metrics.service,
                 modelLimitLabel: metrics.modelLimitLabel,
-                limitTotal: limit.total
+                limitTotal: limit.total,
+                periodKind: limit.periodKind
             )
             let blocksProvider = Self.blocksProvider(
                 service: metrics.service,
@@ -232,18 +233,19 @@ struct NotificationDecider {
         func displayName(
             for service: ServiceType,
             modelLimitLabel: String?,
-            limitTotal: Double? = nil
+            limitTotal: Double? = nil,
+            periodKind: UsageLimit.PeriodKind? = nil
         ) -> String {
             switch self {
             case .session:
                 // Notification copy is Title Case for OpenRouter's key cap.
                 return service == .openRouter
                     ? "Key Limit"
-                    : service.sessionQuotaTitle(limitTotal: limitTotal)
+                    : service.sessionQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
             case .weekly:
                 return service == .openRouter
                     ? "Account Credits"
-                    : service.weeklyQuotaTitle(limitTotal: limitTotal)
+                    : service.weeklyQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
             case .codeReview:
                 return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
             }

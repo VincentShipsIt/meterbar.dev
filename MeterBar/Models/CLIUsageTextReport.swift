@@ -68,14 +68,14 @@ nonisolated public enum CLIUsageTextReport {
         var lines: [String] = []
         if let session = metric.sessionLimit {
             lines += limitLines(
-                service == .openRouter ? "  Key limit" : "  Session",
+                "  \(service.sessionQuotaTitle(limitTotal: session.total, periodKind: session.periodKind))",
                 session,
                 currency: service == .openRouter
             )
         }
         if let weekly = metric.weeklyLimit {
             lines += limitLines(
-                "  \(service.weeklyQuotaTitle)",
+                "  \(service.weeklyQuotaTitle(limitTotal: weekly.total, periodKind: weekly.periodKind))",
                 weekly,
                 currency: service == .openRouter
             )
@@ -83,6 +83,12 @@ nonisolated public enum CLIUsageTextReport {
         if let codeReview = metric.codeReviewLimit {
             let label = service.codeReviewQuotaTitle(modelLimitLabel: metric.modelLimitLabel)
             lines += limitLines("  \(label)", codeReview)
+        }
+        for additional in metric.additionalLimits {
+            lines += limitLines(
+                "  \(service.additionalQuotaTitleKey(for: additional).englishTitle)",
+                additional
+            )
         }
         return lines
     }

@@ -174,8 +174,6 @@ final class GrokCLIUsageService: ObservableObject {
     static func map(_ result: GrokBillingResult, now: Date = Date()) throws -> UsageMetrics {
         let config = result.config
         let periods = config.usagePeriods ?? []
-        let sessionPeriod = periods.first { $0.kind == .session }
-        let weeklyPeriod = periods.first { $0.kind == .weekly }
 
         // The account-wide billing-cycle percent, in descending order of trust:
         // the number the provider reports, the one its credits pair implies, and
@@ -186,11 +184,53 @@ final class GrokCLIUsageService: ObservableObject {
         let accountPercent = config.creditUsagePercent
             ?? config.derivedCreditPercent
             ?? impliedZeroPercent(for: result)
-        let weeklyPercent = weeklyPeriod?.usagePercent ?? accountPercent
-        let sessionLimit = limit(percent: sessionPeriod?.usagePercent, window: sessionPeriod)
-        let weeklyLimit = limit(percent: weeklyPercent, window: weeklyPeriod ?? config.fallbackPeriod)
 
-        guard sessionLimit != nil || weeklyLimit != nil else {
+        var sessionLimit: UsageLimit?
+        var weeklyLimit: UsageLimit?
+        var additionalLimits: [UsageLimit] = []
+
+        for period in periods {
+            guard let mapped = limit(
+                percent: period.usagePercent,
+                window: period,
+                periodKind: period.kind
+            ) else {
+                continue
+            }
+            switch period.kind {
+            case .session:
+                if sessionLimit == nil {
+                    sessionLimit = mapped
+                } else {
+                    additionalLimits.append(mapped)
+                }
+            case .weekly:
+                if weeklyLimit == nil {
+                    weeklyLimit = mapped
+                } else {
+                    additionalLimits.append(mapped)
+                }
+            case .monthly, .billing:
+                if weeklyLimit == nil {
+                    weeklyLimit = mapped
+                } else {
+                    additionalLimits.append(mapped)
+                }
+            case .daily, .unknown:
+                additionalLimits.append(mapped)
+            }
+        }
+
+        if weeklyLimit == nil {
+            let fallback = config.fallbackPeriod
+            weeklyLimit = limit(
+                percent: accountPercent,
+                window: fallback,
+                periodKind: fallback?.kind
+            )
+        }
+
+        guard sessionLimit != nil || weeklyLimit != nil || !additionalLimits.isEmpty else {
             throw GrokBillingRPC.Error.invalidResponse
         }
 
@@ -199,6 +239,7 @@ final class GrokCLIUsageService: ObservableObject {
             sessionLimit: sessionLimit,
             weeklyLimit: weeklyLimit,
             extraUsage: config.extraUsageStatus,
+            additionalLimits: additionalLimits,
             lastUpdated: now
         )
     }
@@ -224,13 +265,18 @@ final class GrokCLIUsageService: ObservableObject {
         return 0
     }
 
-    private static func limit(percent: Double?, window: GrokBillingConfig.Period?) -> UsageLimit? {
+    private static func limit(
+        percent: Double?,
+        window: GrokBillingConfig.Period?,
+        periodKind: UsageLimit.PeriodKind?
+    ) -> UsageLimit? {
         guard let percent else { return nil }
         return UsageLimit(
             used: min(100, max(0, percent)),
             total: 100,
             resetTime: window?.endDate,
-            windowSeconds: window?.windowSeconds
+            windowSeconds: window?.windowSeconds,
+            periodKind: periodKind
         )
     }
 
@@ -432,11 +478,9 @@ nonisolated struct GrokBillingResult: Decodable, Sendable {
 
 nonisolated struct GrokBillingConfig: Decodable, Sendable {
     struct Period: Decodable, Sendable {
-        /// Which shared quota window a provider period belongs to.
-        enum Kind: Sendable {
-            case session
-            case weekly
-        }
+        /// Provider-reported cadence. Classified by the token first and the
+        /// dated window second so a monthly allowance is never called weekly.
+        typealias Kind = UsageLimit.PeriodKind
 
         let type: String?
         let start: String?
@@ -472,18 +516,38 @@ nonisolated struct GrokBillingConfig: Decodable, Sendable {
 
         /// Classified by the provider's own token where possible, and by window
         /// length otherwise — a new token spelling should re-bucket the period,
-        /// not drop it.
-        var kind: Kind? {
+        /// not drop it. An unrecognized token with no dated window stays
+        /// `.unknown` rather than being discarded or invented as weekly.
+        var kind: Kind {
             if let token = type?.uppercased() {
-                if ["WEEK", "MONTH", "BILLING", "CYCLE"].contains(where: token.contains) {
-                    return .weekly
-                }
-                if ["HOUR", "DAILY", "DAY", "SESSION"].contains(where: token.contains) {
+                if token.contains("HOUR") || token.contains("SESSION") {
                     return .session
                 }
+                if token.contains("DAY") || token.contains("DAILY") {
+                    return .daily
+                }
+                if token.contains("WEEK") {
+                    return .weekly
+                }
+                if token.contains("MONTH") {
+                    return .monthly
+                }
+                if token.contains("BILLING") || token.contains("CYCLE") {
+                    return .billing
+                }
+                return kindFromWindow ?? .unknown
             }
+            return kindFromWindow ?? .unknown
+        }
+
+        /// Duration buckets used only when the provider omitted a usable token.
+        /// Keeps the historical 5-hour → session and 7-day → weekly readings.
+        private var kindFromWindow: Kind? {
             guard let windowSeconds else { return nil }
-            return windowSeconds <= 24 * 60 * 60 ? .session : .weekly
+            if windowSeconds <= 24 * 60 * 60 { return .session }
+            if windowSeconds <= 8 * 24 * 60 * 60 { return .weekly }
+            if windowSeconds <= 45 * 24 * 60 * 60 { return .monthly }
+            return .billing
         }
     }
 

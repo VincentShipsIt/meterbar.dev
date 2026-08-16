@@ -474,6 +474,50 @@ final class WidgetPresentationTests: XCTestCase {
         )
     }
 
+    func testGrokMonthlyWeeklySlotIsTitledMonthlyNeverWeekly() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.weekly]
+        let presentation = presentation(
+            metrics: [
+                .grok: UsageMetrics(
+                    service: .grok,
+                    weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly),
+                    lastUpdated: now
+                )
+            ],
+            preferences: preferences
+        )
+        let row = presentation.rows.first { $0.service == .grok && $0.quotaWindow == .weekly }
+
+        XCTAssertEqual(row?.quotaTitleKey, .monthly)
+        XCTAssertEqual(row?.quotaTitle, "Monthly")
+        XCTAssertNotEqual(row?.quotaTitle, "Weekly")
+    }
+
+    func testAdditionalLimitsAppearAsExtraWidgetRows() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
+        let presentation = presentation(
+            metrics: [
+                .grok: UsageMetrics(
+                    service: .grok,
+                    sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .session),
+                    weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
+                    additionalLimits: [
+                        UsageLimit(used: 30, total: 100, resetTime: nil, periodKind: .daily)
+                    ],
+                    lastUpdated: now
+                )
+            ],
+            preferences: preferences
+        )
+        let titles = presentation.rows.filter { $0.service == .grok }.map(\.quotaTitle)
+
+        XCTAssertTrue(titles.contains("Session"))
+        XCTAssertTrue(titles.contains("Weekly"))
+        XCTAssertTrue(titles.contains("Daily"), titles.joined(separator: ", "))
+    }
+
     private func makeMetrics(
         _ service: ServiceType,
         sessionUsed: Double? = nil,

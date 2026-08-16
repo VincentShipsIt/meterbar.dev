@@ -89,6 +89,7 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
 
     private struct Window: Encodable {
         let kind: String
+        let periodKind: String?
         let used: Double
         let total: Double
         let percentUsed: Double
@@ -100,6 +101,7 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
 
         init(kind: String, limit: UsageLimit) {
             self.kind = kind
+            periodKind = limit.periodKind?.rawValue
             used = limit.used
             total = limit.total
             percentUsed = limit.percentage
@@ -115,7 +117,9 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
                 metrics.sessionLimit.map { Window(kind: "session", limit: $0) },
                 metrics.weeklyLimit.map { Window(kind: "weekly", limit: $0) },
                 metrics.codeReviewLimit.map { Window(kind: "codeReview", limit: $0) },
-            ].compactMap { $0 }
+            ].compactMap { $0 } + metrics.additionalLimits.map {
+                Window(kind: $0.cliWindowKind, limit: $0)
+            }
         }
     }
 
@@ -475,6 +479,14 @@ nonisolated extension ServiceType {
     static func fromCLIIdentifier(_ raw: String) -> ServiceType? {
         let needle = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return allCases.first { $0.cliIdentifier == needle }
+    }
+}
+
+nonisolated private extension UsageLimit {
+    /// Extra windows use the reported cadence as `windows[].kind`. The three
+    /// legacy slots keep `session` / `weekly` / `codeReview`.
+    var cliWindowKind: String {
+        periodKind?.rawValue ?? "unknown"
     }
 }
 

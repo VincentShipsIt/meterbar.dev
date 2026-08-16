@@ -462,6 +462,43 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(displayCurrency["source"] as? String, "manual")
     }
 
+    func testPeriodKindIsEmittedAdditivelyAndAdditionalWindowsUseCadenceKind() throws {
+        let metrics = UsageMetrics(
+            service: .grok,
+            sessionLimit: UsageLimit(
+                used: 10,
+                total: 100,
+                resetTime: referenceDate,
+                windowSeconds: 18_000,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 41,
+                total: 100,
+                resetTime: nil,
+                windowSeconds: 2_678_400,
+                periodKind: .monthly
+            ),
+            additionalLimits: [
+                UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily),
+                UsageLimit(used: 8, total: 100, resetTime: nil, periodKind: .unknown)
+            ],
+            lastUpdated: referenceDate
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: UsageCLIJSONResponse(metrics: [.grok: metrics]).jsonData()
+            ) as? [String: Any]
+        )
+        let providers = try XCTUnwrap(object["providers"] as? [[String: Any]])
+        let windows = try XCTUnwrap(providers.first?["windows"] as? [[String: Any]])
+
+        XCTAssertEqual(windows.map { $0["kind"] as? String }, ["session", "weekly", "daily", "unknown"])
+        XCTAssertEqual(windows.map { $0["periodKind"] as? String }, ["session", "monthly", "daily", "unknown"])
+        XCTAssertEqual(windows[1]["used"] as? Double, 41)
+    }
+
     func testErrorResponseIsVersionedAndMachineStable() throws {
         let response = CLIJSONErrorResponse(
             code: "usage_cache_missing",

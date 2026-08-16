@@ -131,6 +131,37 @@ final class CLIUsageTextReportTests: XCTestCase {
         XCTAssertFalse(text.contains("▸ Claude Code"), text)
     }
 
+    func testGrokMonthlyWeeklySlotIsTitledMonthlyNeverWeekly() {
+        let text = render(
+            .grok,
+            metric: UsageMetrics(
+                service: .grok,
+                weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly),
+                lastUpdated: referenceDate
+            )
+        )
+
+        XCTAssertTrue(text.contains("Monthly:"), text)
+        XCTAssertFalse(text.contains("Weekly"), text)
+    }
+
+    func testAdditionalLimitsAppearInTheTextReport() {
+        let text = render(
+            .grok,
+            metric: UsageMetrics(
+                service: .grok,
+                weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
+                additionalLimits: [
+                    UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)
+                ],
+                lastUpdated: referenceDate
+            )
+        )
+
+        XCTAssertTrue(text.contains("Weekly:"), text)
+        XCTAssertTrue(text.contains("Daily:"), text)
+    }
+
     private func render(_ service: ServiceType, metric: UsageMetrics) -> String {
         CLIUsageTextReport.lines(for: [service: metric]).joined(separator: "\n")
     }

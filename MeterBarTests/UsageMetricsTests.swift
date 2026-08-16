@@ -30,6 +30,19 @@ final class UsageMetricsTests: XCTestCase {
         XCTAssertNil(metrics.sessionLimit)
         XCTAssertNil(metrics.weeklyLimit)
         XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertFalse(metrics.hasData)
+    }
+
+    func testHasDataIsTrueWhenOnlyAdditionalLimitsExist() {
+        let metrics = UsageMetrics(
+            service: .grok,
+            additionalLimits: [
+                UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)
+            ]
+        )
+
+        XCTAssertTrue(metrics.hasData)
     }
 
     func testIdIsUnique() {
@@ -76,6 +89,25 @@ final class UsageMetricsTests: XCTestCase {
 
         XCTAssertEqual(decoded.service, .claudeCode)
         XCTAssertNil(decoded.modelLimitLabel)
+        XCTAssertTrue(decoded.additionalLimits.isEmpty)
+    }
+
+    func testAdditionalLimitsRoundTripAndPreserveCopies() throws {
+        let original = UsageMetrics(
+            service: .grok,
+            weeklyLimit: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .weekly),
+            additionalLimits: [
+                UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(UsageMetrics.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(decoded.additionalLimits, original.additionalLimits)
+        XCTAssertEqual(decoded.weeklyLimit?.periodKind, .weekly)
+
+        let copied = decoded.withResetCreditsAvailable(1).withExtraUsage(.unknown)
+        XCTAssertEqual(copied.additionalLimits, original.additionalLimits)
+        XCTAssertEqual(copied.resetCreditsAvailable, 1)
     }
 
     func testOverallStatusIgnoresModelScopedExhaustion() {
