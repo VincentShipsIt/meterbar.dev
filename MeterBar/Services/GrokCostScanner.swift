@@ -132,7 +132,6 @@ enum GrokCostScanner {
             for file in listing.files {
                 guard coverage.keep(file.cacheKey) else { continue }
                 guard let totals = Self.totals(for: file, session: session) else { continue }
-                session.noteProcessedFile()
                 guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the
@@ -277,6 +276,7 @@ enum GrokCostScanner {
 
         // Nothing appended since the last pass.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
+            session.noteProcessedFile()
             return record.payload
         }
 
@@ -333,6 +333,11 @@ enum GrokCostScanner {
             ),
             for: file.cacheKey,
             provider: .grok
+        )
+        session.noteProcessedFile(
+            consumed: read.reachedEndOfFile,
+            committedOffset: read.committedOffset,
+            fileSize: file.size
         )
         return payload
     }

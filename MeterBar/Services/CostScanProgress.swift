@@ -37,7 +37,13 @@ nonisolated struct CostScanProgress: Equatable, Sendable {
 
     var fraction: Double? {
         guard listedFiles > 0 else { return nil }
-        return min(1, Double(processedFiles) / Double(listedFiles))
+        if isComplete { return 1 }
+        // Deferred or still-open files can make processedFiles catch listedFiles
+        // before the refresh is done. Never report 100% in that state.
+        return min(
+            Double(processedFiles) / Double(listedFiles),
+            Double(listedFiles - 1) / Double(listedFiles)
+        )
     }
 
     var formattedListedSize: String { Self.formatBytes(listedBytes) }

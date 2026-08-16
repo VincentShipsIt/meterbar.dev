@@ -326,7 +326,6 @@ enum CodexCostScanner {
         for file in listing.files {
             coverage.keep(file.cacheKey)
             guard let totals = Self.totals(for: file, session: session) else { continue }
-            session.noteProcessedFile()
             guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                 // This rollout shares only *some* of its events with one already
                 // folded in. Aggregates cannot be de-overlapped after the fact,
@@ -373,6 +372,7 @@ enum CodexCostScanner {
 
         // Nothing appended since the last pass.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
+            session.noteProcessedFile()
             return record.payload
         }
 
@@ -471,6 +471,11 @@ enum CodexCostScanner {
             ),
             for: file.cacheKey,
             provider: .codex
+        )
+        session.noteProcessedFile(
+            consumed: read.reachedEndOfFile,
+            committedOffset: committed,
+            fileSize: file.size
         )
         return payload
     }

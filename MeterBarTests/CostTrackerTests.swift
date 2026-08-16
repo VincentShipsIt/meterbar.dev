@@ -1227,12 +1227,65 @@ final class CostTrackerTests: XCTestCase {
 
         XCTAssertFalse(first.isComplete)
         XCTAssertEqual(firstWindows.period.totals.input, 100)
+        let firstProgress = first.progress(windowDays: 30)
+        XCTAssertEqual(firstProgress.listedFiles, 1)
+        XCTAssertEqual(firstProgress.processedFiles, 0)
+        XCTAssertFalse(firstProgress.isComplete)
+        XCTAssertFalse(firstProgress.statusText.contains("1 of 1"))
+        XCTAssertLessThan(try XCTUnwrap(firstProgress.fraction), 1)
 
         let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
         let resumed = CodexCostScanner.scanRollouts(directories: [directory], session: second)
 
         XCTAssertTrue(second.isComplete)
         XCTAssertEqual(resumed.period.totals.input, 150)
+        let completed = second.progress(windowDays: 30)
+        XCTAssertEqual(completed.processedFiles, 1)
+        XCTAssertTrue(completed.isComplete)
+        XCTAssertEqual(try XCTUnwrap(completed.fraction), 1.0, accuracy: 0.000_001)
+    }
+
+    func testUnreadCodexFilesAreNotCountedAsProcessed() throws {
+        let root = try makeCodexHome()
+        let newestLines = [
+            codexTurnContextLine(timestamp: "2026-06-15T09:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T09:02:00Z", conversationID: "conv-new", input: 100)
+        ]
+        let oldestLines = [
+            codexTurnContextLine(timestamp: "2026-06-15T08:01:00Z", model: "gpt-5.6-sol"),
+            codexUsageLine(timestamp: "2026-06-15T08:02:00Z", conversationID: "conv-old", input: 25)
+        ]
+        let newest = try writeCodexRollout(
+            in: root,
+            path: "sessions/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 0,
+            lines: newestLines
+        )
+        try writeCodexRollout(
+            in: root,
+            path: "archived_sessions/\(codexRolloutName(sessionID: UUID()))",
+            modifiedAgo: 60,
+            lines: oldestLines
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: try fileSize(newest),
+            wallClock: nil
+        )
+        let session = CostScanSession(cutoff: cutoff, options: budget)
+
+        _ = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root),
+            session: session
+        )
+        let progress = session.progress(windowDays: 30)
+
+        XCTAssertFalse(session.isComplete)
+        XCTAssertEqual(progress.listedFiles, 2)
+        XCTAssertEqual(progress.processedFiles, 1)
+        XCTAssertEqual(try XCTUnwrap(progress.fraction), 0.5, accuracy: 0.000_001)
+        XCTAssertFalse(progress.isComplete)
     }
 
     func testBudgetedCodexScanRollsBackCumulativeBaselineWithDeferredUsage() throws {
@@ -1976,6 +2029,35 @@ final class CostTrackerTests: XCTestCase {
         let tracker = CostTracker(demoMode: true)
         tracker.lastScanDate = lastScan
         return tracker
+    }
+
+    /// Listing milestones hop off the scan queue onto the main actor so a
+    /// one-slice refresh can show file count and bytes while work is still
+    /// running — the CostTracker wiring for issue #438.
+    func testProgressBridgePublishesListingOnTheMainActor() {
+        let tracker = CostTracker(demoMode: true)
+        let bridge = CostScanProgressBridge(tracker: tracker)
+        let listed = CostScanProgress(
+            windowDays: 30,
+            listedFiles: 4,
+            listedBytes: 2_048,
+            processedFiles: 0,
+            isComplete: false
+        )
+        let published = expectation(description: "listing progress reaches the tracker")
+
+        bridge.publish(listed)
+
+        DispatchQueue.main.async {
+            XCTAssertEqual(tracker.scanProgress?.listedFiles, 4)
+            XCTAssertEqual(tracker.scanProgress?.listedBytes, 2_048)
+            XCTAssertEqual(tracker.scanProgress?.processedFiles, 0)
+            XCTAssertFalse(tracker.scanProgress?.isComplete ?? true)
+            XCTAssertEqual(tracker.scanProgress?.fraction ?? -1, 0, accuracy: 0.000_001)
+            published.fulfill()
+        }
+
+        wait(for: [published], timeout: 1)
     }
 
     @MainActor
