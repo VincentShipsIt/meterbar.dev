@@ -103,7 +103,7 @@ struct ReadinessProviderCard: View {
             size: compact ? 15 : 18,
             foregroundColor: .primary
           )
-          Text(report.provider.displayName)
+          Text(report.identity.displayTitle)
             .font(compact ? .subheadline : .headline)
             .fontWeight(.semibold)
           Spacer(minLength: 0)
@@ -138,7 +138,7 @@ enum DiagnosticsReportText {
   static func plainText(_ reports: [ProviderReadiness]) -> String {
     var lines = ["MeterBar Diagnostics", ""]
     for report in reports {
-      lines.append("\(report.provider.displayName)  [\(report.overall.rawValue.uppercased())]")
+      lines.append("\(report.identity.displayTitle)  [\(report.overall.rawValue.uppercased())]")
       for check in report.checks {
         lines.append("  \(symbol(check.level)) \(check.title): \(check.detail)")
         if let recovery = check.recovery {

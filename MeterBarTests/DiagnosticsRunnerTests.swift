@@ -43,6 +43,21 @@ final class DiagnosticsRunnerTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testAccountRefreshErrorsKeepPerAccountIdentity() {
+        let work = UUID()
+        let result = DiagnosticsRunner.accountRefreshErrors(
+            claudeDefaultAccountEnabled: true,
+            claudeError: .apiError("claude"),
+            claudeAccountErrors: [:],
+            codexAccountErrors: [work: .notAuthenticated],
+            grokAccountErrors: [:]
+        )
+
+        XCTAssertNotNil(result[.claudeCode]?[ClaudeCodeAccount.defaultID])
+        XCTAssertNotNil(result[.codexCli]?[work])
+        XCTAssertNil(result[.grok])
+    }
+
     func testRefreshErrorsMapsEachNonClaudeProvider() {
         let result = DiagnosticsRunner.refreshErrors(
             claudeDefaultAccountEnabled: true,

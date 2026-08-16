@@ -118,6 +118,9 @@ struct MenuBarView: View {
             claudeEnabledAccountMetrics: claudeAccountStore.enabledAccounts.compactMap {
               dataManager.claudeCodeAccountMetrics[$0.id]
             },
+            claudeAccounts: claudeAccountStore.accounts,
+            claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+            codexAccounts: codexAccountStore.accounts,
             grokAccounts: grokAccountStore.accounts,
             showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
           )

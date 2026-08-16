@@ -43,50 +43,82 @@ nonisolated public enum ProviderReadinessInspector {
     static func reports(
         providers: Set<ServiceType> = Set(ServiceType.allCases),
         refreshErrors: [ServiceType: ServiceError] = [:],
+        accountRefreshErrors: [ServiceType: [UUID: ServiceError]] = [:],
         now: Date = Date(),
+        claudeAccounts: [ClaudeCodeAccount]? = nil,
+        claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledAccountMetrics: [UsageMetrics] = [],
-        grokAccounts: [GrokAccount]?,
+        claudeCredentialsProbe: ((ClaudeCodeAccount) -> Data?)? = nil,
+        codexAccounts: [CodexAccount]? = nil,
+        codexAuthProbe: ((CodexAccount) -> (exists: Bool, readable: Bool, json: Data?))? = nil,
+        grokAccounts: [GrokAccount]? = nil,
+        grokAuthProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))? = nil,
         parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil,
-        cachedMetrics: [ServiceType: UsageMetrics]? = nil
+        cachedMetrics: [ServiceType: UsageMetrics]? = nil,
+        cachedAccountMetrics: [AccountUsageSnapshot]? = nil
     ) -> [ProviderReadiness] {
         let metrics = cachedMetrics ?? SharedDataStore.shared.loadMetrics()
-        let configuredGrokAccounts = grokAccounts
-            ?? UsageRefreshConfigurationStore.load()?.grokAccounts
+        let accountSnapshots = cachedAccountMetrics ?? SharedDataStore.shared.loadAccountMetrics()
+        let snapshotsByID = Dictionary(uniqueKeysWithValues: accountSnapshots.map { ($0.id, $0.metrics) })
+        let configuration = UsageRefreshConfigurationStore.load()
+        let configuredClaudeAccounts = claudeAccounts ?? configuration?.claudeAccounts
+        let configuredCodexAccounts = codexAccounts
+            ?? configuration?.codexAccounts
             ?? [.defaultAccount]
+        let configuredGrokAccounts = grokAccounts
+            ?? configuration?.grokAccounts
+            ?? [.defaultAccount]
+        let mergedClaudeMetrics = snapshotsByID.merging(claudeAccountMetrics) { _, incoming in incoming }
+        let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
+
         let baseReports = reports(
             providers: providers,
             refreshErrors: refreshErrors,
             now: now,
-            claudeReport: {
-                claudeReport(
-                    refreshError: $0,
-                    now: $1,
+            claudeReport: { error, date in
+                claudeReports(
+                    refreshError: error,
+                    accountRefreshErrors: accountRefreshErrors[.claudeCode] ?? [:],
+                    now: date,
+                    accounts: configuredClaudeAccounts,
+                    accountMetrics: mergedClaudeMetrics,
                     cachedMetrics: metrics[.claudeCode],
                     defaultAccountEnabled: claudeDefaultAccountEnabled,
-                    enabledAccountMetrics: claudeEnabledAccountMetrics
+                    enabledAccountMetrics: claudeEnabledAccountMetrics,
+                    credentialsProbe: claudeCredentialsProbe
                 )
             },
-            codexReport: { codexReport(refreshError: $0, now: $1) },
-            cursorReport: { cursorReport(refreshError: $0, now: $1) },
-            openRouterReport: { error, _ in openRouterReport(refreshError: error) },
-            grokReport: { error, _ in
-                grokReport(accounts: configuredGrokAccounts, refreshError: error)
+            codexReport: { error, date in
+                codexReports(
+                    refreshError: error,
+                    accountRefreshErrors: accountRefreshErrors[.codexCli] ?? [:],
+                    now: date,
+                    accounts: configuredCodexAccounts,
+                    accountMetrics: snapshotsByID,
+                    authProbe: codexAuthProbe
+                )
+            },
+            cursorReport: { error, date in [cursorReport(refreshError: error, now: date)] },
+            openRouterReport: { error, _ in [openRouterReport(refreshError: error)] },
+            grokReport: { error, date in
+                grokReports(
+                    refreshError: error,
+                    accountRefreshErrors: accountRefreshErrors[.grok] ?? [:],
+                    now: date,
+                    accounts: configuredGrokAccounts,
+                    accountMetrics: snapshotsByID,
+                    authProbe: grokAuthProbe
+                )
             }
         )
-        let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
-        return baseReports.map { report in
-            let record = health[report.provider]
-            let providerMetrics = metrics[report.provider]
-            return ProviderReadiness(
-                provider: report.provider,
-                checks: reconciledRefreshChecks(
-                    report.checks,
-                    record: record,
-                    metrics: providerMetrics
-                ) + [parseHealthCheck(record, metrics: providerMetrics, now: now)]
-            )
-        }
+        return decorate(
+            baseReports,
+            health: health,
+            metrics: metrics,
+            accountMetrics: mergedClaudeMetrics.merging(snapshotsByID) { incoming, _ in incoming },
+            now: now
+        )
     }
 
     /// Injectable routing seam used to prove that disabled providers perform no
@@ -96,18 +128,18 @@ nonisolated public enum ProviderReadinessInspector {
         providers: Set<ServiceType>,
         refreshErrors: [ServiceType: ServiceError],
         now: Date,
-        claudeReport: (ServiceError?, Date) -> ProviderReadiness,
-        codexReport: (ServiceError?, Date) -> ProviderReadiness,
-        cursorReport: (ServiceError?, Date) -> ProviderReadiness,
-        openRouterReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
-            ProviderReadinessInspector.openRouterReport(refreshError: error)
+        claudeReport: (ServiceError?, Date) -> [ProviderReadiness],
+        codexReport: (ServiceError?, Date) -> [ProviderReadiness],
+        cursorReport: (ServiceError?, Date) -> [ProviderReadiness],
+        openRouterReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.openRouterReport(refreshError: error)]
         },
-        grokReport: (ServiceError?, Date) -> ProviderReadiness = { error, _ in
-            ProviderReadinessInspector.grokReport(refreshError: error)
+        grokReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.grokReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
-        ServiceType.allCases.compactMap { provider in
-            guard providers.contains(provider) else { return nil }
+        ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
+            guard providers.contains(provider) else { return [] }
             switch provider {
             case .claudeCode:
                 return claudeReport(refreshErrors[provider], now)
@@ -130,7 +162,63 @@ nonisolated public enum ProviderReadinessInspector {
     /// login, and a later breakage surfaces through the refresh-error check.
     static let recentUsageFetchWindow: TimeInterval = 24 * 60 * 60
 
+    // swiftlint:disable:next function_parameter_count
+    static func claudeReports(
+        refreshError: ServiceError?,
+        accountRefreshErrors: [UUID: ServiceError],
+        now: Date,
+        accounts: [ClaudeCodeAccount]?,
+        accountMetrics: [UUID: UsageMetrics],
+        cachedMetrics: UsageMetrics?,
+        defaultAccountEnabled: Bool,
+        enabledAccountMetrics: [UsageMetrics],
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(
+            command: "claude",
+            overrideEnvVar: "CLAUDE_CLI_PATH"
+        ),
+        isOAuthFallbackEnabled: () -> Bool = {
+            ClaudeCodeLocalService.isOAuthUsageEnabled()
+        },
+        credentialsProbe: ((ClaudeCodeAccount) -> Data?)?
+    ) -> [ProviderReadiness] {
+        if let accounts {
+            let enabled = accounts.filter(\.isEnabled)
+            let reports = enabled.map { account in
+                claudeReport(
+                    identity: .account(.claudeCode, id: account.id, name: account.name),
+                    refreshError: accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil),
+                    now: now,
+                    cachedMetrics: accountMetrics[account.id],
+                    defaultAccountEnabled: account.isDefault,
+                    enabledAccountMetrics: accountMetrics[account.id].map { [$0] } ?? [],
+                    isCLIInstalled: isCLIInstalled,
+                    isOAuthFallbackEnabled: isOAuthFallbackEnabled,
+                    credentialsData: {
+                        if let credentialsProbe {
+                            return credentialsProbe(account)
+                        }
+                        return ClaudeCodeLocalService.shared.credentialsData(for: account)
+                    }
+                )
+            }
+            return pack(provider: .claudeCode, accountReports: reports)
+        }
+
+        return [
+            claudeReport(
+                refreshError: refreshError,
+                now: now,
+                cachedMetrics: cachedMetrics,
+                defaultAccountEnabled: defaultAccountEnabled,
+                enabledAccountMetrics: enabledAccountMetrics,
+                isCLIInstalled: isCLIInstalled,
+                isOAuthFallbackEnabled: isOAuthFallbackEnabled
+            ),
+        ]
+    }
+
     static func claudeReport(
+        identity: ReadinessIdentity = .provider(.claudeCode),
         refreshError: ServiceError? = nil,
         now: Date = Date(),
         cachedMetrics: @autoclosure () -> UsageMetrics? = SharedDataStore.shared.loadMetrics()[.claudeCode],
@@ -168,7 +256,7 @@ nonisolated public enum ProviderReadinessInspector {
             refreshError: sanitize(refreshError),
             now: now
         )
-        return ProviderReadinessEvaluator.claudeCode(input)
+        return ProviderReadinessEvaluator.claudeCode(input).withIdentity(identity)
     }
 
     /// Whether the shared metrics cache holds a Claude Code entry fetched
@@ -185,23 +273,63 @@ nonisolated public enum ProviderReadinessInspector {
         return age >= 0 && age <= recentUsageFetchWindow
     }
 
+    static func codexReports(
+        refreshError: ServiceError?,
+        accountRefreshErrors: [UUID: ServiceError],
+        now: Date,
+        accounts: [CodexAccount],
+        accountMetrics: [UUID: UsageMetrics],
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(command: "codex"),
+        authProbe: ((CodexAccount) -> (exists: Bool, readable: Bool, json: Data?))?
+    ) -> [ProviderReadiness] {
+        let enabled = accounts.filter(\.isEnabled)
+        let reports = enabled.map { account in
+            codexReport(
+                account: account,
+                refreshError: accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil),
+                now: now,
+                isCLIInstalled: isCLIInstalled,
+                authProbe: authProbe
+            )
+        }
+        _ = accountMetrics
+        return pack(provider: .codexCli, accountReports: reports)
+    }
+
     static func codexReport(refreshError: ServiceError? = nil, now: Date = Date()) -> ProviderReadiness {
-        let fileManager = FileManager.default
-        let path = CodexHomeDirectory.authFilePath()
-        let exists = fileManager.fileExists(atPath: path)
-        let bytes = exists && fileManager.isReadableFile(atPath: path)
-            ? fileManager.contents(atPath: path)
-            : nil
+        codexReport(account: .defaultAccount, refreshError: refreshError, now: now)
+    }
+
+    static func codexReport(
+        account: CodexAccount,
+        refreshError: ServiceError? = nil,
+        now: Date = Date(),
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(command: "codex"),
+        authProbe: ((CodexAccount) -> (exists: Bool, readable: Bool, json: Data?))? = nil
+    ) -> ProviderReadiness {
+        let probe: (exists: Bool, readable: Bool, json: Data?)
+        if let authProbe {
+            probe = authProbe(account)
+        } else {
+            let fileManager = FileManager.default
+            let path = CodexHomeDirectory.authFilePath(for: account)
+            let exists = fileManager.fileExists(atPath: path)
+            let bytes = exists && fileManager.isReadableFile(atPath: path)
+                ? fileManager.contents(atPath: path)
+                : nil
+            probe = (exists, bytes != nil, bytes)
+        }
 
         let input = CodexReadinessInput(
-            isCLIInstalled: CLIBinaryLocator.isAvailable(command: "codex"),
-            authFileExists: exists,
-            authFileReadable: bytes != nil,
-            authJSON: bytes,
+            isCLIInstalled: isCLIInstalled,
+            authFileExists: probe.exists,
+            authFileReadable: probe.readable,
+            authJSON: probe.json,
             refreshError: sanitize(refreshError),
             now: now
         )
         return ProviderReadinessEvaluator.codexCli(input)
+            .withIdentity(.account(.codexCli, id: account.id, name: account.name))
     }
 
     static func cursorReport(refreshError: ServiceError? = nil, now: Date = Date()) -> ProviderReadiness {
@@ -227,6 +355,32 @@ nonisolated public enum ProviderReadinessInspector {
         )
     }
 
+    static func grokReports(
+        refreshError: ServiceError?,
+        accountRefreshErrors: [UUID: ServiceError],
+        now: Date,
+        accounts: [GrokAccount],
+        accountMetrics: [UUID: UsageMetrics],
+        isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(
+            command: "grok",
+            overrideEnvVar: "GROK_CLI_PATH"
+        ),
+        authProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))?
+    ) -> [ProviderReadiness] {
+        _ = now
+        _ = accountMetrics
+        return pack(
+            provider: .grok,
+            accountReports: grokAccountReports(
+                accounts: accounts,
+                refreshError: refreshError,
+                accountRefreshErrors: accountRefreshErrors,
+                isCLIInstalled: isCLIInstalled,
+                authProbe: authProbe
+            )
+        )
+    }
+
     static func grokReport(refreshError: ServiceError? = nil) -> ProviderReadiness {
         grokReport(accounts: [.defaultAccount], refreshError: refreshError)
     }
@@ -237,21 +391,222 @@ nonisolated public enum ProviderReadinessInspector {
         isCLIInstalled: Bool = CLIBinaryLocator.isAvailable(
             command: "grok",
             overrideEnvVar: "GROK_CLI_PATH"
-        )
+        ),
+        authProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))? = nil
     ) -> ProviderReadiness {
-        let fileManager = FileManager.default
-        let enabledAccounts = accounts.filter(\.isEnabled)
-        let authPaths = enabledAccounts.map(GrokHomeDirectory.authFilePath(for:))
-        let authExists = !authPaths.isEmpty && authPaths.allSatisfy(fileManager.fileExists(atPath:))
-        let authReadable = authExists && authPaths.allSatisfy(fileManager.isReadableFile(atPath:))
-        return ProviderReadinessEvaluator.grok(
-            GrokReadinessInput(
+        let reports = pack(
+            provider: .grok,
+            accountReports: grokAccountReports(
+                accounts: accounts,
+                refreshError: refreshError,
+                accountRefreshErrors: [:],
                 isCLIInstalled: isCLIInstalled,
-                authFileExists: authExists,
-                authFileReadable: authReadable,
-                refreshError: sanitize(refreshError)
+                authProbe: authProbe
             )
         )
+        return reports.first { !$0.identity.isAccountScoped } ?? reports.first ?? ProviderReadiness(
+            identity: .provider(.grok),
+            checks: []
+        )
+    }
+
+    private static func grokAccountReports(
+        accounts: [GrokAccount],
+        refreshError: ServiceError?,
+        accountRefreshErrors: [UUID: ServiceError],
+        isCLIInstalled: Bool,
+        authProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))?
+    ) -> [ProviderReadiness] {
+        accounts.filter(\.isEnabled).map { account in
+            let probe: (exists: Bool, readable: Bool)
+            if let authProbe {
+                probe = authProbe(account)
+            } else {
+                let path = GrokHomeDirectory.authFilePath(for: account)
+                let exists = FileManager.default.fileExists(atPath: path)
+                probe = (exists, exists && FileManager.default.isReadableFile(atPath: path))
+            }
+            return ProviderReadinessEvaluator.grok(
+                GrokReadinessInput(
+                    isCLIInstalled: isCLIInstalled,
+                    authFileExists: probe.exists,
+                    authFileReadable: probe.readable,
+                    refreshError: sanitize(
+                        accountRefreshErrors[account.id] ?? (account.isDefault ? refreshError : nil)
+                    )
+                )
+            )
+            .withIdentity(.account(.grok, id: account.id, name: account.name))
+        }
+    }
+
+    /// One account-scoped report when a single profile is enabled; otherwise the
+    /// independent account reports plus one provider-wide aggregate.
+    private static func pack(
+        provider: ServiceType,
+        accountReports: [ProviderReadiness]
+    ) -> [ProviderReadiness] {
+        guard !accountReports.isEmpty else {
+            return [
+                ProviderReadiness(
+                    identity: .provider(provider),
+                    checks: [
+                        ReadinessCheck(
+                            id: ReadinessCheckID.auth,
+                            title: "Signed in",
+                            level: .fail,
+                            detail: "No enabled \(provider.displayName) profiles.",
+                            recovery: "Enable a profile in MeterBar Settings."
+                        ),
+                    ]
+                ),
+            ]
+        }
+        guard accountReports.count > 1 else { return accountReports }
+        let parseHealth = ProviderReadiness.aggregatedParseHealth(
+            accountReports.compactMap { $0.check(ReadinessCheckID.parseHealth) }
+        )
+        let aggregate = ProviderReadiness.aggregate(
+            provider: provider,
+            accountReports: accountReports,
+            parseHealth: parseHealth
+        )
+        return [aggregate] + accountReports
+    }
+
+    private static func decorate(
+        _ reports: [ProviderReadiness],
+        health: [ServiceType: ProviderParseHealthRecord],
+        metrics: [ServiceType: UsageMetrics],
+        accountMetrics: [UUID: UsageMetrics],
+        now: Date
+    ) -> [ProviderReadiness] {
+        let decorated = reports.map { report in
+            decorate(
+                report,
+                health: health,
+                metrics: metrics,
+                accountMetrics: accountMetrics,
+                now: now
+            )
+        }
+        return decorated.map { report in
+            guard !report.identity.isAccountScoped else { return report }
+            let siblings = decorated.filter {
+                $0.identity.isAccountScoped && $0.provider == report.provider
+            }
+            guard !siblings.isEmpty else { return report }
+            let parseHealth = ProviderReadiness.aggregatedParseHealth(
+                siblings.compactMap { $0.check(ReadinessCheckID.parseHealth) }
+            )
+            let withoutParse = report.checks.filter { $0.id != ReadinessCheckID.parseHealth }
+            return ProviderReadiness(identity: report.identity, checks: withoutParse + [parseHealth])
+        }
+    }
+
+    private static func decorate(
+        _ report: ProviderReadiness,
+        health: [ServiceType: ProviderParseHealthRecord],
+        metrics: [ServiceType: UsageMetrics],
+        accountMetrics: [UUID: UsageMetrics],
+        now: Date
+    ) -> ProviderReadiness {
+        if let accountID = report.identity.accountID {
+            let accountMetric = accountMetrics[accountID]
+            let record = health[report.provider]
+            return ProviderReadiness(
+                identity: report.identity,
+                checks: reconciledRefreshChecks(
+                    report.checks,
+                    record: record,
+                    metrics: accountMetric ?? metrics[report.provider]
+                ) + [
+                    accountParseHealthCheck(
+                        report: report,
+                        metrics: accountMetric,
+                        record: record,
+                        providerMetrics: metrics[report.provider],
+                        now: now
+                    ),
+                ]
+            )
+        }
+
+        let record = health[report.provider]
+        let providerMetrics = metrics[report.provider]
+        return ProviderReadiness(
+            identity: report.identity,
+            checks: reconciledRefreshChecks(
+                report.checks,
+                record: record,
+                metrics: providerMetrics
+            ) + [parseHealthCheck(record, metrics: providerMetrics, now: now)]
+        )
+    }
+
+    private static func accountParseHealthCheck(
+        report: ProviderReadiness,
+        metrics: UsageMetrics?,
+        record: ProviderParseHealthRecord?,
+        providerMetrics: UsageMetrics?,
+        now: Date
+    ) -> ReadinessCheck {
+        let title = "Usage data"
+        let threshold = "Data is considered stale after 2 hours."
+        let refresh = report.check(ReadinessCheckID.refresh)
+        let refreshFailed = refresh?.level == .fail
+        if refreshFailed, isParseFailureDetail(refresh?.detail) {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .fail,
+                detail: "MeterBar couldn't read the latest usage — the provider's "
+                    + "response format changed. \(threshold)",
+                recovery: "Refresh once more, then copy this Diagnostics report if it persists."
+            )
+        }
+
+        let hasRecentSuccess = metrics.map {
+            let age = now.timeIntervalSince($0.lastUpdated)
+            return age >= 0 && age <= ProviderParseHealthRecord.staleAfter
+        } ?? false
+        if hasRecentSuccess {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .pass,
+                detail: "Showing usage from a recent successful refresh. \(threshold)"
+            )
+        }
+
+        if refreshFailed {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .warn,
+                detail: "The last refresh failed and there's no recent usage to fall back on. \(threshold)",
+                recovery: "Refresh the provider and review any new error."
+            )
+        }
+        if metrics != nil {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .warn,
+                detail: "Usage data is older than the 2-hour freshness window.",
+                recovery: "Refresh the provider and review any new error."
+            )
+        }
+        return parseHealthCheck(record, metrics: providerMetrics, now: now)
+    }
+
+    private static func isParseFailureDetail(_ detail: String?) -> Bool {
+        guard let detail else { return false }
+        let lowered = detail.lowercased()
+        return lowered.contains("could not parse")
+            || lowered.contains("format")
+            || detail.contains(GrokRefreshFailure.unparseableResponse.message)
+            || ClaudeCodeParseFailure.messages.contains(where: detail.contains)
     }
 
     // MARK: - Helpers

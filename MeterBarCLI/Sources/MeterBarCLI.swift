@@ -414,7 +414,7 @@ struct Doctor: ParsableCommand {
     }
 
     private func printJSON(_ reports: [ProviderReadiness]) throws {
-        let dtos = reports.map(DoctorReportDTO.init)
+        let dtos = reports.map(ProviderReadinessExport.init)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data: Data
@@ -443,7 +443,7 @@ struct Doctor: ParsableCommand {
         }
 
         for report in reports {
-            print("▸ \(report.provider.displayName)  [\(report.overall.rawValue.uppercased())]")
+            print("▸ \(report.identity.displayTitle)  [\(report.overall.rawValue.uppercased())]")
             for check in report.checks {
                 print("  \(symbol(for: check.level)) \(check.title): \(check.detail)")
                 if let recovery = check.recovery {
@@ -465,22 +465,5 @@ struct Doctor: ParsableCommand {
         case .warn: return "⚠"
         case .fail: return "✗"
         }
-    }
-}
-
-/// JSON shape for `meterbar doctor --json`: the report plus its rolled-up
-/// `overall`/`healthy` (which are computed, so not part of the core's own
-/// Codable form). Redacted upstream by `ProviderReadinessInspector`.
-private struct DoctorReportDTO: Encodable {
-    let provider: String
-    let overall: String
-    let healthy: Bool
-    let checks: [ReadinessCheck]
-
-    init(_ report: ProviderReadiness) {
-        provider = report.provider.rawValue
-        overall = report.overall.rawValue
-        healthy = report.isHealthy
-        checks = report.checks
     }
 }

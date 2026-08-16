@@ -33,6 +33,185 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertEqual(mixedReport.check(ReadinessCheckID.auth)?.level, .fail)
     }
 
+    func testMixedGrokProfilesIdentifyOnlyTheFailingAccount() throws {
+        let fixtures = try grokMixedFixtures()
+        defer { fixtures.tearDown() }
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.grok],
+            grokAccounts: [fixtures.healthy, fixtures.missing],
+            parseHealth: [:],
+            cachedMetrics: [:]
+        )
+        let byID = Dictionary(uniqueKeysWithValues: reports.compactMap { report -> (UUID, ProviderReadiness)? in
+            guard let id = report.identity.accountID else { return nil }
+            return (id, report)
+        })
+
+        XCTAssertEqual(byID[fixtures.healthy.id]?.check(ReadinessCheckID.auth)?.level, .pass)
+        XCTAssertEqual(byID[fixtures.missing.id]?.check(ReadinessCheckID.auth)?.level, .fail)
+        XCTAssertNotEqual(byID[fixtures.healthy.id]?.overall, .fail)
+        XCTAssertEqual(byID[fixtures.missing.id]?.overall, .fail)
+        XCTAssertEqual(
+            reports.first { !$0.identity.isAccountScoped }?.check(ReadinessCheckID.auth)?.level,
+            .fail
+        )
+        XCTAssertEqual(byID[fixtures.missing.id]?.identity.accountName, "Missing")
+        XCTAssertFalse((byID[fixtures.healthy.id]?.identity.accountName ?? "").contains("/"))
+    }
+
+    func testDisabledDefaultAndCustomOnlyGrokConfigurationReportsTheEnabledAccount() throws {
+        let fixtures = try grokMixedFixtures()
+        defer { fixtures.tearDown() }
+
+        var disabledDefault = GrokAccount.defaultAccount
+        disabledDefault.isEnabled = false
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.grok],
+            grokAccounts: [disabledDefault, fixtures.healthy],
+            parseHealth: [:],
+            cachedMetrics: [:]
+        )
+        let accountIDs = Set(reports.compactMap(\.identity.accountID))
+
+        XCTAssertFalse(accountIDs.contains(GrokAccount.defaultID))
+        XCTAssertTrue(accountIDs.contains(fixtures.healthy.id))
+        XCTAssertEqual(
+            reports.first { $0.identity.accountID == fixtures.healthy.id }?.check(ReadinessCheckID.auth)?.level,
+            .pass
+        )
+    }
+
+    func testMixedCodexProfilesIdentifyOnlyTheFailingAccount() {
+        let healthyID = UUID()
+        let failingID = UUID()
+        let healthy = CodexAccount(id: healthyID, name: "Healthy", homeDirectory: "/tmp/healthy-codex")
+        let failing = CodexAccount(id: failingID, name: "Broken", homeDirectory: "/tmp/broken-codex")
+        let token = futureCodexAuthJSON()
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.codexCli],
+            now: Date(timeIntervalSince1970: 1_000_000),
+            codexAccounts: [healthy, failing],
+            codexAuthProbe: { account in
+                if account.id == healthyID {
+                    return (true, true, token)
+                }
+                return (false, false, nil)
+            },
+            parseHealth: [:],
+            cachedMetrics: [:]
+        )
+        let byID = Dictionary(uniqueKeysWithValues: reports.compactMap { report -> (UUID, ProviderReadiness)? in
+            guard let id = report.identity.accountID else { return nil }
+            return (id, report)
+        })
+
+        XCTAssertEqual(byID[healthyID]?.check(ReadinessCheckID.auth)?.level, .pass)
+        XCTAssertEqual(byID[failingID]?.check(ReadinessCheckID.auth)?.level, .fail)
+        XCTAssertEqual(byID[healthyID]?.identity.accountName, "Healthy")
+        XCTAssertFalse((byID[failingID]?.check(ReadinessCheckID.auth)?.detail ?? "").contains("/tmp/"))
+    }
+
+    func testDisabledDefaultClaudeUsesOnlyEnabledCustomAccount() {
+        let customID = UUID()
+        let custom = ClaudeCodeAccount(
+            id: customID,
+            name: "Work",
+            configDirectory: "/tmp/claude-work",
+            isEnabled: true
+        )
+        var disabledDefault = ClaudeCodeAccount.defaultAccount
+        disabledDefault.isEnabled = false
+        let now = Date(timeIntervalSince1970: 20_000)
+        let recent = UsageMetrics(service: .claudeCode, lastUpdated: now.addingTimeInterval(-60))
+        var probed = [UUID]()
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.claudeCode],
+            now: now,
+            claudeAccounts: [disabledDefault, custom],
+            claudeAccountMetrics: [customID: recent],
+            claudeCredentialsProbe: { account in
+                probed.append(account.id)
+                return nil
+            },
+            parseHealth: [:],
+            cachedMetrics: [:]
+        )
+        let accountIDs = Set(reports.compactMap(\.identity.accountID))
+
+        XCTAssertFalse(accountIDs.contains(ClaudeCodeAccount.defaultID))
+        XCTAssertTrue(accountIDs.contains(customID))
+        XCTAssertFalse(probed.contains(ClaudeCodeAccount.defaultID))
+        XCTAssertEqual(
+            reports.first { $0.identity.accountID == customID }?.check(ReadinessCheckID.auth)?.level,
+            .pass
+        )
+    }
+
+    func testParseHealthAggregationStaysHonestWhenOneAccountSucceedsAndOneFails() {
+        let now = Date(timeIntervalSince1970: 80_000)
+        let healthyID = UUID()
+        let failingID = UUID()
+        let healthy = GrokAccount(id: healthyID, name: "Healthy", homeDirectory: nil)
+        let failing = GrokAccount(id: failingID, name: "Broken", homeDirectory: nil)
+        let recent = UsageMetrics(service: .grok, lastUpdated: now.addingTimeInterval(-60))
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.grok],
+            accountRefreshErrors: [
+                .grok: [failingID: .parsingError("HTTP 500 <body>")],
+            ],
+            now: now,
+            grokAccounts: [healthy, failing],
+            grokAuthProbe: { _ in (true, true) },
+            parseHealth: [
+                .grok: .success(provider: .grok, at: now.addingTimeInterval(-60)),
+            ],
+            cachedMetrics: [.grok: recent],
+            cachedAccountMetrics: [
+                AccountUsageSnapshot(id: healthyID, name: "Healthy", metrics: recent),
+            ]
+        )
+        let byID = Dictionary(uniqueKeysWithValues: reports.compactMap { report -> (UUID, ProviderReadiness)? in
+            guard let id = report.identity.accountID else { return nil }
+            return (id, report)
+        })
+        let aggregate = reports.first { !$0.identity.isAccountScoped }
+
+        XCTAssertEqual(byID[healthyID]?.check(ReadinessCheckID.parseHealth)?.level, .pass)
+        XCTAssertEqual(byID[failingID]?.check(ReadinessCheckID.parseHealth)?.level, .fail)
+        XCTAssertEqual(aggregate?.check(ReadinessCheckID.parseHealth)?.level, .warn)
+        XCTAssertTrue(
+            (aggregate?.check(ReadinessCheckID.parseHealth)?.detail ?? "").contains("Some accounts"),
+            aggregate?.check(ReadinessCheckID.parseHealth)?.detail ?? ""
+        )
+    }
+
+    func testDoctorJSONIncludesPerAccountIdentityWithoutPaths() throws {
+        let fixtures = try grokMixedFixtures()
+        defer { fixtures.tearDown() }
+
+        let reports = ProviderReadinessInspector.reports(
+            providers: [.grok],
+            grokAccounts: [fixtures.healthy, fixtures.missing],
+            parseHealth: [:],
+            cachedMetrics: [:]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(reports.map(ProviderReadinessExport.init))
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+
+        XCTAssertTrue(payload.contains { $0["accountName"] as? String == "Missing" })
+        XCTAssertTrue(payload.contains { $0["accountId"] as? String == fixtures.missing.id.uuidString })
+        XCTAssertFalse(json.contains(fixtures.missing.homeDirectory ?? "___"))
+        XCTAssertFalse(json.contains("auth.json"))
+        XCTAssertFalse(json.contains("homeDirectory"))
+    }
+
     func testReportsGatherOnlyRequestedProvidersInStableOrder() {
         var gathered: [ServiceType] = []
         let reports = ProviderReadinessInspector.reports(
@@ -41,20 +220,51 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_000),
             claudeReport: { _, _ in
                 gathered.append(.claudeCode)
-                return self.report(for: .claudeCode)
+                return [self.report(for: .claudeCode)]
             },
             codexReport: { _, _ in
                 gathered.append(.codexCli)
-                return self.report(for: .codexCli)
+                return [self.report(for: .codexCli)]
             },
             cursorReport: { _, _ in
                 gathered.append(.cursor)
-                return self.report(for: .cursor)
+                return [self.report(for: .cursor)]
             }
         )
 
         XCTAssertEqual(gathered, [.codexCli, .cursor])
         XCTAssertEqual(reports.map(\.provider), [.codexCli, .cursor])
+    }
+
+    func testUnrelatedProvidersAreNotProbedWhenFiltered() {
+        var probed: [ServiceType] = []
+        _ = ProviderReadinessInspector.reports(
+            providers: [.grok],
+            refreshErrors: [:],
+            now: Date(timeIntervalSince1970: 2_000),
+            claudeReport: { _, _ in
+                probed.append(.claudeCode)
+                return [self.report(for: .claudeCode)]
+            },
+            codexReport: { _, _ in
+                probed.append(.codexCli)
+                return [self.report(for: .codexCli)]
+            },
+            cursorReport: { _, _ in
+                probed.append(.cursor)
+                return [self.report(for: .cursor)]
+            },
+            openRouterReport: { _, _ in
+                probed.append(.openRouter)
+                return [self.report(for: .openRouter)]
+            },
+            grokReport: { _, _ in
+                probed.append(.grok)
+                return [self.report(for: .grok)]
+            }
+        )
+
+        XCTAssertEqual(probed, [.grok])
     }
 
     func testRecentClaudeUsageSkipsCredentialRead() {
@@ -211,15 +421,27 @@ final class ProviderReadinessInspectorTests: XCTestCase {
             lastUpdated: now.addingTimeInterval(-60)
         )
 
+        var disabledDefault = ClaudeCodeAccount.defaultAccount
+        disabledDefault.isEnabled = false
+        let custom = ClaudeCodeAccount(
+            id: UUID(),
+            name: "Work",
+            configDirectory: "/tmp/claude-work"
+        )
         let reports = ProviderReadinessInspector.reports(
             providers: [.claudeCode],
             now: now,
+            claudeAccounts: [disabledDefault, custom],
+            claudeAccountMetrics: [custom.id: recentCustomMetrics],
             claudeDefaultAccountEnabled: false,
             claudeEnabledAccountMetrics: [recentCustomMetrics],
             parseHealth: [:]
         )
 
-        XCTAssertEqual(reports.first?.check(ReadinessCheckID.auth)?.level, .pass)
+        XCTAssertEqual(
+            reports.first { $0.identity.accountID == custom.id }?.check(ReadinessCheckID.auth)?.level,
+            .pass
+        )
     }
 
     func testApiErrorDropsResponseBodyKeepsStatusCode() {
@@ -269,8 +491,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.codexCli],
             now: now,
+            codexAccounts: [.defaultAccount],
             parseHealth: [.codexCli: record],
-            cachedMetrics: [:]
+            cachedMetrics: [:],
+            cachedAccountMetrics: []
         )
         let check = reports.first?.check(ReadinessCheckID.parseHealth)
 
@@ -293,8 +517,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.codexCli],
             now: now,
+            codexAccounts: [.defaultAccount],
             parseHealth: [.codexCli: record],
-            cachedMetrics: [.codexCli: metrics]
+            cachedMetrics: [.codexCli: metrics],
+            cachedAccountMetrics: []
         )
 
         XCTAssertEqual(reports.first?.check(ReadinessCheckID.parseHealth)?.level, .pass)
@@ -317,8 +543,10 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let reports = ProviderReadinessInspector.reports(
             providers: [.claudeCode],
             now: now,
+            claudeAccounts: [.defaultAccount],
             parseHealth: [.claudeCode: record],
-            cachedMetrics: [.claudeCode: metrics]
+            cachedMetrics: [.claudeCode: metrics],
+            cachedAccountMetrics: []
         )
         let refresh = reports.first?.check(ReadinessCheckID.refresh)
 
@@ -335,6 +563,40 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         ProviderReadiness(
             provider: provider,
             checks: [ReadinessCheck(id: "test", title: "Test", level: .pass, detail: "Ready")]
+        )
+    }
+
+    private func grokMixedFixtures() throws -> (
+        healthy: GrokAccount,
+        missing: GrokAccount,
+        tearDown: () -> Void
+    ) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProviderReadinessInspectorTests-\(UUID().uuidString)", isDirectory: true)
+        let healthyHome = root.appendingPathComponent("healthy", isDirectory: true)
+        try FileManager.default.createDirectory(at: healthyHome, withIntermediateDirectories: true)
+        try Data().write(to: healthyHome.appendingPathComponent("auth.json"))
+        let healthy = GrokAccount(id: UUID(), name: "Healthy", homeDirectory: healthyHome.path)
+        let missing = GrokAccount(
+            id: UUID(),
+            name: "Missing",
+            homeDirectory: root.appendingPathComponent("missing").path
+        )
+        return (healthy, missing, { try? FileManager.default.removeItem(at: root) })
+    }
+
+    private func futureCodexAuthJSON() -> Data {
+        let payload = Data(#"{"exp":2000000}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let token = "header.\(payload).signature"
+        return Data(
+            """
+            {"OPENAI_API_KEY":null,"tokens":{"id_token":"id","access_token":"\(token)",\
+            "refresh_token":"refresh","account_id":"acct_test"},"last_refresh":"2026-07-03T00:00:00Z"}
+            """.utf8
         )
     }
 }

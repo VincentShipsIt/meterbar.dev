@@ -13,6 +13,7 @@ enum DiagnosticsRunner {
         let providers: [ServiceType]
         let defaultClaudeAccountEnabled: Bool
         let enabledClaudeCustomAccountIDs: [UUID]
+        var enabledCodexAccountIDs: [UUID] = []
         var enabledGrokAccountIDs: [UUID] = []
     }
 
@@ -43,19 +44,45 @@ enum DiagnosticsRunner {
         return result
     }
 
+    static func accountRefreshErrors(
+        claudeDefaultAccountEnabled: Bool,
+        claudeError: ServiceError?,
+        claudeAccountErrors: [UUID: ServiceError] = [:],
+        codexAccountErrors: [UUID: ServiceError] = [:],
+        grokAccountErrors: [UUID: ServiceError] = [:]
+    ) -> [ServiceType: [UUID: ServiceError]] {
+        var claude = claudeAccountErrors
+        if claudeDefaultAccountEnabled, let claudeError {
+            claude[ClaudeCodeAccount.defaultID] = claude[ClaudeCodeAccount.defaultID] ?? claudeError
+        }
+        var result: [ServiceType: [UUID: ServiceError]] = [:]
+        if !claude.isEmpty { result[.claudeCode] = claude }
+        if !codexAccountErrors.isEmpty { result[.codexCli] = codexAccountErrors }
+        if !grokAccountErrors.isEmpty { result[.grok] = grokAccountErrors }
+        return result
+    }
+
     static func inspect(
         enabledProviders: Set<ServiceType>,
         refreshErrors: [ServiceType: ServiceError],
+        accountRefreshErrors: [ServiceType: [UUID: ServiceError]] = [:],
+        claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
+        claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeDefaultAccountEnabled: Bool,
         claudeEnabledAccountMetrics: [UsageMetrics],
+        codexAccounts: [CodexAccount] = [.defaultAccount],
         grokAccounts: [GrokAccount] = [.defaultAccount]
     ) async -> [ProviderReadiness] {
         await Task.detached(priority: .userInitiated) {
             ProviderReadinessInspector.reports(
                 providers: enabledProviders,
                 refreshErrors: refreshErrors,
+                accountRefreshErrors: accountRefreshErrors,
+                claudeAccounts: claudeAccounts,
+                claudeAccountMetrics: claudeAccountMetrics,
                 claudeDefaultAccountEnabled: claudeDefaultAccountEnabled,
                 claudeEnabledAccountMetrics: claudeEnabledAccountMetrics,
+                codexAccounts: codexAccounts,
                 grokAccounts: grokAccounts
             )
         }.value
