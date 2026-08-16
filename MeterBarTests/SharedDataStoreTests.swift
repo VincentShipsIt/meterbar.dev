@@ -41,6 +41,8 @@ final class SharedDataStoreTests: XCTestCase {
         XCTAssertEqual(loaded[.claudeCode]?.sessionLimit, metrics[.claudeCode]?.sessionLimit)
         XCTAssertEqual(loaded[.codexCli]?.resetCreditsAvailable, 2)
         XCTAssertEqual(loaded[.cursor]?.weeklyLimit?.total, 500)
+        XCTAssertEqual(loaded[.grok]?.resetCreditsAvailable, 1)
+        XCTAssertEqual(loaded[.openRouter]?.sessionLimit?.total, 40)
     }
 
     func testFileWrittenAtExpectedPath() throws {

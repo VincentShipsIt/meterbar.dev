@@ -81,33 +81,42 @@ final class WidgetRenderingTests: XCTestCase {
 
     func testAllFamiliesRenderNonEmptyForEveryProvider() {
         let metrics = MetricsFixtures.allProviders()
+        XCTAssertEqual(
+            Set(metrics.keys),
+            Set(ServiceType.allCases),
+            "the canonical fixture must cover every ServiceType"
+        )
 
-        for family in WidgetFamily.allCases {
-            let services = renderedServices(metrics, family: family)
-            XCTAssertEqual(
-                Set(services),
-                Set(metrics.keys),
-                "family \(family) dropped a provider (cap too low for the fixture set)"
-            )
-            for service in services {
-                guard let providerMetrics = metrics[service] else {
-                    XCTFail("no fixture metrics for rendered service \(service)")
-                    continue
-                }
-                assertRowRendersNonEmpty(service, metrics: providerMetrics)
+        for service in ServiceType.allCases {
+            guard let providerMetrics = metrics[service] else {
+                XCTFail("no fixture metrics for \(service)")
+                continue
             }
+            for family in WidgetFamily.allCases {
+                let rendered = renderedServices([service: providerMetrics], family: family)
+                XCTAssertEqual(rendered, [service], "family \(family) failed to render \(service)")
+            }
+            assertRowRendersNonEmpty(service, metrics: providerMetrics)
+        }
+
+        for family in WidgetPresentationFamily.allCases {
+            let presentation = WidgetPresentationPlanner.makePresentation(
+                metrics: metrics,
+                accountMetrics: [],
+                preferences: .defaults,
+                family: family,
+                now: MetricsFixtures.referenceDate
+            )
+            XCTAssertFalse(presentation.rows.isEmpty, "\(family) planned no rows from the all-provider fixture")
+            XCTAssertTrue(
+                Set(presentation.rows.map(\.service)).isSubset(of: Set(ServiceType.allCases)),
+                "\(family) invented an unknown provider"
+            )
         }
     }
 
     func testEachProviderRendersIndividually() {
-        // Every CLI-backed provider renders a populated row on its own.
-        let cases: [(ServiceType, UsageMetrics)] = [
-            (.claudeCode, MetricsFixtures.claudeCode()),
-            (.codexCli, MetricsFixtures.codexCli()),
-            (.cursor, MetricsFixtures.cursor()),
-            (.grok, MetricsFixtures.grok())
-        ]
-        for (service, metrics) in cases {
+        for (service, metrics) in MetricsFixtures.allProviders() {
             for family in WidgetFamily.allCases {
                 let rendered = renderedServices([service: metrics], family: family)
                 XCTAssertEqual(rendered, [service], "family \(family) failed to render \(service)")
@@ -119,11 +128,12 @@ final class WidgetRenderingTests: XCTestCase {
     // MARK: - Sort + cap behavior
 
     func testProvidersRenderInStableSortOrder() {
-        // Regardless of insertion order, rows render Claude → Codex → Cursor.
         let metrics = MetricsFixtures.allProviders()
+        let expected = ServiceType.allCases.sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(renderedServices(metrics, family: .large), expected)
         XCTAssertEqual(
             renderedServices(metrics, family: .medium),
-            [.claudeCode, .codexCli, .cursor]
+            Array(expected.prefix(WidgetFamily.medium.visibleRowCount(totalRowCount: expected.count)))
         )
     }
 

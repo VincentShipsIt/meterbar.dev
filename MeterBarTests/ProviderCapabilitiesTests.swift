@@ -167,6 +167,157 @@ final class ProviderCapabilitiesTests: XCTestCase {
 
     // MARK: - Share provenance
 
+    func testCanonicalFixtureCoversEveryServiceType() {
+        let metrics = MetricsFixtures.allProviders()
+        XCTAssertEqual(Set(metrics.keys), Set(ServiceType.allCases))
+        for service in ServiceType.allCases {
+            let metric = try? XCTUnwrap(metrics[service], "\(service) missing from MetricsFixtures")
+            XCTAssertEqual(metric?.service, service)
+            XCTAssertEqual(metric?.hasData, true, "\(service) fixture must render a supported state")
+        }
+    }
+
+    func testPopoverAndDashboardRowsCoverEveryProvider() {
+        let metrics = MetricsFixtures.allProviders()
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: metrics,
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [:],
+                enabledServices: Set(ServiceType.allCases)
+            )
+        )
+        XCTAssertEqual(Set(snapshots.map(\.service)), Set(ServiceType.allCases))
+        for snapshot in snapshots {
+            XCTAssertTrue(snapshot.hasMetrics, "\(snapshot.service) popover/dashboard row has no metrics")
+            XCTAssertFalse(snapshot.limits.isEmpty, "\(snapshot.service) popover/dashboard row is empty")
+        }
+    }
+
+    func testEveryWidgetFamilyRendersEveryProvider() {
+        let metrics = MetricsFixtures.allProviders()
+        for service in ServiceType.allCases {
+            let providerMetrics = try? XCTUnwrap(metrics[service])
+            for family in WidgetPresentationFamily.allCases {
+                let presentation = WidgetPresentationPlanner.makePresentation(
+                    metrics: providerMetrics.map { [service: $0] } ?? [:],
+                    accountMetrics: [],
+                    preferences: .defaults,
+                    family: family,
+                    now: MetricsFixtures.referenceDate
+                )
+                XCTAssertEqual(
+                    presentation.rows.map(\.service),
+                    [service],
+                    "\(family) dropped \(service)"
+                )
+                XCTAssertNil(presentation.emptyState, "\(family) \(service)")
+                XCTAssertFalse(
+                    presentation.rows.first?.accessibilityValueText.isEmpty ?? true,
+                    "\(family) \(service) has no spoken value"
+                )
+            }
+        }
+    }
+
+    func testCLIAndServeEmitEveryProvider() throws {
+        let metrics = MetricsFixtures.allProviders()
+        let cli = try UsageCLIJSONResponse(metrics: metrics).jsonString()
+        for service in ServiceType.allCases {
+            XCTAssertTrue(
+                cli.contains("\"provider\" : \"\(service.cliIdentifier)\""),
+                "CLI JSON omitted \(service.cliIdentifier)"
+            )
+            XCTAssertTrue(cli.contains(service.displayName), "CLI JSON omitted \(service.displayName)")
+        }
+
+        let serve = ServeRouter.handle(
+            ServeHTTPRequest(
+                method: "GET",
+                path: "/usage",
+                query: [:],
+                authorizationHeader: "Bearer fixture-token"
+            ),
+            token: "fixture-token",
+            dataSource: ServeRouter.DataSource(
+                loadUsageMetrics: { metrics },
+                loadCostCache: { nil }
+            )
+        )
+        XCTAssertEqual(serve.status, 200)
+        XCTAssertEqual(serve.body, try UsageCLIJSONResponse(metrics: metrics).jsonData())
+    }
+
+    func testNotificationsAndEventsCoverEveryProvider() {
+        let coveredNotifications = Set(UsageNotificationCoordinator.flatNotificationServices)
+            .union(ServiceType.allCases.filter(\.hasAccountScopedNotifications))
+        XCTAssertEqual(coveredNotifications, Set(ServiceType.allCases))
+
+        let decider = NotificationDecider(preferences: .default)
+        for service in ServiceType.allCases {
+            let evaluation = decider.evaluate(
+                metrics: UsageMetrics(
+                    service: service,
+                    weeklyLimit: UsageLimit(used: 95, total: 100, resetTime: nil),
+                    lastUpdated: MetricsFixtures.referenceDate
+                ),
+                providerEnabled: true,
+                alreadyNotified: [],
+                now: MetricsFixtures.referenceDate
+            )
+            XCTAssertFalse(
+                evaluation.notifications.isEmpty,
+                "\(service) produced no notification from a critical weekly window"
+            )
+        }
+
+        let events = QuotaEventSnapshotCatalog.snapshots(
+            metrics: MetricsFixtures.allProviders(),
+            accounts: QuotaEventAccountInputs(
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [ClaudeCodeAccount.defaultID: MetricsFixtures.claudeCode()],
+                codexAccounts: [.defaultAccount],
+                codexAccountMetrics: [CodexAccount.defaultID: MetricsFixtures.codexCli()],
+                grokAccounts: [.defaultAccount],
+                grokAccountMetrics: [GrokAccount.defaultID: MetricsFixtures.grok()]
+            ),
+            enabledServices: Set(ServiceType.allCases)
+        )
+        XCTAssertEqual(Set(events.map(\.provider)), Set(ServiceType.allCases))
+    }
+
+    func testDiagnosticsCoverEveryProvider() {
+        let errors = DiagnosticsRunner.refreshErrors(
+            claudeDefaultAccountEnabled: true,
+            claudeError: .apiError("claude"),
+            codexError: .apiError("codex"),
+            cursorError: .apiError("cursor"),
+            openRouterError: .apiError("openrouter"),
+            grokError: .apiError("grok")
+        )
+        XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
+    }
+
+    func testAccessibilityCoversEveryProvider() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: MetricsFixtures.allProviders(),
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [:],
+                enabledServices: Set(ServiceType.allCases)
+            )
+        )
+        XCTAssertEqual(Set(snapshots.map(\.service)), Set(ServiceType.allCases))
+        for snapshot in snapshots {
+            XCTAssertFalse(snapshot.accessibilityLabel.isEmpty, "\(snapshot.service) label")
+            XCTAssertFalse(snapshot.accessibilityValue.isEmpty, "\(snapshot.service) value")
+            for limit in snapshot.limits {
+                XCTAssertFalse(limit.accessibilityLabel.isEmpty, "\(snapshot.service) \(limit.id) label")
+                XCTAssertFalse(limit.accessibilityValue.isEmpty, "\(snapshot.service) \(limit.id) value")
+            }
+        }
+    }
+
     func testShareSourceLabelsIncludeEveryLocalLogProvider() {
         let labels = DashboardShareSection.enabledSourceLabels(for: Set(ServiceType.allCases))
         let expected = ServiceType.allCases.compactMap { service -> String? in
