@@ -513,6 +513,116 @@
       },
       "comment": "Widget placeholder heading when no provider usage could be read."
     },
+    "widget.quota.account_credits": {
+      "comment": "Quota title for an account credit balance.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account credits"
+          }
+        }
+      }
+    },
+    "widget.quota.code_review": {
+      "comment": "Quota title for a code-review window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code Review"
+          }
+        }
+      }
+    },
+    "widget.quota.cursor_models": {
+      "comment": "Cursor included-usage pool for Cursor Grok and Composer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cursor Models"
+          }
+        }
+      }
+    },
+    "widget.quota.key_limit": {
+      "comment": "Quota title for an API-key spend cap.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key limit"
+          }
+        }
+      }
+    },
+    "widget.quota.model": {
+      "comment": "Fallback quota title for a model-scoped window when the provider omitted a label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        }
+      }
+    },
+    "widget.quota.monthly": {
+      "comment": "Quota title for a monthly billing-cycle window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monthly"
+          }
+        }
+      }
+    },
+    "widget.quota.on_demand": {
+      "comment": "Cursor on-demand spend beyond included pools.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-demand"
+          }
+        }
+      }
+    },
+    "widget.quota.other_models": {
+      "comment": "Cursor included-usage pool for third-party API models.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other Models"
+          }
+        }
+      }
+    },
+    "widget.quota.session": {
+      "comment": "Quota title for a short session window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session"
+          }
+        }
+      }
+    },
+    "widget.quota.weekly": {
+      "comment": "Quota title for a weekly window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly"
+          }
+        }
+      }
+    },
     "widget.unavailable": {
       "localizations": {
         "en": {

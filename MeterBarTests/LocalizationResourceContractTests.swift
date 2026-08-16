@@ -93,6 +93,32 @@ final class LocalizationResourceContractTests: XCTestCase {
         }
     }
 
+    /// The Settings preview draws widget quota titles from the app bundle, so
+    /// both catalogs have to carry the same `widget.quota.*` keys with the
+    /// same English words. Translated only on one side, the preview would
+    /// contradict the widget it is previewing.
+    func testWidgetQuotaTitleCopyIsCarriedByBothCatalogsWithMatchingEnglish() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let widgetStrings = try strings(in: loadCatalog(at: widgetCatalogURL))
+
+        for key in [
+            "widget.quota.key_limit",
+            "widget.quota.model",
+            "widget.quota.on_demand",
+            "widget.quota.code_review",
+            "widget.quota.cursor_models",
+            "widget.quota.session",
+            "widget.quota.account_credits",
+            "widget.quota.other_models",
+            "widget.quota.monthly",
+            "widget.quota.weekly",
+        ] {
+            let appValue = try englishValue(for: key, in: appStrings)
+            let widgetValue = try englishValue(for: key, in: widgetStrings)
+            XCTAssertEqual(appValue, widgetValue, "\(key) must read identically in both bundles")
+        }
+    }
+
     /// One key per `ServiceType.QuotaTitleKey` case. The shared routing decides
     /// which case applies; the widget catalog only supplies its words, so a new
     /// case without a key would silently ship English.

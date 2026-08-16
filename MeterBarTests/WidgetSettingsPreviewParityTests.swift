@@ -175,6 +175,50 @@ final class WidgetSettingsPreviewParityTests: XCTestCase {
         }
     }
 
+    /// The preview used to print the shared model's English `quotaTitle` while
+    /// the widget localized `quotaTitleKey`. Both preview surfaces now ask
+    /// the same formatter the widget uses, including verbatim model labels.
+    func testPreviewQuotaTitlesUseTheSharedRoutingKey() {
+        let cases: [(ServiceType, WidgetQuotaWindow, Double, String?)] = [
+            (.claudeCode, .weekly, 100, nil),
+            (.claudeCode, .codeReview, 100, "Fable"),
+            (.claudeCode, .codeReview, 100, nil),
+            (.cursor, .session, ServiceType.cursorIncludedPoolTotal, nil),
+            (.cursor, .weekly, ServiceType.cursorIncludedPoolTotal, nil),
+            (.cursor, .codeReview, 40, nil),
+            (.openRouter, .session, 10, nil),
+            (.openRouter, .weekly, 10, nil),
+            (.codexCli, .session, 100, nil),
+            (.grok, .weekly, 100, nil),
+        ]
+        for (service, window, total, modelLabel) in cases {
+            let row = plannedQuotaRow(
+                service: service,
+                window: window,
+                total: total,
+                modelLabel: modelLabel
+            )
+            let expected = LocalizedUsageFormat.quotaTitle(for: row.quotaTitleKey)
+            let preview = WidgetSettingsPreviewRow(row: row, family: .medium)
+            XCTAssertEqual(preview.quotaTitleText, expected, "\(service) \(window)")
+
+            let burnDown = WidgetSettingsBurnDownPreviewRow(
+                row: WidgetBurnDownRow(
+                    row: row,
+                    stage: .onPace,
+                    stageText: "On pace",
+                    countdownKind: .reset,
+                    countdownTitle: LocalizedUsageFormat.burnDownCountdownTitle(.reset),
+                    countdownTarget: nil,
+                    countdownText: "2h 5m"
+                ),
+                family: .medium
+            )
+            XCTAssertEqual(burnDown.quotaTitleText, expected, "burn-down \(service) \(window)")
+            XCTAssertEqual(expected, row.quotaTitleKey.englishTitle, "\(service) \(window) English")
+        }
+    }
+
     /// The preview inlined the widget's `"Unavailable"` sentinel check instead
     /// of asking the shared formatter, which is two copies of one rule.
     func testBurnDownPreviewCountdownMatchesTheSharedFallback() {
@@ -257,6 +301,36 @@ final class WidgetSettingsPreviewParityTests: XCTestCase {
             family: family,
             now: now
         )
+    }
+
+    private func plannedQuotaRow(
+        service: ServiceType,
+        window: WidgetQuotaWindow,
+        total: Double,
+        modelLabel: String?
+    ) -> WidgetPresentationRow {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [window]
+        let limit = UsageLimit(used: 40, total: total, resetTime: nil)
+        let metrics = UsageMetrics(
+            service: service,
+            sessionLimit: window == .session ? limit : nil,
+            weeklyLimit: window == .weekly ? limit : nil,
+            codeReviewLimit: window == .codeReview ? limit : nil,
+            modelLimitLabel: modelLabel,
+            lastUpdated: now
+        )
+        let presentation = WidgetPresentationPlanner.makePresentation(
+            metrics: [service: metrics],
+            accountMetrics: [],
+            preferences: preferences,
+            family: .medium,
+            now: now
+        )
+        guard let row = presentation.rows.first else {
+            preconditionFailure("fixture must plan a \(service) \(window) row")
+        }
+        return row
     }
 
     private func firstRow(family: WidgetPresentationFamily) -> WidgetPresentationRow {

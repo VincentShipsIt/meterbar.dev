@@ -9,37 +9,10 @@ enum WidgetLocalizedContent {
         quotaTitle(for: row.quotaTitleKey)
     }
 
-    /// Translates the shared row's already-decided quota title.
-    ///
-    /// Which title applies — the OpenRouter exceptions, Cursor's included-pool
-    /// split, Claude Code's model window — is decided once in
-    /// `WidgetPresentationRow.quotaTitleKey`. This switch only supplies the
-    /// widget bundle's words for it, so the widget cannot answer a routing
-    /// question differently from the app.
+    /// Same formatter the Settings preview uses, so the two surfaces cannot
+    /// pick different words for the same routing key.
     static func quotaTitle(for key: ServiceType.QuotaTitleKey) -> String {
-        switch key {
-        case .keyLimit:
-            return String(localized: "widget.quota.key_limit", defaultValue: "Key limit")
-        case let .model(label):
-            return label
-                ?? String(localized: "widget.quota.model", defaultValue: "Model")
-        case .onDemand:
-            return String(localized: "widget.quota.on_demand", defaultValue: "On-demand")
-        case .codeReview:
-            return String(localized: "widget.quota.code_review", defaultValue: "Code Review")
-        case .cursorModels:
-            return String(localized: "widget.quota.cursor_models", defaultValue: "Cursor Models")
-        case .session:
-            return String(localized: "widget.quota.session", defaultValue: "Session")
-        case .accountCredits:
-            return String(localized: "widget.quota.account_credits", defaultValue: "Account credits")
-        case .otherModels:
-            return String(localized: "widget.quota.other_models", defaultValue: "Other Models")
-        case .monthly:
-            return String(localized: "widget.quota.monthly", defaultValue: "Monthly")
-        case .weekly:
-            return String(localized: "widget.quota.weekly", defaultValue: "Weekly")
-        }
+        LocalizedUsageFormat.quotaTitle(for: key)
     }
 
     static func summaryText(for row: WidgetPresentationRow) -> String {

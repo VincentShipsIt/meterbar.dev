@@ -284,6 +284,104 @@ public enum LocalizedUsageFormat {
         )
     }
 
+    /// Translates the shared row's already-decided quota title.
+    ///
+    /// Which title applies — the OpenRouter exceptions, Cursor's included-pool
+    /// split, Claude Code's model window — is decided once in
+    /// `WidgetPresentationRow.quotaTitleKey`. This switch only supplies the
+    /// caller's bundle's words for it, so the Settings preview and the widget
+    /// cannot answer a routing question differently.
+    ///
+    /// Parsed model labels are provider data and stay verbatim in every locale.
+    public static func quotaTitle(
+        for key: ServiceType.QuotaTitleKey,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        switch key {
+        case .keyLimit:
+            return String(
+                localized: "widget.quota.key_limit",
+                defaultValue: "Key limit",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for an API-key spend cap."
+            )
+        case let .model(label):
+            return label ?? String(
+                localized: "widget.quota.model",
+                defaultValue: "Model",
+                bundle: bundle,
+                locale: locale,
+                comment: "Fallback quota title for a model-scoped window when the provider omitted a label."
+            )
+        case .onDemand:
+            return String(
+                localized: "widget.quota.on_demand",
+                defaultValue: "On-demand",
+                bundle: bundle,
+                locale: locale,
+                comment: "Cursor on-demand spend beyond included pools."
+            )
+        case .codeReview:
+            return String(
+                localized: "widget.quota.code_review",
+                defaultValue: "Code Review",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a code-review window."
+            )
+        case .cursorModels:
+            return String(
+                localized: "widget.quota.cursor_models",
+                defaultValue: "Cursor Models",
+                bundle: bundle,
+                locale: locale,
+                comment: "Cursor included-usage pool for Cursor Grok and Composer."
+            )
+        case .session:
+            return String(
+                localized: "widget.quota.session",
+                defaultValue: "Session",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a short session window."
+            )
+        case .accountCredits:
+            return String(
+                localized: "widget.quota.account_credits",
+                defaultValue: "Account credits",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for an account credit balance."
+            )
+        case .otherModels:
+            return String(
+                localized: "widget.quota.other_models",
+                defaultValue: "Other Models",
+                bundle: bundle,
+                locale: locale,
+                comment: "Cursor included-usage pool for third-party API models."
+            )
+        case .monthly:
+            return String(
+                localized: "widget.quota.monthly",
+                defaultValue: "Monthly",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a monthly billing-cycle window."
+            )
+        case .weekly:
+            return String(
+                localized: "widget.quota.weekly",
+                defaultValue: "Weekly",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a weekly window."
+            )
+        }
+    }
+
     public static func widgetEmptyTitle(
         _ state: WidgetPresentationEmptyState,
         bundle: Bundle = .main,

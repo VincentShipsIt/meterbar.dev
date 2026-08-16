@@ -729,7 +729,7 @@ struct WidgetSettingsBurnDownPreviewRow: View {
                 .foregroundStyle(stageColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-            Text("\(row.quotaTitle) · \(quotaLeftText)")
+            Text("\(quotaTitleText) · \(quotaLeftText)")
                 .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -737,6 +737,13 @@ struct WidgetSettingsBurnDownPreviewRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accountName)
         .accessibilityValue(row.accessibilityValueText)
+    }
+
+    /// The same localized quota title the widget draws — not the shared
+    /// model's English `quotaTitle`, which would leave this preview speaking
+    /// English beside a translated widget.
+    var quotaTitleText: String {
+        LocalizedUsageFormat.quotaTitle(for: row.row.quotaTitleKey)
     }
 
     /// The same countdown value the widget draws, fallback and all — the
@@ -861,6 +868,13 @@ struct WidgetSettingsPreviewRow: View {
 
     var metrics: WidgetGlanceMetrics { WidgetGlance.metrics(for: family) }
 
+    /// The same localized quota title the widget draws — not the shared
+    /// model's English `quotaTitle`, which would leave this preview speaking
+    /// English beside a translated widget.
+    var quotaTitleText: String {
+        LocalizedUsageFormat.quotaTitle(for: row.quotaTitleKey)
+    }
+
     private var isHero: Bool { family == .small }
 
     var body: some View {
@@ -890,7 +904,7 @@ struct WidgetSettingsPreviewRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue("\(row.quotaTitle), \(row.summaryText)")
+        .accessibilityValue("\(quotaTitleText), \(row.summaryText)")
     }
 
     private var summary: some View {
@@ -943,7 +957,7 @@ struct WidgetSettingsPreviewRow: View {
 
     private var caption: some View {
         HStack(spacing: metrics.captionSize / 2) {
-            Text(row.quotaTitle)
+            Text(quotaTitleText)
             if let resetTime = row.resetTime {
                 Label {
                     Text(resetTime, style: .relative)
