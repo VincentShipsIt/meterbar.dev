@@ -337,7 +337,6 @@ enum ClaudeCostScanner {
                 guard let totals = Self.totals(for: file, projectID: projectID, session: session) else {
                     continue
                 }
-                session.noteProcessedFile()
                 guard windows.fold(period: totals.period, lifetime: totals.lifetime) else {
                     // This file shares only *some* of its events with one
                     // already folded in — a stale copy holding a prefix of the
@@ -435,6 +434,7 @@ enum ClaudeCostScanner {
         // Nothing appended since the last pass. This is the steady state once
         // the corpus is warm, and it is why a refresh costs almost no I/O.
         if let record, record.isComplete, record.stamp.matches(file.stamp) {
+            session.noteProcessedFile()
             return Self.windows(
                 record.payload,
                 cutoff: session.cutoff,
@@ -523,6 +523,7 @@ enum ClaudeCostScanner {
             for: file.cacheKey,
             provider: .claude
         )
+        session.noteProcessedFile()
         return Self.windows(payload, cutoff: session.cutoff, hourlyCutoff: session.hourlyCutoff)
     }
 

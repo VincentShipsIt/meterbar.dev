@@ -205,6 +205,147 @@ final class CostScanWindowOnlyTests: XCTestCase {
         let last = try XCTUnwrap(seen.snapshots.last)
         XCTAssertEqual(last.processedFiles, 2)
         XCTAssertTrue(last.isComplete)
+        XCTAssertEqual(try XCTUnwrap(last.fraction), 1.0, accuracy: 0.000_001)
+    }
+
+    func testFractionNeverReachesOneWhileTheScanIsIncomplete() {
+        var progress = CostScanProgress(windowDays: 30)
+        progress.listedFiles = 1
+        progress.processedFiles = 1
+        progress.isComplete = false
+
+        XCTAssertLessThan(try XCTUnwrap(progress.fraction), 1)
+
+        progress.listedFiles = 4
+        progress.processedFiles = 4
+        XCTAssertLessThan(try XCTUnwrap(progress.fraction), 1)
+
+        progress.isComplete = true
+        XCTAssertEqual(try XCTUnwrap(progress.fraction), 1)
+    }
+
+    /// A single file the byte budget cannot finish is still a read, so it
+    /// counts as processed — but that must not push `fraction` to 1.0 while
+    /// `isComplete` is false.
+    func testPartialReadDoesNotReportCompleteProgress() throws {
+        let root = try makeCorpusDirectory()
+        let first = claudeEventLine(messageID: "a")
+        let second = claudeEventLine(messageID: "b")
+        try writeClaudeLines(in: root, name: "partial.jsonl", lines: [first, second], modifiedAgo: 0)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let budget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: first.utf8.count + 1,
+            wallClock: nil
+        )
+        let session = CostScanSession(cutoff: cutoff, options: budget)
+
+        let windows = ClaudeCostScanner.scanRoots([root], session: session)
+        let progress = session.progress(windowDays: 30)
+
+        XCTAssertFalse(session.isComplete)
+        XCTAssertEqual(progress.listedFiles, 1)
+        XCTAssertEqual(progress.processedFiles, 1)
+        XCTAssertFalse(progress.isComplete)
+        XCTAssertLessThan(try XCTUnwrap(progress.fraction), 1)
+        XCTAssertEqual(windows.period.input, 100)
+    }
+
+    /// Cached incomplete records still return a payload when the next slice
+    /// has no budget left. Counting those as processed reports 100% on a
+    /// refresh that read nothing new.
+    func testDeferredCachedFileDoesNotCountAsProcessed() throws {
+        let root = try makeCorpusDirectory()
+        let first = claudeEventLine(messageID: "a")
+        let second = claudeEventLine(messageID: "b")
+        try writeClaudeLines(in: root, name: "partial.jsonl", lines: [first, second], modifiedAgo: 0)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+        let firstBudget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: first.utf8.count + 1,
+            wallClock: nil
+        )
+
+        let firstSlice = CostScanSession(cutoff: cutoff, options: firstBudget, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: firstSlice)
+        XCTAssertEqual(firstSlice.persist(), .persisted)
+        XCTAssertFalse(firstSlice.isComplete)
+
+        let emptyBudget = CostScanBudgetOptions(
+            maxBytesPerFile: .max,
+            maxNewBytesPerRefresh: 0,
+            wallClock: nil
+        )
+        let secondSlice = CostScanSession(cutoff: cutoff, options: emptyBudget, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: secondSlice)
+        let progress = secondSlice.progress(windowDays: 30)
+
+        XCTAssertFalse(secondSlice.isComplete)
+        XCTAssertEqual(progress.listedFiles, 1)
+        XCTAssertEqual(progress.processedFiles, 0)
+        XCTAssertFalse(progress.isComplete)
+        XCTAssertLessThan(try XCTUnwrap(progress.fraction), 1)
+    }
+
+    func testWarmCacheHitsCountAsProcessedOnACompletedSlice() throws {
+        let root = try makeCorpusDirectory()
+        try writeClaudeTranscript(in: root, name: "a.jsonl", messageID: "a", modifiedAgo: 0)
+        try writeClaudeTranscript(in: root, name: "b.jsonl", messageID: "b", modifiedAgo: 1)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let store = try makeScanCacheStore()
+
+        let first = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: first)
+        XCTAssertEqual(first.persist(), .persisted)
+        XCTAssertTrue(first.isComplete)
+
+        let second = CostScanSession(cutoff: cutoff, options: .unlimited, store: store)
+        _ = ClaudeCostScanner.scanRoots([root], session: second)
+        let progress = second.progress(windowDays: 30)
+
+        XCTAssertTrue(second.isComplete)
+        XCTAssertEqual(progress.listedFiles, 2)
+        XCTAssertEqual(progress.processedFiles, 2)
+        XCTAssertTrue(progress.isComplete)
+        XCTAssertEqual(try XCTUnwrap(progress.fraction), 1.0, accuracy: 0.000_001)
+    }
+
+    /// `CostTracker.makeCostSummary` drives one slice through `makeScan` plus
+    /// `observeProgress`. A completed single-slice refresh must publish the
+    /// listing (files + bytes, processed == 0) before the finished snapshot.
+    func testSingleSliceRefreshPublishesListingBeforeCompletion() throws {
+        let root = try makeCorpusDirectory()
+        try writeClaudeTranscript(in: root, name: "a.jsonl", messageID: "a", modifiedAgo: 0)
+        try writeClaudeTranscript(in: root, name: "b.jsonl", messageID: "b", modifiedAgo: 1)
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-06-01T00:00:00Z"))
+        let seen = CostScanProgressLog()
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+        session.observeProgress(windowDays: 30, seen.append)
+
+        let scan = CostSummaryBuilder.makeScan(
+            days: 30,
+            enabledProviders: [.claude],
+            claudeAccounts: [],
+            grokAccounts: [],
+            session: session,
+            claudeProjectRoots: [root]
+        )
+
+        XCTAssertTrue(scan.isComplete)
+        XCTAssertNil(scan.summary.lifetime)
+
+        let first = try XCTUnwrap(seen.snapshots.first)
+        XCTAssertEqual(first.listedFiles, 2)
+        XCTAssertEqual(first.processedFiles, 0)
+        XCTAssertGreaterThan(first.listedBytes, 0)
+        XCTAssertFalse(first.isComplete)
+        XCTAssertEqual(try XCTUnwrap(first.fraction), 0, accuracy: 0.000_001)
+
+        let last = try XCTUnwrap(seen.snapshots.last)
+        XCTAssertEqual(last.processedFiles, 2)
+        XCTAssertTrue(last.isComplete)
+        XCTAssertEqual(try XCTUnwrap(last.fraction), 1.0, accuracy: 0.000_001)
     }
 
     // MARK: - Fixtures
@@ -230,19 +371,45 @@ final class CostScanWindowOnlyTests: XCTestCase {
         messageID: String,
         modifiedAgo: TimeInterval
     ) throws -> URL {
-        let line = """
-        {"timestamp": "2026-07-01T10:00:00.000Z", "requestId": "req_\(messageID)", \
-        "message": {"id": "msg_\(messageID)", "model": "claude-sonnet-4-5", \
-        "usage": {"input_tokens": 100, "output_tokens": 10, \
-        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}
-        """
+        try writeClaudeLines(
+            in: root,
+            name: name,
+            lines: [claudeEventLine(messageID: messageID)],
+            modifiedAgo: modifiedAgo
+        )
+    }
+
+    @discardableResult
+    private func writeClaudeLines(
+        in root: URL,
+        name: String,
+        lines: [String],
+        modifiedAgo: TimeInterval
+    ) throws -> URL {
         let url = root.appendingPathComponent(name)
-        try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.modificationDate: Date().addingTimeInterval(-modifiedAgo)],
             ofItemAtPath: url.path
         )
         return url
+    }
+
+    private func claudeEventLine(messageID: String) -> String {
+        """
+        {"timestamp": "2026-07-01T10:00:00.000Z", "requestId": "req_\(messageID)", \
+        "message": {"id": "msg_\(messageID)", "model": "claude-sonnet-4-5", \
+        "usage": {"input_tokens": 100, "output_tokens": 10, \
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}
+        """
+    }
+
+    private func makeScanCacheStore() throws -> CostScanCacheStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CostScanWindowCache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return CostScanCacheStore(directory: directory)
     }
 
     private func fileSize(_ url: URL) throws -> Int {

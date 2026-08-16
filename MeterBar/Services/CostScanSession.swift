@@ -139,9 +139,9 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         handler?(snapshot)
     }
 
-    /// Count only files this slice actually finished — a cache hit or a read.
-    /// Files skipped because the budget ran out stay uncounted so the banner
-    /// cannot report 100% on an incomplete refresh.
+    /// Count a file this slice actually handled — a warm cache hit or a read.
+    /// Files skipped because the budget ran out stay uncounted, even when a
+    /// cached partial payload is reused so the summary does not drop them.
     func noteProcessedFile() {
         lock.lock()
         processedFiles += 1
