@@ -15,6 +15,26 @@ struct AccountNotificationPlanInput {
     let accounts: [AccountNotificationIdentity]
     let accountMetrics: [UUID: UsageMetrics]
     let fallbackMetrics: UsageMetrics?
+    /// Account whose metrics the provider-wide fallback snapshot represents.
+    /// Legacy fallback keys migrate only into this namespace so a secondary
+    /// profile cannot inherit another home's already-notified band.
+    let representativeAccountID: UUID?
+
+    /// Same selection `UsageDataManager` uses when publishing the provider-wide
+    /// snapshot: the enabled default when it has data, otherwise the first
+    /// enabled account with metrics.
+    static func representativeAccountID(
+        accounts: [AccountNotificationIdentity],
+        accountMetrics: [UUID: UsageMetrics],
+        defaultID: UUID
+    ) -> UUID? {
+        let enabled = accounts.filter(\.isEnabled)
+        if enabled.contains(where: { $0.id == defaultID }),
+           accountMetrics[defaultID] != nil {
+            return defaultID
+        }
+        return enabled.first { accountMetrics[$0.id] != nil }?.id
+    }
 }
 
 /// Fired notifications and the dedup state to thread into the next planning pass.
@@ -27,9 +47,9 @@ struct AccountNotificationPlan: Equatable, Sendable {
 ///
 /// Account metrics take precedence whenever at least one enabled account has
 /// data. Provider fallback is used only when every enabled account is
-/// unavailable. Switching between those namespaces primes the new namespace
-/// without delivering, so the same quota state does not produce a duplicate
-/// banner merely because account data appeared or disappeared.
+/// unavailable. Switching from fallback primes only the representative
+/// account's namespace, so a secondary profile cannot inherit another home's
+/// already-notified band.
 struct AccountNotificationPlanner {
     private typealias AvailableAccount = (
         identity: AccountNotificationIdentity,
@@ -144,8 +164,14 @@ struct AccountNotificationPlanner {
         }
 
         let fallbackState = clearFallbackState(service: input.service, keys: &keys)
+        let migrationAccountIDs = Self.fallbackMigrationAccountIDs(
+            representativeAccountID: input.representativeAccountID,
+            availableAccounts: availableAccounts
+        )
         for available in availableAccounts {
-            let accountKey = available.identity.id.uuidString
+            let accountID = available.identity.id
+            let accountKey = accountID.uuidString
+            guard migrationAccountIDs.contains(accountID) else { continue }
             guard !hasObservedAccountState(
                 service: input.service,
                 accountKey: accountKey,
@@ -178,6 +204,16 @@ struct AccountNotificationPlanner {
             )
             notifications.append(contentsOf: evaluation.notifications)
         }
+    }
+
+    private static func fallbackMigrationAccountIDs(
+        representativeAccountID: UUID?,
+        availableAccounts: [AvailableAccount]
+    ) -> Set<UUID> {
+        if let representativeAccountID {
+            return [representativeAccountID]
+        }
+        return Set(availableAccounts.map(\.identity.id))
     }
 
     @discardableResult

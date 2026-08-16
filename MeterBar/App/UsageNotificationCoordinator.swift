@@ -171,28 +171,50 @@ final class UsageNotificationCoordinator {
             }
         }
 
+        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let claudeAccountMetrics = UsageDataManager.shared.claudeCodeAccountMetrics
+        let codexAccounts = CodexAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let codexAccountMetrics = UsageDataManager.shared.codexAccountMetrics
+        let grokAccounts = GrokAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let grokAccountMetrics = UsageDataManager.shared.grokAccountMetrics
+
         let accountPlan = AccountNotificationPlanner(decider: decider).plan(
             inputs: [
                 AccountNotificationPlanInput(
                     service: .claudeCode,
                     providerEnabled: providerVisibilityStore.isEnabled(.claudeCode),
-                    accounts: ClaudeCodeAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:)),
-                    accountMetrics: UsageDataManager.shared.claudeCodeAccountMetrics,
-                    fallbackMetrics: currentMetrics[.claudeCode]
+                    accounts: claudeAccounts,
+                    accountMetrics: claudeAccountMetrics,
+                    fallbackMetrics: currentMetrics[.claudeCode],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: claudeAccounts,
+                        accountMetrics: claudeAccountMetrics,
+                        defaultID: ClaudeCodeAccount.defaultID
+                    )
                 ),
                 AccountNotificationPlanInput(
                     service: .codexCli,
                     providerEnabled: providerVisibilityStore.isEnabled(.codexCli),
-                    accounts: CodexAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:)),
-                    accountMetrics: UsageDataManager.shared.codexAccountMetrics,
-                    fallbackMetrics: currentMetrics[.codexCli]
+                    accounts: codexAccounts,
+                    accountMetrics: codexAccountMetrics,
+                    fallbackMetrics: currentMetrics[.codexCli],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: codexAccounts,
+                        accountMetrics: codexAccountMetrics,
+                        defaultID: CodexAccount.defaultID
+                    )
                 ),
                 AccountNotificationPlanInput(
                     service: .grok,
                     providerEnabled: providerVisibilityStore.isEnabled(.grok),
-                    accounts: GrokAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:)),
-                    accountMetrics: UsageDataManager.shared.grokAccountMetrics,
-                    fallbackMetrics: currentMetrics[.grok]
+                    accounts: grokAccounts,
+                    accountMetrics: grokAccountMetrics,
+                    fallbackMetrics: currentMetrics[.grok],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: grokAccounts,
+                        accountMetrics: grokAccountMetrics,
+                        defaultID: GrokAccount.defaultID
+                    )
                 )
             ],
             alreadyNotified: keys,
