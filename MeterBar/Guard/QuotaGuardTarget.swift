@@ -129,7 +129,7 @@ nonisolated struct QuotaGuardTarget: Equatable, Sendable {
                     outcome: .usageError,
                     code: "unsupported_config_dir",
                     message: "--config-dir is not supported for \(service.displayName). "
-                        + "Only Claude Code and OpenAI Codex have per-account config directories.",
+                        + "Only Claude Code, OpenAI Codex, and Grok have per-account config directories.",
                     flag: "--config-dir",
                     value: trimmedConfigDirectory
                 ))
@@ -151,6 +151,7 @@ nonisolated struct QuotaGuardTarget: Equatable, Sendable {
 nonisolated struct QuotaGuardDefaultDirectories: Equatable, Sendable {
     let claude: String
     let codex: String
+    let grok: String
 
     static func current(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -168,7 +169,11 @@ nonisolated struct QuotaGuardDefaultDirectories: Equatable, Sendable {
                 environment: environment,
                 realHomeDirectory: realHomeDirectory
             ),
-            codex: codex
+            codex: codex,
+            grok: GrokHomeDirectory.path(
+                environment: environment,
+                realHomeDirectory: realHomeDirectory
+            )
         )
     }
 }
@@ -195,7 +200,7 @@ nonisolated extension ServiceType {
     /// Only the CLI-backed providers keep per-account config directories the
     /// app mirrors for cross-process reads.
     var supportsGuardConfigDirectory: Bool {
-        self == .claudeCode || self == .codexCli
+        self == .claudeCode || self == .codexCli || self == .grok
     }
 }
 

@@ -306,7 +306,7 @@ nonisolated enum QuotaGuardAccountResolver {
                     )
                 )
             }
-        default:
+        case .codexCli:
             candidates = configuration.codexAccounts.map {
                 (
                     id: $0.id,
@@ -317,6 +317,26 @@ nonisolated enum QuotaGuardAccountResolver {
                     )
                 )
             }
+        case .grok:
+            candidates = configuration.grokAccounts.map {
+                (
+                    id: $0.id,
+                    name: $0.name,
+                    directory: QuotaGuardPath.normalize(
+                        $0.homeDirectory ?? defaultDirectories.grok,
+                        home: home
+                    )
+                )
+            }
+        default:
+            return .failure(QuotaGuardFailure(
+                outcome: .usageError,
+                code: "unsupported_config_dir",
+                message: "--config-dir is not supported for \(target.service.displayName). "
+                    + "Only Claude Code, OpenAI Codex, and Grok have per-account config directories.",
+                flag: "--config-dir",
+                value: requestedDirectory
+            ))
         }
 
         guard let match = candidates.first(where: { $0.directory == needle }) else {

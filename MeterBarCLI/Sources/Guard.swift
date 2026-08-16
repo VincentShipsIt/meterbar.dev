@@ -35,7 +35,10 @@ struct Guard: AsyncParsableCommand {
     )
     var minRemaining: String?
 
-    @Option(name: .long, help: "Check one configured account by its config directory.")
+    @Option(
+        name: .long,
+        help: "Check one configured Claude, Codex, or Grok account by its config directory."
+    )
     var configDir: String?
 
     @Flag(name: .long, help: "Refresh usage before deciding instead of reading the cached snapshot.")
