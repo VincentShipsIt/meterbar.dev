@@ -62,6 +62,34 @@ final class LocalizedUsageFormattingTests: XCTestCase {
         )
     }
 
+    /// English source copy has to stay word-for-word what `QuotaTitleKey`
+    /// already says, or the Settings preview would change wording the moment
+    /// it started routing through the localized helper. Parsed model labels
+    /// stay verbatim.
+    func testQuotaTitleMatchesSharedEnglishSourceAndPreservesModelLabels() {
+        let english = Locale(identifier: "en")
+        let keys: [ServiceType.QuotaTitleKey] = [
+            .keyLimit,
+            .session,
+            .cursorModels,
+            .accountCredits,
+            .otherModels,
+            .monthly,
+            .weekly,
+            .codeReview,
+            .onDemand,
+            .model(label: nil),
+            .model(label: "Fable"),
+        ]
+        for key in keys {
+            XCTAssertEqual(
+                LocalizedUsageFormat.quotaTitle(for: key, locale: english),
+                key.englishTitle,
+                String(describing: key)
+            )
+        }
+    }
+
     /// The English source copy has to stay word-for-word what the locale-neutral
     /// shared model says, or the Settings preview would change wording the
     /// moment it started routing through the localized helper.

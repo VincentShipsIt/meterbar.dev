@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-16
 status: active
 ---
 
@@ -19,7 +19,7 @@ First launch: `FirstRunOnboardingStore` offers launch-at-login once via `SMAppSe
 
 ## Layout
 
-```
+```text
 MeterBar/                 app (App, Models, Services, SessionWake, Views, Resources)
 MeterBarWidget/           Usage + Burn Down widgets
 MeterBarCLI/              meterbar SwiftPM package

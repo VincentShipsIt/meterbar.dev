@@ -1,7 +1,7 @@
 # 00 — Repo Map: MeterBar
 
 > **Superseded 2026-08-12.** Historical snapshot only. Do not treat this file as current architecture.
-> Live map: `.agents/memory/MEMORY.md` and `architecture.md`.
+> Live map: `.agents/memory/MEMORY.md` and `.agents/memory/architecture.md`.
 > Since this audit: `MeterBarShared` shipped, CI tests/lint are hard gates, views were split, releases are notarized, and the 2026-08-08 bug batch (#374–#386, #422) landed.
 
 **Audit date:** 2026-07-02

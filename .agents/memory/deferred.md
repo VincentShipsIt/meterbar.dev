@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-16
 status: active
 ---
 
@@ -9,10 +9,7 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 ## Still open on the board
 
-- **#387** — Costs dashboard month-to-date picker, provider-independent model rollup, `cost --json` top-level rollup, serve `/cost` MTD.
 - **#389** / **#427** / **#428** / **#429** — next providers (Kimi, Z.ai/GLM, Copilot).
-- **#433** — burn-down widget strings into the widget catalog (this branch).
-- **#434** — CodeRabbit rate-limit must not report pass.
 
 ## Structural debt (no issue required to remember)
 
@@ -23,4 +20,4 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 ## Done — do not re-open as debt
 
-MeterBarShared extraction. CI test/lint hard gates. View-file split of the old dashboard monolith. Signing/notarization. Aug 8 correctness batch (#374–#386, #422). Localization groundwork (#431). Burn-down widget family (#432).
+MeterBarShared extraction. CI test/lint hard gates. View-file split of the old dashboard monolith. Signing/notarization. Aug 8 correctness batch (#374–#386, #422). Localization groundwork (#431). Burn-down widget family (#432). Burn-down widget catalog (#433). Costs dashboard MTD/rollup (#387). CodeRabbit rate-limit reporting (#434).
