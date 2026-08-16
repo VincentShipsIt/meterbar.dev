@@ -95,6 +95,7 @@ struct DashboardDiagnosticsSection: View {
             enabledClaudeCustomAccountIDs: claudeAccountStore.enabledAccounts
                 .filter { !$0.isDefault }
                 .map(\.id),
+            enabledCodexAccountIDs: codexAccountStore.enabledAccounts.map(\.id),
             enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id)
         )
     }
@@ -131,16 +132,39 @@ struct DashboardDiagnosticsSection: View {
             openRouterError: openRouterService.lastError,
             grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
         )
+        let accountErrors = DiagnosticsRunner.accountRefreshErrors(
+            claudeAccountErrors: Dictionary(
+                uniqueKeysWithValues: claudeAccountStore.enabledAccounts.compactMap { account in
+                    claudeCodeService.accountErrors[account.id].map { (account.id, $0) }
+                }
+            ),
+            codexAccountErrors: Dictionary(
+                uniqueKeysWithValues: codexAccountStore.enabledAccounts.compactMap { account in
+                    codexCliService.accountErrors[account.id].map { (account.id, $0) }
+                }
+            ),
+            grokAccountErrors: Dictionary(
+                uniqueKeysWithValues: grokAccountStore.enabledAccounts.compactMap { account in
+                    grokService.accountErrors[account.id].map { (account.id, $0) }
+                }
+            )
+        )
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
         let enabledClaudeAccounts = claudeAccountStore.enabledAccounts
-        let claudeMetrics = enabledClaudeAccounts.compactMap {
-            dataManager.claudeCodeAccountMetrics[$0.id]
-        }
+        let claudeMetricsByID = Dictionary(
+            uniqueKeysWithValues: enabledClaudeAccounts.compactMap { account in
+                dataManager.claudeCodeAccountMetrics[account.id].map { (account.id, $0) }
+            }
+        )
         return await DiagnosticsRunner.inspect(
             enabledProviders: enabledProviders,
             refreshErrors: errors,
+            accountRefreshErrors: accountErrors,
+            claudeAccounts: claudeAccountStore.accounts,
+            claudeAccountMetrics: claudeMetricsByID,
             claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
-            claudeEnabledAccountMetrics: claudeMetrics,
+            claudeEnabledAccountMetrics: Array(claudeMetricsByID.values),
+            codexAccounts: codexAccountStore.accounts,
             grokAccounts: grokAccountStore.accounts
         )
     }

@@ -60,18 +60,130 @@ public struct ReadinessCheck: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// The full readiness report for one provider: an ordered list of checks
-/// (installed → auth → data → refresh) plus a rolled-up overall status.
-public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
+/// Identifies a readiness report as provider-wide or account-scoped.
+///
+/// Account identity is MeterBar's local profile id plus the user-facing display
+/// name — never a filesystem path, credential, or provider-side account id.
+/// Cursor and OpenRouter stay provider-wide (`accountID == nil`).
+public struct ReadinessIdentity: Codable, Sendable, Equatable, Hashable {
     public let provider: ServiceType
+    public let accountID: UUID?
+    public let accountName: String?
+
+    public init(provider: ServiceType, accountID: UUID? = nil, accountName: String? = nil) {
+        self.provider = provider
+        self.accountID = accountID
+        self.accountName = accountName
+    }
+
+    public static func provider(_ provider: ServiceType) -> Self {
+        Self(provider: provider)
+    }
+
+    public static func account(_ provider: ServiceType, id: UUID, name: String) -> Self {
+        Self(provider: provider, accountID: id, accountName: name)
+    }
+
+    public var isAccountScoped: Bool { accountID != nil }
+
+    /// Header used by Diagnostics, the setup checklist, and `meterbar doctor`.
+    public var displayTitle: String {
+        if let accountName {
+            let trimmed = accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return "\(provider.displayName) · \(trimmed)"
+            }
+        }
+        return provider.displayName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case accountId
+        case accountName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        accountID = try container.decodeIfPresent(UUID.self, forKey: .accountId)
+        accountName = try container.decodeIfPresent(String.self, forKey: .accountName)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encodeIfPresent(accountID, forKey: .accountId)
+        try container.encodeIfPresent(accountName, forKey: .accountName)
+    }
+}
+
+/// Flattened, paste-safe JSON for `meterbar doctor --json`. Account fields are
+/// omitted on provider-wide reports so Cursor/OpenRouter stay path-free.
+public struct ProviderReadinessExport: Encodable, Sendable, Equatable {
+    public let provider: String
+    public let accountId: String?
+    public let accountName: String?
+    public let overall: String
+    public let healthy: Bool
     public let checks: [ReadinessCheck]
 
+    public init(_ report: ProviderReadiness) {
+        provider = report.provider.rawValue
+        accountId = report.identity.accountID?.uuidString
+        accountName = report.identity.accountName
+        overall = report.overall.rawValue
+        healthy = report.isHealthy
+        checks = report.checks
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case accountId
+        case accountName
+        case overall
+        case healthy
+        case checks
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encodeIfPresent(accountId, forKey: .accountId)
+        try container.encodeIfPresent(accountName, forKey: .accountName)
+        try container.encode(overall, forKey: .overall)
+        try container.encode(healthy, forKey: .healthy)
+        try container.encode(checks, forKey: .checks)
+    }
+}
+
+/// The full readiness report for one provider or one account: an ordered list of
+/// checks (installed → auth → data → refresh) plus a rolled-up overall status.
+public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
+    public let identity: ReadinessIdentity
+    public let checks: [ReadinessCheck]
+
+    public var provider: ServiceType { identity.provider }
+
     public init(provider: ServiceType, checks: [ReadinessCheck]) {
-        self.provider = provider
+        self.init(identity: .provider(provider), checks: checks)
+    }
+
+    public init(identity: ReadinessIdentity, checks: [ReadinessCheck]) {
+        self.identity = identity
         self.checks = checks
     }
 
-    public var id: String { provider.rawValue }
+    public var id: String {
+        if let accountID = identity.accountID {
+            return "\(identity.provider.rawValue):\(accountID.uuidString)"
+        }
+        return identity.provider.rawValue
+    }
+
+    public func withIdentity(_ identity: ReadinessIdentity) -> ProviderReadiness {
+        ProviderReadiness(identity: identity, checks: checks)
+    }
 
     /// The worst level across all checks (fail > warn > pass).
     public var overall: ReadinessLevel {
@@ -91,6 +203,158 @@ public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
 
     public func check(_ id: String) -> ReadinessCheck? {
         checks.first { $0.id == id }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case identity
+        case checks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        checks = try container.decode([ReadinessCheck].self, forKey: .checks)
+        if let identity = try container.decodeIfPresent(ReadinessIdentity.self, forKey: .identity) {
+            self.identity = identity
+        } else {
+            let provider = try container.decode(ServiceType.self, forKey: .provider)
+            identity = .provider(provider)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(identity, forKey: .identity)
+        try container.encode(checks, forKey: .checks)
+    }
+
+    /// Rolls independently evaluated account reports into one provider-wide
+    /// summary. Mixed pass/fail on the same check stays visible instead of
+    /// collapsing to the last account that finished.
+    public static func aggregate(
+        provider: ServiceType,
+        accountReports: [ProviderReadiness],
+        parseHealth: ReadinessCheck
+    ) -> ProviderReadiness {
+        let checkIDs = [
+            ReadinessCheckID.installed,
+            ReadinessCheckID.auth,
+            ReadinessCheckID.data,
+            ReadinessCheckID.refresh,
+        ]
+        let rolled = checkIDs.compactMap { id -> ReadinessCheck? in
+            rollup(id: id, from: accountReports)
+        }
+        return ProviderReadiness(
+            identity: .provider(provider),
+            checks: rolled + [parseHealth]
+        )
+    }
+
+    /// Provider-level parse-health: a format success on one account must not
+    /// hide a failure on another, and a single healthy sibling must not make
+    /// the provider look fully broken.
+    public static func aggregatedParseHealth(_ accountChecks: [ReadinessCheck]) -> ReadinessCheck {
+        let title = "Usage data"
+        let threshold = "Data is considered stale after 2 hours."
+        guard !accountChecks.isEmpty else {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .warn,
+                detail: "No refresh outcome has been recorded yet. \(threshold)"
+            )
+        }
+
+        let hasPass = accountChecks.contains { $0.level == .pass }
+        let hasFail = accountChecks.contains { $0.level == .fail }
+        let hasWarn = accountChecks.contains { $0.level == .warn }
+
+        if hasPass && hasFail {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .warn,
+                detail: "Some accounts refreshed successfully; others failed. \(threshold)",
+                recovery: "Refresh the failing account and review its Usage data check."
+            )
+        }
+        if hasFail {
+            let worst = accountChecks.first { $0.level == .fail }
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .fail,
+                detail: worst?.detail ?? "MeterBar couldn't read the latest usage. \(threshold)",
+                recovery: worst?.recovery
+            )
+        }
+        if hasWarn {
+            return ReadinessCheck(
+                id: ReadinessCheckID.parseHealth,
+                title: title,
+                level: .warn,
+                detail: "Usage data is older than the 2-hour freshness window on at least one account.",
+                recovery: "Refresh the provider and review any new error."
+            )
+        }
+        return ReadinessCheck(
+            id: ReadinessCheckID.parseHealth,
+            title: title,
+            level: .pass,
+            detail: "Showing usage from a recent successful refresh. \(threshold)"
+        )
+    }
+
+    /// Setup checklist prefers account-scoped failures so a broken profile is
+    /// named once instead of repeating the provider aggregate.
+    public static func setupChecklistReports(from reports: [ProviderReadiness]) -> [ProviderReadiness] {
+        let needing = reports.filter(\.needsSetup)
+        let accountScoped = needing.filter(\.identity.isAccountScoped)
+        guard !accountScoped.isEmpty else { return needing }
+        let accountProviders = Set(accountScoped.map(\.provider))
+        return needing.filter { report in
+            report.identity.isAccountScoped || !accountProviders.contains(report.provider)
+        }
+    }
+
+    private static func rollup(id: String, from reports: [ProviderReadiness]) -> ReadinessCheck? {
+        let matching = reports.compactMap { $0.check(id) }
+        guard let representative = matching.max(by: { $0.level.severity < $1.level.severity }) else {
+            return nil
+        }
+        let passCount = matching.filter { $0.level == .pass }.count
+        let failCount = matching.filter { $0.level == .fail }.count
+        let total = matching.count
+        let detail: String
+        if failCount > 0, passCount > 0 {
+            detail = mixedDetail(id: id, failing: failCount, total: total)
+        } else {
+            detail = representative.detail
+        }
+        return ReadinessCheck(
+            id: id,
+            title: representative.title,
+            level: representative.level,
+            detail: detail,
+            recovery: representative.recovery
+        )
+    }
+
+    private static func mixedDetail(id: String, failing: Int, total: Int) -> String {
+        switch id {
+        case ReadinessCheckID.auth:
+            return "\(failing) of \(total) accounts are not signed in."
+        case ReadinessCheckID.data:
+            return "\(failing) of \(total) accounts cannot read usage."
+        case ReadinessCheckID.refresh:
+            return "\(failing) of \(total) accounts failed their last refresh."
+        case ReadinessCheckID.installed:
+            return "\(failing) of \(total) accounts reported an install problem."
+        default:
+            return "\(failing) of \(total) accounts need attention."
+        }
     }
 }
 

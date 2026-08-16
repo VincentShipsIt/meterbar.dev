@@ -17,6 +17,9 @@ struct PopoverOverviewPanel: View {
     let claudeDefaultAccountEnabled: Bool
     let claudeEnabledCustomAccountIDs: [UUID]
     let claudeEnabledAccountMetrics: [UsageMetrics]
+    let claudeAccounts: [ClaudeCodeAccount]
+    let claudeAccountMetrics: [UUID: UsageMetrics]
+    let codexAccounts: [CodexAccount]
     let grokAccounts: [GrokAccount]
     /// Opt-in one-line "what to use next" hint. Defaults to off so the popover
     /// keeps its pre-feature layout; the full ranking lives in the dashboard.
@@ -39,6 +42,9 @@ struct PopoverOverviewPanel: View {
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledCustomAccountIDs: [UUID] = [],
         claudeEnabledAccountMetrics: [UsageMetrics] = [],
+        claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
+        claudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        codexAccounts: [CodexAccount] = [.defaultAccount],
         grokAccounts: [GrokAccount] = [.defaultAccount],
         showsRecommendationHint: Bool = false
     ) {
@@ -50,6 +56,9 @@ struct PopoverOverviewPanel: View {
         self.claudeDefaultAccountEnabled = claudeDefaultAccountEnabled
         self.claudeEnabledCustomAccountIDs = claudeEnabledCustomAccountIDs
         self.claudeEnabledAccountMetrics = claudeEnabledAccountMetrics
+        self.claudeAccounts = claudeAccounts
+        self.claudeAccountMetrics = claudeAccountMetrics
+        self.codexAccounts = codexAccounts
         self.grokAccounts = grokAccounts
         self.showsRecommendationHint = showsRecommendationHint
     }
@@ -65,7 +74,8 @@ struct PopoverOverviewPanel: View {
     /// *warning* must not keep "Finish setup" pinned open forever. The section
     /// collapses (renders nothing) once no enabled provider has a real setup gap.
     private var providersNeedingSetup: [ProviderReadiness] {
-        setupReports.filter { enabledProviders.contains($0.provider) && $0.needsSetup }
+        ProviderReadiness.setupChecklistReports(from: setupReports)
+            .filter { enabledProviders.contains($0.provider) }
     }
 
     /// Captures *which* tiles the panel shows, not their values. The panel
@@ -87,6 +97,7 @@ struct PopoverOverviewPanel: View {
         let defaultClaudeAccountEnabled: Bool
         let enabledClaudeCustomAccountIDs: [UUID]
         let claudeMetricFreshness: [Bool]
+        let enabledCodexAccountIDs: [UUID]
         let enabledGrokAccountIDs: [UUID]
     }
 
@@ -109,6 +120,7 @@ struct PopoverOverviewPanel: View {
             claudeMetricFreshness: claudeEnabledAccountMetrics.map {
                 ProviderReadinessInspector.hasRecentClaudeUsageFetch(metrics: $0, now: now)
             },
+            enabledCodexAccountIDs: codexAccounts.filter(\.isEnabled).map(\.id),
             enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id)
         )
     }
@@ -275,12 +287,18 @@ struct PopoverOverviewPanel: View {
         let requestedProviders = enabledProviders
         let defaultAccountEnabled = claudeDefaultAccountEnabled
         let accountMetrics = claudeEnabledAccountMetrics
+        let claudeProfiles = claudeAccounts
+        let claudeMetricsByID = claudeAccountMetrics
+        let codexProfiles = codexAccounts
         let grokProfiles = grokAccounts
         let reports = await Task.detached(priority: .utility) {
             ProviderReadinessInspector.reports(
                 providers: requestedProviders,
+                claudeAccounts: claudeProfiles,
+                claudeAccountMetrics: claudeMetricsByID,
                 claudeDefaultAccountEnabled: defaultAccountEnabled,
                 claudeEnabledAccountMetrics: accountMetrics,
+                codexAccounts: codexProfiles,
                 grokAccounts: grokProfiles
             )
         }.value

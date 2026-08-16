@@ -43,6 +43,29 @@ final class DiagnosticsRunnerTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testAccountRefreshErrorsKeepPerAccountIdentity() {
+        let work = UUID()
+        let result = DiagnosticsRunner.accountRefreshErrors(
+            claudeAccountErrors: [ClaudeCodeAccount.defaultID: .apiError("claude")],
+            codexAccountErrors: [work: .notAuthenticated],
+            grokAccountErrors: [:]
+        )
+
+        XCTAssertNotNil(result[.claudeCode]?[ClaudeCodeAccount.defaultID])
+        XCTAssertNotNil(result[.codexCli]?[work])
+        XCTAssertNil(result[.grok])
+    }
+
+    func testAccountRefreshErrorsDoNotCopyAProviderClaudeErrorOntoTheDefaultAccount() {
+        let work = UUID()
+        let result = DiagnosticsRunner.accountRefreshErrors(
+            claudeAccountErrors: [work: .notAuthenticated]
+        )
+
+        XCTAssertNil(result[.claudeCode]?[ClaudeCodeAccount.defaultID])
+        XCTAssertNotNil(result[.claudeCode]?[work])
+    }
+
     func testRefreshErrorsMapsEachNonClaudeProvider() {
         let result = DiagnosticsRunner.refreshErrors(
             claudeDefaultAccountEnabled: true,

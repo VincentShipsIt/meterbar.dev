@@ -616,6 +616,8 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 [
   {
     "provider": "Codex CLI",
+    "accountId": "00000000-0000-0000-0000-000000000002",
+    "accountName": "Default CLI Profile",
     "overall": "warn",
     "healthy": false,
     "checks": [
@@ -632,9 +634,12 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 ```
 
 `overall` and `checks[].level` are `pass`, `warn`, or `fail`. `healthy` is true only when
-`overall` is `pass`. The report contains only the fields shown above; credential, token, password,
-authorization, and secret-bearing fields are never emitted. Diagnostic messages may use standard
-error, but standard output remains one JSON document.
+`overall` is `pass`. Multi-account providers (Claude, Codex, Grok) emit one object per enabled
+profile, plus a provider-wide aggregate when more than one profile is enabled. `accountId` is
+MeterBar's local profile id and `accountName` is the user-facing display name; both are omitted
+for provider-wide reports (Cursor, OpenRouter, and the aggregate). Filesystem paths, credentials,
+tokens, passwords, authorization headers, and raw response bodies are never emitted. Diagnostic
+messages may use standard error, but standard output remains one JSON document.
 
 ## Serve
 

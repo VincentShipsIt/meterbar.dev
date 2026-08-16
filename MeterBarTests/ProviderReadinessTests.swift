@@ -418,6 +418,144 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertEqual(decoded, report)
     }
 
+    func testReadinessIdentityOmitsPathsAndNamesAccountReports() {
+        let id = UUID()
+        let identity = ReadinessIdentity.account(.grok, id: id, name: "Work")
+
+        XCTAssertTrue(identity.isAccountScoped)
+        XCTAssertEqual(identity.displayTitle, "Grok · Work")
+        XCTAssertEqual(ReadinessIdentity.provider(.cursor).displayTitle, "Cursor")
+        XCTAssertFalse(identity.displayTitle.contains("/"))
+    }
+
+    func testAccountScopedReportIdIncludesAccountAndProviderStaysStable() {
+        let id = UUID()
+        let report = ProviderReadiness(
+            identity: .account(.codexCli, id: id, name: "Work"),
+            checks: [ReadinessCheck(id: "auth", title: "Signed in", level: .pass, detail: "OK")]
+        )
+
+        XCTAssertEqual(report.provider, .codexCli)
+        XCTAssertEqual(report.id, "\(ServiceType.codexCli.rawValue):\(id.uuidString)")
+        XCTAssertEqual(
+            ProviderReadiness(
+                provider: .cursor,
+                checks: [ReadinessCheck(id: "auth", title: "Signed in", level: .pass, detail: "OK")]
+            ).id,
+            ServiceType.cursor.rawValue
+        )
+    }
+
+    func testDoctorExportIncludesAccountIdentityWithoutPaths() throws {
+        let id = UUID()
+        let report = ProviderReadiness(
+            identity: .account(.grok, id: id, name: "Work"),
+            checks: [
+                ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Signed in",
+                    level: .fail,
+                    detail: "Not signed in — no Grok Build cached login found.",
+                    recovery: "Run `grok login`."
+                ),
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(ProviderReadinessExport(report))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(object["provider"] as? String, ServiceType.grok.rawValue)
+        XCTAssertEqual(object["accountId"] as? String, id.uuidString)
+        XCTAssertEqual(object["accountName"] as? String, "Work")
+        XCTAssertEqual(object["overall"] as? String, "fail")
+        XCTAssertEqual(object["healthy"] as? Bool, false)
+        XCTAssertFalse(json.contains("/Users"))
+        XCTAssertFalse(json.contains("homeDirectory"))
+        XCTAssertFalse(json.contains("auth.json"))
+        XCTAssertFalse(json.contains("GROK_HOME"))
+    }
+
+    func testDoctorExportOmitsAccountFieldsForProviderWideReports() throws {
+        let report = ProviderReadinessEvaluator.cursor(
+            CursorReadinessInput(isInstalled: true, database: .tokenPresent, now: now)
+        )
+        let data = try JSONEncoder().encode(ProviderReadinessExport(report))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["provider"] as? String, ServiceType.cursor.rawValue)
+        XCTAssertNil(object["accountId"])
+        XCTAssertNil(object["accountName"])
+    }
+
+    func testAggregateIdentifiesMixedAccountFailuresWithoutHidingHealthySiblings() {
+        let healthy = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: true)
+        ).withIdentity(.account(.grok, id: UUID(), name: "Healthy"))
+        let failing = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(isCLIInstalled: true, authFileExists: false, authFileReadable: false)
+        ).withIdentity(.account(.grok, id: UUID(), name: "Missing"))
+
+        let aggregate = ProviderReadiness.aggregate(
+            provider: .grok,
+            accountReports: [healthy, failing],
+            parseHealth: ProviderReadiness.aggregatedParseHealth([
+                ReadinessCheck(
+                    id: ReadinessCheckID.parseHealth,
+                    title: "Usage data",
+                    level: .pass,
+                    detail: "ok"
+                ),
+                ReadinessCheck(
+                    id: ReadinessCheckID.parseHealth,
+                    title: "Usage data",
+                    level: .fail,
+                    detail: "format"
+                ),
+            ])
+        )
+
+        XCTAssertFalse(aggregate.identity.isAccountScoped)
+        XCTAssertEqual(aggregate.check(ReadinessCheckID.auth)?.level, .fail)
+        XCTAssertTrue(
+            (aggregate.check(ReadinessCheckID.auth)?.detail ?? "").contains("1 of 2"),
+            aggregate.check(ReadinessCheckID.auth)?.detail ?? ""
+        )
+        XCTAssertEqual(healthy.check(ReadinessCheckID.auth)?.level, .pass)
+        XCTAssertEqual(failing.check(ReadinessCheckID.auth)?.level, .fail)
+        XCTAssertEqual(aggregate.check(ReadinessCheckID.parseHealth)?.level, .warn)
+        XCTAssertTrue(
+            (aggregate.check(ReadinessCheckID.parseHealth)?.detail ?? "").contains("Some accounts"),
+            aggregate.check(ReadinessCheckID.parseHealth)?.detail ?? ""
+        )
+    }
+
+    func testSetupChecklistPrefersAccountReportsOverTheProviderAggregate() {
+        let aggregate = ProviderReadiness(
+            provider: .grok,
+            checks: [
+                ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .fail, detail: "1 of 2"),
+            ]
+        )
+        let healthy = ProviderReadiness(
+            identity: .account(.grok, id: UUID(), name: "Healthy"),
+            checks: [
+                ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .pass, detail: "OK"),
+            ]
+        )
+        let failing = ProviderReadiness(
+            identity: .account(.grok, id: UUID(), name: "Missing"),
+            checks: [
+                ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .fail, detail: "Not signed in"),
+            ]
+        )
+
+        let setup = ProviderReadiness.setupChecklistReports(from: [aggregate, healthy, failing])
+
+        XCTAssertEqual(setup.map(\.identity.accountName), ["Missing"])
+    }
+
     func testSummaryCountsWarningsSeparatelyFromAttention() {
         let ready = ProviderReadiness(
             provider: .claudeCode,
