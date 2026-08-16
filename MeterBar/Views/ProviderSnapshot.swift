@@ -340,8 +340,10 @@ enum ProviderSnapshotBuilder {
         var claudeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
         var claudeCodeHasAccess: Bool = false
         var codexCliHasAccess: Bool = false
-        var cursorHasAccess: Bool = false
-        var openRouterHasAccess: Bool = false
+        /// Last Cursor probe. `nil` is unprobed; `false` is confirmed signed-out.
+        var cursorHasAccess: Bool?
+        /// Last OpenRouter probe. `nil` is unprobed; `false` is confirmed no key.
+        var openRouterHasAccess: Bool?
         var grokHasAccess: Bool = false
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
 
@@ -487,7 +489,7 @@ enum ProviderSnapshotBuilder {
                 title: ServiceType.cursor.shortName,
                 service: .cursor,
                 metrics: metrics,
-                emptyDetail: input.cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor",
+                emptyDetail: input.cursorHasAccess == true ? "Waiting for refresh" : "Log in to Cursor",
                 authNotice: notice(for: .cursor, accountID: nil, metrics: metrics, input: input)
             ))
         }
@@ -498,7 +500,9 @@ enum ProviderSnapshotBuilder {
                 title: ServiceType.openRouter.shortName,
                 service: .openRouter,
                 metrics: metrics,
-                emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key",
+                emptyDetail: input.openRouterHasAccess == true
+                    ? "Waiting for refresh"
+                    : "Add an OpenRouter API key",
                 authNotice: notice(for: .openRouter, accountID: nil, metrics: metrics, input: input)
             ))
         }
@@ -564,11 +568,11 @@ enum ProviderSnapshotBuilder {
             usesAPIKey = false
         case .cursor:
             lastError = input.lastErrors.cursor
-            probed = input.cursorHasAccess ? true : nil
+            probed = input.cursorHasAccess
             usesAPIKey = false
         case .openRouter:
             lastError = input.lastErrors.openRouter
-            probed = input.openRouterHasAccess ? true : nil
+            probed = input.openRouterHasAccess
             usesAPIKey = true
         case .claudeCode:
             lastError = nil

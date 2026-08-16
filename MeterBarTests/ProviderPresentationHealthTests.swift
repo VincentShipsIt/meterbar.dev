@@ -469,6 +469,60 @@ final class ProviderPresentationHealthTests: XCTestCase {
         XCTAssertEqual(ProviderCardPresentation.statusText(for: newer), QuotaBand.healthy.shortLabel)
     }
 
+    func testSignedOutCursorWithFreshCacheIsNotHealthy() throws {
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [.cursor: healthyMetrics(.cursor, lastUpdated: freshAt)],
+                now: now,
+                claudeAccounts: [],
+                claudeAccountMetrics: [:],
+                enabledServices: [.cursor],
+                cursorHasAccess: false
+            )
+        )
+
+        let card = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        XCTAssertEqual(card.authNotice, .loginRequired)
+        XCTAssertEqual(card.band, .healthy, "The cached percentages stay healthy")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: card), "Login required")
+        XCTAssertNotEqual(ProviderCardPresentation.statusText(for: card), QuotaBand.healthy.shortLabel)
+    }
+
+    func testSignedOutOpenRouterWithFreshCacheIsNotHealthy() throws {
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [.openRouter: healthyMetrics(.openRouter, lastUpdated: freshAt)],
+                now: now,
+                claudeAccounts: [],
+                claudeAccountMetrics: [:],
+                enabledServices: [.openRouter],
+                openRouterHasAccess: false
+            )
+        )
+
+        let card = try XCTUnwrap(snapshots.first { $0.service == .openRouter })
+        XCTAssertEqual(card.authNotice, .notConnected)
+        XCTAssertEqual(card.band, .healthy)
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: card), "Not connected")
+        XCTAssertNotEqual(ProviderCardPresentation.statusText(for: card), QuotaBand.healthy.shortLabel)
+    }
+
+    func testUnprobedCursorWithFreshCacheIsNotTreatedAsSignedOut() throws {
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [.cursor: healthyMetrics(.cursor, lastUpdated: freshAt)],
+                now: now,
+                claudeAccounts: [],
+                claudeAccountMetrics: [:],
+                enabledServices: [.cursor]
+            )
+        )
+
+        let card = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        XCTAssertNil(card.authNotice, "Unknown/unprobed is not a fabricated login failure")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: card), QuotaBand.healthy.shortLabel)
+    }
+
     func testCursorClaudeLoginStateDoesNotLeakOntoAFreshCursorCard() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
@@ -526,8 +580,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 claudeAccounts: kind == .claude ? [.defaultAccount] : [],
                 claudeAccountMetrics: kind == .claude ? [ClaudeCodeAccount.defaultID: metrics] : [:],
                 enabledServices: [kind.service],
-                cursorHasAccess: kind == .cursor,
-                openRouterHasAccess: kind == .openRouter
+                cursorHasAccess: kind == .cursor ? true : nil,
+                openRouterHasAccess: kind == .openRouter ? true : nil
             )
         )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
@@ -595,8 +649,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
             claudeAccountStates: claudeStates,
             claudeCodeHasAccess: kind == .claude && refresh != .unprobed,
             codexCliHasAccess: kind == .codex && refresh != .unprobed,
-            cursorHasAccess: kind == .cursor && refresh != .unprobed,
-            openRouterHasAccess: kind == .openRouter && refresh != .unprobed,
+            cursorHasAccess: kind == .cursor && refresh != .unprobed ? true : nil,
+            openRouterHasAccess: kind == .openRouter && refresh != .unprobed ? true : nil,
             grokHasAccess: kind == .grok && refresh != .unprobed,
             lastErrors: lastErrors
         )

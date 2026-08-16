@@ -33,6 +33,28 @@ final class ProviderSettingsFactsTests: XCTestCase {
         )
     }
 
+    private func snapshot(notice: ProviderAuthNotice?) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: "claude-\(UUID().uuidString)",
+            title: "Claude",
+            service: .claudeCode,
+            updatedAt: Date(),
+            limits: [
+                SnapshotLimit(
+                    id: "session",
+                    kind: .session,
+                    title: "Session",
+                    usageLimit: UsageLimit(used: 30, total: 100, resetTime: nil)
+                )
+            ],
+            emptyDetail: "Waiting for refresh",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil,
+            authNotice: notice
+        )
+    }
+
     // MARK: - noticeText
 
     /// An authored parse failure knows the single step that fixes it, and the
@@ -115,6 +137,28 @@ final class ProviderSettingsFactsTests: XCTestCase {
         derived.authNotice = .stale(since: Date())
         XCTAssertEqual(derived.statusText, "Stale")
         XCTAssertEqual(derived.statusColor, .secondary)
+    }
+
+    func testSharedNoticeRequiresEveryMeteredCardToAgree() {
+        let stale = snapshot(notice: .stale(since: Date(timeIntervalSince1970: 1)))
+        let attention = snapshot(notice: .attention("Work refresh failed"))
+        XCTAssertNil(
+            ProviderSettingsFacts.sharedNotice(in: [stale, attention]),
+            "Distinct overlays must not collapse to whichever card comes first"
+        )
+    }
+
+    func testSharedNoticeKeepsAnAgreedOverlay() {
+        let first = snapshot(notice: .stale(since: Date(timeIntervalSince1970: 1)))
+        let second = snapshot(notice: .stale(since: Date(timeIntervalSince1970: 2)))
+        XCTAssertEqual(ProviderSettingsFacts.sharedNotice(in: [first, second])?.shortLabel, "Stale")
+        XCTAssertEqual(ProviderSettingsFacts.sharedNotice(in: [first])?.shortLabel, "Stale")
+    }
+
+    func testSharedNoticeIsNilWhenASiblingHasNoOverlay() {
+        let stale = snapshot(notice: .stale(since: Date()))
+        let healthy = snapshot(notice: nil)
+        XCTAssertNil(ProviderSettingsFacts.sharedNotice(in: [stale, healthy]))
     }
 
     func testStatusTextWaitingWhenConnectedButNoBand() {

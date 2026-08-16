@@ -35,6 +35,19 @@ struct ProviderSettingsFacts {
     /// labelled Healthy. `nil` when cards disagree (one failed custom must not
     /// paint a healthy sibling) or when nothing is overlayed.
     var authNotice: ProviderAuthNotice?
+
+    /// Overlay shown on the Settings row only when every metered card carries
+    /// the same notice. Distinct overlays (stale vs attention) must not collapse
+    /// to whichever card happens to come first.
+    static func sharedNotice(in snapshots: [ProviderSnapshot]) -> ProviderAuthNotice? {
+        let metered = snapshots.filter(\.hasMetrics)
+        let notices = metered.compactMap(\.authNotice)
+        guard !metered.isEmpty, notices.count == metered.count else { return nil }
+        let labels = Set(notices.map(\.shortLabel))
+        guard labels.count == 1 else { return nil }
+        return notices.first
+    }
+
     /// Display path of the Codex auth file (only used by the Codex source line).
     let codexAuthFileDisplayPath: String
 

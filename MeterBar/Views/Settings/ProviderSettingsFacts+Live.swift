@@ -44,17 +44,6 @@ extension ProviderSettingsFacts {
                 grokLiveState()
             }
 
-        let metered = matching.filter(\.hasMetrics)
-        let notices = metered.compactMap(\.authNotice)
-        let sharedNotice: ProviderAuthNotice?
-        if metered.count <= 1 {
-            sharedNotice = notices.first
-        } else if !metered.isEmpty, metered.allSatisfy({ $0.authNotice != nil }) {
-            sharedNotice = notices.first
-        } else {
-            sharedNotice = nil
-        }
-
         return ProviderSettingsFacts(
             service: service,
             isEnabled: ProviderVisibilityStore.shared.isEnabled(service),
@@ -64,7 +53,7 @@ extension ProviderSettingsFacts {
             errorText: live.error,
             updatedText: matching.filter(\.hasMetrics).map(\.updatedText).first ?? "No data",
             worstBand: matching.compactMap(\.band).max(by: { $0.severity < $1.severity }),
-            authNotice: sharedNotice,
+            authNotice: sharedNotice(in: matching),
             codexAuthFileDisplayPath: CodexHomeDirectory.authFileDisplayPath(
                 for: CodexAccountStore.shared.accounts.first(where: \.isDefault) ?? .defaultAccount
             )
