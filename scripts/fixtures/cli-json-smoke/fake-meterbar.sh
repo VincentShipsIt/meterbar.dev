@@ -25,7 +25,7 @@ case "$scenario:$command_name" in
     ;;
   data:usage)
     printf '%s\n' \
-      '{"schemaVersion":1,"providers":[{"provider":"codex","displayName":"OpenAI Codex","lastUpdated":"2026-07-17T00:00:00Z","windows":[{"kind":"weekly","used":25,"total":100,"percentUsed":25,"percentLeft":75,"quotaBand":"healthy","estimated":false}]}]}'
+      '{"schemaVersion":1,"accounts":[{"accountId":"00000000-0000-0000-0000-000000000002","accountName":"Work","lastUpdated":"2026-07-17T00:00:00Z","provider":"codex","windows":[{"kind":"weekly","used":25,"total":100,"percentUsed":25,"percentLeft":75,"quotaBand":"healthy","estimated":false}]}],"providers":[{"provider":"codex","displayName":"OpenAI Codex","lastUpdated":"2026-07-17T00:00:00Z","windows":[{"kind":"weekly","used":25,"total":100,"percentUsed":25,"percentLeft":75,"quotaBand":"healthy","estimated":false}]}]}'
     ;;
   data:cost)
     printf '%s\n' \

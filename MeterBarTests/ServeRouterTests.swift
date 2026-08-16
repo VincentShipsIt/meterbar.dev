@@ -51,13 +51,15 @@ final class ServeRouterTests: XCTestCase {
 
     private func makeDataSource(
         metrics: [ServiceType: UsageMetrics]? = nil,
+        accounts: [AccountUsageSnapshot] = [],
         costCache: CostSummaryCache?? = nil
     ) -> ServeRouter.DataSource {
         let resolvedMetrics = metrics ?? self.metrics
         let resolvedCostCache = costCache ?? .some(self.costCache)
         return ServeRouter.DataSource(
             loadUsageMetrics: { resolvedMetrics },
-            loadCostCache: { resolvedCostCache }
+            loadCostCache: { resolvedCostCache },
+            loadAccountMetrics: { accounts }
         )
     }
 
@@ -248,6 +250,61 @@ final class ServeRouterTests: XCTestCase {
         try assertUsageEndpoint(provider: "clod", selects: [])
     }
 
+    // MARK: `?account=` parity with `meterbar usage --account`
+
+    func testUsageEndpointAccountQueryUsesTheSameSelectionAndDTOAsTheCLI() throws {
+        let workID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x12))
+        let personalID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x11))
+        let accounts = [
+            AccountUsageSnapshot(
+                id: workID,
+                name: "Work",
+                metrics: UsageMetrics(
+                    service: .claudeCode,
+                    sessionLimit: UsageLimit(used: 80, total: 100, resetTime: referenceDate),
+                    lastUpdated: referenceDate
+                )
+            ),
+            AccountUsageSnapshot(
+                id: personalID,
+                name: "Personal",
+                metrics: UsageMetrics(
+                    service: .claudeCode,
+                    sessionLimit: UsageLimit(used: 20, total: 100, resetTime: referenceDate),
+                    lastUpdated: referenceDate
+                )
+            ),
+            AccountUsageSnapshot(
+                id: UUID(),
+                name: "Work",
+                metrics: UsageMetrics(
+                    service: .codexCli,
+                    weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: referenceDate),
+                    lastUpdated: referenceDate
+                )
+            ),
+        ]
+
+        try assertUsageEndpoint(
+            provider: nil,
+            account: "Work",
+            metrics: multiProviderMetrics,
+            accounts: accounts
+        )
+        try assertUsageEndpoint(
+            provider: "claude",
+            account: workID.uuidString,
+            metrics: multiProviderMetrics,
+            accounts: accounts
+        )
+        try assertUsageEndpoint(
+            provider: nil,
+            account: "missing",
+            metrics: multiProviderMetrics,
+            accounts: accounts
+        )
+    }
+
     /// A missing filter selects everything, and a blank one is still no
     /// filter — the router used to treat "   " as a needle matching nothing.
     func testUsageEndpointWithoutAProviderQueryReturnsEveryCachedProvider() throws {
@@ -379,21 +436,60 @@ final class ServeRouterTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws {
+        try assertUsageEndpoint(
+            provider: provider,
+            account: nil,
+            metrics: multiProviderMetrics,
+            accounts: [],
+            selectedProviders: selected,
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertUsageEndpoint(
+        provider: String?,
+        account: String?,
+        metrics: [ServiceType: UsageMetrics],
+        accounts: [AccountUsageSnapshot],
+        selectedProviders: Set<ServiceType>? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        var query: [String: String] = [:]
+        if let provider { query["provider"] = provider }
+        if let account { query["account"] = account }
+
         let response = ServeRouter.handle(
-            request(
-                path: "/usage",
-                query: provider.map { ["provider": $0] } ?? [:],
-                token: token
-            ),
+            request(path: "/usage", query: query, token: token),
             token: token,
-            dataSource: makeDataSource(metrics: multiProviderMetrics)
+            dataSource: makeDataSource(metrics: metrics, accounts: accounts)
         )
 
-        let expectedMetrics = multiProviderMetrics.filter { selected.contains($0.key) }
-        XCTAssertEqual(expectedMetrics.count, selected.count, "fixture is missing \(selected)", file: file, line: line)
+        let selection = UsageCLISelection.resolve(
+            metrics: metrics,
+            accounts: accounts,
+            provider: provider,
+            account: account
+        )
+        if let selectedProviders {
+            XCTAssertEqual(
+                Set(selection.metrics.keys),
+                selectedProviders,
+                "fixture is missing \(selectedProviders)",
+                file: file,
+                line: line
+            )
+        }
 
-        let expected = try UsageCLIJSONResponse(metrics: expectedMetrics).jsonData()
-        XCTAssertEqual(response.body, expected, "provider=\(provider.debugDescription)", file: file, line: line)
+        let expected = try UsageCLIJSONResponse(selection: selection).jsonData()
+        XCTAssertEqual(
+            response.body,
+            expected,
+            "provider=\(provider.debugDescription) account=\(account.debugDescription)",
+            file: file,
+            line: line
+        )
     }
 
     private func assertBodyContainsNoUsageData(_ response: ServeHTTPResponse, file: StaticString = #filePath, line: UInt = #line) {

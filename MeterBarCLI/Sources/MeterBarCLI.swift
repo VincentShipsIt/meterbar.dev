@@ -85,11 +85,18 @@ struct Usage: ParsableCommand {
     @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok)")
     var provider: String?
 
-    func run() throws {
-        // Same app-group file, codec, and models as the app and widget.
-        let metrics = SharedDataStore.shared.loadMetrics()
+    @Option(
+        name: .long,
+        help: "Filter by account id (UUID) or exact account name"
+    )
+    var account: String?
 
-        if metrics.isEmpty {
+    func run() throws {
+        // Same app-group files, codec, and models as the app and widget.
+        let metrics = SharedDataStore.shared.loadMetrics()
+        let accounts = SharedDataStore.shared.loadAccountMetrics()
+
+        if metrics.isEmpty, accounts.isEmpty {
             if json {
                 try emitJSON(CLIJSONErrorResponse(
                     code: "usage_cache_missing",
@@ -102,17 +109,22 @@ struct Usage: ParsableCommand {
             return
         }
 
-        let filtered = CLIProviderFilter.apply(provider, to: metrics)
+        let selection = UsageCLISelection.resolve(
+            metrics: metrics,
+            accounts: accounts,
+            provider: provider,
+            account: account
+        )
 
         if json {
-            try emitJSON(UsageCLIJSONResponse(metrics: filtered))
+            try emitJSON(UsageCLIJSONResponse(selection: selection))
         } else {
-            printText(filtered)
+            printText(selection)
         }
     }
 
-    private func printText(_ metrics: [ServiceType: UsageMetrics]) {
-        for line in CLIUsageTextReport.lines(for: metrics, filter: provider) {
+    private func printText(_ selection: UsageCLISelection) {
+        for line in CLIUsageTextReport.lines(for: selection) {
             print(line)
         }
     }

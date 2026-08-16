@@ -23,6 +23,8 @@ Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter
 ```sh
 meterbar usage --json
 meterbar usage --provider codex --json
+meterbar usage --account Work --json
+meterbar usage --provider claude --account 00000000-0000-0000-0000-000000000012 --json
 ```
 
 Version 1 shape:
@@ -64,6 +66,61 @@ use MeterBar's shared quota rules; `quotaBand` is `healthy`, `tight`, `critical`
 
 `extraUsage.state` is `on`, `off`, or `unknown`; its optional `detail` is provider-supplied display
 context. `resetCreditsAvailable` is present only when the provider reports banked reset credits.
+
+### Accounts
+
+Claude, Codex, and Grok can have more than one profile. `providers[]` stays the representative
+provider-wide snapshot (`loadMetrics()`), so schema-v1 consumers that only read `providers` keep
+working. When the app-group account cache (`loadAccountMetrics()`) has snapshots, the document
+also includes an additive `accounts` array — one entry per cached profile, never a filesystem path,
+`GROK_HOME`, or token.
+
+`accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor / OpenRouter
+which stay provider-only and never get fake accounts).
+
+```json
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "lastUpdated": "2026-07-14T10:00:00Z",
+      "windows": []
+    }
+  ],
+  "accounts": [
+    {
+      "provider": "claude",
+      "accountId": "00000000-0000-0000-0000-000000000012",
+      "accountName": "Work",
+      "lastUpdated": "2026-07-14T10:00:00Z",
+      "windows": [
+        {
+          "kind": "session",
+          "used": 80,
+          "total": 100,
+          "percentUsed": 80,
+          "percentLeft": 20,
+          "quotaBand": "tight",
+          "estimated": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+`--account` / `GET /usage?account=` matches an account id (UUID string) or the exact account name.
+Matching is case-insensitive and trims surrounding whitespace; it is not a substring. Duplicate
+names return every match, sorted by provider, then name, then id. An unknown account is
+deterministic and successful: `accounts` is omitted (or empty after filtering) and `providers[]`
+is unchanged except for any `--provider` / `?provider=` filter. Human text prints
+`No matching accounts.` instead of the provider rows.
+
+`--provider` / `?provider=` still filters both arrays. Combining `--provider` and `--account`
+intersects them. Disabled or deleted profiles are simply absent from the cache — usage never
+invents rows for them.
 
 ## Cost
 
@@ -617,7 +674,7 @@ trickles bytes cannot hold a handler open indefinitely. Request heads over 8 KiB
 
 | Method & path | Query parameters | Behavior |
 | --- | --- | --- |
-| `GET /usage` | `provider` (optional, same matching as `meterbar usage --provider`) | Returns `UsageCLIJSONResponse` |
+| `GET /usage` | `provider` (optional, same matching as `meterbar usage --provider`); `account` (optional, same matching as `meterbar usage --account`: exact account id or name) | Returns `UsageCLIJSONResponse` |
 | `GET /cost` | `days` (optional, same matching as `meterbar cost --days`; non-positive or non-numeric values are ignored) | Returns `CostCLIJSONResponse` |
 
 An unknown path returns `404` with the same generic error envelope. If the underlying cache is
