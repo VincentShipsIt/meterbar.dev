@@ -7,6 +7,8 @@ final class AccountNotificationPlannerTests: XCTestCase {
     private let claudeAccountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10))
     private let secondClaudeAccountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11))
     private let codexAccountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12))
+    private let grokAccountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13))
+    private let secondGrokAccountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14))
 
     private var planner: AccountNotificationPlanner {
         AccountNotificationPlanner(preferences: .default)
@@ -39,14 +41,16 @@ final class AccountNotificationPlannerTests: XCTestCase {
         providerEnabled: Bool = true,
         accounts: [AccountNotificationIdentity],
         accountMetrics: [UUID: UsageMetrics] = [:],
-        fallbackMetrics: UsageMetrics? = nil
+        fallbackMetrics: UsageMetrics? = nil,
+        representativeAccountID: UUID? = nil
     ) -> AccountNotificationPlanInput {
         AccountNotificationPlanInput(
             service: service,
             providerEnabled: providerEnabled,
             accounts: accounts,
             accountMetrics: accountMetrics,
-            fallbackMetrics: fallbackMetrics
+            fallbackMetrics: fallbackMetrics,
+            representativeAccountID: representativeAccountID
         )
     }
 
@@ -534,5 +538,389 @@ final class AccountNotificationPlannerTests: XCTestCase {
             )
         )
         XCTAssertFalse(result.notifiedKeys.contains("Claude Code-session-critical"))
+    }
+
+    // MARK: - Grok per-account
+
+    func testTwoGrokProfilesCrossWarningCriticalExhaustedAndRecoverIndependently() {
+        let personal = account(id: grokAccountID, name: "Personal")
+        let work = account(id: secondGrokAccountID, name: "Work")
+        let accounts = [personal, work]
+
+        let personalWarns = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: accounts,
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                    ]
+                )
+            ],
+            alreadyNotified: [],
+            now: now
+        )
+        XCTAssertEqual(personalWarns.notifications.map(\.key), [
+            "Grok-\(grokAccountID.uuidString)-weekly-warn"
+        ])
+        XCTAssertEqual(personalWarns.notifications.map(\.serviceDisplayName), [
+            "Personal (Grok)"
+        ])
+        XCTAssertFalse(personalWarns.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+        })
+
+        let workExhausts = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: accounts,
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: personalWarns.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(workExhausts.notifications.map(\.key), [
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ])
+        XCTAssertEqual(workExhausts.notifications.map(\.level), [.critical])
+        XCTAssertTrue(workExhausts.notifiedKeys.contains(
+            "Grok-\(grokAccountID.uuidString)-weekly-warn"
+        ))
+
+        let personalExhausts = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: accounts,
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: workExhausts.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(personalExhausts.notifications.map(\.key), [
+            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+        ])
+
+        let personalRecovers = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: accounts,
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: personalExhausts.notifiedKeys,
+            now: now
+        )
+        XCTAssertTrue(personalRecovers.notifications.isEmpty)
+        XCTAssertFalse(personalRecovers.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(grokAccountID.uuidString)-weekly")
+        })
+        XCTAssertTrue(personalRecovers.notifiedKeys.contains(
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ))
+
+        let workRecovers = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: accounts,
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                    ]
+                )
+            ],
+            alreadyNotified: personalRecovers.notifiedKeys,
+            now: now
+        )
+        XCTAssertTrue(workRecovers.notifications.isEmpty)
+        XCTAssertFalse(workRecovers.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+        })
+    }
+
+    func testGrokEnableDisableDeleteAndRenameReconcilesNotificationState() {
+        let enabledInput = input(
+            service: .grok,
+            accounts: [
+                account(id: grokAccountID, name: "Personal"),
+                account(id: secondGrokAccountID, name: "Work")
+            ],
+            accountMetrics: [
+                grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+            ]
+        )
+        let first = planner.plan(inputs: [enabledInput], alreadyNotified: [], now: now)
+        XCTAssertEqual(first.notifications.count, 2)
+
+        let disabled = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [
+                        account(id: grokAccountID, name: "Personal", isEnabled: false),
+                        account(id: secondGrokAccountID, name: "Work")
+                    ],
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: first.notifiedKeys,
+            now: now
+        )
+        XCTAssertTrue(disabled.notifications.isEmpty)
+        XCTAssertFalse(disabled.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(grokAccountID.uuidString)")
+        })
+        XCTAssertTrue(disabled.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)")
+        })
+
+        let reenabled = planner.plan(
+            inputs: [enabledInput],
+            alreadyNotified: disabled.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(reenabled.notifications.map(\.key), [
+            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+        ])
+
+        let deleted = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [account(id: secondGrokAccountID, name: "Work")],
+                    accountMetrics: [
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: reenabled.notifiedKeys,
+            now: now
+        )
+        XCTAssertTrue(deleted.notifications.isEmpty)
+        XCTAssertTrue(deleted.notifiedKeys.contains(
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ))
+
+        let renamed = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [account(id: secondGrokAccountID, name: "Studio")],
+                    accountMetrics: [
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: deleted.notifiedKeys,
+            now: now
+        )
+        XCTAssertTrue(renamed.notifications.isEmpty)
+
+        let recoveredThenCrossed = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [account(id: secondGrokAccountID, name: "Studio")],
+                    accountMetrics: [
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                    ]
+                )
+            ],
+            alreadyNotified: renamed.notifiedKeys,
+            now: now
+        )
+        let renamedCrossing = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [account(id: secondGrokAccountID, name: "Studio")],
+                    accountMetrics: [
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: recoveredThenCrossed.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(renamedCrossing.notifications.map(\.serviceDisplayName), [
+            "Studio (Grok)"
+        ])
+        XCTAssertEqual(renamedCrossing.notifications.map(\.key), [
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ])
+    }
+
+    func testLegacyGrokProviderWideStateDoesNotRefireUnchangedAlert() {
+        let defaultAccount = account(id: grokAccountID, name: GrokAccount.defaultName)
+        let work = account(id: secondGrokAccountID, name: "Work")
+        let legacyKeys: Set<String> = [
+            "Grok-weekly-warn",
+            "Grok-weekly-critical"
+        ]
+
+        let migrated = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [defaultAccount, work],
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                    ],
+                    fallbackMetrics: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                    representativeAccountID: grokAccountID
+                )
+            ],
+            alreadyNotified: legacyKeys,
+            now: now
+        )
+
+        XCTAssertTrue(
+            migrated.notifications.isEmpty,
+            "The representative profile must inherit the legacy Grok band without a duplicate banner."
+        )
+        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-warn"))
+        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-critical"))
+        XCTAssertTrue(migrated.notifiedKeys.contains(
+            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+        ))
+        XCTAssertFalse(migrated.notifiedKeys.contains {
+            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+        })
+
+        let workCrosses = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [defaultAccount, work],
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ]
+                )
+            ],
+            alreadyNotified: migrated.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(workCrosses.notifications.map(\.key), [
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ])
+    }
+
+    func testLegacyGrokMigrationDoesNotSuppressNonRepresentativeAlert() {
+        let defaultAccount = account(id: grokAccountID, name: GrokAccount.defaultName)
+        let work = account(id: secondGrokAccountID, name: "Work")
+        let legacyKeys: Set<String> = [
+            "Grok-weekly-warn",
+            "Grok-weekly-critical"
+        ]
+
+        let migrated = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [defaultAccount, work],
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95)
+                    ],
+                    fallbackMetrics: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                    representativeAccountID: grokAccountID
+                )
+            ],
+            alreadyNotified: legacyKeys,
+            now: now
+        )
+
+        XCTAssertEqual(
+            migrated.notifications.map(\.key),
+            ["Grok-\(secondGrokAccountID.uuidString)-weekly-warn"],
+            "A non-representative profile already in-band must still fire; fallback only represented the default home."
+        )
+        XCTAssertTrue(migrated.notifications.allSatisfy { $0.serviceDisplayName == "Work (Grok)" })
+        XCTAssertFalse(
+            migrated.notifications.contains { $0.key.contains(grokAccountID.uuidString) },
+            "The representative profile must inherit the legacy band without a duplicate banner."
+        )
+        XCTAssertTrue(migrated.notifiedKeys.contains(
+            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+        ))
+        XCTAssertTrue(migrated.notifiedKeys.contains(
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-warn"
+        ))
+        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-critical"))
+
+        let workExhausts = planner.plan(
+            inputs: [
+                input(
+                    service: .grok,
+                    accounts: [defaultAccount, work],
+                    accountMetrics: [
+                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                    ],
+                    representativeAccountID: grokAccountID
+                )
+            ],
+            alreadyNotified: migrated.notifiedKeys,
+            now: now
+        )
+        XCTAssertEqual(workExhausts.notifications.map(\.key), [
+            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+        ])
+        XCTAssertTrue(workExhausts.notifications.allSatisfy { $0.level == .critical })
+    }
+
+    func testRepresentativeAccountIDPrefersEnabledDefaultWithMetrics() {
+        XCTAssertEqual(
+            AccountNotificationPlanInput.representativeAccountID(
+                accounts: [
+                    account(id: grokAccountID, name: GrokAccount.defaultName),
+                    account(id: secondGrokAccountID, name: "Work")
+                ],
+                accountMetrics: [
+                    grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 18),
+                    secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 88)
+                ],
+                defaultID: grokAccountID
+            ),
+            grokAccountID
+        )
+    }
+
+    func testRepresentativeAccountIDFallsBackToFirstEnabledAccountWithMetrics() {
+        XCTAssertEqual(
+            AccountNotificationPlanInput.representativeAccountID(
+                accounts: [
+                    account(id: grokAccountID, name: GrokAccount.defaultName, isEnabled: false),
+                    account(id: secondGrokAccountID, name: "Work")
+                ],
+                accountMetrics: [
+                    grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                    secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 40)
+                ],
+                defaultID: grokAccountID
+            ),
+            secondGrokAccountID
+        )
     }
 }

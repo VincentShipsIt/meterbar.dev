@@ -5,8 +5,8 @@ import os
 import UserNotifications
 
 /// The shape `AccountNotificationPlanner` needs from a provider account.
-/// `ClaudeCodeAccount` and `CodexAccount` were mapped by two byte-identical
-/// closures in `checkAndNotify()`; this collapses them to one.
+/// `ClaudeCodeAccount`, `CodexAccount`, and `GrokAccount` were mapped by
+/// byte-identical closures in `checkAndNotify()`; this collapses them to one.
 nonisolated protocol NotificationAccountIdentity {
     var id: UUID { get }
     var name: String { get }
@@ -15,6 +15,7 @@ nonisolated protocol NotificationAccountIdentity {
 
 extension ClaudeCodeAccount: NotificationAccountIdentity {}
 extension CodexAccount: NotificationAccountIdentity {}
+extension GrokAccount: NotificationAccountIdentity {}
 
 extension AccountNotificationIdentity {
     nonisolated init(account: some NotificationAccountIdentity) {
@@ -42,11 +43,11 @@ final class UsageNotificationCoordinator {
     /// threshold. Keys are cleared when usage drops back below.
     private var notifiedLimitKeys: Set<String> = []
 
-    /// Providers whose quotas are tracked as a single flat snapshot. Claude Code
-    /// and Codex CLI are excluded because they fan out per account and are
+    /// Providers whose quotas are tracked as a single flat snapshot. Claude Code,
+    /// Codex CLI, and Grok are excluded because they fan out per account and are
     /// handled by `AccountNotificationPlanner` instead.
     static var flatNotificationServices: [ServiceType] {
-        ServiceType.allCases.filter { $0 != .claudeCode && $0 != .codexCli }
+        ServiceType.allCases.filter { $0 != .claudeCode && $0 != .codexCli && $0 != .grok }
     }
 
     func start() {
@@ -108,6 +109,11 @@ final class UsageNotificationCoordinator {
             CodexAccountStore.shared.$defaultAccountHomeDirectory.map { _ in () }.eraseToAnyPublisher(),
             CodexAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
         ])
+        let grokAccountChanges = Publishers.Merge3(
+            GrokAccountStore.shared.$customAccounts.map { _ in () },
+            GrokAccountStore.shared.$defaultAccountName.map { _ in () },
+            GrokAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
         let thresholdChanges = Publishers.Merge3(
             notificationPreferences.$isEnabled.map { _ in () },
             notificationPreferences.$warningThreshold.map { _ in () },
@@ -120,6 +126,7 @@ final class UsageNotificationCoordinator {
             refreshChanges.eraseToAnyPublisher(),
             claudeAccountChanges.eraseToAnyPublisher(),
             codexAccountChanges.eraseToAnyPublisher(),
+            grokAccountChanges.eraseToAnyPublisher(),
             visibilityChanges.eraseToAnyPublisher(),
             thresholdChanges.eraseToAnyPublisher()
         ]
@@ -164,21 +171,50 @@ final class UsageNotificationCoordinator {
             }
         }
 
+        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let claudeAccountMetrics = UsageDataManager.shared.claudeCodeAccountMetrics
+        let codexAccounts = CodexAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let codexAccountMetrics = UsageDataManager.shared.codexAccountMetrics
+        let grokAccounts = GrokAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
+        let grokAccountMetrics = UsageDataManager.shared.grokAccountMetrics
+
         let accountPlan = AccountNotificationPlanner(decider: decider).plan(
             inputs: [
                 AccountNotificationPlanInput(
                     service: .claudeCode,
                     providerEnabled: providerVisibilityStore.isEnabled(.claudeCode),
-                    accounts: ClaudeCodeAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:)),
-                    accountMetrics: UsageDataManager.shared.claudeCodeAccountMetrics,
-                    fallbackMetrics: currentMetrics[.claudeCode]
+                    accounts: claudeAccounts,
+                    accountMetrics: claudeAccountMetrics,
+                    fallbackMetrics: currentMetrics[.claudeCode],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: claudeAccounts,
+                        accountMetrics: claudeAccountMetrics,
+                        defaultID: ClaudeCodeAccount.defaultID
+                    )
                 ),
                 AccountNotificationPlanInput(
                     service: .codexCli,
                     providerEnabled: providerVisibilityStore.isEnabled(.codexCli),
-                    accounts: CodexAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:)),
-                    accountMetrics: UsageDataManager.shared.codexAccountMetrics,
-                    fallbackMetrics: currentMetrics[.codexCli]
+                    accounts: codexAccounts,
+                    accountMetrics: codexAccountMetrics,
+                    fallbackMetrics: currentMetrics[.codexCli],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: codexAccounts,
+                        accountMetrics: codexAccountMetrics,
+                        defaultID: CodexAccount.defaultID
+                    )
+                ),
+                AccountNotificationPlanInput(
+                    service: .grok,
+                    providerEnabled: providerVisibilityStore.isEnabled(.grok),
+                    accounts: grokAccounts,
+                    accountMetrics: grokAccountMetrics,
+                    fallbackMetrics: currentMetrics[.grok],
+                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                        accounts: grokAccounts,
+                        accountMetrics: grokAccountMetrics,
+                        defaultID: GrokAccount.defaultID
+                    )
                 )
             ],
             alreadyNotified: keys,
