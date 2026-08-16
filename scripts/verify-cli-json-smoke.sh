@@ -117,6 +117,37 @@ def validate_error_or_providers(document, label, expected_error_code):
     return providers
 
 
+def validate_usage_windows(entry, path):
+    require(isinstance(entry, dict), f"{path} must be an object")
+    require(
+        isinstance(entry.get("provider"), str) and entry["provider"],
+        f"{path}.provider must be a non-empty string",
+    )
+    require(
+        isinstance(entry.get("lastUpdated"), str) and entry["lastUpdated"],
+        f"{path}.lastUpdated must be a non-empty string",
+    )
+    windows = entry.get("windows")
+    require(isinstance(windows, list), f"{path}.windows must be an array")
+    for window_index, window in enumerate(windows):
+        window_path = f"{path}.windows[{window_index}]"
+        require(isinstance(window, dict), f"{window_path} must be an object")
+        require(
+            window.get("kind") in {"session", "weekly", "codeReview"},
+            f"{window_path}.kind is unexpected",
+        )
+        require(
+            window.get("quotaBand") in {"healthy", "tight", "critical", "exhausted"},
+            f"{window_path}.quotaBand is unexpected",
+        )
+        require(
+            isinstance(window.get("estimated"), bool),
+            f"{window_path}.estimated must be boolean",
+        )
+        for field in ("used", "total", "percentUsed", "percentLeft"):
+            require_number(window.get(field), f"{window_path}.{field}")
+
+
 def validate_usage(document):
     providers = validate_error_or_providers(
         document,
@@ -129,38 +160,34 @@ def validate_usage(document):
     require(providers, "usage.providers must contain at least one provider")
     for provider_index, provider in enumerate(providers):
         path = f"usage.providers[{provider_index}]"
-        require(isinstance(provider, dict), f"{path} must be an object")
-        require(
-            isinstance(provider.get("provider"), str) and provider["provider"],
-            f"{path}.provider must be a non-empty string",
-        )
+        validate_usage_windows(provider, path)
         require(
             isinstance(provider.get("displayName"), str) and provider["displayName"],
             f"{path}.displayName must be a non-empty string",
         )
-        require(
-            isinstance(provider.get("lastUpdated"), str) and provider["lastUpdated"],
-            f"{path}.lastUpdated must be a non-empty string",
-        )
-        windows = provider.get("windows")
-        require(isinstance(windows, list), f"{path}.windows must be an array")
-        for window_index, window in enumerate(windows):
-            window_path = f"{path}.windows[{window_index}]"
-            require(isinstance(window, dict), f"{window_path} must be an object")
+
+    if "accounts" in document:
+        accounts = document["accounts"]
+        require(isinstance(accounts, list), "usage.accounts must be an array")
+        require(accounts, "usage.accounts must be omitted when empty")
+        for account_index, account in enumerate(accounts):
+            path = f"usage.accounts[{account_index}]"
+            require(isinstance(account, dict), f"{path} must be an object")
+            validate_usage_windows(account, path)
             require(
-                window.get("kind") in {"session", "weekly", "codeReview"},
-                f"{window_path}.kind is unexpected",
+                isinstance(account.get("accountId"), str) and account["accountId"],
+                f"{path}.accountId must be a non-empty string",
             )
             require(
-                window.get("quotaBand") in {"healthy", "tight", "critical", "exhausted"},
-                f"{window_path}.quotaBand is unexpected",
+                isinstance(account.get("accountName"), str) and account["accountName"],
+                f"{path}.accountName must be a non-empty string",
             )
+            for forbidden in ("configDirectory", "homeDirectory", "path", "token"):
+                require(forbidden not in account, f"{path} must not expose {forbidden}")
             require(
-                isinstance(window.get("estimated"), bool),
-                f"{window_path}.estimated must be boolean",
+                "/" not in account["accountName"] and "/" not in account["accountId"],
+                f"{path} must not expose a filesystem path",
             )
-            for field in ("used", "total", "percentUsed", "percentLeft"):
-                require_number(window.get(field), f"{window_path}.{field}")
 
 
 def validate_cost(document):

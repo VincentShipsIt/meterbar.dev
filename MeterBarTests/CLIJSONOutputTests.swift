@@ -31,6 +31,80 @@ final class CLIJSONOutputTests: XCTestCase {
         XCTAssertEqual(try response.jsonString(), usageFixture)
     }
 
+    /// Additive `accounts` must not change the version-1 `providers` document
+    /// when the account cache is empty — existing consumers only decode
+    /// `schemaVersion` + `providers`.
+    func testUsageResponseOmitsAccountsWhenTheAccountCacheIsEmpty() throws {
+        let response = UsageCLIJSONResponse(
+            metrics: [.claudeCode: claudeUsageMetrics],
+            accounts: []
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: response.jsonData()) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertNil(object["accounts"])
+        XCTAssertEqual(try response.jsonString(), usageFixture)
+    }
+
+    func testUsageResponseAccountsMatchTheSharedCacheAndNeverExposePaths() throws {
+        let accountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x12))
+        let snapshot = AccountUsageSnapshot(
+            id: accountID,
+            name: "Work",
+            metrics: claudeUsageMetrics
+        )
+        let response = UsageCLIJSONResponse(
+            metrics: [.claudeCode: claudeUsageMetrics],
+            accounts: [snapshot]
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: response.jsonData()) as? [String: Any]
+        )
+        let accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
+        let account = try XCTUnwrap(accounts.first)
+        let windows = try XCTUnwrap(account["windows"] as? [[String: Any]])
+
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(account["provider"] as? String, "claude")
+        XCTAssertEqual(account["accountId"] as? String, accountID.uuidString)
+        XCTAssertEqual(account["accountName"] as? String, "Work")
+        XCTAssertEqual(account["lastUpdated"] as? String, "2023-11-14T22:13:20Z")
+        XCTAssertEqual(account["resetCreditsAvailable"] as? Int, nil)
+        XCTAssertEqual((account["extraUsage"] as? [String: Any])?["state"] as? String, "on")
+        XCTAssertEqual(windows.map { $0["kind"] as? String }, ["session", "weekly"])
+        XCTAssertEqual(windows.first?["used"] as? Double, 42.5)
+        XCTAssertEqual(windows.first?["total"] as? Double, 100)
+        XCTAssertEqual(Set(account.keys), [
+            "provider", "accountId", "accountName", "lastUpdated",
+            "windows", "extraUsage",
+        ])
+
+        let json = try response.jsonString()
+        XCTAssertFalse(json.contains("/"), json)
+        XCTAssertFalse(json.contains("GROK_HOME"), json)
+        XCTAssertFalse(json.contains("configDirectory"), json)
+        XCTAssertFalse(json.contains("homeDirectory"), json)
+    }
+
+    func testSchemaVersionOneConsumersStillDecodeProvidersWithoutReadingAccounts() throws {
+        let snapshot = AccountUsageSnapshot(
+            id: UUID(),
+            name: "Work",
+            metrics: claudeUsageMetrics
+        )
+        let data = try UsageCLIJSONResponse(
+            metrics: [.claudeCode: claudeUsageMetrics],
+            accounts: [snapshot]
+        ).jsonData()
+
+        let decoded = try JSONDecoder().decode(LegacyUsageDocument.self, from: data)
+        XCTAssertEqual(decoded.schemaVersion, 1)
+        XCTAssertEqual(decoded.providers.map(\.provider), ["claude"])
+        XCTAssertEqual(decoded.providers.first?.windows.map(\.kind), ["session", "weekly"])
+    }
+
     func testCostResponseMatchesVersionOneFixture() throws {
         let cost = TokenCost(
             provider: .codexCli,
@@ -466,6 +540,43 @@ final class CLIJSONOutputTests: XCTestCase {
           "totalTokens" : 1800
         }
         """
+    }
+
+    private var claudeUsageMetrics: UsageMetrics {
+        UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(
+                used: 42.5,
+                total: 100,
+                resetTime: referenceDate,
+                windowSeconds: 18_000
+            ),
+            weeklyLimit: UsageLimit(
+                used: 90,
+                total: 100,
+                resetTime: nil,
+                windowSeconds: 604_800,
+                isEstimated: true
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$0.00 used"),
+            lastUpdated: referenceDate
+        )
+    }
+
+    /// The schema-v1 surface: `providers` only. A consumer that never heard of
+    /// `accounts` must still decode a document that includes the new key.
+    private struct LegacyUsageDocument: Decodable {
+        let schemaVersion: Int
+        let providers: [Provider]
+
+        struct Provider: Decodable {
+            let provider: String
+            let windows: [Window]
+        }
+
+        struct Window: Decodable {
+            let kind: String
+        }
     }
 
     private var errorFixture: String {

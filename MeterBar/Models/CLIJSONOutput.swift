@@ -30,11 +30,22 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
 
     private let schemaVersion = currentSchemaVersion
     private let providers: [Provider]
+    /// Per-profile snapshots for Claude / Codex / Grok. Omitted when the
+    /// account cache is empty so version-1 `providers`-only documents stay
+    /// byte-stable.
+    private let accounts: [Account]?
 
-    public init(metrics: [ServiceType: UsageMetrics]) {
+    public init(metrics: [ServiceType: UsageMetrics], accounts: [AccountUsageSnapshot] = []) {
         providers = metrics
             .sorted { $0.key.sortOrder < $1.key.sortOrder }
             .map { Provider(service: $0.key, metrics: $0.value) }
+        self.accounts = accounts.isEmpty
+            ? nil
+            : CLIAccountFilter.apply(nil, to: accounts).map(Account.init(snapshot:))
+    }
+
+    public init(selection: UsageCLISelection) {
+        self.init(metrics: selection.metrics, accounts: selection.accounts)
     }
 
     private struct Provider: Encodable {
@@ -48,11 +59,28 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
         init(service: ServiceType, metrics: UsageMetrics) {
             provider = service.cliIdentifier
             displayName = service.displayName
-            windows = [
-                metrics.sessionLimit.map { Window(kind: "session", limit: $0) },
-                metrics.weeklyLimit.map { Window(kind: "weekly", limit: $0) },
-                metrics.codeReviewLimit.map { Window(kind: "codeReview", limit: $0) },
-            ].compactMap { $0 }
+            windows = Window.all(from: metrics)
+            extraUsage = metrics.extraUsage.map(ExtraUsage.init(status:))
+            resetCreditsAvailable = metrics.resetCreditsAvailable
+            lastUpdated = metrics.lastUpdated
+        }
+    }
+
+    private struct Account: Encodable {
+        let provider: String
+        let accountId: String
+        let accountName: String
+        let windows: [Window]
+        let extraUsage: ExtraUsage?
+        let resetCreditsAvailable: Int?
+        let lastUpdated: Date
+
+        init(snapshot: AccountUsageSnapshot) {
+            let metrics = snapshot.metrics
+            provider = metrics.service.cliIdentifier
+            accountId = snapshot.id.uuidString
+            accountName = snapshot.name
+            windows = Window.all(from: metrics)
             extraUsage = metrics.extraUsage.map(ExtraUsage.init(status:))
             resetCreditsAvailable = metrics.resetCreditsAvailable
             lastUpdated = metrics.lastUpdated
@@ -80,6 +108,14 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
             windowSeconds = limit.windowSeconds
             quotaBand = QuotaBand.forLimit(limit).cliIdentifier
             estimated = limit.isEstimated
+        }
+
+        static func all(from metrics: UsageMetrics) -> [Window] {
+            [
+                metrics.sessionLimit.map { Window(kind: "session", limit: $0) },
+                metrics.weeklyLimit.map { Window(kind: "weekly", limit: $0) },
+                metrics.codeReviewLimit.map { Window(kind: "codeReview", limit: $0) },
+            ].compactMap { $0 }
         }
     }
 

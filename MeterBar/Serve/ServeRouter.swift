@@ -12,18 +12,22 @@ nonisolated public enum ServeRouter {
     public struct DataSource: Sendable {
         public let loadUsageMetrics: @Sendable () -> [ServiceType: UsageMetrics]
         public let loadCostCache: @Sendable () -> CostSummaryCache?
+        public let loadAccountMetrics: @Sendable () -> [AccountUsageSnapshot]
 
         public init(
             loadUsageMetrics: @escaping @Sendable () -> [ServiceType: UsageMetrics],
-            loadCostCache: @escaping @Sendable () -> CostSummaryCache?
+            loadCostCache: @escaping @Sendable () -> CostSummaryCache?,
+            loadAccountMetrics: @escaping @Sendable () -> [AccountUsageSnapshot] = { [] }
         ) {
             self.loadUsageMetrics = loadUsageMetrics
             self.loadCostCache = loadCostCache
+            self.loadAccountMetrics = loadAccountMetrics
         }
 
         public static let liveCache = DataSource(
             loadUsageMetrics: { SharedDataStore.shared.loadMetrics() },
-            loadCostCache: { CostSummaryStore.load() }
+            loadCostCache: { CostSummaryStore.load() },
+            loadAccountMetrics: { SharedDataStore.shared.loadAccountMetrics() }
         )
     }
 
@@ -58,17 +62,24 @@ nonisolated public enum ServeRouter {
 
     private static func usageResponse(dataSource: DataSource, query: [String: String]) -> ServeHTTPResponse {
         let metrics = dataSource.loadUsageMetrics()
-        guard !metrics.isEmpty else {
+        let accounts = dataSource.loadAccountMetrics()
+        guard !metrics.isEmpty || !accounts.isEmpty else {
             return errorResponse(
                 code: "usage_cache_missing",
                 message: "No cached metrics found. Open MeterBar app to fetch data."
             )
         }
 
-        // Same selection as `meterbar usage --provider`, so a padded or blank
-        // needle can't mean one thing over HTTP and another on the CLI.
-        let filtered = CLIProviderFilter.apply(query["provider"], to: metrics)
-        return jsonResponse(UsageCLIJSONResponse(metrics: filtered))
+        // Same selection as `meterbar usage --provider` / `--account`, so a
+        // padded or blank needle can't mean one thing over HTTP and another
+        // on the CLI.
+        let selection = UsageCLISelection.resolve(
+            metrics: metrics,
+            accounts: accounts,
+            provider: query["provider"],
+            account: query["account"]
+        )
+        return jsonResponse(UsageCLIJSONResponse(selection: selection))
     }
 
     private static func costResponse(dataSource: DataSource, query: [String: String]) -> ServeHTTPResponse {

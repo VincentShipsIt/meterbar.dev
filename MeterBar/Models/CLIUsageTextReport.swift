@@ -12,8 +12,20 @@ nonisolated public enum CLIUsageTextReport {
     /// Every line of the report, in print order. Empty strings are blank lines.
     public static func lines(
         for metrics: [ServiceType: UsageMetrics],
-        filter: String? = nil
+        accounts: [AccountUsageSnapshot] = [],
+        filter: String? = nil,
+        accountFilter: String? = nil
     ) -> [String] {
+        lines(for: UsageCLISelection.resolve(
+            metrics: metrics,
+            accounts: accounts,
+            provider: filter,
+            account: accountFilter
+        ))
+    }
+
+    /// Every line of the report, in print order. Empty strings are blank lines.
+    public static func lines(for selection: UsageCLISelection) -> [String] {
         var lines = [
             "╭─────────────────────────────────────────╮",
             "│             MeterBar Usage              │",
@@ -21,39 +33,57 @@ nonisolated public enum CLIUsageTextReport {
             "",
         ]
 
-        // A `--provider` typo used to print the header and nothing else, which
-        // reads like "this provider has no quota data". Say what happened, the
-        // way `meterbar doctor` already does — and distinguish a typo from a
-        // real provider the cache simply has not seen yet.
-        guard !metrics.isEmpty else {
-            lines.append(CLIProviderFilter.emptyReportMessage(for: filter))
+        // A `--provider` / `--account` typo used to print the header and
+        // nothing else, which reads like "this provider has no quota data".
+        if let message = selection.emptyReportMessage {
+            lines.append(message)
             return lines
         }
 
-        for (service, metric) in metrics.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            lines.append("▸ \(service.displayName)")
+        let accountFilterActive = CLIAccountFilter.isActive(selection.accountFilter)
+        let accountsByService = Dictionary(grouping: selection.accounts, by: \.metrics.service)
 
-            if let session = metric.sessionLimit {
-                lines += limitLines(
-                    service == .openRouter ? "  Key limit" : "  Session",
-                    session,
-                    currency: service == .openRouter
-                )
+        for service in ServiceType.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            if let serviceAccounts = accountsByService[service], !serviceAccounts.isEmpty {
+                for snapshot in serviceAccounts {
+                    lines.append("▸ \(service.displayName) · \(snapshot.name)")
+                    lines += metricLines(service, snapshot.metrics)
+                    lines.append("")
+                }
+                continue
             }
-            if let weekly = metric.weeklyLimit {
-                lines += limitLines(
-                    "  \(service.weeklyQuotaTitle)",
-                    weekly,
-                    currency: service == .openRouter
-                )
-            }
-            if let codeReview = metric.codeReviewLimit {
-                let label = service.codeReviewQuotaTitle(modelLimitLabel: metric.modelLimitLabel)
-                lines += limitLines("  \(label)", codeReview)
-            }
+
+            // `--account` is account-scoped: do not fall back to the
+            // representative provider row when the account needle missed.
+            guard !accountFilterActive, let metric = selection.metrics[service] else { continue }
+            lines.append("▸ \(service.displayName)")
+            lines += metricLines(service, metric)
             lines.append("")
         }
 
+        return lines
+    }
+
+    private static func metricLines(_ service: ServiceType, _ metric: UsageMetrics) -> [String] {
+        var lines: [String] = []
+        if let session = metric.sessionLimit {
+            lines += limitLines(
+                service == .openRouter ? "  Key limit" : "  Session",
+                session,
+                currency: service == .openRouter
+            )
+        }
+        if let weekly = metric.weeklyLimit {
+            lines += limitLines(
+                "  \(service.weeklyQuotaTitle)",
+                weekly,
+                currency: service == .openRouter
+            )
+        }
+        if let codeReview = metric.codeReviewLimit {
+            let label = service.codeReviewQuotaTitle(modelLimitLabel: metric.modelLimitLabel)
+            lines += limitLines("  \(label)", codeReview)
+        }
         return lines
     }
 
