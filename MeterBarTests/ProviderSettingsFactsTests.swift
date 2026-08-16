@@ -109,6 +109,13 @@ final class ProviderSettingsFactsTests: XCTestCase {
         XCTAssertEqual(facts(service: .claudeCode, worstBand: .exhausted).statusText, "Out")
     }
 
+    func testStatusTextAuthNoticeBeatsAHealthyBand() {
+        var derived = facts(service: .cursor, worstBand: .healthy)
+        derived.authNotice = .stale(since: Date())
+        XCTAssertEqual(derived.statusText, "Stale")
+        XCTAssertEqual(derived.statusColor, .secondary)
+    }
+
     func testStatusTextWaitingWhenConnectedButNoBand() {
         XCTAssertEqual(facts(service: .claudeCode).statusText, "Waiting for refresh")
     }

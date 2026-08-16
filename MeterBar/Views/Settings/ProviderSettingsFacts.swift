@@ -30,6 +30,11 @@ struct ProviderSettingsFacts {
     let updatedText: String
     /// The single most-severe quota band across this provider's windows.
     let worstBand: QuotaBand?
+    /// Card-level connection overlay when every visible card for this provider
+    /// agrees. Kept separate from `worstBand` so a stale 70%-left cache is not
+    /// labelled Healthy. `nil` when cards disagree (one failed custom must not
+    /// paint a healthy sibling) or when nothing is overlayed.
+    var authNotice: ProviderAuthNotice? = nil
     /// Display path of the Codex auth file (only used by the Codex source line).
     let codexAuthFileDisplayPath: String
 
@@ -91,6 +96,9 @@ struct ProviderSettingsFacts {
         guard hasAccess else {
             return "Not connected"
         }
+        if let authNotice {
+            return authNotice.shortLabel
+        }
         if errorText != nil {
             return "Refresh failed"
         }
@@ -105,6 +113,14 @@ struct ProviderSettingsFacts {
     var statusColor: Color {
         guard isEnabled, hasAccess else {
             return .secondary
+        }
+        if let authNotice {
+            switch authNotice {
+            case .loginRequired, .attention:
+                return MeterBarTheme.warning
+            case .stale, .notConnected:
+                return .secondary
+            }
         }
         if errorText != nil {
             return MeterBarTheme.warning

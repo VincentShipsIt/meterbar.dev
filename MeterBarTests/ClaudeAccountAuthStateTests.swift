@@ -200,7 +200,7 @@ final class ClaudeAccountAuthStateTests: XCTestCase {
         XCTAssertNil(defaultCard.authNotice, "A connected profile must not inherit its neighbour's notice")
     }
 
-    func testNonClaudeCardsNeverCarryANotice() throws {
+    func testClaudeLoginStateDoesNotLeakOntoAFreshCursorCard() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
             metrics: [.cursor: UsageMetrics(
                 service: .cursor,

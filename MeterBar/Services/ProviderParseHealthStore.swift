@@ -59,11 +59,15 @@ nonisolated public struct ProviderParseHealthRecord: Codable, Equatable, Sendabl
         )
     }
 
+    /// Sustained transport failures or consecutive shape mismatches. Does not
+    /// include an aged `lastSuccess` — that is staleness, not attention.
+    var isSustainedOrParseFailure: Bool {
+        consecutiveShapeMismatches >= Self.sustainedShapeMismatchCount
+            || consecutiveFailures >= Self.sustainedFailureCount
+    }
+
     func needsAttention(now: Date = Date()) -> Bool {
-        if consecutiveShapeMismatches >= Self.sustainedShapeMismatchCount
-            || consecutiveFailures >= Self.sustainedFailureCount {
-            return true
-        }
+        if isSustainedOrParseFailure { return true }
         guard let lastSuccess else { return false }
         return now.timeIntervalSince(lastSuccess) > Self.staleAfter
     }

@@ -316,6 +316,12 @@ struct SnapshotLimit: Identifiable {
 enum ProviderSnapshotBuilder {
     struct Input {
         var metrics: [ServiceType: UsageMetrics]
+        /// Clock for cache-freshness. Injectable so stale-cache fixtures do not
+        /// depend on wall time.
+        var now: Date = Date()
+        /// Provider-level parse health. Applied only to a card whose own
+        /// refresh failed, so one broken custom profile cannot mark siblings.
+        var parseHealth: [ServiceType: ProviderParseHealthRecord] = [:]
         var codexAccounts: [CodexAccount] = [.defaultAccount]
         var codexAccountMetrics: [UUID: UsageMetrics] = [:]
         /// Last observed Codex auth result per account id. Empty means "nothing
@@ -323,6 +329,8 @@ enum ProviderSnapshotBuilder {
         var codexAccountAccess: [UUID: Bool] = [:]
         var grokAccounts: [GrokAccount] = [.defaultAccount]
         var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+        /// Last observed Grok auth result per account id. Empty means unprobed.
+        var grokAccountAccess: [UUID: Bool] = [:]
         var claudeAccounts: [ClaudeCodeAccount]
         var claudeAccountMetrics: [UUID: UsageMetrics]
         var enabledServices: Set<ServiceType>
@@ -335,6 +343,55 @@ enum ProviderSnapshotBuilder {
         var cursorHasAccess: Bool = false
         var openRouterHasAccess: Bool = false
         var grokHasAccess: Bool = false
+        var lastErrors: ProviderPresentationHealth.LastErrors = .init()
+
+        /// The popover, dashboard, and settings cards all read the same live
+        /// stores. Building Input here keeps lastError / parse health / Grok
+        /// access from drifting apart across those surfaces.
+        @MainActor
+        static func live(
+            dataManager: UsageDataManager,
+            claudeAccounts: [ClaudeCodeAccount],
+            codexAccounts: [CodexAccount],
+            grokAccounts: [GrokAccount],
+            enabledServices: Set<ServiceType>,
+            claudeCodeService: ClaudeCodeLocalService,
+            codexCliService: CodexCliLocalService,
+            cursorService: CursorLocalService,
+            openRouterService: OpenRouterService,
+            grokService: GrokCLIUsageService,
+            parseHealth: [ServiceType: ProviderParseHealthRecord],
+            now: Date = Date()
+        ) -> Input {
+            Input(
+                metrics: dataManager.metrics,
+                now: now,
+                parseHealth: parseHealth,
+                codexAccounts: codexAccounts,
+                codexAccountMetrics: dataManager.codexAccountMetrics,
+                codexAccountAccess: codexCliService.accountAccess,
+                grokAccounts: grokAccounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics,
+                grokAccountAccess: Dictionary(uniqueKeysWithValues: grokAccounts.map {
+                    ($0.id, grokService.canAccess(account: $0))
+                }),
+                claudeAccounts: claudeAccounts,
+                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                enabledServices: enabledServices,
+                claudeAccountStates: dataManager.claudeCodeAccountStates,
+                claudeCodeHasAccess: claudeCodeService.hasAccess,
+                codexCliHasAccess: codexCliService.hasAccess,
+                cursorHasAccess: cursorService.hasAccess,
+                openRouterHasAccess: openRouterService.hasAccess,
+                grokHasAccess: grokService.hasAccess,
+                lastErrors: ProviderPresentationHealth.LastErrors(
+                    cursor: cursorService.lastError,
+                    openRouter: openRouterService.lastError,
+                    codexAccounts: codexCliService.accountErrors,
+                    grokAccounts: grokService.accountErrors
+                )
+            )
+        }
     }
 
     /// Builds the provider cards. Emission order follows each store; the
@@ -370,12 +427,19 @@ enum ProviderSnapshotBuilder {
                         && input.codexAccountMetrics.isEmpty
                         ? input.metrics[.codexCli]
                         : nil
+                    let metrics = input.codexAccountMetrics[account.id] ?? fallbackMetrics
                     result.append(snapshot(
                         title: title,
                         service: .codexCli,
-                        metrics: input.codexAccountMetrics[account.id] ?? fallbackMetrics,
+                        metrics: metrics,
                         emptyDetail: emptyDetail,
-                        accountID: account.id
+                        accountID: account.id,
+                        authNotice: notice(
+                            for: .codexCli,
+                            accountID: account.id,
+                            metrics: metrics,
+                            input: input
+                        )
                     ))
                 }
             }
@@ -394,33 +458,43 @@ enum ProviderSnapshotBuilder {
                     let emptyDetail = account.isDefault && input.claudeCodeHasAccess
                         ? "Waiting for refresh"
                         : "Run claude login"
+                    let metrics = accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil)
                     result.append(snapshot(
                         title: title,
                         service: .claudeCode,
-                        metrics: accountMetrics[account.id] ?? (account.isDefault ? input.metrics[.claudeCode] : nil),
+                        metrics: metrics,
                         emptyDetail: emptyDetail,
                         accountID: account.id,
-                        authNotice: ProviderAuthNotice.forState(input.claudeAccountStates[account.id])
+                        authNotice: notice(
+                            for: .claudeCode,
+                            accountID: account.id,
+                            metrics: metrics,
+                            input: input
+                        )
                     ))
                 }
             }
         }
 
         if input.enabledServices.contains(.cursor) {
+            let metrics = input.metrics[.cursor]
             result.append(snapshot(
                 title: ServiceType.cursor.shortName,
                 service: .cursor,
-                metrics: input.metrics[.cursor],
-                emptyDetail: input.cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor"
+                metrics: metrics,
+                emptyDetail: input.cursorHasAccess ? "Waiting for refresh" : "Log in to Cursor",
+                authNotice: notice(for: .cursor, accountID: nil, metrics: metrics, input: input)
             ))
         }
 
         if input.enabledServices.contains(.openRouter) {
+            let metrics = input.metrics[.openRouter]
             result.append(snapshot(
                 title: ServiceType.openRouter.shortName,
                 service: .openRouter,
-                metrics: input.metrics[.openRouter],
-                emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key"
+                metrics: metrics,
+                emptyDetail: input.openRouterHasAccess ? "Waiting for refresh" : "Add an OpenRouter API key",
+                authNotice: notice(for: .openRouter, accountID: nil, metrics: metrics, input: input)
             ))
         }
 
@@ -437,19 +511,91 @@ enum ProviderSnapshotBuilder {
                     && input.grokAccountMetrics.isEmpty
                     ? input.metrics[.grok]
                     : nil
+                let metrics = input.grokAccountMetrics[account.id] ?? fallbackMetrics
                 result.append(snapshot(
                     title: title,
                     service: .grok,
-                    metrics: input.grokAccountMetrics[account.id] ?? fallbackMetrics,
+                    metrics: metrics,
                     emptyDetail: account.isDefault && input.grokHasAccess
                         ? "Waiting for refresh"
                         : "Run grok login",
-                    accountID: account.id
+                    accountID: account.id,
+                    authNotice: notice(for: .grok, accountID: account.id, metrics: metrics, input: input)
                 ))
             }
         }
 
         return orderedForDisplay(result)
+    }
+
+    /// Connection-health overlay for one card. Claude states still win for
+    /// login/unavailable/error; lastUpdated and parse health then apply so a
+    /// connected-but-aged cache is Stale, not Healthy. Non-Claude cards use
+    /// lastError + access + parse health. Provider-level parse health only
+    /// upgrades a card whose own refresh failed.
+    private static func notice(
+        for service: ServiceType,
+        accountID: UUID?,
+        metrics: UsageMetrics?,
+        input: Input
+    ) -> ProviderAuthNotice? {
+        if service == .claudeCode {
+            if let state = accountID.flatMap({ input.claudeAccountStates[$0] }),
+               let claudeNotice = ProviderAuthNotice.forState(state) {
+                return claudeNotice
+            }
+            return ProviderPresentationHealth.notice(
+                access: .signedIn,
+                refresh: metrics == nil ? .unprobed : .success,
+                lastUpdated: metrics?.lastUpdated,
+                parseHealth: nil,
+                now: input.now
+            )
+        }
+
+        let lastError: ServiceError?
+        let probed: Bool?
+        let usesAPIKey: Bool
+        switch service {
+        case .codexCli:
+            lastError = accountID.flatMap { input.lastErrors.codexAccounts[$0] }
+            probed = accountID.flatMap { input.codexAccountAccess[$0] }
+            usesAPIKey = false
+        case .grok:
+            lastError = accountID.flatMap { input.lastErrors.grokAccounts[$0] }
+            probed = accountID.flatMap { input.grokAccountAccess[$0] }
+            usesAPIKey = false
+        case .cursor:
+            lastError = input.lastErrors.cursor
+            probed = input.cursorHasAccess ? true : nil
+            usesAPIKey = false
+        case .openRouter:
+            lastError = input.lastErrors.openRouter
+            probed = input.openRouterHasAccess ? true : nil
+            usesAPIKey = true
+        case .claudeCode:
+            lastError = nil
+            probed = nil
+            usesAPIKey = false
+        }
+
+        let parseHealth = input.parseHealth[service]
+        let refresh = ProviderPresentationHealth.refreshOutcome(
+            lastError: lastError,
+            parseHealth: parseHealth,
+            hasCache: metrics != nil
+        )
+        return ProviderPresentationHealth.notice(
+            access: ProviderPresentationHealth.access(
+                probed: probed,
+                lastError: lastError,
+                usesAPIKey: usesAPIKey
+            ),
+            refresh: refresh,
+            lastUpdated: metrics?.lastUpdated,
+            parseHealth: parseHealth,
+            now: input.now
+        )
     }
 
     /// Stable card order for the popover, Overview, and Limits.
