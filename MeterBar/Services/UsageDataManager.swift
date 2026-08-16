@@ -1019,6 +1019,9 @@ class UsageDataManager: ObservableObject {
         for (accountID, accountMetrics) in codexAccountMetrics {
             collect(accountMetrics, prefix: "codex.\(accountID.uuidString)")
         }
+        for (accountID, accountMetrics) in grokAccountMetrics {
+            collect(accountMetrics, prefix: "grok.\(accountID.uuidString)")
+        }
         return AdaptiveQuotaSnapshot(values: values)
     }
 

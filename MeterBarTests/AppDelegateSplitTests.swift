@@ -596,10 +596,12 @@ final class AppDelegateSplitTests: XCTestCase {
 
         XCTAssertFalse(services.contains(.claudeCode))
         XCTAssertFalse(services.contains(.codexCli))
-        XCTAssertEqual(services.count, ServiceType.allCases.count - 2)
+        XCTAssertFalse(services.contains(.grok))
+        XCTAssertEqual(services, [.cursor, .openRouter])
+        XCTAssertEqual(services.count, ServiceType.allCases.count - 3)
     }
 
-    func testAccountNotificationIdentityMapsBothAccountTypes() {
+    func testAccountNotificationIdentityMapsClaudeCodexAndGrokAccounts() {
         let claudeID = UUID()
         let claude = ClaudeCodeAccount(
             id: claudeID,
@@ -617,6 +619,18 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(
             AccountNotificationIdentity(account: codex),
             AccountNotificationIdentity(id: codexID, name: "Codex Work", isEnabled: true)
+        )
+
+        let grokID = UUID()
+        let grok = GrokAccount(
+            id: grokID,
+            name: "Grok Work",
+            homeDirectory: "/tmp/grok",
+            isEnabled: false
+        )
+        XCTAssertEqual(
+            AccountNotificationIdentity(account: grok),
+            AccountNotificationIdentity(id: grokID, name: "Grok Work", isEnabled: false)
         )
     }
 

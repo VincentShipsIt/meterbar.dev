@@ -977,6 +977,47 @@ final class UsageDataManagerTests: XCTestCase {
     }
 
     /// Reset-credit publish skips refresh methods; movement must still reschedule Adaptive.
+    func testAdaptiveSchedulerReschedulesWhenNonRepresentativeGrokQuotaMoves() async throws {
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let accountSuite = "UsageDataManagerTests-grok-adaptive-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        accountStore.addAccount(name: "Work", homeDirectory: "/tmp/grok-work")
+        let work = try XCTUnwrap(accountStore.customAccounts.first)
+        let cachedDefault = MetricsFixtures.grok(weeklyUsedPercent: 18)
+        let cachedWork = MetricsFixtures.grok(weeklyUsedPercent: 67)
+        let provider = MultiAccountGrokProvider(metricsByAccount: [
+            GrokAccount.defaultID: cachedDefault,
+            work.id: MetricsFixtures.grok(weeklyUsedPercent: 88)
+        ])
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: provider,
+            grokAccountStore: accountStore,
+            hidden: [.codexCli, .cursor, .openRouter],
+            preloadGrokAccountMetrics: [
+                GrokAccount.defaultID: cachedDefault,
+                work.id: cachedWork
+            ],
+            savedRefreshInterval: .adaptive,
+            schedulesAutoRefresh: true,
+            adaptiveNow: { now }
+        )
+
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 1_800, accuracy: 0.01)
+
+        await manager.refreshAll()
+
+        XCTAssertEqual(manager.metrics[.grok]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(manager.grokAccountMetrics[work.id]?.weeklyLimit?.used, 88)
+        XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
+        XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
+    }
+
     func testAdaptiveSchedulerReschedulesWhenResetCreditPublishMovesQuota() {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let cached = MetricsFixtures.codexCli(sessionUsedPercent: 40)

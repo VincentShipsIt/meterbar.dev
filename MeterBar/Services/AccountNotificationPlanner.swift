@@ -23,7 +23,7 @@ struct AccountNotificationPlan: Equatable, Sendable {
     let notifiedKeys: Set<String>
 }
 
-/// Pure account/fallback orchestration shared by Claude Code and Codex.
+/// Pure account/fallback orchestration shared by Claude Code, Codex, and Grok.
 ///
 /// Account metrics take precedence whenever at least one enabled account has
 /// data. Provider fallback is used only when every enabled account is
