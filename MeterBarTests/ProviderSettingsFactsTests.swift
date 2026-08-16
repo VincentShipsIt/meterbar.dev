@@ -28,6 +28,7 @@ final class ProviderSettingsFactsTests: XCTestCase {
             errorText: errorText,
             updatedText: "Updated just now",
             worstBand: worstBand,
+            authNotice: nil,
             codexAuthFileDisplayPath: "~/.codex/auth.json"
         )
     }

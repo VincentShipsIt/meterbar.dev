@@ -34,7 +34,7 @@ struct ProviderSettingsFacts {
     /// agrees. Kept separate from `worstBand` so a stale 70%-left cache is not
     /// labelled Healthy. `nil` when cards disagree (one failed custom must not
     /// paint a healthy sibling) or when nothing is overlayed.
-    var authNotice: ProviderAuthNotice? = nil
+    var authNotice: ProviderAuthNotice?
     /// Display path of the Codex auth file (only used by the Codex source line).
     let codexAuthFileDisplayPath: String
 

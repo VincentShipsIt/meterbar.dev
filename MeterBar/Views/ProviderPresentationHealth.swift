@@ -69,18 +69,35 @@ enum ProviderPresentationHealth {
         return nil
     }
 
+    /// Live `lastError` wins when the process still has it. After relaunch that
+    /// field is empty, so a persisted parse-health attempt newer than this
+    /// card's cache is the failure. A cache as new as the attempt is evidence
+    /// this account succeeded and must not inherit a sibling's failure.
     static func refreshOutcome(
         lastError: ServiceError?,
         parseHealth: ProviderParseHealthRecord?,
-        hasCache: Bool
+        lastUpdated: Date?
     ) -> RefreshOutcome {
-        guard lastError != nil else {
-            return hasCache ? .success : .unprobed
+        if lastError != nil {
+            return parseHealth?.isSustainedOrParseFailure == true
+                ? .sustainedOrParseFailure
+                : .transientFailure
         }
-        if parseHealth?.isSustainedOrParseFailure == true {
-            return .sustainedOrParseFailure
+
+        guard let lastUpdated else { return .unprobed }
+        guard let parseHealth else { return .success }
+
+        if lastUpdated >= parseHealth.lastAttempt {
+            return .success
         }
-        return .transientFailure
+
+        let attemptFailed = parseHealth.lastSuccess.map { parseHealth.lastAttempt > $0 }
+            ?? (parseHealth.consecutiveFailures > 0)
+        guard attemptFailed else { return .success }
+
+        return parseHealth.isSustainedOrParseFailure
+            ? .sustainedOrParseFailure
+            : .transientFailure
     }
 
     static func access(

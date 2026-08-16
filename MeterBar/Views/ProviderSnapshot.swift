@@ -318,7 +318,7 @@ enum ProviderSnapshotBuilder {
         var metrics: [ServiceType: UsageMetrics]
         /// Clock for cache-freshness. Injectable so stale-cache fixtures do not
         /// depend on wall time.
-        var now: Date = Date()
+        var now = Date()
         /// Provider-level parse health. Applied only to a card whose own
         /// refresh failed, so one broken custom profile cannot mark siblings.
         var parseHealth: [ServiceType: ProviderParseHealthRecord] = [:]
@@ -345,50 +345,55 @@ enum ProviderSnapshotBuilder {
         var grokHasAccess: Bool = false
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
 
-        /// The popover, dashboard, and settings cards all read the same live
-        /// stores. Building Input here keeps lastError / parse health / Grok
-        /// access from drifting apart across those surfaces.
+        /// Live stores the popover, dashboard, and settings cards share.
+        /// Grouped so `live(stores:parseHealth:)` stays under the parameter cap.
+        struct LiveStores {
+            var dataManager: UsageDataManager
+            var claudeAccounts: [ClaudeCodeAccount]
+            var codexAccounts: [CodexAccount]
+            var grokAccounts: [GrokAccount]
+            var enabledServices: Set<ServiceType>
+            var claudeCodeService: ClaudeCodeLocalService
+            var codexCliService: CodexCliLocalService
+            var cursorService: CursorLocalService
+            var openRouterService: OpenRouterService
+            var grokService: GrokCLIUsageService
+        }
+
+        /// Builds Input here so lastError / parse health / Grok access cannot
+        /// drift apart across those surfaces.
         @MainActor
         static func live(
-            dataManager: UsageDataManager,
-            claudeAccounts: [ClaudeCodeAccount],
-            codexAccounts: [CodexAccount],
-            grokAccounts: [GrokAccount],
-            enabledServices: Set<ServiceType>,
-            claudeCodeService: ClaudeCodeLocalService,
-            codexCliService: CodexCliLocalService,
-            cursorService: CursorLocalService,
-            openRouterService: OpenRouterService,
-            grokService: GrokCLIUsageService,
+            stores: LiveStores,
             parseHealth: [ServiceType: ProviderParseHealthRecord],
             now: Date = Date()
         ) -> Input {
             Input(
-                metrics: dataManager.metrics,
+                metrics: stores.dataManager.metrics,
                 now: now,
                 parseHealth: parseHealth,
-                codexAccounts: codexAccounts,
-                codexAccountMetrics: dataManager.codexAccountMetrics,
-                codexAccountAccess: codexCliService.accountAccess,
-                grokAccounts: grokAccounts,
-                grokAccountMetrics: dataManager.grokAccountMetrics,
-                grokAccountAccess: Dictionary(uniqueKeysWithValues: grokAccounts.map {
-                    ($0.id, grokService.canAccess(account: $0))
+                codexAccounts: stores.codexAccounts,
+                codexAccountMetrics: stores.dataManager.codexAccountMetrics,
+                codexAccountAccess: stores.codexCliService.accountAccess,
+                grokAccounts: stores.grokAccounts,
+                grokAccountMetrics: stores.dataManager.grokAccountMetrics,
+                grokAccountAccess: Dictionary(uniqueKeysWithValues: stores.grokAccounts.map {
+                    ($0.id, stores.grokService.canAccess(account: $0))
                 }),
-                claudeAccounts: claudeAccounts,
-                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-                enabledServices: enabledServices,
-                claudeAccountStates: dataManager.claudeCodeAccountStates,
-                claudeCodeHasAccess: claudeCodeService.hasAccess,
-                codexCliHasAccess: codexCliService.hasAccess,
-                cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess,
-                grokHasAccess: grokService.hasAccess,
+                claudeAccounts: stores.claudeAccounts,
+                claudeAccountMetrics: stores.dataManager.claudeCodeAccountMetrics,
+                enabledServices: stores.enabledServices,
+                claudeAccountStates: stores.dataManager.claudeCodeAccountStates,
+                claudeCodeHasAccess: stores.claudeCodeService.hasAccess,
+                codexCliHasAccess: stores.codexCliService.hasAccess,
+                cursorHasAccess: stores.cursorService.hasAccess,
+                openRouterHasAccess: stores.openRouterService.hasAccess,
+                grokHasAccess: stores.grokService.hasAccess,
                 lastErrors: ProviderPresentationHealth.LastErrors(
-                    cursor: cursorService.lastError,
-                    openRouter: openRouterService.lastError,
-                    codexAccounts: codexCliService.accountErrors,
-                    grokAccounts: grokService.accountErrors
+                    cursor: stores.cursorService.lastError,
+                    openRouter: stores.openRouterService.lastError,
+                    codexAccounts: stores.codexCliService.accountErrors,
+                    grokAccounts: stores.grokService.accountErrors
                 )
             )
         }
@@ -539,18 +544,10 @@ enum ProviderSnapshotBuilder {
         metrics: UsageMetrics?,
         input: Input
     ) -> ProviderAuthNotice? {
-        if service == .claudeCode {
-            if let state = accountID.flatMap({ input.claudeAccountStates[$0] }),
-               let claudeNotice = ProviderAuthNotice.forState(state) {
-                return claudeNotice
-            }
-            return ProviderPresentationHealth.notice(
-                access: .signedIn,
-                refresh: metrics == nil ? .unprobed : .success,
-                lastUpdated: metrics?.lastUpdated,
-                parseHealth: nil,
-                now: input.now
-            )
+        if service == .claudeCode,
+           let state = accountID.flatMap({ input.claudeAccountStates[$0] }),
+           let claudeNotice = ProviderAuthNotice.forState(state) {
+            return claudeNotice
         }
 
         let lastError: ServiceError?
@@ -575,7 +572,7 @@ enum ProviderSnapshotBuilder {
             usesAPIKey = true
         case .claudeCode:
             lastError = nil
-            probed = nil
+            probed = input.claudeCodeHasAccess ? true : nil
             usesAPIKey = false
         }
 
@@ -583,7 +580,7 @@ enum ProviderSnapshotBuilder {
         let refresh = ProviderPresentationHealth.refreshOutcome(
             lastError: lastError,
             parseHealth: parseHealth,
-            hasCache: metrics != nil
+            lastUpdated: metrics?.lastUpdated
         )
         return ProviderPresentationHealth.notice(
             access: ProviderPresentationHealth.access(

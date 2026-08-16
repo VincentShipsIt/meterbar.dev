@@ -405,16 +405,18 @@ struct UsageDashboardView: View {
     /// recommendation card — read this instead of the filtered list.
     private var allProviderSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(.live(
-            dataManager: dataManager,
-            claudeAccounts: claudeAccountStore.accounts,
-            codexAccounts: codexAccountStore.accounts,
-            grokAccounts: grokAccountStore.accounts,
-            enabledServices: providerVisibility.enabledServices,
-            claudeCodeService: claudeCodeService,
-            codexCliService: codexCliService,
-            cursorService: cursorService,
-            openRouterService: openRouterService,
-            grokService: grokService,
+            stores: .init(
+                dataManager: dataManager,
+                claudeAccounts: claudeAccountStore.accounts,
+                codexAccounts: codexAccountStore.accounts,
+                grokAccounts: grokAccountStore.accounts,
+                enabledServices: providerVisibility.enabledServices,
+                claudeCodeService: claudeCodeService,
+                codexCliService: codexCliService,
+                cursorService: cursorService,
+                openRouterService: openRouterService,
+                grokService: grokService
+            ),
             parseHealth: parseHealthStore.records
         ))
     }

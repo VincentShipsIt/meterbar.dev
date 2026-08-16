@@ -123,16 +123,18 @@ struct ProviderSettingsView: View {
     private var providerSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(
             .live(
-                dataManager: dataManager,
-                claudeAccounts: claudeAccountStore.accounts,
-                codexAccounts: codexAccountStore.accounts,
-                grokAccounts: grokAccountStore.accounts,
-                enabledServices: providerVisibility.enabledServices,
-                claudeCodeService: claudeCodeService,
-                codexCliService: codexCliService,
-                cursorService: cursorService,
-                openRouterService: openRouterService,
-                grokService: grokService,
+                stores: .init(
+                    dataManager: dataManager,
+                    claudeAccounts: claudeAccountStore.accounts,
+                    codexAccounts: codexAccountStore.accounts,
+                    grokAccounts: grokAccountStore.accounts,
+                    enabledServices: providerVisibility.enabledServices,
+                    claudeCodeService: claudeCodeService,
+                    codexCliService: codexCliService,
+                    cursorService: cursorService,
+                    openRouterService: openRouterService,
+                    grokService: grokService
+                ),
                 parseHealth: parseHealthStore.records
             )
         )

@@ -181,6 +181,52 @@ final class ProviderPresentationHealthTests: XCTestCase {
         )
     }
 
+    func testPersistedParseFailureWithEmptyLastErrorIsNotSuccess() {
+        let lastSuccess = now.addingTimeInterval(-30)
+        let lastAttempt = now
+        let health = relaunchParseFailureRecord(
+            provider: .cursor,
+            lastSuccess: lastSuccess,
+            lastAttempt: lastAttempt
+        )
+
+        XCTAssertEqual(
+            ProviderPresentationHealth.refreshOutcome(
+                lastError: nil,
+                parseHealth: health,
+                lastUpdated: lastSuccess
+            ),
+            .sustainedOrParseFailure
+        )
+        XCTAssertEqual(
+            ProviderPresentationHealth.notice(
+                access: .signedIn,
+                refresh: .sustainedOrParseFailure,
+                lastUpdated: lastSuccess,
+                parseHealth: health,
+                now: now
+            ),
+            .attention("Refresh failed")
+        )
+    }
+
+    func testCardCacheAsNewAsTheFailedAttemptIsStillSuccess() {
+        let lastSuccess = now.addingTimeInterval(-30)
+        let lastAttempt = now
+        XCTAssertEqual(
+            ProviderPresentationHealth.refreshOutcome(
+                lastError: nil,
+                parseHealth: relaunchParseFailureRecord(
+                    provider: .codexCli,
+                    lastSuccess: lastSuccess,
+                    lastAttempt: lastAttempt
+                ),
+                lastUpdated: lastAttempt
+            ),
+            .success
+        )
+    }
+
     // MARK: - Builder fixtures: all five providers
 
     func testFreshSuccessHasNoOverlayAndKeepsTheBand() throws {
@@ -368,6 +414,61 @@ final class ProviderPresentationHealthTests: XCTestCase {
         XCTAssertEqual(ProviderCardPresentation.statusText(for: card), "Stale")
     }
 
+    func testRelaunchWithPersistedParseFailureAndFreshCacheIsNotHealthy() throws {
+        let lastSuccess = now.addingTimeInterval(-30)
+        for kind in FixtureKind.allCases {
+            let health = relaunchParseFailureRecord(
+                provider: kind.service,
+                lastSuccess: lastSuccess,
+                lastAttempt: now
+            )
+            let card = try relaunchCard(kind, lastUpdated: lastSuccess, parseHealth: health)
+
+            XCTAssertEqual(card.authNotice, .attention("Refresh failed"), kind.rawValue)
+            XCTAssertEqual(card.band, .healthy, "\(kind.rawValue) keeps the cached percentages")
+            XCTAssertNotEqual(
+                ProviderCardPresentation.statusText(for: card),
+                QuotaBand.healthy.shortLabel,
+                "\(kind.rawValue) must not look live after a persisted parse failure"
+            )
+            XCTAssertTrue(card.accessibilityLabel.contains("Needs attention"), card.accessibilityLabel)
+            XCTAssertTrue(recommendationUnavailable(card))
+        }
+    }
+
+    func testPersistedProviderFailureDoesNotMarkSiblingWithNewerCache() throws {
+        let lastSuccess = now.addingTimeInterval(-30)
+        let work = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [:],
+                now: now,
+                parseHealth: [
+                    .codexCli: relaunchParseFailureRecord(
+                        provider: .codexCli,
+                        lastSuccess: lastSuccess,
+                        lastAttempt: now
+                    )
+                ],
+                codexAccounts: [.defaultAccount, work],
+                codexAccountMetrics: [
+                    CodexAccount.defaultID: healthyMetrics(.codexCli, lastUpdated: lastSuccess),
+                    work.id: healthyMetrics(.codexCli, lastUpdated: now)
+                ],
+                codexAccountAccess: [CodexAccount.defaultID: true, work.id: true],
+                claudeAccounts: [],
+                claudeAccountMetrics: [:],
+                enabledServices: [.codexCli]
+            )
+        )
+
+        let failed = try XCTUnwrap(snapshots.first { $0.accountID == CodexAccount.defaultID })
+        let newer = try XCTUnwrap(snapshots.first { $0.accountID == work.id })
+        XCTAssertEqual(failed.authNotice, .attention("Refresh failed"))
+        XCTAssertNil(newer.authNotice, "A sibling whose cache is as new as the attempt is not failed")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: newer), QuotaBand.healthy.shortLabel)
+    }
+
     func testCursorClaudeLoginStateDoesNotLeakOntoAFreshCursorCard() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
@@ -404,6 +505,31 @@ final class ProviderPresentationHealthTests: XCTestCase {
             parseHealth: parseHealth,
             claudeState: claudeState
         ))
+        return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
+    }
+
+    private func relaunchCard(
+        _ kind: FixtureKind,
+        lastUpdated: Date,
+        parseHealth: ProviderParseHealthRecord
+    ) throws -> ProviderSnapshot {
+        let metrics = healthyMetrics(kind.service, lastUpdated: lastUpdated)
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: kind.isFlat ? [kind.service: metrics] : [:],
+                now: now,
+                parseHealth: [kind.service: parseHealth],
+                codexAccounts: kind == .codex ? [.defaultAccount] : [],
+                codexAccountMetrics: kind == .codex ? [CodexAccount.defaultID: metrics] : [:],
+                grokAccounts: kind == .grok ? [.defaultAccount] : [],
+                grokAccountMetrics: kind == .grok ? [GrokAccount.defaultID: metrics] : [:],
+                claudeAccounts: kind == .claude ? [.defaultAccount] : [],
+                claudeAccountMetrics: kind == .claude ? [ClaudeCodeAccount.defaultID: metrics] : [:],
+                enabledServices: [kind.service],
+                cursorHasAccess: kind == .cursor,
+                openRouterHasAccess: kind == .openRouter
+            )
+        )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
     }
 
@@ -505,6 +631,23 @@ final class ProviderPresentationHealthTests: XCTestCase {
             lastAttempt: date,
             consecutiveFailures: ProviderParseHealthRecord.sustainedFailureCount,
             lastFailureWasShapeMismatch: false
+        )
+    }
+
+    /// After relaunch, parse health still has the failed attempt and
+    /// `lastError` is empty. `lastSuccess` is older than `lastAttempt`.
+    private func relaunchParseFailureRecord(
+        provider: ServiceType,
+        lastSuccess: Date,
+        lastAttempt: Date
+    ) -> ProviderParseHealthRecord {
+        ProviderParseHealthRecord(
+            provider: provider,
+            lastSuccess: lastSuccess,
+            lastAttempt: lastAttempt,
+            consecutiveFailures: ProviderParseHealthRecord.sustainedShapeMismatchCount,
+            lastFailureWasShapeMismatch: true,
+            consecutiveShapeMismatches: ProviderParseHealthRecord.sustainedShapeMismatchCount
         )
     }
 
