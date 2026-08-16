@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-16
 status: active
 ---
 
@@ -23,7 +23,7 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 
 - Repo: `VincentShipsIt/meterbar.dev`. Public. Default branch `master`.
 - Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server.
-- Version at last verify: **1.8.35** (`ea7a382`). Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
+- Version at last verify: **1.8.36** (`2d67144`). Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
 - Providers: Claude Code, Codex CLI, Cursor, OpenRouter, Grok, plus optional Anthropic/OpenAI admin keys.
 - Shared models live in `Packages/MeterBarShared`. App group `group.dev.meterbar.app`.
 - Release bundle ids `dev.meterbar.app` / `dev.meterbar.app.Widget`. Debug uses `dev.meterbar.app.debug` so local builds cannot shadow the installed app.

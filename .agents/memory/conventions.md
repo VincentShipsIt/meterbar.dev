@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-08-16
 status: active
 ---
 
@@ -48,7 +48,7 @@ CLI human output may stay English. `--json` keys, enum tokens, and exit codes ar
 
 ## Git
 
-```
+```text
 type(scope): description
 ```
 
