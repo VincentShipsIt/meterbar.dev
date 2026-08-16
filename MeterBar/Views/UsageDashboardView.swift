@@ -35,6 +35,7 @@ struct UsageDashboardView: View {
     @StateObject private var providerStatusMonitor = ProviderStatusMonitor.shared
     @StateObject private var navigation = DashboardNavigationStore.shared
     @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
+    @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
 
     /// Owned by the shell rather than the Share page because the toolbar's
     /// Refresh also re-stamps the card.
@@ -403,22 +404,20 @@ struct UsageDashboardView: View {
     /// Sections that must *name* a silent provider — the Optimize page's
     /// recommendation card — read this instead of the filtered list.
     private var allProviderSnapshots: [ProviderSnapshot] {
-        ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
-            metrics: dataManager.metrics,
-            codexAccounts: codexAccountStore.accounts,
-            codexAccountMetrics: dataManager.codexAccountMetrics,
-            codexAccountAccess: codexCliService.accountAccess,
-            grokAccounts: grokAccountStore.accounts,
-            grokAccountMetrics: dataManager.grokAccountMetrics,
-            claudeAccounts: claudeAccountStore.accounts,
-            claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-            enabledServices: providerVisibility.enabledServices,
-            claudeAccountStates: dataManager.claudeCodeAccountStates,
-            claudeCodeHasAccess: claudeCodeService.hasAccess,
-            codexCliHasAccess: codexCliService.hasAccess,
-            cursorHasAccess: cursorService.hasAccess,
-            openRouterHasAccess: openRouterService.hasAccess,
-            grokHasAccess: grokService.hasAccess
+        ProviderSnapshotBuilder.snapshots(.live(
+            stores: .init(
+                dataManager: dataManager,
+                claudeAccounts: claudeAccountStore.accounts,
+                codexAccounts: codexAccountStore.accounts,
+                grokAccounts: grokAccountStore.accounts,
+                enabledServices: providerVisibility.enabledServices,
+                claudeCodeService: claudeCodeService,
+                codexCliService: codexCliService,
+                cursorService: cursorService,
+                openRouterService: openRouterService,
+                grokService: grokService
+            ),
+            parseHealth: parseHealthStore.records
         ))
     }
 

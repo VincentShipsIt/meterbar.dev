@@ -25,6 +25,7 @@ struct MenuBarView: View {
   // tracker's initializer just rehydrates the cached summary and ledger from
   // disk — observing it never starts a scan.
   @StateObject private var costTracker = CostTracker.shared
+  @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
 
   @State private var contentHeight: CGFloat = 320
   @State private var expandedDetailID: String?
@@ -79,22 +80,20 @@ struct MenuBarView: View {
   /// every account at once.
   private var snapshots: [ProviderSnapshot] {
     ProviderSnapshotBuilder.snapshots(
-      ProviderSnapshotBuilder.Input(
-        metrics: dataManager.metrics,
-        codexAccounts: codexAccountStore.accounts,
-        codexAccountMetrics: dataManager.codexAccountMetrics,
-        codexAccountAccess: codexCliService.accountAccess,
-        grokAccounts: grokAccountStore.accounts,
-        grokAccountMetrics: dataManager.grokAccountMetrics,
-        claudeAccounts: claudeAccountStore.accounts,
-        claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-        enabledServices: providerVisibility.enabledServices,
-        claudeAccountStates: dataManager.claudeCodeAccountStates,
-        claudeCodeHasAccess: claudeCodeService.hasAccess,
-        codexCliHasAccess: codexCliService.hasAccess,
-        cursorHasAccess: cursorService.hasAccess,
-        openRouterHasAccess: openRouterService.hasAccess,
-        grokHasAccess: grokService.hasAccess
+      .live(
+        stores: .init(
+          dataManager: dataManager,
+          claudeAccounts: claudeAccountStore.accounts,
+          codexAccounts: codexAccountStore.accounts,
+          grokAccounts: grokAccountStore.accounts,
+          enabledServices: providerVisibility.enabledServices,
+          claudeCodeService: claudeCodeService,
+          codexCliService: codexCliService,
+          cursorService: cursorService,
+          openRouterService: openRouterService,
+          grokService: grokService
+        ),
+        parseHealth: parseHealthStore.records
       ))
   }
 

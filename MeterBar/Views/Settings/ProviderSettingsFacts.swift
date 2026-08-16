@@ -30,6 +30,24 @@ struct ProviderSettingsFacts {
     let updatedText: String
     /// The single most-severe quota band across this provider's windows.
     let worstBand: QuotaBand?
+    /// Card-level connection overlay when every visible card for this provider
+    /// agrees. Kept separate from `worstBand` so a stale 70%-left cache is not
+    /// labelled Healthy. `nil` when cards disagree (one failed custom must not
+    /// paint a healthy sibling) or when nothing is overlayed.
+    var authNotice: ProviderAuthNotice?
+
+    /// Overlay shown on the Settings row only when every metered card carries
+    /// the same notice. Distinct overlays (stale vs attention) must not collapse
+    /// to whichever card happens to come first.
+    static func sharedNotice(in snapshots: [ProviderSnapshot]) -> ProviderAuthNotice? {
+        let metered = snapshots.filter(\.hasMetrics)
+        let notices = metered.compactMap(\.authNotice)
+        guard !metered.isEmpty, notices.count == metered.count else { return nil }
+        let labels = Set(notices.map(\.shortLabel))
+        guard labels.count == 1 else { return nil }
+        return notices.first
+    }
+
     /// Display path of the Codex auth file (only used by the Codex source line).
     let codexAuthFileDisplayPath: String
 
@@ -91,6 +109,9 @@ struct ProviderSettingsFacts {
         guard hasAccess else {
             return "Not connected"
         }
+        if let authNotice {
+            return authNotice.shortLabel
+        }
         if errorText != nil {
             return "Refresh failed"
         }
@@ -105,6 +126,14 @@ struct ProviderSettingsFacts {
     var statusColor: Color {
         guard isEnabled, hasAccess else {
             return .secondary
+        }
+        if let authNotice {
+            switch authNotice {
+            case .loginRequired, .attention:
+                return MeterBarTheme.warning
+            case .stale, .notConnected:
+                return .secondary
+            }
         }
         if errorText != nil {
             return MeterBarTheme.warning

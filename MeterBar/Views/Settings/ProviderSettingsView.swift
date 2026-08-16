@@ -105,6 +105,7 @@ struct ProviderSettingsView: View {
     @StateObject private var menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     @StateObject private var widgetPreferences = WidgetPreferencesStore.shared
     @StateObject private var sessionWakeSettings = SessionWakeSettingsStore.shared
+    @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
 
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
@@ -121,22 +122,20 @@ struct ProviderSettingsView: View {
 
     private var providerSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(
-            ProviderSnapshotBuilder.Input(
-                metrics: dataManager.metrics,
-                codexAccounts: codexAccountStore.accounts,
-                codexAccountMetrics: dataManager.codexAccountMetrics,
-                codexAccountAccess: codexCliService.accountAccess,
-                grokAccounts: grokAccountStore.accounts,
-                grokAccountMetrics: dataManager.grokAccountMetrics,
-                claudeAccounts: claudeAccountStore.accounts,
-                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-                enabledServices: providerVisibility.enabledServices,
-                claudeAccountStates: dataManager.claudeCodeAccountStates,
-                claudeCodeHasAccess: claudeCodeService.hasAccess,
-                codexCliHasAccess: codexCliService.hasAccess,
-                cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess,
-                grokHasAccess: grokService.hasAccess
+            .live(
+                stores: .init(
+                    dataManager: dataManager,
+                    claudeAccounts: claudeAccountStore.accounts,
+                    codexAccounts: codexAccountStore.accounts,
+                    grokAccounts: grokAccountStore.accounts,
+                    enabledServices: providerVisibility.enabledServices,
+                    claudeCodeService: claudeCodeService,
+                    codexCliService: codexCliService,
+                    cursorService: cursorService,
+                    openRouterService: openRouterService,
+                    grokService: grokService
+                ),
+                parseHealth: parseHealthStore.records
             )
         )
     }

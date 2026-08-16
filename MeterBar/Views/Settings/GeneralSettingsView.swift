@@ -37,6 +37,7 @@ struct GeneralSettingsView: View {
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
     @StateObject private var launchAtLogin = LaunchAtLoginStore.shared
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared
+    @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
 
     /// Explains a rejected menu-bar account selection; nil while under the cap.
     @State private var capNotice: String?
@@ -56,22 +57,20 @@ struct GeneralSettingsView: View {
     // tab does.
     private var providerSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(
-            ProviderSnapshotBuilder.Input(
-                metrics: dataManager.metrics,
-                codexAccounts: codexAccountStore.accounts,
-                codexAccountMetrics: dataManager.codexAccountMetrics,
-                codexAccountAccess: codexCliService.accountAccess,
-                grokAccounts: grokAccountStore.accounts,
-                grokAccountMetrics: dataManager.grokAccountMetrics,
-                claudeAccounts: claudeAccountStore.accounts,
-                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-                enabledServices: providerVisibility.enabledServices,
-                claudeAccountStates: dataManager.claudeCodeAccountStates,
-                claudeCodeHasAccess: claudeCodeService.hasAccess,
-                codexCliHasAccess: codexCliService.hasAccess,
-                cursorHasAccess: cursorService.hasAccess,
-                openRouterHasAccess: openRouterService.hasAccess,
-                grokHasAccess: grokService.hasAccess
+            .live(
+                stores: .init(
+                    dataManager: dataManager,
+                    claudeAccounts: claudeAccountStore.accounts,
+                    codexAccounts: codexAccountStore.accounts,
+                    grokAccounts: grokAccountStore.accounts,
+                    enabledServices: providerVisibility.enabledServices,
+                    claudeCodeService: claudeCodeService,
+                    codexCliService: codexCliService,
+                    cursorService: cursorService,
+                    openRouterService: openRouterService,
+                    grokService: grokService
+                ),
+                parseHealth: parseHealthStore.records
             )
         )
     }
