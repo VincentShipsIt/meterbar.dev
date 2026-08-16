@@ -103,11 +103,51 @@ struct NotificationDecider {
             && providerEnabled
             && now.timeIntervalSince(metrics.lastUpdated) <= stalenessThreshold
 
-        let limits: [(limit: UsageLimit?, kind: QuotaKind)] = [
-            (metrics.sessionLimit, .session),
-            (metrics.weeklyLimit, .weekly),
-            (metrics.codeReviewLimit, .codeReview)
+        var evaluated: [(limit: UsageLimit?, token: String, displayName: String, blocksProvider: Bool)] = [
+            (
+                metrics.sessionLimit,
+                QuotaKind.session.rawValue,
+                QuotaKind.session.displayName(
+                    for: metrics.service,
+                    modelLimitLabel: metrics.modelLimitLabel,
+                    limitTotal: metrics.sessionLimit?.total,
+                    periodKind: metrics.sessionLimit?.periodKind
+                ),
+                Self.blocksProvider(service: metrics.service, quotaKind: .session, metrics: metrics)
+            ),
+            (
+                metrics.weeklyLimit,
+                QuotaKind.weekly.rawValue,
+                QuotaKind.weekly.displayName(
+                    for: metrics.service,
+                    modelLimitLabel: metrics.modelLimitLabel,
+                    limitTotal: metrics.weeklyLimit?.total,
+                    periodKind: metrics.weeklyLimit?.periodKind
+                ),
+                Self.blocksProvider(service: metrics.service, quotaKind: .weekly, metrics: metrics)
+            ),
+            (
+                metrics.codeReviewLimit,
+                QuotaKind.codeReview.rawValue,
+                QuotaKind.codeReview.displayName(
+                    for: metrics.service,
+                    modelLimitLabel: metrics.modelLimitLabel,
+                    limitTotal: metrics.codeReviewLimit?.total,
+                    periodKind: metrics.codeReviewLimit?.periodKind
+                ),
+                Self.blocksProvider(service: metrics.service, quotaKind: .codeReview, metrics: metrics)
+            ),
         ]
+        for (index, additional) in metrics.additionalLimits.enumerated() {
+            evaluated.append((
+                additional,
+                "additional-\(index)",
+                metrics.service.additionalQuotaTitleKey(for: additional).englishTitle,
+                false
+            ))
+        }
+
+        let limits = evaluated
 
         var keys = alreadyNotified
         var fired: [FiredNotification] = []
@@ -115,11 +155,11 @@ struct NotificationDecider {
         let warningRank = preferences.warningThreshold.band.severityRank
         let criticalRank = preferences.criticalThreshold.band.severityRank
 
-        for (limit, quotaKind) in limits {
+        for (limit, token, quotaDisplayName, blocksProvider) in limits {
             let baseKey = Self.notificationBaseKey(
                 service: metrics.service,
                 accountKey: accountKey,
-                quotaKind: quotaKind
+                token: token
             )
             let warnKey = "\(baseKey)-warn"
             let criticalKey = "\(baseKey)-critical"
@@ -141,16 +181,6 @@ struct NotificationDecider {
 
             let band = QuotaBand.forLimit(limit)
             let bandRank = band.severityRank
-            let quotaDisplayName = quotaKind.displayName(
-                for: metrics.service,
-                modelLimitLabel: metrics.modelLimitLabel,
-                limitTotal: limit.total
-            )
-            let blocksProvider = Self.blocksProvider(
-                service: metrics.service,
-                quotaKind: quotaKind,
-                metrics: metrics
-            )
 
             if bandRank >= criticalRank {
                 // Preserve the warning key while critical. Otherwise falling
@@ -200,26 +230,53 @@ struct NotificationDecider {
     /// inactive account and fallback state without duplicating key construction.
     static func notificationKeys(
         service: ServiceType,
-        accountKey: String? = nil
+        accountKey: String? = nil,
+        additionalLimitCount: Int = 0,
+        includingExisting existing: Set<String> = []
     ) -> Set<String> {
-        Set(QuotaKind.allCases.flatMap { quotaKind in
+        var tokens = QuotaKind.allCases.map(\.rawValue)
+        tokens += (0..<max(0, additionalLimitCount)).map { "additional-\($0)" }
+        var result = Set(tokens.flatMap { token -> [String] in
             let baseKey = notificationBaseKey(
                 service: service,
                 accountKey: accountKey,
-                quotaKind: quotaKind
+                token: token
             )
             return ["\(baseKey)-warn", "\(baseKey)-critical"]
         })
+        for key in existing where isOwnedNotificationKey(key, service: service, accountKey: accountKey) {
+            result.insert(key)
+        }
+        return result
     }
 
     private static func notificationBaseKey(
         service: ServiceType,
         accountKey: String?,
-        quotaKind: QuotaKind
+        token: String
     ) -> String {
-        [service.rawValue, accountKey, quotaKind.rawValue]
+        [service.rawValue, accountKey, token]
             .compactMap { $0 }
             .joined(separator: "-")
+    }
+
+    /// Fallback keys must not swallow account-scoped keys that share the
+    /// `"Grok-"` prefix. Account keys include a UUID between the service and
+    /// the window token.
+    private static func isOwnedNotificationKey(
+        _ key: String,
+        service: ServiceType,
+        accountKey: String?
+    ) -> Bool {
+        guard key.hasSuffix("-warn") || key.hasSuffix("-critical") else { return false }
+        if let accountKey {
+            return key.hasPrefix("\(service.rawValue)-\(accountKey)-")
+        }
+        let prefix = "\(service.rawValue)-"
+        guard key.hasPrefix(prefix) else { return false }
+        let levelLength = key.hasSuffix("-warn") ? 5 : 9
+        let token = String(key.dropFirst(prefix.count).dropLast(levelLength))
+        return QuotaKind(rawValue: token) != nil || token.hasPrefix("additional-")
     }
 
     /// Stable quota key plus provider-specific display copy. `codeReviewLimit`
@@ -232,18 +289,19 @@ struct NotificationDecider {
         func displayName(
             for service: ServiceType,
             modelLimitLabel: String?,
-            limitTotal: Double? = nil
+            limitTotal: Double? = nil,
+            periodKind: UsageLimit.PeriodKind? = nil
         ) -> String {
             switch self {
             case .session:
                 // Notification copy is Title Case for OpenRouter's key cap.
                 return service == .openRouter
                     ? "Key Limit"
-                    : service.sessionQuotaTitle(limitTotal: limitTotal)
+                    : service.sessionQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
             case .weekly:
                 return service == .openRouter
                     ? "Account Credits"
-                    : service.weeklyQuotaTitle(limitTotal: limitTotal)
+                    : service.weeklyQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
             case .codeReview:
                 return service.codeReviewQuotaTitle(modelLimitLabel: modelLimitLabel)
             }

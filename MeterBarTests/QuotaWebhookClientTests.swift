@@ -121,6 +121,7 @@ final class QuotaWebhookClientTests: XCTestCase {
             XCTAssertEqual(object["provider"] as? String, ServiceType.codexCli.rawValue)
             XCTAssertEqual(object["event"] as? String, "exhausted")
             XCTAssertEqual(object["window"] as? String, "weekly")
+            XCTAssertNil(object["period_kind"])
             XCTAssertEqual(object["band"] as? String, "exhausted")
             let account = try XCTUnwrap(object["account"] as? [String: Any])
             XCTAssertEqual(Set(account.keys), ["id", "name"])

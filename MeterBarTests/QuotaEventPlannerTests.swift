@@ -204,6 +204,84 @@ final class QuotaEventPlannerTests: XCTestCase {
         XCTAssertEqual(exhausted.map(\.event), [.exhausted])
     }
 
+    func testMonthlyWeeklySlotKeepsWeeklyWindowAndAddsPeriodKind() throws {
+        var planner = QuotaEventPlanner(debounceInterval: 60)
+        let primed = QuotaEventSnapshot(
+            provider: .grok,
+            account: account,
+            metrics: UsageMetrics(
+                service: .grok,
+                weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil, periodKind: .monthly),
+                lastUpdated: start
+            )
+        )
+        XCTAssertTrue(planner.evaluate(snapshots: [primed], now: start).isEmpty)
+
+        let events = planner.evaluate(
+            snapshots: [
+                QuotaEventSnapshot(
+                    provider: .grok,
+                    account: account,
+                    metrics: UsageMetrics(
+                        service: .grok,
+                        weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .monthly),
+                        lastUpdated: start
+                    )
+                )
+            ],
+            now: start.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(events.map(\.window), [.weekly])
+        XCTAssertEqual(events.map(\.periodKind), [.monthly])
+        XCTAssertEqual(events.first?.window.displayName(periodKind: events.first?.periodKind), "Monthly")
+        XCTAssertEqual(QuotaEventWindow.allCases.map(\.rawValue), ["session", "weekly", "code_review"])
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(try XCTUnwrap(events.first))) as? [String: Any]
+        )
+        XCTAssertEqual(object["window"] as? String, "weekly")
+        XCTAssertEqual(object["period_kind"] as? String, "monthly")
+    }
+
+    func testAdditionalLimitsEmitIndependentOverflowEvents() {
+        var planner = QuotaEventPlanner(debounceInterval: 60)
+        func snapshot(daily: Double, billing: Double, unknown: Double) -> QuotaEventSnapshot {
+            QuotaEventSnapshot(
+                provider: .grok,
+                account: account,
+                metrics: UsageMetrics(
+                    service: .grok,
+                    weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .weekly),
+                    additionalLimits: [
+                        UsageLimit(used: daily, total: 100, resetTime: nil, periodKind: .daily),
+                        UsageLimit(used: billing, total: 100, resetTime: nil, periodKind: .billing),
+                        UsageLimit(used: unknown, total: 100, resetTime: nil, periodKind: .unknown)
+                    ],
+                    lastUpdated: start
+                )
+            )
+        }
+
+        XCTAssertTrue(planner.evaluate(snapshots: [snapshot(daily: 10, billing: 10, unknown: 10)], now: start).isEmpty)
+
+        let events = planner.evaluate(
+            snapshots: [snapshot(daily: 80, billing: 100, unknown: 91)],
+            now: start.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(Set(events.map(\.window)), [.session, .weekly])
+        XCTAssertEqual(
+            Set(events.compactMap(\.periodKind)),
+            [.daily, .billing, .unknown]
+        )
+        XCTAssertTrue(events.contains { $0.window == .session && $0.periodKind == .daily })
+        XCTAssertTrue(events.contains { $0.window == .weekly && $0.periodKind == .billing })
+        XCTAssertTrue(events.contains { $0.window == .weekly && $0.periodKind == .unknown })
+    }
+
     private func snapshot(
         account: QuotaEventAccount,
         used: Double

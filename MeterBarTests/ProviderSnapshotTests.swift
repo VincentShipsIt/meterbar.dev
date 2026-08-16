@@ -418,6 +418,8 @@ final class ProviderSnapshotTests: XCTestCase {
             case .cursor: return .onDemand
             case .codexCli, .openRouter, .grok: return .codeReview
             }
+        case .additional:
+            return .quota
         }
     }
 
@@ -896,5 +898,38 @@ final class ProviderSnapshotTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.detailLimits.map(\.id), ["session", "weekly"])
+    }
+
+    func testGrokMonthlyWeeklySlotIsTitledMonthlyNeverWeekly() {
+        let metrics = UsageMetrics(
+            service: .grok,
+            weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .grok)
+        let weekly = try? XCTUnwrap(limits.first { $0.id == "weekly" })
+
+        XCTAssertEqual(weekly?.quotaTitleKey, .monthly)
+        XCTAssertEqual(weekly?.title, "Monthly")
+        XCTAssertEqual(weekly?.localizedTitle, "Monthly")
+        XCTAssertFalse(weekly?.title.contains("Weekly") == true)
+    }
+
+    func testAdditionalLimitsBecomeExtraSnapshotRows() {
+        let metrics = UsageMetrics(
+            service: .grok,
+            sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .session),
+            weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
+            additionalLimits: [
+                UsageLimit(used: 30, total: 100, resetTime: nil, periodKind: .daily),
+                UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .billing),
+                UsageLimit(used: 50, total: 100, resetTime: nil, periodKind: .unknown)
+            ]
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .grok)
+
+        XCTAssertEqual(limits.map(\.id), ["session", "weekly", "additional-0", "additional-1", "additional-2"])
+        XCTAssertEqual(limits.map(\.quotaTitleKey), [.session, .weekly, .daily, .billingCycle, .quota])
+        XCTAssertEqual(limits.map(\.title), ["Session", "Weekly", "Daily", "Billing cycle", "Quota"])
+        XCTAssertEqual(limits.last?.localizedTitle, "Quota")
     }
 }

@@ -19,13 +19,17 @@ final class CachedMetricsContractTests: XCTestCase {
                 total: 100,
                 resetTime: Date(timeIntervalSinceReferenceDate: 700_000_000),
                 windowSeconds: 5 * 3_600,
-                isEstimated: true
+                isEstimated: true,
+                periodKind: .session
             ),
-            weeklyLimit: UsageLimit(used: 12, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .weekly),
             codeReviewLimit: UsageLimit(used: 32, total: 100, resetTime: nil),
             modelLimitLabel: "Fable",
             extraUsage: ExtraUsageStatus(state: .on, detail: "$0.00 used"),
             resetCreditsAvailable: 2,
+            additionalLimits: [
+                UsageLimit(used: 8, total: 100, resetTime: nil, periodKind: .daily)
+            ],
             lastUpdated: Date(timeIntervalSinceReferenceDate: 699_999_000)
         )
     }
@@ -49,6 +53,8 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertEqual(metrics.modelLimitLabel, "Fable")
         XCTAssertEqual(metrics.extraUsage, ExtraUsageStatus(state: .on, detail: "$0.00 used"))
         XCTAssertEqual(metrics.resetCreditsAvailable, 2)
+        XCTAssertEqual(metrics.additionalLimits, original["Claude Code"]?.additionalLimits)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .session)
         XCTAssertEqual(metrics.lastUpdated, original["Claude Code"]?.lastUpdated)
     }
 
@@ -62,18 +68,23 @@ final class CachedMetricsContractTests: XCTestCase {
 
         let topLevelKeys = [
             "id", "service", "sessionLimit", "weeklyLimit", "codeReviewLimit", "modelLimitLabel",
-            "extraUsage", "resetCreditsAvailable", "lastUpdated",
+            "extraUsage", "resetCreditsAvailable", "additionalLimits", "lastUpdated",
         ]
         for key in topLevelKeys {
             XCTAssertNotNil(object[key], "missing top-level key '\(key)'")
         }
 
         let session = try XCTUnwrap(object["sessionLimit"] as? [String: Any])
-        for key in ["used", "total", "resetTime", "windowSeconds", "isEstimated"] {
+        for key in ["used", "total", "resetTime", "windowSeconds", "isEstimated", "periodKind"] {
             XCTAssertNotNil(session[key], "missing sessionLimit key '\(key)'")
         }
         XCTAssertEqual(session["used"] as? Double, 42.5)
         XCTAssertEqual(session["isEstimated"] as? Bool, true)
+        XCTAssertEqual(session["periodKind"] as? String, "session")
+
+        let additional = try XCTUnwrap(object["additionalLimits"] as? [[String: Any]])
+        XCTAssertEqual(additional.count, 1)
+        XCTAssertEqual(additional[0]["periodKind"] as? String, "daily")
 
         let extra = try XCTUnwrap(object["extraUsage"] as? [String: Any])
         XCTAssertEqual(extra["state"] as? String, "on")
@@ -111,6 +122,8 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertNil(metrics.extraUsage)
         XCTAssertNil(metrics.resetCreditsAvailable)
         XCTAssertNil(metrics.modelLimitLabel)
+        XCTAssertNil(metrics.weeklyLimit?.periodKind)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
     // MARK: - Shared App Group location (issue #13 — a rename must break CI)

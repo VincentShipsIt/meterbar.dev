@@ -76,12 +76,16 @@ public enum ProviderRecommendationWindow: String, Equatable, Sendable {
     case session
     case weekly
 
-    public func title(for service: ServiceType, limitTotal: Double? = nil) -> String {
+    public func title(
+        for service: ServiceType,
+        limitTotal: Double? = nil,
+        periodKind: UsageLimit.PeriodKind? = nil
+    ) -> String {
         switch self {
         case .session:
-            return service.sessionQuotaTitle(limitTotal: limitTotal)
+            return service.sessionQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
         case .weekly:
-            return service.weeklyQuotaTitle(limitTotal: limitTotal)
+            return service.weeklyQuotaTitle(limitTotal: limitTotal, periodKind: periodKind)
         }
     }
 }
@@ -134,7 +138,7 @@ public struct ProviderRecommendationRow: Identifiable, Equatable, Sendable {
     }
 
     public var windowTitle: String {
-        window.title(for: service, limitTotal: limit.total)
+        window.title(for: service, limitTotal: limit.total, periodKind: limit.periodKind)
     }
 
     public var headroomText: String {

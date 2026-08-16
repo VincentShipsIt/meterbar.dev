@@ -17,6 +17,7 @@ nonisolated struct GuardCLIResponse: CLIJSONDocument {
     private let provider: String?
     private let displayName: String?
     private let window: String?
+    private let periodKind: String?
     private let account: Account?
     private let used: Double?
     private let total: Double?
@@ -37,6 +38,7 @@ nonisolated struct GuardCLIResponse: CLIJSONDocument {
         provider = evaluation.service?.cliIdentifier
         displayName = evaluation.service?.displayName
         window = evaluation.window?.cliIdentifier
+        periodKind = evaluation.periodKind?.rawValue
         account = evaluation.account.map(Account.init(account:))
         used = evaluation.quota?.used
         total = evaluation.quota?.total

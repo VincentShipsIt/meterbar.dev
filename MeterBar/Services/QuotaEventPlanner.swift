@@ -25,10 +25,32 @@ nonisolated enum QuotaEventWindow: String, Codable, CaseIterable, Sendable {
     case codeReview = "code_review"
 
     var displayName: String {
-        switch self {
+        displayName(periodKind: nil)
+    }
+
+    func displayName(periodKind: UsageLimit.PeriodKind?) -> String {
+        switch periodKind {
         case .session: return "Session"
+        case .daily: return "Daily"
         case .weekly: return "Weekly"
-        case .codeReview: return "Model / code review"
+        case .monthly: return "Monthly"
+        case .billing: return "Billing cycle"
+        case .unknown: return "Quota"
+        case nil:
+            switch self {
+            case .session: return "Session"
+            case .weekly: return "Weekly"
+            case .codeReview: return "Model / code review"
+            }
+        }
+    }
+
+    static func compatible(for periodKind: UsageLimit.PeriodKind?) -> QuotaEventWindow {
+        switch periodKind {
+        case .session, .daily:
+            return .session
+        case .weekly, .monthly, .billing, .unknown, nil:
+            return .weekly
         }
     }
 }
@@ -83,6 +105,7 @@ nonisolated struct QuotaEventPayload: Codable, Equatable, Sendable {
     let account: QuotaEventAccount
     let event: QuotaEventKind
     let window: QuotaEventWindow
+    let periodKind: UsageLimit.PeriodKind?
     let percentage: Double
     let band: QuotaEventBand
     let timestamp: Date
@@ -92,6 +115,7 @@ nonisolated struct QuotaEventPayload: Codable, Equatable, Sendable {
         account: QuotaEventAccount,
         event: QuotaEventKind,
         window: QuotaEventWindow,
+        periodKind: UsageLimit.PeriodKind? = nil,
         percentage: Double,
         band: QuotaEventBand,
         timestamp: Date
@@ -101,6 +125,7 @@ nonisolated struct QuotaEventPayload: Codable, Equatable, Sendable {
         self.account = account
         self.event = event
         self.window = window
+        self.periodKind = periodKind
         self.percentage = percentage
         self.band = band
         self.timestamp = timestamp
@@ -112,9 +137,23 @@ nonisolated struct QuotaEventPayload: Codable, Equatable, Sendable {
         case account
         case event
         case window
+        case periodKind = "period_kind"
         case percentage
         case band
         case timestamp
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(account, forKey: .account)
+        try container.encode(event, forKey: .event)
+        try container.encode(window, forKey: .window)
+        try container.encodeIfPresent(periodKind, forKey: .periodKind)
+        try container.encode(percentage, forKey: .percentage)
+        try container.encode(band, forKey: .band)
+        try container.encode(timestamp, forKey: .timestamp)
     }
 }
 
@@ -129,6 +168,7 @@ nonisolated struct QuotaEventPlanner: Sendable {
         let provider: ServiceType
         let accountID: String
         let window: QuotaEventWindow
+        let overflowIndex: Int?
     }
 
     private struct DeliveryKey: Hashable, Sendable {
@@ -152,17 +192,20 @@ nonisolated struct QuotaEventPlanner: Sendable {
         var activeNamespaces = Set<Namespace>()
 
         for snapshot in snapshots {
-            let limits: [(QuotaEventWindow, UsageLimit?)] = [
-                (.session, snapshot.metrics.sessionLimit),
-                (.weekly, snapshot.metrics.weeklyLimit),
-                (.codeReview, snapshot.metrics.codeReviewLimit),
-            ]
+            let limits: [(QuotaEventWindow, UsageLimit?, Int?)] = [
+                (.session, snapshot.metrics.sessionLimit, nil),
+                (.weekly, snapshot.metrics.weeklyLimit, nil),
+                (.codeReview, snapshot.metrics.codeReviewLimit, nil),
+            ] + snapshot.metrics.additionalLimits.enumerated().map { index, limit in
+                (QuotaEventWindow.compatible(for: limit.periodKind), limit, index)
+            }
 
-            for (window, limit) in limits {
+            for (window, limit, overflowIndex) in limits {
                 let namespace = Namespace(
                     provider: snapshot.provider,
                     accountID: snapshot.account.id,
-                    window: window
+                    window: window,
+                    overflowIndex: overflowIndex
                 )
                 guard let limit, !limit.isEstimated else {
                     bands.removeValue(forKey: namespace)
@@ -190,6 +233,7 @@ nonisolated struct QuotaEventPlanner: Sendable {
                     account: snapshot.account,
                     event: event,
                     window: window,
+                    periodKind: limit.periodKind,
                     percentage: limit.percentage,
                     band: band,
                     timestamp: now

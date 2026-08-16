@@ -115,7 +115,8 @@ struct AccountNotificationPlanner {
             keys.subtract(
                 NotificationDecider.notificationKeys(
                     service: input.service,
-                    accountKey: account.id.uuidString
+                    accountKey: account.id.uuidString,
+                    includingExisting: keys
                 )
             )
             keys.remove(
@@ -221,7 +222,10 @@ struct AccountNotificationPlanner {
         service: ServiceType,
         keys: inout Set<String>
     ) -> Set<String> {
-        let fallbackKeys = NotificationDecider.notificationKeys(service: service)
+        let fallbackKeys = NotificationDecider.notificationKeys(
+            service: service,
+            includingExisting: keys
+        )
         let removedState = keys.intersection(fallbackKeys)
         keys.subtract(fallbackKeys)
         keys.remove(observedFallbackKey(service: service))
@@ -233,7 +237,10 @@ struct AccountNotificationPlanner {
         service: ServiceType,
         keys: inout Set<String>
     ) -> Set<String> {
-        let fallbackKeys = NotificationDecider.notificationKeys(service: service)
+        let fallbackKeys = NotificationDecider.notificationKeys(
+            service: service,
+            includingExisting: keys
+        )
         let fallbackStateKeys = fallbackKeys.union([observedFallbackKey(service: service)])
         let servicePrefix = "\(service.rawValue)-"
         let accountKeys = Set(keys.filter {
@@ -251,7 +258,8 @@ struct AccountNotificationPlanner {
         keys.intersection(
             NotificationDecider.notificationKeys(
                 service: service,
-                accountKey: accountKey
+                accountKey: accountKey,
+                includingExisting: keys
             )
         )
     }
@@ -287,7 +295,10 @@ struct AccountNotificationPlanner {
         keys: Set<String>
     ) -> Bool {
         keys.contains(observedFallbackKey(service: service))
-            || !keys.isDisjoint(with: NotificationDecider.notificationKeys(service: service))
+            || !keys.isDisjoint(with: NotificationDecider.notificationKeys(
+                service: service,
+                includingExisting: keys
+            ))
     }
 
     private func recordObservedFallbackState(
@@ -295,7 +306,10 @@ struct AccountNotificationPlanner {
         keys: inout Set<String>
     ) {
         let observedKey = observedFallbackKey(service: service)
-        if keys.isDisjoint(with: NotificationDecider.notificationKeys(service: service)) {
+        if keys.isDisjoint(with: NotificationDecider.notificationKeys(
+            service: service,
+            includingExisting: keys
+        )) {
             keys.insert(observedKey)
         } else {
             keys.remove(observedKey)

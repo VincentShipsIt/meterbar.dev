@@ -118,6 +118,11 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case otherModels
         case monthly
         case weekly
+        case daily
+        case billingCycle
+        /// Neutral title when the provider reported a window MeterBar cannot
+        /// name honestly. Never a guessed cadence such as "Weekly".
+        case quota
         case codeReview
         case onDemand
         /// Claude Code's model-scoped window. The parsed label is provider data
@@ -136,6 +141,9 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
             case .otherModels: return "Other Models"
             case .monthly: return "Monthly"
             case .weekly: return "Weekly"
+            case .daily: return "Daily"
+            case .billingCycle: return "Billing cycle"
+            case .quota: return "Quota"
             case .codeReview: return "Code Review"
             case .onDemand: return "On-demand"
             case let .model(label): return label ?? "Model"
@@ -178,11 +186,20 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// key spend cap. Cursor's is the **Cursor Models** pool when the payload
     /// used the percent-of-100 shape, and "Session" for the legacy on-demand
     /// mapping.
-    public func sessionQuotaTitle(limitTotal: Double?) -> String {
-        sessionQuotaTitleKey(limitTotal: limitTotal).englishTitle
+    public func sessionQuotaTitle(
+        limitTotal: Double?,
+        periodKind: UsageLimit.PeriodKind? = nil
+    ) -> String {
+        sessionQuotaTitleKey(limitTotal: limitTotal, periodKind: periodKind).englishTitle
     }
 
-    public func sessionQuotaTitleKey(limitTotal: Double?) -> QuotaTitleKey {
+    public func sessionQuotaTitleKey(
+        limitTotal: Double?,
+        periodKind: UsageLimit.PeriodKind? = nil
+    ) -> QuotaTitleKey {
+        if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
+            return titled
+        }
         switch self {
         case .openRouter: return .keyLimit
         case .cursor:
@@ -204,11 +221,20 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Pass `limitTotal` when the concrete window is known: Cursor's percent
     /// pools title as **Other Models**, matching the dashboard; a request-count
     /// billing-cycle quota stays **Monthly**.
-    public func weeklyQuotaTitle(limitTotal: Double?) -> String {
-        weeklyQuotaTitleKey(limitTotal: limitTotal).englishTitle
+    public func weeklyQuotaTitle(
+        limitTotal: Double?,
+        periodKind: UsageLimit.PeriodKind? = nil
+    ) -> String {
+        weeklyQuotaTitleKey(limitTotal: limitTotal, periodKind: periodKind).englishTitle
     }
 
-    public func weeklyQuotaTitleKey(limitTotal: Double?) -> QuotaTitleKey {
+    public func weeklyQuotaTitleKey(
+        limitTotal: Double?,
+        periodKind: UsageLimit.PeriodKind? = nil
+    ) -> QuotaTitleKey {
+        if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
+            return titled
+        }
         switch self {
         case .openRouter: return .accountCredits
         case .cursor:
@@ -221,4 +247,43 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public var weeklyQuotaTitle: String { weeklyQuotaTitle(limitTotal: nil) }
+
+    /// Title for a reported period that did not land in a named slot.
+    public func additionalQuotaTitleKey(for limit: UsageLimit) -> QuotaTitleKey {
+        quotaTitleKey(for: limit.periodKind, limitTotal: limit.total, unspecified: .quota)
+    }
+
+    /// Shared cadence → title mapping. `session` / `weekly` keep each
+    /// provider's existing slot exceptions; every other kind is named honestly
+    /// so a monthly Grok allowance cannot render as "Weekly".
+    public func quotaTitleKey(
+        for periodKind: UsageLimit.PeriodKind?,
+        limitTotal: Double? = nil,
+        unspecified: QuotaTitleKey = .quota
+    ) -> QuotaTitleKey {
+        guard let periodKind else { return unspecified }
+        if let titled = quotaTitleKey(overridingWith: periodKind) {
+            return titled
+        }
+        switch periodKind {
+        case .session:
+            return sessionQuotaTitleKey(limitTotal: limitTotal)
+        case .weekly:
+            return weeklyQuotaTitleKey(limitTotal: limitTotal)
+        case .daily, .monthly, .billing, .unknown:
+            return unspecified
+        }
+    }
+
+    /// Cadences that replace the slot's default title. `session` and `weekly`
+    /// return `nil` so OpenRouter / Cursor exceptions still apply.
+    private func quotaTitleKey(overridingWith periodKind: UsageLimit.PeriodKind) -> QuotaTitleKey? {
+        switch periodKind {
+        case .daily: return .daily
+        case .monthly: return .monthly
+        case .billing: return .billingCycle
+        case .unknown: return .quota
+        case .session, .weekly: return nil
+        }
+    }
 }

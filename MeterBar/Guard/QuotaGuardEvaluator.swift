@@ -43,6 +43,7 @@ nonisolated struct QuotaGuardEvaluation: Sendable {
     let checkedAt: Date
     let service: ServiceType?
     let window: QuotaGuardWindow?
+    let periodKind: UsageLimit.PeriodKind?
     let account: QuotaGuardAccount?
     let minRemainingPercent: Double?
     let quota: QuotaGuardQuota?
@@ -60,7 +61,8 @@ nonisolated struct QuotaGuardEvaluation: Sendable {
     var summaryLine: String {
         var parts = ["Guard: \(outcome.rawValue)"]
         if let service {
-            parts.append([service.displayName, window?.displayName].compactMap { $0 }.joined(separator: " "))
+            let cadence = periodKind?.guardDisplayName ?? window?.displayName
+            parts.append([service.displayName, cadence].compactMap { $0 }.joined(separator: " "))
         }
         if let quota {
             parts.append("\(quota.percentLeft)% left")
@@ -84,6 +86,7 @@ nonisolated struct QuotaGuardEvaluation: Sendable {
             checkedAt: checkedAt,
             service: nil,
             window: nil,
+            periodKind: nil,
             account: nil,
             minRemainingPercent: nil,
             quota: nil,
@@ -181,7 +184,7 @@ nonisolated enum QuotaGuardEvaluator {
             resetCountdown: countdown,
             estimated: limit.isEstimated
         )
-        let window = target.window.displayName
+        let window = target.window.displayName(for: limit)
         let resetSentence = countdown.map { "Resets in \($0)." } ?? "Reset time unknown."
 
         // Exhaustion outranks the caller's threshold: the quota is blocking
@@ -192,6 +195,7 @@ nonisolated enum QuotaGuardEvaluator {
                 checkedAt: now,
                 service: target.service,
                 window: target.window,
+                periodKind: limit.periodKind,
                 account: account,
                 minRemainingPercent: target.minRemainingPercent,
                 quota: quota,
@@ -207,6 +211,7 @@ nonisolated enum QuotaGuardEvaluator {
                 checkedAt: now,
                 service: target.service,
                 window: target.window,
+                periodKind: limit.periodKind,
                 account: account,
                 minRemainingPercent: minimum,
                 quota: quota,
@@ -224,6 +229,7 @@ nonisolated enum QuotaGuardEvaluator {
             checkedAt: now,
             service: target.service,
             window: target.window,
+            periodKind: limit.periodKind,
             account: account,
             minRemainingPercent: target.minRemainingPercent,
             quota: quota,
@@ -246,6 +252,7 @@ nonisolated enum QuotaGuardEvaluator {
             checkedAt: now,
             service: target.service,
             window: target.window,
+            periodKind: nil,
             account: account,
             minRemainingPercent: target.minRemainingPercent,
             quota: nil,

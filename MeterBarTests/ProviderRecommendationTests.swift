@@ -50,6 +50,18 @@ final class ProviderRecommendationTests: XCTestCase {
         )
     }
 
+    func testGrokMonthlyWeeklySlotRecommendationIsTitledMonthly() {
+        let recommendation = rank([
+            makeCandidate(
+                id: "grok-monthly",
+                service: .grok,
+                weekly: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .monthly)
+            )
+        ])
+
+        XCTAssertEqual(recommendation.rows.map(\.windowTitle), ["Monthly"])
+    }
+
     func testEqualScoresFallBackToStableProviderOrder() {
         let recommendation = rank([
             makeCandidate(id: "grok", service: .grok, session: limit(used: 40)),

@@ -59,10 +59,21 @@ Version 1 shape:
 }
 ```
 
-`windows[].kind` is `session`, `weekly`, or `codeReview`. `percentUsed` is clamped to `0...100`
+`windows[].kind` is only `session`, `weekly`, or `codeReview`. That enum is closed in version 1:
+consumers may switch on it exhaustively. Extra reported periods are appended as additional
+`windows[]` entries that still use one of those three tokens — short cadences (`session`,
+`daily`) reuse `session`, longer cadences (`weekly`, `monthly`, `billing`, `unknown`) reuse
+`weekly`. Multiple entries may therefore share a `kind`. `percentUsed` is clamped to `0...100`
 for display, while `used` and `total` preserve the source values. `percentLeft` and `quotaBand`
 use MeterBar's shared quota rules; `quotaBand` is `healthy`, `tight`, `critical`, or `exhausted`.
 `estimated` identifies totals MeterBar inferred instead of receiving from the provider.
+
+`windows[].periodKind` is the additive identity field. It names the provider-reported cadence
+(`session`, `daily`, `weekly`, `monthly`, `billing`, `unknown`) even when `kind` stays a legacy
+slot token. A monthly Grok allowance therefore stays `kind: "weekly"` and adds
+`"periodKind": "monthly"`. An extra daily period is `kind: "session"` plus
+`"periodKind": "daily"`. The key is omitted when the cache did not record a cadence. Do not
+treat `kind` as the human title or as unique within a provider.
 
 `extraUsage.state` is `on`, `off`, or `unknown`; its optional `detail` is provider-supplied display
 context. `resetCreditsAvailable` is present only when the provider reports banked reset credits.
@@ -515,11 +526,17 @@ quota to reset and never consumes a reset credit — that is `meterbar wake`.
 Severity comes from the shared quota band model the menu bar and `meterbar usage` already use, so
 a band threshold change moves guard's behavior with it.
 
-`--limit` accepts `session`, `weekly`, and `code-review`. `--min-remaining` is a percentage of
-quota that must remain; without it, only exhaustion blocks. `--config-dir` narrows the check to one
-configured Claude Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex
-config dir, or Grok `GROK_HOME`). Cursor and OpenRouter have no per-account directories and are
-rejected.
+`--limit` accepts the version 1 window tokens `session`, `weekly`, and `code-review`. Additive
+cadence selectors `daily`, `monthly`, `billing`, and `unknown` resolve a reported period by
+`periodKind` — including a monthly allowance stored in the weekly slot, or an extra daily
+period in `additionalLimits`. `--min-remaining` is a percentage of quota that must remain;
+without it, only exhaustion blocks. `--config-dir` narrows the check to one configured Claude
+Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex config dir, or
+Grok `GROK_HOME`). Cursor and OpenRouter have no per-account directories and are rejected.
+
+The JSON `window` field stays `session`, `weekly`, or `codeReview`. Additive `periodKind` names
+the reported cadence. Human `message` text uses that cadence ("monthly", never "weekly" for a
+monthly Grok allowance).
 
 Version 1 shape:
 
@@ -570,10 +587,10 @@ caller-supplied input was at fault:
   "outcome": "usageError",
   "exitCode": 13,
   "checkedAt": "2026-07-20T17:00:00Z",
-  "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review.",
+  "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review, daily, monthly, billing, unknown.",
   "error": {
     "code": "invalid_window",
-    "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review.",
+    "message": "Unknown quota window 'hourly' for --limit. Expected one of: session, weekly, code-review, daily, monthly, billing, unknown.",
     "flag": "--limit",
     "value": "hourly"
   }
@@ -737,6 +754,7 @@ rather than printed by the CLI:
   },
   "event": "exhausted",
   "window": "weekly",
+  "period_kind": "monthly",
   "percentage": 100,
   "band": "exhausted",
   "timestamp": "2027-01-15T08:00:00Z"

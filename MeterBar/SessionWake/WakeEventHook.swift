@@ -73,19 +73,23 @@ nonisolated struct WakeEventHookContext: Equatable, Sendable {
         let percentage = payload.percentage.rounded() == payload.percentage
             ? String(Int(payload.percentage))
             : String(format: "%.2f", payload.percentage)
+        var environment = [
+            "METERBAR_EVENT": payload.event.rawValue,
+            "METERBAR_PROVIDER": payload.provider.rawValue,
+            "METERBAR_ACCOUNT_ID": payload.account.id,
+            "METERBAR_ACCOUNT_NAME": payload.account.name,
+            "METERBAR_WINDOW": payload.window.rawValue,
+            "METERBAR_PERCENTAGE": percentage,
+            "METERBAR_BAND": payload.band.rawValue,
+            "METERBAR_TIMESTAMP": ISO8601DateFormatter().string(from: payload.timestamp),
+        ]
+        if let periodKind = payload.periodKind {
+            environment["METERBAR_PERIOD_KIND"] = periodKind.rawValue
+        }
         return Self(
             eventName: payload.event.rawValue,
             provider: nil,
-            environment: [
-                "METERBAR_EVENT": payload.event.rawValue,
-                "METERBAR_PROVIDER": payload.provider.rawValue,
-                "METERBAR_ACCOUNT_ID": payload.account.id,
-                "METERBAR_ACCOUNT_NAME": payload.account.name,
-                "METERBAR_WINDOW": payload.window.rawValue,
-                "METERBAR_PERCENTAGE": percentage,
-                "METERBAR_BAND": payload.band.rawValue,
-                "METERBAR_TIMESTAMP": ISO8601DateFormatter().string(from: payload.timestamp),
-            ],
+            environment: environment,
             diagnosticProvider: payload.provider.rawValue
         )
     }

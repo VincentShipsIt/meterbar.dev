@@ -379,6 +379,30 @@ public enum LocalizedUsageFormat {
                 locale: locale,
                 comment: "Quota title for a weekly window."
             )
+        case .daily:
+            return String(
+                localized: "widget.quota.daily",
+                defaultValue: "Daily",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a daily window."
+            )
+        case .billingCycle:
+            return String(
+                localized: "widget.quota.billing_cycle",
+                defaultValue: "Billing cycle",
+                bundle: bundle,
+                locale: locale,
+                comment: "Quota title for a provider billing-cycle window."
+            )
+        case .quota:
+            return String(
+                localized: "widget.quota.quota",
+                defaultValue: "Quota",
+                bundle: bundle,
+                locale: locale,
+                comment: "Neutral title for a reported quota whose cadence is unknown."
+            )
         }
     }
 

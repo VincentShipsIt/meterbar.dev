@@ -129,4 +129,35 @@ final class ServiceTypeTests: XCTestCase {
         )
         XCTAssertEqual(ServiceType.claudeCode.sessionQuotaTitle(limitTotal: 100), "Session")
     }
+
+    /// A Grok monthly (or billing) allowance occupies the legacy weekly slot
+    /// but must never be titled Weekly.
+    func testGrokWeeklySlotHonorsReportedPeriodKind() {
+        XCTAssertEqual(
+            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .monthly),
+            "Monthly"
+        )
+        XCTAssertEqual(
+            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .billing),
+            "Billing cycle"
+        )
+        XCTAssertEqual(
+            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .weekly),
+            "Weekly"
+        )
+        XCTAssertEqual(
+            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .unknown),
+            "Quota"
+        )
+        XCTAssertEqual(
+            ServiceType.grok.sessionQuotaTitle(limitTotal: 100, periodKind: .session),
+            "Session"
+        )
+        XCTAssertEqual(
+            ServiceType.grok.additionalQuotaTitleKey(
+                for: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .daily)
+            ),
+            .daily
+        )
+    }
 }

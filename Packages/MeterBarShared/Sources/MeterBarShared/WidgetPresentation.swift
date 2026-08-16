@@ -67,6 +67,22 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// change here reaches the localized widget instead of silently diverging
     /// from it.
     public var quotaTitleKey: ServiceType.QuotaTitleKey {
+        if let periodKind = limit?.periodKind {
+            switch periodKind {
+            case .daily:
+                return .daily
+            case .monthly:
+                return .monthly
+            case .billing:
+                return .billingCycle
+            case .unknown:
+                return .quota
+            case .session:
+                return service.sessionQuotaTitleKey(limitTotal: limit?.total)
+            case .weekly:
+                return service.weeklyQuotaTitleKey(limitTotal: limit?.total)
+            }
+        }
         switch quotaWindow {
         case .codeReview:
             return service.codeReviewQuotaTitleKey(modelLimitLabel: modelLimitLabel)
@@ -344,15 +360,60 @@ public enum WidgetPresentationPlanner {
         let health: WidgetDataHealth = now.timeIntervalSince(metrics.lastUpdated) > stalenessThreshold
             ? .stale
             : .healthy
-        return windows.compactMap { window in
-            guard let limit = limit(for: window, metrics: metrics) else { return nil }
+        let selectedRows: [WidgetPresentationRow] = windows.compactMap { window in
+            guard let windowLimit = limit(for: window, metrics: metrics) else { return nil }
             return row(
                 source: source,
                 window: window,
-                limit: limit,
+                limit: windowLimit,
                 health: health,
                 preferences: preferences
             )
+        }
+        let additionalRows = additionalRows(
+            source: source,
+            metrics: metrics,
+            health: health,
+            preferences: preferences
+        )
+        return selectedRows + additionalRows
+    }
+
+    private static func additionalRows(
+        source: Source,
+        metrics: UsageMetrics,
+        health: WidgetDataHealth,
+        preferences: WidgetPreferences
+    ) -> [WidgetPresentationRow] {
+        metrics.additionalLimits.enumerated().compactMap { index, limit in
+            let window = widgetWindow(for: limit.periodKind)
+            guard preferences.visibleQuotaWindows.contains(window) else { return nil }
+            return WidgetPresentationRow(
+                id: "\(source.identifier.rawValue):additional-\(index)",
+                accountIdentifier: source.identifier,
+                service: source.service,
+                accountName: source.name,
+                quotaWindow: window,
+                modelLimitLabel: metrics.modelLimitLabel,
+                limit: limit,
+                health: health,
+                displayMode: preferences.displayMode,
+                preservesLegacyOpenRouterBalance: source.service == .openRouter
+                    && preferences.preservesLegacyOpenRouterBalance,
+                resetTime: preferences.showsResetTime ? limit.resetTime : nil,
+                freshnessDate: preferences.showsFreshness ? metrics.lastUpdated : nil
+            )
+        }
+    }
+
+    /// Additional periods reuse the existing session/weekly preference toggles
+    /// rather than inventing a fourth widget slot.
+    private static func widgetWindow(for periodKind: UsageLimit.PeriodKind?) -> WidgetQuotaWindow {
+        switch periodKind {
+        case .session, .daily:
+            return .session
+        case .weekly, .monthly, .billing, .unknown, nil:
+            return .weekly
         }
     }
 

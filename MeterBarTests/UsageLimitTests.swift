@@ -23,6 +23,26 @@ final class UsageLimitTests: XCTestCase {
         let limit = try JSONDecoder().decode(UsageLimit.self, from: data)
 
         XCTAssertFalse(limit.isEstimated)
+        XCTAssertNil(limit.periodKind)
+    }
+
+    func testPeriodKindRoundTripsAndIsOmittedWhenAbsent() throws {
+        let withKind = UsageLimit(
+            used: 25,
+            total: 100,
+            resetTime: nil,
+            periodKind: .monthly
+        )
+        let encoded = try JSONEncoder().encode(withKind)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["periodKind"] as? String, "monthly")
+
+        let decoded = try JSONDecoder().decode(UsageLimit.self, from: encoded)
+        XCTAssertEqual(decoded.periodKind, .monthly)
+
+        let withoutKind = try JSONEncoder().encode(UsageLimit(used: 1, total: 100, resetTime: nil))
+        let omitted = try XCTUnwrap(JSONSerialization.jsonObject(with: withoutKind) as? [String: Any])
+        XCTAssertNil(omitted["periodKind"])
     }
 
     func testPercentageValues() {
