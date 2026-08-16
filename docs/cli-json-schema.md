@@ -502,6 +502,7 @@ refresh` is not answered `alreadyRunning` by an abandoned holder.
 ```sh
 meterbar guard --provider claude --limit session --min-remaining 25
 meterbar guard --provider codex --limit weekly --json
+meterbar guard --provider grok --config-dir ~/.grok-work --json
 meterbar guard --config-dir ~/.claude-work --refresh --json
 ```
 
@@ -516,7 +517,9 @@ a band threshold change moves guard's behavior with it.
 
 `--limit` accepts `session`, `weekly`, and `code-review`. `--min-remaining` is a percentage of
 quota that must remain; without it, only exhaustion blocks. `--config-dir` narrows the check to one
-configured Claude Code or OpenAI Codex account by its configuration directory.
+configured Claude Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex
+config dir, or Grok `GROK_HOME`). Cursor and OpenRouter have no per-account directories and are
+rejected.
 
 Version 1 shape:
 

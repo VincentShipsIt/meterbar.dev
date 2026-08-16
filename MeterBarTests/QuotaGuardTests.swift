@@ -35,6 +35,7 @@ final class QuotaGuardTests: XCTestCase {
         XCTAssertEqual(try target(provider: "claude").service, .claudeCode)
         XCTAssertEqual(try target(provider: "codex").service, .codexCli)
         XCTAssertEqual(try target(provider: " Cursor ").service, .cursor)
+        XCTAssertEqual(try target(provider: "grok").service, .grok)
     }
 
     func testUnknownProviderIsAUsageErrorNamingTheInput() {
@@ -87,10 +88,21 @@ final class QuotaGuardTests: XCTestCase {
     }
 
     func testConfigDirIsRejectedForProvidersWithoutAccounts() {
-        let failure = expectFailure(provider: "cursor", configDirectory: "/tmp/x")
-        XCTAssertEqual(failure.outcome, .usageError)
-        XCTAssertEqual(failure.code, "unsupported_config_dir")
-        XCTAssertTrue(failure.message.contains("Cursor"), failure.message)
+        let cursor = expectFailure(provider: "cursor", configDirectory: "/tmp/x")
+        XCTAssertEqual(cursor.outcome, .usageError)
+        XCTAssertEqual(cursor.code, "unsupported_config_dir")
+        XCTAssertTrue(cursor.message.contains("Cursor"), cursor.message)
+
+        let openRouter = expectFailure(provider: "openrouter", configDirectory: "/tmp/x")
+        XCTAssertEqual(openRouter.outcome, .usageError)
+        XCTAssertEqual(openRouter.code, "unsupported_config_dir")
+        XCTAssertTrue(openRouter.message.contains("OpenRouter"), openRouter.message)
+    }
+
+    func testConfigDirIsAcceptedForGrok() throws {
+        let resolved = try target(provider: "grok", configDirectory: "/tmp/grok-work")
+        XCTAssertEqual(resolved.service, .grok)
+        XCTAssertEqual(resolved.configDirectory, "/tmp/grok-work")
     }
 
     // MARK: - Available
@@ -336,6 +348,248 @@ final class QuotaGuardTests: XCTestCase {
         XCTAssertEqual(selection.metrics?.sessionLimit?.used, 5)
     }
 
+    func testCodexConfigDirStillSelectsTheMatchingAccountSnapshot() throws {
+        let account = CodexAccount(id: UUID(), name: "Lab", homeDirectory: "/tmp/work-codex")
+        let snapshot = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .codexCli, weekly: limit(used: 33))
+        )
+
+        let selection = try QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "codex", configDirectory: "/tmp/work-codex/"),
+            configuration: configuration(codexAccounts: [account]),
+            accountSnapshots: [snapshot],
+            providerMetrics: [.codexCli: metrics(service: .codexCli, weekly: limit(used: 90))],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(selection.account.scope, .account)
+        XCTAssertEqual(selection.account.name, "Lab")
+        XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 33)
+    }
+
+    func testGrokConfigDirSelectsTheMatchingCustomProfile() throws {
+        let account = GrokAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/grok-work")
+        let snapshot = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 12))
+        )
+
+        let selection = try QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "/tmp/grok-work/"),
+            configuration: configuration(grokAccounts: [account]),
+            accountSnapshots: [snapshot],
+            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 90))],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(selection.account.scope, .account)
+        XCTAssertEqual(selection.account.id, account.id)
+        XCTAssertEqual(selection.account.name, "Work")
+        XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 12)
+    }
+
+    func testGrokDefaultHomeSelectsTheDefaultProfile() throws {
+        let snapshot = AccountUsageSnapshot(
+            id: GrokAccount.defaultID,
+            name: GrokAccount.defaultName,
+            metrics: metrics(service: .grok, weekly: limit(used: 8))
+        )
+
+        let selection = try QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "/Users/test/.grok"),
+            configuration: configuration(grokAccounts: [.defaultAccount]),
+            accountSnapshots: [snapshot],
+            providerMetrics: [:],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(selection.account.id, GrokAccount.defaultID)
+        XCTAssertEqual(selection.account.name, GrokAccount.defaultName)
+        XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 8)
+    }
+
+    func testGrokDisabledProfileIsStillSelectableByHomeDirectory() throws {
+        let account = GrokAccount(
+            id: UUID(),
+            name: "Paused",
+            homeDirectory: "/tmp/grok-paused",
+            isEnabled: false
+        )
+        let snapshot = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 40))
+        )
+
+        let selection = try QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "/tmp/grok-paused"),
+            configuration: configuration(grokAccounts: [account]),
+            accountSnapshots: [snapshot],
+            providerMetrics: [:],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(selection.account.id, account.id)
+        XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 40)
+    }
+
+    func testDeletedGrokProfileIsUnknownRatherThanFallingBack() throws {
+        let leftover = AccountUsageSnapshot(
+            id: UUID(),
+            name: "Gone",
+            metrics: metrics(service: .grok, weekly: limit(used: 1))
+        )
+
+        let failure = QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "/tmp/grok-gone"),
+            configuration: configuration(grokAccounts: [.defaultAccount]),
+            accountSnapshots: [leftover],
+            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 70))],
+            defaultDirectories: defaultDirectories
+        ).failureValue
+
+        XCTAssertEqual(failure?.outcome, .usageError)
+        XCTAssertEqual(failure?.code, "unknown_account")
+        XCTAssertEqual(failure?.flag, "--config-dir")
+        XCTAssertEqual(failure?.value, "/tmp/grok-gone")
+        XCTAssertTrue(failure?.message.contains("/tmp/grok-gone") == true, failure?.message ?? "")
+        XCTAssertFalse(failure?.message.contains("/Users/test/.grok") == true, failure?.message ?? "")
+    }
+
+    func testGrokDuplicateNormalizedHomesSelectTheFirstConfiguredProfile() throws {
+        let first = GrokAccount(id: UUID(), name: "First", homeDirectory: "/tmp/grok-dup")
+        let second = GrokAccount(id: UUID(), name: "Second", homeDirectory: "/tmp/grok-dup/")
+        let firstSnapshot = AccountUsageSnapshot(
+            id: first.id,
+            name: first.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 15))
+        )
+        let secondSnapshot = AccountUsageSnapshot(
+            id: second.id,
+            name: second.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 85))
+        )
+
+        let selection = try QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "/tmp/grok-dup/"),
+            configuration: configuration(grokAccounts: [first, second]),
+            accountSnapshots: [firstSnapshot, secondSnapshot],
+            providerMetrics: [:],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(selection.account.id, first.id)
+        XCTAssertEqual(selection.account.name, "First")
+        XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 15)
+    }
+
+    func testGrokTildeAndTrailingSlashSelectTheSameProfile() throws {
+        let home = ServiceSupport.realHomeDirectory()
+        let workHome = (home as NSString).appendingPathComponent(".grok-work")
+        let account = GrokAccount(id: UUID(), name: "Work", homeDirectory: workHome)
+        let snapshot = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 21))
+        )
+        let configuration = configuration(grokAccounts: [account])
+
+        for requested in ["~/.grok-work", "~/.grok-work/", workHome + "/"] {
+            let selection = try QuotaGuardAccountResolver.resolve(
+                target: try target(provider: "grok", configDirectory: requested),
+                configuration: configuration,
+                accountSnapshots: [snapshot],
+                providerMetrics: [:],
+                defaultDirectories: defaultDirectories
+            ).get()
+
+            XCTAssertEqual(selection.account.id, account.id, requested)
+            XCTAssertEqual(selection.metrics?.weeklyLimit?.used, 21, requested)
+        }
+    }
+
+    func testUnknownGrokHomeEchoesTheCallerSuppliedDirectoryNotTheResolvedPath() throws {
+        let failure = QuotaGuardAccountResolver.resolve(
+            target: try target(provider: "grok", configDirectory: "~/.grok-unknown"),
+            configuration: configuration(grokAccounts: [.defaultAccount]),
+            accountSnapshots: [],
+            providerMetrics: [:],
+            defaultDirectories: defaultDirectories
+        ).failureValue
+
+        XCTAssertEqual(failure?.code, "unknown_account")
+        XCTAssertEqual(failure?.value, "~/.grok-unknown")
+        XCTAssertTrue(failure?.message.contains("~/.grok-unknown") == true, failure?.message ?? "")
+        XCTAssertFalse(
+            failure?.message.contains(ServiceSupport.realHomeDirectory()) == true,
+            failure?.message ?? ""
+        )
+    }
+
+    func testGrokRefreshAndCachePathsSelectTheSameProfile() throws {
+        let account = GrokAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/grok-work")
+        let cached = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 18), ageSeconds: 3_600)
+        )
+        let refreshed = AccountUsageSnapshot(
+            id: account.id,
+            name: account.name,
+            metrics: metrics(service: .grok, weekly: limit(used: 27), ageSeconds: 5)
+        )
+        let configuration = configuration(grokAccounts: [account])
+        let resolvedTarget = try target(provider: "grok", configDirectory: "/tmp/grok-work")
+
+        let cachedSelection = try QuotaGuardAccountResolver.resolve(
+            target: resolvedTarget,
+            configuration: configuration,
+            accountSnapshots: [cached],
+            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 99))],
+            defaultDirectories: defaultDirectories
+        ).get()
+        let refreshedSelection = try QuotaGuardAccountResolver.resolve(
+            target: resolvedTarget,
+            configuration: configuration,
+            accountSnapshots: [refreshed],
+            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 99))],
+            defaultDirectories: defaultDirectories
+        ).get()
+
+        XCTAssertEqual(cachedSelection.account, refreshedSelection.account)
+        XCTAssertEqual(cachedSelection.account.id, account.id)
+        XCTAssertEqual(cachedSelection.metrics?.weeklyLimit?.used, 18)
+        XCTAssertEqual(refreshedSelection.metrics?.weeklyLimit?.used, 27)
+    }
+
+    func testDefaultDirectoriesResolveGrokHomeThroughGrokHomeDirectory() {
+        let withEnv = QuotaGuardDefaultDirectories.current(
+            environment: ["GROK_HOME": "~/.grok-work"],
+            realHomeDirectory: "/Users/tester"
+        )
+        XCTAssertEqual(
+            withEnv.grok,
+            GrokHomeDirectory.path(
+                environment: ["GROK_HOME": "~/.grok-work"],
+                realHomeDirectory: "/Users/tester"
+            )
+        )
+        XCTAssertEqual(withEnv.grok, "/Users/tester/.grok-work")
+
+        let fallback = QuotaGuardDefaultDirectories.current(
+            environment: [:],
+            realHomeDirectory: "/Users/tester"
+        )
+        XCTAssertEqual(
+            fallback.grok,
+            GrokHomeDirectory.path(environment: [:], realHomeDirectory: "/Users/tester")
+        )
+        XCTAssertEqual(fallback.grok, "/Users/tester/.grok")
+    }
+
     // MARK: - JSON contract
 
     func testAvailableResponseMatchesVersionOneFixture() throws {
@@ -402,17 +656,23 @@ final class QuotaGuardTests: XCTestCase {
     // MARK: - Helpers
 
     private var defaultDirectories: QuotaGuardDefaultDirectories {
-        QuotaGuardDefaultDirectories(claude: "/Users/test/.claude", codex: "/Users/test/.codex")
+        QuotaGuardDefaultDirectories(
+            claude: "/Users/test/.claude",
+            codex: "/Users/test/.codex",
+            grok: "/Users/test/.grok"
+        )
     }
 
     private func configuration(
         claudeAccounts: [ClaudeCodeAccount] = [],
-        codexAccounts: [CodexAccount] = []
+        codexAccounts: [CodexAccount] = [],
+        grokAccounts: [GrokAccount] = []
     ) -> UsageRefreshConfigurationStore.Snapshot {
         UsageRefreshConfigurationStore.Snapshot(
             hiddenServices: [],
             claudeAccounts: claudeAccounts,
-            codexAccounts: codexAccounts
+            codexAccounts: codexAccounts,
+            grokAccounts: grokAccounts
         )
     }
 
