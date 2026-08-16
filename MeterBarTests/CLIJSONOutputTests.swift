@@ -494,9 +494,14 @@ final class CLIJSONOutputTests: XCTestCase {
         let providers = try XCTUnwrap(object["providers"] as? [[String: Any]])
         let windows = try XCTUnwrap(providers.first?["windows"] as? [[String: Any]])
 
-        XCTAssertEqual(windows.map { $0["kind"] as? String }, ["session", "weekly", "daily", "unknown"])
+        XCTAssertEqual(windows.map { $0["kind"] as? String }, ["session", "weekly", "session", "weekly"])
         XCTAssertEqual(windows.map { $0["periodKind"] as? String }, ["session", "monthly", "daily", "unknown"])
         XCTAssertEqual(windows[1]["used"] as? Double, 41)
+        XCTAssertTrue(
+            windows.allSatisfy { window in
+                ["session", "weekly", "codeReview"].contains(window["kind"] as? String)
+            }
+        )
     }
 
     func testErrorResponseIsVersionedAndMachineStable() throws {

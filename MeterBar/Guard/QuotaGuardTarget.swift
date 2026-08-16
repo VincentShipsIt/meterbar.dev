@@ -7,6 +7,10 @@ nonisolated enum QuotaGuardWindow: String, CaseIterable, Equatable, Sendable {
     case session
     case weekly
     case codeReview
+    case daily
+    case monthly
+    case billing
+    case unknown
 
     /// Accepts the documented spellings plus the hyphen/underscore and casing
     /// variants a shell script is likely to pass.
@@ -20,19 +24,43 @@ nonisolated enum QuotaGuardWindow: String, CaseIterable, Equatable, Sendable {
         case "session": return .session
         case "weekly": return .weekly
         case "codereview": return .codeReview
+        case "daily": return .daily
+        case "monthly": return .monthly
+        case "billing": return .billing
+        case "billingcycle": return .billing
+        case "unknown": return .unknown
         default: return nil
         }
     }
 
-    static let acceptedValues = "session, weekly, code-review"
+    static let acceptedValues = "session, weekly, code-review, daily, monthly, billing, unknown"
 
-    var cliIdentifier: String { rawValue }
+    /// Version 1 JSON `window` token. Cadence selectors collapse onto the
+    /// compatible slot so exhaustive v1 consumers keep working.
+    var cliIdentifier: String {
+        switch self {
+        case .session, .daily: return "session"
+        case .weekly, .monthly, .billing, .unknown: return "weekly"
+        case .codeReview: return "codeReview"
+        }
+    }
 
     var displayName: String {
+        displayName(for: nil)
+    }
+
+    func displayName(for limit: UsageLimit?) -> String {
+        if let periodKind = limit?.periodKind {
+            return periodKind.guardDisplayName
+        }
         switch self {
         case .session: return "session"
         case .weekly: return "weekly"
         case .codeReview: return "code review"
+        case .daily: return "daily"
+        case .monthly: return "monthly"
+        case .billing: return "billing cycle"
+        case .unknown: return "quota"
         }
     }
 
@@ -41,6 +69,36 @@ nonisolated enum QuotaGuardWindow: String, CaseIterable, Equatable, Sendable {
         case .session: return metrics.sessionLimit
         case .weekly: return metrics.weeklyLimit
         case .codeReview: return metrics.codeReviewLimit
+        case .daily: return Self.firstLimit(in: metrics, periodKind: .daily)
+        case .monthly: return Self.firstLimit(in: metrics, periodKind: .monthly)
+        case .billing: return Self.firstLimit(in: metrics, periodKind: .billing)
+        case .unknown: return Self.firstLimit(in: metrics, periodKind: .unknown)
+        }
+    }
+
+    /// Slot first, then overflow: a monthly allowance stored in `weeklyLimit`
+    /// is addressable as `--limit monthly` without inventing a fourth slot.
+    private static func firstLimit(
+        in metrics: UsageMetrics,
+        periodKind: UsageLimit.PeriodKind
+    ) -> UsageLimit? {
+        let slots = [metrics.sessionLimit, metrics.weeklyLimit, metrics.codeReviewLimit]
+        if let match = slots.compactMap({ $0 }).first(where: { $0.periodKind == periodKind }) {
+            return match
+        }
+        return metrics.additionalLimits.first { $0.periodKind == periodKind }
+    }
+}
+
+nonisolated extension UsageLimit.PeriodKind {
+    var guardDisplayName: String {
+        switch self {
+        case .session: return "session"
+        case .daily: return "daily"
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        case .billing: return "billing cycle"
+        case .unknown: return "quota"
         }
     }
 }

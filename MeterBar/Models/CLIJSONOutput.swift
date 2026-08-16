@@ -483,10 +483,10 @@ nonisolated extension ServiceType {
 }
 
 nonisolated private extension UsageLimit {
-    /// Extra windows use the reported cadence as `windows[].kind`. The three
-    /// legacy slots keep `session` / `weekly` / `codeReview`.
+    /// Extra windows keep a v1 `kind` token (`session` / `weekly`). Cadence
+    /// lives in `periodKind` so exhaustive v1 consumers are not broken.
     var cliWindowKind: String {
-        periodKind?.rawValue ?? "unknown"
+        periodKind?.legacyWindowKind ?? "weekly"
     }
 }
 

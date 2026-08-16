@@ -30,6 +30,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_ID=account-id"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_NAME=Work"))
         XCTAssertTrue(output.contains("METERBAR_WINDOW=session"))
+        XCTAssertFalse(output.contains("METERBAR_PERIOD_KIND="))
         XCTAssertTrue(output.contains("METERBAR_PERCENTAGE=91"))
         XCTAssertTrue(output.contains("METERBAR_BAND=critical"))
         XCTAssertFalse(output.contains("CLAUDE_CONFIG_DIR"))
@@ -76,11 +77,49 @@ final class QuotaEventDeliveryTests: XCTestCase {
         XCTAssertTrue(output.contains("METERBAR_PROVIDER=Grok"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_ID=\(GrokAccount.defaultID.uuidString)"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_NAME=Work"))
+        XCTAssertFalse(output.contains("METERBAR_PERIOD_KIND="))
         XCTAssertFalse(output.contains("GROK_HOME"))
         XCTAssertFalse(output.contains("homeDirectory"))
         XCTAssertFalse(output.contains("/secret/"))
         XCTAssertFalse(output.localizedCaseInsensitiveContains("token="))
         XCTAssertFalse(output.contains("auth.json"))
+    }
+
+    func testLocalHookIncludesPeriodKindWhenReported() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuotaEventDeliveryTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let runner = QuotaEventLocalHookRunner(
+            runner: WakeEventHookRunner(
+                logger: WakeRunLogger(directory: tempDirectory.appendingPathComponent("logs", isDirectory: true))
+            )
+        )
+        let grokAccountID = GrokAccount.defaultID.uuidString
+        let result = await runner.run(
+            configuration: configuration(
+                executable: "/usr/bin/env",
+                arguments: [],
+                webhookURL: "",
+                provider: .grok,
+                accountID: grokAccountID
+            ),
+            payload: QuotaEventPayload(
+                provider: .grok,
+                account: QuotaEventAccount(id: grokAccountID, name: "Work"),
+                event: .exhausted,
+                window: .weekly,
+                periodKind: .monthly,
+                percentage: 100,
+                band: .exhausted,
+                timestamp: Date(timeIntervalSince1970: 1_800_000_000)
+            )
+        )
+        let output = try XCTUnwrap(String(bytes: result.stdoutCapture, encoding: .utf8))
+
+        XCTAssertTrue(output.contains("METERBAR_WINDOW=weekly"))
+        XCTAssertTrue(output.contains("METERBAR_PERIOD_KIND=monthly"))
     }
 
     func testOneDeliveryFailureDoesNotBlockOtherChannelsOrLaterEvents() async {

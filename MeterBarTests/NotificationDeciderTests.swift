@@ -23,6 +23,7 @@ final class NotificationDeciderTests: XCTestCase {
         session: UsageLimit? = nil,
         weekly: UsageLimit? = nil,
         codeReview: UsageLimit? = nil,
+        additional: [UsageLimit] = [],
         modelLimitLabel: String? = nil,
         extraUsage: ExtraUsageStatus? = nil,
         lastUpdated: Date? = nil
@@ -35,6 +36,7 @@ final class NotificationDeciderTests: XCTestCase {
             modelLimitLabel: modelLimitLabel
                 ?? (service == .claudeCode && codeReview != nil ? "Sonnet" : nil),
             extraUsage: extraUsage,
+            additionalLimits: additional,
             lastUpdated: lastUpdated ?? now
         )
     }
@@ -448,5 +450,36 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertEqual(result.notifications.first?.quotaDisplayName, "Monthly")
         XCTAssertEqual(result.notifications.first?.title, "Grok Monthly Limit Reached")
         XCTAssertFalse(result.notifications.contains { $0.quotaDisplayName == "Weekly" })
+    }
+
+    func testAdditionalLimitsFireIndependentThresholdNotifications() {
+        let result = decider().evaluate(
+            metrics: metrics(
+                service: .grok,
+                weekly: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .weekly),
+                additional: [
+                    UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily),
+                    UsageLimit(used: 95, total: 100, resetTime: nil, periodKind: .billing),
+                    UsageLimit(used: 95, total: 100, resetTime: nil, periodKind: .unknown)
+                ]
+            ),
+            providerEnabled: true,
+            alreadyNotified: [],
+            now: now
+        )
+
+        XCTAssertEqual(
+            Set(result.notifications.map(\.quotaDisplayName)),
+            ["Daily", "Billing cycle", "Quota"]
+        )
+        XCTAssertEqual(
+            Set(result.notifications.map(\.key)),
+            [
+                "Grok-additional-0-critical",
+                "Grok-additional-1-warn",
+                "Grok-additional-2-warn",
+            ]
+        )
+        XCTAssertTrue(result.notifications.allSatisfy { !$0.blocksProvider })
     }
 }

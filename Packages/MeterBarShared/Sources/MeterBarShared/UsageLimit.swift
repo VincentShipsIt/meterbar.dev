@@ -14,6 +14,17 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         case monthly
         case billing
         case unknown
+
+        /// Compatible v1 slot token for CLI / webhook `kind` / `window` fields.
+        /// Cadence itself is carried separately in `periodKind`.
+        public var legacyWindowKind: String {
+            switch self {
+            case .session, .daily:
+                return "session"
+            case .weekly, .monthly, .billing, .unknown:
+                return "weekly"
+            }
+        }
     }
 
     public let used: Double

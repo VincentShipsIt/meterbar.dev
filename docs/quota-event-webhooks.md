@@ -35,7 +35,8 @@ Fields:
 | `account.id` | string | Account UUID for Claude Code, Codex CLI, and Grok profiles, or `default` for a single-account provider |
 | `account.name` | string | The user-visible account or provider name |
 | `event` | string | `warning`, `critical`, `exhausted`, or `recovered` |
-| `window` | string | `session`, `weekly`, or `code_review` |
+| `window` | string | `session`, `weekly`, or `code_review`. Version 1 enum is closed; extra periods reuse a compatible token. |
+| `period_kind` | string, optional | Reported cadence: `session`, `daily`, `weekly`, `monthly`, `billing`, or `unknown`. Omitted when unknown. A monthly Grok allowance stays `window: "weekly"` and adds `"period_kind": "monthly"`. |
 | `percentage` | number | Provider usage percentage clamped to `0...100` |
 | `band` | string | `healthy`, `tight`, `critical`, or `exhausted` |
 | `timestamp` | string | Time the transition was observed |
@@ -91,10 +92,14 @@ METERBAR_PROVIDER
 METERBAR_ACCOUNT_ID
 METERBAR_ACCOUNT_NAME
 METERBAR_WINDOW
+METERBAR_PERIOD_KIND
 METERBAR_PERCENTAGE
 METERBAR_BAND
 METERBAR_TIMESTAMP
 ```
+
+`METERBAR_WINDOW` stays `session`, `weekly`, or `code_review`. `METERBAR_PERIOD_KIND` is
+omitted when the cache did not record a cadence.
 
 Existing Session Wake hooks migrated into Event Integrations keep their
 unchanged `METERBAR_WAKE_EVENT` and `METERBAR_WAKE_PROVIDER` contract.

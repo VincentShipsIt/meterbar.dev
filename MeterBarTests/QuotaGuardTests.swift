@@ -29,6 +29,62 @@ final class QuotaGuardTests: XCTestCase {
         XCTAssertEqual(try target(window: "code-review").window, .codeReview)
         XCTAssertEqual(try target(window: "codeReview").window, .codeReview)
         XCTAssertEqual(try target(window: " CODE_REVIEW ").window, .codeReview)
+        XCTAssertEqual(try target(window: "monthly").window, .monthly)
+        XCTAssertEqual(try target(window: "daily").window, .daily)
+        XCTAssertEqual(try target(window: "billing-cycle").window, .billing)
+        XCTAssertEqual(try target(window: "unknown").window, .unknown)
+    }
+
+    func testGrokMonthlyWeeklySlotIsGuardedAsMonthlyNeverWeekly() throws {
+        let evaluation = QuotaGuardEvaluator.evaluate(
+            target: try target(provider: "grok", window: "weekly"),
+            account: .providerWide,
+            metrics: metrics(
+                service: .grok,
+                weekly: UsageLimit(used: 100, total: 100, resetTime: now.addingTimeInterval(3_600), periodKind: .monthly)
+            ),
+            now: now
+        )
+
+        XCTAssertEqual(evaluation.window, .weekly)
+        XCTAssertEqual(evaluation.window?.cliIdentifier, "weekly")
+        XCTAssertEqual(evaluation.periodKind, .monthly)
+        XCTAssertTrue(evaluation.message.contains("monthly"), evaluation.message)
+        XCTAssertFalse(evaluation.message.contains("weekly"), evaluation.message)
+        XCTAssertEqual(try json(evaluation)["window"] as? String, "weekly")
+        XCTAssertEqual(try json(evaluation)["periodKind"] as? String, "monthly")
+    }
+
+    func testCadenceSelectorFindsMonthlyInTheWeeklySlotAndDailyOverflow() throws {
+        let metrics = metrics(
+            service: .grok,
+            weekly: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .monthly),
+            additional: [
+                UsageLimit(used: 80, total: 100, resetTime: nil, periodKind: .daily)
+            ]
+        )
+
+        let monthly = QuotaGuardEvaluator.evaluate(
+            target: try target(provider: "grok", window: "monthly"),
+            account: .providerWide,
+            metrics: metrics,
+            now: now
+        )
+        XCTAssertEqual(monthly.outcome, .available)
+        XCTAssertEqual(monthly.periodKind, .monthly)
+        XCTAssertEqual(monthly.window?.cliIdentifier, "weekly")
+        XCTAssertTrue(monthly.message.contains("monthly"), monthly.message)
+
+        let daily = QuotaGuardEvaluator.evaluate(
+            target: try target(provider: "grok", window: "daily"),
+            account: .providerWide,
+            metrics: metrics,
+            now: now
+        )
+        XCTAssertEqual(daily.percentLeft, 20)
+        XCTAssertEqual(daily.periodKind, .daily)
+        XCTAssertEqual(daily.window?.cliIdentifier, "session")
+        XCTAssertTrue(daily.message.contains("daily"), daily.message)
     }
 
     func testResolveAcceptsStableProviderTokens() throws {
@@ -694,6 +750,7 @@ final class QuotaGuardTests: XCTestCase {
         session: UsageLimit? = nil,
         weekly: UsageLimit? = nil,
         codeReview: UsageLimit? = nil,
+        additional: [UsageLimit] = [],
         ageSeconds: TimeInterval = 60
     ) -> UsageMetrics {
         UsageMetrics(
@@ -701,6 +758,7 @@ final class QuotaGuardTests: XCTestCase {
             sessionLimit: session,
             weeklyLimit: weekly,
             codeReviewLimit: codeReview,
+            additionalLimits: additional,
             lastUpdated: now.addingTimeInterval(-ageSeconds)
         )
     }
