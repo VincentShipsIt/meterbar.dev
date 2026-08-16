@@ -375,7 +375,7 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(statuses.filter { $0 == .warning }.count, 1)
         XCTAssertFalse(statuses.contains(.critical))
         // Only generic product providers, never owner project names.
-        XCTAssertTrue(result.rows.allSatisfy { [.claudeCode, .codexCli, .cursor].contains($0.service) })
+        XCTAssertTrue(result.rows.allSatisfy { Set(ServiceType.allCases).contains($0.service) })
     }
 
     // MARK: - Quota title routing

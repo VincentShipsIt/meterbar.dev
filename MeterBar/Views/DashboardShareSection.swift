@@ -40,20 +40,27 @@ struct DashboardShareSection: View {
         self._shareStatus = shareStatus
     }
 
-    /// The card's provenance line. Only the three log-backed providers contribute
-    /// a local source; the API-only ones have nothing on disk to cite.
+    /// The card's provenance line. Only providers that write local token logs
+    /// contribute a source; API-only ones have nothing on disk to cite.
     static func enabledSourceLabels(for enabledServices: Set<ServiceType>) -> [String] {
-        var labels: [String] = []
-        if enabledServices.contains(.codexCli) {
-            labels.append("Codex logs")
+        ServiceType.allCases.compactMap { service in
+            guard enabledServices.contains(service), service.hasLocalHistorySource else {
+                return nil
+            }
+            return sourceLabel(for: service)
         }
-        if enabledServices.contains(.claudeCode) {
-            labels.append("Claude JSONL")
+    }
+
+    /// Share-card wording for one local-history source. Internal so the parity
+    /// suite can pin the labels without duplicating them.
+    static func sourceLabel(for service: ServiceType) -> String {
+        switch service {
+        case .claudeCode: return "Claude JSONL"
+        case .codexCli: return "Codex logs"
+        case .grok: return "Grok JSONL"
+        case .cursor: return "Cursor local state"
+        case .openRouter: return "OpenRouter logs"
         }
-        if enabledServices.contains(.cursor) {
-            labels.append("Cursor local state")
-        }
-        return labels
     }
 
     /// Shared with the Costs cards so the preview and the spend cards announce

@@ -254,14 +254,6 @@ nonisolated enum QuotaGuardPath {
     }
 }
 
-nonisolated extension ServiceType {
-    /// Only the CLI-backed providers keep per-account config directories the
-    /// app mirrors for cross-process reads.
-    var supportsGuardConfigDirectory: Bool {
-        self == .claudeCode || self == .codexCli || self == .grok
-    }
-}
-
 nonisolated private extension String {
     var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)

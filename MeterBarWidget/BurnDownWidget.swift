@@ -49,6 +49,16 @@ struct BurnDownWidgetProvider: TimelineProvider {
                     service: .codexCli,
                     used: 38,
                     resetTime: now.addingTimeInterval(4 * 24 * 60 * 60)
+                ),
+                .grok: placeholderMetrics(
+                    service: .grok,
+                    used: 47,
+                    resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)
+                ),
+                .openRouter: placeholderMetrics(
+                    service: .openRouter,
+                    used: 32,
+                    resetTime: now.addingTimeInterval(18 * 24 * 60 * 60)
                 )
             ],
             accountMetrics: [],
