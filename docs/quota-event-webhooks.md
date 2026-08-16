@@ -32,7 +32,7 @@ Fields:
 |---|---|---|
 | `schema_version` | integer | Current major version: `1` |
 | `provider` | string | `Claude Code`, `Codex CLI`, `Cursor`, `OpenRouter`, or `Grok` |
-| `account.id` | string | Account UUID, or `default` for a single-account provider |
+| `account.id` | string | Account UUID for Claude Code, Codex CLI, and Grok profiles, or `default` for a single-account provider |
 | `account.name` | string | The user-visible account or provider name |
 | `event` | string | `warning`, `critical`, `exhausted`, or `recovered` |
 | `window` | string | `session`, `weekly`, or `code_review` |
@@ -53,16 +53,21 @@ MeterBar derives events from its shared quota bands:
 - `exhausted`: reaches 0% remaining.
 - `recovered`: returns to Healthy (more than 25% remaining).
 
-Each provider/account/window is tracked independently. The first observation
+Each provider/account/window is tracked independently. Claude Code, Codex CLI,
+and Grok evaluate every enabled profile on its own. A provider-wide `Grok` /
+`default` selection from earlier releases maps to the default Grok profile UUID
+and does not also emit a second provider-wide event. The first observation
 primes state; it does not replay cached status as a new event. Repeated states
 are deduplicated, rapid same-event flapping is debounced, and dropping out of a
-band re-arms the next genuine crossing.
+band re-arms the next genuine crossing. Disabled or removed profiles leave the
+catalog so their planner namespace is dropped; a later re-enable primes again
+instead of replaying a stale crossing.
 
 ## Privacy and network boundary
 
 The payload never contains provider credentials, API keys, tokens,
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or other configuration paths. MeterBar sends
-only the fields documented above.
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, or other configuration paths.
+MeterBar sends only the fields documented above.
 
 Webhook URLs must use HTTPS on port 443 with no embedded credentials or
 fragment. Literal loopback, link-local, private, multicast, single-label LAN,

@@ -103,6 +103,118 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
         XCTAssertFalse(store.configuration.includes(wrongAccount))
     }
 
+    func testMigratesLegacyGrokDefaultSelectionWithoutDuplicatingTheDefaultProfile() throws {
+        let legacy = QuotaEventAccountSelection(provider: .grok, accountID: "default")
+        let defaultProfile = QuotaEventAccountSelection(
+            provider: .grok,
+            accountID: GrokAccount.defaultID.uuidString
+        )
+        let work = QuotaEventAccountSelection(
+            provider: .grok,
+            accountID: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF"
+        )
+        let stored = QuotaEventIntegrationConfiguration(
+            localDeliveryEnabled: false,
+            localExecutablePath: "",
+            localArguments: [],
+            webhookDeliveryEnabled: true,
+            webhookURLString: "https://hooks.example.com/meterbar",
+            enabledQuotaEvents: [.warning, .critical],
+            enabledProviders: [.grok],
+            enabledAccounts: [legacy, defaultProfile, work],
+            enabledWakeEvents: []
+        )
+        defaults.set(try JSONEncoder().encode(stored), forKey: StorageKeys.quotaEventIntegrations)
+
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+        let reloaded = try JSONDecoder().decode(
+            QuotaEventIntegrationConfiguration.self,
+            from: try XCTUnwrap(defaults.data(forKey: StorageKeys.quotaEventIntegrations))
+        )
+
+        XCTAssertEqual(store.configuration.enabledAccounts, [defaultProfile, work])
+        XCTAssertEqual(reloaded.enabledAccounts, [defaultProfile, work])
+        XCTAssertTrue(store.configuration.includes(
+            payload(provider: .grok, accountID: GrokAccount.defaultID.uuidString, event: .critical)
+        ))
+        XCTAssertFalse(store.configuration.includes(
+            payload(provider: .grok, accountID: "default", event: .critical)
+        ))
+        XCTAssertTrue(store.configuration.includes(
+            payload(provider: .grok, accountID: work.accountID, event: .warning)
+        ))
+    }
+
+    func testLegacyGrokDefaultSelectionStillMatchesTheDefaultProfilePayload() {
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+        store.setQuotaEventEnabled(true, for: .exhausted)
+        store.setProviderEnabled(true, for: .grok)
+        store.setAccountEnabled(true, for: QuotaEventAccountSelection(provider: .grok, accountID: "default"))
+
+        XCTAssertTrue(store.configuration.includes(
+            payload(provider: .grok, accountID: GrokAccount.defaultID.uuidString, event: .exhausted)
+        ))
+        XCTAssertFalse(store.configuration.includes(
+            payload(
+                provider: .grok,
+                accountID: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF",
+                event: .exhausted
+            )
+        ))
+    }
+
+    func testStaleGrokAccountSelectionIsIgnoredAfterTheProfileLeavesTheCatalog() {
+        let removed = GrokAccount(
+            id: UUID(uuidString: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF")!,
+            name: "Work",
+            homeDirectory: "/secret/grok-work"
+        )
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+        store.setQuotaEventEnabled(true, for: .critical)
+        store.setProviderEnabled(true, for: .grok)
+        store.setAccountEnabled(
+            true,
+            for: QuotaEventAccountSelection(provider: .grok, accountID: removed.id.uuidString)
+        )
+
+        let remaining = QuotaEventSnapshotCatalog.snapshots(
+            metrics: [:],
+            accounts: QuotaEventAccountInputs(
+                grokAccounts: [.defaultAccount],
+                grokAccountMetrics: [GrokAccount.defaultID: payloadMetrics()]
+            ),
+            enabledServices: [.grok]
+        )
+        let selectable = QuotaEventSnapshotCatalog.selectableAccounts(
+            claudeAccounts: [],
+            codexAccounts: [],
+            grokAccounts: [.defaultAccount]
+        )
+
+        XCTAssertFalse(remaining.contains { $0.account.id == removed.id.uuidString })
+        XCTAssertFalse(selectable.contains { $0.accountID == removed.id.uuidString })
+        XCTAssertTrue(store.configuration.enabledAccounts.contains {
+            $0.accountID == removed.id.uuidString
+        })
+        XCTAssertFalse(remaining.contains { snapshot in
+            store.configuration.includes(
+                payload(provider: snapshot.provider, accountID: snapshot.account.id, event: .critical)
+            )
+        })
+    }
+
+    private func payloadMetrics() -> UsageMetrics {
+        UsageMetrics(
+            service: .grok,
+            sessionLimit: UsageLimit(
+                used: 50,
+                total: 100,
+                resetTime: Date(timeIntervalSince1970: 1_800_003_600)
+            ),
+            lastUpdated: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+    }
+
     private func payload(
         provider: ServiceType,
         accountID: String,

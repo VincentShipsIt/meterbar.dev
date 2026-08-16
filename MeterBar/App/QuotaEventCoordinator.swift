@@ -14,6 +14,7 @@ final class QuotaEventCoordinator {
     private let dataManager: UsageDataManager
     private let claudeAccounts: ClaudeCodeAccountStore
     private let codexAccounts: CodexAccountStore
+    private let grokAccounts: GrokAccountStore
     private let providerVisibility: ProviderVisibilityStore
     private let settings: QuotaEventSettingsStore
     private let diagnostics: QuotaEventDiagnosticStore
@@ -26,6 +27,7 @@ final class QuotaEventCoordinator {
         dataManager: UsageDataManager? = nil,
         claudeAccounts: ClaudeCodeAccountStore? = nil,
         codexAccounts: CodexAccountStore? = nil,
+        grokAccounts: GrokAccountStore? = nil,
         providerVisibility: ProviderVisibilityStore? = nil,
         settings: QuotaEventSettingsStore? = nil,
         diagnostics: QuotaEventDiagnosticStore? = nil,
@@ -34,6 +36,7 @@ final class QuotaEventCoordinator {
         self.dataManager = dataManager ?? .shared
         self.claudeAccounts = claudeAccounts ?? .shared
         self.codexAccounts = codexAccounts ?? .shared
+        self.grokAccounts = grokAccounts ?? .shared
         self.providerVisibility = providerVisibility ?? .shared
         self.settings = settings ?? .shared
         self.diagnostics = diagnostics ?? .shared
@@ -54,6 +57,9 @@ final class QuotaEventCoordinator {
             codexAccounts.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
             codexAccounts.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
             codexAccounts.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+            grokAccounts.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            grokAccounts.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
+            grokAccounts.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
         ]
 
         Publishers.MergeMany(triggers)
@@ -68,10 +74,14 @@ final class QuotaEventCoordinator {
     private func evaluateCurrentSnapshot() {
         let snapshots = QuotaEventSnapshotCatalog.snapshots(
             metrics: dataManager.metrics,
-            claudeAccounts: claudeAccounts.accounts,
-            claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-            codexAccounts: codexAccounts.accounts,
-            codexAccountMetrics: dataManager.codexAccountMetrics,
+            accounts: QuotaEventAccountInputs(
+                claudeAccounts: claudeAccounts.accounts,
+                claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+                codexAccounts: codexAccounts.accounts,
+                codexAccountMetrics: dataManager.codexAccountMetrics,
+                grokAccounts: grokAccounts.accounts,
+                grokAccountMetrics: dataManager.grokAccountMetrics
+            ),
             enabledServices: providerVisibility.enabledServices
         )
         let configuration = settings.configuration
