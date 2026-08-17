@@ -79,8 +79,9 @@ public enum DemoData {
         )
     }
 
-    /// Cursor: two included percent pools, both green. No window seconds
-    /// (matching the real Cursor mapping), so no pace label.
+    /// Cursor: two included percent pools plus the weekly Grok Bot bar,
+    /// all green. The included pools have no window seconds (matching the
+    /// real usage-summary mapping). Grok Bot carries a ~7-day window.
     private static func cursor(now: Date) -> UsageMetrics {
         let reset = now.addingTimeInterval(28 * 24 * 3_600)
         return UsageMetrics(
@@ -95,6 +96,15 @@ public enum DemoData {
                 total: ServiceType.cursorIncludedPoolTotal,
                 resetTime: reset
             ),
+            additionalLimits: [
+                UsageLimit(
+                    used: 22,
+                    total: ServiceType.cursorIncludedPoolTotal,
+                    resetTime: now.addingTimeInterval(5 * 24 * 3_600),
+                    windowSeconds: weeklyWindowSeconds,
+                    periodKind: .weekly
+                )
+            ],
             lastUpdated: now
         )
     }

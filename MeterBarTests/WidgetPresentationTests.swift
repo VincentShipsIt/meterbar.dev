@@ -518,6 +518,46 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertTrue(titles.contains("Daily"), titles.joined(separator: ", "))
     }
 
+    func testCursorAdditionalWeeklyPercentPoolIsTitledGrokBotNotOtherModels() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
+        let presentation = presentation(
+            metrics: [
+                .cursor: UsageMetrics(
+                    service: .cursor,
+                    sessionLimit: UsageLimit(
+                        used: 4,
+                        total: ServiceType.cursorIncludedPoolTotal,
+                        resetTime: nil
+                    ),
+                    weeklyLimit: UsageLimit(
+                        used: 64,
+                        total: ServiceType.cursorIncludedPoolTotal,
+                        resetTime: nil
+                    ),
+                    additionalLimits: [
+                        UsageLimit(
+                            used: 18,
+                            total: ServiceType.cursorIncludedPoolTotal,
+                            resetTime: nil,
+                            periodKind: .weekly
+                        )
+                    ],
+                    lastUpdated: now
+                )
+            ],
+            preferences: preferences
+        )
+        let titles = presentation.rows.filter { $0.service == .cursor }.map(\.quotaTitle)
+        let keys = presentation.rows.filter { $0.service == .cursor }.map(\.quotaTitleKey)
+
+        XCTAssertTrue(titles.contains("Cursor Models"), titles.joined(separator: ", "))
+        XCTAssertTrue(titles.contains("Other Models"), titles.joined(separator: ", "))
+        XCTAssertTrue(titles.contains("Grok Bot"), titles.joined(separator: ", "))
+        XCTAssertTrue(keys.contains(.grokBot), "\(keys)")
+        XCTAssertEqual(keys.filter { $0 == .otherModels }.count, 1)
+    }
+
     private func makeMetrics(
         _ service: ServiceType,
         sessionUsed: Double? = nil,
