@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-13
+last_verified: 2026-08-17
 status: active
 ---
 
@@ -11,7 +11,7 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 |---|---|---|
 | Claude Code | `.claudeCode` | Scoped Keychain/file OAuth → `https://api.anthropic.com/api/oauth/usage`. Expired token: delegated `claude /status` with that account’s `CLAUDE_CONFIG_DIR`; success only if the credential fingerprint changes. Missing credentials fall back to `claude /usage`. |
 | Codex CLI | `.codexCli` | `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`) → `https://chatgpt.com/backend-api/wham/usage`. Exhausted accounts can spend a banked reset credit after explicit confirmation. |
-| Cursor | `.cursor` | Session JWT from Cursor `state.vscdb` → `https://cursor.com/api/usage-summary`. Current payloads expose two included pools as `plan.autoPercentUsed` (Cursor Models) and `plan.apiPercentUsed` (Other Models) — those are the dashboard bars. If those fields are absent, the UI falls back to `plan.used` / server quota, and if the API omits totals it uses an assumed 500-request default marked estimated. |
+| Cursor | `.cursor` | Session JWT from Cursor `state.vscdb` → `https://cursor.com/api/usage-summary`. Current payloads expose two included pools as `plan.autoPercentUsed` (Cursor Models) and `plan.apiPercentUsed` (Other Models) — those are the dashboard bars. If those fields are absent, the UI falls back to `plan.used` / server quota, and if the API omits totals it uses an assumed 500-request default marked estimated. On-demand spend is the third bar when enabled. Grok Bot is **not** MeterBar's Grok provider and is **not** on usage-summary: the weekly Ultra entitlement is `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus` with the same Cursor JWT, mapped to `additionalLimits`. That fetch is optional — Cursor still shows the three usage-summary bars if the sand RPC fails. |
 | OpenRouter | `.openRouter` | User API key in Keychain → documented `/api/v1/credits` and `/api/v1/key`. |
 | Grok | `.grok` | On by default (opt-out). Official Grok Build CLI ACP stdio maps `_x.ai/billing` for the weekly gauge. Usage-limit resets (display + Redeem) come from unofficial grok.com `ConsumerUiSvc/GetRemainingResets` and `RedeemReset` using the cached OIDC token in `$GROK_HOME/auth.json` — same class as Codex wham. The token is not logged. Exhausted accounts can spend a banked reset after explicit confirmation. |
 | Claude admin | `.claude` | User Anthropic Admin key → `/v1/organizations/usage_report/messages` (50-page cap). |

@@ -59,6 +59,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
         XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 31 * 24 * 3_600)
         XCTAssertNotNil(metrics.weeklyLimit?.pace(now: Date(timeIntervalSince1970: 1_783_036_800)))
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
     func testMapSummaryFallsBackToBreakdownTotalWhenPlanLimitAbsent() throws {
@@ -300,6 +301,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertNil(metrics.sessionLimit?.windowSeconds)
         XCTAssertNil(metrics.codeReviewLimit)
         XCTAssertNotEqual(metrics.overallStatus, .critical)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
     func testMapSummaryUsesBillingCycleStartAndEndForPace() throws {
@@ -398,6 +400,208 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.used, 0)
         XCTAssertEqual(metrics.sessionLimit?.total, 100)
         XCTAssertEqual(metrics.weeklyLimit?.total, 100)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testMapSummaryWithoutSandStatusLeavesAdditionalLimitsEmpty() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    // MARK: - Grok Bot (GetSandUsageStatus)
+
+    private func decodeSand(_ json: String) throws -> CursorSandUsageStatusResponse {
+        try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: Data(json.utf8))
+    }
+
+    private let sandLiveKeysJSON = """
+    {
+      "currentPeriodStart": "2026-08-10T00:00:00.000Z",
+      "nextResetTimestampUtc": "2026-08-17T00:00:00.000Z",
+      "usagePercent": 18.5,
+      "hasAvailableUsage": true,
+      "hasNonZeroIncludedLimit": true
+    }
+    """
+
+    func testSandUsageStatusDecodesLiveKeySet() throws {
+        let status = try decodeSand(sandLiveKeysJSON)
+
+        XCTAssertEqual(status.currentPeriodStart, "2026-08-10T00:00:00.000Z")
+        XCTAssertEqual(status.nextResetTimestampUtc, "2026-08-17T00:00:00.000Z")
+        XCTAssertEqual(status.usagePercent, 18.5)
+        XCTAssertEqual(status.hasAvailableUsage, true)
+        XCTAssertEqual(status.hasNonZeroIncludedLimit, true)
+    }
+
+    func testMapSummaryAttachesGrokBotWeeklyPercentPoolFromSandStatus() throws {
+        let summary = """
+        {
+          "billingCycleStart": "2026-08-01T00:00:00Z",
+          "billingCycleEnd": "2026-09-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 },
+            "onDemand": { "used": 2, "limit": 10, "enabled": true }
+          }
+        }
+        """
+        let sand = """
+        {
+          "currentPeriodStart": "2026-08-10T00:00:00Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00Z",
+          "usagePercent": 18.5,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 2)
+        XCTAssertEqual(metrics.additionalLimits.count, 1)
+        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(grokBot.used, 18.5)
+        XCTAssertEqual(grokBot.total, ServiceType.cursorIncludedPoolTotal)
+        XCTAssertEqual(grokBot.periodKind, .weekly)
+        XCTAssertEqual(grokBot.isEstimated, false)
+        XCTAssertEqual(grokBot.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
+        XCTAssertEqual(grokBot.windowSeconds, 7 * 24 * 3_600)
+        XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: grokBot), .grokBot)
+    }
+
+    func testMapSandOmitsWindowWhenPeriodStartMissing() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let sand = """
+        {
+          "nextResetTimestampUtc": "2026-08-17T00:00:00Z",
+          "usagePercent": 12,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(grokBot.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
+        XCTAssertNil(grokBot.windowSeconds, "Start missing must not invent a 7-day window")
+    }
+
+    func testMapSandOmitsWindowWhenDurationIsNotPositive() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let equal = """
+        {
+          "currentPeriodStart": "2026-08-17T00:00:00Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00Z",
+          "usagePercent": 12,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let inverted = """
+        {
+          "currentPeriodStart": "2026-08-17T00:00:00Z",
+          "nextResetTimestampUtc": "2026-08-10T00:00:00Z",
+          "usagePercent": 12,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+
+        for sand in [equal, inverted] {
+            let metrics = CursorLocalService.mapSummary(
+                try decodeSummary(summary),
+                sandStatus: try decodeSand(sand)
+            )
+            let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+            XCTAssertNil(grokBot.windowSeconds)
+        }
+    }
+
+    func testMapSandOmitsBarWhenUsagePercentMissing() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let sand = """
+        {
+          "currentPeriodStart": "2026-08-10T00:00:00Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00Z",
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+    }
+
+    func testMapSandOmitsBarWhenUsesPooledEnterpriseAllowance() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let sand = """
+        {
+          "usagePercent": 40,
+          "hasNonZeroIncludedLimit": true,
+          "usesPooledEnterpriseAllowance": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testMapSandOmitsPhantomZeroWhenIncludedLimitIsZero() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let sand = """
+        {
+          "usagePercent": 0,
+          "hasNonZeroIncludedLimit": false
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testMapSandKeepsZeroPercentWhenIncludedLimitIsNonZero() throws {
+        let summary = #"{ "individualUsage": { "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 } } }"#
+        let sand = """
+        {
+          "usagePercent": 0,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(grokBot.used, 0)
+        XCTAssertEqual(grokBot.total, 100)
+        XCTAssertEqual(grokBot.periodKind, .weekly)
+    }
+
+    func testAiserverHeadersCarryBearerAndConnectContract() {
+        let headers = CursorLocalService.aiserverHeaders(token: "dummy-token")
+
+        XCTAssertEqual(headers["Authorization"], "Bearer dummy-token")
+        XCTAssertEqual(headers["Connect-Protocol-Version"], "1")
+        XCTAssertEqual(headers["Content-Type"], "application/json")
+        XCTAssertEqual(headers["x-cursor-client-type"], "ide")
+        XCTAssertFalse((headers["Authorization"] ?? "").contains("cursorAuth"))
     }
 
     // MARK: - Poll observations

@@ -116,6 +116,9 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case cursorModels
         case accountCredits
         case otherModels
+        /// Cursor Ultra weekly Grok Bot usage pool. Distinct from MeterBar's
+        /// `.grok` provider and from the weekly-slot **Other Models** bar.
+        case grokBot
         case monthly
         case weekly
         case daily
@@ -139,6 +142,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
             case .cursorModels: return "Cursor Models"
             case .accountCredits: return "Account credits"
             case .otherModels: return "Other Models"
+            case .grokBot: return "Grok Bot"
             case .monthly: return "Monthly"
             case .weekly: return "Weekly"
             case .daily: return "Daily"
@@ -249,8 +253,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var weeklyQuotaTitle: String { weeklyQuotaTitle(limitTotal: nil) }
 
     /// Title for a reported period that did not land in a named slot.
+    ///
+    /// Cursor Ultra's weekly Grok Bot pool is an additional percent-of-100
+    /// bar. The weekly *slot* with the same shape stays **Other Models**.
     public func additionalQuotaTitleKey(for limit: UsageLimit) -> QuotaTitleKey {
-        quotaTitleKey(for: limit.periodKind, limitTotal: limit.total, unspecified: .quota)
+        if self == .cursor,
+           limit.periodKind == .weekly,
+           Self.isCursorIncludedPool(total: limit.total) {
+            return .grokBot
+        }
+        return quotaTitleKey(for: limit.periodKind, limitTotal: limit.total, unspecified: .quota)
     }
 
     /// Shared cadence → title mapping. `session` / `weekly` keep each

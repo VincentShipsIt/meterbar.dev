@@ -93,10 +93,20 @@ final class DemoDataTests: XCTestCase {
         XCTAssertNotNil(metrics[.claudeCode]?.extraUsage)
         XCTAssertNotNil(metrics[.grok]?.extraUsage)
         XCTAssertNil(metrics[.grok]?.sessionLimit)
-        // Cursor mirrors the real percent-pool mapping: no window seconds,
-        // so no pace label is ever produced.
+        // Cursor included pools have no window seconds, so no pace label.
+        // Grok Bot is a separate weekly additional bar with a ~7-day window.
         XCTAssertNil(metrics[.cursor]?.sessionLimit?.pace(now: now))
         XCTAssertNil(metrics[.cursor]?.weeklyLimit?.pace(now: now))
+        XCTAssertEqual(metrics[.cursor]?.additionalLimits.count, 1)
+        XCTAssertEqual(metrics[.cursor]?.additionalLimits.first?.periodKind, .weekly)
+        XCTAssertEqual(metrics[.cursor]?.additionalLimits.first?.total, ServiceType.cursorIncludedPoolTotal)
+        XCTAssertEqual(
+            ServiceType.cursor.additionalQuotaTitleKey(
+                for: metrics[.cursor]?.additionalLimits.first
+                    ?? UsageLimit(used: 0, total: 0, resetTime: nil)
+            ),
+            .grokBot
+        )
     }
 
     // MARK: - Cost summary: non-alarming, synthetic breakdowns only
@@ -195,6 +205,7 @@ final class DemoDataTests: XCTestCase {
     private func allWindows(in metrics: [ServiceType: UsageMetrics]) -> [UsageLimit] {
         metrics.values.flatMap { metric in
             [metric.sessionLimit, metric.weeklyLimit, metric.codeReviewLimit].compactMap { $0 }
+                + metric.additionalLimits
         }
     }
 }

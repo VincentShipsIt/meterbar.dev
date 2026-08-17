@@ -59,6 +59,9 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public let preservesLegacyOpenRouterBalance: Bool
     public let resetTime: Date?
     public let freshnessDate: Date?
+    /// Extra periods use `additionalQuotaTitleKey` so a Cursor weekly
+    /// percent-pool bar titles as Grok Bot, not Other Models.
+    public let isAdditionalLimit: Bool
 
     /// Which quota title this row resolves to, before any language is chosen.
     ///
@@ -67,6 +70,9 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// change here reaches the localized widget instead of silently diverging
     /// from it.
     public var quotaTitleKey: ServiceType.QuotaTitleKey {
+        if isAdditionalLimit, let limit {
+            return service.additionalQuotaTitleKey(for: limit)
+        }
         if let periodKind = limit?.periodKind {
             switch periodKind {
             case .daily:
@@ -401,7 +407,8 @@ public enum WidgetPresentationPlanner {
                 preservesLegacyOpenRouterBalance: source.service == .openRouter
                     && preferences.preservesLegacyOpenRouterBalance,
                 resetTime: preferences.showsResetTime ? limit.resetTime : nil,
-                freshnessDate: preferences.showsFreshness ? metrics.lastUpdated : nil
+                freshnessDate: preferences.showsFreshness ? metrics.lastUpdated : nil,
+                isAdditionalLimit: true
             )
         }
     }
@@ -437,7 +444,8 @@ public enum WidgetPresentationPlanner {
             preservesLegacyOpenRouterBalance: source.service == .openRouter
                 && preferences.preservesLegacyOpenRouterBalance,
             resetTime: preferences.showsResetTime ? limit?.resetTime : nil,
-            freshnessDate: preferences.showsFreshness ? source.metrics?.lastUpdated : nil
+            freshnessDate: preferences.showsFreshness ? source.metrics?.lastUpdated : nil,
+            isAdditionalLimit: false
         )
     }
 

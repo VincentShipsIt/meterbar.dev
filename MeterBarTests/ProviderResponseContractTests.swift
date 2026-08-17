@@ -170,6 +170,47 @@ final class ProviderResponseContractTests: XCTestCase {
         XCTAssertEqual(plan.used, 495)
     }
 
+    func testCursorSandUsageStatusDecodesLiveKeySet() throws {
+        // Grok Bot weekly entitlement. Not usage-summary — Connect RPC
+        // DashboardService/GetSandUsageStatus. Live 2026-08-17 keys.
+        let json = #"""
+        {
+          "currentPeriodStart": "2026-08-10T00:00:00.000Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00.000Z",
+          "usagePercent": 18.5,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true
+        }
+        """#
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: data)
+
+        XCTAssertEqual(response.currentPeriodStart, "2026-08-10T00:00:00.000Z")
+        XCTAssertEqual(response.nextResetTimestampUtc, "2026-08-17T00:00:00.000Z")
+        XCTAssertEqual(response.usagePercent, 18.5)
+        XCTAssertEqual(response.hasAvailableUsage, true)
+        XCTAssertEqual(response.hasNonZeroIncludedLimit, true)
+    }
+
+    func testCursorSandUsageStatusDecodesOptionalProtoFields() throws {
+        let json = #"""
+        {
+          "usagePercent": 4,
+          "hasNonZeroIncludedLimit": true,
+          "includedLimitZero": false,
+          "availableBankedResetCount": 1,
+          "usesPooledEnterpriseAllowance": false
+        }
+        """#
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: data)
+
+        XCTAssertEqual(response.usagePercent, 4)
+        XCTAssertEqual(response.includedLimitZero, false)
+        XCTAssertEqual(response.availableBankedResetCount, 1)
+        XCTAssertEqual(response.usesPooledEnterpriseAllowance, false)
+    }
+
     func testCursorSparseResponseDecodes() throws {
         // Every field is optional; an empty object must not throw.
         let data = try XCTUnwrap("{}".data(using: .utf8))

@@ -17,6 +17,11 @@ class CursorLocalService: ObservableObject {
     // API endpoint (from Vibeviewer: https://github.com/MarveleE/Vibeviewer)
     private let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
 
+    /// Cursor Ultra weekly Grok Bot entitlement. Not MeterBar's Grok
+    /// provider and not present on `/api/usage-summary`.
+    private let sandUsageEndpoint =
+        "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
+
     // Shared URLSession with the standard usage-request timeouts
     private let urlSession = ServiceSupport.session
 
@@ -258,8 +263,11 @@ class CursorLocalService: ObservableObject {
 
         // Fetch usage summary data (uses /api/usage-summary endpoint)
         let summaryData = try await fetchUsageSummary(userId: userId, token: token)
+        // Grok Bot weekly pool is a separate optional Connect RPC. Failure
+        // must not drop the three usage-summary bars.
+        let sandStatus = await fetchSandUsageStatus(token: token)
 
-        let metrics = CursorLocalService.mapSummary(summaryData)
+        let metrics = CursorLocalService.mapSummary(summaryData, sandStatus: sandStatus)
 
         // Clear any previous errors on success
         await MainActor.run {
@@ -339,11 +347,19 @@ class CursorLocalService: ObservableObject {
     /// (`plan.limit`, else `plan.breakdown`, else the legacy flat `plan.total`);
     /// only when the selected shape carries none of those is the assumed quota
     /// substituted and flagged `isEstimated`.
-    static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
+    ///
+    /// Optional `sandStatus` is Cursor Ultra's weekly Grok Bot pool. It is
+    /// attached as `additionalLimits` when the payload maps; omitted status
+    /// leaves the three usage-summary bars unchanged.
+    static func mapSummary(
+        _ summaryData: CursorUsageSummaryResponse,
+        sandStatus: CursorSandUsageStatusResponse? = nil
+    ) -> UsageMetrics {
         let cycle = billingCycle(from: summaryData)
 
         let usage = selectedUsage(from: summaryData)
         let plan = usage.plan
+        let additionalLimits = [sandStatus].compactMap(mapSandUsage)
 
         if let autoPercent = plan?.autoPercentUsed, let apiPercent = plan?.apiPercentUsed {
             return UsageMetrics(
@@ -362,7 +378,8 @@ class CursorLocalService: ObservableObject {
                     from: usage.onDemand,
                     resetTime: cycle.resetTime,
                     windowSeconds: cycle.windowSeconds
-                )
+                ),
+                additionalLimits: additionalLimits
             )
         }
 
@@ -388,7 +405,43 @@ class CursorLocalService: ObservableObject {
                 windowSeconds: cycle.windowSeconds,
                 isEstimated: planTotalIsEstimated
             ),
-            codeReviewLimit: nil
+            codeReviewLimit: nil,
+            additionalLimits: additionalLimits
+        )
+    }
+
+    /// Cursor Ultra weekly Grok Bot pool. Matches Grok Bot.app's omit rules
+    /// plus MeterBar's "no phantom 0% bar without a grant" rule.
+    static func mapSandUsage(_ status: CursorSandUsageStatusResponse?) -> UsageLimit? {
+        guard let status else { return nil }
+        guard let usagePercent = status.usagePercent, usagePercent.isFinite else {
+            return nil
+        }
+        if status.usesPooledEnterpriseAllowance == true {
+            return nil
+        }
+        let used = max(0, usagePercent)
+        if status.hasNonZeroIncludedLimit == false, used <= 0 {
+            return nil
+        }
+
+        let start = status.currentPeriodStart.flatMap(FlexibleISO8601.date(from:))
+        let end = status.nextResetTimestampUtc.flatMap(FlexibleISO8601.date(from:))
+        let windowSeconds: TimeInterval?
+        if let start, let end {
+            let duration = end.timeIntervalSince(start)
+            windowSeconds = duration > 0 ? duration : nil
+        } else {
+            windowSeconds = nil
+        }
+
+        return UsageLimit(
+            used: used,
+            total: ServiceType.cursorIncludedPoolTotal,
+            resetTime: end,
+            windowSeconds: windowSeconds,
+            isEstimated: false,
+            periodKind: .weekly
         )
     }
 
@@ -484,6 +537,21 @@ class CursorLocalService: ObservableObject {
         return headers
     }
 
+    /// Connect-RPC headers for DashboardService/GetSandUsageStatus.
+    /// Auth is the same Cursor JWT already read from `state.vscdb`.
+    /// Static so the header contract can be asserted without a live token.
+    static func aiserverHeaders(token: String) -> [String: String] {
+        [
+            "Content-Type": "application/json",
+            "Authorization": "Bearer \(token)",
+            "Connect-Protocol-Version": "1",
+            "x-ghost-mode": "true",
+            "x-request-id": UUID().uuidString,
+            "x-cursor-client-type": "ide",
+            "x-cursor-client-version": "1.0.0",
+        ]
+    }
+
     private func fetchUsageSummary(userId: String, token: String) async throws -> CursorUsageSummaryResponse {
         guard let url = URL(string: usageSummaryEndpoint) else {
             throw ServiceError.invalidURL
@@ -511,6 +579,35 @@ class CursorLocalService: ObservableObject {
                 }
             }
             throw serviceError
+        }
+    }
+
+    /// Optional Grok Bot weekly status. Network, 401, and decode failures
+    /// return nil so the required usage-summary path still succeeds.
+    private func fetchSandUsageStatus(token: String) async -> CursorSandUsageStatusResponse? {
+        guard let url = URL(string: sandUsageEndpoint) else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.timeoutInterval = ServiceSupport.usageRequestTimeout
+
+        for (key, value) in Self.aiserverHeaders(token: token) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            try ServiceSupport.validate(response, data: data)
+            return try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: data)
+        } catch {
+            let serviceError = ServiceSupport.serviceError(from: error)
+            AppLog.usage.error(
+                "Cursor Grok Bot usage fetch failed: \(serviceError.localizedDescription, privacy: .public)"
+            )
+            return nil
         }
     }
 }
@@ -594,4 +691,17 @@ nonisolated struct CursorOnDemandUsage: Decodable {
 nonisolated struct CursorTeamUsage: Decodable {
     let plan: CursorPlanUsage?
     let onDemand: CursorOnDemandUsage?
+}
+
+/// Response from `POST …/DashboardService/GetSandUsageStatus`.
+/// Cursor Ultra weekly Grok Bot entitlement. Live keys are camelCase.
+nonisolated struct CursorSandUsageStatusResponse: Decodable {
+    let currentPeriodStart: String?
+    let nextResetTimestampUtc: String?
+    let usagePercent: Double?
+    let hasAvailableUsage: Bool?
+    let hasNonZeroIncludedLimit: Bool?
+    let includedLimitZero: Bool?
+    let availableBankedResetCount: Int?
+    let usesPooledEnterpriseAllowance: Bool?
 }

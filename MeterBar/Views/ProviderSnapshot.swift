@@ -284,6 +284,8 @@ struct SnapshotLimit: Identifiable {
             return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
         case .otherModels:
             return String(localized: "quota.title.other_models", defaultValue: "Other Models")
+        case .grokBot:
+            return String(localized: "quota.title.grok_bot", defaultValue: "Grok Bot")
         case .monthly:
             return String(localized: "quota.title.monthly", defaultValue: "Monthly")
         case .weekly:
