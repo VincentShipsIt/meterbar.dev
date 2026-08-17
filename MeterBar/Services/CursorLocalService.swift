@@ -340,10 +340,7 @@ class CursorLocalService: ObservableObject {
     /// only when the selected shape carries none of those is the assumed quota
     /// substituted and flagged `isEstimated`.
     static func mapSummary(_ summaryData: CursorUsageSummaryResponse) -> UsageMetrics {
-        var resetTime: Date?
-        if let billingEnd = summaryData.billingCycleEnd {
-            resetTime = FlexibleISO8601.date(from: billingEnd)
-        }
+        let cycle = billingCycle(from: summaryData)
 
         let usage = selectedUsage(from: summaryData)
         let plan = usage.plan
@@ -351,9 +348,21 @@ class CursorLocalService: ObservableObject {
         if let autoPercent = plan?.autoPercentUsed, let apiPercent = plan?.apiPercentUsed {
             return UsageMetrics(
                 service: .cursor,
-                sessionLimit: percentPoolLimit(autoPercent, resetTime: resetTime),
-                weeklyLimit: percentPoolLimit(apiPercent, resetTime: resetTime),
-                codeReviewLimit: onDemandLimit(from: usage.onDemand, resetTime: resetTime)
+                sessionLimit: percentPoolLimit(
+                    autoPercent,
+                    resetTime: cycle.resetTime,
+                    windowSeconds: cycle.windowSeconds
+                ),
+                weeklyLimit: percentPoolLimit(
+                    apiPercent,
+                    resetTime: cycle.resetTime,
+                    windowSeconds: cycle.windowSeconds
+                ),
+                codeReviewLimit: onDemandLimit(
+                    from: usage.onDemand,
+                    resetTime: cycle.resetTime,
+                    windowSeconds: cycle.windowSeconds
+                )
             )
         }
 
@@ -367,31 +376,59 @@ class CursorLocalService: ObservableObject {
         // the legacy title for this window is "Monthly".
         return UsageMetrics(
             service: .cursor,
-            sessionLimit: onDemandLimit(from: usage.onDemand, resetTime: resetTime),
+            sessionLimit: onDemandLimit(
+                from: usage.onDemand,
+                resetTime: cycle.resetTime,
+                windowSeconds: cycle.windowSeconds
+            ),
             weeklyLimit: UsageLimit(
                 used: planUsed,
                 total: planTotal,
-                resetTime: resetTime,
+                resetTime: cycle.resetTime,
+                windowSeconds: cycle.windowSeconds,
                 isEstimated: planTotalIsEstimated
             ),
             codeReviewLimit: nil
         )
     }
 
+    /// `billingCycleEnd` is the reset. `end − start` is the real cycle length
+    /// when both parse and the duration is positive — no assumed 30-day month.
+    private static func billingCycle(
+        from summary: CursorUsageSummaryResponse
+    ) -> (resetTime: Date?, windowSeconds: TimeInterval?) {
+        let start = summary.billingCycleStart.flatMap(FlexibleISO8601.date(from:))
+        let end = summary.billingCycleEnd.flatMap(FlexibleISO8601.date(from:))
+        let windowSeconds: TimeInterval?
+        if let start, let end {
+            let duration = end.timeIntervalSince(start)
+            windowSeconds = duration > 0 ? duration : nil
+        } else {
+            windowSeconds = nil
+        }
+        return (end, windowSeconds)
+    }
+
     /// One included pool as the dashboard draws it: `used` is already a
     /// 0…100 percent, so the denominator is 100 rather than a request grant.
-    private static func percentPoolLimit(_ percentUsed: Double, resetTime: Date?) -> UsageLimit {
+    private static func percentPoolLimit(
+        _ percentUsed: Double,
+        resetTime: Date?,
+        windowSeconds: TimeInterval?
+    ) -> UsageLimit {
         UsageLimit(
             used: max(0, percentUsed),
             total: ServiceType.cursorIncludedPoolTotal,
             resetTime: resetTime,
+            windowSeconds: windowSeconds,
             isEstimated: false
         )
     }
 
     private static func onDemandLimit(
         from onDemand: CursorOnDemandUsage?,
-        resetTime: Date?
+        resetTime: Date?,
+        windowSeconds: TimeInterval?
     ) -> UsageLimit? {
         guard let onDemand, onDemand.enabled == true else { return nil }
         let onDemandUsed = Double(onDemand.used ?? 0)
@@ -401,6 +438,7 @@ class CursorLocalService: ObservableObject {
             used: onDemandUsed,
             total: onDemandLimit > 0 ? onDemandLimit : onDemandUsed * onDemandHeadroomMultiplier,
             resetTime: resetTime,
+            windowSeconds: windowSeconds,
             isEstimated: onDemandLimit <= 0
         )
     }
