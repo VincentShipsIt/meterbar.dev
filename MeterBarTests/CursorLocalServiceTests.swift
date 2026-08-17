@@ -53,9 +53,12 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.total, 750)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
+        XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 31 * 24 * 3_600)
         XCTAssertEqual(metrics.sessionLimit?.used, 4)
         XCTAssertEqual(metrics.sessionLimit?.total, 20)
         XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
+        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 31 * 24 * 3_600)
+        XCTAssertNotNil(metrics.weeklyLimit?.pace(now: Date(timeIntervalSince1970: 1_783_036_800)))
     }
 
     func testMapSummaryFallsBackToBreakdownTotalWhenPlanLimitAbsent() throws {
@@ -293,8 +296,59 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.used, 64)
         XCTAssertEqual(metrics.weeklyLimit?.total, 100)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
+        XCTAssertNil(metrics.weeklyLimit?.windowSeconds, "End without start cannot invent a cycle length")
+        XCTAssertNil(metrics.sessionLimit?.windowSeconds)
         XCTAssertNil(metrics.codeReviewLimit)
         XCTAssertNotEqual(metrics.overallStatus, .critical)
+    }
+
+    func testMapSummaryUsesBillingCycleStartAndEndForPace() throws {
+        let json = """
+        {
+          "billingCycleStart": "2026-08-10T00:00:00Z",
+          "billingCycleEnd": "2026-09-10T00:00:00Z",
+          "individualUsage": {
+            "plan": {
+              "autoPercentUsed": 30,
+              "apiPercentUsed": 100
+            },
+            "onDemand": { "used": 2, "limit": 10, "enabled": true }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let expectedWindow = 31 * 24 * 3_600.0
+        let reset = FlexibleISO8601.date(from: "2026-09-10T00:00:00Z")
+
+        XCTAssertEqual(metrics.sessionLimit?.resetTime, reset)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, reset)
+        XCTAssertEqual(metrics.codeReviewLimit?.resetTime, reset)
+        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, expectedWindow)
+        XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, expectedWindow)
+        XCTAssertEqual(metrics.codeReviewLimit?.windowSeconds, expectedWindow)
+
+        let start = try XCTUnwrap(FlexibleISO8601.date(from: "2026-08-10T00:00:00Z"))
+        let now = start.addingTimeInterval(15 * 24 * 3_600)
+        XCTAssertNotNil(metrics.sessionLimit?.pace(now: now))
+        XCTAssertNotNil(metrics.weeklyLimit?.pace(now: now))
+    }
+
+    func testMapSummaryIgnoresNonPositiveBillingCycleDuration() throws {
+        let json = """
+        {
+          "billingCycleStart": "2026-09-10T00:00:00Z",
+          "billingCycleEnd": "2026-09-10T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
+        XCTAssertNil(metrics.weeklyLimit?.windowSeconds)
+        XCTAssertNil(metrics.sessionLimit?.windowSeconds)
+        XCTAssertNil(metrics.weeklyLimit?.pace())
     }
 
     func testMapSummaryIgnoresTotalPercentUsedInFavorOfTheTwoPools() throws {
