@@ -53,6 +53,25 @@ final class WidgetBurnDownTests: XCTestCase {
         XCTAssertNotEqual(MeterBarWidgetKind.usage, MeterBarWidgetKind.burnDown)
     }
 
+    func testBurnDownPlaceholderCoversEveryProviderIncludingCursor() throws {
+        let metrics = WidgetPlaceholderMetrics.burnDown(now: now)
+        XCTAssertEqual(Set(metrics.keys), Set(ServiceType.allCases))
+        XCTAssertNotNil(metrics[.cursor], "Burn Down placeholder omitted Cursor")
+        for service in ServiceType.allCases {
+            let metric = try? XCTUnwrap(metrics[service], "\(service) missing from Burn Down placeholder")
+            XCTAssertEqual(metric?.service, service)
+            XCTAssertNotNil(metric?.weeklyLimit, "\(service) placeholder has no weekly window")
+            XCTAssertEqual(metric?.lastUpdated, now, "\(service)")
+        }
+
+        let cursorOnly = presentation(
+            metrics: [ .cursor: try XCTUnwrap(metrics[.cursor]) ],
+            family: .small
+        )
+        XCTAssertEqual(cursorOnly.rows.map(\.service), [.cursor])
+        XCTAssertNil(cursorOnly.emptyState)
+    }
+
     func testReservePaceCountsDownToReset() throws {
         let resetTime = now.addingTimeInterval(2.5 * 60 * 60)
         let row = try XCTUnwrap(
