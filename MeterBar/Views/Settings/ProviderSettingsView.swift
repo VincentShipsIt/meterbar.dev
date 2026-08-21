@@ -784,6 +784,10 @@ struct ProviderSettingsView: View {
                                 Task { await dataManager.refreshAll() }
                             },
                             onRemove: {
+                                // Eligibility first: a rejected last-enabled
+                                // removal must not have already deleted the
+                                // credential.
+                                guard openRouterAccountStore.canRemoveAccount(id: account.id) else { return }
                                 openRouterService.removeAPIKey(for: account.id)
                                 openRouterAccountStore.removeAccount(id: account.id)
                                 reconcileProviderAccountSelections()
@@ -1067,6 +1071,7 @@ struct ProviderSettingsView: View {
                 claudeAccounts: claudeAccountStore.accounts,
                 codexAccounts: codexAccountStore.accounts,
                 grokAccounts: grokAccountStore.accounts,
+                openRouterAccounts: openRouterAccountStore.accounts,
                 enabledServices: providerVisibility.enabledServices
             ),
             menuBarSelection: menuBarAccountSelection,

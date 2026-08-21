@@ -618,12 +618,15 @@ enum ProviderSnapshotBuilder {
             probed = input.cursorHasAccess
             usesAPIKey = false
         case .openRouter:
-            // Per-key health when the card is key-scoped; the provider-wide
-            // aggregate falls back to the service-level probe and error.
-            lastError = accountID.flatMap { input.lastErrors.openRouterAccounts[$0] }
-                ?? input.lastErrors.openRouter
-            probed = accountID.flatMap { input.openRouterAccountAccess[$0] }
-                ?? input.openRouterAccountAccess.values.first { $0 }
+            // A key-scoped card speaks only about its own key: another key's
+            // failure or missing credential must never dim this card.
+            if let accountID {
+                lastError = input.lastErrors.openRouterAccounts[accountID]
+                probed = input.openRouterAccountAccess[accountID]
+            } else {
+                lastError = input.lastErrors.openRouter
+                probed = input.openRouterAccountAccess.values.first { $0 }
+            }
             usesAPIKey = true
         case .claudeCode:
             lastError = nil

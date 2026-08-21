@@ -71,6 +71,9 @@ final class OpenRouterService: ObservableObject {
         let deleted = keychain.delete(key: Self.keychainKey(for: accountID))
         accountLastErrors[accountID] = nil
         latestAccountObservations[accountID] = nil
+        if accountLastErrors.values.allSatisfy({ $0 == nil }) {
+            lastError = nil
+        }
         return deleted
     }
 
@@ -85,6 +88,11 @@ final class OpenRouterService: ObservableObject {
             let fetched = try await Self.fetchRemotely(apiKey: apiKey, fetchData: fetchData)
             accountLastErrors[account.id] = nil
             latestAccountObservations[account.id] = fetched.observation
+            // The aggregate clears only when every managed key is healthy;
+            // otherwise another key's failure remains the provider-wide state.
+            if accountLastErrors.values.allSatisfy({ $0 == nil }) {
+                lastError = nil
+            }
             return fetched.metrics
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
@@ -198,15 +206,17 @@ final class OpenRouterService: ObservableObject {
     ///
     /// Running totals simply sum — each key reports its own spend. The
     /// authoritative daily total sums only when *every* polled key published
-    /// `usage_daily`; a partial sum would understate the day while looking
-    /// authoritative, so a missing report falls back to the delta path instead.
+    /// `usage_daily` (`allowsAuthoritativeDaily` additionally requires the
+    /// poll itself to be complete — a key that failed this poll would make any
+    /// daily sum understate the day); otherwise the delta path takes over.
     nonisolated static func aggregatedObservation(
         _ observations: [ProviderUsageObservation],
-        observedAt: Date
+        observedAt: Date,
+        allowsAuthoritativeDaily: Bool = true
     ) -> ProviderUsageObservation? {
         guard !observations.isEmpty else { return nil }
         let dailies = observations.map(\.authoritativeDailyTotal)
-        let authoritativeDaily: Double? = dailies.allSatisfy(\.isNotNil)
+        let authoritativeDaily: Double? = allowsAuthoritativeDaily && dailies.allSatisfy(\.isNotNil)
             ? dailies.compactMap { $0 }.reduce(0, +)
             : nil
         return ProviderUsageObservation(

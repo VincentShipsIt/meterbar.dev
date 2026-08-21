@@ -97,7 +97,8 @@ struct DashboardDiagnosticsSection: View {
                 .filter { !$0.isDefault }
                 .map(\.id),
             enabledCodexAccountIDs: codexAccountStore.enabledAccounts.map(\.id),
-            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id)
+            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id),
+            enabledOpenRouterKeyIDs: openRouterAccountStore.enabledAccounts.map(\.id)
         )
     }
 

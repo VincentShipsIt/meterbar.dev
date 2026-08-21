@@ -43,12 +43,13 @@ struct GeneralSettingsView: View {
     /// Explains a rejected menu-bar account selection; nil while under the cap.
     @State private var capNotice: String?
 
-    /// Every tracked Claude/Codex account, already sanitized for display.
+    /// Every tracked account-aware provider profile, already sanitized for display.
     private var menuBarAccounts: [MenuBarAccountIdentity] {
         MenuBarAccountCatalog.identities(
             claudeAccounts: claudeAccountStore.accounts,
             codexAccounts: codexAccountStore.accounts,
             grokAccounts: grokAccountStore.accounts,
+            openRouterAccounts: openRouterAccountStore.accounts,
             enabledServices: providerVisibility.enabledServices
         )
     }

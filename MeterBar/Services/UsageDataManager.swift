@@ -1414,6 +1414,10 @@ class UsageDataManager: ObservableObject {
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
+        // Keys that succeeded *this poll*. Only their observations fold into
+        // the ledger — a key that failed keeps a stale counter from an earlier
+        // poll, and summing it in would look like spend moved when it didn't.
+        var polledObservations: [ProviderUsageObservation] = []
 
         let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
             let account = enabledAccounts[index]
@@ -1427,6 +1431,9 @@ class UsageDataManager: ObservableObject {
             if let metrics = leg.metrics {
                 refreshedMetrics[account.id] = metrics
                 successCount += 1
+                if let observation = openRouterService.latestAccountObservations[account.id] {
+                    polledObservations.append(observation)
+                }
             } else if let error = leg.error {
                 // A keyless account is a skip, not a failure, and must not
                 // resurrect a stale cache — same semantics as Codex/Grok.
@@ -1444,7 +1451,10 @@ class UsageDataManager: ObservableObject {
             parseHealthStore.recordFailure(.openRouter, error: firstFailure)
         }
 
-        recordOpenRouterLedgerObservation(successCount: successCount)
+        recordOpenRouterLedgerObservation(
+            polledObservations,
+            allowsAuthoritativeDaily: successCount == enabledAccounts.count
+        )
 
         return AccountFetchResult(
             metrics: refreshedMetrics,
@@ -1454,15 +1464,18 @@ class UsageDataManager: ObservableObject {
     }
 
     /// Folds this poll's per-key spend readings into the single provider-wide
-    /// ledger entry. Keys that failed keep their previous contribution out of
-    /// the sum — a partial poll must not look like spend went backwards.
-    private func recordOpenRouterLedgerObservation(successCount: Int) {
-        guard !demoMode, let store = usageLedgerStore, successCount > 0 else { return }
-        let polledKeys = openRouterAccountStore.enabledAccounts.filter {
-            openRouterService.latestAccountObservations[$0.id] != nil
-        }
-        let observations = polledKeys.compactMap { openRouterService.latestAccountObservations[$0.id] }
-        guard let aggregated = OpenRouterService.aggregatedObservation(observations, observedAt: Date()) else {
+    /// ledger entry. Only keys that succeeded this poll contribute; the sum of
+    /// a partial poll is still honest because each key's counter is its own.
+    private func recordOpenRouterLedgerObservation(
+        _ observations: [ProviderUsageObservation],
+        allowsAuthoritativeDaily: Bool
+    ) {
+        guard !demoMode, let store = usageLedgerStore, !observations.isEmpty else { return }
+        guard let aggregated = OpenRouterService.aggregatedObservation(
+            observations,
+            observedAt: Date(),
+            allowsAuthoritativeDaily: allowsAuthoritativeDaily
+        ) else {
             return
         }
 

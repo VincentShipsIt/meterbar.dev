@@ -18,6 +18,7 @@ struct ProviderAccountSelectionAvailability {
         claudeAccounts: [ClaudeCodeAccount],
         codexAccounts: [CodexAccount],
         grokAccounts: [GrokAccount],
+        openRouterAccounts: [OpenRouterAccount] = [],
         enabledServices: Set<ServiceType>
     ) {
         menuBarKeys = Set(
@@ -25,6 +26,7 @@ struct ProviderAccountSelectionAvailability {
                 claudeAccounts: claudeAccounts,
                 codexAccounts: codexAccounts,
                 grokAccounts: grokAccounts,
+                openRouterAccounts: openRouterAccounts,
                 enabledServices: enabledServices
             )
             .filter(\.isEnabled)
@@ -36,7 +38,8 @@ struct ProviderAccountSelectionAvailability {
                 enabledServices: enabledServices,
                 claudeAccounts: claudeAccounts,
                 codexAccounts: codexAccounts,
-                grokAccounts: grokAccounts
+                grokAccounts: grokAccounts,
+                openRouterAccounts: openRouterAccounts
             )
             .map(\.id)
         )

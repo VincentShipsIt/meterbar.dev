@@ -15,6 +15,9 @@ enum DiagnosticsRunner {
         let enabledClaudeCustomAccountIDs: [UUID]
         var enabledCodexAccountIDs: [UUID] = []
         var enabledGrokAccountIDs: [UUID] = []
+        /// Keys participate in the diagnostics re-run trigger like every other
+        /// provider's accounts.
+        var enabledOpenRouterKeyIDs: [UUID] = []
     }
 
     static func refreshErrors(

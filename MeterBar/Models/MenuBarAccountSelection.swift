@@ -102,6 +102,7 @@ nonisolated enum MenuBarAccountCatalog {
         claudeAccounts: [ClaudeCodeAccount],
         codexAccounts: [CodexAccount],
         grokAccounts: [GrokAccount] = [],
+        openRouterAccounts: [OpenRouterAccount] = [],
         enabledServices: Set<ServiceType>
     ) -> [MenuBarAccountIdentity] {
         let claude = claudeAccounts.map { account in
@@ -128,7 +129,15 @@ nonisolated enum MenuBarAccountCatalog {
                 isEnabled: account.isEnabled && enabledServices.contains(.grok)
             )
         }
-        return claude + codex + grok
+        let openRouter = openRouterAccounts.map { account in
+            identity(
+                service: .openRouter,
+                accountID: account.id,
+                rawName: account.name,
+                isEnabled: account.isEnabled && enabledServices.contains(.openRouter)
+            )
+        }
+        return claude + codex + grok + openRouter
     }
 
     // MARK: Private

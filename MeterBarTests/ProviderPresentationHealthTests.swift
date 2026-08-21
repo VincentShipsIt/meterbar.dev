@@ -617,7 +617,10 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case (.cursor, .transientFailure), (.cursor, .sustainedOrParseFailure):
             lastErrors.cursor = .apiError("Cursor refresh failed")
         case (.openRouter, .transientFailure), (.openRouter, .sustainedOrParseFailure):
-            lastErrors.openRouter = .apiError("OpenRouter refresh failed")
+            // Key-scoped cards read only their own key's error.
+            lastErrors.openRouterAccounts = [
+                OpenRouterAccount.defaultID: .apiError("OpenRouter refresh failed")
+            ]
         case (.codex, .transientFailure), (.codex, .sustainedOrParseFailure):
             lastErrors.codexAccounts = [CodexAccount.defaultID: .apiError("Codex refresh failed")]
         case (.grok, .transientFailure), (.grok, .sustainedOrParseFailure):
