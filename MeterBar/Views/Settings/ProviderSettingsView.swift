@@ -690,35 +690,50 @@ struct ProviderSettingsView: View {
                     ? "Configured. Refresh validates access and updates credits."
                     : "Create a key at openrouter.ai/settings/keys."
             ) {
-                HStack(spacing: 8) {
-                    if openRouterService.hasAccess {
+                if openRouterService.hasAccess {
+                    HStack(spacing: 8) {
                         StatusPill(title: "Configured", isConnected: true)
                         Button("Remove", role: .destructive) {
                             openRouterService.removeAPIKey()
                             Task { await dataManager.refresh(service: .openRouter) }
                         }
                         .buttonStyle(.bordered)
-                    } else {
+
+                        Button("Get Key") {
+                            if let url = URL(string: "https://openrouter.ai/settings/keys") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    // The control column clamps at `controlMaxWidth` (300pt) with
+                    // `.fixedSize`, so the field and both buttons cannot share
+                    // one row — they crush into circles. The field leads and the
+                    // actions sit under it, mirroring the other provider rows.
+                    VStack(alignment: .trailing, spacing: 8) {
                         SecureField("sk-or-v1-...", text: $openRouterKeyDraft)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 260)
 
-                        Button("Save & Validate") {
-                            guard openRouterService.saveAPIKey(openRouterKeyDraft) else { return }
-                            openRouterKeyDraft = ""
-                            providerVisibility.set(.openRouter, isEnabled: true)
-                            Task { await dataManager.refresh(service: .openRouter) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
+                        HStack(spacing: 8) {
+                            Button("Save & Validate") {
+                                guard openRouterService.saveAPIKey(openRouterKeyDraft) else { return }
+                                openRouterKeyDraft = ""
+                                providerVisibility.set(.openRouter, isEnabled: true)
+                                Task { await dataManager.refresh(service: .openRouter) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    Button("Get Key") {
-                        if let url = URL(string: "https://openrouter.ai/settings/keys") {
-                            NSWorkspace.shared.open(url)
+                            Button("Get Key") {
+                                if let url = URL(string: "https://openrouter.ai/settings/keys") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
-                    .buttonStyle(.bordered)
                 }
             }
 
