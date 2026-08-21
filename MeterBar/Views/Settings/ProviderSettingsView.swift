@@ -698,6 +698,13 @@ struct ProviderSettingsView: View {
                             Task { await dataManager.refresh(service: .openRouter) }
                         }
                         .buttonStyle(.bordered)
+
+                        Button("Get Key") {
+                            if let url = URL(string: "https://openrouter.ai/settings/keys") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.bordered)
                     }
                 } else {
                     // The control column clamps at `controlMaxWidth` (300pt) with
