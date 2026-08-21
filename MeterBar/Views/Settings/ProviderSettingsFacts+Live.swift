@@ -34,12 +34,7 @@ extension ProviderSettingsFacts {
                     CursorLocalService.shared.lastError?.localizedDescription
                 )
             case .openRouter:
-                (
-                    OpenRouterService.shared.hasAccess,
-                    nil,
-                    nil,
-                    OpenRouterService.shared.lastError?.localizedDescription
-                )
+                openRouterLiveState()
             case .grok:
                 grokLiveState()
             }
@@ -95,6 +90,25 @@ extension ProviderSettingsFacts {
             service.subscriptionType,
             nil,
             service.firstError(for: accounts)?.localizedDescription
+        )
+    }
+
+    /// OpenRouter is connected when any enabled key has its Keychain item —
+    /// same any-enabled-profile semantics as Codex and Grok.
+    @MainActor
+    private static func openRouterLiveState() -> (
+        hasAccess: Bool,
+        subscription: String?,
+        tier: String?,
+        error: String?
+    ) {
+        let service = OpenRouterService.shared
+        let accounts = OpenRouterAccountStore.shared.enabledAccounts
+        return (
+            accounts.contains(where: service.canAccess(account:)),
+            nil,
+            nil,
+            service.lastError?.localizedDescription
         )
     }
 }

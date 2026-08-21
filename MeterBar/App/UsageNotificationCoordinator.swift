@@ -16,6 +16,7 @@ nonisolated protocol NotificationAccountIdentity {
 extension ClaudeCodeAccount: NotificationAccountIdentity {}
 extension CodexAccount: NotificationAccountIdentity {}
 extension GrokAccount: NotificationAccountIdentity {}
+extension OpenRouterAccount: NotificationAccountIdentity {}
 
 extension AccountNotificationIdentity {
     nonisolated init(account: some NotificationAccountIdentity) {
@@ -64,7 +65,8 @@ final class UsageNotificationCoordinator {
         isEnabled: (ServiceType) -> Bool,
         claude: NotificationAccountBundle,
         codex: NotificationAccountBundle,
-        grok: NotificationAccountBundle
+        grok: NotificationAccountBundle,
+        openRouter: NotificationAccountBundle
     ) -> [AccountNotificationPlanInput] {
         ServiceType.allCases.filter(\.hasAccountScopedNotifications).compactMap { service in
             switch service {
@@ -89,7 +91,14 @@ final class UsageNotificationCoordinator {
                     bundle: grok,
                     fallbackMetrics: metrics[.grok]
                 )
-            case .cursor, .openRouter:
+            case .openRouter:
+                return planInput(
+                    service: .openRouter,
+                    providerEnabled: isEnabled(.openRouter),
+                    bundle: openRouter,
+                    fallbackMetrics: metrics[.openRouter]
+                )
+            case .cursor:
                 assertionFailure(
                     "account-scoped notifications for \(service.rawValue) have no routing"
                 )
@@ -182,6 +191,11 @@ final class UsageNotificationCoordinator {
             GrokAccountStore.shared.$defaultAccountName.map { _ in () },
             GrokAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
         )
+        let openRouterKeyChanges = Publishers.Merge3(
+            OpenRouterAccountStore.shared.$customAccounts.map { _ in () },
+            OpenRouterAccountStore.shared.$defaultAccountName.map { _ in () },
+            OpenRouterAccountStore.shared.$defaultAccountIsEnabled.map { _ in () }
+        )
         let thresholdChanges = Publishers.Merge3(
             notificationPreferences.$isEnabled.map { _ in () },
             notificationPreferences.$warningThreshold.map { _ in () },
@@ -195,6 +209,7 @@ final class UsageNotificationCoordinator {
             claudeAccountChanges.eraseToAnyPublisher(),
             codexAccountChanges.eraseToAnyPublisher(),
             grokAccountChanges.eraseToAnyPublisher(),
+            openRouterKeyChanges.eraseToAnyPublisher(),
             visibilityChanges.eraseToAnyPublisher(),
             thresholdChanges.eraseToAnyPublisher()
         ]
@@ -263,6 +278,13 @@ final class UsageNotificationCoordinator {
                     ),
                     metrics: UsageDataManager.shared.grokAccountMetrics,
                     defaultID: GrokAccount.defaultID
+                ),
+                openRouter: NotificationAccountBundle(
+                    accounts: OpenRouterAccountStore.shared.accounts.map(
+                        AccountNotificationIdentity.init(account:)
+                    ),
+                    metrics: UsageDataManager.shared.openRouterAccountMetrics,
+                    defaultID: OpenRouterAccount.defaultID
                 )
             ),
             alreadyNotified: keys,

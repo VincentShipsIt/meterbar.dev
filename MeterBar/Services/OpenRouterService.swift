@@ -2,24 +2,29 @@ import Combine
 import Foundation
 import MeterBarShared
 
-/// Fetches OpenRouter account credits and optional per-key spending limits.
-/// The API key is stored in MeterBar's Keychain service and is only sent to
-/// OpenRouter's documented `/api/v1/credits` and `/api/v1/key` endpoints.
+/// Fetches OpenRouter account credits and optional per-key spending limits for
+/// every managed API key.
+///
+/// Each `OpenRouterAccount` owns one Keychain item keyed by its id; the key is
+/// sent only to OpenRouter's documented `/api/v1/credits` and `/api/v1/key`
+/// endpoints. The legacy single-key item (`keychainKey`) doubles as the
+/// default account's item, so pre-multi-key installs migrate without copying
+/// or rewriting anything.
 final class OpenRouterService: ObservableObject {
     nonisolated static let shared = OpenRouterService()
+    /// Legacy single-key item name — now the default account's Keychain key.
     nonisolated static let keychainKey = "openRouterAPIKey"
 
-    @Published private(set) var hasAccess: Bool
+    /// Most recent failure across all keys, cleared on any successful poll.
+    /// Aggregate surface for diagnostics views; per-key detail lives in
+    /// `accountLastErrors`.
     @Published private(set) var lastError: ServiceError?
+    /// Per-key refresh outcome, keyed by account id. Drives the Settings rows.
+    @Published private(set) var accountLastErrors: [UUID: ServiceError] = [:]
 
-    /// The running spend counter from the last successful poll.
-    ///
-    /// OpenRouter writes no session log and serves no dated history, so
-    /// differencing this scalar across polls is the only way its spend can reach
-    /// the chart at all — see `ProviderUsageLedger`. Held here rather than
-    /// returned inside `UsageMetrics`, which is serialized into the app-group
-    /// cache the widget and the CLI decode.
-    private(set) var latestUsageObservation: ProviderUsageObservation?
+    /// Latest per-key running-spend observations from the most recent polls.
+    /// `UsageDataManager` folds these into one provider-wide ledger entry.
+    private(set) var latestAccountObservations: [UUID: ProviderUsageObservation] = [:]
 
     private let keychain: KeychainManager
     private let fetchData: @Sendable (URLRequest) async throws -> Data
@@ -30,50 +35,69 @@ final class OpenRouterService: ObservableObject {
     ) {
         self.keychain = keychain
         self.fetchData = fetchData ?? Self.fetch
-        hasAccess = keychain.hasKey(key: Self.keychainKey)
+    }
+
+    /// The Keychain item name for one managed key. The default account keeps
+    /// the legacy single-key name so existing installs keep working unchanged.
+    nonisolated static func keychainKey(for accountID: UUID) -> String {
+        accountID == OpenRouterAccount.defaultID
+            ? keychainKey
+            : "\(keychainKey).\(accountID.uuidString)"
+    }
+
+    func hasKey(for accountID: UUID) -> Bool {
+        keychain.hasKey(key: Self.keychainKey(for: accountID))
+    }
+
+    /// Whether this key participates in refreshes. Sync and prompt-free: like
+    /// `KeychainManager.hasKey`, it probes attributes only and never decrypts.
+    func canAccess(account: OpenRouterAccount) -> Bool {
+        hasKey(for: account.id)
     }
 
     @discardableResult
-    func saveAPIKey(_ value: String) -> Bool {
+    func saveAPIKey(_ value: String, for accountID: UUID) -> Bool {
         let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, keychain.save(key: Self.keychainKey, value: key) else {
+        guard !key.isEmpty, keychain.save(key: Self.keychainKey(for: accountID), value: key) else {
             return false
         }
-        hasAccess = true
+        accountLastErrors[accountID] = nil
         lastError = nil
         return true
     }
 
     @discardableResult
-    func removeAPIKey() -> Bool {
-        let deleted = keychain.delete(key: Self.keychainKey)
-        hasAccess = keychain.hasKey(key: Self.keychainKey)
-        if !hasAccess {
+    func removeAPIKey(for accountID: UUID) -> Bool {
+        let deleted = keychain.delete(key: Self.keychainKey(for: accountID))
+        accountLastErrors[accountID] = nil
+        latestAccountObservations[accountID] = nil
+        if accountLastErrors.values.allSatisfy({ $0 == nil }) {
             lastError = nil
         }
         return deleted
     }
 
-    func fetchUsageMetrics() async throws -> UsageMetrics {
-        guard let apiKey = keychain.get(key: Self.keychainKey) else {
+    func fetchUsageMetrics(account: OpenRouterAccount) async throws -> UsageMetrics {
+        guard let apiKey = keychain.get(key: Self.keychainKey(for: account.id)) else {
             let error = ServiceError.notAuthenticated
-            lastError = error
-            hasAccess = false
+            accountLastErrors[account.id] = error
             throw error
         }
 
         do {
             let fetched = try await Self.fetchRemotely(apiKey: apiKey, fetchData: fetchData)
-            latestUsageObservation = fetched.observation
-            hasAccess = true
-            lastError = nil
+            accountLastErrors[account.id] = nil
+            latestAccountObservations[account.id] = fetched.observation
+            // The aggregate clears only when every managed key is healthy;
+            // otherwise another key's failure remains the provider-wide state.
+            if accountLastErrors.values.allSatisfy({ $0 == nil }) {
+                lastError = nil
+            }
             return fetched.metrics
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
+            accountLastErrors[account.id] = serviceError
             lastError = serviceError
-            if case .notAuthenticated = serviceError {
-                hasAccess = false
-            }
             throw serviceError
         }
     }
@@ -177,6 +201,34 @@ final class OpenRouterService: ObservableObject {
         )
     }
 
+    /// Folds one poll's per-key readings into the single provider-wide ledger
+    /// observation.
+    ///
+    /// Running totals simply sum — each key reports its own spend. The
+    /// authoritative daily total sums only when *every* polled key published
+    /// `usage_daily` (`allowsAuthoritativeDaily` additionally requires the
+    /// poll itself to be complete — a key that failed this poll would make any
+    /// daily sum understate the day); otherwise the delta path takes over.
+    nonisolated static func aggregatedObservation(
+        _ observations: [ProviderUsageObservation],
+        observedAt: Date,
+        allowsAuthoritativeDaily: Bool = true
+    ) -> ProviderUsageObservation? {
+        guard !observations.isEmpty else { return nil }
+        let dailies = observations.map(\.authoritativeDailyTotal)
+        let authoritativeDaily: Double? = allowsAuthoritativeDaily && dailies.allSatisfy(\.isNotNil)
+            ? dailies.compactMap { $0 }.reduce(0, +)
+            : nil
+        return ProviderUsageObservation(
+            provider: .openRouter,
+            unit: .usd,
+            runningTotal: observations.reduce(0) { $0 + $1.runningTotal },
+            authoritativeDailyTotal: authoritativeDaily,
+            dayBoundary: .utc,
+            observedAt: observedAt
+        )
+    }
+
     nonisolated private static func request(path: String, apiKey: String) throws -> URLRequest {
         guard let url = URL(string: "https://openrouter.ai/api/v1/\(path)") else {
             throw ServiceError.invalidURL
@@ -217,6 +269,10 @@ final class OpenRouterService: ObservableObject {
             return (nil, nil)
         }
     }
+}
+
+private extension Optional where Wrapped == Double {
+    var isNotNil: Bool { self != nil }
 }
 
 // `nonisolated` keeps the Codable conformances usable from the detached fetch

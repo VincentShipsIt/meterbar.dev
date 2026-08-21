@@ -56,21 +56,32 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 hasAccountScopedQuotaEvents: true
             )
         )
-        for service in [ServiceType.cursor, .openRouter] {
-            XCTAssertEqual(
-                service.capabilities,
-                ProviderCapabilities(
-                    isMultiAccount: false,
-                    supportsExtraUsage: false,
-                    supportsResetRedemption: false,
-                    supportsGuardConfigDirectory: false,
-                    supportsSessionWake: false,
-                    hasAccountScopedNotifications: false,
-                    hasAccountScopedQuotaEvents: false
-                ),
-                "\(service)"
-            )
-        }
+        XCTAssertEqual(
+            ServiceType.openRouter.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: true,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: true,
+                hasAccountScopedQuotaEvents: true
+            ),
+            "openRouter"
+        )
+        XCTAssertEqual(
+            ServiceType.cursor.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            ),
+            "cursor"
+        )
     }
 
     func testSessionWakeIsAnExplicitExceptionForGrok() {
@@ -92,8 +103,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.claudeCode))
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.codexCli))
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.grok))
+        XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.openRouter))
         XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.cursor))
-        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.openRouter))
     }
 
     func testFlatQuotaEventProvidersAreExactlyThoseWithoutAccountScopedQuotaEvents() {
@@ -184,7 +195,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 metrics: metrics,
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: Set(ServiceType.allCases)
+                enabledServices: Set(ServiceType.allCases),
+                openRouterAccounts: [.defaultAccount]
             )
         )
         XCTAssertEqual(Set(snapshots.map(\.service)), Set(ServiceType.allCases))
@@ -266,6 +278,11 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 accounts: [AccountNotificationIdentity(account: GrokAccount.defaultAccount)],
                 metrics: [GrokAccount.defaultID: MetricsFixtures.grok()],
                 defaultID: GrokAccount.defaultID
+            ),
+            openRouter: NotificationAccountBundle(
+                accounts: [AccountNotificationIdentity(account: OpenRouterAccount.defaultAccount)],
+                metrics: [OpenRouterAccount.defaultID: MetricsFixtures.openRouter()],
+                defaultID: OpenRouterAccount.defaultID
             )
         )
         XCTAssertEqual(
@@ -282,7 +299,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
         let selectable = QuotaEventSnapshotCatalog.selectableAccounts(
             claudeAccounts: [.defaultAccount],
             codexAccounts: [.defaultAccount],
-            grokAccounts: [.defaultAccount]
+            grokAccounts: [.defaultAccount],
+            openRouterAccounts: [.defaultAccount]
         )
         for service in ServiceType.allCases {
             XCTAssertTrue(
@@ -329,7 +347,9 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 codexAccounts: [.defaultAccount],
                 codexAccountMetrics: [CodexAccount.defaultID: MetricsFixtures.codexCli()],
                 grokAccounts: [.defaultAccount],
-                grokAccountMetrics: [GrokAccount.defaultID: MetricsFixtures.grok()]
+                grokAccountMetrics: [GrokAccount.defaultID: MetricsFixtures.grok()],
+                openRouterAccounts: [.defaultAccount],
+                openRouterAccountMetrics: [OpenRouterAccount.defaultID: MetricsFixtures.openRouter()]
             ),
             enabledServices: Set(ServiceType.allCases)
         )
@@ -354,7 +374,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 metrics: MetricsFixtures.allProviders(),
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: Set(ServiceType.allCases)
+                enabledServices: Set(ServiceType.allCases),
+                openRouterAccounts: [.defaultAccount]
             )
         )
         XCTAssertEqual(Set(snapshots.map(\.service)), Set(ServiceType.allCases))

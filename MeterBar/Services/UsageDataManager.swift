@@ -31,7 +31,6 @@ extension SimpleUsageProviding {
 }
 
 extension CursorLocalService: SimpleUsageProviding {}
-extension OpenRouterService: SimpleUsageProviding {}
 
 protocol ClaudeCodeUsageProviding: AnyObject {
     var hasAccess: Bool { get }
@@ -77,6 +76,19 @@ protocol GrokUsageProviding: AnyObject {
 
 extension GrokCLIUsageService: GrokUsageProviding {}
 
+/// Account-aware seam for the OpenRouter API keys. `canAccess` is a sync,
+/// prompt-free Keychain attribute probe (never a decrypt), so — unlike Codex's
+/// async probe — it can gate the leg directly.
+protocol OpenRouterUsageProviding: AnyObject {
+    func canAccess(account: OpenRouterAccount) -> Bool
+    func fetchUsageMetrics(account: OpenRouterAccount) async throws -> UsageMetrics
+    /// Per-key running-spend observations from the most recent polls, keyed by
+    /// account id. Read after the fan-out folds to build the ledger entry.
+    var latestAccountObservations: [UUID: ProviderUsageObservation] { get }
+}
+
+extension OpenRouterService: OpenRouterUsageProviding {}
+
 @MainActor
 class UsageDataManager: ObservableObject {
     static let shared = UsageDataManager(demoMode: DemoMode.isActive)
@@ -89,6 +101,7 @@ class UsageDataManager: ObservableObject {
     @Published private(set) var claudeCodeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
     @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+    @Published var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
     /// Human-readable explanation for the interval currently installed. The
@@ -117,11 +130,12 @@ class UsageDataManager: ObservableObject {
     private let claudeCodeService: ClaudeCodeUsageProviding
     private let cursorService: SimpleUsageProviding
     private let codexCliService: CodexUsageProviding
-    private let openRouterService: SimpleUsageProviding
+    private let openRouterService: OpenRouterUsageProviding
     private let grokService: GrokUsageProviding
     private let claudeCodeAccountStore: ClaudeCodeAccountStore
     private let codexAccountStore: CodexAccountStore
     private let grokAccountStore: GrokAccountStore
+    private let openRouterAccountStore: OpenRouterAccountStore
     private let providerVisibilityStore: ProviderVisibilityStore
     private let parseHealthStore: ProviderParseHealthStore
     private let refreshLockMode: UsageRefreshLockMode
@@ -164,12 +178,13 @@ class UsageDataManager: ObservableObject {
     init(
         codexCliService: CodexUsageProviding? = nil,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
-        openRouterService: SimpleUsageProviding = OpenRouterService.shared,
+        openRouterService: OpenRouterUsageProviding = OpenRouterService.shared,
         grokService: GrokUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeUsageProviding = ClaudeCodeLocalService.shared,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
         codexAccountStore: CodexAccountStore? = nil,
         grokAccountStore: GrokAccountStore? = nil,
+        openRouterAccountStore: OpenRouterAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
         sharedStore: SharedDataStore = .shared,
         preferences: UserDefaults = .standard,
@@ -195,6 +210,7 @@ class UsageDataManager: ObservableObject {
         self.claudeCodeAccountStore = claudeCodeAccountStore ?? .shared
         self.codexAccountStore = codexAccountStore ?? .shared
         self.grokAccountStore = grokAccountStore ?? .shared
+        self.openRouterAccountStore = openRouterAccountStore ?? .shared
         self.providerVisibilityStore = providerVisibilityStore ?? .shared
         self.sharedStore = sharedStore
         self.preferences = preferences
@@ -291,6 +307,7 @@ class UsageDataManager: ObservableObject {
         let hasEnabledClaudeAccount = !claudeCodeAccountStore.enabledAccounts.isEmpty
         let hasEnabledCodexAccount = !codexAccountStore.enabledAccounts.isEmpty
         let hasEnabledGrokAccount = !grokAccountStore.enabledAccounts.isEmpty
+        let hasEnabledOpenRouterKey = !openRouterAccountStore.enabledAccounts.isEmpty
 
         // The four phases own disjoint state, so they run concurrently: a cycle
         // now costs the slowest phase instead of their sum. Every published
@@ -307,11 +324,15 @@ class UsageDataManager: ObservableObject {
         async let grokFetch = grokAccountFetch(
             isEnabled: providerVisibilityStore.isEnabled(.grok) && hasEnabledGrokAccount
         )
+        async let openRouterFetch = openRouterAccountFetch(
+            isEnabled: providerVisibilityStore.isEnabled(.openRouter) && hasEnabledOpenRouterKey
+        )
         async let simpleFetch = refreshSimpleProviders()
 
         let claudeResult = await claudeFetch
         let codexResult = await codexFetch
         let grokResult = await grokFetch
+        let openRouterResult = await openRouterFetch
         let simpleResults = await simpleFetch
 
         // Rank the phases here, in a fixed order, rather than letting each one
@@ -320,9 +341,11 @@ class UsageDataManager: ObservableObject {
         lastError = claudeResult?.firstFailure
             ?? codexResult?.firstFailure
             ?? grokResult?.firstFailure
+            ?? openRouterResult?.firstFailure
             ?? simpleResults.firstFailure
 
-        // Claude Code metrics (local files)
+        // Claude Code metrics (local files). Its auth states and skip reason
+        // differ; Codex, Grok, and OpenRouter share `foldUniformAccountPhase`.
         if let claudeResult {
             claudeCodeAccountMetrics = claudeResult.metrics
             claudeCodeAccountStates = claudeResult.accountStates
@@ -339,33 +362,32 @@ class UsageDataManager: ObservableObject {
             states[.claudeCode] = (.skipped, claudeCodeSkipReason(hasEnabledAccount: hasEnabledClaudeAccount))
         }
 
-        if let codexResult {
-            codexAccountMetrics = codexResult.metrics
-            if let representative = representativeCodexMetrics(from: codexResult.metrics) {
-                newMetrics[.codexCli] = representative
-            }
-            states[.codexCli] = accountFetchState(codexResult)
-        } else {
-            codexAccountMetrics = [:]
-            states[.codexCli] = (
-                .skipped,
-                providerVisibilityStore.isEnabled(.codexCli) ? Self.noEnabledAccountsReason : Self.disabledReason
-            )
-        }
+        foldUniformAccountPhase(
+            .codexCli,
+            result: codexResult,
+            representative: { representativeCodexMetrics(from: $0.metrics) },
+            storeAccountMetrics: { codexAccountMetrics = $0?.metrics ?? [:] },
+            newMetrics: &newMetrics,
+            states: &states
+        )
 
-        if let grokResult {
-            grokAccountMetrics = grokResult.metrics
-            if let representative = representativeGrokMetrics(from: grokResult.metrics) {
-                newMetrics[.grok] = representative
-            }
-            states[.grok] = accountFetchState(grokResult)
-        } else {
-            grokAccountMetrics = [:]
-            states[.grok] = (
-                .skipped,
-                providerVisibilityStore.isEnabled(.grok) ? Self.noEnabledAccountsReason : Self.disabledReason
-            )
-        }
+        foldUniformAccountPhase(
+            .grok,
+            result: grokResult,
+            representative: { representativeGrokMetrics(from: $0.metrics) },
+            storeAccountMetrics: { grokAccountMetrics = $0?.metrics ?? [:] },
+            newMetrics: &newMetrics,
+            states: &states
+        )
+
+        foldUniformAccountPhase(
+            .openRouter,
+            result: openRouterResult,
+            representative: { representativeOpenRouterMetrics(from: $0.metrics) },
+            storeAccountMetrics: { openRouterAccountMetrics = $0?.metrics ?? [:] },
+            newMetrics: &newMetrics,
+            states: &states
+        )
 
         // Simple (single-account) providers. On failure the final merge loop
         // below preserves any cached metrics (graceful degradation).
@@ -376,7 +398,7 @@ class UsageDataManager: ObservableObject {
         for service in ServiceType.allCases where providerVisibilityStore.isEnabled(service) {
             if service == .claudeCode, !hasEnabledClaudeAccount { continue }
             // Account caches are merged during their provider-specific refresh.
-            if service == .codexCli || service == .grok { continue }
+            if service == .codexCli || service == .grok || service == .openRouter { continue }
             if newMetrics[service] == nil, let cachedMetric = self.metrics[service] {
                 newMetrics[service] = cachedMetric
             }
@@ -406,6 +428,33 @@ class UsageDataManager: ObservableObject {
     private static let noEnabledAccountsReason = "No enabled accounts for this provider."
     private static let refreshContendedReason = "Another MeterBar refresh is already running."
     private static let refreshLockUnavailableReason = "The shared MeterBar refresh lock is unavailable."
+
+    /// Folds one Codex/Grok/OpenRouter-shaped account phase into the committed
+    /// snapshot: publish the fetch result and its representative, or clear the
+    /// phase's caches and mark it skipped when it never ran (disabled or no
+    /// enabled accounts). Claude has its own block above.
+    private func foldUniformAccountPhase(
+        _ service: ServiceType,
+        result: AccountFetchResult?,
+        representative: (AccountFetchResult) -> UsageMetrics?,
+        storeAccountMetrics: (AccountFetchResult?) -> Void,
+        newMetrics: inout [ServiceType: UsageMetrics],
+        states: inout [ServiceType: (state: ProviderRefreshState, reason: String?)]
+    ) {
+        if let result {
+            storeAccountMetrics(result)
+            if let representative = representative(result) {
+                newMetrics[service] = representative
+            }
+            states[service] = accountFetchState(result)
+        } else {
+            storeAccountMetrics(nil)
+            states[service] = (
+                .skipped,
+                providerVisibilityStore.isEnabled(service) ? Self.noEnabledAccountsReason : Self.disabledReason
+            )
+        }
+    }
 
     private enum RefreshLockLease {
         case acquired(WakeLock?)
@@ -532,7 +581,8 @@ class UsageDataManager: ObservableObject {
 
         // Visibility and access are synchronous, so resolve them up front and
         // fan out only the legs that will actually reach a provider.
-        for service in [ServiceType.cursor, .openRouter] {
+        // OpenRouter left this path for the account-aware fetcher.
+        for service in [ServiceType.cursor] {
             guard providerVisibilityStore.isEnabled(service) else {
                 states[service] = (.skipped, Self.disabledReason)
                 continue
@@ -604,9 +654,42 @@ class UsageDataManager: ObservableObject {
         switch service {
         case .cursor:
             return cursorService
+        case .claudeCode, .codexCli, .grok, .openRouter:
+            return nil
+        }
+    }
+
+    /// Clears one provider's per-account caches (used on disable and when its
+    /// enabled-account set becomes empty). Cursor has no account caches.
+    private func clearAccountState(for service: ServiceType) {
+        switch service {
+        case .claudeCode:
+            claudeCodeAccountMetrics = [:]
+            claudeCodeAccountStates = [:]
+        case .codexCli:
+            codexAccountMetrics = [:]
+        case .grok:
+            grokAccountMetrics = [:]
         case .openRouter:
-            return openRouterService
-        case .claudeCode, .codexCli, .grok:
+            openRouterAccountMetrics = [:]
+        case .cursor:
+            break
+        }
+    }
+
+    /// How many enabled accounts back `service`'s fetch. `nil` for the
+    /// single-account providers, which have no empty-set early-out.
+    private func enabledAccountCount(for service: ServiceType) -> Int? {
+        switch service {
+        case .claudeCode:
+            return claudeCodeAccountStore.enabledAccounts.count
+        case .codexCli:
+            return codexAccountStore.enabledAccounts.count
+        case .grok:
+            return grokAccountStore.enabledAccounts.count
+        case .openRouter:
+            return openRouterAccountStore.enabledAccounts.count
+        case .cursor:
             return nil
         }
     }
@@ -624,35 +707,15 @@ class UsageDataManager: ObservableObject {
 
         guard providerVisibilityStore.isEnabled(service) else {
             metrics.removeValue(forKey: service)
-            if service == .claudeCode {
-                claudeCodeAccountMetrics = [:]
-                claudeCodeAccountStates = [:]
-            } else if service == .codexCli {
-                codexAccountMetrics = [:]
-            } else if service == .grok {
-                grokAccountMetrics = [:]
-            }
+            clearAccountState(for: service)
             publishMetrics()
             return
         }
 
-        if service == .claudeCode, claudeCodeAccountStore.enabledAccounts.isEmpty {
-            claudeCodeAccountMetrics = [:]
-            claudeCodeAccountStates = [:]
-            metrics.removeValue(forKey: service)
-            publishMetrics()
-            return
-        }
-
-        if service == .codexCli, codexAccountStore.enabledAccounts.isEmpty {
-            codexAccountMetrics = [:]
-            metrics.removeValue(forKey: service)
-            publishMetrics()
-            return
-        }
-
-        if service == .grok, grokAccountStore.enabledAccounts.isEmpty {
-            grokAccountMetrics = [:]
+        // Every account-aware provider with zero enabled accounts has nothing
+        // to fetch; Cursor (single-account) never takes this early-out.
+        if enabledAccountCount(for: service) == 0 {
+            clearAccountState(for: service)
             metrics.removeValue(forKey: service)
             publishMetrics()
             return
@@ -667,7 +730,7 @@ class UsageDataManager: ObservableObject {
             if lastError == nil {
                 lastError = error
             }
-            if service == .codexCli || service == .grok {
+            if service == .codexCli || service == .grok || service == .openRouter {
                 // Account-aware aggregate metrics carry no account identity. Scoped
                 // per-account caches are restored inside the provider fetcher;
                 // if none exist, showing no data is safer than relabeling a
@@ -767,8 +830,32 @@ class UsageDataManager: ObservableObject {
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
-        // The account fetchers report their first failure instead of writing
-        // `lastError` themselves (see `refreshAll`), so this path surfaces it.
+        case .cursor:
+            return try await refreshedCursorMetrics()
+        case .claudeCode, .codexCli, .grok, .openRouter:
+            return try await refreshedAccountAwareMetrics(for: service)
+        }
+    }
+
+    /// Cursor's single-account refresh with cache-preserving degradation.
+    private func refreshedCursorMetrics() async throws -> UsageMetrics {
+        guard hasProviderAccess(.cursor) else { throw ServiceError.notAuthenticated }
+        do {
+            return try await fetchSimpleProviderMetrics(.cursor)
+        } catch {
+            if let cachedMetric = metrics[.cursor] {
+                lastError = error
+                return cachedMetric
+            }
+            throw error
+        }
+    }
+
+    /// The account-aware providers' per-service refresh. Each account fetcher
+    /// reports its first failure instead of writing `lastError` itself (see
+    /// `refreshAll`), so this path surfaces it.
+    private func refreshedAccountAwareMetrics(for service: ServiceType) async throws -> UsageMetrics {
+        switch service {
         case .claudeCode:
             let fetch = await fetchClaudeCodeAccountMetrics(trigger: .userInitiated)
             claudeCodeAccountMetrics = fetch.metrics
@@ -787,17 +874,14 @@ class UsageDataManager: ObservableObject {
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeGrokMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
-        case .cursor, .openRouter:
-            guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
-            do {
-                return try await fetchSimpleProviderMetrics(service)
-            } catch {
-                if let cachedMetric = metrics[service] {
-                    lastError = error
-                    return cachedMetric
-                }
-                throw error
-            }
+        case .openRouter:
+            let fetch = await fetchOpenRouterAccountMetrics()
+            openRouterAccountMetrics = fetch.metrics
+            if let failure = fetch.firstFailure { lastError = failure }
+            if let representative = representativeOpenRouterMetrics(from: fetch.metrics) { return representative }
+            throw ServiceError.notAuthenticated
+        case .cursor:
+            preconditionFailure("Cursor uses refreshedCursorMetrics")
         }
 
         if let cachedMetric = metrics[service] { return cachedMetric }
@@ -851,46 +935,57 @@ class UsageDataManager: ObservableObject {
     }
 
     private func loadCachedAccountMetrics() {
-        if let data = cacheDefaults.data(forKey: StorageKeys.cachedClaudeCodeAccountMetrics),
-           let decoded = try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data) {
-            claudeCodeAccountMetrics = decoded
-        }
-        if let data = cacheDefaults.data(forKey: StorageKeys.cachedCodexAccountMetrics),
-           let decoded = try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data) {
-            codexAccountMetrics = decoded
-        }
-        if let data = cacheDefaults.data(forKey: StorageKeys.cachedGrokAccountMetrics),
-           let decoded = try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data) {
-            grokAccountMetrics = decoded
-        }
+        claudeCodeAccountMetrics = Self.decodedAccountCache(
+            StorageKeys.cachedClaudeCodeAccountMetrics, in: cacheDefaults
+        ) ?? claudeCodeAccountMetrics
+        codexAccountMetrics = Self.decodedAccountCache(
+            StorageKeys.cachedCodexAccountMetrics, in: cacheDefaults
+        ) ?? codexAccountMetrics
+        grokAccountMetrics = Self.decodedAccountCache(
+            StorageKeys.cachedGrokAccountMetrics, in: cacheDefaults
+        ) ?? grokAccountMetrics
+        openRouterAccountMetrics = Self.decodedAccountCache(
+            StorageKeys.cachedOpenRouterAccountMetrics, in: cacheDefaults
+        ) ?? openRouterAccountMetrics
 
         guard claudeCodeAccountMetrics.isEmpty
             || codexAccountMetrics.isEmpty
-            || grokAccountMetrics.isEmpty else {
+            || grokAccountMetrics.isEmpty
+            || openRouterAccountMetrics.isEmpty else {
             return
         }
         let sharedSnapshots = sharedStore.loadAccountMetrics()
         if claudeCodeAccountMetrics.isEmpty {
-            claudeCodeAccountMetrics = Dictionary(
-                uniqueKeysWithValues: sharedSnapshots
-                    .filter { $0.metrics.service == .claudeCode }
-                    .map { ($0.id, $0.metrics) }
-            )
+            claudeCodeAccountMetrics = Self.sharedFallback(.claudeCode, from: sharedSnapshots)
         }
         if codexAccountMetrics.isEmpty {
-            codexAccountMetrics = Dictionary(
-                uniqueKeysWithValues: sharedSnapshots
-                    .filter { $0.metrics.service == .codexCli }
-                    .map { ($0.id, $0.metrics) }
-            )
+            codexAccountMetrics = Self.sharedFallback(.codexCli, from: sharedSnapshots)
         }
         if grokAccountMetrics.isEmpty {
-            grokAccountMetrics = Dictionary(
-                uniqueKeysWithValues: sharedSnapshots
-                    .filter { $0.metrics.service == .grok }
-                    .map { ($0.id, $0.metrics) }
-            )
+            grokAccountMetrics = Self.sharedFallback(.grok, from: sharedSnapshots)
         }
+        if openRouterAccountMetrics.isEmpty {
+            openRouterAccountMetrics = Self.sharedFallback(.openRouter, from: sharedSnapshots)
+        }
+    }
+
+    private static func decodedAccountCache(
+        _ key: String,
+        in defaults: UserDefaults
+    ) -> [UUID: UsageMetrics]? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data)
+    }
+
+    private static func sharedFallback(
+        _ service: ServiceType,
+        from snapshots: [AccountUsageSnapshot]
+    ) -> [UUID: UsageMetrics] {
+        Dictionary(
+            uniqueKeysWithValues: snapshots
+                .filter { $0.metrics.service == service }
+                .map { ($0.id, $0.metrics) }
+        )
     }
 
     private func saveCachedAccountMetrics() {
@@ -902,6 +997,9 @@ class UsageDataManager: ObservableObject {
         }
         if let data = try? JSONEncoder().encode(grokAccountMetrics) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedGrokAccountMetrics)
+        }
+        if let data = try? JSONEncoder().encode(openRouterAccountMetrics) {
+            cacheDefaults.set(data, forKey: StorageKeys.cachedOpenRouterAccountMetrics)
         }
     }
 
@@ -919,7 +1017,11 @@ class UsageDataManager: ObservableObject {
             guard let metrics = grokAccountMetrics[account.id] else { return nil }
             return AccountUsageSnapshot(id: account.id, name: account.name, metrics: metrics)
         }
-        let accountSnapshots = claudeSnapshots + codexSnapshots + grokSnapshots
+        let openRouterSnapshots: [AccountUsageSnapshot] = openRouterAccountStore.enabledAccounts.compactMap { account in
+            guard let metrics = openRouterAccountMetrics[account.id] else { return nil }
+            return AccountUsageSnapshot(id: account.id, name: account.name, metrics: metrics)
+        }
+        let accountSnapshots = claudeSnapshots + codexSnapshots + grokSnapshots + openRouterSnapshots
         sharedStore.saveAccountMetrics(accountSnapshots)
     }
 
@@ -1022,6 +1124,9 @@ class UsageDataManager: ObservableObject {
         for (accountID, accountMetrics) in grokAccountMetrics {
             collect(accountMetrics, prefix: "grok.\(accountID.uuidString)")
         }
+        for (accountID, accountMetrics) in openRouterAccountMetrics {
+            collect(accountMetrics, prefix: "openrouter.\(accountID.uuidString)")
+        }
         return AdaptiveQuotaSnapshot(values: values)
     }
 
@@ -1069,7 +1174,15 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        for service in [ServiceType.cursor, .openRouter]
+        if providerVisibilityStore.isEnabled(.openRouter),
+           !openRouterAccountStore.enabledAccounts.isEmpty {
+            for account in openRouterAccountStore.enabledAccounts
+            where openRouterService.canAccess(account: account) {
+                collect(openRouterAccountMetrics[account.id])
+            }
+        }
+
+        for service in [ServiceType.cursor]
         where providerVisibilityStore.isEnabled(service) && hasProviderAccess(service) {
             collect(metrics[service])
         }
@@ -1096,6 +1209,9 @@ class UsageDataManager: ObservableObject {
     /// account contributes no metrics, no cached fallback, and no failure.
     private struct CodexAccountUnreachable: Error {}
     private struct GrokAccountUnreachable: Error {}
+    /// A key with no Keychain item: a skip, not a failure — the account exists
+    /// but its credential was never entered (or was removed).
+    private struct OpenRouterKeyUnreachable: Error {}
 
     private func claudeAccountFetch(
         isEnabled: Bool,
@@ -1113,6 +1229,11 @@ class UsageDataManager: ObservableObject {
     private func grokAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
         guard isEnabled else { return nil }
         return await fetchGrokAccountMetrics()
+    }
+
+    private func openRouterAccountFetch(isEnabled: Bool) async -> AccountFetchResult? {
+        guard isEnabled else { return nil }
+        return await fetchOpenRouterAccountMetrics()
     }
 
     private func fetchClaudeCodeAccountMetrics(
@@ -1288,6 +1409,95 @@ class UsageDataManager: ObservableObject {
         return grokAccountStore.enabledAccounts.lazy.compactMap { accountMetrics[$0.id] }.first
     }
 
+    private func fetchOpenRouterAccountMetrics() async -> AccountFetchResult {
+        let enabledAccounts = openRouterAccountStore.enabledAccounts
+        var refreshedMetrics: [UUID: UsageMetrics] = [:]
+        var firstFailure: Error?
+        var successCount = 0
+        // Keys that succeeded *this poll*. Only their observations fold into
+        // the ledger — a key that failed keeps a stale counter from an earlier
+        // poll, and summing it in would look like spend moved when it didn't.
+        var polledObservations: [ProviderUsageObservation] = []
+
+        let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
+            let account = enabledAccounts[index]
+            guard self.openRouterService.canAccess(account: account) else {
+                throw OpenRouterKeyUnreachable()
+            }
+            return try await self.openRouterService.fetchUsageMetrics(account: account)
+        }
+
+        for (account, leg) in zip(enabledAccounts, legs) {
+            if let metrics = leg.metrics {
+                refreshedMetrics[account.id] = metrics
+                successCount += 1
+                if let observation = openRouterService.latestAccountObservations[account.id] {
+                    polledObservations.append(observation)
+                }
+            } else if let error = leg.error {
+                // A keyless account is a skip, not a failure, and must not
+                // resurrect a stale cache — same semantics as Codex/Grok.
+                if error is OpenRouterKeyUnreachable { continue }
+                if firstFailure == nil { firstFailure = error }
+                if let cachedMetrics = openRouterAccountMetrics[account.id] {
+                    refreshedMetrics[account.id] = cachedMetrics
+                }
+            }
+        }
+
+        if successCount > 0 {
+            parseHealthStore.recordSuccess(.openRouter)
+        } else if let firstFailure {
+            parseHealthStore.recordFailure(.openRouter, error: firstFailure)
+        }
+
+        recordOpenRouterLedgerObservation(
+            polledObservations,
+            allowsAuthoritativeDaily: successCount == enabledAccounts.count
+        )
+
+        return AccountFetchResult(
+            metrics: refreshedMetrics,
+            successCount: successCount,
+            firstFailure: firstFailure
+        )
+    }
+
+    /// Folds this poll's per-key spend readings into the single provider-wide
+    /// ledger entry. Only keys that succeeded this poll contribute; the sum of
+    /// a partial poll is still honest because each key's counter is its own.
+    private func recordOpenRouterLedgerObservation(
+        _ observations: [ProviderUsageObservation],
+        allowsAuthoritativeDaily: Bool
+    ) {
+        guard !demoMode, let store = usageLedgerStore, !observations.isEmpty else { return }
+        guard let aggregated = OpenRouterService.aggregatedObservation(
+            observations,
+            observedAt: Date(),
+            allowsAuthoritativeDaily: allowsAuthoritativeDaily
+        ) else {
+            return
+        }
+
+        var ledger = store.load()
+        ledger.record(aggregated)
+        do {
+            try store.save(ledger)
+        } catch {
+            AppLog.usage.error(
+                "Failed to persist provider usage observations: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func representativeOpenRouterMetrics(from accountMetrics: [UUID: UsageMetrics]) -> UsageMetrics? {
+        if openRouterAccountStore.defaultAccountIsEnabled,
+           let defaultMetrics = accountMetrics[OpenRouterAccount.defaultID] {
+            return defaultMetrics
+        }
+        return openRouterAccountStore.enabledAccounts.lazy.compactMap { accountMetrics[$0.id] }.first
+    }
+
     // MARK: - Provider strategy
 
     private func hasProviderAccess(_ service: ServiceType) -> Bool {
@@ -1299,23 +1509,24 @@ class UsageDataManager: ObservableObject {
         case .cursor:
             return cursorService.hasAccess
         case .openRouter:
-            return openRouterService.hasAccess
+            // Access means at least one enabled key has its Keychain item.
+            return openRouterAccountStore.enabledAccounts.contains {
+                openRouterService.canAccess(account: $0)
+            }
         case .grok:
             return false
         }
     }
 
-    /// Fetch for the providers without multi-account handling (Claude Code has
-    /// its own account-aware path).
+    /// Fetch for the providers without multi-account handling (Claude Code,
+    /// Codex, Grok, and OpenRouter have their own account-aware paths).
     private func fetchSimpleProviderMetrics(_ service: ServiceType) async throws -> UsageMetrics {
         do {
             let result: UsageMetrics
             switch service {
             case .cursor:
                 result = try await cursorService.fetchUsageMetrics()
-            case .openRouter:
-                result = try await openRouterService.fetchUsageMetrics()
-            case .claudeCode, .codexCli, .grok:
+            case .claudeCode, .codexCli, .grok, .openRouter:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }
             parseHealthStore.recordSuccess(service)

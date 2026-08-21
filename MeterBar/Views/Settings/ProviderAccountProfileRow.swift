@@ -28,6 +28,7 @@ struct ProviderAccountProfileRow: View {
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
         isRefreshing: Bool = false,
+        showsPathField: Bool = true,
         showsRefresh: Bool = false,
         showsReconnect: Bool = false,
         reconnectProviderName: String = "",
@@ -48,6 +49,7 @@ struct ProviderAccountProfileRow: View {
         self.pathPlaceholder = pathPlaceholder
         self.resolvedPath = resolvedPath
         self.defaultPathHelp = defaultPathHelp
+        self.showsPathField = showsPathField
         self.statusPresentation = statusPresentation
         self.statusAccessibilityValue = statusAccessibilityValue
         self.canDisable = canDisable
@@ -98,26 +100,28 @@ struct ProviderAccountProfileRow: View {
                         .onSubmit(saveChanges)
                 }
 
-                fieldRow(label: pathLabel) {
-                    HStack(spacing: 8) {
-                        TextField(pathPlaceholder, text: $draft.path)
-                            .textFieldStyle(.plain)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-                            .accessibilityLabel("\(pathLabel) for \(accountName)")
-                            .onSubmit(saveChanges)
+                if showsPathField {
+                    fieldRow(label: pathLabel) {
+                        HStack(spacing: 8) {
+                            TextField(pathPlaceholder, text: $draft.path)
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                                .accessibilityLabel("\(pathLabel) for \(accountName)")
+                                .onSubmit(saveChanges)
 
-                        Button {
-                            chooseDirectory()
-                        } label: {
-                            Image(systemName: "folder")
+                            Button {
+                                chooseDirectory()
+                            } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .fixedSize()
+                            .accessibilityLabel("Choose \(pathLabel) for \(accountName)")
+                            .help("Choose \(pathLabel)")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .fixedSize()
-                        .accessibilityLabel("Choose \(pathLabel) for \(accountName)")
-                        .help("Choose \(pathLabel)")
                     }
                 }
 
@@ -208,6 +212,9 @@ struct ProviderAccountProfileRow: View {
     private let pathPlaceholder: String
     private let resolvedPath: String
     private let defaultPathHelp: String?
+    /// Credential-less providers (OpenRouter keys live in the Keychain) hide
+    /// the path field entirely; their row is name + status + controls.
+    private let showsPathField: Bool
     private let statusPresentation: SettingsStatusPresentation
     /// Richer VoiceOver sentence for the status pill; `nil` falls back to the
     /// pill's own text.

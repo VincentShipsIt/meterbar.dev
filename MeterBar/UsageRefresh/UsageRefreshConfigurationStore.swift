@@ -13,17 +13,20 @@ nonisolated enum UsageRefreshConfigurationStore {
         let claudeAccounts: [ClaudeCodeAccount]
         let codexAccounts: [CodexAccount]
         let grokAccounts: [GrokAccount]
+        let openRouterAccounts: [OpenRouterAccount]
 
         init(
             hiddenServices: Set<ServiceType>,
             claudeAccounts: [ClaudeCodeAccount],
             codexAccounts: [CodexAccount],
-            grokAccounts: [GrokAccount] = [.defaultAccount]
+            grokAccounts: [GrokAccount] = [.defaultAccount],
+            openRouterAccounts: [OpenRouterAccount] = [.defaultAccount]
         ) {
             self.hiddenServices = hiddenServices
             self.claudeAccounts = claudeAccounts
             self.codexAccounts = codexAccounts
             self.grokAccounts = grokAccounts
+            self.openRouterAccounts = openRouterAccounts
         }
     }
 
@@ -31,6 +34,7 @@ nonisolated enum UsageRefreshConfigurationStore {
     private static let claudeAccountsFileName = "refresh-claude-accounts-v1.json"
     private static let codexAccountsFileName = "refresh-codex-accounts-v1.json"
     private static let grokAccountsFileName = "refresh-grok-accounts-v1.json"
+    private static let openRouterAccountsFileName = "refresh-openrouter-accounts-v1.json"
 
     static func saveVisibility(
         _ hiddenServices: Set<ServiceType>,
@@ -60,6 +64,13 @@ nonisolated enum UsageRefreshConfigurationStore {
         write(accounts, fileName: grokAccountsFileName, directory: directory)
     }
 
+    static func saveOpenRouterAccounts(
+        _ accounts: [OpenRouterAccount],
+        directory: URL? = SharedMetricsStore.containerURL
+    ) {
+        write(accounts, fileName: openRouterAccountsFileName, directory: directory)
+    }
+
     /// Fail closed unless the original three projections exist and decode.
     /// Grok's account projection is additive and optional so a CLI bundled with
     /// this version can still refresh after an older app wrote the v1 files.
@@ -83,6 +94,8 @@ nonisolated enum UsageRefreshConfigurationStore {
             claudeAccounts: claudeAccounts,
             codexAccounts: codexAccounts,
             grokAccounts: read(fileName: grokAccountsFileName, directory: directory)
+                ?? [.defaultAccount],
+            openRouterAccounts: read(fileName: openRouterAccountsFileName, directory: directory)
                 ?? [.defaultAccount]
         )
     }

@@ -14,7 +14,8 @@ enum WidgetSettingsAccountProjection {
         enabledServices: Set<ServiceType>,
         claudeAccounts: [ClaudeCodeAccount],
         codexAccounts: [CodexAccount],
-        grokAccounts: [GrokAccount] = []
+        grokAccounts: [GrokAccount] = [],
+        openRouterAccounts: [OpenRouterAccount] = []
     ) -> [WidgetSettingsAccountOption] {
         ServiceType.allCases.flatMap { service -> [WidgetSettingsAccountOption] in
             guard enabledServices.contains(service) else { return [] }
@@ -44,7 +45,17 @@ enum WidgetSettingsAccountProjection {
                         name: $0.name
                     )
                 }
-            case .cursor, .openRouter:
+            case .openRouter:
+                // One widget row per managed key, like every other
+                // account-aware provider.
+                return openRouterAccounts.filter(\.isEnabled).map {
+                    WidgetSettingsAccountOption(
+                        id: .account(service: service, id: $0.id),
+                        service: service,
+                        name: $0.name
+                    )
+                }
+            case .cursor:
                 return [
                     WidgetSettingsAccountOption(
                         id: .provider(service),
@@ -209,6 +220,7 @@ struct WidgetSettingsView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var grokAccountStore = GrokAccountStore.shared
+    @StateObject private var openRouterAccountStore = OpenRouterAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @State private var previewAppearance: WidgetSettingsPreviewAppearance = .light
 
@@ -230,7 +242,8 @@ struct WidgetSettingsView: View {
             enabledServices: providerVisibility.enabledServices,
             claudeAccounts: claudeAccountStore.accounts,
             codexAccounts: codexAccountStore.accounts,
-            grokAccounts: grokAccountStore.accounts
+            grokAccounts: grokAccountStore.accounts,
+            openRouterAccounts: openRouterAccountStore.accounts
         )
     }
 

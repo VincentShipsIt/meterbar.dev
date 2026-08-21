@@ -80,6 +80,18 @@ struct ProviderSettingsView: View {
                 Task { await dataManager.refreshAll() }
             }
         }
+        .sheet(isPresented: $isAddingOpenRouterKey) {
+            AddProviderAPIKeySheet(
+                providerName: ServiceType.openRouter.shortName,
+                logoKind: .openRouter,
+                accent: MeterBarTheme.openRouterAccent,
+                subtitle: "The key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs.",
+                keyPlaceholder: "sk-or-v1-..."
+            ) { name, apiKey in
+                addOpenRouterKey(name: name, apiKey: apiKey)
+                isAddingOpenRouterKey = false
+            }
+        }
         .task(id: codexDefaultAccount) {
             guard service == .codexCli, codexDefaultAccount.isEnabled else { return }
             let codexCliService = codexCliService
@@ -97,6 +109,7 @@ struct ProviderSettingsView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var grokAccountStore = GrokAccountStore.shared
+    @StateObject private var openRouterAccountStore = OpenRouterAccountStore.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var openRouterService = OpenRouterService.shared
@@ -110,9 +123,9 @@ struct ProviderSettingsView: View {
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
     @State private var isAddingGrokAccount = false
+    @State private var isAddingOpenRouterKey = false
     @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
-    @State private var openRouterKeyDraft = ""
 
     /// Same key ClaudeCodeLocalService reads. OAuth (`/api/oauth/usage`) is the
     /// primary Claude Code usage source and is on by default; turning this off
@@ -128,6 +141,7 @@ struct ProviderSettingsView: View {
                     claudeAccounts: claudeAccountStore.accounts,
                     codexAccounts: codexAccountStore.accounts,
                     grokAccounts: grokAccountStore.accounts,
+                    openRouterAccounts: openRouterAccountStore.accounts,
                     enabledServices: providerVisibility.enabledServices,
                     claudeCodeService: claudeCodeService,
                     codexCliService: codexCliService,
@@ -674,73 +688,40 @@ struct ProviderSettingsView: View {
     }
 
     private var openRouterSection: some View {
-        SettingsPanelSection(
+        let hasAccess = openRouterAccountStore.enabledAccounts.contains {
+            openRouterService.canAccess(account: $0)
+        }
+        return SettingsPanelSection(
             title: ServiceType.openRouter.displayName,
             logoKind: .openRouter,
             color: MeterBarTheme.openRouterAccent
         ) {
             SettingsNotice(
-                text: "The key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs.",
+                text: "Each key is stored in macOS Keychain and sent only to OpenRouter's credits and key APIs. "
+                    + "Create keys at openrouter.ai/settings/keys.",
                 color: .secondary
             )
 
-            SettingsRowView(
-                title: "API key",
-                detail: openRouterService.hasAccess
-                    ? "Configured. Refresh validates access and updates credits."
-                    : "Create a key at openrouter.ai/settings/keys."
-            ) {
-                if openRouterService.hasAccess {
-                    HStack(spacing: 8) {
-                        StatusPill(title: "Configured", isConnected: true)
-                        Button("Remove", role: .destructive) {
-                            openRouterService.removeAPIKey()
-                            Task { await dataManager.refresh(service: .openRouter) }
-                        }
-                        .buttonStyle(.bordered)
+            SettingsRowView(title: "Connection") {
+                HStack(spacing: 8) {
+                    StatusPill(
+                        title: hasAccess ? "Connected" : "Not Connected",
+                        isConnected: hasAccess
+                    )
 
-                        Button("Get Key") {
-                            if let url = URL(string: "https://openrouter.ai/settings/keys") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                } else {
-                    // The control column clamps at `controlMaxWidth` (300pt) with
-                    // `.fixedSize`, so the field and both buttons cannot share
-                    // one row — they crush into circles. The field leads and the
-                    // actions sit under it, mirroring the other provider rows.
-                    VStack(alignment: .trailing, spacing: 8) {
-                        SecureField("sk-or-v1-...", text: $openRouterKeyDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
-
-                        HStack(spacing: 8) {
-                            Button("Save & Validate") {
-                                guard openRouterService.saveAPIKey(openRouterKeyDraft) else { return }
-                                openRouterKeyDraft = ""
-                                providerVisibility.set(.openRouter, isEnabled: true)
-                                Task { await dataManager.refresh(service: .openRouter) }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                            Button("Get Key") {
-                                if let url = URL(string: "https://openrouter.ai/settings/keys") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            .buttonStyle(.bordered)
+                    Button("Get Key") {
+                        if let url = URL(string: "https://openrouter.ai/settings/keys") {
+                            NSWorkspace.shared.open(url)
                         }
                     }
+                    .buttonStyle(.bordered)
                 }
             }
 
             if let error = openRouterService.lastError {
                 let detail = switch error {
                 case .notAuthenticated:
-                    "OpenRouter rejected this key. Remove it and add a valid API key."
+                    "OpenRouter rejected a key. Remove it and add a valid API key."
                 default:
                     error.localizedDescription
                 }
@@ -750,6 +731,73 @@ struct ProviderSettingsView: View {
                     message: detail,
                     tone: .warning
                 )
+            }
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("API Keys")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button {
+                        isAddingOpenRouterKey = true
+                    } label: {
+                        Label("Add Key", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(openRouterAccountStore.accounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 { SettingsDivider() }
+                        ProviderAccountProfileRow(
+                            accountName: account.name,
+                            isDefault: account.isDefault,
+                            isEnabled: account.isEnabled,
+                            accent: MeterBarTheme.openRouterAccent,
+                            pathLabel: "API key",
+                            pathPlaceholder: "sk-or-v1-...",
+                            resolvedPath: "",
+                            defaultPathHelp: nil,
+                            statusPresentation: ProviderAccountConnectionState
+                                .from(
+                                    isEnabled: account.isEnabled,
+                                    isConnected: openRouterService.canAccess(account: account)
+                                )
+                                .statusPresentation,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < openRouterAccountStore.accounts.count - 1,
+                            showsPathField: false,
+                            deleteMessage:
+                                "MeterBar will stop tracking this key and delete it from the Keychain. "
+                                + "The key keeps working on OpenRouter until you revoke it there.",
+                            onEnabledChange: { isEnabled in
+                                openRouterAccountStore.setEnabled(isEnabled, for: account.id)
+                                reconcileProviderAccountSelections()
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onSave: { name, _ in
+                                openRouterAccountStore.updateAccount(id: account.id, name: name)
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onRemove: {
+                                // Eligibility first: a rejected last-enabled
+                                // removal must not have already deleted the
+                                // credential.
+                                guard openRouterAccountStore.canRemoveAccount(id: account.id) else { return }
+                                openRouterService.removeAPIKey(for: account.id)
+                                openRouterAccountStore.removeAccount(id: account.id)
+                                reconcileProviderAccountSelections()
+                                Task { await dataManager.refreshAll() }
+                            },
+                            onMoveUp: { moveOpenRouterKey(at: index, down: false) },
+                            onMoveDown: { moveOpenRouterKey(at: index, down: true) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -969,6 +1017,26 @@ struct ProviderSettingsView: View {
         }
     }
 
+    private func moveOpenRouterKey(at index: Int, down: Bool) {
+        moveAccount(at: index, down: down, count: openRouterAccountStore.accounts.count) {
+            openRouterAccountStore.moveAccounts(fromOffsets: $0, toOffset: $1)
+        }
+    }
+
+    /// Stores the key material first; only a successful Keychain write creates
+    /// the account, so an account can never exist without its credential.
+    private func addOpenRouterKey(name: String, apiKey: String) {
+        guard let account = openRouterAccountStore.addAccount(name: name) else { return }
+        guard openRouterService.saveAPIKey(apiKey, for: account.id) else {
+            openRouterAccountStore.removeAccount(id: account.id)
+            return
+        }
+        // First key ever: OpenRouter is opt-in, so adding one un-hides it.
+        providerVisibility.set(.openRouter, isEnabled: true)
+        reconcileProviderAccountSelections()
+        Task { await dataManager.refreshAll() }
+    }
+
     private func moveAccount(
         at index: Int,
         down: Bool,
@@ -1003,6 +1071,7 @@ struct ProviderSettingsView: View {
                 claudeAccounts: claudeAccountStore.accounts,
                 codexAccounts: codexAccountStore.accounts,
                 grokAccounts: grokAccountStore.accounts,
+                openRouterAccounts: openRouterAccountStore.accounts,
                 enabledServices: providerVisibility.enabledServices
             ),
             menuBarSelection: menuBarAccountSelection,

@@ -363,8 +363,10 @@ enum ProviderSnapshotBuilder {
         var codexCliHasAccess: Bool = false
         /// Last Cursor probe. `nil` is unprobed; `false` is confirmed signed-out.
         var cursorHasAccess: Bool?
-        /// Last OpenRouter probe. `nil` is unprobed; `false` is confirmed no key.
-        var openRouterHasAccess: Bool?
+        /// Per-key Keychain probes and refresh errors for the OpenRouter cards.
+        var openRouterAccounts: [OpenRouterAccount] = []
+        var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
+        var openRouterAccountAccess: [UUID: Bool] = [:]
         var grokHasAccess: Bool = false
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
 
@@ -375,6 +377,7 @@ enum ProviderSnapshotBuilder {
             var claudeAccounts: [ClaudeCodeAccount]
             var codexAccounts: [CodexAccount]
             var grokAccounts: [GrokAccount]
+            var openRouterAccounts: [OpenRouterAccount]
             var enabledServices: Set<ServiceType>
             var claudeCodeService: ClaudeCodeLocalService
             var codexCliService: CodexCliLocalService
@@ -410,13 +413,18 @@ enum ProviderSnapshotBuilder {
                 claudeCodeHasAccess: stores.claudeCodeService.hasAccess,
                 codexCliHasAccess: stores.codexCliService.hasAccess,
                 cursorHasAccess: stores.cursorService.hasAccess,
-                openRouterHasAccess: stores.openRouterService.hasAccess,
+                openRouterAccounts: stores.openRouterAccounts,
+                openRouterAccountMetrics: stores.dataManager.openRouterAccountMetrics,
+                openRouterAccountAccess: Dictionary(uniqueKeysWithValues: stores.openRouterAccounts.map {
+                    ($0.id, stores.openRouterService.canAccess(account: $0))
+                }),
                 grokHasAccess: stores.grokService.hasAccess,
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
                     openRouter: stores.openRouterService.lastError,
                     codexAccounts: stores.codexCliService.accountErrors,
-                    grokAccounts: stores.grokService.accountErrors
+                    grokAccounts: stores.grokService.accountErrors,
+                    openRouterAccounts: stores.openRouterService.accountLastErrors
                 )
             )
         }
@@ -516,16 +524,34 @@ enum ProviderSnapshotBuilder {
         }
 
         if input.enabledServices.contains(.openRouter) {
-            let metrics = input.metrics[.openRouter]
-            result.append(snapshot(
-                title: ServiceType.openRouter.shortName,
-                service: .openRouter,
-                metrics: metrics,
-                emptyDetail: input.openRouterHasAccess == true
-                    ? "Waiting for refresh"
-                    : "Add an OpenRouter API key",
-                authNotice: notice(for: .openRouter, accountID: nil, metrics: metrics, input: input)
-            ))
+            let enabledAccounts = input.openRouterAccounts.filter(\.isEnabled)
+            for account in enabledAccounts {
+                let title = account.isDefault
+                    && account.name == OpenRouterAccount.defaultName
+                    && enabledAccounts.count == 1
+                    ? ServiceType.openRouter.shortName
+                    : account.name
+                let fallbackMetrics = account.isDefault
+                    && enabledAccounts.count == 1
+                    && input.openRouterAccountMetrics.isEmpty
+                    ? input.metrics[.openRouter]
+                    : nil
+                let metrics = input.openRouterAccountMetrics[account.id] ?? fallbackMetrics
+                let hasKey = input.openRouterAccountAccess[account.id] == true
+                result.append(snapshot(
+                    title: title,
+                    service: .openRouter,
+                    metrics: metrics,
+                    emptyDetail: hasKey ? "Waiting for refresh" : "Add an OpenRouter API key",
+                    accountID: account.id,
+                    authNotice: notice(
+                        for: .openRouter,
+                        accountID: account.id,
+                        metrics: metrics,
+                        input: input
+                    )
+                ))
+            }
         }
 
         if input.enabledServices.contains(.grok) {
@@ -592,8 +618,15 @@ enum ProviderSnapshotBuilder {
             probed = input.cursorHasAccess
             usesAPIKey = false
         case .openRouter:
-            lastError = input.lastErrors.openRouter
-            probed = input.openRouterHasAccess
+            // A key-scoped card speaks only about its own key: another key's
+            // failure or missing credential must never dim this card.
+            if let accountID {
+                lastError = input.lastErrors.openRouterAccounts[accountID]
+                probed = input.openRouterAccountAccess[accountID]
+            } else {
+                lastError = input.lastErrors.openRouter
+                probed = input.openRouterAccountAccess.values.first { $0 }
+            }
             usesAPIKey = true
         case .claudeCode:
             lastError = nil

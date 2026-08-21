@@ -496,7 +496,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 claudeAccounts: [],
                 claudeAccountMetrics: [:],
                 enabledServices: [.openRouter],
-                openRouterHasAccess: false
+                openRouterAccounts: [.defaultAccount],
+                openRouterAccountAccess: [OpenRouterAccount.defaultID: false]
             )
         )
 
@@ -581,7 +582,13 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 claudeAccountMetrics: kind == .claude ? [ClaudeCodeAccount.defaultID: metrics] : [:],
                 enabledServices: [kind.service],
                 cursorHasAccess: kind == .cursor ? true : nil,
-                openRouterHasAccess: kind == .openRouter ? true : nil
+                openRouterAccounts: kind == .openRouter ? [.defaultAccount] : [],
+                openRouterAccountMetrics: kind == .openRouter
+                    ? [OpenRouterAccount.defaultID: metrics]
+                    : [:],
+                openRouterAccountAccess: kind == .openRouter
+                    ? [OpenRouterAccount.defaultID: true]
+                    : [:]
             )
         )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
@@ -610,7 +617,10 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case (.cursor, .transientFailure), (.cursor, .sustainedOrParseFailure):
             lastErrors.cursor = .apiError("Cursor refresh failed")
         case (.openRouter, .transientFailure), (.openRouter, .sustainedOrParseFailure):
-            lastErrors.openRouter = .apiError("OpenRouter refresh failed")
+            // Key-scoped cards read only their own key's error.
+            lastErrors.openRouterAccounts = [
+                OpenRouterAccount.defaultID: .apiError("OpenRouter refresh failed")
+            ]
         case (.codex, .transientFailure), (.codex, .sustainedOrParseFailure):
             lastErrors.codexAccounts = [CodexAccount.defaultID: .apiError("Codex refresh failed")]
         case (.grok, .transientFailure), (.grok, .sustainedOrParseFailure):
@@ -650,7 +660,13 @@ final class ProviderPresentationHealthTests: XCTestCase {
             claudeCodeHasAccess: kind == .claude && refresh != .unprobed,
             codexCliHasAccess: kind == .codex && refresh != .unprobed,
             cursorHasAccess: kind == .cursor && refresh != .unprobed ? true : nil,
-            openRouterHasAccess: kind == .openRouter && refresh != .unprobed ? true : nil,
+            openRouterAccounts: kind == .openRouter ? [.defaultAccount] : [],
+            openRouterAccountMetrics: kind == .openRouter
+                ? metrics.map { [OpenRouterAccount.defaultID: $0] } ?? [:]
+                : [:],
+            openRouterAccountAccess: kind == .openRouter && refresh != .unprobed
+                ? [OpenRouterAccount.defaultID: true]
+                : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
             lastErrors: lastErrors
         )

@@ -86,8 +86,8 @@ working. When the app-group account cache (`loadAccountMetrics()`) has snapshots
 also includes an additive `accounts` array — one entry per cached profile, never a filesystem path,
 `GROK_HOME`, or token.
 
-`accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor / OpenRouter
-which stay provider-only and never get fake accounts).
+`accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor which stays
+provider-only and never gets fake accounts). OpenRouter entries are one per managed API key.
 
 ```json
 {
@@ -533,7 +533,6 @@ period in `additionalLimits`. `--min-remaining` is a percentage of quota that mu
 without it, only exhaustion blocks. `--config-dir` narrows the check to one configured Claude
 Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex config dir, or
 Grok `GROK_HOME`). Cursor and OpenRouter have no per-account directories and are rejected.
-
 The JSON `window` field stays `session`, `weekly`, or `codeReview`. Additive `periodKind` names
 the reported cadence. Human `message` text uses that cadence ("monthly", never "weekly" for a
 monthly Grok allowance).

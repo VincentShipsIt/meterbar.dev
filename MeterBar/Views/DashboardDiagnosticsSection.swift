@@ -35,6 +35,7 @@ struct DashboardDiagnosticsSection: View {
     @StateObject private var openRouterService = OpenRouterService.shared
     @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var grokAccountStore = GrokAccountStore.shared
+    @StateObject private var openRouterAccountStore = OpenRouterAccountStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -96,7 +97,8 @@ struct DashboardDiagnosticsSection: View {
                 .filter { !$0.isDefault }
                 .map(\.id),
             enabledCodexAccountIDs: codexAccountStore.enabledAccounts.map(\.id),
-            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id)
+            enabledGrokAccountIDs: grokAccountStore.enabledAccounts.map(\.id),
+            enabledOpenRouterKeyIDs: openRouterAccountStore.enabledAccounts.map(\.id)
         )
     }
 
@@ -147,6 +149,11 @@ struct DashboardDiagnosticsSection: View {
                 uniqueKeysWithValues: grokAccountStore.enabledAccounts.compactMap { account in
                     grokService.accountErrors[account.id].map { (account.id, $0) }
                 }
+            ),
+            openRouterKeyErrors: Dictionary(
+                uniqueKeysWithValues: openRouterAccountStore.enabledAccounts.compactMap { account in
+                    openRouterService.accountLastErrors[account.id].map { (account.id, $0) }
+                }
             )
         )
         let defaultClaudeAccountEnabled = claudeAccountStore.defaultAccountIsEnabled
@@ -165,7 +172,8 @@ struct DashboardDiagnosticsSection: View {
             claudeDefaultAccountEnabled: defaultClaudeAccountEnabled,
             claudeEnabledAccountMetrics: Array(claudeMetricsByID.values),
             codexAccounts: codexAccountStore.accounts,
-            grokAccounts: grokAccountStore.accounts
+            grokAccounts: grokAccountStore.accounts,
+            openRouterAccounts: openRouterAccountStore.accounts
         )
     }
 
