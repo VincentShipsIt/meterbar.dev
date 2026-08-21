@@ -1,5 +1,6 @@
 import Foundation
 import MeterBarShared
+import Security
 import XCTest
 @testable import MeterBar
 
@@ -145,6 +146,49 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertNotEqual(observation.runningTotal, credits.data.totalUsage)
     }
 
+    // MARK: - Off-main fetch regression
+
+    /// Regression for the 1.8.37 crash entering `NSURLSession.data` the moment
+    /// a saved key was first validated: with `SWIFT_DEFAULT_ACTOR_ISOLATION =
+    /// MainActor` the fetch legs ran as main-actor jobs through the *stored*
+    /// `fetchData` closure's reabstraction thunk, the same actor-hop hazard as
+    /// the Settings → Codex crash (#328). The network legs now run detached, so
+    /// probing through the stored closure from off the main actor — the exact
+    /// shape production uses after "Save & Validate" — must still record
+    /// success and publish `hasAccess`.
+    func testFetchUsageMetricsProbedThroughStoredClosureFromDetachedTask() async throws {
+        let metrics = try await Task.detached(priority: .userInitiated) {
+            let keychain = KeychainManager(
+                backend: SeededKeychainBackend(),
+                currentService: "test.openrouter.regression"
+            )
+            XCTAssertTrue(keychain.save(key: OpenRouterService.keychainKey, value: "sk-or-v1-test"))
+
+            let service = OpenRouterService(keychain: keychain) { request in
+                switch request.url?.path {
+                case "/api/v1/credits":
+                    return Data(#"{"data":{"total_credits":100,"total_usage":25}}"#.utf8)
+                case "/api/v1/key":
+                    return Data(
+                        #"{"data":{"limit":null,"limit_reset":null,"usage":27.5,"usage_daily":1.25}}"#.utf8
+                    )
+                default:
+                    throw ServiceError.invalidURL
+                }
+            }
+
+            let fetched = try await service.fetchUsageMetrics()
+            return (fetched, service.hasAccess)
+        }.value
+
+        XCTAssertEqual(metrics.0.service, .openRouter)
+        XCTAssertEqual(metrics.0.weeklyLimit?.used, 25)
+        XCTAssertEqual(metrics.0.weeklyLimit?.total, 100)
+        // The fixture key carries `limit: null`, so no session window maps.
+        XCTAssertNil(metrics.0.sessionLimit)
+        XCTAssertTrue(metrics.1)
+    }
+
     private func decodeCredits(_ json: String) throws -> OpenRouterCreditsResponse {
         try JSONDecoder().decode(OpenRouterCreditsResponse.self, from: Data(json.utf8))
     }
@@ -157,5 +201,58 @@ final class OpenRouterServiceTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour)) ?? .distantPast
+    }
+}
+
+/// In-memory `KeychainBackend` seeded purely by writes, keyed by service and
+/// account like the real item space. Only what the regression test needs:
+/// update-then-add save, data-returning read.
+nonisolated private final class SeededKeychainBackend: KeychainBackend {
+    private struct ItemKey: Hashable {
+        let service: String
+        let account: String
+    }
+
+    private var storage: [ItemKey: Data] = [:]
+
+    private func itemKey(in query: [String: Any]) -> ItemKey? {
+        guard let service = query[kSecAttrService as String] as? String,
+              let account = query[kSecAttrAccount as String] as? String else {
+            return nil
+        }
+        return ItemKey(service: service, account: account)
+    }
+
+    func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query), storage[itemKey] != nil,
+              let data = attributes[kSecValueData as String] as? Data else {
+            return errSecItemNotFound
+        }
+        storage[itemKey] = data
+        return errSecSuccess
+    }
+
+    func add(query: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query),
+              let data = query[kSecValueData as String] as? Data else {
+            return errSecParam
+        }
+        storage[itemKey] = data
+        return errSecSuccess
+    }
+
+    func copyMatching(query: [String: Any], result: inout AnyObject?) -> OSStatus {
+        guard let itemKey = itemKey(in: query), let data = storage[itemKey] else {
+            return errSecItemNotFound
+        }
+        if (query[kSecReturnData as String] as? Bool) == true {
+            result = data as AnyObject
+        }
+        return errSecSuccess
+    }
+
+    func delete(query: [String: Any]) -> OSStatus {
+        guard let itemKey = itemKey(in: query) else { return errSecParam }
+        return storage.removeValue(forKey: itemKey) == nil ? errSecItemNotFound : errSecSuccess
     }
 }

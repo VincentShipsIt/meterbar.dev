@@ -22,11 +22,11 @@ final class OpenRouterService: ObservableObject {
     private(set) var latestUsageObservation: ProviderUsageObservation?
 
     private let keychain: KeychainManager
-    private let fetchData: (URLRequest) async throws -> Data
+    private let fetchData: @Sendable (URLRequest) async throws -> Data
 
     init(
         keychain: KeychainManager = .shared,
-        fetchData: ((URLRequest) async throws -> Data)? = nil
+        fetchData: (@Sendable (URLRequest) async throws -> Data)? = nil
     ) {
         self.keychain = keychain
         self.fetchData = fetchData ?? Self.fetch
@@ -63,16 +63,11 @@ final class OpenRouterService: ObservableObject {
         }
 
         do {
-            async let creditsData = fetchData(try Self.request(path: "credits", apiKey: apiKey))
-            async let keyData = fetchData(try Self.request(path: "key", apiKey: apiKey))
-            let decoder = JSONDecoder()
-            let credits = try decoder.decode(OpenRouterCreditsResponse.self, from: await creditsData)
-            let key = try decoder.decode(OpenRouterKeyResponse.self, from: await keyData)
-            let metrics = Self.map(credits: credits.data, key: key.data)
-            latestUsageObservation = Self.observation(key: key.data, at: metrics.lastUpdated)
+            let fetched = try await Self.fetchRemotely(apiKey: apiKey, fetchData: fetchData)
+            latestUsageObservation = fetched.observation
             hasAccess = true
             lastError = nil
-            return metrics
+            return fetched.metrics
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
             lastError = serviceError
@@ -83,7 +78,45 @@ final class OpenRouterService: ObservableObject {
         }
     }
 
-    static func map(
+    /// The outcome of one off-main poll, shipped back to the caller as one
+    /// `Sendable` value so the main-actor side only ever touches its own
+    /// `@Published` state after the network work has fully settled.
+    private struct FetchedUsage: Sendable {
+        let metrics: UsageMetrics
+        let observation: ProviderUsageObservation
+    }
+
+    /// Runs both network legs and the decode off the main actor.
+    ///
+    /// The app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION =
+    /// MainActor`, so an unannotated fetch path here would execute as
+    /// main-actor jobs — and the two `async let` legs through the *stored*
+    /// `fetchData` closure cross a reabstraction-thunk actor hop whose
+    /// caller-owned argument buffer does not reliably survive. That is the
+    /// exact hazard that crashed Settings → Codex (#328, 4a38ab6) and that
+    /// crashed 1.8.37 entering `NSURLSession.data(for:delegate:)` with a dead
+    /// receiver the moment a key was saved and validated. Nothing in the
+    /// detached scope touches main-actor state: only `Sendable` values go in,
+    /// only a `Sendable` result comes out.
+    nonisolated private static func fetchRemotely(
+        apiKey: String,
+        fetchData: @escaping @Sendable (URLRequest) async throws -> Data
+    ) async throws -> FetchedUsage {
+        try await Task.detached(priority: .userInitiated) {
+            async let creditsData = fetchData(try request(path: "credits", apiKey: apiKey))
+            async let keyData = fetchData(try request(path: "key", apiKey: apiKey))
+            let decoder = JSONDecoder()
+            let credits = try decoder.decode(OpenRouterCreditsResponse.self, from: await creditsData)
+            let key = try decoder.decode(OpenRouterKeyResponse.self, from: await keyData)
+            let metrics = map(credits: credits.data, key: key.data)
+            return FetchedUsage(
+                metrics: metrics,
+                observation: observation(key: key.data, at: metrics.lastUpdated)
+            )
+        }.value
+    }
+
+    nonisolated static func map(
         credits: OpenRouterCredits,
         key: OpenRouterKey,
         now: Date = Date(),
@@ -127,7 +160,7 @@ final class OpenRouterService: ObservableObject {
     /// the whole account. Mixing the two would have the delta path and the
     /// authoritative-today path measuring different things and contradicting
     /// each other on alternating polls.
-    static func observation(key: OpenRouterKey, at observedAt: Date) -> ProviderUsageObservation {
+    nonisolated static func observation(key: OpenRouterKey, at observedAt: Date) -> ProviderUsageObservation {
         ProviderUsageObservation(
             provider: .openRouter,
             unit: .usd,
@@ -144,7 +177,7 @@ final class OpenRouterService: ObservableObject {
         )
     }
 
-    private static func request(path: String, apiKey: String) throws -> URLRequest {
+    nonisolated private static func request(path: String, apiKey: String) throws -> URLRequest {
         guard let url = URL(string: "https://openrouter.ai/api/v1/\(path)") else {
             throw ServiceError.invalidURL
         }
@@ -155,13 +188,13 @@ final class OpenRouterService: ObservableObject {
         return request
     }
 
-    private static func fetch(_ request: URLRequest) async throws -> Data {
+    nonisolated private static func fetch(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await ServiceSupport.session.data(for: request)
         try ServiceSupport.validate(response, data: data)
         return data
     }
 
-    private static func resetWindow(
+    nonisolated private static func resetWindow(
         _ rawValue: String?,
         now: Date,
         calendar: Calendar
@@ -186,11 +219,14 @@ final class OpenRouterService: ObservableObject {
     }
 }
 
-struct OpenRouterCreditsResponse: Codable {
+// `nonisolated` keeps the Codable conformances usable from the detached fetch
+// scope — under default MainActor isolation they would otherwise be
+// main-actor-isolated and unusable off the main actor.
+nonisolated struct OpenRouterCreditsResponse: Codable {
     let data: OpenRouterCredits
 }
 
-struct OpenRouterCredits: Codable {
+nonisolated struct OpenRouterCredits: Codable {
     let totalCredits: Double
     let totalUsage: Double
 
@@ -200,11 +236,11 @@ struct OpenRouterCredits: Codable {
     }
 }
 
-struct OpenRouterKeyResponse: Codable {
+nonisolated struct OpenRouterKeyResponse: Codable {
     let data: OpenRouterKey
 }
 
-struct OpenRouterKey: Codable {
+nonisolated struct OpenRouterKey: Codable {
     let label: String?
     let limit: Double?
     let limitReset: String?
