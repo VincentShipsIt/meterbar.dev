@@ -23,6 +23,13 @@ extension AccountNotificationIdentity {
     }
 }
 
+/// One provider's live accounts for exhaustive notification routing.
+struct NotificationAccountBundle {
+    let accounts: [AccountNotificationIdentity]
+    let metrics: [UUID: UsageMetrics]
+    let defaultID: UUID
+}
+
 /// Owns quota-threshold and Session Wake banners, extracted from
 /// `MeterBarApp.swift` (C1 split).
 ///
@@ -47,6 +54,68 @@ final class UsageNotificationCoordinator {
     /// scoped providers fan out through `AccountNotificationPlanner` instead.
     static var flatNotificationServices: [ServiceType] {
         ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }
+    }
+
+    /// Exhaustive account-scoped notification inputs. A new `ServiceType` with
+    /// `hasAccountScopedNotifications` is a compile error in the switch until
+    /// its account bundle is wired here.
+    static func accountScopedPlanInputs(
+        metrics: [ServiceType: UsageMetrics],
+        isEnabled: (ServiceType) -> Bool,
+        claude: NotificationAccountBundle,
+        codex: NotificationAccountBundle,
+        grok: NotificationAccountBundle
+    ) -> [AccountNotificationPlanInput] {
+        ServiceType.allCases.filter(\.hasAccountScopedNotifications).compactMap { service in
+            switch service {
+            case .claudeCode:
+                return planInput(
+                    service: .claudeCode,
+                    providerEnabled: isEnabled(.claudeCode),
+                    bundle: claude,
+                    fallbackMetrics: metrics[.claudeCode]
+                )
+            case .codexCli:
+                return planInput(
+                    service: .codexCli,
+                    providerEnabled: isEnabled(.codexCli),
+                    bundle: codex,
+                    fallbackMetrics: metrics[.codexCli]
+                )
+            case .grok:
+                return planInput(
+                    service: .grok,
+                    providerEnabled: isEnabled(.grok),
+                    bundle: grok,
+                    fallbackMetrics: metrics[.grok]
+                )
+            case .cursor, .openRouter:
+                assertionFailure(
+                    "account-scoped notifications for \(service.rawValue) have no routing"
+                )
+                return nil
+            }
+        }
+    }
+
+    private static func planInput(
+        service: ServiceType,
+        providerEnabled: Bool,
+        bundle: NotificationAccountBundle,
+        fallbackMetrics: UsageMetrics?
+    ) -> AccountNotificationPlanInput {
+        AccountNotificationPlanInput(
+            service: service,
+            providerEnabled: providerEnabled,
+            accounts: bundle.accounts,
+            accountMetrics: bundle.metrics,
+            fallbackMetrics: fallbackMetrics,
+            representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
+                accounts: bundle.accounts,
+                accountMetrics: bundle.metrics,
+                defaultID: bundle.defaultID
+            )
+        )
     }
 
     func start() {
@@ -170,52 +239,32 @@ final class UsageNotificationCoordinator {
             }
         }
 
-        let claudeAccounts = ClaudeCodeAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
-        let claudeAccountMetrics = UsageDataManager.shared.claudeCodeAccountMetrics
-        let codexAccounts = CodexAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
-        let codexAccountMetrics = UsageDataManager.shared.codexAccountMetrics
-        let grokAccounts = GrokAccountStore.shared.accounts.map(AccountNotificationIdentity.init(account:))
-        let grokAccountMetrics = UsageDataManager.shared.grokAccountMetrics
-
         let accountPlan = AccountNotificationPlanner(decider: decider).plan(
-            inputs: [
-                AccountNotificationPlanInput(
-                    service: .claudeCode,
-                    providerEnabled: providerVisibilityStore.isEnabled(.claudeCode),
-                    accounts: claudeAccounts,
-                    accountMetrics: claudeAccountMetrics,
-                    fallbackMetrics: currentMetrics[.claudeCode],
-                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
-                        accounts: claudeAccounts,
-                        accountMetrics: claudeAccountMetrics,
-                        defaultID: ClaudeCodeAccount.defaultID
-                    )
+            inputs: Self.accountScopedPlanInputs(
+                metrics: currentMetrics,
+                isEnabled: providerVisibilityStore.isEnabled,
+                claude: NotificationAccountBundle(
+                    accounts: ClaudeCodeAccountStore.shared.accounts.map(
+                        AccountNotificationIdentity.init(account:)
+                    ),
+                    metrics: UsageDataManager.shared.claudeCodeAccountMetrics,
+                    defaultID: ClaudeCodeAccount.defaultID
                 ),
-                AccountNotificationPlanInput(
-                    service: .codexCli,
-                    providerEnabled: providerVisibilityStore.isEnabled(.codexCli),
-                    accounts: codexAccounts,
-                    accountMetrics: codexAccountMetrics,
-                    fallbackMetrics: currentMetrics[.codexCli],
-                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
-                        accounts: codexAccounts,
-                        accountMetrics: codexAccountMetrics,
-                        defaultID: CodexAccount.defaultID
-                    )
+                codex: NotificationAccountBundle(
+                    accounts: CodexAccountStore.shared.accounts.map(
+                        AccountNotificationIdentity.init(account:)
+                    ),
+                    metrics: UsageDataManager.shared.codexAccountMetrics,
+                    defaultID: CodexAccount.defaultID
                 ),
-                AccountNotificationPlanInput(
-                    service: .grok,
-                    providerEnabled: providerVisibilityStore.isEnabled(.grok),
-                    accounts: grokAccounts,
-                    accountMetrics: grokAccountMetrics,
-                    fallbackMetrics: currentMetrics[.grok],
-                    representativeAccountID: AccountNotificationPlanInput.representativeAccountID(
-                        accounts: grokAccounts,
-                        accountMetrics: grokAccountMetrics,
-                        defaultID: GrokAccount.defaultID
-                    )
+                grok: NotificationAccountBundle(
+                    accounts: GrokAccountStore.shared.accounts.map(
+                        AccountNotificationIdentity.init(account:)
+                    ),
+                    metrics: UsageDataManager.shared.grokAccountMetrics,
+                    defaultID: GrokAccount.defaultID
                 )
-            ],
+            ),
             alreadyNotified: keys,
             now: now
         )

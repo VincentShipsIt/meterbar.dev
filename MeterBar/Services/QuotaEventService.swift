@@ -49,33 +49,21 @@ nonisolated enum QuotaEventSnapshotCatalog {
             )
         }
 
-        result += accountSnapshots(
-            provider: .claudeCode,
-            accounts: accounts.claudeAccounts.map {
-                AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
-            },
-            accountMetrics: accounts.claudeAccountMetrics,
-            fallbackMetrics: metrics[.claudeCode],
-            enabledServices: enabledServices
-        )
-        result += accountSnapshots(
-            provider: .codexCli,
-            accounts: accounts.codexAccounts.map {
-                AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
-            },
-            accountMetrics: accounts.codexAccountMetrics,
-            fallbackMetrics: metrics[.codexCli],
-            enabledServices: enabledServices
-        )
-        result += accountSnapshots(
-            provider: .grok,
-            accounts: accounts.grokAccounts.map {
-                AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
-            },
-            accountMetrics: accounts.grokAccountMetrics,
-            fallbackMetrics: metrics[.grok],
-            enabledServices: enabledServices
-        )
+        for provider in ServiceType.allCases where provider.hasAccountScopedQuotaEvents {
+            guard let source = accountSource(for: provider, from: accounts) else {
+                assertionFailure(
+                    "account-scoped quota events for \(provider.rawValue) have no routing"
+                )
+                continue
+            }
+            result += accountSnapshots(
+                provider: provider,
+                accounts: source.accounts,
+                accountMetrics: source.metrics,
+                fallbackMetrics: metrics[provider],
+                enabledServices: enabledServices
+            )
+        }
         return result.sorted {
             if $0.provider.sortOrder != $1.provider.sortOrder {
                 return $0.provider.sortOrder < $1.provider.sortOrder
@@ -89,35 +77,66 @@ nonisolated enum QuotaEventSnapshotCatalog {
         codexAccounts: [CodexAccount],
         grokAccounts: [GrokAccount]
     ) -> [QuotaEventSelectableAccount] {
+        let inputs = QuotaEventAccountInputs(
+            claudeAccounts: claudeAccounts,
+            codexAccounts: codexAccounts,
+            grokAccounts: grokAccounts
+        )
         let flat = flatProviders.map {
             QuotaEventSelectableAccount(provider: $0, accountID: "default", name: $0.displayName)
         }
-        let claude = claudeAccounts.filter(\.isEnabled).map {
-            QuotaEventSelectableAccount(
-                provider: .claudeCode,
-                accountID: $0.id.uuidString,
-                name: $0.name
-            )
+        var scoped: [QuotaEventSelectableAccount] = []
+        for provider in ServiceType.allCases where provider.hasAccountScopedQuotaEvents {
+            guard let source = accountSource(for: provider, from: inputs) else {
+                assertionFailure(
+                    "account-scoped quota events for \(provider.rawValue) have no routing"
+                )
+                continue
+            }
+            scoped += source.accounts.filter(\.isEnabled).map {
+                QuotaEventSelectableAccount(
+                    provider: provider,
+                    accountID: $0.id.uuidString,
+                    name: $0.name
+                )
+            }
         }
-        let codex = codexAccounts.filter(\.isEnabled).map {
-            QuotaEventSelectableAccount(
-                provider: .codexCli,
-                accountID: $0.id.uuidString,
-                name: $0.name
-            )
-        }
-        let grok = grokAccounts.filter(\.isEnabled).map {
-            QuotaEventSelectableAccount(
-                provider: .grok,
-                accountID: $0.id.uuidString,
-                name: $0.name
-            )
-        }
-        return (claude + codex + grok + flat).sorted {
+        return (scoped + flat).sorted {
             if $0.provider.sortOrder != $1.provider.sortOrder {
                 return $0.provider.sortOrder < $1.provider.sortOrder
             }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private static func accountSource(
+        for provider: ServiceType,
+        from accounts: QuotaEventAccountInputs
+    ) -> (accounts: [AccountMetricIdentity], metrics: [UUID: UsageMetrics])? {
+        switch provider {
+        case .claudeCode:
+            return (
+                accounts.claudeAccounts.map {
+                    AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
+                },
+                accounts.claudeAccountMetrics
+            )
+        case .codexCli:
+            return (
+                accounts.codexAccounts.map {
+                    AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
+                },
+                accounts.codexAccountMetrics
+            )
+        case .grok:
+            return (
+                accounts.grokAccounts.map {
+                    AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
+                },
+                accounts.grokAccountMetrics
+            )
+        case .cursor, .openRouter:
+            return nil
         }
     }
 

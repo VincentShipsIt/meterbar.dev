@@ -334,10 +334,15 @@ public enum WidgetPresentationPlanner {
         visibleWindows: Set<WidgetQuotaWindow>
     ) -> Double {
         guard let metrics = source.metrics else { return -Double.infinity }
-        return WidgetQuotaWindow.allCases
+        let primary = WidgetQuotaWindow.allCases
             .filter { visibleWindows.contains($0) }
             .compactMap { limit(for: $0, metrics: metrics)?.percentage }
-            .max() ?? 0
+        let additional = metrics.additionalLimits.compactMap { additionalLimit -> Double? in
+            let window = widgetWindow(for: additionalLimit.periodKind)
+            guard visibleWindows.contains(window) else { return nil }
+            return additionalLimit.percentage
+        }
+        return (primary + additional).max() ?? 0
     }
 
     private static func presentationRows(

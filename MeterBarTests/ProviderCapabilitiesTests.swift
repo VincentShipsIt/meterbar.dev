@@ -248,6 +248,56 @@ final class ProviderCapabilitiesTests: XCTestCase {
         XCTAssertEqual(serve.body, try UsageCLIJSONResponse(metrics: metrics).jsonData())
     }
 
+    func testAccountScopedNotificationAndQuotaEventRoutingIsExhaustive() {
+        let notificationInputs = UsageNotificationCoordinator.accountScopedPlanInputs(
+            metrics: MetricsFixtures.allProviders(),
+            isEnabled: { _ in true },
+            claude: NotificationAccountBundle(
+                accounts: [AccountNotificationIdentity(account: ClaudeCodeAccount.defaultAccount)],
+                metrics: [ClaudeCodeAccount.defaultID: MetricsFixtures.claudeCode()],
+                defaultID: ClaudeCodeAccount.defaultID
+            ),
+            codex: NotificationAccountBundle(
+                accounts: [AccountNotificationIdentity(account: CodexAccount.defaultAccount)],
+                metrics: [CodexAccount.defaultID: MetricsFixtures.codexCli()],
+                defaultID: CodexAccount.defaultID
+            ),
+            grok: NotificationAccountBundle(
+                accounts: [AccountNotificationIdentity(account: GrokAccount.defaultAccount)],
+                metrics: [GrokAccount.defaultID: MetricsFixtures.grok()],
+                defaultID: GrokAccount.defaultID
+            )
+        )
+        XCTAssertEqual(
+            Set(notificationInputs.map(\.service)),
+            Set(ServiceType.allCases.filter(\.hasAccountScopedNotifications))
+        )
+        for input in notificationInputs {
+            XCTAssertFalse(
+                input.accounts.isEmpty,
+                "\(input.service) account-scoped notification routing has no accounts"
+            )
+        }
+
+        let selectable = QuotaEventSnapshotCatalog.selectableAccounts(
+            claudeAccounts: [.defaultAccount],
+            codexAccounts: [.defaultAccount],
+            grokAccounts: [.defaultAccount]
+        )
+        for service in ServiceType.allCases {
+            XCTAssertTrue(
+                selectable.contains { $0.provider == service },
+                "\(service) missing from quota-event selectable accounts"
+            )
+        }
+        for service in ServiceType.allCases where service.hasAccountScopedQuotaEvents {
+            XCTAssertTrue(
+                selectable.contains { $0.provider == service && $0.accountID != "default" },
+                "\(service) account-scoped quota events still use the flat default path"
+            )
+        }
+    }
+
     func testNotificationsAndEventsCoverEveryProvider() {
         let coveredNotifications = Set(UsageNotificationCoordinator.flatNotificationServices)
             .union(ServiceType.allCases.filter(\.hasAccountScopedNotifications))

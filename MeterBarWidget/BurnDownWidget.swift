@@ -39,28 +39,7 @@ struct BurnDownWidgetProvider: TimelineProvider {
         let now = Date()
         return BurnDownWidgetEntry(
             date: now,
-            metrics: [
-                .claudeCode: placeholderMetrics(
-                    service: .claudeCode,
-                    used: 72,
-                    resetTime: now.addingTimeInterval(2.5 * 24 * 60 * 60)
-                ),
-                .codexCli: placeholderMetrics(
-                    service: .codexCli,
-                    used: 38,
-                    resetTime: now.addingTimeInterval(4 * 24 * 60 * 60)
-                ),
-                .grok: placeholderMetrics(
-                    service: .grok,
-                    used: 47,
-                    resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)
-                ),
-                .openRouter: placeholderMetrics(
-                    service: .openRouter,
-                    used: 32,
-                    resetTime: now.addingTimeInterval(18 * 24 * 60 * 60)
-                )
-            ],
+            metrics: WidgetPlaceholderMetrics.burnDown(now: now),
             accountMetrics: [],
             preferences: .defaults
         )
@@ -92,23 +71,6 @@ struct BurnDownWidgetProvider: TimelineProvider {
 
     private func presentationFamily(_ family: WidgetFamily) -> WidgetPresentationFamily {
         family == .systemSmall ? .small : .medium
-    }
-
-    private func placeholderMetrics(
-        service: ServiceType,
-        used: Double,
-        resetTime: Date
-    ) -> UsageMetrics {
-        UsageMetrics(
-            service: service,
-            weeklyLimit: UsageLimit(
-                used: used,
-                total: 100,
-                resetTime: resetTime,
-                windowSeconds: 7 * 24 * 60 * 60
-            ),
-            lastUpdated: Date()
-        )
     }
 }
 

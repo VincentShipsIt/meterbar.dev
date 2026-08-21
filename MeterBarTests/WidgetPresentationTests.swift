@@ -104,6 +104,79 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(result.rows.map(\.service), [.codexCli, .cursor, .claudeCode])
     }
 
+    func testUrgencyOrderingIncludesVisibleAdditionalLimits() {
+        var preferences = WidgetPreferences.defaults
+        preferences.accountOrdering = .urgency
+        preferences.visibleQuotaWindows = [.weekly]
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90),
+            .cursor: makeMetrics(
+                .cursor,
+                weeklyUsed: 10,
+                additionalLimits: [
+                    UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly)
+                ]
+            )
+        ]
+
+        let result = presentation(
+            metrics: metrics,
+            preferences: preferences,
+            family: .large
+        )
+
+        XCTAssertEqual(uniqueServices(in: result), [.cursor, .claudeCode])
+    }
+
+    func testUrgencyOrderingIgnoresAdditionalLimitsOutsideVisibleWindows() {
+        var preferences = WidgetPreferences.defaults
+        preferences.accountOrdering = .urgency
+        preferences.visibleQuotaWindows = [.weekly]
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90),
+            .cursor: makeMetrics(
+                .cursor,
+                weeklyUsed: 10,
+                additionalLimits: [
+                    UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily)
+                ]
+            )
+        ]
+
+        let result = presentation(
+            metrics: metrics,
+            preferences: preferences,
+            family: .large
+        )
+
+        XCTAssertEqual(result.rows.map(\.service), [.claudeCode, .cursor])
+    }
+
+    func testUrgencyOrderingUsesWidgetWindowForAdditionalLimitPeriod() {
+        var preferences = WidgetPreferences.defaults
+        preferences.accountOrdering = .urgency
+        preferences.visibleQuotaWindows = [.session]
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, sessionUsed: 20, weeklyUsed: 90),
+            .cursor: makeMetrics(
+                .cursor,
+                sessionUsed: 5,
+                weeklyUsed: 10,
+                additionalLimits: [
+                    UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily)
+                ]
+            )
+        ]
+
+        let result = presentation(
+            metrics: metrics,
+            preferences: preferences,
+            family: .large
+        )
+
+        XCTAssertEqual(uniqueServices(in: result), [.cursor, .claudeCode])
+    }
+
     func testUsedAndRemainingModesProduceComplementaryValues() throws {
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 25)
@@ -430,6 +503,14 @@ final class WidgetPresentationTests: XCTestCase {
         }
     }
 
+    private func uniqueServices(in presentation: WidgetPresentation) -> [ServiceType] {
+        var seen = Set<WidgetAccountIdentifier>()
+        return presentation.rows.compactMap { row in
+            guard seen.insert(row.accountIdentifier).inserted else { return nil }
+            return row.service
+        }
+    }
+
     /// One row per quota window for a single provider, built through the real
     /// planner rather than a hand-made row.
     private func allWindowRows(service: ServiceType, total: Double) -> [WidgetPresentationRow] {
@@ -566,7 +647,8 @@ final class WidgetPresentationTests: XCTestCase {
         total: Double = 100,
         modelLimitLabel: String? = nil,
         resetTime: Date? = nil,
-        lastUpdated: Date? = nil
+        lastUpdated: Date? = nil,
+        additionalLimits: [UsageLimit] = []
     ) -> UsageMetrics {
         UsageMetrics(
             service: service,
@@ -580,6 +662,7 @@ final class WidgetPresentationTests: XCTestCase {
                 UsageLimit(used: $0, total: total, resetTime: resetTime)
             },
             modelLimitLabel: modelLimitLabel,
+            additionalLimits: additionalLimits,
             lastUpdated: lastUpdated ?? now
         )
     }
