@@ -25,6 +25,7 @@ struct UsageDashboardView: View {
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
     @StateObject private var codexAccountStore = CodexAccountStore.shared
     @StateObject private var grokAccountStore = GrokAccountStore.shared
+    @StateObject private var openRouterAccountStore = OpenRouterAccountStore.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var codexCliService = CodexCliLocalService.shared
@@ -410,6 +411,7 @@ struct UsageDashboardView: View {
                 claudeAccounts: claudeAccountStore.accounts,
                 codexAccounts: codexAccountStore.accounts,
                 grokAccounts: grokAccountStore.accounts,
+                openRouterAccounts: openRouterAccountStore.accounts,
                 enabledServices: providerVisibility.enabledServices,
                 claudeCodeService: claudeCodeService,
                 codexCliService: codexCliService,

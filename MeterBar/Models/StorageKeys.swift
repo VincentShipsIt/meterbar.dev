@@ -115,6 +115,17 @@ nonisolated enum StorageKeys {
     static let grokAccountOrder = "GrokAccountOrder"
     /// Cached per-account Grok metrics (JSON-encoded [UUID: UsageMetrics]).
     static let cachedGrokAccountMetrics = "CachedGrokAccountMetrics"
+    /// Extra OpenRouter API keys (JSON-encoded [OpenRouterAccount]). Key
+    /// material lives in the Keychain, never here.
+    static let openRouterCustomAccounts = "OpenRouterCustomAccounts"
+    /// User-chosen display name for the default OpenRouter key.
+    static let openRouterDefaultAccountName = "OpenRouterDefaultAccountName"
+    /// Whether the synthesized default OpenRouter key participates in tracking.
+    static let openRouterDefaultAccountEnabled = "OpenRouterDefaultAccountEnabled"
+    /// Persisted OpenRouter key display order (array of UUID strings).
+    static let openRouterAccountOrder = "OpenRouterAccountOrder"
+    /// Cached per-key OpenRouter metrics (JSON-encoded [UUID: UsageMetrics]).
+    static let cachedOpenRouterAccountMetrics = "CachedOpenRouterAccountMetrics"
     /// Global on/off switch for usage notifications.
     static let notificationsEnabled = "NotificationsEnabled"
     /// Raw value of the `NotificationThreshold` at which a warning notifies.

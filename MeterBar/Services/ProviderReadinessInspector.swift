@@ -56,6 +56,7 @@ nonisolated public enum ProviderReadinessInspector {
         grokAccounts: [GrokAccount]? = nil,
         grokIsCLIInstalled: Bool? = nil,
         grokAuthProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))? = nil,
+        openRouterAccounts: [OpenRouterAccount]? = nil,
         parseHealth: [ServiceType: ProviderParseHealthRecord]? = nil,
         cachedMetrics: [ServiceType: UsageMetrics]? = nil,
         cachedAccountMetrics: [AccountUsageSnapshot]? = nil
@@ -70,6 +71,9 @@ nonisolated public enum ProviderReadinessInspector {
             ?? [.defaultAccount]
         let configuredGrokAccounts = grokAccounts
             ?? configuration?.grokAccounts
+            ?? [.defaultAccount]
+        let configuredOpenRouterAccounts = openRouterAccounts
+            ?? configuration?.openRouterAccounts
             ?? [.defaultAccount]
         let mergedClaudeMetrics = snapshotsByID.merging(claudeAccountMetrics) { _, incoming in incoming }
         let health = parseHealth ?? ProviderParseHealthStore.sharedRecords()
@@ -106,7 +110,13 @@ nonisolated public enum ProviderReadinessInspector {
                 )
             },
             cursorReport: { error, date in [cursorReport(refreshError: error, now: date)] },
-            openRouterReport: { error, _ in [openRouterReport(refreshError: error)] },
+            openRouterReport: { error, _ in
+                openRouterReports(
+                    refreshError: error,
+                    accountRefreshErrors: accountRefreshErrors[.openRouter] ?? [:],
+                    accounts: configuredOpenRouterAccounts
+                )
+            },
             grokReport: { error, date in
                 grokReports(
                     refreshError: error,
@@ -363,6 +373,28 @@ nonisolated public enum ProviderReadinessInspector {
                 refreshError: sanitize(refreshError)
             )
         )
+    }
+
+    /// One report per enabled key plus a provider-wide aggregate when several
+    /// keys are tracked — same shape as Codex and Grok.
+    static func openRouterReports(
+        refreshError: ServiceError?,
+        accountRefreshErrors: [UUID: ServiceError],
+        accounts: [OpenRouterAccount],
+        keyProbe: ((OpenRouterAccount) -> Bool)? = nil
+    ) -> [ProviderReadiness] {
+        let reports = accounts.filter(\.isEnabled).map { account -> ProviderReadiness in
+            let hasKey = keyProbe.map { $0(account) }
+                ?? { KeychainManager.shared.hasKey(key: OpenRouterService.keychainKey(for: account.id)) }()
+            return ProviderReadinessEvaluator.openRouter(
+                OpenRouterReadinessInput(
+                    hasAPIKey: hasKey,
+                    refreshError: sanitize(accountRefreshErrors[account.id] ?? refreshError)
+                )
+            )
+            .withIdentity(.account(.openRouter, id: account.id, name: account.name))
+        }
+        return pack(provider: .openRouter, accountReports: reports)
     }
 
     static func grokReports(

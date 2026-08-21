@@ -73,7 +73,7 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 hasAccountScopedNotifications: true,
                 hasAccountScopedQuotaEvents: true
             )
-        case .cursor, .openRouter:
+        case .cursor:
             return ProviderCapabilities(
                 isMultiAccount: false,
                 supportsExtraUsage: false,
@@ -82,6 +82,19 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 supportsSessionWake: false,
                 hasAccountScopedNotifications: false,
                 hasAccountScopedQuotaEvents: false
+            )
+        case .openRouter:
+            // Multi-key: each managed API key is an account. Extra usage, reset
+            // redemption, guard config directories, and Session Wake have no
+            // OpenRouter analog.
+            return ProviderCapabilities(
+                isMultiAccount: true,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: true,
+                hasAccountScopedQuotaEvents: true
             )
         }
     }

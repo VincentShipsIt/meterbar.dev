@@ -29,6 +29,8 @@ final class ProviderSnapshotTests: XCTestCase {
         grokAccountMetrics: [UUID: UsageMetrics] = [:],
         claudeAccounts: [ClaudeCodeAccount] = [.defaultAccount],
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
+        openRouterAccounts: [OpenRouterAccount] = [.defaultAccount],
+        openRouterAccountMetrics: [UUID: UsageMetrics] = [:],
         enabledServices: Set<ServiceType> = Set(ServiceType.allCases),
         codexAccountAccess: [UUID: Bool] = [:],
         codexCliHasAccess: Bool = false
@@ -43,7 +45,12 @@ final class ProviderSnapshotTests: XCTestCase {
             claudeAccounts: claudeAccounts,
             claudeAccountMetrics: claudeAccountMetrics,
             enabledServices: enabledServices,
-            codexCliHasAccess: codexCliHasAccess
+            codexCliHasAccess: codexCliHasAccess,
+            openRouterAccounts: openRouterAccounts,
+            openRouterAccountMetrics: openRouterAccountMetrics,
+            openRouterAccountAccess: openRouterAccounts.reduce(into: [:]) {
+                $0[$1.id] = true
+            }
         )
     }
 

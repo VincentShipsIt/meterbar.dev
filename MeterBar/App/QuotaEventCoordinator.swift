@@ -15,6 +15,7 @@ final class QuotaEventCoordinator {
     private let claudeAccounts: ClaudeCodeAccountStore
     private let codexAccounts: CodexAccountStore
     private let grokAccounts: GrokAccountStore
+    private let openRouterKeys: OpenRouterAccountStore
     private let providerVisibility: ProviderVisibilityStore
     private let settings: QuotaEventSettingsStore
     private let diagnostics: QuotaEventDiagnosticStore
@@ -28,6 +29,7 @@ final class QuotaEventCoordinator {
         claudeAccounts: ClaudeCodeAccountStore? = nil,
         codexAccounts: CodexAccountStore? = nil,
         grokAccounts: GrokAccountStore? = nil,
+        openRouterKeys: OpenRouterAccountStore? = nil,
         providerVisibility: ProviderVisibilityStore? = nil,
         settings: QuotaEventSettingsStore? = nil,
         diagnostics: QuotaEventDiagnosticStore? = nil,
@@ -37,6 +39,7 @@ final class QuotaEventCoordinator {
         self.claudeAccounts = claudeAccounts ?? .shared
         self.codexAccounts = codexAccounts ?? .shared
         self.grokAccounts = grokAccounts ?? .shared
+        self.openRouterKeys = openRouterKeys ?? .shared
         self.providerVisibility = providerVisibility ?? .shared
         self.settings = settings ?? .shared
         self.diagnostics = diagnostics ?? .shared
@@ -60,6 +63,9 @@ final class QuotaEventCoordinator {
             grokAccounts.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
             grokAccounts.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
             grokAccounts.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
+            openRouterKeys.$customAccounts.map { _ in () }.eraseToAnyPublisher(),
+            openRouterKeys.$defaultAccountName.map { _ in () }.eraseToAnyPublisher(),
+            openRouterKeys.$defaultAccountIsEnabled.map { _ in () }.eraseToAnyPublisher(),
         ]
 
         Publishers.MergeMany(triggers)
@@ -80,7 +86,9 @@ final class QuotaEventCoordinator {
                 codexAccounts: codexAccounts.accounts,
                 codexAccountMetrics: dataManager.codexAccountMetrics,
                 grokAccounts: grokAccounts.accounts,
-                grokAccountMetrics: dataManager.grokAccountMetrics
+                grokAccountMetrics: dataManager.grokAccountMetrics,
+                openRouterAccounts: openRouterKeys.accounts,
+                openRouterAccountMetrics: dataManager.openRouterAccountMetrics
             ),
             enabledServices: providerVisibility.enabledServices
         )

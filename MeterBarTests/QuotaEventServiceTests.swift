@@ -34,7 +34,11 @@ final class QuotaEventServiceTests: XCTestCase {
                 codexAccounts: [codex],
                 codexAccountMetrics: [codex.id: usage(service: .codexCli, used: 50)],
                 grokAccounts: [grok],
-                grokAccountMetrics: [grok.id: usage(service: .grok, used: 50)]
+                grokAccountMetrics: [grok.id: usage(service: .grok, used: 50)],
+                openRouterAccounts: [.defaultAccount],
+                openRouterAccountMetrics: [
+                    OpenRouterAccount.defaultID: usage(service: .openRouter, used: 50)
+                ]
             ),
             enabledServices: Set(ServiceType.allCases)
         )

@@ -15,8 +15,8 @@ nonisolated struct QuotaEventSelectableAccount: Identifiable, Equatable, Sendabl
     }
 }
 
-/// Account-aware inputs for Claude, Codex, and Grok. Flat providers still
-/// arrive through the provider-wide metrics map.
+/// Account-aware inputs for Claude, Codex, Grok, and OpenRouter. Flat providers
+/// still arrive through the provider-wide metrics map.
 nonisolated struct QuotaEventAccountInputs: Sendable {
     var claudeAccounts: [ClaudeCodeAccount] = []
     var claudeAccountMetrics: [UUID: UsageMetrics] = [:]
@@ -24,6 +24,8 @@ nonisolated struct QuotaEventAccountInputs: Sendable {
     var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     var grokAccounts: [GrokAccount] = []
     var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+    var openRouterAccounts: [OpenRouterAccount] = []
+    var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
 }
 
 /// Builds the app-wide provider/account input without ever projecting
@@ -75,12 +77,14 @@ nonisolated enum QuotaEventSnapshotCatalog {
     static func selectableAccounts(
         claudeAccounts: [ClaudeCodeAccount],
         codexAccounts: [CodexAccount],
-        grokAccounts: [GrokAccount]
+        grokAccounts: [GrokAccount],
+        openRouterAccounts: [OpenRouterAccount] = []
     ) -> [QuotaEventSelectableAccount] {
         let inputs = QuotaEventAccountInputs(
             claudeAccounts: claudeAccounts,
             codexAccounts: codexAccounts,
-            grokAccounts: grokAccounts
+            grokAccounts: grokAccounts,
+            openRouterAccounts: openRouterAccounts
         )
         let flat = flatProviders.map {
             QuotaEventSelectableAccount(provider: $0, accountID: "default", name: $0.displayName)
@@ -135,7 +139,14 @@ nonisolated enum QuotaEventSnapshotCatalog {
                 },
                 accounts.grokAccountMetrics
             )
-        case .cursor, .openRouter:
+        case .openRouter:
+            return (
+                accounts.openRouterAccounts.map {
+                    AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
+                },
+                accounts.openRouterAccountMetrics
+            )
+        case .cursor:
             return nil
         }
     }

@@ -177,8 +177,9 @@ final class OpenRouterServiceTests: XCTestCase {
                 }
             }
 
-            let fetched = try await service.fetchUsageMetrics()
-            return (fetched, service.hasAccess)
+            let account = OpenRouterAccount.defaultAccount
+            let fetched = try await service.fetchUsageMetrics(account: account)
+            return (fetched, service.canAccess(account: account))
         }.value
 
         XCTAssertEqual(metrics.0.service, .openRouter)
@@ -205,9 +206,10 @@ final class OpenRouterServiceTests: XCTestCase {
 }
 
 /// In-memory `KeychainBackend` seeded purely by writes, keyed by service and
+/// (shared with `OpenRouterMultiKeyTests`)
 /// account like the real item space. Only what the regression test needs:
 /// update-then-add save, data-returning read.
-nonisolated private final class SeededKeychainBackend: KeychainBackend {
+nonisolated final class SeededKeychainBackend: KeychainBackend {
     private struct ItemKey: Hashable {
         let service: String
         let account: String

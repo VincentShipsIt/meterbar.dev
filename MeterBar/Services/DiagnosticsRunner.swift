@@ -47,12 +47,14 @@ enum DiagnosticsRunner {
     static func accountRefreshErrors(
         claudeAccountErrors: [UUID: ServiceError] = [:],
         codexAccountErrors: [UUID: ServiceError] = [:],
-        grokAccountErrors: [UUID: ServiceError] = [:]
+        grokAccountErrors: [UUID: ServiceError] = [:],
+        openRouterKeyErrors: [UUID: ServiceError] = [:]
     ) -> [ServiceType: [UUID: ServiceError]] {
         var result: [ServiceType: [UUID: ServiceError]] = [:]
         if !claudeAccountErrors.isEmpty { result[.claudeCode] = claudeAccountErrors }
         if !codexAccountErrors.isEmpty { result[.codexCli] = codexAccountErrors }
         if !grokAccountErrors.isEmpty { result[.grok] = grokAccountErrors }
+        if !openRouterKeyErrors.isEmpty { result[.openRouter] = openRouterKeyErrors }
         return result
     }
 
@@ -65,7 +67,8 @@ enum DiagnosticsRunner {
         claudeDefaultAccountEnabled: Bool,
         claudeEnabledAccountMetrics: [UsageMetrics],
         codexAccounts: [CodexAccount] = [.defaultAccount],
-        grokAccounts: [GrokAccount] = [.defaultAccount]
+        grokAccounts: [GrokAccount] = [.defaultAccount],
+        openRouterAccounts: [OpenRouterAccount] = [.defaultAccount]
     ) async -> [ProviderReadiness] {
         await Task.detached(priority: .userInitiated) {
             ProviderReadinessInspector.reports(
@@ -77,7 +80,8 @@ enum DiagnosticsRunner {
                 claudeDefaultAccountEnabled: claudeDefaultAccountEnabled,
                 claudeEnabledAccountMetrics: claudeEnabledAccountMetrics,
                 codexAccounts: codexAccounts,
-                grokAccounts: grokAccounts
+                grokAccounts: grokAccounts,
+                openRouterAccounts: openRouterAccounts
             )
         }.value
     }

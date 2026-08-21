@@ -28,6 +28,7 @@ enum ProviderPresentationHealth {
         var openRouter: ServiceError?
         var codexAccounts: [UUID: ServiceError] = [:]
         var grokAccounts: [UUID: ServiceError] = [:]
+        var openRouterAccounts: [UUID: ServiceError] = [:]
     }
 
     static var staleAfter: TimeInterval { ProviderParseHealthRecord.staleAfter }

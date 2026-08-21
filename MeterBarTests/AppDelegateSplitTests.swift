@@ -601,7 +601,8 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertFalse(services.contains(.claudeCode))
         XCTAssertFalse(services.contains(.codexCli))
         XCTAssertFalse(services.contains(.grok))
-        XCTAssertEqual(services, [.cursor, .openRouter])
+        XCTAssertFalse(services.contains(.openRouter))
+        XCTAssertEqual(services, [.cursor])
         XCTAssertEqual(
             services.count,
             ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }.count
