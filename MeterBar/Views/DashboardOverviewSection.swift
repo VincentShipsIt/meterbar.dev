@@ -169,22 +169,19 @@ private struct OverviewProviderRow: View {
                     )
 
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
-                            Text(snapshot.title)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .lineLimit(1)
-
-                            Spacer(minLength: 4)
-
-                            ProviderCardStatusLabel(snapshot: snapshot)
-                        }
+                        Text(snapshot.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
 
                         Text(DashboardOverviewSection.detailLine(for: snapshot, now: timeline.date))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ProviderCardStatusLabel(snapshot: snapshot)
 
                     CardDisclosureChevron()
                 }

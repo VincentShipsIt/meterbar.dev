@@ -9,8 +9,9 @@ import SwiftUI
 /// hovering a card replaced it with something that read like a different
 /// provider, and a logged-out account looked healthy the moment the pointer
 /// landed on it. One component keeps them identical; the only legitimate
-/// difference is the disclosure chevron, which belongs to the card because the
-/// panel is already the thing it discloses.
+/// difference is placement: a full provider card can move status and disclosure
+/// into a trailing rail that centers against the complete card, while the hover
+/// panel keeps them inline with its compact header.
 struct ProviderCardHeader: View {
     /// Display strings for the header, with no SwiftUI attached so each rule is
     /// directly assertable and the two surfaces can be compared value-to-value.
@@ -28,6 +29,7 @@ struct ProviderCardHeader: View {
     }
 
     let snapshot: ProviderSnapshot
+    var showsStatus: Bool = true
     var showsDisclosureChevron: Bool = false
 
     var content: Content { Content(snapshot: snapshot) }
@@ -50,7 +52,9 @@ struct ProviderCardHeader: View {
 
             Spacer(minLength: 0)
 
-            ProviderCardStatusLabel(snapshot: snapshot)
+            if showsStatus {
+                ProviderCardStatusLabel(snapshot: snapshot)
+            }
 
             if showsDisclosureChevron {
                 CardDisclosureChevron()
