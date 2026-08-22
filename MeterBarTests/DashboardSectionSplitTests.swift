@@ -439,6 +439,16 @@ final class DashboardSectionSplitTests: XCTestCase {
         )
     }
 
+    func testOverviewDetailLineUsesLocalizedPercentLeftCopy() throws {
+        let provider = snapshot()
+        let limit = try XCTUnwrap(provider.primaryLimit)
+
+        XCTAssertEqual(
+            DashboardOverviewSection.detailLine(for: provider, now: Date()),
+            "\(limit.localizedTitle) · \(LocalizedUsageFormat.percentLeft(limit.usageLimit))"
+        )
+    }
+
     func testLimitsCardsUseRegularDensityAtFullWidth() {
         let card = ProviderStatusCard(
             snapshot: snapshot(),

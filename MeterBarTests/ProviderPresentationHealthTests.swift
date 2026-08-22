@@ -593,6 +593,10 @@ final class ProviderPresentationHealthTests: XCTestCase {
         var login = healthy
         login.authNotice = .loginRequired
         XCTAssertTrue(ProviderCardPresentation.statusUsesChip(for: login))
+
+        var attention = healthy
+        attention.authNotice = .attention("Refresh failed")
+        XCTAssertTrue(ProviderCardPresentation.statusUsesChip(for: attention))
     }
 
     // MARK: - Helpers

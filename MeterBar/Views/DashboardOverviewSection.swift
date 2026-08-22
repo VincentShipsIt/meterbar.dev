@@ -60,7 +60,7 @@ struct DashboardOverviewSection: View {
         guard let limit = snapshot.primaryLimit else {
             return snapshot.emptyDetail
         }
-        var parts = ["\(limit.localizedTitle) · \(limit.usageLimit.percentLeftText)"]
+        var parts = ["\(limit.localizedTitle) · \(LocalizedUsageFormat.percentLeft(limit.usageLimit))"]
         if needsAttention(snapshot),
            let countdown = limit.usageLimit.resetCountdownText(now: now),
            countdown != "now" {
