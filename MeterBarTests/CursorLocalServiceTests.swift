@@ -737,4 +737,60 @@ final class CursorLocalServiceTests: XCTestCase {
     func testExtractUserIdReturnsNilForMalformedToken() {
         XCTAssertNil(CursorLocalService.extractUserIdFromJWT("not-a-jwt"))
     }
+
+    // MARK: - Off-main fetch regression
+
+    /// Regression for the 1.8.38 SIGSEGV entering `NSURLSession.data` during
+    /// Cursor refresh: with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` the
+    /// usage-summary / sand legs ran as main-actor jobs through a *stored*
+    /// fetch closure's reabstraction thunk (OpenRouter #480, Codex #328).
+    /// Network + decode now run detached; probing that path from off the main
+    /// actor through a stored `@Sendable` closure must still succeed.
+    func testFetchRemotelyProbedThroughStoredClosureFromDetachedTask() async throws {
+        let summaryJSON = """
+        {
+          "billingCycleStart": "2026-07-01T00:00:00Z",
+          "billingCycleEnd": "2026-08-01T00:00:00Z",
+          "membershipType": "pro",
+          "individualUsage": {
+            "plan": { "used": 10, "limit": 100 },
+            "onDemand": { "used": 0, "limit": 20, "enabled": true }
+          }
+        }
+        """
+        let sandJSON = """
+        {
+          "currentPeriodStart": "2026-07-01T00:00:00Z",
+          "nextResetTimestampUtc": "2026-07-08T00:00:00Z",
+          "usagePercent": 12,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+
+        let fetched = try await Task.detached(priority: .userInitiated) {
+            let fetchData: @Sendable (URLRequest) async throws -> Data = { request in
+                let path = request.url?.path ?? ""
+                if path.contains("usage-summary") {
+                    return Data(summaryJSON.utf8)
+                }
+                if path.contains("GetSandUsageStatus") {
+                    return Data(sandJSON.utf8)
+                }
+                throw ServiceError.invalidURL
+            }
+            return try await CursorLocalService.fetchRemotely(
+                userId: "user-test",
+                token: "tok-test",
+                fetchData: fetchData
+            )
+        }.value
+
+        XCTAssertEqual(fetched.metrics.service, .cursor)
+        XCTAssertEqual(fetched.membershipType, "pro")
+        XCTAssertEqual(fetched.metrics.weeklyLimit?.used, 10)
+        XCTAssertEqual(fetched.metrics.weeklyLimit?.total, 100)
+        XCTAssertEqual(fetched.observation?.runningTotal, 10)
+        XCTAssertEqual(fetched.metrics.additionalLimits.first?.used, 12)
+    }
 }

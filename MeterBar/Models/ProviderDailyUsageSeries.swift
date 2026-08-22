@@ -227,6 +227,14 @@ struct ProviderDailyUsageSeries: Equatable {
     /// seven flat bars, which would read as a genuinely quiet week.
     var hasHistory: Bool { days.contains { $0.isMeasured && $0.value > 0 } }
 
+    /// Whether the hover detail panel should render the history section.
+    ///
+    /// Log-scanning providers always get a block (empty, loading, or chart).
+    /// Polled providers (Cursor, OpenRouter) only when the ledger has data —
+    /// Cursor's documented Admin API daily history requires Enterprise API keys
+    /// MeterBar does not use, and `/api/usage-summary` publishes no dated series.
+    var showsInOverview: Bool { hasHistory || service.writesLocalTokenLogs }
+
     /// True when the source could speak for part of the window but not all of
     /// it, which is worth a one-line caption rather than an empty state.
     var hasPartialCoverage: Bool { days.contains { !$0.isMeasured } }

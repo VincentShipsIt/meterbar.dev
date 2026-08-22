@@ -44,13 +44,17 @@ struct LimitRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: density.rowSpacing) {
             header
-            UsageBar(
-                usedPercentage: limit.usedPercent,
-                accentColor: accentColor,
-                pace: content.pace,
-                paceContext: limit.paceContext
-            )
-            footer
+            if content.showsUsageBar {
+                UsageBar(
+                    usedPercentage: limit.usedPercent,
+                    accentColor: accentColor,
+                    pace: content.pace,
+                    paceContext: limit.paceContext
+                )
+            }
+            if content.showsFooter {
+                footer
+            }
         }
         // One combined VoiceOver element per limit row across all three
         // surfaces, via the shared SnapshotLimit accessibility helpers.
@@ -63,8 +67,8 @@ struct LimitRow: View {
         HStack(spacing: density.headerSpacing) {
             Text(limit.localizedTitle)
                 .font(density.titleFont)
-                .fontWeight(density.titleWeight)
-                .foregroundColor(density.titleColor)
+                .fontWeight(content.emphasizesCompactOutHeader ? .semibold : density.titleWeight)
+                .foregroundColor(content.emphasizesCompactOutHeader ? MeterBarTheme.danger : density.titleColor)
                 .lineLimit(1)
 
             if content.showsEstimatedTag {
@@ -73,12 +77,20 @@ struct LimitRow: View {
 
             Spacer(minLength: 4)
 
-            Text(content.trailingText)
-                .font(density.trailingFont)
-                .fontWeight(density.trailingWeight)
-                .foregroundColor(content.isTrailingDanger ? MeterBarTheme.danger : .primary)
-                .lineLimit(1)
-                .numericRefreshTransition(value: content.trailingText, reduceMotion: reduceMotion)
+            if content.emphasizesCompactOutHeader {
+                MeterBarChip(
+                    content.trailingText.uppercased(),
+                    tint: MeterBarTheme.danger,
+                    style: .flat
+                )
+            } else {
+                Text(content.trailingText)
+                    .font(density.trailingFont)
+                    .fontWeight(density.trailingWeight)
+                    .foregroundColor(content.isTrailingDanger ? MeterBarTheme.danger : .primary)
+                    .lineLimit(1)
+                    .numericRefreshTransition(value: content.trailingText, reduceMotion: reduceMotion)
+            }
         }
     }
 
@@ -164,6 +176,20 @@ extension LimitRow {
         private var isEstimated: Bool { limit.usageLimit.isEstimated }
         private var isOut: Bool { limit.percentLeft <= 0 }
 
+        /// A real exhaustion on a non-blocking pool (e.g. Cursor's Other Models
+        /// while Cursor Models still has room). The header keeps the same "Out"
+        /// status as other surfaces; the bar and reset footer are dropped so the
+        /// row matches the compact blocked-card treatment.
+        var compactsWhenOut: Bool { isOut && !isEstimated }
+
+        var showsUsageBar: Bool { !compactsWhenOut }
+
+        /// Active full-density rows keep their used/pace footer even when the
+        /// provider does not publish a reset timestamp. Compact density still
+        /// renders no footer in that case because its reset-only footer body is
+        /// empty.
+        var showsFooter: Bool { !compactsWhenOut }
+
         var showsEstimatedTag: Bool { isEstimated }
 
         /// Suppressed for estimated limits so a derived total can't drive the
@@ -192,6 +218,10 @@ extension LimitRow {
         /// The trailing value turns red once the window is exhausted, matching
         /// the pre-unification per-surface behavior.
         var isTrailingDanger: Bool { isOut }
+
+        /// Compact-out rows tint the whole header line danger so a one-line row
+        /// still scans as exhausted without bringing the bar back.
+        var emphasizesCompactOutHeader: Bool { compactsWhenOut }
 
         /// Footer "used" value. Currency limits show money spent; quota limits
         /// show percent-used.

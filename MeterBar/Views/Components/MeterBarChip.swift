@@ -3,7 +3,7 @@ import SwiftUI
 /// A single, unified capsule chip for MeterBar's small status/tier/role badges.
 ///
 /// Before this existed, five near-identical recipes had drifted apart
-/// (`ExtraUsageStatusPill`, `ReadinessBadge`, `ProviderStatusBadge`, the
+/// (`ExtraUsageStatusToggle`, `ReadinessBadge`, `ProviderStatusBadge`, the
 /// Optimize tier badge, and the Settings role capsule) — each with its own
 /// padding, fill opacity, and stroke. `MeterBarChip` collapses them onto one
 /// padding scale and one stroke treatment so the badges read as one system.

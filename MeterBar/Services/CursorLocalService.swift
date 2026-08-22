@@ -15,23 +15,26 @@ class CursorLocalService: ObservableObject {
     nonisolated static let shared = CursorLocalService()
 
     // API endpoint (from Vibeviewer: https://github.com/MarveleE/Vibeviewer)
-    private let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
+    nonisolated private static let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
 
     /// Cursor Ultra weekly Grok Bot entitlement. Not MeterBar's Grok
     /// provider and not present on `/api/usage-summary`.
-    private let sandUsageEndpoint =
+    nonisolated private static let sandUsageEndpoint =
         "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
 
-    // Shared URLSession with the standard usage-request timeouts
-    private let urlSession = ServiceSupport.session
+    /// Production and tests share this seam so the off-main regression can
+    /// probe through a *stored* `@Sendable` closure — the exact shape that
+    /// crashed 1.8.38 entering `NSURLSession.data(for:)` (OpenRouter #480,
+    /// Codex #328).
+    private let fetchData: @Sendable (URLRequest) async throws -> Data
 
     // Last-resort monthly request quota, used only when the API returns no
     // usable plan quota at all; the resulting limit is marked `isEstimated`.
     // Static so the pure `mapSummary` mapping can share the same constant.
-    private static let defaultPlanTotal: Double = 500
+    nonisolated private static let defaultPlanTotal: Double = 500
 
     // Display headroom estimate when no explicit on-demand limit is returned by the API
-    private static let onDemandHeadroomMultiplier: Double = 1.5
+    nonisolated private static let onDemandHeadroomMultiplier: Double = 1.5
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
@@ -45,7 +48,8 @@ class CursorLocalService: ObservableObject {
     /// only way Cursor can appear in a dated series. See `ProviderUsageLedger`.
     private(set) var latestUsageObservation: ProviderUsageObservation?
 
-    private init() {
+    init(fetchData: (@Sendable (URLRequest) async throws -> Data)? = nil) {
+        self.fetchData = fetchData ?? Self.fetch
         // Defer I/O off main thread; only @Published mutations land on main actor
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess(forceRescan: false) }
     }
@@ -218,7 +222,7 @@ class CursorLocalService: ObservableObject {
     }
 
     /// Format authentication cookie for Cursor API
-    private static func formatAuthCookie(userId: String, token: String) -> String {
+    nonisolated private static func formatAuthCookie(userId: String, token: String) -> String {
         // Format: userId::token (URL encoded)
         "\(userId)%3A%3A\(token)"
     }
@@ -261,22 +265,75 @@ class CursorLocalService: ObservableObject {
             self.hasAccess = true
         }
 
-        // Fetch usage summary data (uses /api/usage-summary endpoint)
-        let summaryData = try await fetchUsageSummary(userId: userId, token: token)
-        // Grok Bot weekly pool is a separate optional Connect RPC. Failure
-        // must not drop the three usage-summary bars.
-        let sandStatus = await fetchSandUsageStatus(token: token)
-
-        let metrics = CursorLocalService.mapSummary(summaryData, sandStatus: sandStatus)
-
-        // Clear any previous errors on success
-        await MainActor.run {
-            self.lastError = nil
-            self.subscriptionType = summaryData.membershipType
-            self.latestUsageObservation = CursorLocalService.observation(summaryData, at: metrics.lastUpdated)
+        do {
+            let fetched = try await Self.fetchRemotely(
+                userId: userId,
+                token: token,
+                fetchData: fetchData
+            )
+            await MainActor.run {
+                self.lastError = nil
+                self.subscriptionType = fetched.membershipType
+                self.latestUsageObservation = fetched.observation
+            }
+            return fetched.metrics
+        } catch {
+            let serviceError = ServiceSupport.serviceError(from: error)
+            AppLog.usage.error("Cursor usage-summary fetch failed: \(serviceError.localizedDescription)")
+            await MainActor.run {
+                self.lastError = serviceError
+                if case .notAuthenticated = serviceError {
+                    self.hasAccess = false
+                }
+            }
+            throw serviceError
         }
+    }
 
-        return metrics
+    /// Outcome of one off-main poll — only `Sendable` values cross back so the
+    /// main-actor side never touches network state.
+    nonisolated struct FetchedUsage: Sendable {
+        let metrics: UsageMetrics
+        let observation: ProviderUsageObservation?
+        let membershipType: String?
+    }
+
+    /// Runs both network legs and the decode off the main actor.
+    ///
+    /// The app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION =
+    /// MainActor`, so an unannotated fetch path here would execute as
+    /// main-actor jobs — and hops through a *stored* `fetchData` closure's
+    /// reabstraction thunk leave a dead receiver entering
+    /// `NSURLSession.data(for:delegate:)`. That is the 1.8.38 Cursor refresh
+    /// crash (same class as OpenRouter #480 / Codex #328). Nothing in the
+    /// detached scope touches main-actor state.
+    nonisolated static func fetchRemotely(
+        userId: String,
+        token: String,
+        fetchData: @escaping @Sendable (URLRequest) async throws -> Data
+    ) async throws -> FetchedUsage {
+        try await Task.detached(priority: .userInitiated) {
+            let summaryData = try await fetchUsageSummary(
+                userId: userId,
+                token: token,
+                fetchData: fetchData
+            )
+            // Grok Bot weekly pool is a separate optional Connect RPC. Failure
+            // must not drop the three usage-summary bars.
+            let sandStatus = await fetchSandUsageStatus(token: token, fetchData: fetchData)
+            let metrics = mapSummary(summaryData, sandStatus: sandStatus)
+            return FetchedUsage(
+                metrics: metrics,
+                observation: observation(summaryData, at: metrics.lastUpdated),
+                membershipType: summaryData.membershipType
+            )
+        }.value
+    }
+
+    nonisolated private static func fetch(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await ServiceSupport.session.data(for: request)
+        try ServiceSupport.validate(response, data: data)
+        return data
     }
 
     /// One poll's reading of the plan counter, in requests.
@@ -307,7 +364,7 @@ class CursorLocalService: ObservableObject {
     /// the ledger, which reads a drop as a new billing cycle and re-baselines to
     /// zero — so the next complete poll would charge the entire cycle-to-date
     /// count to a single day as a phantom spike.
-    static func observation(
+    nonisolated static func observation(
         _ summaryData: CursorUsageSummaryResponse,
         at observedAt: Date
     ) -> ProviderUsageObservation? {
@@ -351,7 +408,7 @@ class CursorLocalService: ObservableObject {
     /// Optional `sandStatus` is Cursor Ultra's weekly Grok Bot pool. It is
     /// attached as `additionalLimits` when the payload maps; omitted status
     /// leaves the three usage-summary bars unchanged.
-    static func mapSummary(
+    nonisolated static func mapSummary(
         _ summaryData: CursorUsageSummaryResponse,
         sandStatus: CursorSandUsageStatusResponse? = nil
     ) -> UsageMetrics {
@@ -412,7 +469,7 @@ class CursorLocalService: ObservableObject {
 
     /// Cursor Ultra weekly Grok Bot pool. Matches Grok Bot.app's omit rules
     /// plus MeterBar's "no phantom 0% bar without a grant" rule.
-    static func mapSandUsage(_ status: CursorSandUsageStatusResponse?) -> UsageLimit? {
+    nonisolated static func mapSandUsage(_ status: CursorSandUsageStatusResponse?) -> UsageLimit? {
         guard let status else { return nil }
         guard let usagePercent = status.usagePercent, usagePercent.isFinite else {
             return nil
@@ -447,7 +504,7 @@ class CursorLocalService: ObservableObject {
 
     /// `billingCycleEnd` is the reset. `end − start` is the real cycle length
     /// when both parse and the duration is positive — no assumed 30-day month.
-    private static func billingCycle(
+    nonisolated private static func billingCycle(
         from summary: CursorUsageSummaryResponse
     ) -> (resetTime: Date?, windowSeconds: TimeInterval?) {
         let start = summary.billingCycleStart.flatMap(FlexibleISO8601.date(from:))
@@ -464,7 +521,7 @@ class CursorLocalService: ObservableObject {
 
     /// One included pool as the dashboard draws it: `used` is already a
     /// 0…100 percent, so the denominator is 100 rather than a request grant.
-    private static func percentPoolLimit(
+    nonisolated private static func percentPoolLimit(
         _ percentUsed: Double,
         resetTime: Date?,
         windowSeconds: TimeInterval?
@@ -478,7 +535,7 @@ class CursorLocalService: ObservableObject {
         )
     }
 
-    private static func onDemandLimit(
+    nonisolated private static func onDemandLimit(
         from onDemand: CursorOnDemandUsage?,
         resetTime: Date?,
         windowSeconds: TimeInterval?
@@ -502,7 +559,7 @@ class CursorLocalService: ObservableObject {
     /// counter. If neither has a counter, retain a server-backed quota or the
     /// first available shape for the summary mapper, while `observation` still
     /// rejects the missing counter instead of inventing a reset.
-    private static func selectedUsage(
+    nonisolated private static func selectedUsage(
         from summaryData: CursorUsageSummaryResponse
     ) -> (plan: CursorPlanUsage?, onDemand: CursorOnDemandUsage?) {
         let individual = summaryData.individualUsage
@@ -530,7 +587,7 @@ class CursorLocalService: ObservableObject {
 
     /// Cursor's session cookie layered on top of the shared browser identity.
     /// Static so the header contract can be asserted without a live service.
-    static func dashboardHeaders(userId: String, token: String) -> [String: String] {
+    nonisolated static func dashboardHeaders(userId: String, token: String) -> [String: String] {
         var headers = ServiceSupport.browserHeaders(for: .cursorDashboard, accept: "*/*")
         headers["Content-Type"] = "application/json"
         headers["Cookie"] = "WorkosCursorSessionToken=\(formatAuthCookie(userId: userId, token: token))"
@@ -540,7 +597,7 @@ class CursorLocalService: ObservableObject {
     /// Connect-RPC headers for DashboardService/GetSandUsageStatus.
     /// Auth is the same Cursor JWT already read from `state.vscdb`.
     /// Static so the header contract can be asserted without a live token.
-    static func aiserverHeaders(token: String) -> [String: String] {
+    nonisolated static func aiserverHeaders(token: String) -> [String: String] {
         [
             "Content-Type": "application/json",
             "Authorization": "Bearer \(token)",
@@ -552,7 +609,11 @@ class CursorLocalService: ObservableObject {
         ]
     }
 
-    private func fetchUsageSummary(userId: String, token: String) async throws -> CursorUsageSummaryResponse {
+    nonisolated private static func fetchUsageSummary(
+        userId: String,
+        token: String,
+        fetchData: @Sendable (URLRequest) async throws -> Data
+    ) async throws -> CursorUsageSummaryResponse {
         guard let url = URL(string: usageSummaryEndpoint) else {
             throw ServiceError.invalidURL
         }
@@ -561,30 +622,20 @@ class CursorLocalService: ObservableObject {
         request.httpMethod = "GET"
         request.timeoutInterval = ServiceSupport.usageRequestTimeout
 
-        for (key, value) in Self.dashboardHeaders(userId: userId, token: token) {
+        for (key, value) in dashboardHeaders(userId: userId, token: token) {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        do {
-            let (data, response) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(response, data: data)
-            return try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
-        } catch {
-            let serviceError = ServiceSupport.serviceError(from: error)
-            AppLog.usage.error("Cursor usage-summary fetch failed: \(serviceError.localizedDescription)")
-            await MainActor.run {
-                self.lastError = serviceError
-                if case .notAuthenticated = serviceError {
-                    self.hasAccess = false
-                }
-            }
-            throw serviceError
-        }
+        let data = try await fetchData(request)
+        return try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
     }
 
     /// Optional Grok Bot weekly status. Network, 401, and decode failures
     /// return nil so the required usage-summary path still succeeds.
-    private func fetchSandUsageStatus(token: String) async -> CursorSandUsageStatusResponse? {
+    nonisolated private static func fetchSandUsageStatus(
+        token: String,
+        fetchData: @Sendable (URLRequest) async throws -> Data
+    ) async -> CursorSandUsageStatusResponse? {
         guard let url = URL(string: sandUsageEndpoint) else {
             return nil
         }
@@ -594,13 +645,12 @@ class CursorLocalService: ObservableObject {
         request.httpBody = Data("{}".utf8)
         request.timeoutInterval = ServiceSupport.usageRequestTimeout
 
-        for (key, value) in Self.aiserverHeaders(token: token) {
+        for (key, value) in aiserverHeaders(token: token) {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(response, data: data)
+            let data = try await fetchData(request)
             return try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: data)
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)

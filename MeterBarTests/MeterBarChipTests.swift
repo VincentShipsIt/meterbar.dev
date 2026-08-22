@@ -56,25 +56,22 @@ final class MeterBarChipTests: XCTestCase {
         assertHosts(MeterBarChip("Scan", systemImage: "bolt.fill", tint: .blue, style: .glass))
     }
 
-    // MARK: - ExtraUsageStatusPill migration
+    // MARK: - ExtraUsageStatusToggle
 
-    func testExtraUsagePillPreservesLabelAndTint() {
-        let on = ExtraUsageStatusPill(status: ExtraUsageStatus(state: .on))
-        XCTAssertEqual(on.label, "On")
-        XCTAssertEqual(on.color, MeterBarTheme.warning)
+    func testExtraUsageToggleReflectsProviderState() {
+        XCTAssertTrue(ExtraUsageStatusToggle(status: ExtraUsageStatus(state: .on)).isOn)
+        XCTAssertEqual(ExtraUsageStatusToggle(status: ExtraUsageStatus(state: .on)).label, "On")
 
-        let off = ExtraUsageStatusPill(status: ExtraUsageStatus(state: .off))
-        XCTAssertEqual(off.label, "Off")
-        XCTAssertEqual(off.color, MeterBarTheme.success)
+        XCTAssertFalse(ExtraUsageStatusToggle(status: ExtraUsageStatus(state: .off)).isOn)
+        XCTAssertEqual(ExtraUsageStatusToggle(status: ExtraUsageStatus(state: .off)).label, "Off")
 
-        let unknown = ExtraUsageStatusPill(status: .unknown)
-        XCTAssertEqual(unknown.label, "Unknown")
-        XCTAssertEqual(unknown.color, .secondary)
+        XCTAssertFalse(ExtraUsageStatusToggle(status: .unknown).isOn)
+        XCTAssertEqual(ExtraUsageStatusToggle(status: .unknown).label, "Unknown")
     }
 
-    func testExtraUsagePillHosts() {
+    func testExtraUsageToggleHosts() {
         for state in [ExtraUsageStatus.State.on, .off, .unknown] {
-            assertHosts(ExtraUsageStatusPill(status: ExtraUsageStatus(state: state)))
+            assertHosts(ExtraUsageStatusToggle(status: ExtraUsageStatus(state: state)))
         }
     }
 

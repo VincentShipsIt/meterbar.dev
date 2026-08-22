@@ -325,7 +325,7 @@ struct ExtraUsageRow: View {
     var body: some View {
         SettingsRowView(title: title, detail: Self.detailText(status)) {
             HStack(spacing: 8) {
-                ExtraUsageStatusPill(status: status ?? .unknown)
+                ExtraUsageStatusToggle(status: status ?? .unknown)
 
                 Button("Manage") {
                     if let url = URL(string: manageURL) {

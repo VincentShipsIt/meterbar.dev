@@ -3,7 +3,7 @@ import MeterBarShared
 
 /// Trailing status badges shown beneath a provider's limits:
 /// - "N reset(s) available" — banked rate-limit resets (`resetCreditsAvailable`)
-/// - "Extra usage" + On/Off pill — paid overage state (`extraUsage`)
+/// - "Extra usage" + read-only toggle — paid overage state (`extraUsage`)
 ///
 /// Shared by the single provider card (`ProviderStatusCard`) that renders on the
 /// popover, the dashboard Overview, and the Limits page — one component, so the
@@ -79,7 +79,7 @@ struct ProviderStatusBadges: View {
                         .font(textFont)
                         .foregroundColor(.secondary)
                     Spacer(minLength: 4)
-                    ExtraUsageStatusPill(status: extraUsage)
+                    ExtraUsageStatusToggle(status: extraUsage)
                 }
             }
         }

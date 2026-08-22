@@ -351,6 +351,57 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         XCTAssertFalse(ServiceType.openRouter.writesLocalTokenLogs)
     }
 
+    func testPolledProvidersHideOverviewUntilLedgerHasHistory() {
+        let emptyCursor = ProviderDailyUsageSeries.make(
+            service: .cursor,
+            dailyUsage: [],
+            ledger: ProviderUsageLedger(),
+            accountCount: 1,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertFalse(emptyCursor.showsInOverview)
+
+        var ledger = ProviderUsageLedger()
+        ledger.record(
+            ProviderUsageObservation(
+                provider: .cursor,
+                unit: .requests,
+                runningTotal: 0,
+                observedAt: day(-4)
+            ),
+            calendar: calendar
+        )
+        ledger.record(
+            ProviderUsageObservation(
+                provider: .cursor,
+                unit: .requests,
+                runningTotal: 12,
+                observedAt: day(-2)
+            ),
+            calendar: calendar
+        )
+        let cursorWithHistory = ProviderDailyUsageSeries.make(
+            service: .cursor,
+            dailyUsage: [],
+            ledger: ledger,
+            accountCount: 1,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(cursorWithHistory.showsInOverview)
+
+        let emptyCodex = ProviderDailyUsageSeries.make(
+            service: .codexCli,
+            dailyUsage: [],
+            ledger: ledger,
+            accountCount: 1,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(emptyCodex.showsInOverview, "log providers still prompt for a scan")
+    }
+
     func testRequestHeaderTotalDoesNotRepeatTheUnitNoun() {
         var ledger = ProviderUsageLedger()
         ledger.record(
