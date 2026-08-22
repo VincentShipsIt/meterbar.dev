@@ -50,11 +50,7 @@ struct ProviderCardHeader: View {
 
             Spacer(minLength: 0)
 
-            Text(content.statusText)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundColor(ProviderCardPresentation.statusColor(for: snapshot))
-                .lineLimit(1)
+            ProviderCardStatusLabel(snapshot: snapshot)
 
             if showsDisclosureChevron {
                 CardDisclosureChevron()

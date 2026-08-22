@@ -5,18 +5,6 @@ import SwiftUI
 // pages are fed. Each page lives in its own `Dashboard*Section` file (C1 split);
 // the navigation types live in `DashboardNavigation.swift`.
 
-/// Limits card order. Focus is for scrolling, not ranking — pinning the
-/// selected provider reshuffled Overview vs Limits every time a card was
-/// clicked.
-enum DashboardLimitsLayout {
-    static func orderedSnapshots(
-        _ snapshots: [ProviderSnapshot],
-        focusedProviderID _: ProviderSnapshot.ID?
-    ) -> [ProviderSnapshot] {
-        snapshots
-    }
-}
-
 struct UsageDashboardView: View {
     private static let detailHorizontalPadding = MeterBarTheme.Spacing.xxl
 
@@ -295,7 +283,11 @@ struct UsageDashboardView: View {
                 }
             )
         case .limits:
-            limitsContent(scrollProxy: scrollProxy)
+            DashboardLimitsSection(
+                snapshots: providerSnapshots,
+                focusedProviderID: navigation.focusedProviderID,
+                scrollProxy: scrollProxy
+            )
         case .status:
             DashboardStatusSection()
         case .costs:
@@ -353,46 +345,6 @@ struct UsageDashboardView: View {
         case .about:
             AboutSettingsView()
         }
-    }
-
-    private func limitsContent(scrollProxy: ScrollViewProxy) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if providerSnapshots.isEmpty {
-                DashboardCard(title: "No Quota Windows") {
-                    Text("Enable providers in Settings to show quota windows.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                // Same two-column masonry as Overview. Clicking a card from
-                // Overview still focuses it (scroll), but the grid order stays
-                // subscription-then-label so cards do not jump around.
-                ProviderMasonryLayout(columnCount: 2, spacing: MeterBarTheme.Spacing.sm) {
-                    ForEach(DashboardLimitsLayout.orderedSnapshots(
-                        providerSnapshots,
-                        focusedProviderID: navigation.focusedProviderID
-                    )) { snapshot in
-                        // The one provider card, shared with the popover, so
-                        // the two surfaces cannot drift.
-                        ProviderStatusCard(snapshot: snapshot)
-                            .id(snapshot.id)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .onAppear {
-                    scrollToFocusedProvider(using: scrollProxy)
-                }
-                .onChange(of: navigation.focusedProviderID) { _, _ in
-                    scrollToFocusedProvider(using: scrollProxy)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func scrollToFocusedProvider(using proxy: ScrollViewProxy) {
-        guard let focusedProviderID = navigation.focusedProviderID else { return }
-        proxy.scrollTo(focusedProviderID, anchor: .top)
     }
 
     private var providerSnapshots: [ProviderSnapshot] {

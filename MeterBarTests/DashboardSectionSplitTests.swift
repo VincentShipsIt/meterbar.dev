@@ -414,6 +414,43 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertNil(tile.band)
     }
 
+    func testOverviewSortsAttentionAheadOfHealthyProviders() {
+        let snapshots = [
+            snapshot(id: "codex", title: "Codex", service: .codexCli),
+            snapshot(id: "cursor", title: "Cursor", service: .cursor, used: 95),
+        ]
+
+        XCTAssertEqual(
+            DashboardOverviewSection.sortedForOverview(snapshots).map(\.id),
+            ["cursor", "codex"]
+        )
+        XCTAssertTrue(DashboardOverviewSection.needsAttention(snapshots[1]))
+        XCTAssertFalse(DashboardOverviewSection.needsAttention(snapshots[0]))
+    }
+
+    func testOverviewDetailLineNamesAuthBeforeQuota() {
+        let since = Date(timeIntervalSince1970: 1_750_000_000)
+        var stale = snapshot()
+        stale.authNotice = .stale(since: since)
+
+        XCTAssertEqual(
+            DashboardOverviewSection.detailLine(for: stale, now: since),
+            ProviderAuthNotice.stale(since: since).shortLabel
+        )
+    }
+
+    func testLimitsCardsUseRegularDensityAtFullWidth() {
+        let card = ProviderStatusCard(
+            snapshot: snapshot(),
+            limitDensity: .regular,
+            badgeStyle: .regular,
+            tilePadding: .standard
+        )
+        .frame(maxWidth: .infinity)
+
+        assertRenders(card, width: 900, height: 260)
+    }
+
     // MARK: - Optimize KPI tiles
 
     /// The four KPI tiles are one glanceable band of headline numbers, not a
@@ -628,10 +665,11 @@ final class DashboardSectionSplitTests: XCTestCase {
     private func snapshot(
         id: String = "codex",
         title: String = "Codex",
-        service: ServiceType = .codexCli
+        service: ServiceType = .codexCli,
+        used: Double = 40
     ) -> ProviderSnapshot {
         let weekly = UsageLimit(
-            used: 40,
+            used: used,
             total: 100,
             resetTime: Date().addingTimeInterval(3600),
             windowSeconds: 604_800

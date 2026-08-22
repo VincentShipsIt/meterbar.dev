@@ -11,8 +11,6 @@ struct DashboardOverviewSection: View {
     let costSummary: CostSummary?
     let onSelectProvider: (ProviderSnapshot.ID) -> Void
 
-    private static let masonryColumnCount = 2
-
     /// Copy for the "Use next" tile — the Optimize ranking's top pick, boiled
     /// down to one glance. Replaces the old "Tracked sources" tile, which was a
     /// Settings fact that almost always read "all reporting".
@@ -37,8 +35,50 @@ struct DashboardOverviewSection: View {
         return ("No data", "Waiting for provider refresh", nil)
     }
 
+    /// Providers that need a decision or are running low, sorted ahead of the
+    /// healthy ones. Auth overlays beat quota bands.
+    static func sortedForOverview(_ snapshots: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        snapshots.sorted { lhs, rhs in
+            let left = attentionRank(for: lhs)
+            let right = attentionRank(for: rhs)
+            if left != right { return left > right }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    static func needsAttention(_ snapshot: ProviderSnapshot) -> Bool {
+        snapshot.authNotice != nil
+            || (snapshot.band?.severityRank ?? 0) >= QuotaBand.tight.severityRank
+    }
+
+    /// One-line summary under each overview row — enough to decide whether to
+    /// open Limits, without replaying every quota bar.
+    static func detailLine(for snapshot: ProviderSnapshot, now: Date) -> String {
+        if let authNotice = snapshot.authNotice {
+            return authNotice.shortLabel
+        }
+        guard let limit = snapshot.primaryLimit else {
+            return snapshot.emptyDetail
+        }
+        var parts = ["\(limit.localizedTitle) · \(limit.usageLimit.percentLeftText)"]
+        if needsAttention(snapshot),
+           let countdown = limit.usageLimit.resetCountdownText(now: now),
+           countdown != "now" {
+            parts.append("Resets in \(countdown)")
+        } else if needsAttention(snapshot),
+                  limit.usageLimit.resetCountdownText(now: now) == "now" {
+            parts.append("Reset due")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func attentionRank(for snapshot: ProviderSnapshot) -> Int {
+        if snapshot.authNotice != nil { return 1_000 }
+        return (snapshot.band?.severityRank ?? -1) * 100
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.lg) {
             OverviewSummaryStrip(
                 snapshots: snapshots,
                 tightestLimit: tightestLimit,
@@ -46,23 +86,109 @@ struct DashboardOverviewSection: View {
                 formattedTokens: UsageFormat.tokens(costSummary?.totalTokens ?? 0)
             )
 
-            // One container, one ForEach: the layout decides which column each
-            // card lands in, so a card keeps its identity — and any in-flight
-            // state — when the snapshot list changes underneath it.
-            ProviderMasonryLayout(
-                columnCount: Self.masonryColumnCount,
-                spacing: MeterBarTheme.Spacing.sm
-            ) {
+            if snapshots.isEmpty {
+                DashboardCard(title: "Providers") {
+                    Text("Enable providers in Settings to start tracking quotas.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                overviewProviderList
+            }
+        }
+    }
+
+    private var overviewProviderList: some View {
+        let sorted = Self.sortedForOverview(snapshots)
+        let attention = sorted.filter(Self.needsAttention)
+        let healthy = sorted.filter { !Self.needsAttention($0) }
+
+        return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+            if !attention.isEmpty {
+                OverviewProviderGroup(
+                    title: "Needs attention",
+                    snapshots: attention,
+                    onSelectProvider: onSelectProvider
+                )
+            }
+
+            if !healthy.isEmpty {
+                OverviewProviderGroup(
+                    title: attention.isEmpty ? "Providers" : "Healthy",
+                    snapshots: healthy,
+                    onSelectProvider: onSelectProvider
+                )
+            }
+        }
+    }
+}
+
+private struct OverviewProviderGroup: View {
+    let title: String
+    let snapshots: [ProviderSnapshot]
+    let onSelectProvider: (ProviderSnapshot.ID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+            Text(title.uppercased())
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: MeterBarTheme.Spacing.sm) {
                 ForEach(snapshots) { snapshot in
-                    // Same shared provider card as the popover and the Limits
-                    // page; tapping it jumps to that provider in Limits.
-                    ProviderStatusCard(
-                        snapshot: snapshot,
-                        onSelect: { onSelectProvider(snapshot.id) }
-                    )
+                    Button {
+                        onSelectProvider(snapshot.id)
+                    } label: {
+                        OverviewProviderRow(snapshot: snapshot)
+                    }
+                    .buttonStyle(ProviderCardButtonStyle())
+                    .accessibilityHint("Open \(snapshot.title) quota details")
                 }
             }
-            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct OverviewProviderRow: View {
+    let snapshot: ProviderSnapshot
+
+    var body: some View {
+        TimelineView(
+            .periodic(
+                from: ResetCountdownSchedule.anchor,
+                by: ResetCountdownSchedule.interval
+            )
+        ) { timeline in
+            DashboardTile(padding: .popover) {
+                HStack(spacing: 10) {
+                    ProviderLogoView(
+                        kind: snapshot.logoKind,
+                        size: 18,
+                        foregroundColor: snapshot.accentColor
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(snapshot.title)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 4)
+
+                            ProviderCardStatusLabel(snapshot: snapshot)
+                        }
+
+                        Text(DashboardOverviewSection.detailLine(for: snapshot, now: timeline.date))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    CardDisclosureChevron()
+                }
+            }
         }
     }
 }
@@ -73,8 +199,6 @@ private struct OverviewSummaryStrip: View {
     let estimatedCost: String?
     let formattedTokens: String
 
-    // Same gutter as the provider masonry below it, so the page reads as one
-    // grid rather than two with different spacing.
     private let columns = Array(
         repeating: GridItem(.flexible(minimum: 180), spacing: MeterBarTheme.Spacing.sm),
         count: 3
@@ -106,8 +230,6 @@ private struct OverviewSummaryStrip: View {
                 style: .compact
             )
 
-            // The Optimize ranking's top pick, on the same countdown clock as
-            // the tightest-window tile so its reset caption stays current.
             TimelineView(
                 .periodic(
                     from: ResetCountdownSchedule.anchor,

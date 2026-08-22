@@ -132,13 +132,11 @@ final class CardStateTransitionTests: XCTestCase {
         )
     }
 
-    // MARK: - Overview masonry build smoke
+    // MARK: - Overview provider list
 
-    /// The overview's provider grid moved from nested per-column `VStack`s to a
-    /// single `ProviderMasonryLayout` container so a card keeps its identity —
-    /// and its in-flight redemption state — when the snapshot list changes
-    /// underneath it. An odd count exercises the uneven-columns path.
-    func testOverviewSectionRendersTheProviderMasonry() {
+    /// Overview is a summary + tappable rows now, not a duplicate of the Limits
+    /// masonry grid.
+    func testOverviewSectionRendersTheProviderList() {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
                 metrics: [
@@ -151,7 +149,6 @@ final class CardStateTransitionTests: XCTestCase {
                 enabledServices: [.codexCli, .cursor, .grok]
             )
         )
-        XCTAssertEqual(snapshots.count % 2, 1, "fixture must be odd to leave one column short")
 
         assertRenders(
             DashboardOverviewSection(
@@ -162,7 +159,7 @@ final class CardStateTransitionTests: XCTestCase {
             )
         )
 
-        // Empty is the other structural state: no cards, no columns to place.
+        // Empty is the other structural state: no rows to list.
         assertRenders(
             DashboardOverviewSection(
                 snapshots: [],

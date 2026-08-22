@@ -127,25 +127,22 @@ enum ProviderLogoImageCache {
     }
 }
 
-/// Colored On/Off chip showing whether paid "extra usage" / overage is enabled for a service.
-struct ExtraUsageStatusPill: View {
+/// Read-only switch showing whether paid "extra usage" / overage is enabled.
+///
+/// MeterBar reads this from provider APIs — it is not togglable in-app. A native
+/// `Toggle` matches settings and reads more clearly than a status pill for a
+/// binary on/off fact.
+struct ExtraUsageStatusToggle: View {
     let status: ExtraUsageStatus
 
-    // `label`/`color` are the chip's text + tint; kept internal (not private)
-    // so the migration test can assert the On/Off/Unknown mapping is preserved.
+    /// VoiceOver / test hook for the reflected state.
+    var isOn: Bool { status.state == .on }
+
     var label: String {
         switch status.state {
         case .on: return "On"
         case .off: return "Off"
         case .unknown: return "Unknown"
-        }
-    }
-
-    var color: Color {
-        switch status.state {
-        case .on: return MeterBarTheme.warning
-        case .off: return MeterBarTheme.success
-        case .unknown: return .secondary
         }
     }
 
@@ -162,11 +159,16 @@ struct ExtraUsageStatusPill: View {
     }
 
     var body: some View {
-        // Migrated to the shared `MeterBarChip`. The status color now tints the
-        // whole chip (leading dot + label) rather than only the dot, matching
-        // the other status badges; the On/Off/Unknown semantics are unchanged.
-        MeterBarChip(label, systemImage: "circle.fill", tint: color, style: .flat)
+        Toggle("", isOn: .constant(isOn))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .disabled(true)
+            .opacity(status.state == .unknown ? 0.45 : 1)
+            .tint(status.state == .on ? MeterBarTheme.warning : nil)
             .help(tooltip)
+            .accessibilityLabel("Extra usage")
+            .accessibilityValue(label)
     }
 }
 

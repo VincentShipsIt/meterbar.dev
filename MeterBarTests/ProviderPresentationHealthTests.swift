@@ -543,6 +543,39 @@ final class ProviderPresentationHealthTests: XCTestCase {
         XCTAssertEqual(ProviderCardPresentation.statusText(for: cursor), QuotaBand.healthy.shortLabel)
     }
 
+    func testHealthyStatusStaysPlainTextWhileAttentionUsesAChip() throws {
+        let healthy = try card(.codex, lastUpdated: freshAt, refresh: .success, parseHealth: .success(provider: .codexCli, at: freshAt))
+        XCTAssertFalse(ProviderCardPresentation.statusUsesChip(for: healthy))
+
+        let critical = ProviderSnapshot(
+            id: "cursor",
+            title: "Cursor",
+            service: .cursor,
+            updatedAt: freshAt,
+            limits: [
+                SnapshotLimit(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usageLimit: UsageLimit(used: 95, total: 100, resetTime: nil)
+                )
+            ],
+            emptyDetail: "Waiting",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+        XCTAssertTrue(ProviderCardPresentation.statusUsesChip(for: critical))
+
+        var stale = healthy
+        stale.authNotice = .stale(since: freshAt)
+        XCTAssertFalse(ProviderCardPresentation.statusUsesChip(for: stale))
+
+        var login = healthy
+        login.authNotice = .loginRequired
+        XCTAssertTrue(ProviderCardPresentation.statusUsesChip(for: login))
+    }
+
     // MARK: - Helpers
 
     private func card(

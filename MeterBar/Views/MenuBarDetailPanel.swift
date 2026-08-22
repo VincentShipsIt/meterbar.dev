@@ -321,7 +321,7 @@ struct MenuBarProviderDetailContent: View {
         badges
       }
 
-      if let dailyUsage {
+      if let dailyUsage, dailyUsage.showsInOverview {
         // Last, and separated by a little extra space rather than a rule: the
         // rows above are the window the card already summarised, and this is the
         // week behind it. Reading top-to-bottom is now → recent past.

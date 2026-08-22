@@ -140,6 +140,28 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         )
     }
 
+    private func cursorSnapshot() -> ProviderSnapshot {
+        let weekly = UsageLimit(
+            used: 40,
+            total: 100,
+            resetTime: Date().addingTimeInterval(3600),
+            windowSeconds: 604_800
+        )
+        return ProviderSnapshot(
+            id: "cursor",
+            title: "Cursor",
+            service: .cursor,
+            updatedAt: Date(),
+            limits: [
+                SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
+            ],
+            emptyDetail: "Waiting for refresh",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+    }
+
     /// The parity that matters: both surfaces derive their identity row from the
     /// same component, so neither can quietly start showing a different field.
     func testDetailPanelHeaderMatchesTheCardHeader() {
@@ -243,6 +265,29 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         charted.layoutSubtreeIfNeeded()
 
         XCTAssertGreaterThan(charted.fittingSize.height, plain.fittingSize.height)
+    }
+
+    func testCursorWithoutLedgerHistoryOmitsTheStripEntirely() {
+        let plain = NSHostingView(
+            rootView: MenuBarProviderDetailContent(snapshot: cursorSnapshot())
+                .frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        let withEmptySeries = NSHostingView(
+            rootView: MenuBarProviderDetailContent(
+                snapshot: cursorSnapshot(),
+                dailyUsage: ProviderDailyUsageSeries.make(
+                    service: .cursor,
+                    dailyUsage: [],
+                    ledger: ProviderUsageLedger(),
+                    accountCount: 1
+                )
+            )
+            .frame(width: MeterBarMenuDetailPanelLayout.detailWidth)
+        )
+        plain.layoutSubtreeIfNeeded()
+        withEmptySeries.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
     func testHeaderRendersWithAndWithoutTheDisclosureChevron() {

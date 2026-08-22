@@ -59,6 +59,21 @@ final class LimitRowTests: XCTestCase {
         XCTAssertTrue(content.isTrailingDanger)
     }
 
+    func testOutRowCompactsToHeaderOnly() {
+        let content = LimitRow.RowContent(limit: quotaLimit(used: 100, resetTime: future))
+        XCTAssertTrue(content.compactsWhenOut)
+        XCTAssertTrue(content.emphasizesCompactOutHeader)
+        XCTAssertFalse(content.showsUsageBar)
+        XCTAssertFalse(content.showsFooter)
+    }
+
+    func testNonOutRowStillShowsBarAndReset() {
+        let content = LimitRow.RowContent(limit: quotaLimit(used: 40, resetTime: future))
+        XCTAssertFalse(content.compactsWhenOut)
+        XCTAssertTrue(content.showsUsageBar)
+        XCTAssertTrue(content.showsFooter)
+    }
+
     func testEstimatedExhaustedShowsPercentInsteadOfOut() {
         // An estimated total must never claim a hard "Out" — the total is a
         // guess, so it falls back to the (approximate) percent-left label.
@@ -155,6 +170,24 @@ final class LimitRowTests: XCTestCase {
         let host = NSHostingView(rootView: row.frame(width: 320))
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(host.fittingSize.height, 0)
+    }
+
+    func testCompactOutRowIsShorterThanActiveRow() {
+        let active = LimitRow(
+            limit: quotaLimit(used: 40, resetTime: future),
+            accentColor: .blue,
+            density: .compact
+        )
+        let out = LimitRow(
+            limit: quotaLimit(used: 100, resetTime: future),
+            accentColor: .blue,
+            density: .compact
+        )
+        let activeHost = NSHostingView(rootView: active.frame(width: 320))
+        let outHost = NSHostingView(rootView: out.frame(width: 320))
+        activeHost.layoutSubtreeIfNeeded()
+        outHost.layoutSubtreeIfNeeded()
+        XCTAssertTrue(outHost.fittingSize.height < activeHost.fittingSize.height)
     }
 }
 

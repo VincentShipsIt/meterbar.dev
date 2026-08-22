@@ -29,6 +29,19 @@ enum ProviderCardPresentation {
         return snapshot.band?.shortLabel ?? "Offline"
     }
 
+    /// Healthy and subdued auth states stay plain text; amber and red bands get
+    /// a pill so attention-grabbing status does not wallpaper every card.
+    static func statusUsesChip(for snapshot: ProviderSnapshot) -> Bool {
+        switch snapshot.authNotice {
+        case .loginRequired, .attention:
+            return true
+        case .stale, .notConnected, .none:
+            break
+        }
+        guard let band = snapshot.band else { return false }
+        return band != .healthy
+    }
+
     /// How long a login-required card may keep showing its cached gauges before
     /// they stop being useful context and start being noise. Two hours is past
     /// any session window the cache could still be describing.

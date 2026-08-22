@@ -8,6 +8,9 @@ struct ProviderStatusCard: View {
     let snapshot: ProviderSnapshot
     var onSelect: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
+    var limitDensity: LimitRow.Density = .compact
+    var badgeStyle: ProviderStatusBadges.Style = .compact
+    var tilePadding: MeterBarTheme.CardPadding = .popover
 
     @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     @Environment(\.accessibilityReduceMotion)
@@ -31,10 +34,16 @@ struct ProviderStatusCard: View {
     init(
         snapshot: ProviderSnapshot,
         onHoverChange: ((Bool) -> Void)? = nil,
+        limitDensity: LimitRow.Density = .compact,
+        badgeStyle: ProviderStatusBadges.Style = .compact,
+        tilePadding: MeterBarTheme.CardPadding = .popover,
         onSelect: (() -> Void)? = nil
     ) {
         self.snapshot = snapshot
         self.onHoverChange = onHoverChange
+        self.limitDensity = limitDensity
+        self.badgeStyle = badgeStyle
+        self.tilePadding = tilePadding
         self.onSelect = onSelect
     }
 
@@ -99,7 +108,7 @@ struct ProviderStatusCard: View {
     }
 
     private var cardContent: some View {
-        DashboardTile(padding: .popover) {
+        DashboardTile(padding: tilePadding) {
             cardBody
         }
         .contentShape(RoundedRectangle(cornerRadius: MeterBarTheme.Radius.card, style: .continuous))
@@ -210,12 +219,12 @@ struct ProviderStatusCard: View {
             } else {
                 VStack(alignment: .leading, spacing: 9) {
                     ForEach(snapshot.limits) { limit in
-                        LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .compact)
+                        LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
                     }
                 }
             }
 
-            let badges = ProviderStatusBadges(snapshot: snapshot, style: .compact)
+            let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
             if badges.hasContent {
                 badges
             }
