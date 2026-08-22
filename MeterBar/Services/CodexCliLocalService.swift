@@ -235,27 +235,30 @@ class CodexCliLocalService: ObservableObject {
         )
 
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(response, data: data)
-
-            let decoder = JSONDecoder()
-            // Note: Codex CLI API uses Unix timestamps (Int64), not ISO8601 dates
-
-            // Decode the actual Codex CLI usage response
-            let usageResponse = try decoder.decode(CodexCliUsageResponse.self, from: data)
+            // Network + decode must not run as main-actor jobs: same
+            // `NSURLSession.data(for:)` null-receiver hazard as Cursor /
+            // OpenRouter (#480) when default actor isolation is MainActor.
+            let session = urlSession
+            let (metrics, planType) = try await Task.detached(priority: .userInitiated) {
+                let (data, response) = try await session.data(for: request)
+                try ServiceSupport.validate(response, data: data)
+                // Codex CLI API uses Unix timestamps (Int64), not ISO8601 dates.
+                let usageResponse = try JSONDecoder().decode(CodexCliUsageResponse.self, from: data)
+                return (usageResponse.toUsageMetrics(), usageResponse.planType)
+            }.value
 
             await MainActor.run {
                 self.accountErrors.removeValue(forKey: account.id)
                 self.record(true, for: account)
                 if account.isDefault {
-                    self.subscriptionType = usageResponse.planType
+                    self.subscriptionType = planType
                 }
             }
 
             // Pure response→UsageMetrics mapping (window math, code-review limit,
             // extra-usage + reset-credit derivation) lives on the response type
             // so it's unit-testable with fixture JSON, no network.
-            return usageResponse.toUsageMetrics()
+            return metrics
         } catch {
             let serviceError = ServiceSupport.serviceError(from: error)
             AppLog.usage.error("Codex usage fetch failed: \(serviceError.localizedDescription)")
@@ -310,9 +313,12 @@ class CodexCliLocalService: ObservableObject {
 
         let response: ConsumeResetCreditResponse
         do {
-            let (data, urlResponse) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(urlResponse, data: data)
-            response = try JSONDecoder().decode(ConsumeResetCreditResponse.self, from: data)
+            let session = urlSession
+            response = try await Task.detached(priority: .userInitiated) {
+                let (data, urlResponse) = try await session.data(for: request)
+                try ServiceSupport.validate(urlResponse, data: data)
+                return try JSONDecoder().decode(ConsumeResetCreditResponse.self, from: data)
+            }.value
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
@@ -355,9 +361,12 @@ class CodexCliLocalService: ObservableObject {
         )
 
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(response, data: data)
-            return try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
+            let session = urlSession
+            return try await Task.detached(priority: .userInitiated) {
+                let (data, response) = try await session.data(for: request)
+                try ServiceSupport.validate(response, data: data)
+                return try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
+            }.value
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
@@ -395,7 +404,7 @@ class CodexCliLocalService: ObservableObject {
     /// Thin alias over `CodexCliUsageResponse.toUsageMetrics()` — the single
     /// implementation of the window/limit derivation — kept so both fixture
     /// test suites exercise the same code path.
-    static func mapUsageResponse(_ usageResponse: CodexCliUsageResponse) -> UsageMetrics {
+    nonisolated static func mapUsageResponse(_ usageResponse: CodexCliUsageResponse) -> UsageMetrics {
         usageResponse.toUsageMetrics()
     }
 }
@@ -629,7 +638,7 @@ extension CodexCliUsageResponse {
     /// limit and moves the only remaining weekly window into `primary_window`.
     /// Free accounts (null `rate_limit`) carry no windows, only the
     /// extra-usage/reset-credit signals.
-    func toUsageMetrics() -> UsageMetrics {
+    nonisolated func toUsageMetrics() -> UsageMetrics {
         guard let rateLimit else {
             // Free accounts have a null rate_limit — no quota windows to report.
             return UsageMetrics(
