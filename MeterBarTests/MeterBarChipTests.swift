@@ -107,6 +107,42 @@ final class MeterBarChipTests: XCTestCase {
         assertHosts(ProviderStatusBadge(indicator: .critical, label: "Major outage"))
     }
 
+    /// PR #483 mixed plain Healthy text with an OUT pill. Both statuses now use
+    /// the same capsule grammar; the semantic label and tint are the only
+    /// differences.
+    func testProviderStatusLabelUsesPillsForHealthyAndOut() {
+        let plainHeight = fittingHeight(
+            Text("HEALTHY")
+                .font(.caption2)
+                .fontWeight(.semibold)
+        )
+        let healthyHeight = fittingHeight(
+            ProviderCardStatusLabel(snapshot: providerSnapshot(used: 10))
+        )
+        let exhaustedHeight = fittingHeight(
+            ProviderCardStatusLabel(snapshot: providerSnapshot(used: 100))
+        )
+
+        XCTAssertGreaterThan(healthyHeight, plainHeight)
+        XCTAssertEqual(exhaustedHeight, healthyHeight, accuracy: 0.5)
+    }
+
+    func testOptimizeRowUsesStatusForThePillAndWindowForSupportingText() throws {
+        let healthy = try XCTUnwrap(recommendationRow(used: 26))
+        let healthyContent = HeadroomRecommendationRow.Content(row: healthy)
+
+        XCTAssertEqual(healthyContent.statusBand, .healthy)
+        XCTAssertEqual(healthyContent.valueText, "74% left")
+        XCTAssertEqual(healthyContent.detailParts.first, "Session")
+
+        let exhausted = try XCTUnwrap(recommendationRow(used: 100))
+        let exhaustedContent = HeadroomRecommendationRow.Content(row: exhausted)
+
+        XCTAssertEqual(exhaustedContent.statusBand, .exhausted)
+        XCTAssertEqual(exhaustedContent.valueText, "0% left")
+        XCTAssertEqual(exhaustedContent.detailParts, ["Session", "Available in 1h"])
+    }
+
     // MARK: - Helpers
 
     /// Renders a view in an off-screen host and asserts it lays out to a real,
@@ -123,5 +159,55 @@ final class MeterBarChipTests: XCTestCase {
         let size = host.fittingSize
         XCTAssertGreaterThan(size.width, 0, "chip should have non-zero width", file: file, line: line)
         XCTAssertGreaterThan(size.height, 0, "chip should have non-zero height", file: file, line: line)
+    }
+
+    private func fittingHeight(_ view: some View) -> CGFloat {
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: 100)
+        host.layoutSubtreeIfNeeded()
+        return host.fittingSize.height
+    }
+
+    private func providerSnapshot(used: Double) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: "cursor",
+            title: "Cursor",
+            service: .cursor,
+            updatedAt: Date(),
+            limits: [
+                SnapshotLimit(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usageLimit: UsageLimit(
+                        used: used,
+                        total: 100,
+                        resetTime: Date().addingTimeInterval(3_600)
+                    )
+                )
+            ],
+            emptyDetail: "Waiting for refresh",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+    }
+
+    private func recommendationRow(used: Double) -> ProviderRecommendationRow? {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        let candidate = ProviderRecommendationCandidate(
+            id: "codex",
+            name: "Codex",
+            service: .codexCli,
+            displayOrder: 0,
+            sessionLimit: UsageLimit(
+                used: used,
+                total: 100,
+                resetTime: now.addingTimeInterval(3_600)
+            ),
+            weeklyLimit: nil,
+            lastUpdated: now
+        )
+        return ProviderRecommendationPlanner.rank(candidates: [candidate], now: now).top
     }
 }
