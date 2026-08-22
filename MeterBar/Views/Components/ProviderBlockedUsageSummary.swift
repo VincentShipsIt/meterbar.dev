@@ -133,12 +133,7 @@ struct ProviderBlockedUsageSummary: View {
 
                     Spacer(minLength: MeterBarTheme.Spacing.sm)
 
-                    Text(content.statusText)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(ProviderCardPresentation.statusColor(for: snapshot))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                    ProviderCardStatusLabel(snapshot: snapshot)
                 }
 
                 if let resetText = content.resetText {

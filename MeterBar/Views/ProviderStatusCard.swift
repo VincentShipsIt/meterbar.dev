@@ -136,10 +136,7 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text("Offline")
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+            ProviderCardStatusLabel(snapshot: snapshot)
         }
     }
 
@@ -155,10 +152,7 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(ProviderAuthNotice.loginRequired.shortLabel)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(MeterBarTheme.warning)
+            ProviderCardStatusLabel(snapshot: snapshot)
         }
         .help("\(snapshot.updatedText) — log in to resume tracking")
     }

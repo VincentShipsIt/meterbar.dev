@@ -454,9 +454,27 @@ struct OptimizeInsightsView: View {
 /// left, reset countdown, pace — so the ordering can be read off the row rather
 /// than taken on faith. Deliberately plain: this is arithmetic over cached
 /// quota numbers, not a prediction.
-private struct HeadroomRecommendationRow: View {
+struct HeadroomRecommendationRow: View {
+  struct Content: Equatable {
+    let statusBand: QuotaBand
+    let valueText: String
+    let detailParts: [String]
+
+    init(row: ProviderRecommendationRow) {
+      statusBand = row.band
+      valueText = row.headroomText
+      if row.isExhausted {
+        detailParts = [row.windowTitle, row.availabilityText].compactMap { $0 }
+      } else {
+        detailParts = [row.windowTitle, row.resetText, row.paceText].compactMap { $0 }
+      }
+    }
+  }
+
   let rank: Int
   let row: ProviderRecommendationRow
+
+  var content: Content { Content(row: row) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 5) {
@@ -478,20 +496,22 @@ private struct HeadroomRecommendationRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
 
-        MeterBarChip(row.windowTitle, tint: row.band.color, style: .flat)
+        ProviderCardStatusLabel(band: content.statusBand)
 
         Spacer(minLength: 8)
 
-        Text(row.isExhausted ? "Spent" : row.headroomText)
+        Text(content.valueText)
           .font(.callout)
           .monospacedDigit()
-          .foregroundColor(row.band.color)
       }
 
-      ShareBar(fraction: Double(row.percentLeft) / 100, tint: row.band.color)
+      ShareBar(
+        fraction: Double(row.percentLeft) / 100,
+        tint: MeterBarTheme.accent(for: row.service)
+      )
 
-      if !detailParts.isEmpty {
-        Text(detailParts.joined(separator: " · "))
+      if !content.detailParts.isEmpty {
+        Text(content.detailParts.joined(separator: " · "))
           .font(.caption)
           .foregroundColor(.secondary)
           .lineLimit(1)
@@ -502,14 +522,6 @@ private struct HeadroomRecommendationRow: View {
     .accessibilityValue(row.summary)
   }
 
-  /// The score inputs that don't fit the headline row, in weighting order: when
-  /// the window refills, then how the burn compares to the clock.
-  private var detailParts: [String] {
-    if row.isExhausted {
-      return [row.availabilityText].compactMap { $0 }
-    }
-    return [row.resetText, row.paceText].compactMap { $0 }
-  }
 }
 
 /// A provider left out of the ranking, with the reason in place of a rank.
