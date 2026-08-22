@@ -184,7 +184,11 @@ extension LimitRow {
 
         var showsUsageBar: Bool { !compactsWhenOut }
 
-        var showsFooter: Bool { !compactsWhenOut && showsReset }
+        /// Active full-density rows keep their used/pace footer even when the
+        /// provider does not publish a reset timestamp. Compact density still
+        /// renders no footer in that case because its reset-only footer body is
+        /// empty.
+        var showsFooter: Bool { !compactsWhenOut }
 
         var showsEstimatedTag: Bool { isEstimated }
 

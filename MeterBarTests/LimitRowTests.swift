@@ -74,6 +74,17 @@ final class LimitRowTests: XCTestCase {
         XCTAssertTrue(content.showsFooter)
     }
 
+    func testNonOutRowWithoutResetKeepsFullDensityFooterContent() {
+        let content = LimitRow.RowContent(limit: quotaLimit(used: 40))
+        XCTAssertFalse(content.compactsWhenOut)
+        XCTAssertTrue(content.showsUsageBar)
+        XCTAssertTrue(
+            content.showsFooter,
+            "detail and regular rows must keep used/pace text without a reset timestamp"
+        )
+        XCTAssertFalse(content.showsReset)
+    }
+
     func testEstimatedExhaustedShowsPercentInsteadOfOut() {
         // An estimated total must never claim a hard "Out" — the total is a
         // guess, so it falls back to the (approximate) percent-left label.

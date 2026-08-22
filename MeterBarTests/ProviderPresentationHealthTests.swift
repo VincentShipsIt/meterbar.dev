@@ -544,7 +544,12 @@ final class ProviderPresentationHealthTests: XCTestCase {
     }
 
     func testHealthyStatusStaysPlainTextWhileAttentionUsesAChip() throws {
-        let healthy = try card(.codex, lastUpdated: freshAt, refresh: .success, parseHealth: .success(provider: .codexCli, at: freshAt))
+        let healthy = try card(
+            .codex,
+            lastUpdated: freshAt,
+            refresh: .success,
+            parseHealth: .success(provider: .codexCli, at: freshAt)
+        )
         XCTAssertFalse(ProviderCardPresentation.statusUsesChip(for: healthy))
 
         let critical = ProviderSnapshot(
@@ -570,6 +575,20 @@ final class ProviderPresentationHealthTests: XCTestCase {
         var stale = healthy
         stale.authNotice = .stale(since: freshAt)
         XCTAssertFalse(ProviderCardPresentation.statusUsesChip(for: stale))
+
+        var staleCritical = critical
+        staleCritical.authNotice = .stale(since: freshAt)
+        XCTAssertFalse(
+            ProviderCardPresentation.statusUsesChip(for: staleCritical),
+            "stale must stay plain text even when cached quota is critical"
+        )
+
+        var notConnectedCritical = critical
+        notConnectedCritical.authNotice = .notConnected
+        XCTAssertFalse(
+            ProviderCardPresentation.statusUsesChip(for: notConnectedCritical),
+            "offline/not-connected must stay plain text even when cached quota is critical"
+        )
 
         var login = healthy
         login.authNotice = .loginRequired

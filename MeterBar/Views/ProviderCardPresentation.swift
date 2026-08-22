@@ -35,7 +35,9 @@ enum ProviderCardPresentation {
         switch snapshot.authNotice {
         case .loginRequired, .attention:
             return true
-        case .stale, .notConnected, .none:
+        case .stale, .notConnected:
+            return false
+        case .none:
             break
         }
         guard let band = snapshot.band else { return false }
