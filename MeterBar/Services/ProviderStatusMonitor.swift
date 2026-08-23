@@ -47,13 +47,13 @@ enum ProviderStatusIndicator: String, Codable, Equatable {
     var summaryLabel: String {
         switch self {
         case .none:
-            return "Operational"
+            return "Healthy"
         case .minor:
-            return "Partial Degradation"
+            return "Degraded"
         case .major:
-            return "Major Outage"
+            return "Outage"
         case .critical:
-            return "Critical Issue"
+            return "Down"
         case .maintenance:
             return "Maintenance"
         case .unknown:
@@ -120,13 +120,13 @@ struct ProviderStatusComponent: Identifiable, Equatable {
     static func label(forStatuspageStatus status: String) -> String {
         switch status {
         case "operational":
-            return "Operational"
+            return "Healthy"
         case "degraded_performance":
             return "Degraded"
         case "partial_outage":
-            return "Partial Outage"
+            return "Outage"
         case "major_outage", "full_outage":
-            return "Major Outage"
+            return "Down"
         case "under_maintenance":
             return "Maintenance"
         default:

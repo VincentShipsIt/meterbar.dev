@@ -226,7 +226,7 @@ struct StatusMenuBuilder {
 
         if let report = status.reports[service] {
             let summaryItem = Self.disabledMenuItem(
-                title: report.summary.description ?? report.summary.indicator.summaryLabel,
+                title: report.summary.indicator.summaryLabel,
                 image: MenuBarIconRenderer.statusDot(for: report.summary.indicator)
             )
             menu.addItem(summaryItem)
@@ -287,7 +287,7 @@ struct StatusMenuBuilder {
 
     static func providerStatusMenuTitle(for service: ServiceType, status: StatusSnapshot) -> String {
         if let report = status.reports[service] {
-            let summary = report.summary.description ?? report.summary.indicator.summaryLabel
+            let summary = report.summary.indicator.summaryLabel
             return "\(service.statusPageDisplayName) — \(summary)"
         }
         if status.errors[service] != nil {

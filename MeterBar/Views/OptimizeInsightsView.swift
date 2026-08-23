@@ -521,7 +521,6 @@ struct HeadroomRecommendationRow: View {
     .accessibilityLabel("Rank \(rank)")
     .accessibilityValue(row.summary)
   }
-
 }
 
 /// A provider left out of the ranking, with the reason in place of a rank.

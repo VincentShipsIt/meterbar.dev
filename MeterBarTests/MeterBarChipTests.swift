@@ -103,8 +103,8 @@ final class MeterBarChipTests: XCTestCase {
     }
 
     func testProviderStatusBadgeHosts() {
-        assertHosts(ProviderStatusBadge(indicator: .none, label: "All systems operational"))
-        assertHosts(ProviderStatusBadge(indicator: .critical, label: "Major outage"))
+        assertHosts(ProviderStatusBadge(indicator: .none, label: "Healthy"))
+        assertHosts(ProviderStatusBadge(indicator: .critical, label: "Down"))
     }
 
     /// PR #483 mixed plain Healthy text with an OUT pill. Both statuses now use

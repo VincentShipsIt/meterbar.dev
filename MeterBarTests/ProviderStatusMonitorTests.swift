@@ -100,7 +100,20 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertEqual(components[0].children.map(\.name), ["Responses API"])
         XCTAssertEqual(components[0].children.first?.indicator, .major)
         XCTAssertEqual(components[1].name, "ChatGPT")
-        XCTAssertEqual(components[1].statusLabel, "Operational")
+        XCTAssertEqual(components[1].statusLabel, "Healthy")
+    }
+
+    func testProviderStatusLabelsStayCompact() {
+        XCTAssertEqual(ProviderStatusIndicator.none.summaryLabel, "Healthy")
+        XCTAssertEqual(ProviderStatusIndicator.minor.summaryLabel, "Degraded")
+        XCTAssertEqual(ProviderStatusIndicator.major.summaryLabel, "Outage")
+        XCTAssertEqual(ProviderStatusIndicator.critical.summaryLabel, "Down")
+        XCTAssertEqual(ProviderStatusIndicator.maintenance.summaryLabel, "Maintenance")
+        XCTAssertEqual(ProviderStatusIndicator.unknown.summaryLabel, "Unknown")
+
+        XCTAssertEqual(ProviderStatusComponent.label(forStatuspageStatus: "operational"), "Healthy")
+        XCTAssertEqual(ProviderStatusComponent.label(forStatuspageStatus: "partial_outage"), "Outage")
+        XCTAssertEqual(ProviderStatusComponent.label(forStatuspageStatus: "major_outage"), "Down")
     }
 
     func testServiceTypeStatusPageURLs() throws {
