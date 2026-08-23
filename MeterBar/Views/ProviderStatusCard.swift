@@ -136,10 +136,7 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text("Offline")
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+            ProviderCardStatusLabel(snapshot: snapshot)
         }
     }
 
@@ -155,10 +152,7 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(ProviderAuthNotice.loginRequired.shortLabel)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(MeterBarTheme.warning)
+            ProviderCardStatusLabel(snapshot: snapshot)
         }
         .help("\(snapshot.updatedText) — log in to resume tracking")
     }
@@ -204,34 +198,48 @@ struct ProviderStatusCard: View {
     }
 
     private var expandedCardBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // The chevron rides along only when the card opens a detail panel,
-            // so "clickable" is visible instead of relying on the
-            // accessibilityHint alone.
-            ProviderCardHeader(snapshot: snapshot, showsDisclosureChevron: allowsDetailNavigation)
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                ProviderCardHeader(snapshot: snapshot, showsStatus: false)
 
-            if snapshot.hasExhaustedLimit {
-                BlockingLimitResetCounter(
-                    windows: snapshot.resetWindows,
-                    accentColor: snapshot.accentColor,
-                    format: menuBarDisplayPreferences.resetTimeFormat
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 9) {
-                    ForEach(snapshot.limits) { limit in
-                        LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
+                if snapshot.hasExhaustedLimit {
+                    BlockingLimitResetCounter(
+                        windows: snapshot.resetWindows,
+                        accentColor: snapshot.accentColor,
+                        format: menuBarDisplayPreferences.resetTimeFormat
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach(snapshot.limits) { limit in
+                            LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
+                        }
                     }
                 }
-            }
 
-            let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
-            if badges.hasContent {
-                badges
-            }
+                let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
+                if badges.hasContent {
+                    badges
+                }
 
-            if showsResetCreditAction {
-                Divider()
-                resetCreditButton(isCompact: false)
+                if showsResetCreditAction {
+                    Divider()
+                    resetCreditButton(isCompact: false)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Status belongs to the whole card, not its first text line. Keeping
+            // it in a dedicated rail also reserves space so it cannot overlap a
+            // quota value or bar as the card grows.
+            HStack(spacing: 7) {
+                ProviderCardStatusLabel(snapshot: snapshot)
+
+                // The chevron rides along only when the card opens a detail
+                // panel, so "clickable" is visible without relying on the
+                // accessibility hint alone.
+                if allowsDetailNavigation {
+                    CardDisclosureChevron()
+                }
             }
         }
     }

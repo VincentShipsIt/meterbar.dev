@@ -290,16 +290,22 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
-    func testHeaderRendersWithAndWithoutTheDisclosureChevron() {
-        for showsChevron in [true, false] {
-            let header = ProviderCardHeader(snapshot: snapshot(), showsDisclosureChevron: showsChevron)
-            let host = NSHostingView(rootView: header.frame(width: 320))
-            host.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(
-                host.fittingSize.height,
-                0,
-                "ProviderCardHeader(showsDisclosureChevron: \(showsChevron)) should lay out"
-            )
+    func testHeaderRendersWithInlineAndExternalStatusLayouts() {
+        for showsStatus in [true, false] {
+            for showsChevron in [true, false] {
+                let header = ProviderCardHeader(
+                    snapshot: snapshot(),
+                    showsStatus: showsStatus,
+                    showsDisclosureChevron: showsChevron
+                )
+                let host = NSHostingView(rootView: header.frame(width: 320))
+                host.layoutSubtreeIfNeeded()
+                XCTAssertGreaterThan(
+                    host.fittingSize.height,
+                    0,
+                    "ProviderCardHeader(status: \(showsStatus), chevron: \(showsChevron)) should lay out"
+                )
+            }
         }
     }
 }

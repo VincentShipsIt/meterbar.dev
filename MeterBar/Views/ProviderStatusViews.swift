@@ -101,7 +101,10 @@ private struct ProviderStatusDisclosureRow: View {
     }
 
     private var headline: String {
-        report?.summary.description ?? report?.summary.indicator.summaryLabel ?? "Loading status"
+        if let report {
+            return report.summary.indicator.summaryLabel
+        }
+        return error == nil ? "Loading" : "Unavailable"
     }
 
     var body: some View {
@@ -370,7 +373,10 @@ private struct MenuBarStatusDetailProviderSection: View {
     }
 
     private var headline: String {
-        report?.summary.description ?? report?.summary.indicator.summaryLabel ?? "Loading status"
+        if let report {
+            return report.summary.indicator.summaryLabel
+        }
+        return error == nil ? "Loading" : "Unavailable"
     }
 
     private var subtitle: String? {

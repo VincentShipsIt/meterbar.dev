@@ -86,14 +86,14 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(builder.makeMenu().items[2].state, .off)
     }
 
-    func testProviderStatusMenuTitleUsesReportSummaryDescription() {
+    func testProviderStatusMenuTitleUsesCompactIndicatorLabel() {
         let status = StatusMenuBuilder.StatusSnapshot(
             reports: [.claudeCode: Self.report(indicator: .minor, description: "Elevated errors")]
         )
 
         XCTAssertEqual(
             StatusMenuBuilder.providerStatusMenuTitle(for: .claudeCode, status: status),
-            "\(ServiceType.claudeCode.statusPageDisplayName) — Elevated errors"
+            "\(ServiceType.claudeCode.statusPageDisplayName) — Degraded"
         )
     }
 
@@ -104,7 +104,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
         XCTAssertEqual(
             StatusMenuBuilder.providerStatusMenuTitle(for: .claudeCode, status: status),
-            "\(ServiceType.claudeCode.statusPageDisplayName) — Operational"
+            "\(ServiceType.claudeCode.statusPageDisplayName) — Healthy"
         )
     }
 
@@ -167,7 +167,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
         // summary + separator + 2 components + separator + open item
         XCTAssertEqual(submenu.items.count, 6)
-        XCTAssertEqual(submenu.items[0].title, "Elevated errors")
+        XCTAssertEqual(submenu.items[0].title, "Degraded")
         XCTAssertFalse(submenu.items[0].isEnabled)
         XCTAssertTrue(submenu.items[1].isSeparatorItem)
         XCTAssertTrue(submenu.items[2].title.hasPrefix("API"))
@@ -213,7 +213,7 @@ final class AppDelegateSplitTests: XCTestCase {
         let item = StatusMenuBuilder.makeStatusComponentMenuItem(component)
 
         XCTAssertEqual(item.submenu?.items.count, 1)
-        XCTAssertEqual(item.submenu?.items[0].title, "API  Operational")
+        XCTAssertEqual(item.submenu?.items[0].title, "API  Healthy")
         XCTAssertTrue(item.isEnabled)
     }
 

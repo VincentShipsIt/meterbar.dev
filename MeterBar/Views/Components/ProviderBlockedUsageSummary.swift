@@ -111,46 +111,41 @@ struct ProviderBlockedUsageSummary: View {
                 hasAuthNotice: snapshot.authNotice != nil
             )
 
-            // The countdown takes its own line. Sharing the title's row made the
-            // title the only compressible element between two `fixedSize`
-            // siblings, so at popover width it collapsed to one character while
-            // the countdown kept its full ideal size.
-            VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xs) {
-                HStack(spacing: density == .popoverCard ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md) {
+            // The countdown stays below the title, while status gets its own
+            // trailing rail centered against the complete summary. Sharing all
+            // three on one line made the title collapse at popover width.
+            HStack(spacing: density == .popoverCard ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xs) {
                     if showsTitle {
-                        ProviderLogoView(
-                            kind: snapshot.logoKind,
-                            size: density == .popoverCard ? 17 : 16,
-                            foregroundColor: snapshot.accentColor
-                        )
-                        Text(snapshot.title)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .layoutPriority(1)
+                        HStack(spacing: density == .popoverCard ? MeterBarTheme.Spacing.sm : MeterBarTheme.Spacing.md) {
+                            ProviderLogoView(
+                                kind: snapshot.logoKind,
+                                size: density == .popoverCard ? 17 : 16,
+                                foregroundColor: snapshot.accentColor
+                            )
+                            Text(snapshot.title)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(1)
+                        }
                     }
 
-                    Spacer(minLength: MeterBarTheme.Spacing.sm)
-
-                    Text(content.statusText)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(ProviderCardPresentation.statusColor(for: snapshot))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                    if let resetText = content.resetText {
+                        Label(resetText, systemImage: "hourglass")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(snapshot.accentColor)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .numericRefreshTransition(value: resetText, reduceMotion: reduceMotion)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let resetText = content.resetText {
-                    Label(resetText, systemImage: "hourglass")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(snapshot.accentColor)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .numericRefreshTransition(value: resetText, reduceMotion: reduceMotion)
-                }
+                ProviderCardStatusLabel(snapshot: snapshot)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
