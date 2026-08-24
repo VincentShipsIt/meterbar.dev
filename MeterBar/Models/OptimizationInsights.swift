@@ -34,12 +34,24 @@ nonisolated enum ModelTier: String, Sendable, Equatable {
 
     var isPremium: Bool { self == .premium }
 
-    var label: String {
+    /// Compact relative-price marker used by the Optimize breakdown. The tier
+    /// is intentionally typography-only: status colors stay reserved for
+    /// health and attention states elsewhere in the app.
+    var costIndicator: String {
         switch self {
-        case .premium: return "Premium"
-        case .standard: return "Standard"
-        case .economy: return "Economy"
-        case .unknown: return "Other"
+        case .premium: return "$$$"
+        case .standard: return "$$"
+        case .economy: return "$"
+        case .unknown: return "—"
+        }
+    }
+
+    var costAccessibilityLabel: String {
+        switch self {
+        case .premium: return "High-cost model"
+        case .standard: return "Mid-cost model"
+        case .economy: return "Low-cost model"
+        case .unknown: return "Unknown cost tier"
         }
     }
 }
@@ -297,13 +309,13 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
 
         var recommendations: [OptimizationRecommendation] = []
 
-        // Premium-model routing.
+        // High-cost model routing.
         if premiumShare >= Threshold.premiumWarning {
             recommendations.append(OptimizationRecommendation(
                 id: "premium-share",
-                title: "Premium models are doing most of the work",
-                detail: "Premium models handled \(percentString(premiumShare)) of your tokens. "
-                    + "Routing routine edits, summaries, and lookups to a mid-tier or economy model "
+                title: "High-cost models are doing most of the work",
+                detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
+                    + "Routing routine edits, summaries, and lookups to $$ or $ models "
                     + "can cut token spend without much quality loss.",
                 severity: .warning,
                 systemImage: "bolt.badge.automatic"
@@ -311,9 +323,9 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         } else if premiumShare >= Threshold.premiumSuggestion {
             recommendations.append(OptimizationRecommendation(
                 id: "premium-share",
-                title: "Consider tiering your model choice",
-                detail: "Premium models handled \(percentString(premiumShare)) of your tokens. "
-                    + "Reserve them for the hardest reasoning and let cheaper models handle the rest.",
+                title: "Use lower-cost models more often",
+                detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
+                    + "Reserve them for the hardest reasoning and route routine work to $$ or $ models.",
                 severity: .suggestion,
                 systemImage: "bolt.badge.automatic"
             ))
@@ -390,7 +402,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
                 id: "lean",
                 title: "Usage looks lean",
                 detail: "No major optimization flags right now — your model mix, cache reuse, and context "
-                    + "size are in a healthy range. Keep an eye on premium share as usage grows.",
+                    + "size are in a healthy range. Keep an eye on $$$ model share as usage grows.",
                 severity: .positive,
                 systemImage: "leaf"
             ))

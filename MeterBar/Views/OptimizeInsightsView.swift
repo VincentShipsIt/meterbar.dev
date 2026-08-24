@@ -196,7 +196,7 @@ struct OptimizeInsightsView: View {
     DashboardStatusHero(
       title: "Optimization score \(insights.optimizationScore)/100 · \(insights.scoreGrade)",
       detail:
-        "\(insights.scoreHeadline) — based on premium-model share, context size, cache reuse, "
+        "\(insights.scoreHeadline) — based on high-cost model share, context size, cache reuse, "
         + "and how concentrated your usage is.",
       iconName: "leaf.fill",
       color: Self.gradeColor(insights.optimizationScore)
@@ -254,9 +254,9 @@ struct OptimizeInsightsView: View {
   private func kpiGrid(for insights: OptimizationInsights) -> some View {
     LazyVGrid(columns: Self.kpiColumns, alignment: .leading, spacing: 12) {
       DashboardMetricTile(
-        title: "Premium model share",
+        title: "$$$ model share",
         value: insights.formattedPremiumShare,
-        caption: "of tokens on premium models",
+        caption: "tokens routed to high-cost models",
         systemImage: "bolt.fill",
         indicatorTint: Self.shareTint(insights.premiumTokenShare)
       )
@@ -306,36 +306,29 @@ struct OptimizeInsightsView: View {
   }
 
   private func modelBreakdownCard(for insights: OptimizationInsights) -> some View {
-    DashboardCard(title: "Token Burn by Model") {
-      if insights.topModels.isEmpty {
-        Text("No per-model breakdown available in the current scan.")
-          .font(.caption)
-          .foregroundColor(.secondary)
-      } else {
-        VStack(spacing: 10) {
-          ForEach(insights.topModels.prefix(6)) { entry in
-            RankedBreakdownRow(entry: entry, showsTier: true)
-          }
-        }
-      }
-    }
+    breakdownCard(kind: .model, entries: insights.topModels)
   }
 
   private func originBreakdownCard(for insights: OptimizationInsights) -> some View {
-    DashboardCard(title: "Top Usage Origins") {
-      VStack(alignment: .leading, spacing: 10) {
-        Text("Where tokens are spent — agents, tool use, skills, and main chat.")
-          .font(.caption)
-          .foregroundColor(.secondary)
+    breakdownCard(kind: .origin, entries: insights.topOrigins)
+  }
 
-        if insights.topOrigins.isEmpty {
-          Text("No origin breakdown available in the current scan.")
+  private func breakdownCard(
+    kind: RankedBreakdownKind,
+    entries: [RankedTokenEntry]
+  ) -> some View {
+    DashboardCard(title: kind.title) {
+      VStack(alignment: .leading, spacing: 10) {
+        Text(kind.subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+        if entries.isEmpty {
+          Text(kind.emptyText)
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         } else {
-          ForEach(insights.topOrigins.prefix(6)) { entry in
-            RankedBreakdownRow(entry: entry, showsTier: false)
-          }
+          RankedBreakdownTable(entries: Array(entries.prefix(6)), kind: kind)
         }
       }
     }
@@ -573,54 +566,129 @@ private struct HeadroomUnavailableRow: View {
   }
 }
 
-// MARK: - Ranked breakdown row
+// MARK: - Ranked breakdown table
 
-private struct RankedBreakdownRow: View {
-  let entry: RankedTokenEntry
-  let showsTier: Bool
+private enum RankedBreakdownKind: Equatable {
+  case model
+  case origin
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      HStack(spacing: 8) {
-        Circle()
-          .fill(MeterBarTheme.accent(for: entry.provider))
-          .frame(width: 8, height: 8)
-
-        Text(entry.name)
-          .font(.callout)
-          .fontWeight(.medium)
-          .lineLimit(1)
-          .truncationMode(.middle)
-
-        if showsTier, entry.tier != .unknown {
-          // Migrated to the shared `MeterBarChip`; fill normalizes 0.18 -> 0.14
-          // and it picks up the standard hairline stroke. Tier color unchanged.
-          MeterBarChip(entry.tier.label, tint: tierColor, style: .flat)
-        }
-
-        Spacer(minLength: 8)
-
-        Text(entry.formattedTokens)
-          .font(.callout)
-          .monospacedDigit()
-        Text(entry.formattedShare)
-          .font(.caption)
-          .foregroundColor(.secondary)
-          .monospacedDigit()
-          .frame(width: 42, alignment: .trailing)
-      }
-
-      ShareBar(fraction: entry.tokenShare, tint: MeterBarTheme.accent(for: entry.provider))
+  var title: String {
+    switch self {
+    case .model: return "Token Burn by Model"
+    case .origin: return "Top Usage Origins"
     }
   }
 
-  private var tierColor: Color {
-    switch entry.tier {
-    case .premium: return MeterBarTheme.danger
-    case .standard: return MeterBarTheme.warning
-    case .economy: return MeterBarTheme.success
-    case .unknown: return .secondary
+  var subtitle: String {
+    switch self {
+    case .model: return "Model mix by token share. $ is lower-cost; $$$ is higher-cost."
+    case .origin: return "Where tokens are spent across apps, agents, tools, skills, and chat."
     }
+  }
+
+  var emptyText: String {
+    switch self {
+    case .model: return "No per-model breakdown available in the current scan."
+    case .origin: return "No origin breakdown available in the current scan."
+    }
+  }
+
+  var primaryColumnTitle: String {
+    switch self {
+    case .model: return "Model"
+    case .origin: return "Origin"
+    }
+  }
+
+  var showsCostTier: Bool { self == .model }
+  var columnCount: Int { showsCostTier ? 4 : 3 }
+}
+
+private struct RankedBreakdownTable: View {
+  let entries: [RankedTokenEntry]
+  let kind: RankedBreakdownKind
+
+  var body: some View {
+    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+      GridRow {
+        Text(kind.primaryColumnTitle)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .gridColumnAlignment(.leading)
+
+        if kind.showsCostTier {
+          Text("Cost tier")
+            .gridColumnAlignment(.center)
+        }
+
+        Text("Tokens")
+          .gridColumnAlignment(.trailing)
+        Text("Share")
+          .gridColumnAlignment(.trailing)
+      }
+      .font(.caption2)
+      .fontWeight(.semibold)
+      .foregroundStyle(.secondary)
+      .textCase(.uppercase)
+
+      ForEach(entries) { entry in
+        RankedBreakdownRow(entry: entry, kind: kind)
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
+}
+
+private struct RankedBreakdownRow: View {
+  let entry: RankedTokenEntry
+  let kind: RankedBreakdownKind
+
+  @ViewBuilder var body: some View {
+    GridRow {
+      Text(entry.name)
+        .font(.callout)
+        .fontWeight(.medium)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+      if kind.showsCostTier {
+        Text(entry.tier.costIndicator)
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+          .monospaced()
+          .accessibilityLabel(entry.tier.costAccessibilityLabel)
+      }
+
+      Text(entry.formattedTokens)
+        .font(.callout)
+        .fontWeight(.semibold)
+        .monospacedDigit()
+
+      Text(entry.formattedShare)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(entry.name)
+    .accessibilityValue(accessibilityValue)
+
+    GridRow {
+      ShareBar(fraction: entry.tokenShare, tint: MeterBarTheme.accent(for: entry.provider))
+        .gridCellColumns(kind.columnCount)
+        .accessibilityHidden(true)
+    }
+  }
+
+  private var accessibilityValue: String {
+    var parts: [String] = []
+    if kind.showsCostTier {
+      parts.append(entry.tier.costAccessibilityLabel)
+    }
+    parts.append("\(entry.formattedTokens) tokens")
+    parts.append(entry.formattedShare)
+    return parts.joined(separator: ", ")
   }
 }
 
