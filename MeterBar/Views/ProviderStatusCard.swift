@@ -198,48 +198,34 @@ struct ProviderStatusCard: View {
     }
 
     private var expandedCardBody: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 10) {
-                ProviderCardHeader(snapshot: snapshot, showsStatus: false)
+        VStack(alignment: .leading, spacing: 10) {
+            // Active providers keep status beside their identity. Terminal
+            // summaries (Out, Offline, login required) use the compact card
+            // branches above, where centering against the whole row is useful.
+            ProviderCardHeader(snapshot: snapshot, showsDisclosureChevron: allowsDetailNavigation)
 
-                if snapshot.hasExhaustedLimit {
-                    BlockingLimitResetCounter(
-                        windows: snapshot.resetWindows,
-                        accentColor: snapshot.accentColor,
-                        format: menuBarDisplayPreferences.resetTimeFormat
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 9) {
-                        ForEach(snapshot.limits) { limit in
-                            LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
-                        }
+            if snapshot.hasExhaustedLimit {
+                BlockingLimitResetCounter(
+                    windows: snapshot.resetWindows,
+                    accentColor: snapshot.accentColor,
+                    format: menuBarDisplayPreferences.resetTimeFormat
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(snapshot.limits) { limit in
+                        LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
                     }
                 }
-
-                let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
-                if badges.hasContent {
-                    badges
-                }
-
-                if showsResetCreditAction {
-                    Divider()
-                    resetCreditButton(isCompact: false)
-                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Status belongs to the whole card, not its first text line. Keeping
-            // it in a dedicated rail also reserves space so it cannot overlap a
-            // quota value or bar as the card grows.
-            HStack(spacing: 7) {
-                ProviderCardStatusLabel(snapshot: snapshot)
+            let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
+            if badges.hasContent {
+                badges
+            }
 
-                // The chevron rides along only when the card opens a detail
-                // panel, so "clickable" is visible without relying on the
-                // accessibility hint alone.
-                if allowsDetailNavigation {
-                    CardDisclosureChevron()
-                }
+            if showsResetCreditAction {
+                Divider()
+                resetCreditButton(isCompact: false)
             }
         }
     }
