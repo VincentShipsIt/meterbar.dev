@@ -36,14 +36,12 @@ struct ProviderCardHeader: View {
     var body: some View {
         HStack(spacing: 7) {
             ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
-                .accessibilityIdentifier("provider-card-header-logo")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(content.title)
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-                    .accessibilityIdentifier("provider-card-header-title")
                 Text(content.subtitle)
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -54,7 +52,6 @@ struct ProviderCardHeader: View {
             Spacer(minLength: 0)
 
             ProviderCardStatusLabel(snapshot: snapshot)
-                .accessibilityIdentifier("provider-card-header-status")
 
             if showsDisclosureChevron {
                 CardDisclosureChevron()

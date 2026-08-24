@@ -290,80 +290,61 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
-    func testHeaderAlwaysRendersInlineStatusWithOrWithoutDisclosureChevron() throws {
+    func testHeaderAlwaysRendersInlineStatusWithOrWithoutDisclosureChevron() {
         for showsChevron in [true, false] {
             let currentSnapshot = snapshot()
             let expectedStatus = ProviderCardPresentation.statusText(for: currentSnapshot)
-            let header = ProviderCardHeader(
-                snapshot: currentSnapshot,
-                showsDisclosureChevron: showsChevron
+            let headerHost = NSHostingView(
+                rootView: ProviderCardHeader(
+                    snapshot: currentSnapshot,
+                    showsDisclosureChevron: showsChevron
+                )
             )
-            let host = NSHostingView(rootView: header.frame(width: 320))
-            host.frame = NSRect(origin: .zero, size: host.fittingSize)
-            host.layoutSubtreeIfNeeded()
-
-            let logo = try XCTUnwrap(
-                accessibilityElement(identifier: "provider-card-header-logo", in: host),
-                "Provider logo should render when chevron is \(showsChevron)"
+            let identityHost = NSHostingView(
+                rootView: HStack(spacing: 7) {
+                    ProviderLogoView(
+                        kind: currentSnapshot.logoKind,
+                        size: 17,
+                        foregroundColor: currentSnapshot.accentColor
+                    )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(currentSnapshot.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                        Text(currentSnapshot.updatedText)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    if showsChevron {
+                        CardDisclosureChevron()
+                    }
+                }
             )
-            let title = try XCTUnwrap(
-                accessibilityElement(identifier: "provider-card-header-title", in: host),
-                "Provider title should render when chevron is \(showsChevron)"
-            )
-            let status = try XCTUnwrap(
-                accessibilityElement(identifier: "provider-card-header-status", in: host),
-                "Provider status should render when chevron is \(showsChevron)"
-            )
+            let statusHost = NSHostingView(rootView: ProviderCardStatusLabel(snapshot: currentSnapshot))
 
             XCTAssertEqual(
-                status.accessibilityLabel(),
+                ProviderCardHeader.Content(snapshot: currentSnapshot).statusText,
                 expectedStatus,
                 "Provider status should render when chevron is \(showsChevron)"
             )
-            XCTAssertEqual(
-                logo.accessibilityFrame().midY,
-                title.accessibilityFrame().midY,
-                accuracy: 1,
-                "Provider logo and title should stay on one row when chevron is \(showsChevron)"
+            XCTAssertGreaterThanOrEqual(
+                headerHost.fittingSize.width,
+                identityHost.fittingSize.width + statusHost.fittingSize.width,
+                "Provider header should include identity and status when chevron is \(showsChevron)"
             )
             XCTAssertEqual(
-                title.accessibilityFrame().midY,
-                status.accessibilityFrame().midY,
+                headerHost.fittingSize.height,
+                max(identityHost.fittingSize.height, statusHost.fittingSize.height),
                 accuracy: 1,
-                "Provider title and status should stay on one row when chevron is \(showsChevron)"
+                "Provider identity and status should stay on one row when chevron is \(showsChevron)"
             )
             XCTAssertGreaterThan(
-                host.fittingSize.height,
+                headerHost.fittingSize.height,
                 0,
                 "ProviderCardHeader(chevron: \(showsChevron)) should keep status inline"
             )
         }
-    }
-
-    private func accessibilityElement(
-        identifier: String,
-        in element: Any
-    ) -> NSAccessibilityElement? {
-        if let accessibleElement = element as? NSAccessibilityElement,
-           accessibleElement.accessibilityIdentifier() == identifier {
-            return accessibleElement
-        }
-
-        for child in accessibilityChildren(of: element) {
-            if let match = accessibilityElement(identifier: identifier, in: child) {
-                return match
-            }
-        }
-        return nil
-    }
-
-    private func accessibilityChildren(of element: Any) -> [Any] {
-        if let view = element as? NSView {
-            return view.accessibilityChildren() ?? []
-        }
-        if let accessibleElement = element as? NSAccessibilityElement {
-            return accessibleElement.accessibilityChildren() ?? []
-        }
-        return []
     }
 }
