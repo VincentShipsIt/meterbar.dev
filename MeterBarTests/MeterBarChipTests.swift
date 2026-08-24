@@ -133,14 +133,18 @@ final class MeterBarChipTests: XCTestCase {
 
         XCTAssertEqual(healthyContent.statusBand, .healthy)
         XCTAssertEqual(healthyContent.valueText, "74% left")
-        XCTAssertEqual(healthyContent.detailParts.first, "Session")
+        XCTAssertEqual(healthyContent.windowText, "Session")
+        XCTAssertTrue(healthyContent.showsUsage)
+        XCTAssertEqual(healthyContent.footerParts.first, "Resets in 1h")
 
         let exhausted = try XCTUnwrap(recommendationRow(used: 100))
         let exhaustedContent = HeadroomRecommendationRow.Content(row: exhausted)
 
         XCTAssertEqual(exhaustedContent.statusBand, .exhausted)
-        XCTAssertEqual(exhaustedContent.valueText, "0% left")
-        XCTAssertEqual(exhaustedContent.detailParts, ["Session", "Available in 1h"])
+        XCTAssertEqual(exhaustedContent.windowText, "Session")
+        XCTAssertNil(exhaustedContent.valueText)
+        XCTAssertFalse(exhaustedContent.showsUsage)
+        XCTAssertEqual(exhaustedContent.footerParts, ["Available in 1h"])
     }
 
     // MARK: - Helpers

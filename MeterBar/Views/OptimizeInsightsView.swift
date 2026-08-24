@@ -457,18 +457,23 @@ struct OptimizeInsightsView: View {
 struct HeadroomRecommendationRow: View {
   struct Content: Equatable {
     let statusBand: QuotaBand
-    let valueText: String
-    let detailParts: [String]
+    let windowText: String
+    let valueText: String?
+    let footerParts: [String]
 
     init(row: ProviderRecommendationRow) {
       statusBand = row.band
-      valueText = row.headroomText
+      windowText = row.windowTitle
       if row.isExhausted {
-        detailParts = [row.windowTitle, row.availabilityText].compactMap { $0 }
+        valueText = nil
+        footerParts = [row.availabilityText].compactMap { $0 }
       } else {
-        detailParts = [row.windowTitle, row.resetText, row.paceText].compactMap { $0 }
+        valueText = row.headroomText
+        footerParts = [row.resetText, row.paceText].compactMap { $0 }
       }
     }
+
+    var showsUsage: Bool { valueText != nil }
   }
 
   let rank: Int
@@ -496,22 +501,39 @@ struct HeadroomRecommendationRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
 
-        ProviderCardStatusLabel(band: content.statusBand)
-
         Spacer(minLength: 8)
 
-        Text(content.valueText)
-          .font(.callout)
-          .monospacedDigit()
+        ProviderCardStatusLabel(band: content.statusBand)
       }
 
-      ShareBar(
-        fraction: Double(row.percentLeft) / 100,
-        tint: MeterBarTheme.accent(for: row.service)
-      )
+      if content.showsUsage {
+        HStack(spacing: 8) {
+          Text(content.windowText)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundColor(.secondary)
 
-      if !content.detailParts.isEmpty {
-        Text(content.detailParts.joined(separator: " · "))
+          Spacer(minLength: 8)
+
+          if let valueText = content.valueText {
+            Text(valueText)
+              .font(.callout)
+              .fontWeight(.semibold)
+              .monospacedDigit()
+          }
+        }
+
+        ShareBar(
+          fraction: Double(row.percentLeft) / 100,
+          tint: MeterBarTheme.accent(for: row.service)
+        )
+      }
+
+      let supportingParts = content.showsUsage
+        ? content.footerParts
+        : [content.windowText] + content.footerParts
+      if !supportingParts.isEmpty {
+        Text(supportingParts.joined(separator: " · "))
           .font(.caption)
           .foregroundColor(.secondary)
           .lineLimit(1)
