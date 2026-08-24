@@ -290,22 +290,61 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
-    func testHeaderRendersWithInlineAndExternalStatusLayouts() {
-        for showsStatus in [true, false] {
-            for showsChevron in [true, false] {
-                let header = ProviderCardHeader(
-                    snapshot: snapshot(),
-                    showsStatus: showsStatus,
+    func testHeaderAlwaysRendersInlineStatusWithOrWithoutDisclosureChevron() {
+        for showsChevron in [true, false] {
+            let currentSnapshot = snapshot()
+            let expectedStatus = ProviderCardPresentation.statusText(for: currentSnapshot)
+            let headerHost = NSHostingView(
+                rootView: ProviderCardHeader(
+                    snapshot: currentSnapshot,
                     showsDisclosureChevron: showsChevron
                 )
-                let host = NSHostingView(rootView: header.frame(width: 320))
-                host.layoutSubtreeIfNeeded()
-                XCTAssertGreaterThan(
-                    host.fittingSize.height,
-                    0,
-                    "ProviderCardHeader(status: \(showsStatus), chevron: \(showsChevron)) should lay out"
-                )
-            }
+            )
+            let identityHost = NSHostingView(
+                rootView: HStack(spacing: 7) {
+                    ProviderLogoView(
+                        kind: currentSnapshot.logoKind,
+                        size: 17,
+                        foregroundColor: currentSnapshot.accentColor
+                    )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(currentSnapshot.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                        Text(currentSnapshot.updatedText)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    if showsChevron {
+                        CardDisclosureChevron()
+                    }
+                }
+            )
+            let statusHost = NSHostingView(rootView: ProviderCardStatusLabel(snapshot: currentSnapshot))
+
+            XCTAssertEqual(
+                ProviderCardHeader.Content(snapshot: currentSnapshot).statusText,
+                expectedStatus,
+                "Provider status should render when chevron is \(showsChevron)"
+            )
+            XCTAssertGreaterThanOrEqual(
+                headerHost.fittingSize.width,
+                identityHost.fittingSize.width + statusHost.fittingSize.width,
+                "Provider header should include identity and status when chevron is \(showsChevron)"
+            )
+            XCTAssertEqual(
+                headerHost.fittingSize.height,
+                max(identityHost.fittingSize.height, statusHost.fittingSize.height),
+                accuracy: 1,
+                "Provider identity and status should stay on one row when chevron is \(showsChevron)"
+            )
+            XCTAssertGreaterThan(
+                headerHost.fittingSize.height,
+                0,
+                "ProviderCardHeader(chevron: \(showsChevron)) should keep status inline"
+            )
         }
     }
 }

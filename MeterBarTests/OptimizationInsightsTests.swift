@@ -48,6 +48,18 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertFalse(ModelTier.unknown.isPremium)
     }
 
+    func testModelCostTierIndicatorsUseNeutralRelativePriceScale() {
+        XCTAssertEqual(ModelTier.economy.costIndicator, "$")
+        XCTAssertEqual(ModelTier.standard.costIndicator, "$$")
+        XCTAssertEqual(ModelTier.premium.costIndicator, "$$$")
+        XCTAssertEqual(ModelTier.unknown.costIndicator, "—")
+
+        XCTAssertEqual(ModelTier.economy.costAccessibilityLabel, "Low-cost model")
+        XCTAssertEqual(ModelTier.standard.costAccessibilityLabel, "Mid-cost model")
+        XCTAssertEqual(ModelTier.premium.costAccessibilityLabel, "High-cost model")
+        XCTAssertEqual(ModelTier.unknown.costAccessibilityLabel, "Unknown cost tier")
+    }
+
     // MARK: - Optimization score
 
     func testScoreBestCaseIsHundred() {
@@ -164,9 +176,11 @@ final class OptimizationInsightsTests: XCTestCase {
         ])
         let insights = OptimizationInsights(summary: summary, now: Self.referenceNow)
 
-        let premiumRec = insights.recommendations.first { $0.title.localizedCaseInsensitiveContains("premium") }
+        let premiumRec = insights.recommendations.first { $0.id == "premium-share" }
         XCTAssertNotNil(premiumRec)
         XCTAssertEqual(premiumRec?.severity, .warning)
+        XCTAssertEqual(premiumRec?.title, "High-cost models are doing most of the work")
+        XCTAssertTrue(premiumRec?.detail.contains("$$$ models") == true)
     }
 
     func testLowCacheReuseProducesWarning() {
