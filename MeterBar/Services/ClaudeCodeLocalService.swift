@@ -408,11 +408,18 @@ class ClaudeCodeLocalService: ObservableObject {
         }
 
         do {
-            let (data, response) = try await session.data(for: request)
-            try ServiceSupport.validate(response, data: data)
-
-            let usageResponse = try decodeUsageResponse(from: data)
-            return metrics(from: usageResponse)
+            // Network + decode must not run as main-actor jobs: same
+            // `NSURLSession.data(for:)` null-receiver hazard as Cursor /
+            // OpenRouter (#480) and Codex when default actor isolation is
+            // MainActor. 1.8.39 crashed on launch in this hop — the keychain
+            // read was already detached, the usage GET was not.
+            let capturedSession = session
+            return try await Task.detached(priority: .userInitiated) {
+                let (data, response) = try await capturedSession.data(for: request)
+                try ServiceSupport.validate(response, data: data)
+                let usageResponse = try decodeUsageResponse(from: data)
+                return metrics(from: usageResponse)
+            }.value
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
@@ -597,10 +604,13 @@ class ClaudeCodeLocalService: ObservableObject {
         }
 
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            try ServiceSupport.validate(response, data: data)
-            let usageResponse = try Self.decodeUsageResponse(from: data)
-            return usageResponse.extraUsageStatus
+            let session = urlSession
+            return try await Task.detached(priority: .utility) {
+                let (data, response) = try await session.data(for: request)
+                try ServiceSupport.validate(response, data: data)
+                let usageResponse = try Self.decodeUsageResponse(from: data)
+                return usageResponse.extraUsageStatus
+            }.value
         } catch {
             return .unknown
         }
