@@ -151,7 +151,7 @@ nonisolated enum GrokResetCreditsRPC {
         request.setValue("https://grok.com", forHTTPHeaderField: "Origin")
         request.httpBody = body
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await ServiceSupport.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw Error.requestFailed
         }

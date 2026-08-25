@@ -86,6 +86,32 @@ nonisolated enum ServiceSupport {
         return URLSession(configuration: safeConfiguration)
     }
 
+    /// Byte-transport that does **not** use `URLSession.data(for:)`.
+    ///
+    /// The Swift overlay of that method SIGSEGVs with a nil receiver when the
+    /// app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+    /// (OpenRouter 1.8.37, Cursor 1.8.38, Claude 1.8.39–1.8.40). `dataTask(with:)`
+    /// is the ObjC API and does not go through that overlay.
+    nonisolated static func data(
+        for request: URLRequest,
+        session: URLSession = session
+    ) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let task = session.dataTask(with: request) { data, response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let data, let response else {
+                    continuation.resume(throwing: URLError(.badServerResponse))
+                    return
+                }
+                continuation.resume(returning: (data, response))
+            }
+            task.resume()
+        }
+    }
+
     /// Validates an HTTP response, mapping 401 to `.notAuthenticated` and any
     /// other non-2xx status to `.apiError` with a consistent message format.
     /// Returns the typed response for callers that need headers/status.
@@ -116,7 +142,7 @@ nonisolated enum ServiceSupport {
         decoder: JSONDecoder = JSONDecoder()
     ) async throws -> T {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await data(for: request)
             try validate(response, data: data)
             return try decoder.decode(T.self, from: data)
         } catch {

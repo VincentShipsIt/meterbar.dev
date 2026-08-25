@@ -42,7 +42,7 @@ nonisolated struct DisplayCurrencyRateClient {
 
     init(fetchData: FetchData? = nil) {
         self.fetchData = fetchData ?? { request in
-            try await ServiceSupport.session.data(for: request)
+            try await ServiceSupport.data(for: request)
         }
     }
 
