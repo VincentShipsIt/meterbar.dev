@@ -153,6 +153,26 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertFalse(report.hasIssue)
     }
 
+    /// Launch calls `refreshAllIfNeeded` on the main actor, which fans
+    /// `ProviderStatusClient.fetchReport` through a task group. 1.8.39 SIGSEGV'd
+    /// entering `NSURLSession.data` on that hop; the network leg is now detached.
+    func testFetchReportFromMainActorDoesNotCrashEnteringURLSessionData() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let client = ProviderStatusClient(session: URLSession(configuration: configuration))
+
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            return (response, Data("<h1>All Systems Operational</h1>".utf8))
+        }
+
+        let report = try await client.fetchReport(for: .openRouter)
+        XCTAssertEqual(report.summary.indicator, .none)
+    }
+
     @MainActor
     func testRefreshFailureClearsPreviouslySuccessfulReport() async throws {
         let configuration = URLSessionConfiguration.ephemeral

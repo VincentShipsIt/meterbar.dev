@@ -308,7 +308,7 @@ struct ProviderStatusClient {
         guard let url = ServiceType.openRouter.statusPageURL else {
             throw ServiceError.invalidURL
         }
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await fetch(from: url)
         try ServiceSupport.validate(response, data: data)
         guard let html = String(data: data, encoding: .utf8) else {
             throw ServiceError.parsingError(nil)
@@ -334,7 +334,7 @@ struct ProviderStatusClient {
         let url = baseURL.appendingPathComponent("api/v2/status.json")
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(request)
         try ServiceSupport.validate(response, data: data)
         return try ProviderStatusFeedParser.parseStatuspageStatus(data: data)
     }
@@ -343,9 +343,25 @@ struct ProviderStatusClient {
         let url = baseURL.appendingPathComponent("api/v2/components.json")
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(request)
         try ServiceSupport.validate(response, data: data)
         return try ProviderStatusFeedParser.parseStatuspageComponents(data: data)
+    }
+
+    /// `URLSession.data` must not run as a main-actor job. The app target
+    /// compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and launch
+    /// calls `refreshAllIfNeeded` which fans these fetches out — the same
+    /// null-receiver SIGSEGV as Claude 1.8.39 / Cursor 1.8.38 / OpenRouter
+    /// 1.8.37 entering `NSURLSession.data(for:delegate:)`.
+    private func fetch(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let session = session
+        return try await Task.detached(priority: .utility) {
+            try await session.data(for: request)
+        }.value
+    }
+
+    private func fetch(from url: URL) async throws -> (Data, URLResponse) {
+        try await fetch(URLRequest(url: url))
     }
 }
 

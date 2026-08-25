@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import MeterBar
 @testable import MeterBarShared
@@ -196,6 +197,44 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertNil(ClaudeCodeLocalService.usageRequest(token: "t", endpoint: "", timeout: 30))
     }
 
+    // MARK: - Off-main fetch regression
+
+    /// Regression for the 1.8.39 SIGSEGV on launch: `fetchUsageViaOAuth` is a
+    /// MainActor method (app + test targets set `SWIFT_DEFAULT_ACTOR_ISOLATION =
+    /// MainActor`) and called `fetchOAuthMetrics` → `URLSession.data(for:)`
+    /// without a detached hop. Same null-receiver hazard as Cursor 1.8.38 /
+    /// OpenRouter 1.8.37 / Codex #328. Probing from the main actor through a
+    /// real `URLSession` (URLProtocol stub) must still decode.
+    func testFetchOAuthMetricsFromMainActorDoesNotCrashEnteringURLSessionData() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            XCTAssertEqual(url.absoluteString, ClaudeCodeLocalService.defaultUsageEndpoint)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            let body = Data(#"""
+            {
+              "five_hour": {"utilization": 61.5, "resets_at": "2026-07-02T14:00:00Z"},
+              "seven_day": {"utilization": 30.0, "resets_at": "2026-07-08T00:00:00Z"}
+            }
+            """#.utf8)
+            return (response, body)
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let metrics = try await ClaudeCodeLocalService.fetchOAuthMetrics(
+            token: "oauth-token",
+            session: session
+        )
+
+        XCTAssertEqual(metrics.service, .claudeCode)
+        XCTAssertEqual(metrics.sessionLimit?.percentage ?? 0, 61.5, accuracy: 0.01)
+        XCTAssertEqual(metrics.weeklyLimit?.percentage ?? 0, 30.0, accuracy: 0.01)
+    }
+
     // MARK: - Enabled-by-default flag
 
     func testOAuthUsageEnabledDefaultsTrueWhenUnset() throws {
@@ -241,5 +280,29 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return defaults
+    }
+
+    private final class StubURLProtocol: URLProtocol {
+        static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+        override func startLoading() {
+            guard let handler = Self.handler else {
+                client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+                return
+            }
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+        }
+
+        override func stopLoading() {}
     }
 }
