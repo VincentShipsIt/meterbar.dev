@@ -71,7 +71,7 @@ jobs:
           persist-credentials: false
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
 
       - name: Run tests with coverage gate
         run: bash scripts/check-coverage.sh
@@ -160,7 +160,7 @@ jobs:
           echo "All required signing credentials are present."
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
 
       - name: Show Xcode version
         run: xcodebuild -version

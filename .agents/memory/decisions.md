@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-13
+last_verified: 2026-08-25
 status: active
 ---
 
@@ -26,6 +26,10 @@ Live ADRs only.
 ## Debug must not shadow release
 
 **Accepted.** Debug bundle id `dev.meterbar.app.debug`, product name `MeterBar Dev`. Same app group as release. Local runs cannot overwrite the notarized install.
+
+## CI and releases use Xcode 26.6
+
+**Accepted 2026-08-25.** CI, scheduled E2E, nightly, and stable signed releases select Xcode 26.6 explicitly. The GitHub-built v1.8.41 artifact from Xcode 26.2 reproduced the same launch `EXC_BAD_ACCESS` on both the MacBook Pro and Mac Studio, while the Xcode 26.6 Studio build remained running. `verify-release-workflow-contract.sh` rejects toolchain drift between validation and distribution workflows.
 
 ## Singletons for services
 
