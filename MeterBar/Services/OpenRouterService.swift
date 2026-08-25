@@ -241,7 +241,7 @@ final class OpenRouterService: ObservableObject {
     }
 
     nonisolated private static func fetch(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await ServiceSupport.session.data(for: request)
+        let (data, response) = try await ServiceSupport.data(for: request)
         try ServiceSupport.validate(response, data: data)
         return data
     }

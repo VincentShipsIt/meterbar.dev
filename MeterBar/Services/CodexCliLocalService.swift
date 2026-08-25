@@ -240,7 +240,7 @@ class CodexCliLocalService: ObservableObject {
             // OpenRouter (#480) when default actor isolation is MainActor.
             let session = urlSession
             let (metrics, planType) = try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await ServiceSupport.data(for: request, session: session)
                 try ServiceSupport.validate(response, data: data)
                 // Codex CLI API uses Unix timestamps (Int64), not ISO8601 dates.
                 let usageResponse = try JSONDecoder().decode(CodexCliUsageResponse.self, from: data)
@@ -315,7 +315,7 @@ class CodexCliLocalService: ObservableObject {
         do {
             let session = urlSession
             response = try await Task.detached(priority: .userInitiated) {
-                let (data, urlResponse) = try await session.data(for: request)
+                let (data, urlResponse) = try await ServiceSupport.data(for: request, session: session)
                 try ServiceSupport.validate(urlResponse, data: data)
                 return try JSONDecoder().decode(ConsumeResetCreditResponse.self, from: data)
             }.value
@@ -363,7 +363,7 @@ class CodexCliLocalService: ObservableObject {
         do {
             let session = urlSession
             return try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await ServiceSupport.data(for: request, session: session)
                 try ServiceSupport.validate(response, data: data)
                 return try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
             }.value

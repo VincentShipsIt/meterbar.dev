@@ -415,7 +415,7 @@ class ClaudeCodeLocalService: ObservableObject {
             // read was already detached, the usage GET was not.
             let capturedSession = session
             return try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await capturedSession.data(for: request)
+                let (data, response) = try await ServiceSupport.data(for: request, session: capturedSession)
                 try ServiceSupport.validate(response, data: data)
                 let usageResponse = try decodeUsageResponse(from: data)
                 return metrics(from: usageResponse)
@@ -606,7 +606,7 @@ class ClaudeCodeLocalService: ObservableObject {
         do {
             let session = urlSession
             return try await Task.detached(priority: .utility) {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await ServiceSupport.data(for: request, session: session)
                 try ServiceSupport.validate(response, data: data)
                 let usageResponse = try Self.decodeUsageResponse(from: data)
                 return usageResponse.extraUsageStatus

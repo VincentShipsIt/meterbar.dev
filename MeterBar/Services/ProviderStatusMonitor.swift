@@ -356,7 +356,7 @@ struct ProviderStatusClient {
     private func fetch(_ request: URLRequest) async throws -> (Data, URLResponse) {
         let session = session
         return try await Task.detached(priority: .utility) {
-            try await session.data(for: request)
+            try await ServiceSupport.data(for: request, session: session)
         }.value
     }
 
