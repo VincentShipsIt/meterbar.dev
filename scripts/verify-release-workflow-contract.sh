@@ -15,6 +15,7 @@ e2e_path = repository_root / ".github/workflows/e2e.yml"
 nightly_path = repository_root / ".github/workflows/nightly.yml"
 release_path = repository_root / ".github/workflows/release.yml"
 signed_path = repository_root / ".github/workflows/_build-signed.yml"
+EXPECTED_XCODE_DEVELOPER_DIR = "/Applications/Xcode_26.6.app/Contents/Developer"
 
 
 def read(path: Path) -> str:
@@ -68,6 +69,24 @@ def coverage_threshold(workflow: str, path: Path) -> str:
     return matches[0]
 
 
+def require_xcode_selection(workflow: str, path: Path, expected_count: int) -> None:
+    matches = re.findall(
+        r"^\s+run:\s+sudo xcode-select -s (\S+)\s*$",
+        workflow,
+        re.MULTILINE,
+    )
+    if len(matches) != expected_count:
+        raise SystemExit(
+            f"{path}: expected {expected_count} explicit Xcode selections, found {len(matches)}"
+        )
+    unexpected = sorted(set(matches) - {EXPECTED_XCODE_DEVELOPER_DIR})
+    if unexpected:
+        raise SystemExit(
+            f"{path}: every Xcode selection must use {EXPECTED_XCODE_DEVELOPER_DIR}; "
+            f"found {unexpected}"
+        )
+
+
 ci = read(ci_path)
 e2e = read(e2e_path)
 nightly = read(nightly_path)
@@ -88,6 +107,10 @@ thresholds = {
 if len(set(thresholds.values())) != 1:
     details = ", ".join(f"{path.name}={value}" for path, value in thresholds.items())
     raise SystemExit(f"Coverage thresholds must match across broad validation workflows: {details}")
+
+require_xcode_selection(ci, ci_path, expected_count=2)
+require_xcode_selection(e2e, e2e_path, expected_count=1)
+require_xcode_selection(signed, signed_path, expected_count=2)
 
 release_publishers = re.findall(
     r"^\s+uses:\s*softprops/action-gh-release@([0-9a-f]{40})\s+#\s+(v[0-9.]+)\s*$",
