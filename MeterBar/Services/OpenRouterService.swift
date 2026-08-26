@@ -62,7 +62,11 @@ final class OpenRouterService: ObservableObject {
             return false
         }
         accountLastErrors[accountID] = nil
-        lastError = nil
+        // Saving one key does not heal a different key's failure, so the
+        // aggregate clears only when no managed key is still failing.
+        if accountLastErrors.isEmpty {
+            lastError = nil
+        }
         return true
     }
 
@@ -71,7 +75,7 @@ final class OpenRouterService: ObservableObject {
         let deleted = keychain.delete(key: Self.keychainKey(for: accountID))
         accountLastErrors[accountID] = nil
         latestAccountObservations[accountID] = nil
-        if accountLastErrors.values.allSatisfy({ $0 == nil }) {
+        if accountLastErrors.isEmpty {
             lastError = nil
         }
         return deleted
@@ -90,7 +94,7 @@ final class OpenRouterService: ObservableObject {
             latestAccountObservations[account.id] = fetched.observation
             // The aggregate clears only when every managed key is healthy;
             // otherwise another key's failure remains the provider-wide state.
-            if accountLastErrors.values.allSatisfy({ $0 == nil }) {
+            if accountLastErrors.isEmpty {
                 lastError = nil
             }
             return fetched.metrics
@@ -216,7 +220,7 @@ final class OpenRouterService: ObservableObject {
     ) -> ProviderUsageObservation? {
         guard !observations.isEmpty else { return nil }
         let dailies = observations.map(\.authoritativeDailyTotal)
-        let authoritativeDaily: Double? = allowsAuthoritativeDaily && dailies.allSatisfy(\.isNotNil)
+        let authoritativeDaily: Double? = allowsAuthoritativeDaily && !dailies.contains(nil)
             ? dailies.compactMap { $0 }.reduce(0, +)
             : nil
         return ProviderUsageObservation(
@@ -269,10 +273,6 @@ final class OpenRouterService: ObservableObject {
             return (nil, nil)
         }
     }
-}
-
-private extension Optional where Wrapped == Double {
-    var isNotNil: Bool { self != nil }
 }
 
 // `nonisolated` keeps the Codable conformances usable from the detached fetch

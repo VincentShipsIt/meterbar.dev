@@ -508,6 +508,37 @@ final class ProviderPresentationHealthTests: XCTestCase {
         XCTAssertNotEqual(ProviderCardPresentation.statusText(for: card), QuotaBand.healthy.shortLabel)
     }
 
+    func testOneFailedOpenRouterKeyDoesNotMarkItsHealthySibling() throws {
+        let work = OpenRouterAccount(id: UUID(), name: "Work")
+        let snapshots = ProviderSnapshotBuilder.snapshots(
+            ProviderSnapshotBuilder.Input(
+                metrics: [:],
+                now: now,
+                parseHealth: [.openRouter: .success(provider: .openRouter, at: freshAt)],
+                claudeAccounts: [],
+                claudeAccountMetrics: [:],
+                enabledServices: [.openRouter],
+                openRouterAccounts: [.defaultAccount, work],
+                openRouterAccountMetrics: [
+                    OpenRouterAccount.defaultID: healthyMetrics(.openRouter, lastUpdated: freshAt),
+                    work.id: healthyMetrics(.openRouter, lastUpdated: freshAt)
+                ],
+                openRouterAccountAccess: [OpenRouterAccount.defaultID: true, work.id: true],
+                lastErrors: ProviderPresentationHealth.LastErrors(
+                    openRouterAccounts: [work.id: .apiError("Work key failed")]
+                )
+            )
+        )
+
+        let healthy = try XCTUnwrap(snapshots.first { $0.accountID == OpenRouterAccount.defaultID })
+        let failed = try XCTUnwrap(snapshots.first { $0.accountID == work.id })
+
+        XCTAssertNil(healthy.authNotice, "another key's failure must never dim this card")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: healthy), QuotaBand.healthy.shortLabel)
+        XCTAssertEqual(failed.authNotice, .stale(since: freshAt))
+        XCTAssertEqual(failed.band, .healthy, "the failed key keeps its cached percentages")
+    }
+
     func testUnprobedCursorWithFreshCacheIsNotTreatedAsSignedOut() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(

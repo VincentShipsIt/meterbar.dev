@@ -25,7 +25,6 @@ enum ProviderPresentationHealth {
     /// Last observed fetch errors. Missing entries are unprobed, not failures.
     struct LastErrors {
         var cursor: ServiceError?
-        var openRouter: ServiceError?
         var codexAccounts: [UUID: ServiceError] = [:]
         var grokAccounts: [UUID: ServiceError] = [:]
         var openRouterAccounts: [UUID: ServiceError] = [:]
