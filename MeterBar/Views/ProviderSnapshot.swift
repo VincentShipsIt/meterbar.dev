@@ -421,7 +421,6 @@ enum ProviderSnapshotBuilder {
                 grokHasAccess: stores.grokService.hasAccess,
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
-                    openRouter: stores.openRouterService.lastError,
                     codexAccounts: stores.codexCliService.accountErrors,
                     grokAccounts: stores.grokService.accountErrors,
                     openRouterAccounts: stores.openRouterService.accountLastErrors
@@ -620,13 +619,8 @@ enum ProviderSnapshotBuilder {
         case .openRouter:
             // A key-scoped card speaks only about its own key: another key's
             // failure or missing credential must never dim this card.
-            if let accountID {
-                lastError = input.lastErrors.openRouterAccounts[accountID]
-                probed = input.openRouterAccountAccess[accountID]
-            } else {
-                lastError = input.lastErrors.openRouter
-                probed = input.openRouterAccountAccess.values.first { $0 }
-            }
+            lastError = accountID.flatMap { input.lastErrors.openRouterAccounts[$0] }
+            probed = accountID.flatMap { input.openRouterAccountAccess[$0] }
             usesAPIKey = true
         case .claudeCode:
             lastError = nil
