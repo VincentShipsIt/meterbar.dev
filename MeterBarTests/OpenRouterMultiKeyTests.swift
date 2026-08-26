@@ -106,6 +106,191 @@ final class OpenRouterAggregatedObservationTests: XCTestCase {
     }
 }
 
+// MARK: - Aggregate error lifecycle
+
+/// Boxes the stub network's failure state so a test can flip one key between
+/// failing and healthy across polls without rebuilding the service.
+private final class FailureSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failing = true
+
+    var isFailing: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return failing
+    }
+
+    func heal() {
+        lock.lock()
+        defer { lock.unlock() }
+        failing = false
+    }
+}
+
+/// `lastError` is documented as clearing only when every managed key is
+/// healthy — one key's failure must survive its siblings' successful polls
+/// and key edits until that key itself heals or leaves.
+final class OpenRouterAggregateErrorTests: XCTestCase {
+    private func makeKeychain(_ suffix: String) -> KeychainManager {
+        KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.openrouter.aggregate.\(suffix)"
+        )
+    }
+
+    /// Requests authenticated with `sk-or-v1-bad` fail while the switch is
+    /// failing; every other key gets healthy fixture responses.
+    private func makeService(
+        keychain: KeychainManager,
+        badKeyFails failureSwitch: FailureSwitch
+    ) -> OpenRouterService {
+        OpenRouterService(keychain: keychain) { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-or-v1-bad",
+               failureSwitch.isFailing {
+                throw ServiceError.apiError("Key disabled")
+            }
+            switch request.url?.path {
+            case "/api/v1/credits":
+                return Data(#"{"data":{"total_credits":100,"total_usage":25}}"#.utf8)
+            case "/api/v1/key":
+                return Data(#"{"data":{"limit":null,"limit_reset":null,"usage":27.5,"usage_daily":1.25}}"#.utf8)
+            default:
+                throw ServiceError.invalidURL
+            }
+        }
+    }
+
+    private func pollExpectingFailure(
+        _ service: OpenRouterService,
+        account: OpenRouterAccount,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await service.fetchUsageMetrics(account: account)
+            XCTFail("the disabled key's poll must fail", file: file, line: line)
+        } catch {}
+    }
+
+    func testSiblingSuccessLeavesAFailingKeysAggregateErrorInPlace() async throws {
+        let keychain = makeKeychain("sibling")
+        let failure = FailureSwitch()
+        let service = makeService(keychain: keychain, badKeyFails: failure)
+        let work = OpenRouterAccount(id: UUID(), name: "Work")
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-good", for: OpenRouterAccount.defaultID))
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-bad", for: work.id))
+
+        await pollExpectingFailure(service, account: work)
+        XCTAssertNotNil(service.lastError)
+        XCTAssertNotNil(service.accountLastErrors[work.id])
+
+        _ = try await service.fetchUsageMetrics(account: .defaultAccount)
+        XCTAssertNotNil(
+            service.lastError,
+            "a sibling's healthy poll must not hide the failing key from diagnostics"
+        )
+
+        failure.heal()
+        _ = try await service.fetchUsageMetrics(account: work)
+        XCTAssertNil(service.lastError, "once every key is healthy the aggregate clears")
+        XCTAssertNil(service.accountLastErrors[work.id])
+    }
+
+    func testRemovingTheOnlyFailingKeyClearsTheAggregateError() async {
+        let keychain = makeKeychain("remove")
+        let service = makeService(keychain: keychain, badKeyFails: FailureSwitch())
+        let work = OpenRouterAccount(id: UUID(), name: "Work")
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-bad", for: work.id))
+
+        await pollExpectingFailure(service, account: work)
+        XCTAssertNotNil(service.lastError)
+
+        XCTAssertTrue(service.removeAPIKey(for: work.id))
+        XCTAssertNil(service.lastError, "no managed key is failing once the failed key leaves")
+    }
+
+    func testSavingOneKeyKeepsAnotherKeysFailureOnTheAggregate() async {
+        let keychain = makeKeychain("save")
+        let service = makeService(keychain: keychain, badKeyFails: FailureSwitch())
+        let work = OpenRouterAccount(id: UUID(), name: "Work")
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-bad", for: work.id))
+
+        await pollExpectingFailure(service, account: work)
+        XCTAssertNotNil(service.lastError)
+
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-new", for: OpenRouterAccount.defaultID))
+        XCTAssertNotNil(
+            service.lastError,
+            "adding an unrelated key must not hide the failing key from diagnostics"
+        )
+
+        // Re-entering the failing account's own key is the user fixing it.
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-fixed", for: work.id))
+        XCTAssertNil(service.lastError)
+    }
+}
+
+// MARK: - Off-main fetch regression
+
+/// Regression for the 1.8.37 launch SIGSEGV (#480): the two `async let` legs
+/// through the *stored* `fetchData` closure crossed a reabstraction-thunk
+/// actor hop as main-actor jobs. Network + decode must run detached — the
+/// stored closure must never execute on the main thread even when the poll is
+/// awaited from the main actor.
+final class OpenRouterOffMainFetchTests: XCTestCase {
+    @MainActor
+    func testFetchUsageMetricsRunsStoredFetchClosureOffMainThread() async throws {
+        nonisolated final class ThreadRecorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var sawMainThread = false
+            private var callCount = 0
+            func record() {
+                lock.lock()
+                defer { lock.unlock() }
+                if Thread.isMainThread { sawMainThread = true }
+                callCount += 1
+            }
+            var wasCalledOnMainThread: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return sawMainThread
+            }
+            var wasCalled: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return callCount > 0
+            }
+        }
+
+        let recorder = ThreadRecorder()
+        let keychain = KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.openrouter.offmain"
+        )
+        let service = OpenRouterService(keychain: keychain) { request in
+            recorder.record()
+            switch request.url?.path {
+            case "/api/v1/credits":
+                return Data(#"{"data":{"total_credits":100,"total_usage":25}}"#.utf8)
+            case "/api/v1/key":
+                return Data(#"{"data":{"limit":null,"limit_reset":null,"usage":27.5,"usage_daily":1.25}}"#.utf8)
+            default:
+                throw ServiceError.invalidURL
+            }
+        }
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-test", for: OpenRouterAccount.defaultID))
+
+        let metrics = try await service.fetchUsageMetrics(account: .defaultAccount)
+
+        XCTAssertEqual(metrics.service, .openRouter)
+        XCTAssertTrue(recorder.wasCalled)
+        XCTAssertFalse(
+            recorder.wasCalledOnMainThread,
+            "the stored fetch closure must never run as a main-actor job"
+        )
+    }
+}
+
 // MARK: - Account store
 
 final class OpenRouterAccountStoreTests: XCTestCase {
@@ -173,7 +358,7 @@ final class OpenRouterAccountStoreTests: XCTestCase {
         let first = addKey(store, "First")
         let second = addKey(store, "Second")
 
-        var reloaded = OpenRouterAccountStore(userDefaults: defaults, refreshConfigurationDirectory: nil)
+        let reloaded = OpenRouterAccountStore(userDefaults: defaults, refreshConfigurationDirectory: nil)
         reloaded.moveAccounts(fromOffsets: IndexSet(integer: 2), toOffset: 0)
 
         let reordered = OpenRouterAccountStore(userDefaults: defaults, refreshConfigurationDirectory: nil)
