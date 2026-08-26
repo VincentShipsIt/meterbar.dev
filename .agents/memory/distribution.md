@@ -15,7 +15,7 @@ Automatic Sparkle checks stay off until the user opts in. **Check Now** is alway
 
 ## CI
 
-- `ci.yml` — push/PR to `master`, `macos-26` + Xcode 26.6. Tests/coverage and SwiftLint `--strict` are hard gates, then universal app/widget/CLI builds. No `|| echo` swallow. The workflow contract keeps CI, E2E, and signed releases on the same explicit Xcode toolchain.
+- `ci.yml` — push/PR to `master`, `macos-26` + the pinned Xcode. Tests/coverage and SwiftLint `--strict` are hard gates, then universal app/widget/CLI builds. No `|| echo` swallow. The toolchain version is single-sourced in `.github/actions/select-xcode/action.yml`; every macOS job pulls it in with `uses: ./.github/actions/select-xcode`, and the workflow contract fails PR CI if a workflow pins Xcode itself or a Swift-building job skips the action.
 - `secret-scan.yml` — gitleaks, pinned + checksum-verified, full history.
 - `release.yml` — tag `vMAJOR.MINOR.PATCH`. Preflights Developer ID, notarization, Sparkle EdDSA. Builds universal artifacts, checks tag/app/CLI version agreement, signs/notarizes/staples, publishes the appcast, then calls `update-homebrew.yml`.
 

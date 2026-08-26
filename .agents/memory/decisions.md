@@ -31,6 +31,10 @@ Live ADRs only.
 
 **Accepted 2026-08-25.** CI, scheduled E2E, nightly, and stable signed releases select Xcode 26.6 explicitly. The GitHub-built v1.8.41 artifact from Xcode 26.2 reproduced the same launch `EXC_BAD_ACCESS` on both the MacBook Pro and Mac Studio, while the Xcode 26.6 Studio build remained running. `verify-release-workflow-contract.sh` rejects toolchain drift between validation and distribution workflows.
 
+## The Xcode pin lives in one file
+
+**Accepted 2026-08-26.** `.github/actions/select-xcode/action.yml` holds the version; workflows say `uses: ./.github/actions/select-xcode` and never name a toolchain path. Bumping is a one-line edit to that action's `default`, not the five-workflow, six-literal sweep the 26.2 → 26.6 bump required. The action fails loudly when the version is absent from the runner image, and exports `DEVELOPER_DIR` so later steps — including the `swift test` inside `check-coverage.sh` — cannot fall back to the image default. `verify-release-workflow-contract.sh` rejects any workflow that pins Xcode itself, and any job running `xcodebuild` or `check-coverage.sh` that skips the action.
+
 ## Singletons for services
 
 **Accepted 2025-12-29, still in force.** `UsageDataManager.shared` and peer services. A DI refactor is not scheduled.

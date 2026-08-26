@@ -1,0 +1,40 @@
+name: Select Xcode
+description: >-
+  Pins the toolchain for a macOS job. The pinned version lives here and nowhere
+  else — workflows must not hardcode /Applications/Xcode_*.app paths, and
+  scripts/verify-release-workflow-contract.sh fails PR CI if one does.
+
+inputs:
+  version:
+    description: >-
+      Xcode version to select, matching /Applications/Xcode_<version>.app on the
+      runner image. Override only for a deliberate one-off comparison; the
+      default is the toolchain that validation and distribution both ship on.
+    required: false
+    default: "26.6"
+
+runs:
+  using: composite
+  steps:
+    # Bumping the toolchain is a one-line change to this action's default.
+    # Xcode 26.2 built a v1.8.41 release artifact that crashed at launch during
+    # URLRequest bridging (#493), so validation and distribution must never
+    # drift onto different toolchains.
+    - name: Select Xcode ${{ inputs.version }}
+      shell: bash
+      env:
+        XCODE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        developer_dir="/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+        if [ ! -d "$developer_dir" ]; then
+          installed=$(ls -d /Applications/Xcode*.app 2>/dev/null | tr '\n' ' ')
+          echo "::error::Xcode ${XCODE_VERSION} is not on this runner image (looked for $developer_dir). Installed: ${installed:-none}" >&2
+          exit 1
+        fi
+        sudo xcode-select -s "$developer_dir"
+        # Exported as well as selected: DEVELOPER_DIR outranks the system-wide
+        # selection, so every later step in the job — including the `swift test`
+        # inside scripts/check-coverage.sh — stays on the pinned toolchain.
+        echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+        xcodebuild -version
