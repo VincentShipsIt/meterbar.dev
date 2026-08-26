@@ -15,7 +15,9 @@ e2e_path = repository_root / ".github/workflows/e2e.yml"
 nightly_path = repository_root / ".github/workflows/nightly.yml"
 release_path = repository_root / ".github/workflows/release.yml"
 signed_path = repository_root / ".github/workflows/_build-signed.yml"
-EXPECTED_XCODE_DEVELOPER_DIR = "/Applications/Xcode_26.6.app/Contents/Developer"
+workflows_dir = repository_root / ".github/workflows"
+xcode_action_dir = ".github/actions/select-xcode"
+xcode_action_path = repository_root / xcode_action_dir / "action.yml"
 
 
 def read(path: Path) -> str:
@@ -69,22 +71,71 @@ def coverage_threshold(workflow: str, path: Path) -> str:
     return matches[0]
 
 
-def require_xcode_selection(workflow: str, path: Path, expected_count: int) -> None:
-    matches = re.findall(
-        r"^\s+run:\s+sudo xcode-select -s (\S+)\s*$",
-        workflow,
-        re.MULTILINE,
+def jobs_in(workflow: str, path: Path) -> dict[str, str]:
+    """Every `jobs.<name>` block, keyed by job name.
+
+    Scoped to the text after the top-level `jobs:` key so two-space keys under
+    `on:` (push, pull_request, schedule, workflow_call) are not mistaken for jobs.
+    """
+    start = re.search(r"(?m)^jobs:\s*$", workflow)
+    if start is None:
+        raise SystemExit(f"{path}: missing top-level jobs:")
+    body = workflow[start.end():]
+    blocks = re.findall(
+        r"(?ms)^  (?P<name>[A-Za-z0-9_-]+):\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*\n|\Z)",
+        body,
     )
-    if len(matches) != expected_count:
+    return {name: block for name, block in blocks}
+
+
+def pinned_xcode_version() -> str:
+    """The one place the toolchain version is written down."""
+    try:
+        action = xcode_action_path.read_text(encoding="utf-8")
+    except OSError as error:
         raise SystemExit(
-            f"{path}: expected {expected_count} explicit Xcode selections, found {len(matches)}"
-        )
-    unexpected = sorted(set(matches) - {EXPECTED_XCODE_DEVELOPER_DIR})
-    if unexpected:
+            f"{xcode_action_path}: composite Xcode action is missing ({error}). "
+            "Workflows depend on it for the pinned toolchain."
+        ) from error
+    match = re.search(r"(?m)^    default:\s*\"([0-9]+(?:\.[0-9]+)*)\"\s*$", action)
+    if match is None:
         raise SystemExit(
-            f"{path}: every Xcode selection must use {EXPECTED_XCODE_DEVELOPER_DIR}; "
-            f"found {unexpected}"
+            f"{xcode_action_path}: expected a quoted `default: \"<version>\"` "
+            "for the Xcode version input"
         )
+    return match.group(1)
+
+
+def require_single_source_xcode(workflows: dict[Path, str]) -> str:
+    """No workflow may pin Xcode itself; toolchain users must use the action.
+
+    Xcode 26.2 built a v1.8.41 release artifact that crashed at launch (#493).
+    Validation and distribution drifting onto different toolchains is the
+    failure this guards, so the version is bumped in exactly one file and every
+    job that compiles or tests Swift goes through it.
+    """
+    for path, workflow in workflows.items():
+        hardcoded = re.findall(r"(?m)^.*(?:/Applications/Xcode|xcode-select\s+-s).*$", workflow)
+        if hardcoded:
+            raise SystemExit(
+                f"{path}: workflows must not select Xcode directly; "
+                f"use `uses: ./{xcode_action_dir}` so the version stays "
+                f"single-sourced in {xcode_action_dir}/action.yml. "
+                f"Found: {[line.strip() for line in hardcoded]}"
+            )
+
+        for job_name, job in jobs_in(workflow, path).items():
+            needs_toolchain = re.search(r"xcodebuild|scripts/check-coverage\.sh", job)
+            if needs_toolchain is None:
+                continue
+            if re.search(rf"(?m)^\s+uses:\s*\./{re.escape(xcode_action_dir)}\s*$", job) is None:
+                raise SystemExit(
+                    f"{path}: jobs.{job_name} builds or tests Swift but never runs "
+                    f"`uses: ./{xcode_action_dir}`, so it would use whatever Xcode "
+                    "the runner image defaults to"
+                )
+
+    return pinned_xcode_version()
 
 
 ci = read(ci_path)
@@ -108,9 +159,11 @@ if len(set(thresholds.values())) != 1:
     details = ", ".join(f"{path.name}={value}" for path, value in thresholds.items())
     raise SystemExit(f"Coverage thresholds must match across broad validation workflows: {details}")
 
-require_xcode_selection(ci, ci_path, expected_count=2)
-require_xcode_selection(e2e, e2e_path, expected_count=1)
-require_xcode_selection(signed, signed_path, expected_count=2)
+# Every workflow, not just the release path: a new macOS job that skips the
+# action would silently build on the runner image default.
+xcode_version = require_single_source_xcode(
+    {path: read(path) for path in sorted(workflows_dir.glob("*.yml"))}
+)
 
 release_publishers = re.findall(
     r"^\s+uses:\s*softprops/action-gh-release@([0-9a-f]{40})\s+#\s+(v[0-9.]+)\s*$",
@@ -181,5 +234,8 @@ require(
     f"{nightly_path}: jobs.build must declare needs: version",
 )
 
-print(f"Signed-release workflow contract verified at coverage threshold {next(iter(thresholds.values()))}%.")
+print(
+    "Signed-release workflow contract verified at coverage threshold "
+    f"{next(iter(thresholds.values()))}% on Xcode {xcode_version}."
+)
 PYTHON
