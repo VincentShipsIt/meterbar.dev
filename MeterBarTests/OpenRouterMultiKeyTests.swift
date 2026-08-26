@@ -230,6 +230,67 @@ final class OpenRouterAggregateErrorTests: XCTestCase {
     }
 }
 
+// MARK: - Off-main fetch regression
+
+/// Regression for the 1.8.37 launch SIGSEGV (#480): the two `async let` legs
+/// through the *stored* `fetchData` closure crossed a reabstraction-thunk
+/// actor hop as main-actor jobs. Network + decode must run detached — the
+/// stored closure must never execute on the main thread even when the poll is
+/// awaited from the main actor.
+final class OpenRouterOffMainFetchTests: XCTestCase {
+    @MainActor
+    func testFetchUsageMetricsRunsStoredFetchClosureOffMainThread() async throws {
+        nonisolated final class ThreadRecorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var sawMainThread = false
+            private var callCount = 0
+            func record() {
+                lock.lock()
+                defer { lock.unlock() }
+                if Thread.isMainThread { sawMainThread = true }
+                callCount += 1
+            }
+            var wasCalledOnMainThread: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return sawMainThread
+            }
+            var wasCalled: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return callCount > 0
+            }
+        }
+
+        let recorder = ThreadRecorder()
+        let keychain = KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.openrouter.offmain"
+        )
+        let service = OpenRouterService(keychain: keychain) { request in
+            recorder.record()
+            switch request.url?.path {
+            case "/api/v1/credits":
+                return Data(#"{"data":{"total_credits":100,"total_usage":25}}"#.utf8)
+            case "/api/v1/key":
+                return Data(#"{"data":{"limit":null,"limit_reset":null,"usage":27.5,"usage_daily":1.25}}"#.utf8)
+            default:
+                throw ServiceError.invalidURL
+            }
+        }
+        XCTAssertTrue(service.saveAPIKey("sk-or-v1-test", for: OpenRouterAccount.defaultID))
+
+        let metrics = try await service.fetchUsageMetrics(account: .defaultAccount)
+
+        XCTAssertEqual(metrics.service, .openRouter)
+        XCTAssertTrue(recorder.wasCalled)
+        XCTAssertFalse(
+            recorder.wasCalledOnMainThread,
+            "the stored fetch closure must never run as a main-actor job"
+        )
+    }
+}
+
 // MARK: - Account store
 
 final class OpenRouterAccountStoreTests: XCTestCase {

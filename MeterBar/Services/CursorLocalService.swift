@@ -49,7 +49,7 @@ class CursorLocalService: ObservableObject {
     private(set) var latestUsageObservation: ProviderUsageObservation?
 
     init(fetchData: (@Sendable (URLRequest) async throws -> Data)? = nil) {
-        self.fetchData = fetchData ?? Self.fetch
+        self.fetchData = fetchData ?? ServiceSupport.fetchValidatedData
         // Defer I/O off main thread; only @Published mutations land on main actor
         Task.detached(priority: .utility) { [weak self] in self?.checkAccess(forceRescan: false) }
     }
@@ -298,21 +298,16 @@ class CursorLocalService: ObservableObject {
         let membershipType: String?
     }
 
-    /// Runs both network legs and the decode off the main actor.
-    ///
-    /// The app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION =
-    /// MainActor`, so an unannotated fetch path here would execute as
-    /// main-actor jobs — and hops through a *stored* `fetchData` closure's
-    /// reabstraction thunk leave a dead receiver entering
-    /// `NSURLSession.data(for:delegate:)`. That is the 1.8.38 Cursor refresh
-    /// crash (same class as OpenRouter #480 / Codex #328). Nothing in the
-    /// detached scope touches main-actor state.
+    /// Runs both network legs and the decode off the main actor — see
+    /// `ServiceSupport.detached` for the SIGSEGV rationale (the 1.8.38 Cursor
+    /// refresh crash is this service's case). Nothing in the detached scope
+    /// touches main-actor state.
     nonisolated static func fetchRemotely(
         userId: String,
         token: String,
         fetchData: @escaping @Sendable (URLRequest) async throws -> Data
     ) async throws -> FetchedUsage {
-        try await Task.detached(priority: .userInitiated) {
+        try await ServiceSupport.detached {
             let summaryData = try await fetchUsageSummary(
                 userId: userId,
                 token: token,
@@ -327,13 +322,7 @@ class CursorLocalService: ObservableObject {
                 observation: observation(summaryData, at: metrics.lastUpdated),
                 membershipType: summaryData.membershipType
             )
-        }.value
-    }
-
-    nonisolated private static func fetch(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await ServiceSupport.data(for: request)
-        try ServiceSupport.validate(response, data: data)
-        return data
+        }
     }
 
     /// One poll's reading of the plan counter, in requests.
