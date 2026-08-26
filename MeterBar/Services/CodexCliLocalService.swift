@@ -235,17 +235,15 @@ class CodexCliLocalService: ObservableObject {
         )
 
         do {
-            // Network + decode must not run as main-actor jobs: same
-            // `NSURLSession.data(for:)` null-receiver hazard as Cursor /
-            // OpenRouter (#480) when default actor isolation is MainActor.
+            // Network + decode off the main actor — see `ServiceSupport.detached`
+            // for the SIGSEGV rationale.
             let session = urlSession
-            let (metrics, planType) = try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await ServiceSupport.data(for: request, session: session)
-                try ServiceSupport.validate(response, data: data)
+            let (metrics, planType) = try await ServiceSupport.detached {
+                let data = try await ServiceSupport.fetchValidatedData(request, session: session)
                 // Codex CLI API uses Unix timestamps (Int64), not ISO8601 dates.
                 let usageResponse = try JSONDecoder().decode(CodexCliUsageResponse.self, from: data)
                 return (usageResponse.toUsageMetrics(), usageResponse.planType)
-            }.value
+            }
 
             await MainActor.run {
                 self.accountErrors.removeValue(forKey: account.id)
@@ -314,11 +312,11 @@ class CodexCliLocalService: ObservableObject {
         let response: ConsumeResetCreditResponse
         do {
             let session = urlSession
-            response = try await Task.detached(priority: .userInitiated) {
-                let (data, urlResponse) = try await ServiceSupport.data(for: request, session: session)
-                try ServiceSupport.validate(urlResponse, data: data)
+            let preparedRequest = request
+            response = try await ServiceSupport.detached {
+                let data = try await ServiceSupport.fetchValidatedData(preparedRequest, session: session)
                 return try JSONDecoder().decode(ConsumeResetCreditResponse.self, from: data)
-            }.value
+            }
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
@@ -362,11 +360,10 @@ class CodexCliLocalService: ObservableObject {
 
         do {
             let session = urlSession
-            return try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await ServiceSupport.data(for: request, session: session)
-                try ServiceSupport.validate(response, data: data)
+            return try await ServiceSupport.detached {
+                let data = try await ServiceSupport.fetchValidatedData(request, session: session)
                 return try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
-            }.value
+            }
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }

@@ -348,16 +348,14 @@ struct ProviderStatusClient {
         return try ProviderStatusFeedParser.parseStatuspageComponents(data: data)
     }
 
-    /// `URLSession.data` must not run as a main-actor job. The app target
-    /// compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and launch
-    /// calls `refreshAllIfNeeded` which fans these fetches out — the same
-    /// null-receiver SIGSEGV as Claude 1.8.39 / Cursor 1.8.38 / OpenRouter
-    /// 1.8.37 entering `NSURLSession.data(for:delegate:)`.
+    /// `URLSession.data` must not run as a main-actor job — see
+    /// `ServiceSupport.detached` for the SIGSEGV rationale. Launch calls
+    /// `refreshAllIfNeeded`, which fans these fetches out.
     private func fetch(_ request: URLRequest) async throws -> (Data, URLResponse) {
         let session = session
-        return try await Task.detached(priority: .utility) {
+        return try await ServiceSupport.detached(priority: .utility) {
             try await ServiceSupport.data(for: request, session: session)
-        }.value
+        }
     }
 
     private func fetch(from url: URL) async throws -> (Data, URLResponse) {

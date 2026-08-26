@@ -34,7 +34,7 @@ final class OpenRouterService: ObservableObject {
         fetchData: (@Sendable (URLRequest) async throws -> Data)? = nil
     ) {
         self.keychain = keychain
-        self.fetchData = fetchData ?? Self.fetch
+        self.fetchData = fetchData ?? ServiceSupport.fetchValidatedData
     }
 
     /// The Keychain item name for one managed key. The default account keeps
@@ -114,23 +114,16 @@ final class OpenRouterService: ObservableObject {
         let observation: ProviderUsageObservation
     }
 
-    /// Runs both network legs and the decode off the main actor.
-    ///
-    /// The app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION =
-    /// MainActor`, so an unannotated fetch path here would execute as
-    /// main-actor jobs — and the two `async let` legs through the *stored*
-    /// `fetchData` closure cross a reabstraction-thunk actor hop whose
-    /// caller-owned argument buffer does not reliably survive. That is the
-    /// exact hazard that crashed Settings → Codex (#328, 4a38ab6) and that
-    /// crashed 1.8.37 entering `NSURLSession.data(for:delegate:)` with a dead
-    /// receiver the moment a key was saved and validated. Nothing in the
+    /// Runs both network legs and the decode off the main actor — see
+    /// `ServiceSupport.detached` for the SIGSEGV rationale (this service's
+    /// 1.8.37 launch crash, #480, is the canonical case). Nothing in the
     /// detached scope touches main-actor state: only `Sendable` values go in,
     /// only a `Sendable` result comes out.
     nonisolated private static func fetchRemotely(
         apiKey: String,
         fetchData: @escaping @Sendable (URLRequest) async throws -> Data
     ) async throws -> FetchedUsage {
-        try await Task.detached(priority: .userInitiated) {
+        try await ServiceSupport.detached {
             async let creditsData = fetchData(try request(path: "credits", apiKey: apiKey))
             async let keyData = fetchData(try request(path: "key", apiKey: apiKey))
             let decoder = JSONDecoder()
@@ -141,7 +134,7 @@ final class OpenRouterService: ObservableObject {
                 metrics: metrics,
                 observation: observation(key: key.data, at: metrics.lastUpdated)
             )
-        }.value
+        }
     }
 
     nonisolated static func map(
@@ -242,12 +235,6 @@ final class OpenRouterService: ObservableObject {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
-    }
-
-    nonisolated private static func fetch(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await ServiceSupport.data(for: request)
-        try ServiceSupport.validate(response, data: data)
-        return data
     }
 
     nonisolated private static func resetWindow(

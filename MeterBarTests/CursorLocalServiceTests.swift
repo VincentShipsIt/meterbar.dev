@@ -793,4 +793,66 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(fetched.observation?.runningTotal, 10)
         XCTAssertEqual(fetched.metrics.additionalLimits.first?.used, 12)
     }
+
+    /// The stronger pin for the same 1.8.38 crash: even when the poll is
+    /// awaited from the main actor, the stored fetch closure itself must run
+    /// detached — it executing as a main-actor job is the exact hazard.
+    @MainActor
+    func testFetchRemotelyRunsStoredFetchClosureOffMainThread() async throws {
+        nonisolated final class ThreadRecorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var sawMainThread = false
+            private var callCount = 0
+            func record() {
+                lock.lock()
+                defer { lock.unlock() }
+                if Thread.isMainThread { sawMainThread = true }
+                callCount += 1
+            }
+            var wasCalledOnMainThread: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return sawMainThread
+            }
+            var wasCalled: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return callCount > 0
+            }
+        }
+
+        let summaryJSON = """
+        {
+          "billingCycleStart": "2026-07-01T00:00:00Z",
+          "billingCycleEnd": "2026-08-01T00:00:00Z",
+          "membershipType": "pro",
+          "individualUsage": {
+            "plan": { "used": 10, "limit": 100 },
+            "onDemand": { "used": 0, "limit": 20, "enabled": true }
+          }
+        }
+        """
+        let recorder = ThreadRecorder()
+        let fetchData: @Sendable (URLRequest) async throws -> Data = { request in
+            recorder.record()
+            let path = request.url?.path ?? ""
+            if path.contains("usage-summary") {
+                return Data(summaryJSON.utf8)
+            }
+            throw ServiceError.invalidURL
+        }
+
+        let fetched = try await CursorLocalService.fetchRemotely(
+            userId: "user-test",
+            token: "tok-test",
+            fetchData: fetchData
+        )
+
+        XCTAssertEqual(fetched.metrics.service, .cursor)
+        XCTAssertTrue(recorder.wasCalled)
+        XCTAssertFalse(
+            recorder.wasCalledOnMainThread,
+            "the stored fetch closure must never run as a main-actor job"
+        )
+    }
 }

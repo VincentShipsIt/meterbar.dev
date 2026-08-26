@@ -408,18 +408,15 @@ class ClaudeCodeLocalService: ObservableObject {
         }
 
         do {
-            // Network + decode must not run as main-actor jobs: same
-            // `NSURLSession.data(for:)` null-receiver hazard as Cursor /
-            // OpenRouter (#480) and Codex when default actor isolation is
-            // MainActor. 1.8.39 crashed on launch in this hop — the keychain
-            // read was already detached, the usage GET was not.
+            // Network + decode off the main actor — see `ServiceSupport.detached`
+            // for the SIGSEGV rationale (1.8.39 crashed on launch in this hop:
+            // the keychain read was already detached, the usage GET was not).
             let capturedSession = session
-            return try await Task.detached(priority: .userInitiated) {
-                let (data, response) = try await ServiceSupport.data(for: request, session: capturedSession)
-                try ServiceSupport.validate(response, data: data)
+            return try await ServiceSupport.detached {
+                let data = try await ServiceSupport.fetchValidatedData(request, session: capturedSession)
                 let usageResponse = try decodeUsageResponse(from: data)
                 return metrics(from: usageResponse)
-            }.value
+            }
         } catch {
             throw ServiceSupport.serviceError(from: error)
         }
@@ -605,12 +602,11 @@ class ClaudeCodeLocalService: ObservableObject {
 
         do {
             let session = urlSession
-            return try await Task.detached(priority: .utility) {
-                let (data, response) = try await ServiceSupport.data(for: request, session: session)
-                try ServiceSupport.validate(response, data: data)
+            return try await ServiceSupport.detached(priority: .utility) {
+                let data = try await ServiceSupport.fetchValidatedData(request, session: session)
                 let usageResponse = try Self.decodeUsageResponse(from: data)
                 return usageResponse.extraUsageStatus
-            }.value
+            }
         } catch {
             return .unknown
         }

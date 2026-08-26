@@ -112,6 +112,45 @@ nonisolated enum ServiceSupport {
         }
     }
 
+    /// Runs `operation` in a detached task and returns its value.
+    ///
+    /// The app target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
+    /// where awaiting network + decode work directly from a main-actor caller
+    /// runs it as main-actor jobs. The hop back through a *stored*
+    /// `fetchData` closure's reabstraction thunk then SIGSEGVs at launch
+    /// (OpenRouter 1.8.37 #480, Cursor 1.8.38, Claude 1.8.39–1.8.40 #488/#490).
+    /// `operation` is forwarded to `Task.detached` directly — no wrapping
+    /// closure literal — so no extra thunk or isolation inference is added.
+    /// `@concurrent` keeps the parameter convertible to `Task.detached`'s
+    /// `@isolated(any)` operation under the app target's
+    /// `SWIFT_APPROACHABLE_CONCURRENCY` (NonisolatedNonsendingByDefault),
+    /// where a bare `@Sendable` async type would be `nonisolated(nonsending)`.
+    nonisolated static func detached<T: Sendable>(
+        priority: TaskPriority = .userInitiated,
+        _ operation: @escaping @concurrent @Sendable () async throws -> T
+    ) async throws -> T {
+        try await Task.detached(priority: priority, operation: operation).value
+    }
+
+    /// `data` + `validate` on the shared session, returning the raw body.
+    /// Shaped as an unapplied function reference so services can default their
+    /// injectable transport with `fetchData ?? ServiceSupport.fetchValidatedData`.
+    nonisolated static func fetchValidatedData(_ request: URLRequest) async throws -> Data {
+        try await fetchValidatedData(request, session: session)
+    }
+
+    /// `data` + `validate` on an explicit session, returning the raw body.
+    /// (An overload, not a defaulted parameter — a defaulted-param function
+    /// cannot be referenced unapplied at arity 1.)
+    nonisolated static func fetchValidatedData(
+        _ request: URLRequest,
+        session: URLSession
+    ) async throws -> Data {
+        let (data, response) = try await data(for: request, session: session)
+        try validate(response, data: data)
+        return data
+    }
+
     /// Validates an HTTP response, mapping 401 to `.notAuthenticated` and any
     /// other non-2xx status to `.apiError` with a consistent message format.
     /// Returns the typed response for callers that need headers/status.
