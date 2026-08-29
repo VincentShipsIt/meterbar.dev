@@ -1097,4 +1097,90 @@ final class ProviderSnapshotTests: XCTestCase {
 
         XCTAssertTrue(snapshots.statusItemPinOptions.contains { $0.title == "Grok Bot · Weekly" })
     }
+
+    // MARK: - Card role: account vs. sub-pool
+
+    /// The Grok Bot split shares Cursor's `service` for branding, but it is not
+    /// a second Cursor account — `cardRole` is the property that says so, and
+    /// filters that mean "which cards are accounts" must key off it instead of
+    /// `service`.
+    func testCursorGrokBotSplitProducesOneAccountCardAndOneSubPoolCard() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertEqual(cursor?.cardRole, .account)
+        XCTAssertTrue(cursor?.isAccountCard == true)
+        XCTAssertEqual(grokBot?.cardRole, .subPool)
+        XCTAssertFalse(grokBot?.isAccountCard == true)
+        XCTAssertEqual(snapshots.filter(\.isAccountCard).count, 1)
+    }
+
+    /// A plain `snapshot(...)` construction (every non-Cursor-split call site,
+    /// and every existing test fixture) keeps meaning "this is an account"
+    /// without having to say so.
+    func testDefaultConstructionIsAnAccountCard() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: nil,
+            emptyDetail: "Run codex login"
+        )
+
+        XCTAssertEqual(snapshot.cardRole, .account)
+        XCTAssertTrue(snapshot.isAccountCard)
+    }
+
+    /// The dashboard Costs panel's per-provider selection: prefer an exhausted
+    /// card so the panel can surface that provider's reset, but a sub-pool
+    /// card can never win the selection even fully exhausted — it does not
+    /// speak for the account.
+    func testAccountSnapshotSelectionPrefersTheAccountCardOverAnExhaustedSubPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot(session: 10, weekly: 20, grokBotUsed: 100)],
+            enabledServices: [.cursor]
+        ))
+        XCTAssertTrue(
+            snapshots.first { $0.title == "Grok Bot" }?.hasExhaustedLimit == true,
+            "fixture should be exhausted"
+        )
+
+        let selected = snapshots.accountSnapshot(for: .cursor)
+
+        XCTAssertEqual(selected?.title, "Cursor")
+        XCTAssertEqual(selected?.cardRole, .account)
+    }
+
+    func testAccountSnapshotSelectionUnaffectedWithoutAGrokBotPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeMetrics(service: .cursor, session: 100)],
+            enabledServices: [.cursor]
+        ))
+        XCTAssertTrue(snapshots.first?.hasExhaustedLimit == true, "fixture should be exhausted")
+
+        XCTAssertEqual(snapshots.accountSnapshot(for: .cursor)?.title, "Cursor")
+    }
+
+    /// The popover's account-count badge: a Cursor Ultra user with a Grok Bot
+    /// pool still has exactly one Cursor account.
+    func testAccountCardCountIsOneForCursorWhenAGrokBotPoolExists() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
+    }
+
+    func testAccountCardCountMatchesRawCountWithoutAGrokBotPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
+    }
 }
