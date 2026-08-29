@@ -26,6 +26,39 @@ struct ProviderSnapshot: Identifiable {
     /// a `var` only because a defaulted `let` is dropped from the memberwise
     /// initializer entirely, which would leave the builder unable to set it.
     var authNotice: ProviderAuthNotice?
+    /// What kind of card this is — distinct from `service`, which only says
+    /// which provider's data source and branding the card borrows. Two cards
+    /// can share a `service` while meaning very different things: Cursor's
+    /// Grok Bot pool renders with Cursor's logo and accent color, but it is
+    /// not a second Cursor account, just Cursor Ultra's weekly Grok Bot
+    /// entitlement split out for its own header and reset cadence. Any filter
+    /// that means "how many accounts does the user have on this provider" or
+    /// "which card speaks for this account" must key off this property, not
+    /// `service` — see `isAccountCard`. Defaulted to `.account` so every
+    /// existing memberwise construction (previews, tests, every other
+    /// provider's cards) keeps meaning "a real account" without restating it.
+    var cardRole: CardRole = .account
+
+    /// The two things a `ProviderSnapshot` can represent. See `cardRole`'s
+    /// doc comment for why this needs to be modeled explicitly instead of
+    /// inferred from `id`/`title`.
+    enum CardRole: Equatable {
+        /// A real provider account — what `accountID` identifies. Account-
+        /// scoped rules (dashboard per-provider selection, account counts)
+        /// should match this case.
+        case account
+
+        /// A sub-pool carved out of a parent account's data, sharing the
+        /// parent's `service` purely for branding. Never stands in for the
+        /// parent as an account, however exhausted it is — Cursor's Grok Bot
+        /// card is the motivating example.
+        case subPool
+    }
+
+    /// Convenience for the account-scoped filters described on `cardRole`, so
+    /// call sites read as intent ("keep only the account cards") rather than
+    /// as an enum comparison repeated at every filter.
+    var isAccountCard: Bool { cardRole == .account }
 
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
@@ -760,7 +793,8 @@ enum ProviderSnapshotBuilder {
             extraUsage: nil,
             resetCreditsAvailable: nil,
             accountID: cursor.accountID,
-            authNotice: cursor.authNotice
+            authNotice: cursor.authNotice,
+            cardRole: .subPool
         )
         return [cursorWithoutGrokBot, grokBot]
     }
@@ -830,6 +864,26 @@ extension Array where Element == ProviderSnapshot {
                 )
             }
         }
+    }
+}
+
+extension Array where Element == ProviderSnapshot {
+    /// How many account cards this list draws for one provider. A shared-
+    /// branding sub-pool card (Cursor's Grok Bot) must never inflate this:
+    /// going from one to two here is supposed to mean the user genuinely has
+    /// two accounts on that provider, which the popover's account-count badge
+    /// states outright to the user.
+    func accountCardCount(for service: ServiceType) -> Int {
+        filter { $0.service == service && $0.isAccountCard }.count
+    }
+
+    /// The card that speaks for one provider account. Prefers an exhausted
+    /// card so callers like the dashboard's Costs panel can surface that
+    /// provider's next reset, but a sub-pool card can never win this
+    /// selection — it is not the account, however exhausted it looks.
+    func accountSnapshot(for service: ServiceType) -> ProviderSnapshot? {
+        let matches = filter { $0.service == service && $0.isAccountCard }
+        return matches.first(where: \.hasExhaustedLimit) ?? matches.first
     }
 }
 
