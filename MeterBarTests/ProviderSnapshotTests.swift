@@ -681,6 +681,33 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly, .session])
     }
 
+    /// Cursor's included pools now carry `periodKind: .monthly` (for the
+    /// cadence-title headline) but `paceContext` still switches on `kind`, so
+    /// pace copy for the session/weekly slots must stay byte-identical.
+    func testPaceContextIgnoresPeriodKindForSessionAndWeeklySlots() {
+        let metrics = makeMetrics(service: .cursor, session: 10, weekly: 20)
+        let monthlyMetrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(
+                used: 10,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: metrics.sessionLimit?.resetTime,
+                periodKind: .monthly
+            ),
+            weeklyLimit: UsageLimit(
+                used: 20,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: metrics.weeklyLimit?.resetTime,
+                periodKind: .monthly
+            )
+        )
+
+        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, service: .cursor)
+
+        XCTAssertEqual(limits.map(\.kind), [.session, .weekly])
+        XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly])
+    }
+
     func testPrimaryLimitIsTheTightestWindow() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Codex",

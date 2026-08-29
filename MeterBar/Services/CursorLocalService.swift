@@ -510,6 +510,9 @@ class CursorLocalService: ObservableObject {
 
     /// One included pool as the dashboard draws it: `used` is already a
     /// 0…100 percent, so the denominator is 100 rather than a request grant.
+    /// The pool resets with the monthly billing cycle, so `periodKind` is
+    /// always `.monthly` — that cadence drives the shared "Monthly reset in
+    /// Xd" blocked-card headline (see `ResetCountdownWindow.cadenceTitle`).
     nonisolated private static func percentPoolLimit(
         _ percentUsed: Double,
         resetTime: Date?,
@@ -520,7 +523,8 @@ class CursorLocalService: ObservableObject {
             total: ServiceType.cursorIncludedPoolTotal,
             resetTime: resetTime,
             windowSeconds: windowSeconds,
-            isEstimated: false
+            isEstimated: false,
+            periodKind: .monthly
         )
     }
 
