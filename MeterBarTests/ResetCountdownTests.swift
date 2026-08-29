@@ -190,6 +190,40 @@ final class ResetCountdownTests: XCTestCase {
         XCTAssertNil(NextResetCountdownLabel.selectNextWindow([], now: epoch))
     }
 
+    // MARK: - NextResetCountdownLabel.counterText
+
+    /// The popover's card-level reset line reads the cadence, not the raw
+    /// window title — same rule as the blocked-card headline, so "Cursor
+    /// Models reset in 3d" becomes "Monthly reset in 3d" here too.
+    func testNextResetCounterTextUsesCadenceTitleNotWindowTitle() {
+        let monthly = window("w", "Cursor Models", periodKind: .monthly)
+
+        XCTAssertEqual(
+            NextResetCountdownLabel.counterText(for: monthly, now: epoch),
+            "Monthly reset in 1h"
+        )
+    }
+
+    func testNextResetCounterTextHonorsClockFormat() {
+        let weekly = window("w", "Weekly", resetIn: 3_660)
+
+        XCTAssertEqual(
+            NextResetCountdownLabel.counterText(
+                for: weekly,
+                now: epoch,
+                format: .clock,
+                locale: Locale(identifier: "en_GB"),
+                timeZone: TimeZone(secondsFromGMT: 0) ?? .current
+            ),
+            "Weekly resets at 01:01"
+        )
+    }
+
+    func testNextResetCounterTextNilWhenNoResetTime() {
+        let noReset = window("n", "Session", resetIn: nil)
+        XCTAssertNil(NextResetCountdownLabel.counterText(for: noReset, now: epoch))
+    }
+
     // MARK: - BlockingLimitResetCounter.selectBlockingWindow
 
     func testBlockingResetPicksExhaustedWeeklyOverHealthySession() {

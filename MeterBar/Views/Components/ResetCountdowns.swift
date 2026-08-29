@@ -170,6 +170,13 @@ struct NextResetCountdownLabel: View {
     var font: Font = .caption
     var foregroundColor: Color = .secondary
     var iconSize: CGFloat = 10
+    /// Countdown vs. clock-time rendering. The caller resolves this from
+    /// `MenuBarDisplayPreferencesStore` and passes the value in — the same
+    /// division of responsibility `BlockingLimitResetCounter.format` uses —
+    /// rather than this view observing the store itself, since its one caller
+    /// (`ProviderStatusCard`) already resolves the preference once per render
+    /// for that sibling component.
+    var format: ResetTimeFormat = .countdown
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -183,11 +190,7 @@ struct NextResetCountdownLabel: View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
             Group {
                 if let window = Self.selectNextWindow(windows, now: timeline.date),
-                   let text = ResetCountdownLabel.counterText(
-                       title: window.title,
-                       limit: window.limit,
-                       now: timeline.date
-                   ) {
+                   let text = Self.counterText(for: window, now: timeline.date, format: format) {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: iconSize, weight: .semibold))
@@ -201,6 +204,27 @@ struct NextResetCountdownLabel: View {
                 }
             }
         }
+    }
+
+    /// Reset text for the selected window, titled by its reset cadence (e.g.
+    /// "Monthly reset in 3d") rather than the raw window name — matching
+    /// `BlockingLimitResetCounter.titleText`'s blocked-card headline so the
+    /// popover's healthy- and blocked-card reset lines read the same way.
+    static func counterText(
+        for window: ResetCountdownWindow,
+        now: Date,
+        format: ResetTimeFormat = .countdown,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        ResetCountdownLabel.counterText(
+            title: window.cadenceTitle,
+            limit: window.limit,
+            format: format,
+            now: now,
+            locale: locale,
+            timeZone: timeZone
+        )
     }
 
     /// Picks the window each provider card should count down to: the soonest

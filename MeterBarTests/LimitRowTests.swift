@@ -183,6 +183,34 @@ final class LimitRowTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
+    /// The popover card now carries one shared reset line below all rows
+    /// (`NextResetCountdownLabel` in `ProviderStatusCard`), so the per-row
+    /// footer must disappear entirely at `.compact` density — not just when
+    /// there's nothing to show. Height must match whether or not the limit
+    /// reports a reset time, since neither case renders a footer any more.
+    func testCompactDensityRendersNoFooterRegardlessOfResetTime() {
+        let withReset = LimitRow(
+            limit: quotaLimit(used: 40, resetTime: future),
+            accentColor: .blue,
+            density: .compact
+        )
+        let withoutReset = LimitRow(
+            limit: quotaLimit(used: 40),
+            accentColor: .blue,
+            density: .compact
+        )
+        let withResetHost = NSHostingView(rootView: withReset.frame(width: 320))
+        let withoutResetHost = NSHostingView(rootView: withoutReset.frame(width: 320))
+        withResetHost.layoutSubtreeIfNeeded()
+        withoutResetHost.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            withResetHost.fittingSize.height,
+            withoutResetHost.fittingSize.height,
+            accuracy: 0.5,
+            "compact density must never render a per-row footer, reset time or not"
+        )
+    }
+
     func testCompactOutRowIsShorterThanActiveRow() {
         let active = LimitRow(
             limit: quotaLimit(used: 40, resetTime: future),
@@ -209,12 +237,13 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
     private func snapshot(
         exhausted: Bool,
         resetCreditsAvailable: Int? = nil,
-        accountID: UUID? = nil
+        accountID: UUID? = nil,
+        hasResetTime: Bool = true
     ) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: exhausted ? 100 : 40,
             total: 100,
-            resetTime: Date().addingTimeInterval(exhausted ? 7200 : 3600),
+            resetTime: hasResetTime ? Date().addingTimeInterval(exhausted ? 7200 : 3600) : nil,
             windowSeconds: 604_800
         )
         return ProviderSnapshot(
@@ -258,6 +287,28 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         let host = NSHostingView(rootView: card.frame(width: 300))
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(host.fittingSize.height, 0)
+    }
+
+    /// The popover card carries one shared reset line below all rows now that
+    /// individual `.compact` rows never render a footer (see
+    /// `LimitRowTests.testCompactDensityRendersNoFooterRegardlessOfResetTime`).
+    /// A card whose limits report a reset time must be taller than one whose
+    /// limits don't, since only the former has anything to show on that line.
+    func testCompactCardGrowsForSharedResetLineWhenAResetTimeExists() {
+        let withReset = ProviderStatusCard(snapshot: snapshot(exhausted: false), limitDensity: .compact)
+        let withoutReset = ProviderStatusCard(
+            snapshot: snapshot(exhausted: false, hasResetTime: false),
+            limitDensity: .compact
+        )
+        let withResetHost = NSHostingView(rootView: withReset.frame(width: 320))
+        let withoutResetHost = NSHostingView(rootView: withoutReset.frame(width: 320))
+        withResetHost.layoutSubtreeIfNeeded()
+        withoutResetHost.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            withResetHost.fittingSize.height,
+            withoutResetHost.fittingSize.height,
+            "compact card should grow by one shared reset line when a limit reports a reset time"
+        )
     }
 
     func testOnlyCardWithUsageAvailableAllowsDetailNavigation() {
