@@ -269,8 +269,10 @@ struct MenuBarView: View {
   /// How many cards the popover is currently drawing for one provider. Anything
   /// above one means the panel's figures are the provider's total, not this
   /// card's account, which the chart says out loud rather than implying.
+  /// Delegates to `accountCardCount(for:)` so a shared-branding sub-pool card
+  /// (Cursor's Grok Bot) never inflates this into a false multi-account claim.
   private func accountCardCount(for service: ServiceType) -> Int {
-    snapshots.filter { $0.service == service }.count
+    snapshots.accountCardCount(for: service)
   }
 
   /// Provider-card hover owns the detail panel together with the detail panel's
