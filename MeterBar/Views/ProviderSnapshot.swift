@@ -513,12 +513,10 @@ enum ProviderSnapshotBuilder {
 
         if input.enabledServices.contains(.cursor) {
             let metrics = input.metrics[.cursor]
-            result.append(snapshot(
-                title: ServiceType.cursor.shortName,
-                service: .cursor,
+            result.append(contentsOf: cursorSnapshots(
                 metrics: metrics,
-                emptyDetail: input.cursorHasAccess == true ? "Waiting for refresh" : "Log in to Cursor",
-                authNotice: notice(for: .cursor, accountID: nil, metrics: metrics, input: input)
+                authNotice: notice(for: .cursor, accountID: nil, metrics: metrics, input: input),
+                cursorHasAccess: input.cursorHasAccess
             ))
         }
 
@@ -707,6 +705,64 @@ enum ProviderSnapshotBuilder {
             accountID: accountID,
             authNotice: authNotice
         )
+    }
+
+    /// Cursor Ultra's weekly Grok Bot allowance arrives as an additional pool
+    /// alongside the included Cursor Models / Other Models pools, so it would
+    /// otherwise render as a third row on the Cursor card — and never block
+    /// the provider, since only `.session`/`.weekly` kinds do. Splitting it
+    /// into its own card gives it a real header and lets it go "Out" on its
+    /// own cadence instead of hiding behind Cursor's included-pool state.
+    private static func cursorSnapshots(
+        metrics: UsageMetrics?,
+        authNotice: ProviderAuthNotice?,
+        cursorHasAccess: Bool?
+    ) -> [ProviderSnapshot] {
+        let cursor = snapshot(
+            title: ServiceType.cursor.shortName,
+            service: .cursor,
+            metrics: metrics,
+            emptyDetail: cursorHasAccess == true ? "Waiting for refresh" : "Log in to Cursor",
+            authNotice: authNotice
+        )
+        guard let grokBotLimit = cursor.limits.first(where: { $0.quotaTitleKey == .grokBot }) else {
+            return [cursor]
+        }
+
+        let cursorWithoutGrokBot = ProviderSnapshot(
+            id: cursor.id,
+            title: cursor.title,
+            service: cursor.service,
+            updatedAt: cursor.updatedAt,
+            limits: cursor.limits.filter { $0.id != grokBotLimit.id },
+            emptyDetail: cursor.emptyDetail,
+            extraUsage: cursor.extraUsage,
+            resetCreditsAvailable: cursor.resetCreditsAvailable,
+            accountID: cursor.accountID,
+            authNotice: cursor.authNotice
+        )
+        let grokBot = ProviderSnapshot(
+            id: "cursor-grokbot-\(cursor.accountID?.uuidString ?? "default")",
+            title: String(localized: "quota.title.grok_bot", defaultValue: "Grok Bot"),
+            service: .cursor,
+            updatedAt: cursor.updatedAt,
+            // Retitled `.weekly` rather than left as `.grokBot`: the card
+            // header already says "Grok Bot", so the row itself only needs
+            // to name the window, and `.weekly` is what makes the limit
+            // `isProviderBlocking` — the whole point of the split.
+            limits: [SnapshotLimit(
+                id: "grokBot",
+                kind: .weekly,
+                quotaTitleKey: .weekly,
+                usageLimit: grokBotLimit.usageLimit
+            )],
+            emptyDetail: cursor.emptyDetail,
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: cursor.accountID,
+            authNotice: cursor.authNotice
+        )
+        return [cursorWithoutGrokBot, grokBot]
     }
 
     static func limits(for metrics: UsageMetrics?, service: ServiceType) -> [SnapshotLimit] {
