@@ -18,8 +18,8 @@ struct ICloudUsageSettingsView: View {
             ) {
                 SettingsNotice(
                     text: "Opt in to combine daily token and estimated-cost totals across your Macs. "
-                        + "MeterBar stores compact rollups in your private iCloud database—never raw logs "
-                        + "or credentials.",
+                        + "MeterBar also syncs coarse quota windows using locally hashed account IDs, so "
+                        + "the same subscription is counted once. Raw IDs, logs, and credentials stay local.",
                     color: .secondary
                 )
 
@@ -31,12 +31,7 @@ struct ICloudUsageSettingsView: View {
                         get: { settings.isEnabled },
                         set: { enabled in
                             settings.setEnabled(enabled)
-                            Task {
-                                await aggregation.sync(
-                                    localSummary: costTracker.costSummary,
-                                    quotaSnapshots: []
-                                )
-                            }
+                            Task { await syncNow() }
                         }
                     ))
                     .labelsHidden()
@@ -58,12 +53,7 @@ struct ICloudUsageSettingsView: View {
                     SettingsRowView(title: "Sync now", detail: syncDetail) {
                         Button {
                             saveDeviceName()
-                            Task {
-                                await aggregation.sync(
-                                    localSummary: costTracker.costSummary,
-                                    quotaSnapshots: []
-                                )
-                            }
+                            Task { await syncNow() }
                         } label: {
                             if aggregation.isSyncing {
                                 ProgressView()
@@ -125,5 +115,15 @@ struct ICloudUsageSettingsView: View {
     private func saveDeviceName() {
         settings.setDeviceName(deviceNameDraft)
         deviceNameDraft = settings.deviceName
+    }
+
+    private func syncNow() async {
+        let quotas = settings.isEnabled
+            ? await ICloudQuotaSnapshotSource.live()
+            : []
+        await aggregation.sync(
+            localSummary: costTracker.costSummary,
+            quotaSnapshots: quotas
+        )
     }
 }

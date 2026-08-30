@@ -387,6 +387,28 @@ final class ICloudUsageAggregationTests: XCTestCase {
 
         XCTAssertEqual(result.quotaSnapshots.count, 1)
         XCTAssertEqual(result.quotaSnapshots.first?.windows.first?.used, 12)
+        XCTAssertEqual(old.accountIdentity, latest.accountIdentity)
+        XCTAssertTrue(old.accountIdentity.hasPrefix("v1:"))
+        XCTAssertEqual(old.accountIdentity.count, 67)
+        XCTAssertFalse(old.accountIdentity.contains("account-123"))
+    }
+
+    func testQuotaPseudonymIsProviderScoped() throws {
+        let codex = try XCTUnwrap(ICloudQuotaSnapshot(
+            snapshot: providerSnapshot(accountID: UUID(), used: 12, capturedAt: now),
+            externalAccountIdentity: "shared-provider-id"
+        ))
+        let claude = try XCTUnwrap(ICloudQuotaSnapshot(
+            snapshot: providerSnapshot(
+                accountID: UUID(),
+                used: 12,
+                capturedAt: now,
+                provider: .claudeCode
+            ),
+            externalAccountIdentity: "shared-provider-id"
+        ))
+
+        XCTAssertNotEqual(codex.accountIdentity, claude.accountIdentity)
     }
 
     func testQuotaSnapshotWithoutExternalIdentityIsNotPublishable() {
@@ -403,13 +425,19 @@ final class ICloudUsageAggregationTests: XCTestCase {
         settings.setEnabled(true)
         let published = expectation(description: "app lifecycle published")
         let calls = MainActorCallCounter()
+        let identityReads = MainActorCallCounter()
         let coordinator = ICloudUsageAggregationCoordinator(
             settings: settings,
             refreshPublisher: refreshes.eraseToAnyPublisher(),
             costPublisher: costs.eraseToAnyPublisher(),
             minimumInterval: 900,
-            sync: { _, _ in
+            quotaSnapshots: {
+                identityReads.count += 1
+                return [self.quota(account: "pseudonym", used: 12, capturedAt: self.now)]
+            },
+            sync: { _, quotas in
                 calls.count += 1
+                XCTAssertEqual(quotas.count, 1)
                 published.fulfill()
             }
         )
@@ -418,6 +446,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
         await fulfillment(of: [published], timeout: 1)
 
         XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(identityReads.count, 1)
     }
 
     @MainActor
@@ -426,11 +455,16 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let costs = PassthroughSubject<Void, Never>()
         let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
         let calls = MainActorCallCounter()
+        let identityReads = MainActorCallCounter()
         let coordinator = ICloudUsageAggregationCoordinator(
             settings: settings,
             refreshPublisher: refreshes.eraseToAnyPublisher(),
             costPublisher: costs.eraseToAnyPublisher(),
             minimumInterval: 0,
+            quotaSnapshots: {
+                identityReads.count += 1
+                return []
+            },
             sync: { _, _ in calls.count += 1 }
         )
 
@@ -440,6 +474,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(calls.count, 0)
+        XCTAssertEqual(identityReads.count, 0)
     }
 
     @MainActor
@@ -567,6 +602,22 @@ final class ICloudUsageAggregationTests: XCTestCase {
         })
     }
 
+    func testCloudKitPayloadDoesNotContainRawProviderAccountIdentity() throws {
+        let rawIdentity = "provider-account-secret-123"
+        let snapshot = try XCTUnwrap(ICloudQuotaSnapshot(
+            snapshot: providerSnapshot(accountID: UUID(), used: 12, capturedAt: now),
+            externalAccountIdentity: rawIdentity
+        ))
+        let payload = try ICloudUsageRecordSchema.fields(
+            for: rollup(firstDeviceID, quota: [snapshot])
+        )
+        let quotaData = try XCTUnwrap(payload["quotaSnapshots"] as? Data)
+        let serialized = try XCTUnwrap(String(data: quotaData, encoding: .utf8))
+
+        XCTAssertFalse(serialized.contains(rawIdentity))
+        XCTAssertTrue(serialized.contains(snapshot.accountIdentity))
+    }
+
     func testFeatureOffMakesZeroRepositoryCalls() async {
         let repository = RepositorySpy()
         let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
@@ -622,11 +673,16 @@ final class ICloudUsageAggregationTests: XCTestCase {
         )
     }
 
-    private func providerSnapshot(accountID: UUID, used: Double, capturedAt: Date) -> ProviderSnapshot {
+    private func providerSnapshot(
+        accountID: UUID,
+        used: Double,
+        capturedAt: Date,
+        provider: ServiceType = .codexCli
+    ) -> ProviderSnapshot {
         ProviderSnapshot(
-            id: "codex-\(accountID.uuidString)",
-            title: "Codex",
-            service: .codexCli,
+            id: "\(provider.rawValue)-\(accountID.uuidString)",
+            title: provider.displayName,
+            service: provider,
             updatedAt: capturedAt,
             limits: [
                 SnapshotLimit(

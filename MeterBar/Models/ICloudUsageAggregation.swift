@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import MeterBarShared
 
@@ -21,8 +22,8 @@ nonisolated struct ICloudQuotaWindow: Codable, Equatable, Sendable {
 }
 
 /// Provider/account quota state captured at refresh cadence. Account identity
-/// is the dedupe key: shared server-side quota is selected once, never summed
-/// merely because two Macs observed it.
+/// is a deterministic provider-scoped pseudonym: shared server-side quota is
+/// selected once without uploading the provider's raw account identifier.
 nonisolated struct ICloudQuotaSnapshot: Codable, Equatable, Sendable {
     let provider: ServiceType
     let accountIdentity: String
@@ -107,7 +108,10 @@ nonisolated struct ICloudQuotaSnapshot: Codable, Equatable, Sendable {
             normalized.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
             return nil
         }
-        return "\(provider.rawValue):\(normalized)"
+        let seed = "meterbar-icloud-quota-v1|\(provider.rawValue)|\(normalized)"
+        let digest = SHA256.hash(data: Data(seed.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "v1:\(hex)"
     }
 }
 

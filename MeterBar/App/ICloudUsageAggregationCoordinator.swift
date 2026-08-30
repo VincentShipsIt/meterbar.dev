@@ -17,9 +17,7 @@ final class ICloudUsageAggregationCoordinator {
             .eraseToAnyPublisher(),
         minimumInterval: 15 * 60,
         localSummary: { CostTracker.shared.costSummary },
-        // Provider identities stay local until account-identity publication is
-        // explicitly authorized; usage/cost rollups still sync at app cadence.
-        quotaSnapshots: { [] },
+        quotaSnapshots: { await ICloudQuotaSnapshotSource.live() },
         sync: { summary, quotas in
             await ICloudUsageAggregationService.shared.sync(
                 localSummary: summary,
