@@ -304,6 +304,24 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
+    /// Cursor's included pools reset with the monthly billing cycle. Both
+    /// percent-of-100 pools must carry that cadence so the blocked-card
+    /// headline reads "Monthly reset in Xd" instead of the raw window name.
+    func testMapSummaryPercentPoolsCarryMonthlyPeriodKind() throws {
+        let json = """
+        {
+          "billingCycleEnd": "2026-09-10T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 }
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
+    }
+
     func testMapSummaryUsesBillingCycleStartAndEndForPace() throws {
         let json = """
         {

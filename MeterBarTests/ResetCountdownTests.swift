@@ -23,6 +23,42 @@ final class ResetCountdownTests: XCTestCase {
         ResetCountdownWindow(id: id, title: title, limit: limit(resetIn: seconds, used: used))
     }
 
+    private func window(
+        _ id: String,
+        _ title: String,
+        periodKind: UsageLimit.PeriodKind?,
+        resetIn seconds: TimeInterval? = 3_600
+    ) -> ResetCountdownWindow {
+        ResetCountdownWindow(
+            id: id,
+            title: title,
+            limit: UsageLimit(
+                used: 25,
+                total: 100,
+                resetTime: seconds.map { epoch.addingTimeInterval($0) },
+                periodKind: periodKind
+            )
+        )
+    }
+
+    // MARK: - ResetCountdownWindow.cadenceTitle
+
+    /// One template driven by reset cadence: every provider's blocked card
+    /// reads "Monthly reset in 3d" / "Weekly reset in 2d" instead of a mix of
+    /// provider-specific window names.
+    func testCadenceTitleMapsEachPeriodKind() {
+        XCTAssertEqual(window("w", "Cursor Models", periodKind: .monthly).cadenceTitle, "Monthly")
+        XCTAssertEqual(window("w", "Weekly", periodKind: .weekly).cadenceTitle, "Weekly")
+        XCTAssertEqual(window("w", "Session", periodKind: .daily).cadenceTitle, "Daily")
+        XCTAssertEqual(window("w", "Billing", periodKind: .billing).cadenceTitle, "Billing cycle")
+        XCTAssertEqual(window("w", "Session", periodKind: .session).cadenceTitle, "Session")
+    }
+
+    func testCadenceTitleFallsBackToWindowTitleWhenPeriodKindIsUnknownOrMissing() {
+        XCTAssertEqual(window("w", "Cursor Models", periodKind: nil).cadenceTitle, "Cursor Models")
+        XCTAssertEqual(window("w", "Sonnet", periodKind: .unknown).cadenceTitle, "Sonnet")
+    }
+
     // MARK: - UsageDurationText.short
 
     func testShortSubMinute() {
@@ -154,6 +190,40 @@ final class ResetCountdownTests: XCTestCase {
         XCTAssertNil(NextResetCountdownLabel.selectNextWindow([], now: epoch))
     }
 
+    // MARK: - NextResetCountdownLabel.counterText
+
+    /// The popover's card-level reset line reads the cadence, not the raw
+    /// window title — same rule as the blocked-card headline, so "Cursor
+    /// Models reset in 3d" becomes "Monthly reset in 3d" here too.
+    func testNextResetCounterTextUsesCadenceTitleNotWindowTitle() {
+        let monthly = window("w", "Cursor Models", periodKind: .monthly)
+
+        XCTAssertEqual(
+            NextResetCountdownLabel.counterText(for: monthly, now: epoch),
+            "Monthly reset in 1h"
+        )
+    }
+
+    func testNextResetCounterTextHonorsClockFormat() {
+        let weekly = window("w", "Weekly", resetIn: 3_660)
+
+        XCTAssertEqual(
+            NextResetCountdownLabel.counterText(
+                for: weekly,
+                now: epoch,
+                format: .clock,
+                locale: Locale(identifier: "en_GB"),
+                timeZone: TimeZone(secondsFromGMT: 0) ?? .current
+            ),
+            "Weekly resets at 01:01"
+        )
+    }
+
+    func testNextResetCounterTextNilWhenNoResetTime() {
+        let noReset = window("n", "Session", resetIn: nil)
+        XCTAssertNil(NextResetCountdownLabel.counterText(for: noReset, now: epoch))
+    }
+
     // MARK: - BlockingLimitResetCounter.selectBlockingWindow
 
     func testBlockingResetPicksExhaustedWeeklyOverHealthySession() {
@@ -193,6 +263,17 @@ final class ResetCountdownTests: XCTestCase {
         let weekly = window("w", "Weekly", resetIn: 4 * 86_400, used: 80)
 
         XCTAssertNil(BlockingLimitResetCounter.selectBlockingWindow([session, weekly], now: epoch))
+    }
+
+    /// The blocked-card headline reads the reset cadence, not the raw window
+    /// title — "Cursor Models reset in 3d" becomes "Monthly reset in 3d".
+    func testBlockingCounterTitleUsesCadenceNotWindowTitle() {
+        let monthly = window("w", "Cursor Models", periodKind: .monthly)
+
+        XCTAssertEqual(
+            BlockingLimitResetCounter.titleText(for: monthly, in: [monthly]),
+            "Monthly reset"
+        )
     }
 
     func testBlockingCounterText() {

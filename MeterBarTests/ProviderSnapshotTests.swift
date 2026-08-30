@@ -681,6 +681,33 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly, .session])
     }
 
+    /// Cursor's included pools now carry `periodKind: .monthly` (for the
+    /// cadence-title headline) but `paceContext` still switches on `kind`, so
+    /// pace copy for the session/weekly slots must stay byte-identical.
+    func testPaceContextIgnoresPeriodKindForSessionAndWeeklySlots() {
+        let metrics = makeMetrics(service: .cursor, session: 10, weekly: 20)
+        let monthlyMetrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(
+                used: 10,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: metrics.sessionLimit?.resetTime,
+                periodKind: .monthly
+            ),
+            weeklyLimit: UsageLimit(
+                used: 20,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: metrics.weeklyLimit?.resetTime,
+                periodKind: .monthly
+            )
+        )
+
+        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, service: .cursor)
+
+        XCTAssertEqual(limits.map(\.kind), [.session, .weekly])
+        XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly])
+    }
+
     func testPrimaryLimitIsTheTightestWindow() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Codex",
@@ -938,5 +965,222 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(limits.map(\.quotaTitleKey), [.session, .weekly, .daily, .billingCycle, .quota])
         XCTAssertEqual(limits.map(\.title), ["Session", "Weekly", "Daily", "Billing cycle", "Quota"])
         XCTAssertEqual(limits.last?.localizedTitle, "Quota")
+    }
+
+    // MARK: - Cursor Grok Bot pool surfaces as its own provider card
+
+    /// Cursor Ultra's weekly Grok Bot allowance arrives as an additional
+    /// percent-of-100 pool alongside the included Cursor Models / Other Models
+    /// pools. Mirrors `CursorLocalService.mapSandUsage`'s output shape.
+    private func makeCursorMetricsWithGrokBot(
+        session: Double = 10,
+        weekly: Double = 20,
+        grokBotUsed: Double = 30,
+        grokBotResetTime: Date? = nil
+    ) -> UsageMetrics {
+        UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(
+                used: session,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: nil,
+                periodKind: .monthly
+            ),
+            weeklyLimit: UsageLimit(
+                used: weekly,
+                total: ServiceType.cursorIncludedPoolTotal,
+                resetTime: nil,
+                periodKind: .monthly
+            ),
+            additionalLimits: [
+                UsageLimit(
+                    used: grokBotUsed,
+                    total: ServiceType.cursorIncludedPoolTotal,
+                    resetTime: grokBotResetTime,
+                    periodKind: .weekly
+                )
+            ]
+        )
+    }
+
+    func testCursorGrokBotPoolBecomesItsOwnSnapshotAdjacentToCursor() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.service), [.cursor, .cursor])
+        XCTAssertEqual(snapshots.map(\.title), ["Cursor", "Grok Bot"])
+    }
+
+    func testCursorSnapshotStaysSingularWhenNoGrokBotPoolIsReported() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots.first?.title, "Cursor")
+    }
+
+    func testGrokBotSnapshotHasOneWeeklyProviderBlockingLimitTitledWeekly() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot(grokBotUsed: 45)],
+            enabledServices: [.cursor]
+        ))
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertEqual(grokBot?.limits.count, 1)
+        XCTAssertEqual(grokBot?.limits.first?.kind, .weekly)
+        XCTAssertEqual(grokBot?.limits.first?.quotaTitleKey, .weekly)
+        XCTAssertEqual(grokBot?.limits.first?.localizedTitle, "Weekly")
+        XCTAssertEqual(grokBot?.limits.first?.isProviderBlocking, true)
+        XCTAssertEqual(grokBot?.limits.first?.usageLimit.used, 45)
+        XCTAssertEqual(grokBot?.service, .cursor)
+    }
+
+    func testGrokBotPoolNoLongerAppearsInCursorSnapshotsLimits() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
+
+        XCTAssertEqual(cursor?.limits.map(\.kind), [.session, .weekly])
+        XCTAssertFalse(cursor?.limits.contains { $0.quotaTitleKey == .grokBot } == true)
+    }
+
+    func testExhaustedGrokBotPoolMarksOnlyItsOwnSnapshotWeeklyExhausted() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot(session: 10, weekly: 20, grokBotUsed: 100)],
+            enabledServices: [.cursor]
+        ))
+        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertEqual(grokBot?.hasExhaustedWeeklyLimit, true)
+        XCTAssertEqual(cursor?.hasExhaustedWeeklyLimit, false)
+    }
+
+    func testGrokBotSnapshotHasStableIDDerivedFromAccountID() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertEqual(grokBot?.id, "cursor-grokbot-default")
+    }
+
+    func testGrokBotSnapshotSharesCursorsAuthNotice() {
+        var input = makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        )
+        input.cursorHasAccess = false
+        let snapshots = ProviderSnapshotBuilder.snapshots(input)
+        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertNotNil(cursor?.authNotice)
+        XCTAssertEqual(grokBot?.authNotice, cursor?.authNotice)
+    }
+
+    /// `statusItemPinOptions` flat-maps every snapshot's limits, so the split
+    /// must give the popover its own "Grok Bot" pin candidate rather than
+    /// bundling the pool under Cursor's pin options.
+    func testGrokBotPoolGainsItsOwnStatusItemPinOption() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertTrue(snapshots.statusItemPinOptions.contains { $0.title == "Grok Bot · Weekly" })
+    }
+
+    // MARK: - Card role: account vs. sub-pool
+
+    /// The Grok Bot split shares Cursor's `service` for branding, but it is not
+    /// a second Cursor account — `cardRole` is the property that says so, and
+    /// filters that mean "which cards are accounts" must key off it instead of
+    /// `service`.
+    func testCursorGrokBotSplitProducesOneAccountCardAndOneSubPoolCard() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
+        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
+
+        XCTAssertEqual(cursor?.cardRole, .account)
+        XCTAssertTrue(cursor?.isAccountCard == true)
+        XCTAssertEqual(grokBot?.cardRole, .subPool)
+        XCTAssertFalse(grokBot?.isAccountCard == true)
+        XCTAssertEqual(snapshots.filter(\.isAccountCard).count, 1)
+    }
+
+    /// A plain `snapshot(...)` construction (every non-Cursor-split call site,
+    /// and every existing test fixture) keeps meaning "this is an account"
+    /// without having to say so.
+    func testDefaultConstructionIsAnAccountCard() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: nil,
+            emptyDetail: "Run codex login"
+        )
+
+        XCTAssertEqual(snapshot.cardRole, .account)
+        XCTAssertTrue(snapshot.isAccountCard)
+    }
+
+    /// The dashboard Costs panel's per-provider selection: prefer an exhausted
+    /// card so the panel can surface that provider's reset, but a sub-pool
+    /// card can never win the selection even fully exhausted — it does not
+    /// speak for the account.
+    func testAccountSnapshotSelectionPrefersTheAccountCardOverAnExhaustedSubPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot(session: 10, weekly: 20, grokBotUsed: 100)],
+            enabledServices: [.cursor]
+        ))
+        XCTAssertTrue(
+            snapshots.first { $0.title == "Grok Bot" }?.hasExhaustedLimit == true,
+            "fixture should be exhausted"
+        )
+
+        let selected = snapshots.accountSnapshot(for: .cursor)
+
+        XCTAssertEqual(selected?.title, "Cursor")
+        XCTAssertEqual(selected?.cardRole, .account)
+    }
+
+    func testAccountSnapshotSelectionUnaffectedWithoutAGrokBotPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeMetrics(service: .cursor, session: 100)],
+            enabledServices: [.cursor]
+        ))
+        XCTAssertTrue(snapshots.first?.hasExhaustedLimit == true, "fixture should be exhausted")
+
+        XCTAssertEqual(snapshots.accountSnapshot(for: .cursor)?.title, "Cursor")
+    }
+
+    /// The popover's account-count badge: a Cursor Ultra user with a Grok Bot
+    /// pool still has exactly one Cursor account.
+    func testAccountCardCountIsOneForCursorWhenAGrokBotPoolExists() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
+    }
+
+    func testAccountCardCountMatchesRawCountWithoutAGrokBotPool() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
     }
 }

@@ -13,8 +13,10 @@ import MeterBarShared
 struct LimitRow: View {
     /// Per-surface sizing only — no surface chrome, since every caller already
     /// draws the card the row sits in. `.compact` = popover provider card (terse,
-    /// reset-only footer), `.detail` = menu-bar detail panel (same chrome as the
-    /// card, fuller footer), `.regular` = dashboard & settings (largest type).
+    /// no per-row footer — the card renders one shared reset line below all rows
+    /// instead, via `NextResetCountdownLabel`), `.detail` = menu-bar detail panel
+    /// (same chrome as the card, full footer), `.regular` = dashboard & settings
+    /// (largest type).
     enum Density {
         case compact
         case detail
@@ -52,7 +54,12 @@ struct LimitRow: View {
                     paceContext: limit.paceContext
                 )
             }
-            if content.showsFooter {
+            // Compact never shows a per-row footer — the card draws one shared
+            // reset line below all its rows instead (`ProviderStatusCard`'s
+            // `NextResetCountdownLabel`), so a duplicate title/countdown per
+            // row isn't what distinguishes the popover from the hover detail
+            // panel anymore.
+            if density != .compact && content.showsFooter {
                 footer
             }
         }
@@ -108,43 +115,31 @@ struct LimitRow: View {
             .foregroundColor(.secondary)
     }
 
-    @ViewBuilder private var footer: some View {
-        switch density.footerStyle {
-        case .resetOnly:
+    /// Reached only by `.detail`/`.regular` — `body` never draws this for
+    /// `.compact` (see the density check around the `footer` call).
+    private var footer: some View {
+        HStack(spacing: density.footerSpacing) {
+            Text(content.usedText)
+                .font(density.footerFont)
+                .foregroundColor(.secondary)
+                .numericRefreshTransition(value: content.usedText, reduceMotion: reduceMotion)
+
+            if let pace = content.pace {
+                Text(pace.leftLabel)
+                    .font(density.footerFont)
+                    .foregroundColor(Self.paceLabelColor(pace))
+            }
+
+            Spacer(minLength: 6)
+
             if content.showsReset {
                 ResetCountdownLabel(
-                    title: limit.localizedTitle,
+                    title: nil,
                     limit: limit.usageLimit,
                     font: density.resetFont,
                     foregroundColor: .secondary,
-                    iconSize: density.resetIconSize,
-                    usesPopoverPreference: density == .compact
+                    iconSize: density.resetIconSize
                 )
-            }
-        case .full:
-            HStack(spacing: density.footerSpacing) {
-                Text(content.usedText)
-                    .font(density.footerFont)
-                    .foregroundColor(.secondary)
-                    .numericRefreshTransition(value: content.usedText, reduceMotion: reduceMotion)
-
-                if let pace = content.pace {
-                    Text(pace.leftLabel)
-                        .font(density.footerFont)
-                        .foregroundColor(Self.paceLabelColor(pace))
-                }
-
-                Spacer(minLength: 6)
-
-                if content.showsReset {
-                    ResetCountdownLabel(
-                        title: nil,
-                        limit: limit.usageLimit,
-                        font: density.resetFont,
-                        foregroundColor: .secondary,
-                        iconSize: density.resetIconSize
-                    )
-                }
             }
         }
     }
@@ -184,10 +179,12 @@ extension LimitRow {
 
         var showsUsageBar: Bool { !compactsWhenOut }
 
-        /// Active full-density rows keep their used/pace footer even when the
-        /// provider does not publish a reset timestamp. Compact density still
-        /// renders no footer in that case because its reset-only footer body is
-        /// empty.
+        /// Density-independent: true whenever the row isn't compacted-out, so
+        /// `.detail`/`.regular` keep their used/pace footer even without a
+        /// reset timestamp. `.compact` never renders a footer regardless of
+        /// this value — `LimitRow.body` gates the `footer` call to non-compact
+        /// densities, since the popover card shows one shared reset line for
+        /// all its rows instead.
         var showsFooter: Bool { !compactsWhenOut }
 
         var showsEstimatedTag: Bool { isEstimated }
@@ -239,13 +236,6 @@ extension LimitRow {
 // MARK: - Density metrics
 
 private extension LimitRow.Density {
-    enum FooterStyle {
-        /// Popover: a single reset-countdown line (titled), no pace/used text.
-        case resetOnly
-        /// Detail + dashboard: used value, pace label, and an untitled reset.
-        case full
-    }
-
     var rowSpacing: CGFloat {
         switch self {
         case .compact: return 4
@@ -301,13 +291,6 @@ private extension LimitRow.Density {
         switch self {
         case .compact, .detail: return .semibold
         case .regular: return .bold
-        }
-    }
-
-    var footerStyle: FooterStyle {
-        switch self {
-        case .compact: return .resetOnly
-        case .detail, .regular: return .full
         }
     }
 

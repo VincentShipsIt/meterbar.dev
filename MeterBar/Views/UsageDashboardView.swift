@@ -377,9 +377,11 @@ struct UsageDashboardView: View {
 
     /// The snapshot for a provider in the Costs panel — prefers an exhausted
     /// one so the cost card can surface when that provider's quota resets.
+    /// Delegates to `accountSnapshot(for:)` so a shared-branding sub-pool
+    /// card (Cursor's Grok Bot) can never win this selection just for being
+    /// exhausted; only an actual account card can.
     private func providerSnapshot(for service: ServiceType) -> ProviderSnapshot? {
-        let matches = providerSnapshots.filter { $0.service == service }
-        return matches.first(where: \.hasExhaustedLimit) ?? matches.first
+        providerSnapshots.accountSnapshot(for: service)
     }
 
     private var visibleCostSummary: CostSummary? {

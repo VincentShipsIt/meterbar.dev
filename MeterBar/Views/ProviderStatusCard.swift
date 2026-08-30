@@ -216,6 +216,22 @@ struct ProviderStatusCard: View {
                         LimitRow(limit: limit, accentColor: snapshot.accentColor, density: limitDensity)
                     }
                 }
+
+                // `.compact` rows never draw their own footer any more (see
+                // `LimitRow.Density`), so the popover card carries one shared
+                // reset line for the whole card instead of repeating a
+                // title/countdown per row — what visually separates the
+                // terse popover from the hover detail panel, which still
+                // shows each row's own footer at `.detail`/`.regular`.
+                if limitDensity == .compact {
+                    NextResetCountdownLabel(
+                        windows: sharedResetWindows,
+                        font: .caption2,
+                        foregroundColor: .secondary,
+                        iconSize: 9,
+                        format: menuBarDisplayPreferences.resetTimeFormat
+                    )
+                }
             }
 
             let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
@@ -227,6 +243,19 @@ struct ProviderStatusCard: View {
                 Divider()
                 resetCreditButton(isCompact: false)
             }
+        }
+    }
+
+    /// Windows for the popover card's one shared reset line — every limit that
+    /// reports a reset time, titled by its own reset cadence via
+    /// `NextResetCountdownLabel.counterText` (falls back to `localizedTitle`
+    /// when the limit has no `periodKind`). Limits without a reset time are
+    /// left out rather than passed through with a `nil` limit, since they'd
+    /// never be selected by `NextResetCountdownLabel.selectNextWindow` anyway.
+    private var sharedResetWindows: [ResetCountdownWindow] {
+        snapshot.limits.compactMap { limit in
+            guard limit.usageLimit.resetTime != nil else { return nil }
+            return ResetCountdownWindow(id: limit.id, title: limit.localizedTitle, limit: limit.usageLimit)
         }
     }
 

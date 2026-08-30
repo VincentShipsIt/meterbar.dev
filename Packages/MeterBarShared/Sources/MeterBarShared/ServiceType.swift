@@ -201,18 +201,19 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
     ) -> QuotaTitleKey {
+        // Provider-specific exceptions win first: Cursor's included pool and
+        // OpenRouter's key spend cap are never a reported cadence, so the
+        // `periodKind` override below must not eclipse them.
+        if self == .openRouter {
+            return .keyLimit
+        }
+        if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
+            return .cursorModels
+        }
         if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
             return titled
         }
-        switch self {
-        case .openRouter: return .keyLimit
-        case .cursor:
-            if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-                return .cursorModels
-            }
-            return .session
-        case .claudeCode, .codexCli, .grok: return .session
-        }
+        return .session
     }
 
     /// Display title for the long ("weekly") quota window. The shared window id
@@ -236,18 +237,19 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
     ) -> QuotaTitleKey {
+        // Provider-specific exceptions win first: OpenRouter's credit balance
+        // and Cursor's included pool are never a reported cadence, so the
+        // `periodKind` override below must not retitle them "Monthly".
+        if self == .openRouter {
+            return .accountCredits
+        }
+        if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
+            return .otherModels
+        }
         if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
             return titled
         }
-        switch self {
-        case .openRouter: return .accountCredits
-        case .cursor:
-            if let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-                return .otherModels
-            }
-            return .monthly
-        case .claudeCode, .codexCli, .grok: return .weekly
-        }
+        return self == .cursor ? .monthly : .weekly
     }
 
     public var weeklyQuotaTitle: String { weeklyQuotaTitle(limitTotal: nil) }

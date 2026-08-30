@@ -194,4 +194,44 @@ final class ServiceTypeTests: XCTestCase {
             .grokBot
         )
     }
+
+    /// Once Cursor's included pools carry `periodKind: .monthly` (the pool
+    /// resets with the billing cycle), the provider exception must still win:
+    /// the periodKind override is a fallback for slots with no dedicated
+    /// title, not a way to retitle Cursor Models / Other Models as "Monthly".
+    func testCursorIncludedPoolOutranksPeriodKindOverride() {
+        XCTAssertEqual(
+            ServiceType.cursor.sessionQuotaTitleKey(
+                limitTotal: ServiceType.cursorIncludedPoolTotal,
+                periodKind: .monthly
+            ),
+            .cursorModels
+        )
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(
+                limitTotal: ServiceType.cursorIncludedPoolTotal,
+                periodKind: .monthly
+            ),
+            .otherModels
+        )
+        // A non-pool Cursor total still falls through to the periodKind override.
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(limitTotal: 500, periodKind: .monthly),
+            .monthly
+        )
+    }
+
+    /// OpenRouter's quota is a running credit balance, never period-based, so
+    /// the periodKind override must never eclipse its key-limit / account-credits
+    /// titles either.
+    func testOpenRouterOutranksPeriodKindOverride() {
+        XCTAssertEqual(
+            ServiceType.openRouter.sessionQuotaTitleKey(limitTotal: nil, periodKind: .monthly),
+            .keyLimit
+        )
+        XCTAssertEqual(
+            ServiceType.openRouter.weeklyQuotaTitleKey(limitTotal: nil, periodKind: .monthly),
+            .accountCredits
+        )
+    }
 }
