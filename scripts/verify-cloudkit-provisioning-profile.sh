@@ -58,7 +58,10 @@ for key in (
 ):
     expected = set(requested.get(key, []))
     actual = set(granted.get(key, []))
-    if not expected or not expected.issubset(actual):
+    # Apple-issued Developer ID profiles may use "*" for restricted
+    # iCloud services while still authorizing the requested CloudKit service.
+    authorized = "*" in actual or expected.issubset(actual)
+    if not expected or not authorized:
         raise SystemExit(
             f"Provisioning profile does not authorize {key}: "
             f"expected {sorted(expected)!r}, granted {sorted(actual)!r}"
