@@ -268,8 +268,11 @@ struct DashboardShareSection: View {
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(json, forType: .string)
-        setExportStatus("JSON copied")
+        if pasteboard.setString(json, forType: .string) {
+            setExportStatus("JSON copied")
+        } else {
+            setShareStatus("Copy failed")
+        }
     }
 
     private func saveCostJSON() {
