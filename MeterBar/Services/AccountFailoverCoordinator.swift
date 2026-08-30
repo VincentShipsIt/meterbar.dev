@@ -147,20 +147,24 @@ final class AccountFailoverCoordinator {
         metrics: [UUID: UsageMetrics],
         evidence: AccountFailoverRefreshEvidence
     ) async {
+        let activeID: UUID
+        do {
+            activeID = try credentialSwitcher.liveAccountID(for: provider)
+        } catch {
+            if settings.isEnabled(for: provider) {
+                settings.setEnabled(false, for: provider)
+            }
+            return
+        }
+        settings.setActiveAccountID(activeID, for: provider)
         guard settings.isEnabled(for: provider) else { return }
         guard credentialSwitcher.eligibility(for: provider).isEligible else {
             settings.setEnabled(false, for: provider)
             return
         }
-        let orderedIDs = accounts.map(\.id)
-        let activeID: UUID
-        do {
-            activeID = try credentialSwitcher.liveAccountID(for: provider)
-        } catch {
-            settings.setEnabled(false, for: provider)
-            return
+        let orderedIDs = accounts.map(\.id).reduce(into: [UUID]()) { uniqueIDs, accountID in
+            if !uniqueIDs.contains(accountID) { uniqueIDs.append(accountID) }
         }
-        settings.setActiveAccountID(activeID, for: provider)
         let availability = Dictionary(uniqueKeysWithValues: orderedIDs.map {
             (
                 $0,
@@ -265,7 +269,8 @@ final class LiveAccountFailoverNotifier: AccountFailoverNotifying {
         await notificationPoster.post(
             identifier: "account-failover-\(event.id.uuidString.lowercased())",
             title: "\(event.provider.service.shortName) account switched",
-            body: "\(event.fromAccountName) → \(event.toAccountName)"
+            body: "\(event.fromAccountName) → \(event.toAccountName)",
+            suppressesDuplicates: true
         )
     }
 }

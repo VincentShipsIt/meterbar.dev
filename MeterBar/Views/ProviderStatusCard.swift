@@ -182,6 +182,7 @@ struct ProviderStatusCard: View {
                 snapshot: snapshot,
                 density: .popoverCard,
                 showsTitle: true,
+                showsLiveAccount: isLiveAccount,
                 resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
             )
 

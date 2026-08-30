@@ -137,6 +137,54 @@ final class AccountFailoverCoordinatorTests: XCTestCase {
         XCTAssertTrue(notifier.events.isEmpty)
     }
 
+    func testDisabledFailoverStillPublishesTheLiveAccountForCardState() async {
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        let liveAccountID = accounts.enabledAccounts[0].id
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        let coordinator = AccountFailoverCoordinator(
+            settings: settings,
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            credentialSwitcher: CoordinatorCredentialSwitcher(liveAccountID: liveAccountID),
+            notifier: CoordinatorFailoverNotifier()
+        )
+
+        await coordinator.evaluate(claudeMetrics: [:], codexMetrics: [:])
+
+        XCTAssertFalse(settings.isEnabled(for: .codexCli))
+        XCTAssertEqual(settings.activeAccountIDs[.codexCli], liveAccountID)
+    }
+
+    func testDuplicatePersistedAccountIDsDoNotCrashRefreshEvaluation() async {
+        let duplicateID = UUID()
+        let accounts = CodexAccountStore(accounts: [
+            .defaultAccount,
+            CodexAccount(id: duplicateID, name: "Fallback A", homeDirectory: "/tmp/fallback-a"),
+            CodexAccount(id: duplicateID, name: "Fallback B", homeDirectory: "/tmp/fallback-b"),
+        ])
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        settings.setEnabled(true, for: .codexCli)
+        let switcher = CoordinatorCredentialSwitcher(liveAccountID: CodexAccount.defaultID)
+        let coordinator = AccountFailoverCoordinator(
+            settings: settings,
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            credentialSwitcher: switcher,
+            notifier: CoordinatorFailoverNotifier()
+        )
+
+        await coordinator.evaluate(
+            claudeMetrics: [:],
+            codexMetrics: [
+                CodexAccount.defaultID: metrics(.codexCli, used: 100),
+                duplicateID: metrics(.codexCli, used: 1),
+            ],
+            evidence: evidence(codex: [CodexAccount.defaultID, duplicateID])
+        )
+
+        XCTAssertEqual(switcher.calls.map(\.toAccountID), [duplicateID])
+    }
+
     func testCachedFailedPrimaryRefreshCannotTriggerSwitch() async {
         let accounts = CodexAccountStore(userDefaults: defaults)
         accounts.addAccount(name: "Fallback", homeDirectory: "/tmp/codex-fallback")
@@ -324,6 +372,16 @@ final class AccountFailoverCoordinatorTests: XCTestCase {
         XCTAssertEqual(poster.posts.count, 1)
         XCTAssertEqual(poster.posts.first?.title, "Codex account switched")
         XCTAssertEqual(poster.posts.first?.body, "Primary → Fallback")
+        XCTAssertEqual(poster.posts.first?.suppressesDuplicates, true)
+    }
+
+    @MainActor
+    func testNotificationPostingAllowsRepeatedIdentifiersByDefault() async {
+        let poster = RecordingUserNotificationPoster()
+
+        _ = await poster.post(identifier: "quota", title: "Quota", body: "Body")
+
+        XCTAssertEqual(poster.posts.first?.suppressesDuplicates, false)
     }
 
     @MainActor
@@ -372,6 +430,7 @@ private final class RecordingUserNotificationPoster: UserNotificationPosting {
         let identifier: String
         let title: String
         let body: String
+        let suppressesDuplicates: Bool
     }
 
     private(set) var posts: [Post] = []
@@ -379,8 +438,18 @@ private final class RecordingUserNotificationPoster: UserNotificationPosting {
     func requestAuthorizationIfNeeded() {}
     func ensureAuthorization() async -> Bool { true }
 
-    func post(identifier: String, title: String, body: String) async -> Bool {
-        posts.append(Post(identifier: identifier, title: title, body: body))
+    func post(
+        identifier: String,
+        title: String,
+        body: String,
+        suppressesDuplicates: Bool
+    ) async -> Bool {
+        posts.append(Post(
+            identifier: identifier,
+            title: title,
+            body: body,
+            suppressesDuplicates: suppressesDuplicates
+        ))
         return true
     }
 }

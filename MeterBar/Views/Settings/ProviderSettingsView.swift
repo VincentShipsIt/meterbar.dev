@@ -658,7 +658,11 @@ struct ProviderSettingsView: View {
             detail: "Use the account order below as the preferred → fallback chain. Off by default."
         ) {
             Toggle("Automatic fallback", isOn: Binding(
-                get: { eligibility.isEligible && failoverSettings.isEnabled(for: provider) },
+                get: {
+                    accounts.count >= 2
+                        && eligibility.isEligible
+                        && failoverSettings.isEnabled(for: provider)
+                },
                 set: { enabled in
                     if enabled, let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider) {
                         failoverSettings.setActiveAccountID(liveID, for: provider)
@@ -673,6 +677,11 @@ struct ProviderSettingsView: View {
 
         if let reason = eligibility.reason {
             SettingsNotice(text: reason, color: MeterBarTheme.warning)
+        } else if accounts.count < 2 {
+            SettingsNotice(
+                text: "Add and enable at least two accounts to configure automatic fallback.",
+                color: .secondary
+            )
         } else if failoverSettings.isEnabled(for: provider) {
             let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider)
             let liveName = accounts.first(where: { $0.id == liveID })?.name ?? "Unavailable"
@@ -688,11 +697,6 @@ struct ProviderSettingsView: View {
             SettingsInfoRow(label: "Live CLI account", value: liveName)
             SettingsNotice(
                 text: "Automatic switching is off. The current CLI credential remains active.",
-                color: .secondary
-            )
-        } else if accounts.count < 2 {
-            SettingsNotice(
-                text: "Add and enable at least two accounts to configure automatic fallback.",
                 color: .secondary
             )
         }

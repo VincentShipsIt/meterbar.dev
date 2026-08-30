@@ -298,7 +298,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     }
 
     func credentialLocationsMatchPersistedState() -> Bool {
-        guard userDefaults.synchronize() else { return false }
+        _ = userDefaults.synchronize()
         guard userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == defaultAccountConfigDirectory else {
             return false
         }
@@ -309,7 +309,13 @@ final class ClaudeCodeAccountStore: ObservableObject {
         } else {
             persisted = []
         }
-        guard Set(persisted.map(\.id)) == Set(customAccounts.map(\.id)) else { return false }
+        let persistedIDs = persisted.map(\.id)
+        let currentIDs = customAccounts.map(\.id)
+        guard Set(persistedIDs).count == persistedIDs.count,
+              Set(currentIDs).count == currentIDs.count,
+              Set(persistedIDs) == Set(currentIDs) else {
+            return false
+        }
         let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.configDirectory) })
         return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.configDirectory }
     }
@@ -394,12 +400,20 @@ final class ClaudeCodeAccountStore: ObservableObject {
     }
 
     private func orderedAccounts(from unorderedAccounts: [ClaudeCodeAccount]) -> [ClaudeCodeAccount] {
-        guard !accountOrder.isEmpty else { return unorderedAccounts }
+        var accountsByID: [UUID: ClaudeCodeAccount] = [:]
+        let uniqueAccounts = unorderedAccounts.filter { account in
+            guard accountsByID[account.id] == nil else { return false }
+            accountsByID[account.id] = account
+            return true
+        }
+        guard !accountOrder.isEmpty else { return uniqueAccounts }
 
-        let accountsByID = Dictionary(uniqueKeysWithValues: unorderedAccounts.map { ($0.id, $0) })
-        let ordered = accountOrder.compactMap { accountsByID[$0] }
-        let orderedIDs = Set(ordered.map(\.id))
-        let unordered = unorderedAccounts.filter { !orderedIDs.contains($0.id) }
+        var orderedIDs = Set<UUID>()
+        let ordered = accountOrder.compactMap { id -> ClaudeCodeAccount? in
+            guard let account = accountsByID[id], orderedIDs.insert(id).inserted else { return nil }
+            return account
+        }
+        let unordered = uniqueAccounts.filter { !orderedIDs.contains($0.id) }
         return ordered + unordered
     }
 

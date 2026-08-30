@@ -284,7 +284,7 @@ final class CodexAccountStore: ObservableObject {
     }
 
     func credentialLocationsMatchPersistedState() -> Bool {
-        guard userDefaults.synchronize() else { return false }
+        _ = userDefaults.synchronize()
         guard userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory) == defaultAccountHomeDirectory else {
             return false
         }
@@ -295,7 +295,13 @@ final class CodexAccountStore: ObservableObject {
         } else {
             persisted = []
         }
-        guard Set(persisted.map(\.id)) == Set(customAccounts.map(\.id)) else { return false }
+        let persistedIDs = persisted.map(\.id)
+        let currentIDs = customAccounts.map(\.id)
+        guard Set(persistedIDs).count == persistedIDs.count,
+              Set(currentIDs).count == currentIDs.count,
+              Set(persistedIDs) == Set(currentIDs) else {
+            return false
+        }
         let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.homeDirectory) })
         return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.homeDirectory }
     }
@@ -373,11 +379,20 @@ final class CodexAccountStore: ObservableObject {
     }
 
     private func orderedAccounts(from unordered: [CodexAccount]) -> [CodexAccount] {
-        guard !accountOrder.isEmpty else { return unordered }
-        let byID = Dictionary(uniqueKeysWithValues: unordered.map { ($0.id, $0) })
-        let ordered = accountOrder.compactMap { byID[$0] }
-        let orderedIDs = Set(ordered.map(\.id))
-        return ordered + unordered.filter { !orderedIDs.contains($0.id) }
+        var accountsByID: [UUID: CodexAccount] = [:]
+        let uniqueAccounts = unordered.filter { account in
+            guard accountsByID[account.id] == nil else { return false }
+            accountsByID[account.id] = account
+            return true
+        }
+        guard !accountOrder.isEmpty else { return uniqueAccounts }
+
+        var orderedIDs = Set<UUID>()
+        let ordered = accountOrder.compactMap { id -> CodexAccount? in
+            guard let account = accountsByID[id], orderedIDs.insert(id).inserted else { return nil }
+            return account
+        }
+        return ordered + uniqueAccounts.filter { !orderedIDs.contains($0.id) }
     }
 
     private func pruneAccountOrder() {

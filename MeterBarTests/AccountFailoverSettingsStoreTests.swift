@@ -42,6 +42,16 @@ final class AccountFailoverSettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.isEnabled(for: .codexCli))
         XCTAssertEqual(reloaded.activeAccountID(for: .claudeCode, orderedAccountIDs: [claude, UUID()]), claude)
         XCTAssertEqual(reloaded.activeAccountID(for: .codexCli, orderedAccountIDs: [codex, UUID()]), codex)
+
+        reloaded.setEnabled(false, for: .claudeCode)
+        reloaded.setActiveAccountID(nil, for: .claudeCode)
+        reloaded.setActiveAccountID(nil, for: .codexCli)
+
+        let cleared = AccountFailoverSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(cleared.isEnabled(for: .claudeCode))
+        XCTAssertTrue(cleared.activeAccountIDs.isEmpty)
+        XCTAssertNil(defaults.object(forKey: StorageKeys.accountFailoverEnabledProviders))
+        XCTAssertNil(defaults.object(forKey: StorageKeys.accountFailoverActiveAccounts))
     }
 
     func testRemovedLiveAccountReconciliationClearsMetadataWithoutRetargeting() {

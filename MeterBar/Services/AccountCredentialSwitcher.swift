@@ -697,14 +697,18 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
 
     func completeNotification(eventID: UUID) throws {
         let acquiredNow = try transactionLock.acquire()
+        var completed = false
+        defer {
+            if acquiredNow, !completed { transactionLock.release() }
+        }
         guard let record = try journal.load(),
               record.phase == .committed,
               record.event.id == eventID else {
-            if acquiredNow { transactionLock.release() }
             throw CredentialExchangeError.notificationEventMismatch
         }
         try advanceAuthoritativeState(for: record)
         try journal.clear()
+        completed = true
         transactionLock.release()
     }
 

@@ -685,6 +685,46 @@ final class AccountCredentialSwitcherTests: XCTestCase {
     }
 
     @MainActor
+    func testFreshCompletionReleasesItsLockWhenJournalClearFails() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let journal = TestCredentialExchangeJournal(clearError: TestFailure.injected)
+        let completedStateStore = TestCredentialCompletedStateStore()
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        let first = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: settings,
+            fileOperator: fileOperator,
+            journal: journal,
+            completedStateStore: completedStateStore,
+            transactionLock: TestCredentialExchangeProcessLock()
+        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        try await first.switchCredentials(for: switchEvent)
+        let completionLock = TestCredentialExchangeProcessLock()
+        let completion = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal,
+            completedStateStore: completedStateStore,
+            transactionLock: completionLock
+        )
+        XCTAssertThrowsError(try completion.completeNotification(eventID: switchEvent.id))
+        XCTAssertFalse(completionLock.isHeld)
+        XCTAssertEqual(journal.record?.phase, .committed)
+    }
+
+    @MainActor
     func testFailedAuthoritativeStateAdvanceLeavesCommittedWALForRecovery() async throws {
         let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -9,7 +9,24 @@ protocol UserNotificationPosting {
     func requestAuthorizationIfNeeded()
     func ensureAuthorization() async -> Bool
     @discardableResult
-    func post(identifier: String, title: String, body: String) async -> Bool
+    func post(
+        identifier: String,
+        title: String,
+        body: String,
+        suppressesDuplicates: Bool
+    ) async -> Bool
+}
+
+extension UserNotificationPosting {
+    @discardableResult
+    func post(identifier: String, title: String, body: String) async -> Bool {
+        await post(
+            identifier: identifier,
+            title: title,
+            body: body,
+            suppressesDuplicates: false
+        )
+    }
 }
 
 /// Shared permission-aware notification boundary for quota, Session Wake, and
@@ -48,13 +65,20 @@ final class LiveUserNotificationPoster: UserNotificationPosting {
         }
     }
 
-    func post(identifier: String, title: String, body: String) async -> Bool {
+    func post(
+        identifier: String,
+        title: String,
+        body: String,
+        suppressesDuplicates: Bool
+    ) async -> Bool {
         let center = injectedCenter ?? .current()
         guard await ensureAuthorization(using: center) else { return false }
-        let delivered = await center.deliveredNotifications()
-        if delivered.contains(where: { $0.request.identifier == identifier }) { return true }
-        let pending = await center.pendingNotificationRequests()
-        if pending.contains(where: { $0.identifier == identifier }) { return true }
+        if suppressesDuplicates {
+            let delivered = await center.deliveredNotifications()
+            if delivered.contains(where: { $0.request.identifier == identifier }) { return true }
+            let pending = await center.pendingNotificationRequests()
+            if pending.contains(where: { $0.identifier == identifier }) { return true }
+        }
 
         let content = UNMutableNotificationContent()
         content.title = title
