@@ -204,6 +204,19 @@ require(
     build_job,
     f"{signed_path}: build must keep signing credentials in the release environment",
 )
+for required_cloudkit_release_token in (
+    "DEVELOPER_ID_PROVISIONING_PROFILE_BASE64",
+    "Contents/embedded.provisionprofile",
+    "security cms -D -i",
+    "ProvisionsAllDevices",
+    "com.apple.developer.icloud-container-identifiers",
+    "com.apple.developer.icloud-services",
+):
+    if required_cloudkit_release_token not in build_job:
+        raise SystemExit(
+            f"{signed_path}: jobs.build must validate and embed the CloudKit "
+            f"Developer ID profile ({required_cloudkit_release_token})"
+        )
 require_checkout_input(
     build_job,
     "ref",

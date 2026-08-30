@@ -35,6 +35,12 @@ cli_binary="$app_path/Contents/Helpers/meterbar"
 session_wake_agent_plist="$app_path/Contents/Library/LaunchAgents/dev.meterbar.app.session-wake.plist"
 app_entitlements="$repository_root/MeterBar/MeterBar.entitlements"
 widget_entitlements="$repository_root/MeterBarWidget/MeterBarWidget.entitlements"
+embedded_profile="$app_path/Contents/embedded.provisionprofile"
+
+if [ -n "$signing_identity" ] && [ ! -f "$embedded_profile" ]; then
+  echo "Developer ID signing requires Contents/embedded.provisionprofile for CloudKit." >&2
+  exit 1
+fi
 
 # Keep every version value free of shell metacharacters (they flow into echo and
 # string comparisons downstream). Stable stays strictly canonical; nightly allows

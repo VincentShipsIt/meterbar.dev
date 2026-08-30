@@ -122,6 +122,7 @@ jobs:
           {
             echo "CERT_PATH=$RUNNER_TEMP/build_certificate.p12"
             echo "ASC_KEY_PATH=$RUNNER_TEMP/asc_api_key.p8"
+            echo "PROVISIONING_PROFILE_PATH=$RUNNER_TEMP/MeterBar-DeveloperID.provisionprofile"
             echo "KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db"
             echo "KEYCHAIN_LIST_BACKUP=$RUNNER_TEMP/original-keychains.list"
             echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD"
@@ -134,6 +135,7 @@ jobs:
         env:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          DEVELOPER_ID_PROVISIONING_PROFILE_BASE64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 }}
           APPLE_API_PRIVATE_KEY_P8_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_P8_BASE64 }}
           APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
@@ -145,6 +147,7 @@ jobs:
           # required. KEYCHAIN_PASSWORD is intentionally absent — it is generated at
           # runtime, not stored.
           for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD \
+                      DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 \
                       APPLE_API_PRIVATE_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID \
                       SPARKLE_PRIVATE_ED_KEY SPARKLE_PUBLIC_ED_KEY; do
             # Indirect expansion reads the env var named in $name without echoing its value.
@@ -190,6 +193,78 @@ jobs:
           scripts/build-universal-cli.sh \
             "$APP_PATH/Contents/Helpers/meterbar" \
             "$RUNNER_TEMP/meterbar-cli-build"
+
+      # CloudKit is a restricted macOS entitlement. A Developer ID signature
+      # alone cannot authorize it: the distributed app must contain a matching
+      # Developer ID provisioning profile inside the bundle before it is sealed.
+      - name: Validate and embed CloudKit provisioning profile
+        env:
+          DEVELOPER_ID_PROVISIONING_PROFILE_BASE64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          PROFILE_PLIST="$RUNNER_TEMP/MeterBar-DeveloperID-profile.plist"
+          echo -n "$DEVELOPER_ID_PROVISIONING_PROFILE_BASE64" \
+            | base64 --decode -o "$PROVISIONING_PROFILE_PATH"
+          security cms -D -i "$PROVISIONING_PROFILE_PATH" -o "$PROFILE_PLIST"
+
+          /usr/bin/python3 - \
+            "$PROFILE_PLIST" \
+            "$APP_PATH/Contents/Info.plist" \
+            "MeterBar/MeterBar.entitlements" <<'PY'
+          import datetime
+          import plistlib
+          import sys
+
+          profile_path, info_path, entitlements_path = sys.argv[1:]
+          with open(profile_path, "rb") as source:
+              profile = plistlib.load(source)
+          with open(info_path, "rb") as source:
+              info = plistlib.load(source)
+          with open(entitlements_path, "rb") as source:
+              requested = plistlib.load(source)
+
+          expiration = profile.get("ExpirationDate")
+          now = datetime.datetime.now(datetime.timezone.utc)
+          if not isinstance(expiration, datetime.datetime):
+              raise SystemExit("Provisioning profile has no valid ExpirationDate")
+          if expiration.tzinfo is None:
+              expiration = expiration.replace(tzinfo=datetime.timezone.utc)
+          if expiration <= now:
+              raise SystemExit(f"Provisioning profile expired at {expiration.isoformat()}")
+          if profile.get("ProvisionsAllDevices") is not True:
+              raise SystemExit("Provisioning profile is not a Developer ID distribution profile")
+
+          granted = profile.get("Entitlements", {})
+          bundle_id = info.get("CFBundleIdentifier")
+          application_id = granted.get("com.apple.application-identifier", "")
+          if not bundle_id or not application_id.endswith(f".{bundle_id}"):
+              raise SystemExit(
+                  f"Provisioning profile application identifier {application_id!r} "
+                  f"does not authorize bundle {bundle_id!r}"
+              )
+          team_prefix = application_id[: -(len(bundle_id) + 1)]
+          if team_prefix not in profile.get("TeamIdentifier", []):
+              raise SystemExit("Provisioning profile TeamIdentifier does not match its application identifier")
+
+          for key in (
+              "com.apple.developer.icloud-container-identifiers",
+              "com.apple.developer.icloud-services",
+          ):
+              expected = set(requested.get(key, []))
+              actual = set(granted.get(key, []))
+              if not expected or not expected.issubset(actual):
+                  raise SystemExit(
+                      f"Provisioning profile does not authorize {key}: "
+                      f"expected {sorted(expected)!r}, granted {sorted(actual)!r}"
+                  )
+
+          print(
+              "Developer ID profile authorizes "
+              f"{bundle_id} with CloudKit through {expiration.date().isoformat()}."
+          )
+          PY
+
+          cp "$PROVISIONING_PROFILE_PATH" "$APP_PATH/Contents/embedded.provisionprofile"
 
       # Import the Developer ID cert + private key into a DEDICATED temporary
       # keychain, and store the notarization API key profile in that same
