@@ -184,7 +184,7 @@ struct NextResetCountdownLabel: View {
     /// How long after a window's reset time we keep showing "reset due" before
     /// treating the data as stale and hiding the label (until a refresh repopulates
     /// a future reset time). Prevents a perpetual "reset due" when a provider goes offline.
-    static let resetDueGracePeriod: TimeInterval = 5 * 60
+    static let resetDueGracePeriod = ProviderBlockingPolicy.resetDueGracePeriod
 
     var body: some View {
         TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
@@ -314,27 +314,17 @@ struct BlockingLimitResetCounter: View {
         now: Date,
         gracePeriod: TimeInterval = NextResetCountdownLabel.resetDueGracePeriod
     ) -> ResetCountdownWindow? {
-        let exhaustedWindows = windows.filter { $0.limit.isAtLimit }
-        guard !exhaustedWindows.isEmpty else { return nil }
-
-        let candidates = exhaustedWindows.compactMap { w -> (window: ResetCountdownWindow, seconds: TimeInterval)? in
-            guard let seconds = w.limit.secondsUntilReset(now: now) else { return nil }
-            return (w, seconds)
+        let candidates = windows.map {
+            ProviderBlockingCandidate(id: $0.id, role: .weekly, limit: $0.limit)
         }
-
-        guard candidates.count == exhaustedWindows.count else { return nil }
-
-        let futureCandidates = candidates.filter { $0.seconds > 0 }
-        if let blocking = futureCandidates.max(by: { $0.seconds < $1.seconds }) {
-            return blocking.window
+        guard let headline = ProviderBlockingPolicy.headline(
+            from: candidates.filter { $0.limit.isAtLimit },
+            now: now,
+            gracePeriod: gracePeriod
+        ), headline.visibleResetTime != nil else {
+            return nil
         }
-
-        if let mostRecent = candidates.max(by: { $0.seconds < $1.seconds }),
-           mostRecent.seconds >= -gracePeriod {
-            return mostRecent.window
-        }
-
-        return nil
+        return windows.first { $0.id == headline.blocker.id }
     }
 
     static func titleText(for window: ResetCountdownWindow?, in windows: [ResetCountdownWindow]) -> String {

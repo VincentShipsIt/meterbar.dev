@@ -59,6 +59,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public let preservesLegacyOpenRouterBalance: Bool
     public let resetTime: Date?
     public let freshnessDate: Date?
+    public let isBlocked: Bool
     /// Extra periods use `additionalQuotaTitleKey` so a Cursor weekly
     /// percent-pool bar titles as Grok Bot, not Other Models.
     public let isAdditionalLimit: Bool
@@ -69,11 +70,6 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// This is deliberately separate from freshness: a stale snapshot can
     /// still say that the last known state was blocked, while its health badge
     /// explains that the snapshot needs refreshing.
-    public var isBlocked: Bool {
-        guard let limit else { return false }
-        return !limit.isEstimated && limit.isAtLimit
-    }
-
     /// Which quota title this row resolves to, before any language is chosen.
     ///
     /// The widget extension localizes *this*, rather than re-deriving the same
@@ -270,6 +266,11 @@ public enum WidgetPresentationPlanner {
         let window: WidgetQuotaWindow
         let limit: UsageLimit
         let isAdditional: Bool
+        let blockingRole: ProviderBlockingCandidate.Role
+
+        var blockingCandidate: ProviderBlockingCandidate {
+            ProviderBlockingCandidate(id: idSuffix, role: blockingRole, limit: limit)
+        }
     }
 
     private static func availableSources(
@@ -362,7 +363,8 @@ public enum WidgetPresentationPlanner {
         visibleWindows: Set<WidgetQuotaWindow>
     ) -> Double {
         guard let metrics = source.metrics else { return -Double.infinity }
-        if blockingCandidate(in: metrics) != nil {
+        let evaluation = blockingEvaluation(in: metrics)
+        if !evaluation.providerBlockers.isEmpty || !evaluation.independentSubPoolBlockers.isEmpty {
             return 100
         }
         let primary = WidgetQuotaWindow.allCases
@@ -402,24 +404,38 @@ public enum WidgetPresentationPlanner {
         let health: WidgetDataHealth = now.timeIntervalSince(metrics.lastUpdated) > stalenessThreshold
             ? .stale
             : .healthy
+        let evaluation = blockingEvaluation(in: metrics)
+        let blockers = evaluation.providerBlockers + evaluation.independentSubPoolBlockers
+        let blockedIDs = Set(blockers.map(\.id))
         let selectedRows: [WidgetPresentationRow] = windows.compactMap { window in
             guard let windowLimit = limit(for: window, metrics: metrics) else { return nil }
+            let isBlocked = blockedIDs.contains(window.rawValue)
             return row(
                 source: source,
                 window: window,
                 limit: windowLimit,
                 health: health,
-                preferences: preferences
+                preferences: preferences,
+                isBlocked: isBlocked,
+                resetTimeOverride: isBlocked ? visibleResetTime(for: windowLimit, now: now) : nil,
+                usesResetTimeOverride: isBlocked
             )
         }
         let additionalRows = additionalRows(
             source: source,
             metrics: metrics,
             health: health,
-            preferences: preferences
+            preferences: preferences,
+            blockedIDs: blockedIDs,
+            now: now
         )
         var rows = selectedRows + additionalRows
-        guard let blocker = blockingCandidate(in: metrics) else { return rows }
+        guard let headline = ProviderBlockingPolicy.headline(from: blockers, now: now),
+              let blocker = limitCandidates(in: metrics).first(where: {
+                  $0.idSuffix == headline.blocker.id
+              }) else {
+            return rows
+        }
 
         let blockedRow = row(
             source: source,
@@ -428,7 +444,10 @@ public enum WidgetPresentationPlanner {
             limit: blocker.limit,
             health: health,
             preferences: preferences,
-            isAdditionalLimit: blocker.isAdditional
+            isAdditionalLimit: blocker.isAdditional,
+            isBlocked: true,
+            resetTimeOverride: headline.visibleResetTime,
+            usesResetTimeOverride: true
         )
         if let existingIndex = rows.firstIndex(where: { $0.id == blockedRow.id }) {
             rows.remove(at: existingIndex)
@@ -448,13 +467,17 @@ public enum WidgetPresentationPlanner {
         source: Source,
         metrics: UsageMetrics,
         health: WidgetDataHealth,
-        preferences: WidgetPreferences
+        preferences: WidgetPreferences,
+        blockedIDs: Set<String>,
+        now: Date
     ) -> [WidgetPresentationRow] {
         metrics.additionalLimits.enumerated().compactMap { index, limit in
             let window = widgetWindow(for: limit.periodKind)
             guard preferences.visibleQuotaWindows.contains(window) else { return nil }
+            let idSuffix = "additional-\(index)"
+            let isBlocked = blockedIDs.contains(idSuffix)
             return WidgetPresentationRow(
-                id: "\(source.identifier.rawValue):additional-\(index)",
+                id: "\(source.identifier.rawValue):\(idSuffix)",
                 accountIdentifier: source.identifier,
                 service: source.service,
                 accountName: source.name,
@@ -465,8 +488,11 @@ public enum WidgetPresentationPlanner {
                 displayMode: preferences.displayMode,
                 preservesLegacyOpenRouterBalance: source.service == .openRouter
                     && preferences.preservesLegacyOpenRouterBalance,
-                resetTime: preferences.showsResetTime ? limit.resetTime : nil,
+                resetTime: preferences.showsResetTime
+                    ? (isBlocked ? visibleResetTime(for: limit, now: now) : limit.resetTime)
+                    : nil,
                 freshnessDate: preferences.showsFreshness ? metrics.lastUpdated : nil,
+                isBlocked: isBlocked,
                 isAdditionalLimit: true
             )
         }
@@ -490,7 +516,10 @@ public enum WidgetPresentationPlanner {
         limit: UsageLimit?,
         health: WidgetDataHealth,
         preferences: WidgetPreferences,
-        isAdditionalLimit: Bool = false
+        isAdditionalLimit: Bool = false,
+        isBlocked: Bool = false,
+        resetTimeOverride: Date? = nil,
+        usesResetTimeOverride: Bool = false
     ) -> WidgetPresentationRow {
         WidgetPresentationRow(
             id: "\(source.identifier.rawValue):\(idSuffix ?? window.rawValue)",
@@ -504,25 +533,32 @@ public enum WidgetPresentationPlanner {
             displayMode: preferences.displayMode,
             preservesLegacyOpenRouterBalance: source.service == .openRouter
                 && preferences.preservesLegacyOpenRouterBalance,
-            resetTime: preferences.showsResetTime ? limit?.resetTime : nil,
+            resetTime: preferences.showsResetTime
+                ? (usesResetTimeOverride ? resetTimeOverride : limit?.resetTime)
+                : nil,
             freshnessDate: preferences.showsFreshness ? source.metrics?.lastUpdated : nil,
+            isBlocked: isBlocked,
             isAdditionalLimit: isAdditionalLimit
         )
     }
 
-    /// Picks the exhausted period that gates the account for presentation.
-    /// When every blocker has a reset date, the latest reset wins because the
-    /// account cannot become usable before it. If any blocker has no known
-    /// reset, that candidate wins so the widget never displays a misleading
-    /// earlier countdown.
-    private static func blockingCandidate(in metrics: UsageMetrics) -> LimitCandidate? {
+    private static func blockingEvaluation(in metrics: UsageMetrics) -> ProviderBlockingEvaluation {
+        ProviderBlockingPolicy.evaluate(
+            service: metrics.service,
+            extraUsage: metrics.extraUsage,
+            candidates: limitCandidates(in: metrics).map(\.blockingCandidate)
+        )
+    }
+
+    private static func limitCandidates(in metrics: UsageMetrics) -> [LimitCandidate] {
         var candidates: [LimitCandidate] = []
         if let limit = metrics.sessionLimit {
             candidates.append(LimitCandidate(
                 idSuffix: WidgetQuotaWindow.session.rawValue,
                 window: .session,
                 limit: limit,
-                isAdditional: false
+                isAdditional: false,
+                blockingRole: .session
             ))
         }
         if let limit = metrics.weeklyLimit {
@@ -530,7 +566,8 @@ public enum WidgetPresentationPlanner {
                 idSuffix: WidgetQuotaWindow.weekly.rawValue,
                 window: .weekly,
                 limit: limit,
-                isAdditional: false
+                isAdditional: false,
+                blockingRole: .weekly
             ))
         }
         if let limit = metrics.codeReviewLimit {
@@ -538,7 +575,8 @@ public enum WidgetPresentationPlanner {
                 idSuffix: WidgetQuotaWindow.codeReview.rawValue,
                 window: .codeReview,
                 limit: limit,
-                isAdditional: false
+                isAdditional: false,
+                blockingRole: .secondary
             ))
         }
         candidates += metrics.additionalLimits.enumerated().map { index, limit in
@@ -546,18 +584,21 @@ public enum WidgetPresentationPlanner {
                 idSuffix: "additional-\(index)",
                 window: widgetWindow(for: limit.periodKind),
                 limit: limit,
-                isAdditional: true
+                isAdditional: true,
+                blockingRole: metrics.service == .cursor
+                    && metrics.service.additionalQuotaTitleKey(for: limit) == .grokBot
+                    ? .independentSubPool
+                    : .secondary
             )
         }
+        return candidates
+    }
 
-        let exhausted = candidates.filter { !$0.limit.isEstimated && $0.limit.isAtLimit }
-        guard !exhausted.isEmpty else { return nil }
-        if let unknownReset = exhausted.first(where: { $0.limit.resetTime == nil }) {
-            return unknownReset
-        }
-        return exhausted.max {
-            ($0.limit.resetTime ?? .distantPast) < ($1.limit.resetTime ?? .distantPast)
-        }
+    private static func visibleResetTime(for limit: UsageLimit, now: Date) -> Date? {
+        ProviderBlockingPolicy.headline(
+            from: [ProviderBlockingCandidate(id: "row", role: .weekly, limit: limit)],
+            now: now
+        )?.visibleResetTime
     }
 
     private static func limit(
