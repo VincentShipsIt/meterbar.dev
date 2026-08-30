@@ -783,12 +783,14 @@ enum ProviderSnapshotBuilder {
             // header already says "Grok Bot", so the row itself only needs
             // to name the window, and `.weekly` is what makes the limit
             // `isProviderBlocking` — the whole point of the split.
-            limits: [SnapshotLimit(
-                id: "grokBot",
-                kind: .weekly,
-                quotaTitleKey: .weekly,
-                usageLimit: grokBotLimit.usageLimit
-            )],
+            limits: [
+                SnapshotLimit(
+                    id: "grokBot",
+                    kind: .weekly,
+                    quotaTitleKey: .weekly,
+                    usageLimit: grokBotLimit.usageLimit
+                ),
+            ],
             emptyDetail: cursor.emptyDetail,
             extraUsage: nil,
             resetCreditsAvailable: nil,
