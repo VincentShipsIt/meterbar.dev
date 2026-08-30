@@ -48,10 +48,73 @@ nonisolated enum ModelTier: String, Sendable, Equatable {
 
     var costAccessibilityLabel: String {
         switch self {
-        case .premium: return "High-cost model"
-        case .standard: return "Mid-cost model"
-        case .economy: return "Low-cost model"
-        case .unknown: return "Unknown cost tier"
+        case .premium:
+            return String(
+                localized: "optimize.cost_tier.high",
+                defaultValue: "High-cost model",
+                comment: "VoiceOver description for a three-dollar-sign model cost marker."
+            )
+        case .standard:
+            return String(
+                localized: "optimize.cost_tier.mid",
+                defaultValue: "Mid-cost model",
+                comment: "VoiceOver description for a two-dollar-sign model cost marker."
+            )
+        case .economy:
+            return String(
+                localized: "optimize.cost_tier.low",
+                defaultValue: "Low-cost model",
+                comment: "VoiceOver description for a one-dollar-sign model cost marker."
+            )
+        case .unknown:
+            return String(
+                localized: "optimize.cost_tier.unknown",
+                defaultValue: "Unknown cost tier",
+                comment: "VoiceOver description when a model cost tier cannot be classified."
+            )
+        }
+    }
+
+    private var pluralCostAccessibilityLabel: String {
+        switch self {
+        case .premium:
+            return String(
+                localized: "optimize.cost_tier.high_plural",
+                defaultValue: "High-cost models",
+                comment: "VoiceOver description replacing a three-dollar-sign marker before the plural word models."
+            )
+        case .standard:
+            return String(
+                localized: "optimize.cost_tier.mid_plural",
+                defaultValue: "Mid-cost models",
+                comment: "VoiceOver description replacing a two-dollar-sign marker before the plural word models."
+            )
+        case .economy:
+            return String(
+                localized: "optimize.cost_tier.low_plural",
+                defaultValue: "Low-cost models",
+                comment: "VoiceOver description replacing a one-dollar-sign marker before the plural word models."
+            )
+        case .unknown:
+            return costAccessibilityLabel
+        }
+    }
+
+    /// Replaces the visual relative-price scale with semantic speech while
+    /// leaving the on-screen recommendation copy untouched. Longest markers
+    /// go first so `$$$` can never be mistaken for three low-cost markers.
+    static func accessibilityText(replacingCostMarkersIn text: String) -> String {
+        [ModelTier.premium, .standard, .economy].reduce(text) { result, tier in
+            result
+                .replacingOccurrences(
+                    of: "\(tier.costIndicator) models",
+                    with: tier.pluralCostAccessibilityLabel
+                )
+                .replacingOccurrences(
+                    of: "\(tier.costIndicator) model",
+                    with: tier.costAccessibilityLabel
+                )
+                .replacingOccurrences(of: tier.costIndicator, with: tier.costAccessibilityLabel)
         }
     }
 }
@@ -97,6 +160,10 @@ nonisolated struct OptimizationRecommendation: Identifiable, Equatable, Sendable
     let detail: String
     let severity: RecommendationSeverity
     let systemImage: String
+
+    var accessibilityDetail: String {
+        ModelTier.accessibilityText(replacingCostMarkersIn: detail)
+    }
 }
 
 // MARK: - Insights
