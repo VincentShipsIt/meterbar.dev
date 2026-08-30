@@ -105,19 +105,25 @@ class CostTracker: ObservableObject {
         }
     }
 
-    /// Resolves a summary safe for private-CloudKit publication. Caches written
-    /// before daily cache-creation tokens existed carry a decoded zero that is
-    /// not evidence; the first opt-in replaces those rows with a completed scan.
-    /// If a scan cannot complete, the caller must stay local-only.
-    func prepareSummaryForICloudPublication(_ candidate: CostSummary?) async -> CostSummary? {
-        guard let candidate else { return nil }
-        guard !candidate.hasAuthoritativeDailyCacheCreationTokens else { return candidate }
-
-        let outcome = await scanCosts(days: max(30, candidate.periodDays))
-        guard outcome.isAuthoritative else { return nil }
-        return await MainActor.run {
-            guard costSummary?.hasAuthoritativeDailyCacheCreationTokens == true else { return nil }
-            return costSummary
+    /// Resolves a summary safe for private-CloudKit publication. Missing daily
+    /// coverage and caches written before daily cache-creation tokens existed
+    /// are not evidence; the first opt-in replaces either with a completed scan.
+    /// If that scan cannot complete, the caller must stay local-only.
+    func prepareSummaryForICloudPublication(
+        _ candidate: CostSummary?
+    ) async -> ICloudUsageSummaryPreparationResult {
+        let outcome = await scanCosts(days: max(30, candidate?.periodDays ?? 30))
+        switch outcome {
+        case .skipped:
+            return .skipped
+        case .partial:
+            return .partial
+        case .completed:
+            guard let summary = costSummary,
+                  summary.hasAuthoritativeDailyCacheCreationTokens else {
+                return .failed
+            }
+            return .completed(summary)
         }
     }
 

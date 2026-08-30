@@ -445,6 +445,14 @@ nonisolated public struct CostSummary: Codable, Sendable {
         dailyUsage.allSatisfy(\.cacheCreationTokensAreAuthoritative)
     }
 
+    /// Cached history can bypass publication preparation only when it contains
+    /// actual daily coverage and every row carries the current token schema.
+    /// An empty array needs a completed scan because `allSatisfy` is vacuously
+    /// true and cannot distinguish "no usage" from "no cached daily history."
+    var hasAuthoritativeICloudDailyCoverage: Bool {
+        !dailyUsage.isEmpty && hasAuthoritativeDailyCacheCreationTokens
+    }
+
     /// Whether the cached summary is missing daily rows inside the visible window
     /// and should be quietly backfilled. Returns `false` once a scan has already
     /// run today (a genuinely zero-usage day shouldn't trigger constant rescans),

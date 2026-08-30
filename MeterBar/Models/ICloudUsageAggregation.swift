@@ -210,6 +210,16 @@ nonisolated struct ICloudUsageRepositorySnapshot: Sendable {
     let rollups: [ICloudDailyUsageRollup]
 }
 
+/// Whether local history is safe to publish after an attempted preparation.
+/// Only `completed` proves that the full reporting window was scanned; a
+/// missing or empty cached daily series is not publication authority by itself.
+nonisolated enum ICloudUsageSummaryPreparationResult: Sendable {
+    case completed(CostSummary)
+    case failed
+    case skipped
+    case partial
+}
+
 nonisolated protocol ICloudUsageRepository: Sendable {
     func synchronize(
         device: ICloudUsageDevice,

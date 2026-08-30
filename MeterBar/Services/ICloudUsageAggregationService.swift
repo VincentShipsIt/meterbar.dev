@@ -22,13 +22,13 @@ final class ICloudUsageAggregationService: ObservableObject {
 
     private let repository: any ICloudUsageRepository
     private let now: () -> Date
-    private let prepareLocalSummary: (CostSummary?) async -> CostSummary?
+    private let prepareLocalSummary: (CostSummary?) async -> ICloudUsageSummaryPreparationResult
 
     init(
         settings: ICloudUsageSettingsStore,
         repository: any ICloudUsageRepository,
         now: @escaping () -> Date = Date.init,
-        prepareLocalSummary: @escaping (CostSummary?) async -> CostSummary? = { $0 }
+        prepareLocalSummary: @escaping (CostSummary?) async -> ICloudUsageSummaryPreparationResult = { _ in .failed }
     ) {
         self.settings = settings
         self.repository = repository
@@ -50,9 +50,15 @@ final class ICloudUsageAggregationService: ObservableObject {
         isSyncing = true
         defer { isSyncing = false }
         let publishableSummary: CostSummary?
-        if localSummary?.hasAuthoritativeDailyCacheCreationTokens == false {
-            let prepared = await prepareLocalSummary(localSummary)
-            guard prepared?.hasAuthoritativeDailyCacheCreationTokens == true else {
+        if localSummary?.hasAuthoritativeICloudDailyCoverage != true {
+            let preparation = await prepareLocalSummary(localSummary)
+            guard settings.isEnabled else {
+                aggregate = nil
+                lastError = nil
+                return
+            }
+            guard case let .completed(prepared) = preparation,
+                  prepared.hasAuthoritativeDailyCacheCreationTokens else {
                 aggregate = nil
                 lastError = "Local cost history needs a full scan before it can sync to iCloud."
                 return
@@ -74,6 +80,11 @@ final class ICloudUsageAggregationService: ObservableObject {
             now: syncDate
         )
 
+        guard settings.isEnabled else {
+            aggregate = nil
+            lastError = nil
+            return
+        }
         do {
             let snapshot = try await repository.synchronize(device: device, rollups: rollups)
             aggregate = ICloudUsageAggregation.fold(

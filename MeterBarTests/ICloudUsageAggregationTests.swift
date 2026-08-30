@@ -120,7 +120,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
             prepareLocalSummary: { candidate in
                 preparationCount += 1
                 XCTAssertFalse(candidate?.hasAuthoritativeDailyCacheCreationTokens ?? true)
-                return authoritativeSummary
+                return .completed(authoritativeSummary)
             }
         )
 
@@ -140,7 +140,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let service = ICloudUsageAggregationService(
             settings: settings,
             repository: repository,
-            prepareLocalSummary: { _ in nil }
+            prepareLocalSummary: { _ in .failed }
         )
 
         await service.sync(localSummary: legacySummary, quotaSnapshots: [])
@@ -148,6 +148,97 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let callCount = await repository.callCount
         XCTAssertEqual(callCount, 0)
         XCTAssertNotNil(service.lastError)
+    }
+
+    @MainActor
+    func testNilSummaryRequiresCompletedPreparationBeforeRepositoryAccess() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        var preparationCount = 0
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { candidate in
+                preparationCount += 1
+                XCTAssertNil(candidate)
+                return .completed(self.summary())
+            }
+        )
+
+        await service.sync(localSummary: nil, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(preparationCount, 1)
+        XCTAssertEqual(callCount, 1)
+    }
+
+    @MainActor
+    func testSummaryWithoutDailyRowsRequiresCompletedPreparation() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let missingDailyCoverage = summary(dailyUsage: [])
+        var preparationCount = 0
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { candidate in
+                preparationCount += 1
+                XCTAssertEqual(candidate?.dailyUsage.isEmpty, true)
+                return .completed(self.summary())
+            }
+        )
+
+        await service.sync(localSummary: missingDailyCoverage, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(preparationCount, 1)
+        XCTAssertEqual(callCount, 1)
+    }
+
+    @MainActor
+    func testFailedPreparationMakesZeroRepositoryCalls() async {
+        await assertPreparationDoesNotPublish(.failed)
+    }
+
+    @MainActor
+    func testSkippedPreparationMakesZeroRepositoryCalls() async {
+        await assertPreparationDoesNotPublish(.skipped)
+    }
+
+    @MainActor
+    func testPartialPreparationMakesZeroRepositoryCalls() async {
+        await assertPreparationDoesNotPublish(.partial)
+    }
+
+    @MainActor
+    func testDisablingDuringSuspendedPreparationMakesZeroRepositoryCalls() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let preparationStarted = expectation(description: "preparation suspended")
+        let gate = SuspendedPreparationGate()
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { _ in
+                preparationStarted.fulfill()
+                await gate.wait()
+                return .completed(self.summary())
+            }
+        )
+
+        let syncTask = Task {
+            await service.sync(localSummary: nil, quotaSnapshots: [])
+        }
+        await fulfillment(of: [preparationStarted], timeout: 1)
+        settings.setEnabled(false)
+        await gate.resume()
+        await syncTask.value
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 0)
     }
 
     func testContributorsRespectSelectedWindowAndExcludeZeroRows() throws {
@@ -542,6 +633,25 @@ final class ICloudUsageAggregationTests: XCTestCase {
         )
     }
 
+    @MainActor
+    private func assertPreparationDoesNotPublish(
+        _ result: ICloudUsageSummaryPreparationResult
+    ) async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { _ in result }
+        )
+
+        await service.sync(localSummary: nil, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 0)
+    }
+
     private enum TestError: Error { case unavailable }
 }
 
@@ -589,4 +699,20 @@ private struct LegacyDailyUsageWire: Encodable {
     let outputTokens: Int
     let cacheReadTokens: Int
     let estimatedCostUSD: Double
+}
+
+private actor SuspendedPreparationGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func resume() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
 }
