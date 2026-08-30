@@ -5,6 +5,10 @@ import MeterBarShared
 /// The shared model stays locale-neutral so the app preview and CLI contracts
 /// do not accidentally resolve against the widget extension's bundle.
 enum WidgetLocalizedContent {
+    static func compactIdentity(for row: WidgetPresentationRow) -> String {
+        LocalizedUsageFormat.widgetCompactIdentity(for: row)
+    }
+
     static func quotaTitle(for row: WidgetPresentationRow) -> String {
         quotaTitle(for: row.quotaTitleKey)
     }

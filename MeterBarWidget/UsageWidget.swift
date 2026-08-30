@@ -273,7 +273,7 @@ struct WidgetGlanceRail: View {
                 ForEach(rows) { row in
                     HStack(spacing: metrics.rowSpacing) {
                         WidgetProviderIcon(service: row.service, size: metrics.captionSize)
-                        Text(row.accountName)
+                        Text(WidgetLocalizedContent.compactIdentity(for: row))
                             .font(.system(size: metrics.captionSize))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -284,7 +284,7 @@ struct WidgetGlanceRail: View {
                             .foregroundStyle(row.usageStatus?.color ?? .secondary)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel(row.accountName)
+                    .accessibilityLabel(WidgetLocalizedContent.compactIdentity(for: row))
                     .accessibilityValue(WidgetLocalizedContent.accessibilityValue(for: row, compact: true))
                 }
             }

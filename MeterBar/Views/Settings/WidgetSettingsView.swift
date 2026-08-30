@@ -1007,6 +1007,13 @@ struct WidgetSettingsPreviewRailRow: View {
     let row: WidgetPresentationRow
     let metrics: WidgetGlanceMetrics
 
+    /// Shared with the widget extension: compact rows have room for one
+    /// identity, so an independently blocked sub-pool names the quota rather
+    /// than making its healthy parent account sound exhausted.
+    var compactIdentityText: String {
+        LocalizedUsageFormat.widgetCompactIdentity(for: row)
+    }
+
     var body: some View {
         HStack(spacing: metrics.rowSpacing) {
             ProviderLogoView(
@@ -1014,7 +1021,7 @@ struct WidgetSettingsPreviewRailRow: View {
                 size: metrics.captionSize,
                 foregroundColor: .secondary
             )
-            Text(row.accountName)
+            Text(compactIdentityText)
                 .font(.system(size: metrics.captionSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -1025,7 +1032,7 @@ struct WidgetSettingsPreviewRailRow: View {
                 .foregroundStyle(row.usageStatus?.color ?? .secondary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(row.accountName)
+        .accessibilityLabel(compactIdentityText)
         .accessibilityValue(accessibilitySummaryText)
     }
 

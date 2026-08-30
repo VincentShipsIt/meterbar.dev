@@ -110,6 +110,19 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         quotaTitleKey.englishTitle
     }
 
+    /// The quota title to use as this row's identity when compact UI cannot
+    /// show both the parent account and the independently blocked sub-pool.
+    ///
+    /// A normal additional row still belongs to its account. An exhausted
+    /// independent row does not: saying "Cursor, OUT" would imply Cursor's
+    /// healthy primary pools are blocked when only Grok Bot is exhausted.
+    /// Returning a localization key keeps the policy shared without choosing
+    /// the widget extension's or Settings app's resource bundle here.
+    public var compactIdentityQuotaTitleKey: ServiceType.QuotaTitleKey? {
+        guard isBlocked, isAdditionalLimit else { return nil }
+        return quotaTitleKey
+    }
+
     public var progressValue: Double? {
         guard let limit else { return nil }
         switch displayMode {
