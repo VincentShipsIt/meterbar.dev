@@ -10,7 +10,6 @@ import MeterBarShared
 /// thresholds without any network or on-disk state, mirroring the
 /// `SocialShareCardContent` pattern.
 final class OptimizationInsightsTests: XCTestCase {
-
     // MARK: - Model tier classification
 
     func testClassifyPremiumModels() {
@@ -58,6 +57,45 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertEqual(ModelTier.standard.costAccessibilityLabel, "Mid-cost model")
         XCTAssertEqual(ModelTier.premium.costAccessibilityLabel, "High-cost model")
         XCTAssertEqual(ModelTier.unknown.costAccessibilityLabel, "Unknown cost tier")
+    }
+
+    func testHighCostDashboardMetricPreservesMarkerAndExposesSemanticLabel() {
+        let tile = DashboardMetricTile(
+            title: "$$$ model share",
+            value: "68%",
+            caption: "tokens routed to high-cost models",
+            systemImage: "bolt.fill",
+            accessibilityTitle: ModelTier.premium.costAccessibilityLabel
+        )
+
+        XCTAssertEqual(tile.title, "$$$ model share")
+        XCTAssertEqual(tile.accessibilityLabelText, "High-cost model")
+    }
+
+    func testRecommendationRowsPreserveMarkersAndExposeEverySemanticCostTier() {
+        let expectations: [(tier: ModelTier, marker: String, semanticLabel: String)] = [
+            (.premium, "$$$", "High-cost model"),
+            (.standard, "$$", "Mid-cost model"),
+            (.economy, "$", "Low-cost model"),
+        ]
+
+        for expectation in expectations {
+            let recommendation = OptimizationRecommendation(
+                id: expectation.tier.rawValue,
+                title: "Route routine work carefully",
+                detail: "\(expectation.marker) models handled this work.",
+                severity: .suggestion,
+                systemImage: "bolt.badge.automatic"
+            )
+            let row = RecommendationRow(recommendation: recommendation)
+
+            XCTAssertTrue(recommendation.detail.contains(expectation.marker))
+            XCTAssertTrue(
+                row.accessibilityValueText.contains(expectation.semanticLabel),
+                "\(expectation.tier) recommendation must announce its semantic cost tier"
+            )
+            XCTAssertFalse(row.accessibilityValueText.contains(expectation.marker))
+        }
     }
 
     // MARK: - Optimization score
@@ -180,7 +218,7 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertNotNil(premiumRec)
         XCTAssertEqual(premiumRec?.severity, .warning)
         XCTAssertEqual(premiumRec?.title, "High-cost models are doing most of the work")
-        XCTAssertTrue(premiumRec?.detail.contains("$$$ models") == true)
+        XCTAssertEqual(premiumRec?.detail.contains("$$$ models"), true)
     }
 
     func testLowCacheReuseProducesWarning() {

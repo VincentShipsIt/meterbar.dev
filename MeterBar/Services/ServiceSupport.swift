@@ -96,19 +96,19 @@ nonisolated enum ServiceSupport {
         for request: URLRequest,
         session: URLSession = session
     ) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = session.dataTask(with: request) { data, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+        let handoff = ServiceSupportDataTaskHandoff()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                handoff.store(continuation)
+                let task = session.dataTask(with: request) { data, response, error in
+                    handoff.finish(data: data, response: response, error: error)
                 }
-                guard let data, let response else {
-                    continuation.resume(throwing: URLError(.badServerResponse))
-                    return
+                if handoff.install(task) {
+                    task.resume()
                 }
-                continuation.resume(returning: (data, response))
             }
-            task.resume()
+        } onCancel: {
+            handoff.cancel()
         }
     }
 
@@ -333,5 +333,87 @@ nonisolated enum ServiceSupport {
             return resolvedPath
         }
         return "~/\(resolvedPath.dropFirst(homePrefix.count))"
+    }
+}
+
+/// Owns the cancellation race between a Swift caller and an Objective-C
+/// `URLSessionDataTask` completion. Every terminal path takes the continuation
+/// while holding the lock, so exactly one of cancellation or completion wins.
+nonisolated private final class ServiceSupportDataTaskHandoff: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+    private var settled = false
+
+    /// Stores the continuation, or resolves it immediately if cancellation
+    /// arrived before the continuation and task handle were installed.
+    func store(_ continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        lock.lock()
+        if settled {
+            lock.unlock()
+            continuation.resume(throwing: URLError(.cancelled))
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    /// Installs the task handle. A cancellation that won before installation
+    /// still cancels the underlying task as soon as the handle becomes visible.
+    ///
+    /// - Returns: Whether the caller should start the task.
+    func install(_ task: URLSessionDataTask) -> Bool {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            task.cancel()
+            return false
+        }
+        self.task = task
+        lock.unlock()
+        return true
+    }
+
+    func finish(data: Data?, response: URLResponse?, error: Error?) {
+        guard let continuation = takeForCompletion() else { return }
+        if let error {
+            continuation.resume(throwing: error)
+            return
+        }
+        guard let data, let response else {
+            continuation.resume(throwing: URLError(.badServerResponse))
+            return
+        }
+        continuation.resume(returning: (data, response))
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !settled else {
+            lock.unlock()
+            return
+        }
+        cancelled = true
+        settled = true
+        let pendingContinuation = continuation
+        continuation = nil
+        let pendingTask = task
+        task = nil
+        lock.unlock()
+
+        pendingTask?.cancel()
+        pendingContinuation?.resume(throwing: URLError(.cancelled))
+    }
+
+    private func takeForCompletion() -> CheckedContinuation<(Data, URLResponse), Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !settled else { return nil }
+        settled = true
+        let pendingContinuation = continuation
+        continuation = nil
+        task = nil
+        return pendingContinuation
     }
 }

@@ -170,6 +170,23 @@ final class LocalizationResourceContractTests: XCTestCase {
         }
     }
 
+    func testOptimizationCostTierAccessibilityLabelsAreLocalizedInTheAppCatalog() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let expectedEnglish = [
+            "optimize.cost_tier.high": "High-cost model",
+            "optimize.cost_tier.high_plural": "High-cost models",
+            "optimize.cost_tier.mid": "Mid-cost model",
+            "optimize.cost_tier.mid_plural": "Mid-cost models",
+            "optimize.cost_tier.low": "Low-cost model",
+            "optimize.cost_tier.low_plural": "Low-cost models",
+            "optimize.cost_tier.unknown": "Unknown cost tier",
+        ]
+
+        for (key, expectedValue) in expectedEnglish {
+            XCTAssertEqual(try englishValue(for: key, in: appStrings), expectedValue, key)
+        }
+    }
+
     /// Every routing key resolves a real catalog entry rather than falling back
     /// to hardcoded English.
     ///

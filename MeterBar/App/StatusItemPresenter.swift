@@ -64,12 +64,17 @@ final class StatusItemPresenter {
     /// back through the delegate, and a stale mirror would rotate the label out
     /// from under an open popover.
     private let isPopoverOpen: () -> Bool
+    /// Read at render time so an acquired/released power assertion updates the
+    /// visible status-item badge without changing quota descriptors.
+    private let showsStayAwakeIndicator: () -> Bool
 
     init(
         isPopoverOpen: @escaping () -> Bool = { false },
+        showsStayAwakeIndicator: @escaping () -> Bool = { false },
         applyDescriptors: @escaping ([MenuBarStatusItemDescriptor]) -> Void
     ) {
         self.isPopoverOpen = isPopoverOpen
+        self.showsStayAwakeIndicator = showsStayAwakeIndicator
         self.applyDescriptors = applyDescriptors
     }
 
@@ -188,7 +193,10 @@ final class StatusItemPresenter {
 
     @MainActor
     func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
-        let resolvedImage = image(for: descriptor.service)
+        let baseImage = image(for: descriptor.service)
+        let resolvedImage = showsStayAwakeIndicator()
+            ? MenuBarIconRenderer.stayAwakeIndicator(baseImage: baseImage)
+            : baseImage
         // Never publish a zero-size template — AppKit collapses the status item
         // to an invisible slot when both image and title are empty-width.
         if resolvedImage.size.width < 1 || resolvedImage.size.height < 1 {
@@ -199,8 +207,13 @@ final class StatusItemPresenter {
         button.imagePosition = descriptor.title.isEmpty ? .imageOnly : .imageLeft
         applyVisualStyle(descriptor.visualStyle, to: button)
         setTitle(button, to: descriptor.title, style: descriptor.visualStyle)
-        button.toolTip = descriptor.tooltip
-        button.setAccessibilityLabel(descriptor.accessibilityLabel)
+        if showsStayAwakeIndicator() {
+            button.toolTip = "\(descriptor.tooltip)\nStay Awake active"
+            button.setAccessibilityLabel("\(descriptor.accessibilityLabel); Stay Awake active")
+        } else {
+            button.toolTip = descriptor.tooltip
+            button.setAccessibilityLabel(descriptor.accessibilityLabel)
+        }
         applyParseHealthAppearance(to: button)
     }
 
