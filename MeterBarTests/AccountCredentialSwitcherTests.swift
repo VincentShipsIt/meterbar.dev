@@ -104,18 +104,26 @@ final class AccountCredentialSwitcherTests: XCTestCase {
 
     @MainActor
     func testIndependentSwitcherCannotDoubleSwapAcrossTransactionLock() async throws {
-        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
-        let firstDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { firstDefaults.removePersistentDomain(forName: suite) }
+        let firstSuite = "AccountCredentialSwitcherTests.first.\(UUID().uuidString)"
+        let secondSuite = "AccountCredentialSwitcherTests.second.\(UUID().uuidString)"
+        let firstDefaults = try XCTUnwrap(UserDefaults(suiteName: firstSuite))
+        let secondDefaults = try XCTUnwrap(UserDefaults(suiteName: secondSuite))
+        defer {
+            firstDefaults.removePersistentDomain(forName: firstSuite)
+            secondDefaults.removePersistentDomain(forName: secondSuite)
+        }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MeterBarTransactionLockTests-\(UUID().uuidString)", isDirectory: true)
         let journalURL = directory.appendingPathComponent("transaction.json")
+        let completedStateURL = directory.appendingPathComponent("completed-state.json")
         let lockURL = directory.appendingPathComponent("transaction.lock")
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let targetID = UUID()
+        let fallback = CodexAccount(id: targetID, name: "Fallback", homeDirectory: "/provider/fallback")
+        let persistedFallback = try JSONEncoder().encode([fallback])
+        firstDefaults.set(persistedFallback, forKey: StorageKeys.codexCustomAccounts)
+        secondDefaults.set(persistedFallback, forKey: StorageKeys.codexCustomAccounts)
         let firstAccounts = CodexAccountStore(userDefaults: firstDefaults)
-        firstAccounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
-        let targetID = try XCTUnwrap(firstAccounts.customAccounts.first?.id)
-        let secondDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let secondAccounts = CodexAccountStore(userDefaults: secondDefaults)
         let fileOperator = TestCredentialFileOperator()
         fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
@@ -126,6 +134,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: firstDefaults),
             fileOperator: fileOperator,
             journal: DurableCredentialExchangeJournal(fileURL: journalURL),
+            completedStateStore: DurableCredentialCompletedStateStore(fileURL: completedStateURL),
             transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
         )
         let second = LiveAccountCredentialSwitcher(
@@ -134,6 +143,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: secondDefaults),
             fileOperator: fileOperator,
             journal: DurableCredentialExchangeJournal(fileURL: journalURL),
+            completedStateStore: DurableCredentialCompletedStateStore(fileURL: completedStateURL),
             transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
         )
         let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
@@ -148,12 +158,99 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         XCTAssertEqual(fileOperator.exchangeCount, 1)
 
         try first.completeNotification(eventID: switchEvent.id)
+        let completedState = try XCTUnwrap(
+            DurableCredentialCompletedStateStore(fileURL: completedStateURL).load()?.state(for: .codexCli)
+        )
+        XCTAssertEqual(completedState.generation, 1)
+        XCTAssertEqual(
+            completedState.accounts.first(where: { $0.accountID == targetID })?.credentialPath,
+            CodexHomeDirectory.authFilePath()
+        )
         do {
             try await second.switchCredentials(for: switchEvent)
             XCTFail("Expected stale account metadata to fail closed after lock release")
         } catch {
-            XCTAssertEqual(error as? CredentialExchangeError, .liveAccountUnavailable)
+            XCTAssertEqual(error as? CredentialExchangeError, .authoritativeStateMismatch)
         }
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
+    }
+
+    @MainActor
+    func testAuthoritativeStateSafelyReconcilesFallbackAdditionAndRemoval() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let fallbackID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let completedStateStore = TestCredentialCompletedStateStore()
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: TestCredentialExchangeJournal(),
+            completedStateStore: completedStateStore,
+            transactionLock: TestCredentialExchangeProcessLock()
+        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: fallbackID)
+        try await switcher.switchCredentials(for: switchEvent)
+        try switcher.completeNotification(eventID: switchEvent.id)
+
+        accounts.addAccount(name: "New fallback", homeDirectory: "/provider/new")
+        let addedID = try XCTUnwrap(accounts.customAccounts.first(where: { $0.id != fallbackID })?.id)
+        fileOperator.seed("/provider/new/auth.json", identity: .c)
+        XCTAssertTrue(switcher.eligibility(for: .codexCli).isEligible)
+        let addedState = try XCTUnwrap(completedStateStore.state?.state(for: .codexCli))
+        XCTAssertEqual(addedState.generation, 2)
+        XCTAssertEqual(Set(addedState.accounts.map(\.accountID)), Set(accounts.enabledAccounts.map(\.id)))
+
+        XCTAssertEqual(accounts.removeAccount(id: addedID), .updated)
+        XCTAssertTrue(switcher.eligibility(for: .codexCli).isEligible)
+        let removedState = try XCTUnwrap(completedStateStore.state?.state(for: .codexCli))
+        XCTAssertEqual(removedState.generation, 3)
+        XCTAssertEqual(Set(removedState.accounts.map(\.accountID)), Set(accounts.enabledAccounts.map(\.id)))
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
+    }
+
+    @MainActor
+    func testPendingNotificationDefersSafeAccountSetReconciliationUntilAck() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let fallbackID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let journal = TestCredentialExchangeJournal()
+        let completedStateStore = TestCredentialCompletedStateStore()
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal,
+            completedStateStore: completedStateStore,
+            transactionLock: TestCredentialExchangeProcessLock()
+        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: fallbackID)
+        try await switcher.switchCredentials(for: switchEvent)
+
+        accounts.addAccount(name: "New fallback", homeDirectory: "/provider/new")
+        fileOperator.seed("/provider/new/auth.json", identity: .c)
+        XCTAssertFalse(switcher.eligibility(for: .codexCli).isEligible)
+        XCTAssertEqual(completedStateStore.state?.state(for: .codexCli)?.generation, 1)
+
+        try switcher.completeNotification(eventID: switchEvent.id)
+        let completed = try XCTUnwrap(completedStateStore.state?.state(for: .codexCli))
+        XCTAssertEqual(completed.generation, 2)
+        XCTAssertEqual(Set(completed.accounts.map(\.accountID)), Set(accounts.enabledAccounts.map(\.id)))
+        XCTAssertNil(journal.record)
         XCTAssertEqual(fileOperator.exchangeCount, 1)
     }
 
@@ -165,6 +262,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MeterBarCrashedTransactionLockTests-\(UUID().uuidString)", isDirectory: true)
         let journalURL = directory.appendingPathComponent("transaction.json")
+        let completedStateURL = directory.appendingPathComponent("completed-state.json")
         let lockURL = directory.appendingPathComponent("transaction.lock")
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let accounts = CodexAccountStore(userDefaults: defaults)
@@ -192,6 +290,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: DurableCredentialCompletedStateStore(fileURL: completedStateURL),
             transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
         )
         let holder = try SpawnedCredentialExchangeLockHolder(lockURL: lockURL)
@@ -207,6 +306,14 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         holder.terminate()
         let recoveredEvent = try await switcher.recoverPendingTransactions()
         XCTAssertEqual(recoveredEvent, pendingEvent)
+        let completedState = try XCTUnwrap(
+            DurableCredentialCompletedStateStore(fileURL: completedStateURL).load()?.state(for: .codexCli)
+        )
+        XCTAssertEqual(completedState.generation, 1)
+        XCTAssertEqual(
+            completedState.accounts.first(where: { $0.accountID == targetID })?.credentialIdentity,
+            .b
+        )
         try switcher.completeNotification(eventID: pendingEvent.id)
         XCTAssertNil(try journal.load())
     }
@@ -240,6 +347,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -273,6 +381,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: TestCredentialFileOperator(),
             journal: TestCredentialExchangeJournal(),
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock(),
             keychainItemProbe: { _ in true }
         )
@@ -299,6 +408,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: TestCredentialExchangeJournal(),
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -322,6 +432,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: TestCredentialExchangeJournal(),
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -352,6 +463,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: settings,
             fileOperator: fileOperator,
             journal: TestCredentialExchangeJournal(),
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -415,6 +527,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: settings,
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -431,6 +544,49 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         XCTAssertEqual(journal.record?.phase, .committed)
         XCTAssertEqual(journal.record?.event, switchEvent)
 
+        try switcher.completeNotification(eventID: switchEvent.id)
+        XCTAssertNil(journal.record)
+    }
+
+    @MainActor
+    func testFailedAuthoritativeStateAdvanceLeavesCommittedWALForRecovery() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let journal = TestCredentialExchangeJournal()
+        let completedStateStore = TestCredentialCompletedStateStore(failSaveAttempt: 2)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal,
+            completedStateStore: completedStateStore,
+            transactionLock: TestCredentialExchangeProcessLock()
+        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+
+        do {
+            try await switcher.switchCredentials(for: switchEvent)
+            XCTFail("Expected the authoritative state advance to fail")
+        } catch {
+            XCTAssertTrue(error is TestFailure)
+        }
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
+        XCTAssertEqual(journal.record?.phase, .committed)
+        XCTAssertEqual(completedStateStore.state?.state(for: .codexCli)?.generation, 0)
+
+        completedStateStore.failSaveAttempt = nil
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
+        XCTAssertEqual(recoveredEvent, switchEvent)
+        XCTAssertEqual(completedStateStore.state?.state(for: .codexCli)?.generation, 1)
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
         try switcher.completeNotification(eventID: switchEvent.id)
         XCTAssertNil(journal.record)
     }
@@ -481,6 +637,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: settings,
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -527,6 +684,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -594,6 +752,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -634,6 +793,36 @@ final class AccountCredentialSwitcherTests: XCTestCase {
 
         try DurableCredentialExchangeJournal(fileURL: fileURL).clear()
         XCTAssertNil(try DurableCredentialExchangeJournal(fileURL: fileURL).load())
+    }
+
+    func testDurableCompletedStateRoundTripsMetadataAcrossFreshInstances() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeterBarFailoverCompletedStateTests-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("completed-state.json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let accountID = UUID()
+        let stored = CredentialCompletedState(providers: [
+            CredentialCompletedProviderState(
+                provider: .codexCli,
+                generation: 7,
+                accounts: [
+                    CredentialCompletedAccountState(
+                        accountID: accountID,
+                        credentialLocation: "/provider/a",
+                        credentialPath: "/provider/a/auth.json",
+                        credentialIdentity: .a
+                    ),
+                ]
+            ),
+        ])
+
+        try DurableCredentialCompletedStateStore(fileURL: fileURL).save(stored)
+
+        XCTAssertEqual(try DurableCredentialCompletedStateStore(fileURL: fileURL).load(), stored)
+        let serialized = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertTrue(serialized.contains(accountID.uuidString))
+        XCTAssertFalse(serialized.contains("source-credential"))
+        XCTAssertFalse(serialized.contains("target-credential"))
     }
 
     @MainActor
@@ -677,6 +866,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: DurableCredentialExchangeJournal(fileURL: fileURL),
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -771,6 +961,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
             journal: journal,
+            completedStateStore: TestCredentialCompletedStateStore(),
             transactionLock: TestCredentialExchangeProcessLock()
         )
 
@@ -864,6 +1055,24 @@ nonisolated private final class TestCredentialExchangeJournal: CredentialExchang
     func clear() throws {
         if let clearError { throw clearError }
         record = nil
+    }
+}
+
+nonisolated private final class TestCredentialCompletedStateStore: CredentialCompletedStateStoring {
+    var state: CredentialCompletedState?
+    var failSaveAttempt: Int?
+    private(set) var saveAttempts = 0
+
+    init(failSaveAttempt: Int? = nil) {
+        self.failSaveAttempt = failSaveAttempt
+    }
+
+    func load() throws -> CredentialCompletedState? { state }
+
+    func save(_ state: CredentialCompletedState) throws {
+        saveAttempts += 1
+        if saveAttempts == failSaveAttempt { throw TestFailure.injected }
+        self.state = state
     }
 }
 

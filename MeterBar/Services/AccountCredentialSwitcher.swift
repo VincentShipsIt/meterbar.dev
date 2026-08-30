@@ -48,6 +48,7 @@ nonisolated enum CredentialExchangeError: Error, Equatable {
     case nonRegularFile
     case journalWriteFailed
     case journalAlreadyPending
+    case authoritativeStateMismatch
     case transactionLockContended
     case transactionLockUnavailable(Int32)
     case atomicExchangeFailed(Int32)
@@ -102,6 +103,49 @@ nonisolated protocol CredentialExchangeJournaling {
     func load() throws -> CredentialFileExchangeRecord?
     func save(_ record: CredentialFileExchangeRecord) throws
     func clear() throws
+}
+
+nonisolated struct CredentialCompletedAccountState: Codable, Equatable, Sendable {
+    let accountID: UUID
+    let credentialLocation: String?
+    let credentialPath: String
+    let credentialIdentity: CredentialFileIdentity
+}
+
+nonisolated struct CredentialCompletedProviderState: Codable, Equatable, Sendable {
+    let provider: AccountFailoverProvider
+    let generation: UInt64
+    let accounts: [CredentialCompletedAccountState]
+}
+
+/// Shared, secret-free authority for the last completed provider-file mapping.
+/// Unlike bundle-local UserDefaults, this file is common to release and debug
+/// builds, so a stale process cannot authorize a second exchange after WAL ack.
+nonisolated struct CredentialCompletedState: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    private(set) var providers: [CredentialCompletedProviderState]
+
+    init(providers: [CredentialCompletedProviderState] = []) {
+        schemaVersion = Self.currentSchemaVersion
+        self.providers = providers
+    }
+
+    func state(for provider: AccountFailoverProvider) -> CredentialCompletedProviderState? {
+        providers.first { $0.provider == provider }
+    }
+
+    mutating func setState(_ state: CredentialCompletedProviderState) {
+        providers.removeAll { $0.provider == state.provider }
+        providers.append(state)
+        providers.sort { $0.provider.rawValue < $1.provider.rawValue }
+    }
+}
+
+nonisolated protocol CredentialCompletedStateStoring {
+    func load() throws -> CredentialCompletedState?
+    func save(_ state: CredentialCompletedState) throws
 }
 
 /// Cross-process ownership for the WAL, provider-file exchange, recovery, and
@@ -207,7 +251,6 @@ nonisolated struct DarwinCredentialFileOperator: CredentialFileOperating {
 /// provider/account metadata, file paths, inode identities, and display-safe
 /// event metadata. Credential bytes never enter this app-owned file.
 nonisolated final class DurableCredentialExchangeJournal: CredentialExchangeJournaling {
-    private static let maximumBytes = 64 * 1024
     private let fileURL: URL
 
     init(fileURL: URL? = nil) {
@@ -215,28 +258,16 @@ nonisolated final class DurableCredentialExchangeJournal: CredentialExchangeJour
     }
 
     func load() throws -> CredentialFileExchangeRecord? {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        let data = try Data(contentsOf: fileURL)
-        guard data.count <= Self.maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
-        return try JSONDecoder().decode(CredentialFileExchangeRecord.self, from: data)
+        try DurableCredentialMetadataFile.load(CredentialFileExchangeRecord.self, from: fileURL)
     }
 
     func save(_ record: CredentialFileExchangeRecord) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(record)
-        guard data.count <= Self.maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
-        try Self.replaceDurably(data, at: fileURL)
+        try DurableCredentialMetadataFile.save(record, to: fileURL)
         guard try load() == record else { throw CredentialExchangeError.journalWriteFailed }
     }
 
     func clear() throws {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        guard unlink(fileURL.path) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
-        try Self.syncDirectory(fileURL.deletingLastPathComponent())
-        guard !FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw CredentialExchangeError.journalWriteFailed
-        }
+        try DurableCredentialMetadataFile.clear(fileURL)
     }
 
     private static func defaultFileURL() -> URL {
@@ -247,11 +278,72 @@ nonisolated final class DurableCredentialExchangeJournal: CredentialExchangeJour
             .appendingPathComponent("account-failover", isDirectory: true)
             .appendingPathComponent("transaction.json")
     }
+}
+
+nonisolated final class DurableCredentialCompletedStateStore: CredentialCompletedStateStoring {
+    private let fileURL: URL
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? Self.defaultFileURL()
+    }
+
+    func load() throws -> CredentialCompletedState? {
+        guard let state = try DurableCredentialMetadataFile.load(CredentialCompletedState.self, from: fileURL),
+              state.schemaVersion == CredentialCompletedState.currentSchemaVersion else {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                throw CredentialExchangeError.authoritativeStateMismatch
+            }
+            return nil
+        }
+        return state
+    }
+
+    func save(_ state: CredentialCompletedState) throws {
+        try DurableCredentialMetadataFile.save(state, to: fileURL)
+        guard try load() == state else { throw CredentialExchangeError.journalWriteFailed }
+    }
+
+    private static func defaultFileURL() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: "\(ServiceSupport.realHomeDirectory())/Library/Application Support")
+        return support
+            .appendingPathComponent("MeterBar", isDirectory: true)
+            .appendingPathComponent("account-failover", isDirectory: true)
+            .appendingPathComponent("completed-state.json")
+    }
+}
+
+nonisolated private enum DurableCredentialMetadataFile {
+    static let maximumBytes = 64 * 1024
+
+    static func load<Value: Decodable>(_ type: Value.Type, from fileURL: URL) throws -> Value? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        let data = try Data(contentsOf: fileURL)
+        guard data.count <= maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
+        return try JSONDecoder().decode(type, from: data)
+    }
+
+    static func save<Value: Encodable>(_ value: Value, to destination: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(value)
+        guard data.count <= maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
+        try replaceDurably(data, at: destination)
+    }
+
+    static func clear(_ fileURL: URL) throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        guard unlink(fileURL.path) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+        try syncDirectory(fileURL.deletingLastPathComponent())
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw CredentialExchangeError.journalWriteFailed
+        }
+    }
 
     private static func replaceDurably(_ data: Data, at destination: URL) throws {
         let directory = destination.deletingLastPathComponent()
         try SecureFileWriter.ensurePrivateDirectory(directory)
-        let staging = directory.appendingPathComponent(".transaction.\(UUID().uuidString).partial")
+        let staging = directory.appendingPathComponent(".credential-metadata.\(UUID().uuidString).partial")
         let descriptor = open(staging.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
         var isOpen = true
@@ -370,6 +462,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     private let failoverSettings: AccountFailoverSettingsStore
     private let fileOperator: CredentialFileOperating
     private let journal: CredentialExchangeJournaling
+    private let completedStateStore: CredentialCompletedStateStoring
     private let transactionLock: CredentialExchangeProcessLocking
     private let keychainItemProbe: (String) -> Bool
 
@@ -379,6 +472,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         failoverSettings: AccountFailoverSettingsStore? = nil,
         fileOperator: CredentialFileOperating = DarwinCredentialFileOperator(),
         journal: CredentialExchangeJournaling? = nil,
+        completedStateStore: CredentialCompletedStateStoring? = nil,
         transactionLock: CredentialExchangeProcessLocking? = nil,
         keychainItemProbe: ((String) -> Bool)? = nil
     ) {
@@ -387,6 +481,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         self.failoverSettings = failoverSettings ?? .shared
         self.fileOperator = fileOperator
         self.journal = journal ?? DurableCredentialExchangeJournal()
+        self.completedStateStore = completedStateStore ?? DurableCredentialCompletedStateStore()
         self.transactionLock = transactionLock ?? CredentialExchangeProcessLock()
         self.keychainItemProbe = keychainItemProbe ?? Self.keychainItemMayExist(service:)
     }
@@ -408,6 +503,15 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             guard Set(identities).count == identities.count else {
                 return .ineligible("Each account must use a distinct provider credential file.")
             }
+            let acquiredNow = try transactionLock.acquire()
+            defer {
+                if acquiredNow { transactionLock.release() }
+            }
+            try validateAuthoritativeState(
+                for: provider,
+                initializeIfMissing: false,
+                reconcileAccountSetChanges: try journal.load() == nil
+            )
             return .eligible
         } catch CredentialExchangeError.unsupportedCredentialLayout {
             return .ineligible(
@@ -418,6 +522,12 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             return .ineligible(
                 "Exactly one enabled account must map to the provider's live default credential path."
             )
+        } catch CredentialExchangeError.authoritativeStateMismatch {
+            return .ineligible(
+                "This MeterBar build's account mapping differs from the shared live credential state."
+            )
+        } catch CredentialExchangeError.transactionLockContended {
+            return .ineligible("Another MeterBar instance is completing an automatic account switch.")
         } catch {
             return .ineligible("Every enabled account must have a readable provider credential file.")
         }
@@ -456,10 +566,12 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try commitLogicalMapping(for: record)
             record.phase = .committed
             try journal.save(record)
+            try advanceAuthoritativeState(for: record)
             retainOwnership = true
             return record.event
         case (.committed, .swapped):
             try commitLogicalMapping(for: record)
+            try advanceAuthoritativeState(for: record)
             retainOwnership = true
             return record.event
         case (_, .inconsistent), (.committed, .original):
@@ -477,6 +589,11 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         guard try liveAccountID(for: event.provider) == event.fromAccountID else {
             throw CredentialExchangeError.liveAccountUnavailable
         }
+        try validateAuthoritativeState(
+            for: event.provider,
+            initializeIfMissing: true,
+            reconcileAccountSetChanges: true
+        )
         let locations = try credentialLocations(
             provider: event.provider,
             sourceID: event.fromAccountID,
@@ -500,6 +617,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         var committed = record
         committed.phase = .committed
         try journal.save(committed)
+        try advanceAuthoritativeState(for: committed)
         retainOwnership = true
     }
 
@@ -511,21 +629,13 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             if acquiredNow { transactionLock.release() }
             throw CredentialExchangeError.notificationEventMismatch
         }
+        try advanceAuthoritativeState(for: record)
         try journal.clear()
         transactionLock.release()
     }
 
     private func credentialAccounts(for provider: AccountFailoverProvider) throws -> [(id: UUID, path: String)] {
-        switch provider {
-        case .claudeCode:
-            return try claudeAccounts.enabledAccounts.map {
-                ($0.id, try claudeFileCredentialPath(for: $0))
-            }
-        case .codexCli:
-            return codexAccounts.enabledAccounts.map {
-                ($0.id, Self.standardized(CodexHomeDirectory.authFilePath(for: $0)))
-            }
-        }
+        try credentialAccountDescriptors(for: provider).map { ($0.id, $0.path) }
     }
 
     private func canonicalCredentialPath(for provider: AccountFailoverProvider) -> String {
@@ -627,5 +737,185 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             throw CredentialExchangeError.recoveryRequired
         }
         failoverSettings.setActiveAccountID(record.event.toAccountID, for: record.event.provider)
+    }
+
+    private func validateAuthoritativeState(
+        for provider: AccountFailoverProvider,
+        initializeIfMissing: Bool,
+        reconcileAccountSetChanges: Bool
+    ) throws {
+        let currentAccounts = try completedAccountSnapshot(for: provider)
+        var completedState = try completedStateStore.load() ?? CredentialCompletedState()
+        guard let authoritative = completedState.state(for: provider) else {
+            guard initializeIfMissing else { return }
+            completedState.setState(CredentialCompletedProviderState(
+                provider: provider,
+                generation: 0,
+                accounts: currentAccounts
+            ))
+            try completedStateStore.save(completedState)
+            return
+        }
+        guard authoritative.accounts != currentAccounts else { return }
+        guard reconcileAccountSetChanges,
+              authoritative.generation < UInt64.max,
+              accountSetChangeIsSafe(from: authoritative.accounts, to: currentAccounts) else {
+            throw CredentialExchangeError.authoritativeStateMismatch
+        }
+        completedState.setState(CredentialCompletedProviderState(
+            provider: provider,
+            generation: authoritative.generation + 1,
+            accounts: currentAccounts
+        ))
+        try completedStateStore.save(completedState)
+    }
+
+    private func advanceAuthoritativeState(for record: CredentialFileExchangeRecord) throws {
+        let currentAccounts = try completedAccountSnapshot(for: record.event.provider)
+        var completedState = try completedStateStore.load() ?? CredentialCompletedState()
+        guard let authoritative = completedState.state(for: record.event.provider) else {
+            guard transitionMatches(record: record, before: nil, after: currentAccounts) else {
+                throw CredentialExchangeError.authoritativeStateMismatch
+            }
+            completedState.setState(CredentialCompletedProviderState(
+                provider: record.event.provider,
+                generation: 1,
+                accounts: currentAccounts
+            ))
+            try completedStateStore.save(completedState)
+            return
+        }
+        if authoritative.accounts == currentAccounts {
+            guard transitionMatches(record: record, before: nil, after: currentAccounts) else {
+                throw CredentialExchangeError.authoritativeStateMismatch
+            }
+            return
+        }
+        if transitionMatches(record: record, before: nil, after: authoritative.accounts),
+           authoritative.generation < UInt64.max,
+           accountSetChangeIsSafe(from: authoritative.accounts, to: currentAccounts) {
+            completedState.setState(CredentialCompletedProviderState(
+                provider: record.event.provider,
+                generation: authoritative.generation + 1,
+                accounts: currentAccounts
+            ))
+            try completedStateStore.save(completedState)
+            return
+        }
+        guard authoritative.generation < UInt64.max,
+              transitionMatches(record: record, before: authoritative.accounts, after: currentAccounts) else {
+            throw CredentialExchangeError.authoritativeStateMismatch
+        }
+        completedState.setState(CredentialCompletedProviderState(
+            provider: record.event.provider,
+            generation: authoritative.generation + 1,
+            accounts: currentAccounts
+        ))
+        try completedStateStore.save(completedState)
+    }
+
+    private func completedAccountSnapshot(
+        for provider: AccountFailoverProvider
+    ) throws -> [CredentialCompletedAccountState] {
+        let descriptors = try credentialAccountDescriptors(for: provider)
+        guard Set(descriptors.map(\.path)).count == descriptors.count else {
+            throw CredentialExchangeError.sameLocation
+        }
+        let accounts = try descriptors.map { descriptor in
+            CredentialCompletedAccountState(
+                accountID: descriptor.id,
+                credentialLocation: descriptor.location,
+                credentialPath: descriptor.path,
+                credentialIdentity: try fileOperator.identity(at: descriptor.path)
+            )
+        }
+        guard Set(accounts.map(\.credentialIdentity)).count == accounts.count else {
+            throw CredentialExchangeError.duplicateCredentialIdentity
+        }
+        guard Set(accounts.map(\.credentialIdentity.device)).count == 1 else {
+            throw CredentialExchangeError.crossVolume
+        }
+        return accounts.sorted { $0.accountID.uuidString < $1.accountID.uuidString }
+    }
+
+    private func credentialAccountDescriptors(
+        for provider: AccountFailoverProvider
+    ) throws -> [(id: UUID, location: String?, path: String)] {
+        switch provider {
+        case .claudeCode:
+            return try claudeAccounts.enabledAccounts.map {
+                ($0.id, $0.configDirectory, try claudeFileCredentialPath(for: $0))
+            }
+        case .codexCli:
+            return codexAccounts.enabledAccounts.map {
+                ($0.id, $0.homeDirectory, Self.standardized(CodexHomeDirectory.authFilePath(for: $0)))
+            }
+        }
+    }
+
+    private func transitionMatches(
+        record: CredentialFileExchangeRecord,
+        before: [CredentialCompletedAccountState]?,
+        after: [CredentialCompletedAccountState]
+    ) -> Bool {
+        let expectedAfter = [
+            record.event.fromAccountID: CredentialCompletedAccountState(
+                accountID: record.event.fromAccountID,
+                credentialLocation: record.targetCredentialLocation,
+                credentialPath: record.targetPath,
+                credentialIdentity: record.sourceIdentity
+            ),
+            record.event.toAccountID: CredentialCompletedAccountState(
+                accountID: record.event.toAccountID,
+                credentialLocation: record.sourceCredentialLocation,
+                credentialPath: record.sourcePath,
+                credentialIdentity: record.targetIdentity
+            ),
+        ]
+        let afterByID = Dictionary(uniqueKeysWithValues: after.map { ($0.accountID, $0) })
+        guard expectedAfter.allSatisfy({ afterByID[$0.key] == $0.value }) else { return false }
+        guard let before else { return true }
+        let expectedBefore = [
+            record.event.fromAccountID: CredentialCompletedAccountState(
+                accountID: record.event.fromAccountID,
+                credentialLocation: record.sourceCredentialLocation,
+                credentialPath: record.sourcePath,
+                credentialIdentity: record.sourceIdentity
+            ),
+            record.event.toAccountID: CredentialCompletedAccountState(
+                accountID: record.event.toAccountID,
+                credentialLocation: record.targetCredentialLocation,
+                credentialPath: record.targetPath,
+                credentialIdentity: record.targetIdentity
+            ),
+        ]
+        let beforeByID = Dictionary(uniqueKeysWithValues: before.map { ($0.accountID, $0) })
+        guard expectedBefore.allSatisfy({ beforeByID[$0.key] == $0.value }) else { return false }
+        let transactionIDs = Set(expectedBefore.keys)
+        let beforeOtherIDs = Set(beforeByID.keys).subtracting(transactionIDs)
+        let afterOtherIDs = Set(afterByID.keys).subtracting(transactionIDs)
+        guard beforeOtherIDs.isSubset(of: afterOtherIDs) || afterOtherIDs.isSubset(of: beforeOtherIDs) else {
+            return false
+        }
+        return beforeOtherIDs.intersection(afterOtherIDs).allSatisfy {
+            beforeByID[$0] == afterByID[$0]
+        }
+    }
+
+    private func accountSetChangeIsSafe(
+        from authoritative: [CredentialCompletedAccountState],
+        to current: [CredentialCompletedAccountState]
+    ) -> Bool {
+        let authoritativeByID = Dictionary(uniqueKeysWithValues: authoritative.map { ($0.accountID, $0) })
+        let currentByID = Dictionary(uniqueKeysWithValues: current.map { ($0.accountID, $0) })
+        let authoritativeIDs = Set(authoritativeByID.keys)
+        let currentIDs = Set(currentByID.keys)
+        guard authoritativeIDs != currentIDs,
+              authoritativeIDs.isSubset(of: currentIDs) || currentIDs.isSubset(of: authoritativeIDs) else {
+            return false
+        }
+        return authoritativeIDs.intersection(currentIDs).allSatisfy {
+            authoritativeByID[$0] == currentByID[$0]
+        }
     }
 }
