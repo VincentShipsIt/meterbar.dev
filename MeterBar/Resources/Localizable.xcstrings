@@ -1,6 +1,83 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "optimize.cost_tier.high": {
+      "comment": "VoiceOver description for a three-dollar-sign model cost marker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High-cost model"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.high_plural": {
+      "comment": "VoiceOver description replacing a three-dollar-sign marker before the plural word models.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High-cost models"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.low": {
+      "comment": "VoiceOver description for a one-dollar-sign model cost marker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low-cost model"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.low_plural": {
+      "comment": "VoiceOver description replacing a one-dollar-sign marker before the plural word models.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low-cost models"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.mid": {
+      "comment": "VoiceOver description for a two-dollar-sign model cost marker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mid-cost model"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.mid_plural": {
+      "comment": "VoiceOver description replacing a two-dollar-sign marker before the plural word models.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mid-cost models"
+          }
+        }
+      }
+    },
+    "optimize.cost_tier.unknown": {
+      "comment": "VoiceOver description when a model cost tier cannot be classified.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown cost tier"
+          }
+        }
+      }
+    },
     "burndown.countdown": {
       "localizations": {
         "en": {

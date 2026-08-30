@@ -258,6 +258,7 @@ struct OptimizeInsightsView: View {
         value: insights.formattedPremiumShare,
         caption: "tokens routed to high-cost models",
         systemImage: "bolt.fill",
+        accessibilityTitle: ModelTier.premium.costAccessibilityLabel,
         indicatorTint: Self.shareTint(insights.premiumTokenShare)
       )
       DashboardMetricTile(
@@ -717,8 +718,11 @@ private struct ShareBar: View {
 
 // MARK: - Recommendation row
 
-private struct RecommendationRow: View {
+struct RecommendationRow: View {
   let recommendation: OptimizationRecommendation
+
+  var accessibilityLabelText: String { recommendation.title }
+  var accessibilityValueText: String { recommendation.accessibilityDetail }
 
   var body: some View {
     HStack(alignment: .top, spacing: 10) {
@@ -739,6 +743,9 @@ private struct RecommendationRow: View {
 
       Spacer(minLength: 0)
     }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabelText)
+    .accessibilityValue(accessibilityValueText)
   }
 
   private var severityColor: Color {
