@@ -577,6 +577,56 @@ final class DashboardSectionSplitTests: XCTestCase {
         )
     }
 
+    // MARK: - Share JSON export
+
+    /// The dashboard's JSON export must be the same versioned document the
+    /// bundled CLI prints for `meterbar cost --json` — one schema, one set of
+    /// consumers, no dashboard-only dialect to document or drift.
+    func testCostJSONExportEmitsTheVersionedCLIDocument() throws {
+        let referenceDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let cost = TokenCost(
+            provider: .codexCli,
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheCreationTokens: 50,
+            cacheReadTokens: 500,
+            estimatedCostUSD: 1.25,
+            sessionCount: 3,
+            periodStart: referenceDate.addingTimeInterval(-86_400),
+            periodEnd: referenceDate
+        )
+        let summary = CostSummary(
+            costs: [cost],
+            totalCostUSD: 1.25,
+            totalTokens: 1_800,
+            periodDays: 30
+        )
+
+        let exported = try XCTUnwrap(
+            DashboardShareSection.costJSON(summary: summary, lastScanDate: referenceDate)
+        )
+        let expected = try CostCLIJSONResponse(
+            cache: CostSummaryCache(summary: summary, lastScanDate: referenceDate)
+        ).jsonString()
+
+        XCTAssertEqual(exported, expected)
+        XCTAssertTrue(
+            exported.contains("\"schemaVersion\" : 1"),
+            "the export must carry the CLI contract's version marker"
+        )
+    }
+
+    /// Same UTC stamp convention as the PNG card, so a folder of exports sorts
+    /// chronologically regardless of which button produced each file.
+    func testCostJSONFilenameUsesTheSharedUTCStamp() {
+        XCTAssertEqual(
+            DashboardShareSection.costJSONFilename(
+                generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            "meterbar-cost-20231114-221320.json"
+        )
+    }
+
     // MARK: - Extracted section views still render
 
     func testOverviewSectionRenders() {

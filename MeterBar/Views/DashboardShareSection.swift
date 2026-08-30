@@ -80,6 +80,21 @@ struct DashboardShareSection: View {
         isRefreshInProgress ? "\(status) — totals still updating" : status
     }
 
+    /// The machine-readable export is the same versioned document the bundled
+    /// CLI prints for `meterbar cost --json` — one schema, one contract
+    /// (docs/cli-json-schema.md), no dashboard-only dialect to keep in sync.
+    static func costJSON(summary: CostSummary, lastScanDate: Date) -> String? {
+        try? CostCLIJSONResponse(
+            cache: CostSummaryCache(summary: summary, lastScanDate: lastScanDate)
+        ).jsonString()
+    }
+
+    /// Same UTC stamp as the PNG card's filename, so a folder of exports sorts
+    /// chronologically regardless of which button produced each file.
+    static func costJSONFilename(generatedAt: Date) -> String {
+        "meterbar-cost-\(SocialShareCardDateFormat.filename(generatedAt)).json"
+    }
+
     var body: some View {
         let previewSize = SocialShareCardLayout.previewSize(
             viewportWidth: viewportWidth,
@@ -124,6 +139,22 @@ struct DashboardShareSection: View {
                             Label("Copy Caption", systemImage: "text.quote")
                         }
                         .buttonStyle(.bordered)
+
+                        Button {
+                            copyCostJSON()
+                        } label: {
+                            Label("Copy JSON", systemImage: "curlybraces")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(costSummary == nil)
+
+                        Button {
+                            saveCostJSON()
+                        } label: {
+                            Label("Save JSON", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(costSummary == nil)
 
                         if costSummary?.dailyUsage.isEmpty ?? true {
                             Button {
@@ -230,6 +261,60 @@ struct DashboardShareSection: View {
                 setShareStatus("Save failed")
             }
         }
+    }
+
+    private func copyCostJSON() {
+        guard let json = exportableCostJSON() else { return }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.setString(json, forType: .string) {
+            setExportStatus("JSON copied")
+        } else {
+            setShareStatus("Copy failed")
+        }
+    }
+
+    private func saveCostJSON() {
+        // Same capture as the PNG save: the bytes are built now, so the caveat
+        // must describe the totals in this document, not the tracker's state
+        // once the panel closes.
+        let wasRefreshInProgress = costTracker.isRefreshInProgress
+        guard let json = exportableCostJSON() else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = Self.costJSONFilename(generatedAt: Date())
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                // Deliberately not routed through `SecureFileWriter` for the
+                // same reason as the PNG save: a user-picked share destination
+                // wants normal umask semantics, not owner-only app state.
+                try Data(json.utf8).write(to: url, options: .atomic)
+                setShareStatus(
+                    Self.exportStatus("JSON saved", isRefreshInProgress: wasRefreshInProgress)
+                )
+            } catch {
+                setShareStatus("Save failed")
+            }
+        }
+    }
+
+    /// The buttons are disabled without a summary, so the only reachable
+    /// failure here is the encoder itself.
+    private func exportableCostJSON() -> String? {
+        guard let costSummary,
+              let json = Self.costJSON(
+                  summary: costSummary,
+                  lastScanDate: costTracker.lastScanDate ?? Date()
+              )
+        else {
+            setShareStatus("JSON export failed")
+            return nil
+        }
+        return json
     }
 
     private func copyCaption() {

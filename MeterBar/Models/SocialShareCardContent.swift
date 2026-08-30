@@ -208,7 +208,9 @@ struct SocialShareUsageTier: Equatable {
 
 // MARK: - SocialShareCardDateFormat
 
-private enum SocialShareCardDateFormat {
+/// Internal (not file-private) because the dashboard's JSON export stamps its
+/// filename with the same UTC formatter, so both artifacts sort together.
+enum SocialShareCardDateFormat {
     // MARK: Internal
 
     static func filename(_ date: Date) -> String {
