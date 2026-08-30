@@ -49,6 +49,15 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(icon.size, MenuBarIconRenderer.iconSize)
     }
 
+    func testStayAwakeIndicatorAddsAVisibleTemplateBadge() {
+        let base = MenuBarIconRenderer.meterIcon()
+        let indicated = MenuBarIconRenderer.stayAwakeIndicator(baseImage: base)
+
+        XCTAssertGreaterThan(indicated.size.width, base.size.width)
+        XCTAssertEqual(indicated.size.height, MenuBarIconRenderer.iconSize.height)
+        XCTAssertTrue(indicated.isTemplate)
+    }
+
     // MARK: - StatusMenuBuilder
 
     func testStatusMenuHasDockDashboardStatusAndQuitItems() {

@@ -127,6 +127,9 @@ struct MenuBarView: View {
             showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
           )
 
+          Divider()
+          StayAwakeMenuControl()
+
           if SessionWakeMenuControl.shouldShow(
             featureEnabled: sessionWakeStore.featureEnabled,
             isOn: sessionWakeStore.isOn,
