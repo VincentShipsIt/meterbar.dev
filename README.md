@@ -226,7 +226,9 @@ Codex, the session window is primary when present, otherwise the provider's
 weekly `primary_window` is used. Notification authorization is required before
 a new automatic switch. Each successful switch posts a stable-id macOS
 notification, and the live profile is marked in the menu-bar popover and
-provider settings.
+provider settings. Account-switch delivery to Event Integrations is explicitly
+deferred and is not part of fallback-account acceptance; fallback switching
+does not invoke the local-command or webhook lanes.
 Automatic switching is available only when every enabled profile uses a
 provider-owned credential file on the same volume. MeterBar exchanges those
 files with macOS's atomic `RENAME_SWAP` operation, verifies the inode mapping,

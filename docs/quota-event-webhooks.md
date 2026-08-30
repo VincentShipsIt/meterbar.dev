@@ -57,6 +57,9 @@ MeterBar derives events from its shared quota bands:
 Automatic account-switch notifications are not quota transitions and are not
 part of the version 1 webhook or local-command contract. Enabling fallback
 accounts does not send account names, ids, or switch reasons to integrations.
+Account-switch integration delivery is explicitly deferred and is not an
+acceptance requirement for fallback accounts. Successful switches remain
+user-visible through the macOS notification and live-account UI state.
 
 Each provider/account/window is tracked independently. Claude Code, Codex CLI,
 and Grok evaluate every enabled profile on its own. A provider-wide `Grok` /
