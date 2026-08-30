@@ -160,6 +160,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     case widget = "Widget"
     case apiUsage = "API Usage"
     case cost = "Cost"
+    case iCloud = "iCloud"
     case automation = "Automation"
     case about = "About"
 
@@ -172,6 +173,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .widget: return "rectangle.3.group"
         case .apiUsage: return "key"
         case .cost: return "chart.bar"
+        case .iCloud: return "icloud"
         case .automation: return "moon.zzz"
         case .about: return "info.circle"
         }

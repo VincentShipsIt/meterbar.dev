@@ -202,6 +202,11 @@
 					};
 					52CFA4FF2F0323EF0036036C = {
 						CreatedOnToolsVersion = 26.2;
+						SystemCapabilities = {
+							com.apple.iCloud = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};

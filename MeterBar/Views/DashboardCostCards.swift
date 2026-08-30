@@ -362,6 +362,8 @@ struct ProviderCostBreakdown: View {
   var window: ProviderDailyTotal?
   /// Caption naming the window the figures cover, shown only when windowed.
   var windowSubtitle: String?
+  /// Installations whose daily records contributed to this aggregate card.
+  var contributingDeviceNames: [String] = []
 
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
@@ -394,6 +396,10 @@ struct ProviderCostBreakdown: View {
           )
           if let windowSubtitle {
             DashboardCardCaption(text: windowSubtitle)
+          }
+          if !contributingDeviceNames.isEmpty {
+            DashboardCardCaption(text: contributingDeviceNames.joined(separator: ", "))
+              .help("Contributing Macs")
           }
           Spacer()
           Text(formattedCost)

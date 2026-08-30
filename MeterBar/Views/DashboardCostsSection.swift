@@ -11,6 +11,8 @@ struct DashboardCostsSection: View {
 
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var apiUsageStore = ApiUsageStore.shared
+    @StateObject private var iCloudSettings = ICloudUsageSettingsStore.shared
+    @StateObject private var iCloudAggregation = ICloudUsageAggregationService.shared
 
     /// The page-wide 7/30-day reporting window. Presentation-only: both windows
     /// are cut from the same cached 30-day scan, so flipping never rescans —
@@ -104,7 +106,8 @@ struct DashboardCostsSection: View {
                             cost: cost,
                             quotaSnapshot: quotaSnapshot(cost.provider),
                             window: providerWindow,
-                            windowSubtitle: providerWindow != nil ? windowSelection.subtitle : nil
+                            windowSubtitle: providerWindow != nil ? windowSelection.subtitle : nil,
+                            contributingDeviceNames: contributingDeviceNames(for: cost.provider)
                         )
                     }
                 }
@@ -138,6 +141,16 @@ struct DashboardCostsSection: View {
     /// surface below always reports the same days.
     private var windowPicker: some View {
         HStack {
+            if iCloudSettings.isEnabled {
+                Toggle("All Macs", isOn: Binding(
+                    get: { iCloudSettings.showsAllMacs },
+                    set: { iCloudSettings.setShowsAllMacs($0) }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(iCloudAggregation.aggregate == nil)
+                .help("Combine compact daily usage rollups from your iCloud devices")
+            }
             Spacer()
             Picker("Reporting window", selection: $costsWindowDays) {
                 ForEach(CostWindowSelection.allCases) { window in
@@ -149,6 +162,13 @@ struct DashboardCostsSection: View {
             .fixedSize()
             .accessibilityLabel("Reporting window")
         }
+    }
+
+    private func contributingDeviceNames(for provider: ServiceType) -> [String] {
+        guard iCloudSettings.showsAllMacs else { return [] }
+        return iCloudAggregation.aggregate?
+            .contributingDevices(for: provider)
+            .map(\.name) ?? []
     }
 
     private var costTrendCard: some View {

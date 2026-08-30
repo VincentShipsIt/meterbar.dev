@@ -25,6 +25,8 @@ struct UsageDashboardView: View {
     @StateObject private var navigation = DashboardNavigationStore.shared
     @StateObject private var sessionWakeStore = SessionWakeSettingsStore.shared
     @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
+    @StateObject private var iCloudSettings = ICloudUsageSettingsStore.shared
+    @StateObject private var iCloudAggregation = ICloudUsageAggregationService.shared
 
     /// Owned by the shell rather than the Share page because the toolbar's
     /// Refresh also re-stamps the card.
@@ -58,6 +60,7 @@ struct UsageDashboardView: View {
         dashboardSplitView
         .task {
             await refreshCostsIfMissingDays()
+            await syncICloudUsage()
         }
         .onChange(of: navigation.selectedSection) {
             Task { await refreshCostsIfMissingDays() }
@@ -340,6 +343,8 @@ struct UsageDashboardView: View {
             ApiUsageSettingsView()
         case .cost:
             CostSettingsView()
+        case .iCloud:
+            ICloudUsageSettingsView()
         case .automation:
             SessionWakeSettingsView()
         case .about:
@@ -385,7 +390,12 @@ struct UsageDashboardView: View {
     }
 
     private var visibleCostSummary: CostSummary? {
-        costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
+        if iCloudSettings.isEnabled,
+           iCloudSettings.showsAllMacs,
+           let aggregate = iCloudAggregation.aggregate?.costSummary {
+            return aggregate.filtered(to: providerVisibility.enabledServices)
+        }
+        return costTracker.costSummary?.filtered(to: providerVisibility.enabledServices)
     }
 
     private var tightestLimit: SnapshotLimit? {
@@ -429,10 +439,19 @@ struct UsageDashboardView: View {
         case .usage:
             await dataManager.refreshForExplicitAction(.manualRefresh)
         }
+        await syncICloudUsage()
     }
 
     private func refreshCostsIfMissingDays() async {
         guard activeSection.refreshTarget == .costs else { return }
         await costTracker.refreshMissingDaysInBackground(days: 30)
+    }
+
+    private func syncICloudUsage() async {
+        let quotas = allProviderSnapshots.compactMap(ICloudQuotaSnapshot.init(snapshot:))
+        await iCloudAggregation.sync(
+            localSummary: costTracker.costSummary,
+            quotaSnapshots: quotas
+        )
     }
 }
