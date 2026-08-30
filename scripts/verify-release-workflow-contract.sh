@@ -240,6 +240,8 @@ for required_profile_validator_token in (
 for required_sign_release_token in (
     'security cms -D -i "$embedded_profile"',
     "scripts/verify-cloudkit-provisioning-profile.sh",
+    "scripts/prepare-cloudkit-release-entitlements.sh",
+    'sign_code "$app_path" --entitlements "$signed_app_entitlements"',
     '"$signing_identity"',
 ):
     if required_sign_release_token not in sign_release:
@@ -253,6 +255,9 @@ for required_profile_test_token in (
     "matching_fingerprint",
     "mismatched_fingerprint",
     "accepted a different Developer ID certificate",
+    "com.apple.application-identifier",
+    "com.apple.developer.icloud-container-environment",
+    "CloudKit release entitlement preparation accepted the Development environment",
 ):
     if required_profile_test_token not in cloudkit_profile_test:
         raise SystemExit(
