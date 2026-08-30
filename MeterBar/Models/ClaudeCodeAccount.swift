@@ -89,6 +89,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let refreshConfigurationDirectory: URL?
+    private let credentialPersistenceBarrier: (UserDefaults) -> Bool
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
     private let defaultConfigDirectoryStorageKey = StorageKeys.claudeCodeDefaultConfigDirectory
@@ -110,10 +111,15 @@ final class ClaudeCodeAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        refreshConfigurationDirectory: URL? = nil,
+        credentialPersistenceBarrier: ((UserDefaults) -> Bool)? = nil
+    ) {
         self.userDefaults = userDefaults
         self.refreshConfigurationDirectory = refreshConfigurationDirectory
             ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
+        self.credentialPersistenceBarrier = credentialPersistenceBarrier ?? { $0.synchronize() }
         load()
         persistRefreshConfiguration()
     }
@@ -122,6 +128,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     init(accounts: [ClaudeCodeAccount]) {
         userDefaults = .standard
         refreshConfigurationDirectory = nil
+        credentialPersistenceBarrier = { _ in false }
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
         defaultAccountConfigDirectory = defaultAccount.configDirectory
@@ -241,6 +248,78 @@ final class ClaudeCodeAccountStore: ObservableObject {
         saveAccountOrder()
     }
 
+    /// Keeps logical account identity attached to its credential after the
+    /// provider-native stores exchange payloads. `nil` means the CLI's live
+    /// default location, and is valid for either logical profile after a swap.
+    @discardableResult
+    func exchangeCredentialLocations(
+        from sourceID: UUID,
+        to targetID: UUID,
+        expectedSource: String?,
+        expectedTarget: String?
+    ) -> Bool {
+        guard sourceID != targetID,
+              let source = accounts.first(where: { $0.id == sourceID }),
+              let target = accounts.first(where: { $0.id == targetID }),
+              source.configDirectory == expectedSource || source.configDirectory == expectedTarget,
+              target.configDirectory == expectedTarget || target.configDirectory == expectedSource else {
+            return false
+        }
+        setCredentialLocation(expectedTarget, for: sourceID)
+        setCredentialLocation(expectedSource, for: targetID)
+        saveDefaultAccountConfigDirectory()
+        saveCustomAccounts()
+        guard credentialPersistenceBarrier(userDefaults) else { return false }
+        return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
+            && persistedCredentialLocationMatches(expectedSource, for: targetID)
+    }
+
+    private func setCredentialLocation(_ configDirectory: String?, for id: UUID) {
+        if id == ClaudeCodeAccount.defaultID {
+            defaultAccountConfigDirectory = configDirectory
+            return
+        }
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
+        var updated = customAccounts
+        updated[index].configDirectory = configDirectory
+        customAccounts = updated
+    }
+
+    private func persistedCredentialLocationMatches(_ expected: String?, for id: UUID) -> Bool {
+        if id == ClaudeCodeAccount.defaultID {
+            return userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == expected
+        }
+        guard let data = userDefaults.data(forKey: storageKey),
+              let persisted = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data),
+              let account = persisted.first(where: { $0.id == id }) else {
+            return false
+        }
+        return account.configDirectory == expected
+    }
+
+    func credentialLocationsMatchPersistedState() -> Bool {
+        _ = userDefaults.synchronize()
+        guard userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == defaultAccountConfigDirectory else {
+            return false
+        }
+        let persisted: [ClaudeCodeAccount]
+        if let data = userDefaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data) {
+            persisted = decoded.filter { !$0.isDefault }
+        } else {
+            persisted = []
+        }
+        let persistedIDs = persisted.map(\.id)
+        let currentIDs = customAccounts.map(\.id)
+        guard Set(persistedIDs).count == persistedIDs.count,
+              Set(currentIDs).count == currentIDs.count,
+              Set(persistedIDs) == Set(currentIDs) else {
+            return false
+        }
+        let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.configDirectory) })
+        return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.configDirectory }
+    }
+
     private func load() {
         let storedDefaultName = userDefaults.string(forKey: defaultNameStorageKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -321,12 +400,20 @@ final class ClaudeCodeAccountStore: ObservableObject {
     }
 
     private func orderedAccounts(from unorderedAccounts: [ClaudeCodeAccount]) -> [ClaudeCodeAccount] {
-        guard !accountOrder.isEmpty else { return unorderedAccounts }
+        var accountsByID: [UUID: ClaudeCodeAccount] = [:]
+        let uniqueAccounts = unorderedAccounts.filter { account in
+            guard accountsByID[account.id] == nil else { return false }
+            accountsByID[account.id] = account
+            return true
+        }
+        guard !accountOrder.isEmpty else { return uniqueAccounts }
 
-        let accountsByID = Dictionary(uniqueKeysWithValues: unorderedAccounts.map { ($0.id, $0) })
-        let ordered = accountOrder.compactMap { accountsByID[$0] }
-        let orderedIDs = Set(ordered.map(\.id))
-        let unordered = unorderedAccounts.filter { !orderedIDs.contains($0.id) }
+        var orderedIDs = Set<UUID>()
+        let ordered = accountOrder.compactMap { id -> ClaudeCodeAccount? in
+            guard let account = accountsByID[id], orderedIDs.insert(id).inserted else { return nil }
+            return account
+        }
+        let unordered = uniqueAccounts.filter { !orderedIDs.contains($0.id) }
         return ordered + unordered
     }
 

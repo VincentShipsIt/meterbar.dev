@@ -60,6 +60,7 @@ final class CodexAccountStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let refreshConfigurationDirectory: URL?
+    private let credentialPersistenceBarrier: (UserDefaults) -> Bool
 
     var accounts: [CodexAccount] {
         orderedAccounts(from: [
@@ -76,10 +77,15 @@ final class CodexAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        refreshConfigurationDirectory: URL? = nil,
+        credentialPersistenceBarrier: ((UserDefaults) -> Bool)? = nil
+    ) {
         self.userDefaults = userDefaults
         self.refreshConfigurationDirectory = refreshConfigurationDirectory
             ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
+        self.credentialPersistenceBarrier = credentialPersistenceBarrier ?? { $0.synchronize() }
         load()
         persistRefreshConfiguration()
     }
@@ -88,6 +94,7 @@ final class CodexAccountStore: ObservableObject {
     init(accounts: [CodexAccount]) {
         userDefaults = .standard
         refreshConfigurationDirectory = nil
+        credentialPersistenceBarrier = { _ in false }
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
         defaultAccountHomeDirectory = defaultAccount.homeDirectory
@@ -228,6 +235,77 @@ final class CodexAccountStore: ObservableObject {
         saveAccountOrder()
     }
 
+    /// Keeps each account UUID/name paired with its credential after the two
+    /// provider-owned auth.json locations exchange payloads.
+    @discardableResult
+    func exchangeCredentialLocations(
+        from sourceID: UUID,
+        to targetID: UUID,
+        expectedSource: String?,
+        expectedTarget: String?
+    ) -> Bool {
+        guard sourceID != targetID,
+              let source = accounts.first(where: { $0.id == sourceID }),
+              let target = accounts.first(where: { $0.id == targetID }),
+              source.homeDirectory == expectedSource || source.homeDirectory == expectedTarget,
+              target.homeDirectory == expectedTarget || target.homeDirectory == expectedSource else {
+            return false
+        }
+        setCredentialLocation(expectedTarget, for: sourceID)
+        setCredentialLocation(expectedSource, for: targetID)
+        saveDefaultAccountHomeDirectory()
+        saveCustomAccounts()
+        guard credentialPersistenceBarrier(userDefaults) else { return false }
+        return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
+            && persistedCredentialLocationMatches(expectedSource, for: targetID)
+    }
+
+    private func setCredentialLocation(_ homeDirectory: String?, for id: UUID) {
+        if id == CodexAccount.defaultID {
+            defaultAccountHomeDirectory = homeDirectory
+            return
+        }
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
+        var updated = customAccounts
+        updated[index].homeDirectory = homeDirectory
+        customAccounts = updated
+    }
+
+    private func persistedCredentialLocationMatches(_ expected: String?, for id: UUID) -> Bool {
+        if id == CodexAccount.defaultID {
+            return userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory) == expected
+        }
+        guard let data = userDefaults.data(forKey: StorageKeys.codexCustomAccounts),
+              let persisted = try? JSONDecoder().decode([CodexAccount].self, from: data),
+              let account = persisted.first(where: { $0.id == id }) else {
+            return false
+        }
+        return account.homeDirectory == expected
+    }
+
+    func credentialLocationsMatchPersistedState() -> Bool {
+        _ = userDefaults.synchronize()
+        guard userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory) == defaultAccountHomeDirectory else {
+            return false
+        }
+        let persisted: [CodexAccount]
+        if let data = userDefaults.data(forKey: StorageKeys.codexCustomAccounts),
+           let decoded = try? JSONDecoder().decode([CodexAccount].self, from: data) {
+            persisted = decoded.filter { !$0.isDefault }
+        } else {
+            persisted = []
+        }
+        let persistedIDs = persisted.map(\.id)
+        let currentIDs = customAccounts.map(\.id)
+        guard Set(persistedIDs).count == persistedIDs.count,
+              Set(currentIDs).count == currentIDs.count,
+              Set(persistedIDs) == Set(currentIDs) else {
+            return false
+        }
+        let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.homeDirectory) })
+        return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.homeDirectory }
+    }
+
     private func load() {
         if let name = userDefaults.string(forKey: StorageKeys.codexDefaultAccountName)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
@@ -301,11 +379,20 @@ final class CodexAccountStore: ObservableObject {
     }
 
     private func orderedAccounts(from unordered: [CodexAccount]) -> [CodexAccount] {
-        guard !accountOrder.isEmpty else { return unordered }
-        let byID = Dictionary(uniqueKeysWithValues: unordered.map { ($0.id, $0) })
-        let ordered = accountOrder.compactMap { byID[$0] }
-        let orderedIDs = Set(ordered.map(\.id))
-        return ordered + unordered.filter { !orderedIDs.contains($0.id) }
+        var accountsByID: [UUID: CodexAccount] = [:]
+        let uniqueAccounts = unordered.filter { account in
+            guard accountsByID[account.id] == nil else { return false }
+            accountsByID[account.id] = account
+            return true
+        }
+        guard !accountOrder.isEmpty else { return uniqueAccounts }
+
+        var orderedIDs = Set<UUID>()
+        let ordered = accountOrder.compactMap { id -> CodexAccount? in
+            guard let account = accountsByID[id], orderedIDs.insert(id).inserted else { return nil }
+            return account
+        }
+        return ordered + uniqueAccounts.filter { !orderedIDs.contains($0.id) }
     }
 
     private func pruneAccountOrder() {

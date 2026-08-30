@@ -20,6 +20,7 @@ struct ProviderStatusCard: View {
     @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var grokAccounts = GrokAccountStore.shared
     @StateObject private var dataManager = UsageDataManager.shared
+    @StateObject private var failoverSettings = AccountFailoverSettingsStore.shared
     // Session-scoped rather than per-card `@State`: this card's identity is not
     // stable across dashboard re-deals, and losing the record re-offers a credit
     // that was already spent.
@@ -51,6 +52,15 @@ struct ProviderStatusCard: View {
     /// header can be asserted equal to it.
     var headerContent: ProviderCardHeader.Content {
         ProviderCardHeader.Content(snapshot: snapshot)
+    }
+
+    private var isLiveAccount: Bool {
+        guard snapshot.isAccountCard,
+              let accountID = snapshot.accountID,
+              let provider = AccountFailoverProvider(service: snapshot.service) else {
+            return false
+        }
+        return failoverSettings.activeAccountIDs[provider] == accountID
     }
 
     /// Cards without usage data and exhausted cards are terminal summaries. A
@@ -136,6 +146,9 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
+            if isLiveAccount {
+                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+            }
             ProviderCardStatusLabel(snapshot: snapshot)
         }
     }
@@ -152,6 +165,9 @@ struct ProviderStatusCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer(minLength: 8)
+            if isLiveAccount {
+                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+            }
             ProviderCardStatusLabel(snapshot: snapshot)
         }
         .help("\(snapshot.updatedText) — log in to resume tracking")
@@ -166,6 +182,7 @@ struct ProviderStatusCard: View {
                 snapshot: snapshot,
                 density: .popoverCard,
                 showsTitle: true,
+                showsLiveAccount: isLiveAccount,
                 resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
             )
 
@@ -202,7 +219,11 @@ struct ProviderStatusCard: View {
             // Active providers keep status beside their identity. Terminal
             // summaries (Out, Offline, login required) use the compact card
             // branches above, where centering against the whole row is useful.
-            ProviderCardHeader(snapshot: snapshot, showsDisclosureChevron: allowsDetailNavigation)
+            ProviderCardHeader(
+                snapshot: snapshot,
+                showsDisclosureChevron: allowsDetailNavigation,
+                showsLiveAccount: isLiveAccount
+            )
 
             if snapshot.hasExhaustedLimit {
                 BlockingLimitResetCounter(

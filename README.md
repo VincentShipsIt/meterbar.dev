@@ -52,6 +52,7 @@ by itself once a limit resets.
 ### Automation
 
 - **Session Wake**: Watch one Claude or Codex account and automatically resume its blocked sessions, one at a time, once the limit resets — the watcher keeps running after MeterBar quits ([details](#session-wake))
+- **Fallback accounts**: Optionally use the ordered Claude Code or Codex account list as a failover chain when the live account's primary quota is exhausted. MeterBar restores the preferred account after reset.
 - **Pre-limit Alerts**: Two configurable thresholds — an early heads-up as a quota tightens, and a stronger alert as it runs out ([details](#alerts))
 - **Event Integrations**: Run a local command or POST quota transitions to a webhook ([details](#event-integrations))
 
@@ -208,6 +209,52 @@ never notify, repeat crossings are deduplicated rather than stacked, and an
 alert only claims a quota is *exhausted* when it actually is — configuring the
 critical level at "10% left" produces a warning at 10%, not a false
 limit-reached banner.
+
+### Fallback accounts
+
+Claude Code and Codex CLI can opt into automatic fallback from their provider
+settings. The enabled account order is the chain: the first profile is
+preferred, followed by each fallback. MeterBar identifies the live account from
+the one profile mapped to the provider's canonical credential path; it never
+infers the live account from list order. Missing or ambiguous mappings disable
+automatic fallback until the profile layout is repaired.
+
+MeterBar evaluates the chain only when the current refresh successfully reports
+the live account's non-estimated primary window exhausted; cached data from a
+failed fetch cannot trigger a switch, and it does not add another poll. For
+Codex, the session window is primary when present, otherwise the provider's
+weekly `primary_window` is used. Notification authorization is required before
+a new automatic switch. Each successful switch posts a stable-id macOS
+notification, and the live profile is marked in the menu-bar popover and
+provider settings. Account-switch delivery to Event Integrations is explicitly
+deferred and is not part of fallback-account acceptance; fallback switching
+does not invoke the local-command or webhook lanes.
+Automatic switching is available only when every enabled profile uses a
+provider-owned credential file on the same volume. MeterBar exchanges those
+files with macOS's atomic `RENAME_SWAP` operation, verifies the inode mapping,
+and keeps a secret-free, atomically persisted recovery journal containing the
+provider, account ids, paths, inode ids, and notification metadata only until
+the switch notification is delivered. Startup recovery repairs interrupted
+account metadata writes and retries an unacknowledged notification without
+repeating the credential exchange.
+
+After acknowledgement, a shared `completed-state.json` ledger durably retains
+the provider, generation, current account UUID/location/path/inode snapshots,
+and immutable path-to-authorized-UUID ownership history. A provider may
+atomically replace an account's credential file; under the shared lock MeterBar
+accepts the new inode only when the UUID, location, and normalized path are
+unchanged. Release and debug builds use the ledger to prevent stale metadata
+from repeating an exchange and to ensure a removed path cannot be reassigned to
+a new account UUID. It contains neither credential bytes nor account display
+names. Credential bytes are never copied into MeterBar storage or logs. Claude
+Keychain and mixed
+Keychain/file layouts are intentionally ineligible: Security.framework does
+not provide an atomic multi-item transaction, so MeterBar refuses to risk a
+partial credential exchange.
+
+A request already in flight keeps the credential it started with and may fail;
+its next CLI request uses the newly live account. The preferred profile is
+restored once a later refresh observes its reset.
 
 ### Session Wake
 

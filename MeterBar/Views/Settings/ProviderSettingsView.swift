@@ -119,6 +119,7 @@ struct ProviderSettingsView: View {
     @StateObject private var widgetPreferences = WidgetPreferencesStore.shared
     @StateObject private var sessionWakeSettings = SessionWakeSettingsStore.shared
     @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
+    @StateObject private var failoverSettings = AccountFailoverSettingsStore.shared
 
     @State private var isAddingClaudeAccount = false
     @State private var isAddingCodexAccount = false
@@ -442,6 +443,11 @@ struct ProviderSettingsView: View {
                 .meterBarSwitch()
             }
 
+            accountFailoverRows(
+                provider: .claudeCode,
+                accounts: claudeAccountStore.enabledAccounts.map { ($0.id, $0.name) }
+            )
+
             SettingsDivider()
 
             VStack(alignment: .leading, spacing: 10) {
@@ -581,6 +587,11 @@ struct ProviderSettingsView: View {
                 )
             }
 
+            accountFailoverRows(
+                provider: .codexCli,
+                accounts: codexAccountStore.enabledAccounts.map { ($0.id, $0.name) }
+            )
+
             SettingsDivider()
 
             VStack(alignment: .leading, spacing: 10) {
@@ -633,6 +644,61 @@ struct ProviderSettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func accountFailoverRows(
+        provider: AccountFailoverProvider,
+        accounts: [(id: UUID, name: String)]
+    ) -> some View {
+        let eligibility = LiveAccountCredentialSwitcher.shared.eligibility(for: provider)
+        SettingsRowView(
+            title: "Automatic fallback",
+            detail: "Use the account order below as the preferred → fallback chain. Off by default."
+        ) {
+            Toggle("Automatic fallback", isOn: Binding(
+                get: {
+                    accounts.count >= 2
+                        && eligibility.isEligible
+                        && failoverSettings.isEnabled(for: provider)
+                },
+                set: { enabled in
+                    if enabled, let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider) {
+                        failoverSettings.setActiveAccountID(liveID, for: provider)
+                    }
+                    failoverSettings.setEnabled(enabled, for: provider)
+                }
+            ))
+            .labelsHidden()
+            .meterBarSwitch()
+            .disabled(accounts.count < 2 || !eligibility.isEligible)
+        }
+
+        if let reason = eligibility.reason {
+            SettingsNotice(text: reason, color: MeterBarTheme.warning)
+        } else if accounts.count < 2 {
+            SettingsNotice(
+                text: "Add and enable at least two accounts to configure automatic fallback.",
+                color: .secondary
+            )
+        } else if failoverSettings.isEnabled(for: provider) {
+            let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider)
+            let liveName = accounts.first(where: { $0.id == liveID })?.name ?? "Unavailable"
+            SettingsInfoRow(label: "Live CLI account", value: liveName)
+            SettingsNotice(
+                text: "MeterBar switches after an existing usage refresh finds the live account's primary "
+                    + "window exhausted, and restores the preferred account after reset. A request already "
+                    + "in flight may fail; the next CLI request uses the new credential.",
+                color: .secondary
+            )
+        } else if let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider),
+                  let liveName = accounts.first(where: { $0.id == liveID })?.name {
+            SettingsInfoRow(label: "Live CLI account", value: liveName)
+            SettingsNotice(
+                text: "Automatic switching is off. The current CLI credential remains active.",
+                color: .secondary
+            )
         }
     }
 

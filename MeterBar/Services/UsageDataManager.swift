@@ -140,6 +140,7 @@ class UsageDataManager: ObservableObject {
     private let parseHealthStore: ProviderParseHealthStore
     private let refreshLockMode: UsageRefreshLockMode
     private let refreshLockFactory: @Sendable () -> WakeLock
+    private let accountFailoverCoordinator: AccountFailoverCoordinator
 
     /// Where polled running counters are accumulated into a dated series.
     ///
@@ -190,6 +191,7 @@ class UsageDataManager: ObservableObject {
         preferences: UserDefaults = .standard,
         cacheDefaults: UserDefaults = .standard,
         parseHealthStore: ProviderParseHealthStore? = nil,
+        accountFailoverCoordinator: AccountFailoverCoordinator? = nil,
         schedulesAutoRefresh: Bool = true,
         refreshLockMode: UsageRefreshLockMode = .acquirePerRefresh,
         refreshLockFactory: @escaping @Sendable () -> WakeLock = {
@@ -216,6 +218,7 @@ class UsageDataManager: ObservableObject {
         self.preferences = preferences
         self.cacheDefaults = cacheDefaults
         self.parseHealthStore = parseHealthStore ?? .shared
+        self.accountFailoverCoordinator = accountFailoverCoordinator ?? .shared
         self.refreshLockMode = refreshLockMode
         self.refreshLockFactory = refreshLockFactory
         self.adaptiveNow = adaptiveNow
@@ -406,6 +409,14 @@ class UsageDataManager: ObservableObject {
 
         metrics = newMetrics
         publishMetrics()
+        await accountFailoverCoordinator.evaluate(
+            claudeMetrics: claudeCodeAccountMetrics,
+            codexMetrics: codexAccountMetrics,
+            evidence: AccountFailoverRefreshEvidence(
+                claudeSuccessfulAccountIDs: claudeResult?.successfulAccountIDs ?? [],
+                codexSuccessfulAccountIDs: codexResult?.successfulAccountIDs ?? []
+            )
+        )
 
         return UsageRefreshReport(
             startedAt: startedAt,
@@ -1199,6 +1210,7 @@ class UsageDataManager: ObservableObject {
         let metrics: [UUID: UsageMetrics]
         let successCount: Int
         let firstFailure: Error?
+        var successfulAccountIDs: Set<UUID> = []
         /// Claude-only; defaulted because the Codex path shares this type and
         /// has no per-account auth state of its own.
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
@@ -1246,6 +1258,7 @@ class UsageDataManager: ObservableObject {
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
         var firstFailure: Error?
         var successCount = 0
+        var successfulAccountIDs: Set<UUID> = []
 
         let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
             try await self.claudeCodeService.fetchUsageMetrics(
@@ -1264,6 +1277,7 @@ class UsageDataManager: ObservableObject {
             if let metrics = leg.metrics {
                 refreshedMetrics[account.id] = metrics
                 successCount += 1
+                successfulAccountIDs.insert(account.id)
             } else if let error = leg.error {
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = claudeCodeAccountMetrics[account.id] {
@@ -1297,6 +1311,7 @@ class UsageDataManager: ObservableObject {
             metrics: refreshedMetrics,
             successCount: successCount,
             firstFailure: firstFailure,
+            successfulAccountIDs: successfulAccountIDs,
             accountStates: accountStates
         )
     }
@@ -1314,6 +1329,7 @@ class UsageDataManager: ObservableObject {
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
+        var successfulAccountIDs: Set<UUID> = []
 
         // `canAccess` is itself an async probe, so it moves into the leg rather
         // than gating it serially; an unreachable account throws the sentinel.
@@ -1329,6 +1345,7 @@ class UsageDataManager: ObservableObject {
             if let metrics = leg.metrics {
                 refreshedMetrics[account.id] = metrics
                 successCount += 1
+                successfulAccountIDs.insert(account.id)
             } else if let error = leg.error {
                 // Matches the previous `continue`: an inaccessible account is a
                 // skip, not a failure, and must not resurrect a stale cache.
@@ -1349,7 +1366,8 @@ class UsageDataManager: ObservableObject {
         return AccountFetchResult(
             metrics: refreshedMetrics,
             successCount: successCount,
-            firstFailure: firstFailure
+            firstFailure: firstFailure,
+            successfulAccountIDs: successfulAccountIDs
         )
     }
 

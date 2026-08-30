@@ -96,6 +96,7 @@ struct ProviderBlockedUsageSummary: View {
     let snapshot: ProviderSnapshot
     var density: Density = .popoverCard
     var showsTitle: Bool = true
+    var showsLiveAccount: Bool = false
     var resetTimeFormat: ResetTimeFormat = .countdown
 
     @Environment(\.accessibilityReduceMotion)
@@ -144,6 +145,11 @@ struct ProviderBlockedUsageSummary: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                if showsLiveAccount {
+                    MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                        .accessibilityLabel("Live CLI account")
+                }
 
                 ProviderCardStatusLabel(snapshot: snapshot)
             }

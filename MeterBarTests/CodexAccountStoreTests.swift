@@ -188,4 +188,38 @@ final class CodexAccountStoreTests: XCTestCase {
         XCTAssertEqual(store.enabledAccounts.map(\.id), [CodexAccount.defaultID])
         XCTAssertNil(defaults.object(forKey: StorageKeys.codexDefaultAccountEnabled))
     }
+
+    func testCredentialLocationExchangePreservesLogicalIdentityAndPersists() throws {
+        let store = CodexAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Fallback", homeDirectory: "/tmp/codex-fallback")
+        let fallback = try XCTUnwrap(store.customAccounts.first)
+
+        XCTAssertTrue(store.exchangeCredentialLocations(
+            from: CodexAccount.defaultID,
+            to: fallback.id,
+            expectedSource: nil,
+            expectedTarget: "/tmp/codex-fallback"
+        ))
+
+        let reloaded = CodexAccountStore(userDefaults: defaults)
+        XCTAssertEqual(
+            reloaded.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
+            "/tmp/codex-fallback"
+        )
+        XCTAssertNil(reloaded.accounts.first(where: { $0.id == fallback.id })?.homeDirectory)
+    }
+
+    func testCredentialLocationExchangeRejectsAProfileChangedMidSwitch() throws {
+        let store = CodexAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Fallback", homeDirectory: "/tmp/codex-fallback")
+        let fallback = try XCTUnwrap(store.customAccounts.first)
+        store.updateAccount(id: fallback.id, name: fallback.name, homeDirectory: "/tmp/changed")
+
+        XCTAssertFalse(store.exchangeCredentialLocations(
+            from: CodexAccount.defaultID,
+            to: fallback.id,
+            expectedSource: nil,
+            expectedTarget: "/tmp/codex-fallback"
+        ))
+    }
 }
