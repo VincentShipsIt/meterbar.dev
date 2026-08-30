@@ -213,6 +213,7 @@ struct WidgetGlanceRow: View {
                 WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
                 Text(WidgetLocalizedContent.summaryText(for: row))
                     .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.isBlocked ? Color.red : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -246,6 +247,7 @@ struct WidgetGlanceHero: View {
 
             Text(WidgetLocalizedContent.summaryText(for: row))
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(row.isBlocked ? Color.red : Color.primary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -271,7 +273,7 @@ struct WidgetGlanceRail: View {
                 ForEach(rows) { row in
                     HStack(spacing: metrics.rowSpacing) {
                         WidgetProviderIcon(service: row.service, size: metrics.captionSize)
-                        Text(row.accountName)
+                        Text(WidgetLocalizedContent.compactIdentity(for: row))
                             .font(.system(size: metrics.captionSize))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -282,7 +284,7 @@ struct WidgetGlanceRail: View {
                             .foregroundStyle(row.usageStatus?.color ?? .secondary)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel(row.accountName)
+                    .accessibilityLabel(WidgetLocalizedContent.compactIdentity(for: row))
                     .accessibilityValue(WidgetLocalizedContent.accessibilityValue(for: row, compact: true))
                 }
             }

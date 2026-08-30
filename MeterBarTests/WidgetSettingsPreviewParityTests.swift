@@ -74,6 +74,65 @@ final class WidgetSettingsPreviewParityTests: XCTestCase {
         }
     }
 
+    func testSmallBlockedIndependentPoolNamesThePoolInTheSupportRail() throws {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.weekly]
+        let presentation = WidgetPresentationPlanner.makePresentation(
+            metrics: [
+                .claudeCode: UsageMetrics(
+                    service: .claudeCode,
+                    weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+                    lastUpdated: now
+                ),
+                .cursor: UsageMetrics(
+                    service: .cursor,
+                    sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+                    additionalLimits: [
+                        UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly)
+                    ],
+                    lastUpdated: now
+                ),
+            ],
+            accountMetrics: [],
+            preferences: preferences,
+            family: .small,
+            now: now
+        )
+
+        guard case let .hero(headline, supporting) = WidgetGlance.layout(
+            for: presentation,
+            family: .small
+        ) else {
+            return XCTFail("small must use the hero and support-rail layout")
+        }
+        XCTAssertEqual(headline.service, .claudeCode)
+        XCTAssertFalse(headline.isBlocked)
+
+        let cursorPrimary = try XCTUnwrap(supporting.first { !$0.isAdditionalLimit })
+        XCTAssertEqual(cursorPrimary.accountName, "Cursor")
+        XCTAssertFalse(cursorPrimary.isBlocked)
+        XCTAssertNil(cursorPrimary.compactIdentityQuotaTitleKey)
+
+        let grokBot = try XCTUnwrap(supporting.first { $0.quotaTitleKey == .grokBot })
+        XCTAssertEqual(grokBot.accountName, "Cursor", "the source account remains Cursor")
+        XCTAssertTrue(grokBot.isBlocked)
+        XCTAssertEqual(grokBot.compactIdentityQuotaTitleKey, .grokBot)
+
+        let expectedIdentity = LocalizedUsageFormat.quotaTitle(for: .grokBot)
+        let rail = WidgetSettingsPreviewRailRow(
+            row: grokBot,
+            metrics: WidgetGlance.metrics(for: .small)
+        )
+        XCTAssertEqual(rail.compactIdentityText, expectedIdentity)
+        XCTAssertEqual(
+            LocalizedUsageFormat.widgetCompactIdentity(for: grokBot),
+            expectedIdentity,
+            "visual text and VoiceOver label must identify the exhausted sub-pool"
+        )
+        XCTAssertNotEqual(expectedIdentity, grokBot.accountName)
+    }
+
     // MARK: - One severity → color map
 
     /// The preview used to carry a private `UsageStatus` → `Color` switch of its

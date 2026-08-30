@@ -284,6 +284,48 @@ public enum LocalizedUsageFormat {
         )
     }
 
+    public static func widgetBlockedBadge(
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        String(
+            localized: "widget.blocked.badge",
+            defaultValue: "OUT",
+            bundle: bundle,
+            locale: locale,
+            comment: "Compact widget badge shown when an account quota is exhausted."
+        )
+    }
+
+    public static func widgetBlockedAccessibility(
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        String(
+            localized: "widget.blocked.accessibility",
+            defaultValue: "Quota exhausted",
+            bundle: bundle,
+            locale: locale,
+            comment: "VoiceOver description for a widget account whose quota is exhausted."
+        )
+    }
+
+    /// The identity drawn and spoken by a compact widget support row.
+    ///
+    /// Most rows use the account name. Independently blocked additional pools
+    /// use their quota title so a healthy parent account is not announced as
+    /// exhausted merely because the compact layout has room for one identity.
+    public static func widgetCompactIdentity(
+        for row: WidgetPresentationRow,
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        guard let quotaTitleKey = row.compactIdentityQuotaTitleKey else {
+            return row.accountName
+        }
+        return quotaTitle(for: quotaTitleKey, bundle: bundle, locale: locale)
+    }
+
     /// Translates the shared row's already-decided quota title.
     ///
     /// Which title applies — the OpenRouter exceptions, Cursor's included-pool

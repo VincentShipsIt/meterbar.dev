@@ -5,6 +5,10 @@ import MeterBarShared
 /// The shared model stays locale-neutral so the app preview and CLI contracts
 /// do not accidentally resolve against the widget extension's bundle.
 enum WidgetLocalizedContent {
+    static func compactIdentity(for row: WidgetPresentationRow) -> String {
+        LocalizedUsageFormat.widgetCompactIdentity(for: row)
+    }
+
     static func quotaTitle(for row: WidgetPresentationRow) -> String {
         quotaTitle(for: row.quotaTitleKey)
     }
@@ -18,6 +22,9 @@ enum WidgetLocalizedContent {
     static func summaryText(for row: WidgetPresentationRow) -> String {
         guard let limit = row.limit else {
             return String(localized: "widget.unavailable", defaultValue: "Unavailable")
+        }
+        guard !row.isBlocked else {
+            return LocalizedUsageFormat.widgetBlockedBadge()
         }
         if row.service == .openRouter {
             let amount: Double
@@ -40,6 +47,9 @@ enum WidgetLocalizedContent {
     }
 
     static func compactSummaryText(for row: WidgetPresentationRow) -> String {
+        guard !row.isBlocked else {
+            return LocalizedUsageFormat.widgetBlockedBadge()
+        }
         guard row.service == .openRouter,
               row.preservesLegacyOpenRouterBalance,
               let limit = row.limit else {
@@ -49,9 +59,12 @@ enum WidgetLocalizedContent {
     }
 
     static func accessibilityValue(for row: WidgetPresentationRow, compact: Bool = false) -> String {
+        let summary = row.isBlocked
+            ? LocalizedUsageFormat.widgetBlockedAccessibility()
+            : compact ? compactSummaryText(for: row) : summaryText(for: row)
         let leading = compact
-            ? [compactSummaryText(for: row)]
-            : [quotaTitle(for: row), summaryText(for: row)]
+            ? [summary]
+            : [quotaTitle(for: row), summary]
         return (leading + [healthDescription(row.health)].compactMap { $0 })
             .formatted(.list(type: .and, width: .short))
     }

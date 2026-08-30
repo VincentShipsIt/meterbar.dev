@@ -94,6 +94,17 @@ final class LocalizationResourceContractTests: XCTestCase {
         }
     }
 
+    func testWidgetBlockedCopyIsCarriedByBothCatalogsWithMatchingEnglish() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let widgetStrings = try strings(in: loadCatalog(at: widgetCatalogURL))
+
+        for key in ["widget.blocked.badge", "widget.blocked.accessibility"] {
+            let appValue = try englishValue(for: key, in: appStrings)
+            let widgetValue = try englishValue(for: key, in: widgetStrings)
+            XCTAssertEqual(appValue, widgetValue, "\(key) must read identically in both bundles")
+        }
+    }
+
     /// The Settings preview draws widget quota titles from the app bundle, so
     /// both catalogs have to carry the same `widget.quota.*` keys with the
     /// same English words. Translated only on one side, the preview would

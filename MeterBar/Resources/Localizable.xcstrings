@@ -590,6 +590,28 @@
         }
       }
     },
+    "widget.blocked.accessibility": {
+      "comment": "VoiceOver description for a widget account whose quota is exhausted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota exhausted"
+          }
+        }
+      }
+    },
+    "widget.blocked.badge": {
+      "comment": "Compact widget badge shown when an account quota is exhausted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OUT"
+          }
+        }
+      }
+    },
     "widget.empty.choose_detail": {
       "localizations": {
         "en": {

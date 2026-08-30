@@ -109,6 +109,16 @@ final class LocalizedUsageFormattingTests: XCTestCase {
         }
     }
 
+    func testWidgetBlockedCopyHasDistinctVisibleAndAccessibilityForms() {
+        let english = Locale(identifier: "en")
+
+        XCTAssertEqual(LocalizedUsageFormat.widgetBlockedBadge(locale: english), "OUT")
+        XCTAssertEqual(
+            LocalizedUsageFormat.widgetBlockedAccessibility(locale: english),
+            "Quota exhausted"
+        )
+    }
+
     /// `countdownText` arrives from the locale-neutral planner, so an
     /// unavailable countdown reads as the English sentinel. Recognizing it is
     /// the formatter's job — every renderer that spelled the check out itself is
