@@ -419,6 +419,9 @@ public enum WidgetPresentationPlanner {
             : .healthy
         let evaluation = blockingEvaluation(in: metrics)
         let blockers = evaluation.providerBlockers + evaluation.independentSubPoolBlockers
+        let headlineBlockers = evaluation.providerBlockers.isEmpty
+            ? blockers
+            : evaluation.providerBlockers
         let blockedIDs = Set(blockers.map(\.id))
         let selectedRows: [WidgetPresentationRow] = windows.compactMap { window in
             guard let windowLimit = limit(for: window, metrics: metrics) else { return nil }
@@ -443,7 +446,7 @@ public enum WidgetPresentationPlanner {
             now: now
         )
         var rows = selectedRows + additionalRows
-        guard let headline = ProviderBlockingPolicy.headline(from: blockers, now: now),
+        guard let headline = ProviderBlockingPolicy.headline(from: headlineBlockers, now: now),
               let blocker = limitCandidates(in: metrics).first(where: {
                   $0.idSuffix == headline.blocker.id
               }) else {

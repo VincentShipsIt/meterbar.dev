@@ -516,6 +516,51 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertTrue(result.rows.filter { !$0.isAdditionalLimit }.allSatisfy { !$0.isBlocked })
     }
 
+    func testProviderBlockerLeadsWhenIndependentPoolHasLaterReset() throws {
+        let sessionReset = now.addingTimeInterval(60 * 60)
+        let weeklyReset = now.addingTimeInterval(2 * 60 * 60)
+        let grokBotReset = now.addingTimeInterval(3 * 60 * 60)
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: sessionReset),
+            weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: weeklyReset),
+            additionalLimits: [
+                UsageLimit(used: 100, total: 100, resetTime: grokBotReset, periodKind: .weekly)
+            ],
+            lastUpdated: now
+        )
+
+        var hiddenPreferences = WidgetPreferences.defaults
+        hiddenPreferences.visibleQuotaWindows = [.session]
+        hiddenPreferences.showsResetTime = true
+        let hidden = presentation(
+            metrics: [.cursor: metrics],
+            preferences: hiddenPreferences,
+            family: .small
+        )
+        let hiddenHeadline = try XCTUnwrap(hidden.rows.first)
+
+        XCTAssertEqual(hidden.rows.count, 1, "the blocker must keep the selected row budget")
+        XCTAssertFalse(hiddenHeadline.isAdditionalLimit)
+        XCTAssertTrue(hiddenHeadline.isBlocked)
+        XCTAssertEqual(hiddenHeadline.quotaTitleKey, .otherModels)
+        XCTAssertEqual(hiddenHeadline.resetTime, weeklyReset)
+
+        var visiblePreferences = hiddenPreferences
+        visiblePreferences.visibleQuotaWindows = [.session, .weekly]
+        let visible = presentation(
+            metrics: [.cursor: metrics],
+            preferences: visiblePreferences,
+            family: .small
+        )
+        let grokBot = try XCTUnwrap(visible.rows.first { $0.quotaTitleKey == .grokBot })
+
+        XCTAssertFalse(visible.rows[0].isAdditionalLimit, "the parent provider outage must lead")
+        XCTAssertEqual(visible.rows[0].quotaTitleKey, .otherModels)
+        XCTAssertTrue(grokBot.isBlocked, "headline precedence must not clear the independent blocked state")
+        XCTAssertEqual(grokBot.resetTime, grokBotReset)
+    }
+
     func testBlockedResetTimeHonorsRecentDueGraceAndHidesExpiredDates() throws {
         var preferences = WidgetPreferences.defaults
         preferences.showsResetTime = true
