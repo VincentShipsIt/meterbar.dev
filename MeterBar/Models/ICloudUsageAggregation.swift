@@ -340,7 +340,11 @@ nonisolated enum ICloudUsageAggregation {
         var quotaWinners: [QuotaKey: ICloudQuotaSnapshot] = [:]
         for snapshot in selected.flatMap(\.quotaSnapshots) {
             let key = QuotaKey(provider: snapshot.provider, accountIdentity: snapshot.accountIdentity)
-            if quotaWinners[key].map({ snapshot.capturedAt > $0.capturedAt }) ?? true {
+            if quotaWinners[key].map({ existing in
+                snapshot.capturedAt > existing.capturedAt
+                    || (snapshot.capturedAt == existing.capturedAt
+                        && stableQuotaTieBreak(snapshot) > stableQuotaTieBreak(existing))
+            }) ?? true {
                 quotaWinners[key] = snapshot
             }
         }
@@ -509,5 +513,15 @@ nonisolated enum ICloudUsageAggregation {
         return "\(rollup.inputTokens):\(rollup.outputTokens):\(rollup.cacheCreationTokens):"
             + "\(rollup.cacheReadTokens):"
             + "\(rollup.estimatedCostUSD):\(quota)"
+    }
+
+    private static func stableQuotaTieBreak(_ snapshot: ICloudQuotaSnapshot) -> String {
+        snapshot.windows
+            .map { window in
+                "\(window.kind):\(window.used):\(window.total):"
+                    + "\(window.resetAt?.timeIntervalSinceReferenceDate.description ?? "nil")"
+            }
+            .sorted()
+            .joined(separator: "|")
     }
 }

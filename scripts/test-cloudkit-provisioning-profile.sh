@@ -5,17 +5,75 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 validator="$script_dir/verify-cloudkit-provisioning-profile.sh"
 profile="$script_dir/fixtures/cloudkit-profile-valid.plist"
 entitlements="$script_dir/../MeterBar/MeterBar.entitlements"
-matching_fingerprint="B2E09F94A8B2EEC2FB69C8ED645DFDE1F3558F0D"
 mismatched_fingerprint="0000000000000000000000000000000000000000"
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/meterbar-cloudkit-profile.XXXXXX")
+trap 'rm -rf "$temporary_directory"' EXIT
 
-"$validator" "$profile" "$entitlements" "dev.meterbar.app" "$matching_fingerprint"
+make_certificate() {
+  local common_name="$1"
+  local output_prefix="$2"
+  openssl req \
+    -x509 \
+    -newkey rsa:2048 \
+    -nodes \
+    -days 1 \
+    -subj "/CN=$common_name/OU=C76R5DRH64/O=MeterBar Fixture" \
+    -keyout "$output_prefix.key" \
+    -out "$output_prefix.pem" >/dev/null 2>&1
+  openssl x509 -in "$output_prefix.pem" -outform DER -out "$output_prefix.der"
+}
+
+profile_with_certificate() {
+  local certificate="$1"
+  local output="$2"
+  python3 - "$profile" "$certificate" "$output" <<'PY'
+import plistlib
+import sys
+
+profile_path, certificate_path, output_path = sys.argv[1:]
+with open(profile_path, "rb") as source:
+    profile = plistlib.load(source)
+with open(certificate_path, "rb") as source:
+    profile["DeveloperCertificates"] = [source.read()]
+with open(output_path, "wb") as destination:
+    plistlib.dump(profile, destination)
+PY
+}
+
+certificate_fingerprint() {
+  openssl x509 -in "$1" -noout -fingerprint -sha1 \
+    | cut -d= -f2 \
+    | tr -d ':'
+}
+
+developer_prefix="$temporary_directory/developer-id"
+developer_profile="$temporary_directory/developer-id-profile.plist"
+make_certificate "Developer ID Application: Fixture (C76R5DRH64)" "$developer_prefix"
+profile_with_certificate "$developer_prefix.der" "$developer_profile"
+matching_fingerprint=$(certificate_fingerprint "$developer_prefix.pem")
+
+"$validator" "$developer_profile" "$entitlements" "dev.meterbar.app" "$matching_fingerprint"
 
 if "$validator" \
-  "$profile" \
+  "$developer_profile" \
   "$entitlements" \
   "dev.meterbar.app" \
   "$mismatched_fingerprint" >/dev/null 2>&1; then
   echo "CloudKit profile validator accepted a different Developer ID certificate." >&2
+  exit 1
+fi
+
+distribution_prefix="$temporary_directory/apple-distribution"
+distribution_profile="$temporary_directory/apple-distribution-profile.plist"
+make_certificate "Apple Distribution: Fixture (C76R5DRH64)" "$distribution_prefix"
+profile_with_certificate "$distribution_prefix.der" "$distribution_profile"
+distribution_fingerprint=$(certificate_fingerprint "$distribution_prefix.pem")
+if "$validator" \
+  "$distribution_profile" \
+  "$entitlements" \
+  "dev.meterbar.app" \
+  "$distribution_fingerprint" >/dev/null 2>&1; then
+  echo "CloudKit profile validator accepted a non-Developer-ID certificate." >&2
   exit 1
 fi
 

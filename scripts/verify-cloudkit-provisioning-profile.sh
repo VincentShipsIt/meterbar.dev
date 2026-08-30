@@ -20,6 +20,7 @@ import datetime
 import hashlib
 import plistlib
 import re
+import subprocess
 import sys
 
 profile_path, entitlements_path, bundle_id, signing_cert_sha1 = sys.argv[1:]
@@ -66,15 +67,40 @@ for key in (
 normalized_fingerprint = signing_cert_sha1.replace(":", "").upper()
 if re.fullmatch(r"[0-9A-F]{40}", normalized_fingerprint) is None:
     raise SystemExit("Signing certificate fingerprint must be exactly 40 hexadecimal SHA-1 characters")
-profile_fingerprints = {
-    hashlib.sha1(certificate).hexdigest().upper()
+profile_certificates = {
+    hashlib.sha1(certificate).hexdigest().upper(): certificate
     for certificate in profile.get("DeveloperCertificates", [])
     if isinstance(certificate, bytes)
 }
-if normalized_fingerprint not in profile_fingerprints:
+matching_certificate = profile_certificates.get(normalized_fingerprint)
+if matching_certificate is None:
     raise SystemExit(
         "Developer ID signing certificate is not authorized by the provisioning profile"
     )
+
+try:
+    certificate_subject = subprocess.run(
+        [
+            "/usr/bin/openssl",
+            "x509",
+            "-inform",
+            "DER",
+            "-noout",
+            "-subject",
+            "-nameopt",
+            "RFC2253",
+        ],
+        input=matching_certificate,
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8", errors="strict")
+except (OSError, subprocess.CalledProcessError, UnicodeDecodeError) as error:
+    raise SystemExit(f"Provisioning profile contains an unreadable signing certificate: {error}")
+
+if "CN=Developer ID Application:" not in certificate_subject:
+    raise SystemExit("Provisioning profile signing certificate is not a Developer ID Application certificate")
+if f"OU={team_prefix}" not in certificate_subject:
+    raise SystemExit("Developer ID Application certificate team does not match the provisioning profile")
 
 print(
     "Developer ID profile authorizes "

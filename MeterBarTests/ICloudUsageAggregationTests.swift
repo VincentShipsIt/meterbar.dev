@@ -360,6 +360,31 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(snapshot.windows.first?.used, 12)
     }
 
+    func testSameAccountQuotaUsesStableTieBreakForEqualTimestamps() throws {
+        let lower = quota(account: "acct-shared", used: 12, capturedAt: now)
+        let higher = quota(account: "acct-shared", used: 90, capturedAt: now)
+
+        let forward = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID), device(secondDeviceID)],
+            rollups: [
+                rollup(firstDeviceID, quota: [lower]),
+                rollup(secondDeviceID, quota: [higher]),
+            ],
+            now: now
+        )
+        let reverse = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID), device(secondDeviceID)],
+            rollups: [
+                rollup(secondDeviceID, quota: [higher]),
+                rollup(firstDeviceID, quota: [lower]),
+            ],
+            now: now
+        )
+
+        XCTAssertEqual(try XCTUnwrap(forward.quotaSnapshots.first).windows.first?.used, 90)
+        XCTAssertEqual(try XCTUnwrap(reverse.quotaSnapshots.first).windows.first?.used, 90)
+    }
+
     func testDifferentLocalProfileIDsWithSameExternalIdentityDeduplicateQuota() throws {
         let first = providerSnapshot(
             accountID: UUID(),

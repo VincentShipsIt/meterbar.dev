@@ -173,7 +173,10 @@ class CursorLocalService: ObservableObject {
     /// Provider-issued subject for cross-Mac quota deduplication. Only the
     /// subject is returned; the token read from Cursor's database remains local.
     nonisolated func externalAccountIdentity() -> String? {
-        getAccessTokenFromDatabase()?.userId
+        (
+            getAccessTokenFromDatabase(forceRescan: false)
+                ?? getAccessTokenFromDatabase(forceRescan: true)
+        )?.userId
     }
 
     /// Probe the Cursor state database for provider-readiness diagnostics,
