@@ -105,7 +105,7 @@ nonisolated protocol CredentialExchangeJournaling {
     func clear() throws
 }
 
-nonisolated struct CredentialCompletedAccountState: Codable, Equatable, Sendable {
+nonisolated struct CredentialCompletedAccountState: Codable, Equatable, Hashable, Sendable {
     let accountID: UUID
     let credentialLocation: String?
     let credentialPath: String
@@ -116,6 +116,48 @@ nonisolated struct CredentialCompletedProviderState: Codable, Equatable, Sendabl
     let provider: AccountFailoverProvider
     let generation: UInt64
     let accounts: [CredentialCompletedAccountState]
+    let bindingHistory: [CredentialCompletedAccountState]
+
+    init(
+        provider: AccountFailoverProvider,
+        generation: UInt64,
+        accounts: [CredentialCompletedAccountState],
+        bindingHistory: [CredentialCompletedAccountState]? = nil
+    ) {
+        self.provider = provider
+        self.generation = generation
+        self.accounts = accounts
+        self.bindingHistory = Self.mergedHistory(bindingHistory ?? [], with: accounts)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(AccountFailoverProvider.self, forKey: .provider)
+        generation = try container.decode(UInt64.self, forKey: .generation)
+        accounts = try container.decode([CredentialCompletedAccountState].self, forKey: .accounts)
+        bindingHistory = Self.mergedHistory(
+            try container.decodeIfPresent([CredentialCompletedAccountState].self, forKey: .bindingHistory) ?? [],
+            with: accounts
+        )
+    }
+
+    private static func mergedHistory(
+        _ history: [CredentialCompletedAccountState],
+        with accounts: [CredentialCompletedAccountState]
+    ) -> [CredentialCompletedAccountState] {
+        Array(Set(history + accounts)).sorted {
+            if $0.accountID != $1.accountID {
+                return $0.accountID.uuidString < $1.accountID.uuidString
+            }
+            if $0.credentialPath != $1.credentialPath {
+                return $0.credentialPath < $1.credentialPath
+            }
+            if $0.credentialIdentity.device != $1.credentialIdentity.device {
+                return $0.credentialIdentity.device < $1.credentialIdentity.device
+            }
+            return $0.credentialIdentity.inode < $1.credentialIdentity.inode
+        }
+    }
 }
 
 /// Shared, secret-free authority for the last completed provider-file mapping.
@@ -756,6 +798,9 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try completedStateStore.save(completedState)
             return
         }
+        guard bindingsRespectHistory(currentAccounts, history: authoritative.bindingHistory) else {
+            throw CredentialExchangeError.authoritativeStateMismatch
+        }
         guard authoritative.accounts != currentAccounts else { return }
         guard reconcileAccountSetChanges,
               authoritative.generation < UInt64.max,
@@ -765,13 +810,17 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         completedState.setState(CredentialCompletedProviderState(
             provider: provider,
             generation: authoritative.generation + 1,
-            accounts: currentAccounts
+            accounts: currentAccounts,
+            bindingHistory: authoritative.bindingHistory
         ))
         try completedStateStore.save(completedState)
     }
 
     private func advanceAuthoritativeState(for record: CredentialFileExchangeRecord) throws {
         let currentAccounts = try completedAccountSnapshot(for: record.event.provider)
+        guard transitionMatches(record: record, before: nil, after: currentAccounts) else {
+            throw CredentialExchangeError.authoritativeStateMismatch
+        }
         var completedState = try completedStateStore.load() ?? CredentialCompletedState()
         guard let authoritative = completedState.state(for: record.event.provider) else {
             guard transitionMatches(record: record, before: nil, after: currentAccounts) else {
@@ -785,10 +834,10 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try completedStateStore.save(completedState)
             return
         }
+        guard bindingsRespectHistory(currentAccounts, history: authoritative.bindingHistory) else {
+            throw CredentialExchangeError.authoritativeStateMismatch
+        }
         if authoritative.accounts == currentAccounts {
-            guard transitionMatches(record: record, before: nil, after: currentAccounts) else {
-                throw CredentialExchangeError.authoritativeStateMismatch
-            }
             return
         }
         if transitionMatches(record: record, before: nil, after: authoritative.accounts),
@@ -797,7 +846,8 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             completedState.setState(CredentialCompletedProviderState(
                 provider: record.event.provider,
                 generation: authoritative.generation + 1,
-                accounts: currentAccounts
+                accounts: currentAccounts,
+                bindingHistory: authoritative.bindingHistory
             ))
             try completedStateStore.save(completedState)
             return
@@ -809,7 +859,8 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         completedState.setState(CredentialCompletedProviderState(
             provider: record.event.provider,
             generation: authoritative.generation + 1,
-            accounts: currentAccounts
+            accounts: currentAccounts,
+            bindingHistory: authoritative.bindingHistory
         ))
         try completedStateStore.save(completedState)
     }
@@ -918,4 +969,31 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             authoritativeByID[$0] == currentByID[$0]
         }
     }
+
+    private func bindingsRespectHistory(
+        _ accounts: [CredentialCompletedAccountState],
+        history: [CredentialCompletedAccountState]
+    ) -> Bool {
+        var owners: [CredentialCompletedBindingKey: UUID] = [:]
+        for binding in history {
+            let key = CredentialCompletedBindingKey(
+                path: binding.credentialPath,
+                identity: binding.credentialIdentity
+            )
+            if let owner = owners[key], owner != binding.accountID { return false }
+            owners[key] = binding.accountID
+        }
+        return accounts.allSatisfy { account in
+            let key = CredentialCompletedBindingKey(
+                path: account.credentialPath,
+                identity: account.credentialIdentity
+            )
+            return owners[key].map { $0 == account.accountID } ?? true
+        }
+    }
+}
+
+nonisolated private struct CredentialCompletedBindingKey: Hashable {
+    let path: String
+    let identity: CredentialFileIdentity
 }

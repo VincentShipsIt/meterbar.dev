@@ -230,12 +230,19 @@ provider settings.
 Automatic switching is available only when every enabled profile uses a
 provider-owned credential file on the same volume. MeterBar exchanges those
 files with macOS's atomic `RENAME_SWAP` operation, verifies the inode mapping,
-and keeps only a secret-free, atomically persisted recovery journal (provider,
-account ids, paths, inode ids, and notification metadata) until the switch
-notification is delivered. Startup recovery repairs interrupted account
-metadata writes and retries an unacknowledged notification without repeating
-the credential exchange. Credential bytes are never copied into MeterBar
-storage or logs. Claude Keychain and mixed
+and keeps a secret-free, atomically persisted recovery journal containing the
+provider, account ids, paths, inode ids, and notification metadata only until
+the switch notification is delivered. Startup recovery repairs interrupted
+account metadata writes and retries an unacknowledged notification without
+repeating the credential exchange.
+
+After acknowledgement, a shared `completed-state.json` ledger durably retains
+the provider, generation, account UUIDs, credential locations and paths, and
+inode identities. Release and debug builds use this ledger to prevent stale
+account metadata from repeating a credential exchange and to ensure a removed
+credential-file binding cannot be reassigned to a new account UUID. It contains
+neither credential bytes nor account display names. Credential bytes are never
+copied into MeterBar storage or logs. Claude Keychain and mixed
 Keychain/file layouts are intentionally ineligible: Security.framework does
 not provide an atomic multi-item transaction, so MeterBar refuses to risk a
 partial credential exchange.
