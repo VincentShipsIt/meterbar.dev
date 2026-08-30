@@ -11,8 +11,10 @@ struct CostOverviewStatusCard: View {
   let formattedTokens: String
   /// The page's 7/30-day toggle. The month keeps the scan's own totals
   /// (authoritative, cache-creation tokens included); the week is cut from the
-  /// cached daily rows — no rescan. Defaulted so existing hosts and tests keep
-  /// meaning "the full scan window".
+  /// cached daily rows — no rescan. The rows retain cache-creation tokens, but
+  /// the version-1 windowed DTO intentionally omits that field for CLI schema
+  /// compatibility. Defaulted so existing hosts and tests keep meaning "the
+  /// full scan window".
   var windowSelection: CostWindowSelection = .month
 
   @ScaledMetric(relativeTo: .title)
@@ -42,9 +44,9 @@ struct CostOverviewStatusCard: View {
   }
 
   /// The figures the card renders for the selected window. The month view keeps
-  /// the scan's own totals; the week view aggregates the cached daily rows,
-  /// which carry input/output/cache-read tokens but not cache-creation tokens —
-  /// the same basis every daily chart on this page already reports.
+  /// the scan's own totals; the week view aggregates the compatibility-shaped
+  /// `ProviderDailyTotal`, which omits cache-creation tokens even though its
+  /// source daily rows retain them.
   private var figures: (cost: String, tokens: String, providers: Int) {
     guard let summary else { return ("", formattedTokens, 0) }
     guard windowSelection != .month else {

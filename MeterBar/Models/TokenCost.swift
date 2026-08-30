@@ -182,6 +182,10 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     public let inputTokens: Int
     public let outputTokens: Int
     public let cacheCreationTokens: Int
+    /// `false` only for cache rows decoded from a schema that did not persist
+    /// daily cache-creation tokens. The zero value on such a row is a decoding
+    /// fallback, not an observed zero, and must never be published to iCloud.
+    public let cacheCreationTokensAreAuthoritative: Bool
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
     /// Day × model attribution from the v2 cost cache. `nil` means the row
@@ -203,6 +207,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         inputTokens: Int,
         outputTokens: Int,
         cacheCreationTokens: Int = 0,
+        cacheCreationTokensAreAuthoritative: Bool = true,
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
@@ -214,6 +219,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.cacheCreationTokens = cacheCreationTokens
+        self.cacheCreationTokensAreAuthoritative = cacheCreationTokensAreAuthoritative
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
         self.modelBreakdowns = modelBreakdowns
@@ -231,6 +237,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         case inputTokens
         case outputTokens
         case cacheCreationTokens
+        case cacheCreationTokensAreAuthoritative
         case cacheReadTokens
         case estimatedCostUSD
         case modelBreakdowns
@@ -244,7 +251,14 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         provider = try container.decode(ServiceType.self, forKey: .provider)
         inputTokens = try container.decode(Int.self, forKey: .inputTokens)
         outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        let containsCacheCreationTokens = container.contains(.cacheCreationTokens)
         cacheCreationTokens = try container.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        let explicitCacheCreationAuthority = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .cacheCreationTokensAreAuthoritative
+        )
+        cacheCreationTokensAreAuthoritative = containsCacheCreationTokens
+            && (explicitCacheCreationAuthority ?? true)
         cacheReadTokens = try container.decode(Int.self, forKey: .cacheReadTokens)
         estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
         modelBreakdowns = try container.decodeIfPresent(
@@ -425,6 +439,12 @@ nonisolated public struct CostSummary: Codable, Sendable {
         "\(UsageFormat.cost(averageDailyCost))/day"
     }
 
+    /// A legacy zero is not evidence. CloudKit publication must first replace
+    /// every such row with a completed local scan.
+    var hasAuthoritativeDailyCacheCreationTokens: Bool {
+        dailyUsage.allSatisfy(\.cacheCreationTokensAreAuthoritative)
+    }
+
     /// Whether the cached summary is missing daily rows inside the visible window
     /// and should be quietly backfilled. Returns `false` once a scan has already
     /// run today (a genuinely zero-usage day shouldn't trigger constant rescans),
@@ -438,7 +458,10 @@ nonisolated public struct CostSummary: Codable, Sendable {
         guard !costs.isEmpty, totalTokens > 0 else { return false }
         guard !dailyUsage.isEmpty else { return true }
         guard dailyUsage.allSatisfy({
-            $0.modelBreakdowns != nil && $0.projectBreakdowns != nil && $0.sessionBreakdowns != nil
+            $0.cacheCreationTokensAreAuthoritative
+                && $0.modelBreakdowns != nil
+                && $0.projectBreakdowns != nil
+                && $0.sessionBreakdowns != nil
         }) else {
             return true
         }
@@ -512,9 +535,11 @@ nonisolated public struct CostSummary: Codable, Sendable {
 
     /// Aggregates the cached daily rows into per-provider totals over the last
     /// `days` calendar days (inclusive of today). Pure and rescan-free: it reads
-    /// only `dailyUsage`, so it can report input/output/cache-read tokens and
-    /// cost — not cache-creation tokens or session counts, which daily rows
-    /// don't carry. Powers `meterbar cost --days N` (issue #26).
+    /// only `dailyUsage`. Those rows now retain cache-creation tokens, but the
+    /// version-1 `ProviderDailyTotal` CLI boundary deliberately continues to
+    /// expose input/output/cache-read tokens and cost only. Session counts and
+    /// cache-creation tokens therefore remain absent from windowed CLI output.
+    /// Powers `meterbar cost --days N` (issue #26).
     ///
     /// `coveredDays` is bounded by the last scan window (`periodDays`) *and* the
     /// actual span of cached daily rows (earliest row → today). `periodDays`
@@ -663,7 +688,9 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
         self.sessionBreakdowns = sessionBreakdowns
     }
 
-    /// Daily rows omit cache-creation tokens, so this is input + output + cache-read.
+    /// The version-1 windowed CLI DTO deliberately omits cache-creation tokens,
+    /// even though its source daily rows now retain them. Keep this sum aligned
+    /// with that published compatibility boundary.
     public var totalTokens: Int {
         inputTokens + outputTokens + cacheReadTokens
     }

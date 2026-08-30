@@ -5,7 +5,7 @@ import Foundation
 /// `meterbar cost` (which reports the app's scan instead of re-implementing
 /// a divergent one).
 nonisolated public struct CostSummaryCache: Codable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public let schemaVersion: Int
     public let summary: CostSummary
@@ -20,7 +20,8 @@ nonisolated public struct CostSummaryCache: Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Version 1 had no envelope version field. Its DailyTokenUsage rows
-        // also decode their missing attribution arrays as nil.
+        // decode missing attribution arrays as nil and missing daily
+        // cache-creation data as explicitly non-authoritative.
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         summary = try container.decode(CostSummary.self, forKey: .summary)
         lastScanDate = try container.decode(Date.self, forKey: .lastScanDate)

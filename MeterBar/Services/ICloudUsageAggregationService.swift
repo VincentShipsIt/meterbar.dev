@@ -7,7 +7,10 @@ import Foundation
 final class ICloudUsageAggregationService: ObservableObject {
     static let shared = ICloudUsageAggregationService(
         settings: .shared,
-        repository: CloudKitUsageRepository()
+        repository: CloudKitUsageRepository(),
+        prepareLocalSummary: { candidate in
+            await CostTracker.shared.prepareSummaryForICloudPublication(candidate)
+        }
     )
 
     @Published private(set) var aggregate: ICloudUsageAggregationResult?
@@ -19,15 +22,18 @@ final class ICloudUsageAggregationService: ObservableObject {
 
     private let repository: any ICloudUsageRepository
     private let now: () -> Date
+    private let prepareLocalSummary: (CostSummary?) async -> CostSummary?
 
     init(
         settings: ICloudUsageSettingsStore,
         repository: any ICloudUsageRepository,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        prepareLocalSummary: @escaping (CostSummary?) async -> CostSummary? = { $0 }
     ) {
         self.settings = settings
         self.repository = repository
         self.now = now
+        self.prepareLocalSummary = prepareLocalSummary
     }
 
     func sync(
@@ -43,6 +49,18 @@ final class ICloudUsageAggregationService: ObservableObject {
 
         isSyncing = true
         defer { isSyncing = false }
+        let publishableSummary: CostSummary?
+        if localSummary?.hasAuthoritativeDailyCacheCreationTokens == false {
+            let prepared = await prepareLocalSummary(localSummary)
+            guard prepared?.hasAuthoritativeDailyCacheCreationTokens == true else {
+                aggregate = nil
+                lastError = "Local cost history needs a full scan before it can sync to iCloud."
+                return
+            }
+            publishableSummary = prepared
+        } else {
+            publishableSummary = localSummary
+        }
         let syncDate = now()
         let device = ICloudUsageDevice(
             id: settings.deviceID,
@@ -51,7 +69,7 @@ final class ICloudUsageAggregationService: ObservableObject {
         )
         let rollups = ICloudUsageAggregation.localRollups(
             deviceID: settings.deviceID,
-            summary: localSummary,
+            summary: publishableSummary,
             quotaSnapshots: quotaSnapshots,
             now: syncDate
         )

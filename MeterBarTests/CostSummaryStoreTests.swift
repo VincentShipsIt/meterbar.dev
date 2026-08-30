@@ -21,7 +21,7 @@ final class CostSummaryStoreTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testLoadMigratesVersionOneCacheToVersionTwoWithoutInventingAttribution() throws {
+    func testLoadMigratesVersionOneCacheWithoutInventingDailyCompleteness() throws {
         let currentURL = tempDirectory.appendingPathComponent("cost-summary-v2.json")
         let legacyURL = tempDirectory.appendingPathComponent("cost-summary-v1.json")
         try legacyPayload().write(to: legacyURL)
@@ -30,9 +30,10 @@ final class CostSummaryStoreTests: XCTestCase {
             CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL)
         )
 
-        XCTAssertEqual(CostSummaryCache.currentSchemaVersion, 2)
-        XCTAssertEqual(migrated.schemaVersion, 2)
+        XCTAssertEqual(CostSummaryCache.currentSchemaVersion, 3)
+        XCTAssertEqual(migrated.schemaVersion, 3)
         XCTAssertEqual(migrated.summary.dailyUsage.count, 1)
+        XCTAssertFalse(migrated.summary.dailyUsage[0].cacheCreationTokensAreAuthoritative)
         XCTAssertNil(migrated.summary.dailyUsage[0].modelBreakdowns)
         XCTAssertNil(migrated.summary.dailyUsage[0].projectBreakdowns)
         XCTAssertNil(migrated.summary.hourlyUsage)
@@ -49,7 +50,12 @@ final class CostSummaryStoreTests: XCTestCase {
         let persisted = try JSONSerialization.jsonObject(
             with: Data(contentsOf: currentURL)
         ) as? [String: Any]
-        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 3)
+
+        let reloaded = try XCTUnwrap(
+            CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL)
+        )
+        XCTAssertFalse(reloaded.summary.dailyUsage[0].cacheCreationTokensAreAuthoritative)
     }
 
     func testLoadPrefersCurrentVersionOverStaleLegacyCache() throws {

@@ -172,10 +172,13 @@ Version 1 shape:
 ```
 
 With `--days`, MeterBar derives the response from cached daily rows without rescanning logs.
-Provider-level daily rows do not retain `cacheCreationTokens` or `sessionCount`, so those fields are
-omitted in a windowed response. Cost-cache schema v2 does retain day × model and day × project
-attribution; when every included row is v2, windowed providers may include `modelBreakdowns` and
-`projectBreakdowns`. `period.isTruncated` is true when the cache covers fewer days than requested.
+Current daily rows retain `cacheCreationTokens`; legacy rows explicitly mark that value as
+non-authoritative until the app completes a fresh local scan. The version-1 windowed CLI DTO still
+omits `cacheCreationTokens` and `sessionCount` to preserve its published JSON shape. Cost-cache
+schema v2 introduced day × model and day × project attribution; schema v3 adds the daily
+cache-creation authority marker used by iCloud preparation. When every included row has attribution,
+windowed providers may include `modelBreakdowns` and `projectBreakdowns`.
+`period.isTruncated` is true when the cache covers fewer days than requested.
 
 ### Month-to-date window
 

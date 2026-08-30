@@ -74,6 +74,82 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(aggregate.totalCostUSD, localSummary.totalCostUSD, accuracy: 0.000_001)
     }
 
+    func testDemoOneMacRoundTripPreservesTokenProviderParity() {
+        let calendar = Calendar(identifier: .gregorian)
+        let providers = Set(ServiceType.allCases.filter(\.writesLocalTokenLogs))
+        let localSummary = DemoData.costSummary(now: now, calendar: calendar).filtered(to: providers)
+        let rollups = ICloudUsageAggregation.localRollups(
+            deviceID: firstDeviceID,
+            summary: localSummary,
+            quotaSnapshots: [],
+            now: now,
+            calendar: calendar
+        )
+        let aggregate = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID)],
+            rollups: rollups,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(aggregate.totalTokens, localSummary.totalTokens)
+        XCTAssertEqual(aggregate.totalCostUSD, localSummary.totalCostUSD, accuracy: 0.000_001)
+    }
+
+    @MainActor
+    func testFirstOptInPreparesLegacyDailyRowsBeforePublishing() async throws {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let legacySummary = summary(dailyUsage: [try legacyDailyUsage()])
+        let authoritativeSummary = summary(dailyUsage: [
+            DailyTokenUsage(
+                date: day,
+                provider: .codexCli,
+                inputTokens: 42,
+                outputTokens: 0,
+                cacheCreationTokens: 7,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 1
+            ),
+        ])
+        var preparationCount = 0
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { candidate in
+                preparationCount += 1
+                XCTAssertFalse(candidate?.hasAuthoritativeDailyCacheCreationTokens ?? true)
+                return authoritativeSummary
+            }
+        )
+
+        await service.sync(localSummary: legacySummary, quotaSnapshots: [])
+
+        let published = await repository.synchronizedRollups
+        XCTAssertEqual(preparationCount, 1)
+        XCTAssertEqual(published.first?.cacheCreationTokens, 7)
+    }
+
+    @MainActor
+    func testLegacyDailyRowsAreNotPublishedWhenPreparationCannotComplete() async throws {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let legacySummary = summary(dailyUsage: [try legacyDailyUsage()])
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { _ in nil }
+        )
+
+        await service.sync(localSummary: legacySummary, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 0)
+        XCTAssertNotNil(service.lastError)
+    }
+
     func testContributorsRespectSelectedWindowAndExcludeZeroRows() throws {
         let calendar = Calendar(identifier: .gregorian)
         let oldDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -8, to: day))
@@ -429,13 +505,13 @@ final class ICloudUsageAggregationTests: XCTestCase {
         )
     }
 
-    private func summary() -> CostSummary {
+    private func summary(dailyUsage: [DailyTokenUsage]? = nil) -> CostSummary {
         CostSummary(
             costs: [],
             totalCostUSD: 1,
             totalTokens: 42,
             periodDays: 30,
-            dailyUsage: [
+            dailyUsage: dailyUsage ?? [
                 DailyTokenUsage(
                     date: day,
                     provider: .codexCli,
@@ -445,6 +521,24 @@ final class ICloudUsageAggregationTests: XCTestCase {
                     estimatedCostUSD: 1
                 )
             ]
+        )
+    }
+
+    private func legacyDailyUsage() throws -> DailyTokenUsage {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        return try decoder.decode(
+            DailyTokenUsage.self,
+            from: encoder.encode(
+                LegacyDailyUsageWire(
+                    date: day,
+                    provider: .codexCli,
+                    inputTokens: 42,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1
+                )
+            )
         )
     }
 
@@ -467,6 +561,7 @@ private final class MainActorClock {
 
 private actor RepositorySpy: ICloudUsageRepository {
     private(set) var callCount = 0
+    private(set) var synchronizedRollups: [ICloudDailyUsageRollup] = []
     let error: Error?
 
     init(error: Error? = nil) {
@@ -476,6 +571,7 @@ private actor RepositorySpy: ICloudUsageRepository {
     func synchronize(device: ICloudUsageDevice, rollups: [ICloudDailyUsageRollup]) async throws
         -> ICloudUsageRepositorySnapshot {
         callCount += 1
+        synchronizedRollups = rollups
         if let error { throw error }
         return ICloudUsageRepositorySnapshot(devices: [device], rollups: rollups)
     }
@@ -484,4 +580,13 @@ private actor RepositorySpy: ICloudUsageRepository {
         callCount += 1
         if let error { throw error }
     }
+}
+
+private struct LegacyDailyUsageWire: Encodable {
+    let date: Date
+    let provider: ServiceType
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int
+    let estimatedCostUSD: Double
 }

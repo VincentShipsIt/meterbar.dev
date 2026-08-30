@@ -150,6 +150,23 @@ extension DemoData {
 
     private static let demoPeriodDays = 30
 
+    /// Integer apportionment whose output always sums back to `total`. Using a
+    /// floating-point fraction independently for every day loses the truncated
+    /// remainder and makes one-Mac CloudKit round trips look smaller than the
+    /// fixture's provider totals.
+    private static func distributedTokens(total: Int, weights: [Int]) -> [Int] {
+        let weightTotal = weights.reduce(0, +)
+        guard total > 0, weightTotal > 0 else { return Array(repeating: 0, count: weights.count) }
+
+        var values = weights.map { total * $0 / weightTotal }
+        var remainder = total - values.reduce(0, +)
+        for index in values.indices where remainder > 0 {
+            values[index] += 1
+            remainder -= 1
+        }
+        return values
+    }
+
     /// Synthetic 30-day cost summary for demo mode.
     static func costSummary(now: Date = Date(), calendar: Calendar = .current) -> CostSummary {
         let periodEnd = now
@@ -201,9 +218,15 @@ extension DemoData {
         return demoProviderCosts
             .filter { $0.inputTokens > 0 || $0.outputTokens > 0 }
             .flatMap { provider -> [DailyTokenUsage] in
-                let weightTotal = (0..<demoPeriodDays).reduce(0) { sum, index in
-                    sum + weeklyWeights[index % weeklyWeights.count]
-                }
+                let weights = (0..<demoPeriodDays).map { weeklyWeights[$0 % weeklyWeights.count] }
+                let weightTotal = weights.reduce(0, +)
+                let dailyInput = distributedTokens(total: provider.inputTokens, weights: weights)
+                let dailyOutput = distributedTokens(total: provider.outputTokens, weights: weights)
+                let dailyCacheCreation = distributedTokens(
+                    total: provider.cacheCreationTokens,
+                    weights: weights
+                )
+                let dailyCacheRead = distributedTokens(total: provider.cacheReadTokens, weights: weights)
                 return (0..<demoPeriodDays).compactMap { index -> DailyTokenUsage? in
                     guard let date = calendar.date(
                         byAdding: .day,
@@ -212,15 +235,17 @@ extension DemoData {
                     ) else { return nil }
                     let weight = Double(weeklyWeights[index % weeklyWeights.count])
                     let fraction = weight / Double(weightTotal)
-                    let dayInput = Int(Double(provider.inputTokens) * fraction)
-                    let dayOutput = Int(Double(provider.outputTokens) * fraction)
-                    let dayCacheRead = Int(Double(provider.cacheReadTokens) * fraction)
+                    let dayInput = dailyInput[index]
+                    let dayOutput = dailyOutput[index]
+                    let dayCacheCreation = dailyCacheCreation[index]
+                    let dayCacheRead = dailyCacheRead[index]
                     let dayCost = provider.costUSD * fraction
                     return DailyTokenUsage(
                         date: date,
                         provider: provider.provider,
                         inputTokens: dayInput,
                         outputTokens: dayOutput,
+                        cacheCreationTokens: dayCacheCreation,
                         cacheReadTokens: dayCacheRead,
                         estimatedCostUSD: dayCost,
                         // Per-day model attribution, so the 7-day window's model
@@ -233,7 +258,7 @@ extension DemoData {
                                 provider: provider.provider,
                                 inputTokens: dayInput,
                                 outputTokens: dayOutput,
-                                cacheCreationTokens: 0,
+                                cacheCreationTokens: dayCacheCreation,
                                 cacheReadTokens: dayCacheRead,
                                 costUSD: dayCost,
                                 sessionCount: 1
