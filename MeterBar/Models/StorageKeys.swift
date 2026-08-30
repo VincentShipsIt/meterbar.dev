@@ -105,6 +105,11 @@ nonisolated enum StorageKeys {
     static let codexAccountOrder = "CodexAccountOrder"
     /// Cached per-account Codex metrics (JSON-encoded [UUID: UsageMetrics]).
     static let cachedCodexAccountMetrics = "CachedCodexAccountMetrics"
+    /// Providers whose ordered tracked-account chain may automatically fail over.
+    /// Missing means disabled for every provider.
+    static let accountFailoverEnabledProviders = "AccountFailoverEnabledProviders"
+    /// Last live logical account per failover-capable provider. Contains UUIDs only.
+    static let accountFailoverActiveAccounts = "AccountFailoverActiveAccounts"
     /// Extra Grok Build profiles (JSON-encoded [GrokAccount]).
     static let grokCustomAccounts = "GrokCustomAccounts"
     /// User-chosen display name for the default Grok Build profile.

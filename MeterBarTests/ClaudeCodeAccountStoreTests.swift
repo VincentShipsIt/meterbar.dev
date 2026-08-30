@@ -244,6 +244,40 @@ final class ClaudeCodeAccountStoreTests: XCTestCase {
         XCTAssertEqual(store.customAccounts.first?.configDirectory, "/tmp/genfeed-claude-profile")
     }
 
+    func testCredentialLocationExchangePreservesLogicalIdentityAndPersists() throws {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Fallback", configDirectory: "/tmp/claude-fallback")
+        let fallback = try XCTUnwrap(store.customAccounts.first)
+
+        XCTAssertTrue(store.exchangeCredentialLocations(
+            from: ClaudeCodeAccount.defaultID,
+            to: fallback.id,
+            expectedSource: nil,
+            expectedTarget: "/tmp/claude-fallback"
+        ))
+
+        let reloaded = ClaudeCodeAccountStore(userDefaults: defaults)
+        XCTAssertEqual(
+            reloaded.accounts.first(where: { $0.id == ClaudeCodeAccount.defaultID })?.configDirectory,
+            "/tmp/claude-fallback"
+        )
+        XCTAssertNil(reloaded.accounts.first(where: { $0.id == fallback.id })?.configDirectory)
+    }
+
+    func testCredentialLocationExchangeRejectsAProfileChangedMidSwitch() throws {
+        let store = ClaudeCodeAccountStore(userDefaults: defaults)
+        store.addAccount(name: "Fallback", configDirectory: "/tmp/claude-fallback")
+        let fallback = try XCTUnwrap(store.customAccounts.first)
+        store.updateAccount(id: fallback.id, name: fallback.name, configDirectory: "/tmp/changed")
+
+        XCTAssertFalse(store.exchangeCredentialLocations(
+            from: ClaudeCodeAccount.defaultID,
+            to: fallback.id,
+            expectedSource: nil,
+            expectedTarget: "/tmp/claude-fallback"
+        ))
+    }
+
     // MARK: Private
 
     private var suiteName: String!

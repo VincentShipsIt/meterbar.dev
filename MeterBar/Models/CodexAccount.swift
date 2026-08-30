@@ -228,6 +228,40 @@ final class CodexAccountStore: ObservableObject {
         saveAccountOrder()
     }
 
+    /// Keeps each account UUID/name paired with its credential after the two
+    /// provider-owned auth.json locations exchange payloads.
+    @discardableResult
+    func exchangeCredentialLocations(
+        from sourceID: UUID,
+        to targetID: UUID,
+        expectedSource: String?,
+        expectedTarget: String?
+    ) -> Bool {
+        guard sourceID != targetID,
+              let source = accounts.first(where: { $0.id == sourceID }),
+              let target = accounts.first(where: { $0.id == targetID }),
+              source.homeDirectory == expectedSource,
+              target.homeDirectory == expectedTarget else {
+            return false
+        }
+        setCredentialLocation(target.homeDirectory, for: sourceID)
+        setCredentialLocation(source.homeDirectory, for: targetID)
+        saveDefaultAccountHomeDirectory()
+        saveCustomAccounts()
+        return true
+    }
+
+    private func setCredentialLocation(_ homeDirectory: String?, for id: UUID) {
+        if id == CodexAccount.defaultID {
+            defaultAccountHomeDirectory = homeDirectory
+            return
+        }
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
+        var updated = customAccounts
+        updated[index].homeDirectory = homeDirectory
+        customAccounts = updated
+    }
+
     private func load() {
         if let name = userDefaults.string(forKey: StorageKeys.codexDefaultAccountName)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {

@@ -52,6 +52,7 @@ by itself once a limit resets.
 ### Automation
 
 - **Session Wake**: Watch one Claude or Codex account and automatically resume its blocked sessions, one at a time, once the limit resets — the watcher keeps running after MeterBar quits ([details](#session-wake))
+- **Fallback accounts**: Optionally use the ordered Claude Code or Codex account list as a failover chain when the live account's primary quota is exhausted. MeterBar restores the preferred account after reset.
 - **Pre-limit Alerts**: Two configurable thresholds — an early heads-up as a quota tightens, and a stronger alert as it runs out ([details](#alerts))
 - **Event Integrations**: Run a local command or POST quota transitions to a webhook ([details](#event-integrations))
 
@@ -208,6 +209,23 @@ never notify, repeat crossings are deduplicated rather than stacked, and an
 alert only claims a quota is *exhausted* when it actually is — configuring the
 critical level at "10% left" produces a warning at 10%, not a false
 limit-reached banner.
+
+### Fallback accounts
+
+Claude Code and Codex CLI can opt into automatic fallback from their provider
+settings. The enabled account order is the chain: the first profile is
+preferred, followed by each fallback. MeterBar evaluates the chain only when an
+existing usage refresh reports the live account's primary window exhausted; it
+does not add another poll. Each successful switch posts a macOS notification,
+and the live profile is marked in the menu-bar popover and provider settings.
+Configured Event Integrations receive the same triggering `exhausted` or
+`recovered` quota transition through their existing local/webhook delivery.
+
+Credentials are exchanged only between the providers' own Keychain or profile
+auth-file locations. MeterBar does not write a backup credential, UserDefaults
+copy, or credential log. A request already in flight keeps the credential it
+started with and may fail; its next CLI request uses the newly live account.
+The preferred profile is restored once a later refresh observes its reset.
 
 ### Session Wake
 

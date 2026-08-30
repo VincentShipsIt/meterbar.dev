@@ -30,6 +30,7 @@ struct ProviderCardHeader: View {
 
     let snapshot: ProviderSnapshot
     var showsDisclosureChevron: Bool = false
+    var showsLiveAccount: Bool = false
 
     var content: Content { Content(snapshot: snapshot) }
 
@@ -50,6 +51,11 @@ struct ProviderCardHeader: View {
             .layoutPriority(1)
 
             Spacer(minLength: 0)
+
+            if showsLiveAccount {
+                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                    .accessibilityLabel("Live CLI account")
+            }
 
             ProviderCardStatusLabel(snapshot: snapshot)
 

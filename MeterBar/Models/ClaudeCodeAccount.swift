@@ -241,6 +241,41 @@ final class ClaudeCodeAccountStore: ObservableObject {
         saveAccountOrder()
     }
 
+    /// Keeps logical account identity attached to its credential after the
+    /// provider-native stores exchange payloads. `nil` means the CLI's live
+    /// default location, and is valid for either logical profile after a swap.
+    @discardableResult
+    func exchangeCredentialLocations(
+        from sourceID: UUID,
+        to targetID: UUID,
+        expectedSource: String?,
+        expectedTarget: String?
+    ) -> Bool {
+        guard sourceID != targetID,
+              let source = accounts.first(where: { $0.id == sourceID }),
+              let target = accounts.first(where: { $0.id == targetID }),
+              source.configDirectory == expectedSource,
+              target.configDirectory == expectedTarget else {
+            return false
+        }
+        setCredentialLocation(target.configDirectory, for: sourceID)
+        setCredentialLocation(source.configDirectory, for: targetID)
+        saveDefaultAccountConfigDirectory()
+        saveCustomAccounts()
+        return true
+    }
+
+    private func setCredentialLocation(_ configDirectory: String?, for id: UUID) {
+        if id == ClaudeCodeAccount.defaultID {
+            defaultAccountConfigDirectory = configDirectory
+            return
+        }
+        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
+        var updated = customAccounts
+        updated[index].configDirectory = configDirectory
+        customAccounts = updated
+    }
+
     private func load() {
         let storedDefaultName = userDefaults.string(forKey: defaultNameStorageKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)

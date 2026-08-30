@@ -140,6 +140,7 @@ class UsageDataManager: ObservableObject {
     private let parseHealthStore: ProviderParseHealthStore
     private let refreshLockMode: UsageRefreshLockMode
     private let refreshLockFactory: @Sendable () -> WakeLock
+    private let accountFailoverCoordinator: AccountFailoverCoordinator
 
     /// Where polled running counters are accumulated into a dated series.
     ///
@@ -190,6 +191,7 @@ class UsageDataManager: ObservableObject {
         preferences: UserDefaults = .standard,
         cacheDefaults: UserDefaults = .standard,
         parseHealthStore: ProviderParseHealthStore? = nil,
+        accountFailoverCoordinator: AccountFailoverCoordinator? = nil,
         schedulesAutoRefresh: Bool = true,
         refreshLockMode: UsageRefreshLockMode = .acquirePerRefresh,
         refreshLockFactory: @escaping @Sendable () -> WakeLock = {
@@ -216,6 +218,7 @@ class UsageDataManager: ObservableObject {
         self.preferences = preferences
         self.cacheDefaults = cacheDefaults
         self.parseHealthStore = parseHealthStore ?? .shared
+        self.accountFailoverCoordinator = accountFailoverCoordinator ?? .shared
         self.refreshLockMode = refreshLockMode
         self.refreshLockFactory = refreshLockFactory
         self.adaptiveNow = adaptiveNow
@@ -406,6 +409,10 @@ class UsageDataManager: ObservableObject {
 
         metrics = newMetrics
         publishMetrics()
+        await accountFailoverCoordinator.evaluate(
+            claudeMetrics: claudeCodeAccountMetrics,
+            codexMetrics: codexAccountMetrics
+        )
 
         return UsageRefreshReport(
             startedAt: startedAt,
