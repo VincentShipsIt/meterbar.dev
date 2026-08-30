@@ -89,12 +89,14 @@ public enum DemoData {
             sessionLimit: UsageLimit(
                 used: 18,
                 total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: reset
+                resetTime: reset,
+                periodKind: .monthly
             ),
             weeklyLimit: UsageLimit(
                 used: 42,
                 total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: reset
+                resetTime: reset,
+                periodKind: .monthly
             ),
             additionalLimits: [
                 UsageLimit(
