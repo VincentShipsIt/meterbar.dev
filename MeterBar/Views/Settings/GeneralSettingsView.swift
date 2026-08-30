@@ -15,6 +15,7 @@ struct GeneralSettingsView: View {
             menuBarAccountsSection
             notificationsSection
             QuotaEventSettingsView()
+            stayAwakeSection
             generalSection
         }
     }
@@ -33,6 +34,8 @@ struct GeneralSettingsView: View {
     @StateObject private var grokService = GrokCLIUsageService.shared
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var dockVisibility = DockVisibilityStore.shared
+    @StateObject private var stayAwakeStore = StayAwakeSettingsStore.shared
+    @StateObject private var powerAssertionManager = PowerAssertionManager.shared
     @StateObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
     @StateObject private var menuBarAccountSelection = MenuBarAccountSelectionStore.shared
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
@@ -669,5 +672,45 @@ struct GeneralSettingsView: View {
             launchAtLogin.refreshStatus()
             softwareUpdates.refreshState()
         }
+    }
+
+    private var stayAwakeSection: some View {
+        SettingsPanelSection(
+            title: "Stay Awake",
+            systemImage: "flame",
+            color: MeterBarTheme.warning
+        ) {
+            SettingsNotice(
+                text: "Stay Awake blocks automatic system sleep while an enabled provider has session quota. "
+                    + "This also keeps the Mac awake on battery power; the display may still sleep.",
+                color: MeterBarTheme.warning
+            )
+
+            SettingsRowView(
+                title: "Stay Awake",
+                detail: "Turn on manually while a tracked agent session is running. "
+                    + "MeterBar releases the assertion at session depletion, provider disable, or app quit."
+            ) {
+                Toggle("Stay Awake", isOn: Binding(
+                    get: { stayAwakeStore.isEnabled },
+                    set: { stayAwakeStore.setEnabled($0) }
+                ))
+                .labelsHidden()
+                .meterBarSwitch()
+            }
+
+            SettingsRowView(title: "Status") {
+                Text(stayAwakeStatusText)
+                    .foregroundStyle(powerAssertionManager.isAssertionHeld ? MeterBarTheme.warning : .secondary)
+            }
+        }
+    }
+
+    private var stayAwakeStatusText: String {
+        if let provider = powerAssertionManager.activeProvider,
+           powerAssertionManager.isAssertionHeld {
+            return "Active · \(provider.shortName)"
+        }
+        return stayAwakeStore.isEnabled ? "Waiting for session quota" : "Off"
     }
 }
