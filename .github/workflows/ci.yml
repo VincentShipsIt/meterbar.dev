@@ -55,6 +55,9 @@ jobs:
       - name: Verify signed-release workflow contract
         run: scripts/verify-release-workflow-contract.sh
 
+      - name: Test CloudKit provisioning profile validation
+        run: scripts/test-cloudkit-provisioning-profile.sh
+
       - name: Test Homebrew cask update
         run: scripts/test-update-homebrew-cask.sh
 

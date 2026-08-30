@@ -52,7 +52,7 @@ final class SettingsSidebarNavigationTests: XCTestCase {
     func testAppPagesDropProvidersBecauseItMovedUnderTheProvidersGroup() {
         XCTAssertEqual(
             SettingsSidebarModel.appPages,
-            [.general, .widget, .apiUsage, .cost, .automation, .about]
+            [.general, .widget, .apiUsage, .cost, .iCloud, .automation, .about]
         )
         XCTAssertFalse(SettingsSidebarModel.appPages.contains(.providers))
     }

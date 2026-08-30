@@ -49,6 +49,7 @@ trap 'rm -rf "$temporary_directory"' EXIT
 
 stdout_file="$temporary_directory/launch.stdout"
 stderr_file="$temporary_directory/launch.stderr"
+watchdog_marker="$temporary_directory/watchdog-fired"
 
 # macOS ships no `timeout(1)`, so the probe runs in the background behind a
 # watchdog. A bundle that blocks (a stuck singleton, a window-server prompt on a
@@ -58,6 +59,7 @@ launch_pid=$!
 
 (
   sleep "$launch_timeout"
+  : > "$watchdog_marker"
   kill -9 "$launch_pid" 2> /dev/null || true
 ) &
 watchdog_pid=$!
@@ -80,10 +82,16 @@ report_launch_diagnostics() {
   fi
 }
 
-# SIGKILL is how the watchdog fires, and also how the kernel reports a code
-# signature the loader refused, so name the timeout explicitly.
+# SIGKILL is how both the watchdog and the kernel report failure. Keep a marker
+# so an immediate restricted-entitlement rejection is not mislabeled as a 90s
+# timeout.
 if [ "$launch_status" -eq 137 ] && [ ! -s "$stdout_file" ]; then
-  echo "$app_path did not answer --launch-smoke within ${launch_timeout}s." >&2
+  if [ -f "$watchdog_marker" ]; then
+    echo "$app_path did not answer --launch-smoke within ${launch_timeout}s." >&2
+  else
+    echo "$app_path was killed before completing --launch-smoke." >&2
+    echo "A restricted entitlement may lack an authorizing provisioning profile." >&2
+  fi
   report_launch_diagnostics
   exit 1
 fi

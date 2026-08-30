@@ -52,6 +52,11 @@ struct SettingsView: View {
             }
             .tabItem { Label("Cost", systemImage: "chart.bar") }
 
+            settingsTab {
+                ICloudUsageSettingsView()
+            }
+            .tabItem { Label("iCloud", systemImage: "icloud") }
+
             if sessionWakeStore.featureEnabled {
                 settingsTab {
                     SessionWakeSettingsView()

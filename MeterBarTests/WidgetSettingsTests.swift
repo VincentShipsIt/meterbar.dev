@@ -9,7 +9,7 @@ final class WidgetSettingsTests: XCTestCase {
     func testWidgetRouteIsBetweenProvidersAndAPIUsage() {
         XCTAssertEqual(
             SettingsSection.allCases,
-            [.general, .providers, .widget, .apiUsage, .cost, .automation, .about]
+            [.general, .providers, .widget, .apiUsage, .cost, .iCloud, .automation, .about]
         )
         XCTAssertEqual(SettingsSection.widget.iconName, "rectangle.3.group")
     }

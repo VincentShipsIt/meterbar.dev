@@ -46,6 +46,8 @@ by itself once a limit resets.
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
 - **Real-time Updates**: Background refresh defaults to 10 minutes, with an opt-in 1–30 minute
   adaptive cadence and prompt catch-up after wake
+- **Private Multi-Mac Sync**: Opt in to combine daily usage, estimated cost, and shared quota state
+  across your Macs through your private iCloud database
 - **Pace-aware Bars**: Usage bars show quota left with an expected-pace marker and burn-rate projection
 - **Color-coded Status**: Green (healthy), Orange (tight), Red (critical/exhausted)
 
@@ -370,6 +372,9 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 
 - All credentials remain in their original locations (managed by CLI tools)
 - Cost figures are computed locally from session logs already on your disk; no log content leaves the machine
+- Multi-Mac sync is off by default. When enabled, it sends compact daily rollups, coarse quota
+  windows/reset times, and deterministic hashes of provider account IDs to your private iCloud database.
+  It never sends raw account IDs, credentials, or log content.
 - No data is sent beyond providers' own usage endpoints by default. An explicitly
   enabled webhook sends only the documented quota event fields to the URL the
   user configured; credentials and config paths are never included.

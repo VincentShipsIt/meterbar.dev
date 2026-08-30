@@ -178,6 +178,17 @@ nonisolated enum StorageKeys {
     /// window. Missing or unknown means the 30-day view.
     static let costsWindowDays = "CostsWindowDays"
 
+    // MARK: - Multi-Mac iCloud aggregation (#499)
+
+    /// Explicit opt-in. Missing/false guarantees no CloudKit call is made.
+    static let iCloudUsageEnabled = "ICloudUsageEnabled"
+    /// Stable UUID for this installation and its private record-zone name.
+    static let iCloudUsageDeviceID = "ICloudUsageDeviceID"
+    /// User-visible installation name published with last-seen metadata.
+    static let iCloudUsageDeviceName = "ICloudUsageDeviceName"
+    /// Dashboard presentation toggle. Forced off when sync is disabled.
+    static let iCloudUsageShowsAllMacs = "ICloudUsageShowsAllMacs"
+
     // MARK: - Display Currency (#270)
 
     /// `DisplayCurrencySelection` raw value. Missing or unknown means USD.

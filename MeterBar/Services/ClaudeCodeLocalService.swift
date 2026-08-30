@@ -177,6 +177,31 @@ class ClaudeCodeLocalService: ObservableObject {
         credentialStore.credentialsData(for: account, mode: mode)
     }
 
+    /// Stable provider-issued identity used only to deduplicate coarse quota
+    /// snapshots in the user's private iCloud database. The credential never
+    /// leaves this process; accounts whose access token has no safe identity
+    /// claim deliberately return nil instead of falling back to a local UUID.
+    nonisolated func externalAccountIdentity(
+        for account: ClaudeCodeAccount = .defaultAccount
+    ) -> String? {
+        guard let data = credentialsData(for: account),
+              let credentials = try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data) else {
+            return nil
+        }
+        return Self.externalAccountIdentity(accessToken: credentials.claudeAiOauth.accessToken)
+    }
+
+    nonisolated static func externalAccountIdentity(accessToken: String) -> String? {
+        for claim in ["sub", "account_id", "organization_id"] {
+            if let value = JWT.claimString(claim, in: accessToken)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
     /// Check and update access status.
     /// `nonisolated`: file stats + (with the OAuth fallback) a no-UI Keychain
     /// read — call from a detached task.

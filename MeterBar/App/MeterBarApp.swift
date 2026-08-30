@@ -89,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notifications = UsageNotificationCoordinator()
     private let quotaEvents = QuotaEventCoordinator.shared
+    private let iCloudUsage = ICloudUsageAggregationCoordinator.shared
     private var cancellables = Set<AnyCancellable>()
 
     /// Decides what each menu bar item shows and styles its button. Item
@@ -161,6 +162,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             observeStatusItemRefreshes()
+            // Menu-bar-only sessions never construct UsageDashboardView. Keep
+            // the opt-in iCloud publisher attached to app refresh lifecycle.
+            iCloudUsage.activate()
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()

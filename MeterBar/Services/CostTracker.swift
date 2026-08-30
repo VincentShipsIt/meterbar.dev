@@ -105,6 +105,28 @@ class CostTracker: ObservableObject {
         }
     }
 
+    /// Resolves a summary safe for private-CloudKit publication. Missing daily
+    /// coverage and caches written before daily cache-creation tokens existed
+    /// are not evidence; the first opt-in replaces either with a completed scan.
+    /// If that scan cannot complete, the caller must stay local-only.
+    func prepareSummaryForICloudPublication(
+        _ candidate: CostSummary?
+    ) async -> ICloudUsageSummaryPreparationResult {
+        let outcome = await scanCosts(days: max(30, candidate?.periodDays ?? 30))
+        switch outcome {
+        case .skipped:
+            return .skipped
+        case .partial:
+            return .partial
+        case .completed:
+            guard let summary = costSummary,
+                  summary.hasAuthoritativeDailyCacheCreationTokens else {
+                return .failed
+            }
+            return .completed(summary)
+        }
+    }
+
     /// Quietly backfills missing daily or hourly rows when Overview/Costs
     /// opens, without the visible "Scanning" UI a manual scan shows.
     ///

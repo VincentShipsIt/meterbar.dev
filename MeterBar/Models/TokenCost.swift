@@ -181,6 +181,11 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     public let provider: ServiceType
     public let inputTokens: Int
     public let outputTokens: Int
+    public let cacheCreationTokens: Int
+    /// `false` only for cache rows decoded from a schema that did not persist
+    /// daily cache-creation tokens. The zero value on such a row is a decoding
+    /// fallback, not an observed zero, and must never be published to iCloud.
+    public let cacheCreationTokensAreAuthoritative: Bool
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
     /// Day × model attribution from the v2 cost cache. `nil` means the row
@@ -201,6 +206,8 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         provider: ServiceType,
         inputTokens: Int,
         outputTokens: Int,
+        cacheCreationTokens: Int = 0,
+        cacheCreationTokensAreAuthoritative: Bool = true,
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
@@ -211,6 +218,8 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.provider = provider
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheCreationTokensAreAuthoritative = cacheCreationTokensAreAuthoritative
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
         self.modelBreakdowns = modelBreakdowns
@@ -219,7 +228,51 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }
 
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheReadTokens
+        inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case date
+        case provider
+        case inputTokens
+        case outputTokens
+        case cacheCreationTokens
+        case cacheCreationTokensAreAuthoritative
+        case cacheReadTokens
+        case estimatedCostUSD
+        case modelBreakdowns
+        case projectBreakdowns
+        case sessionBreakdowns
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(Date.self, forKey: .date)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        let containsCacheCreationTokens = container.contains(.cacheCreationTokens)
+        cacheCreationTokens = try container.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        let explicitCacheCreationAuthority = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .cacheCreationTokensAreAuthoritative
+        )
+        cacheCreationTokensAreAuthoritative = containsCacheCreationTokens
+            && (explicitCacheCreationAuthority ?? true)
+        cacheReadTokens = try container.decode(Int.self, forKey: .cacheReadTokens)
+        estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
+        modelBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .modelBreakdowns
+        )
+        projectBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .projectBreakdowns
+        )
+        sessionBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .sessionBreakdowns
+        )
     }
 
     private static let dayFormatter: DateFormatter = {
@@ -338,6 +391,11 @@ nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
 }
 
 nonisolated public struct CostSummary: Codable, Sendable {
+    enum LocalScanCompletion: String, Codable, Sendable {
+        case complete
+        case incomplete
+    }
+
     public let costs: [TokenCost]
     public let totalCostUSD: Double
     public let totalTokens: Int
@@ -352,6 +410,10 @@ nonisolated public struct CostSummary: Codable, Sendable {
     /// that predate dated pricing still decode; readers fall back to
     /// `ModelPricing.tableProvenance`.
     public let pricing: PricingProvenance?
+    /// Nil identifies summaries written before scan provenance existed or
+    /// constructed outside `CostSummaryScan`. A completed empty scan needs an
+    /// explicit positive marker so it does not trigger another full scan.
+    private(set) var localScanCompletion: LocalScanCompletion?
 
     public init(
         costs: [TokenCost],
@@ -371,6 +433,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         self.hourlyUsage = hourlyUsage
         self.lifetime = lifetime
         self.pricing = pricing
+        localScanCompletion = nil
     }
 
     public var formattedTotalCost: String {
@@ -386,6 +449,33 @@ nonisolated public struct CostSummary: Codable, Sendable {
         "\(UsageFormat.cost(averageDailyCost))/day"
     }
 
+    /// A legacy zero is not evidence. CloudKit publication must first replace
+    /// every such row with a completed local scan.
+    var hasAuthoritativeDailyCacheCreationTokens: Bool {
+        dailyUsage.allSatisfy(\.cacheCreationTokensAreAuthoritative)
+    }
+
+    /// Cached history can bypass publication preparation only when it contains
+    /// actual daily coverage and every row carries the current token schema.
+    /// An empty array needs a completed scan because `allSatisfy` is vacuously
+    /// true and cannot distinguish "no usage" from "no cached daily history."
+    var hasAuthoritativeICloudDailyCoverage: Bool {
+        switch localScanCompletion {
+        case .complete:
+            hasAuthoritativeDailyCacheCreationTokens
+        case .incomplete:
+            false
+        case nil:
+            !dailyUsage.isEmpty && hasAuthoritativeDailyCacheCreationTokens
+        }
+    }
+
+    func recordingLocalScanCompletion(_ isComplete: Bool) -> CostSummary {
+        var copy = self
+        copy.localScanCompletion = isComplete ? .complete : .incomplete
+        return copy
+    }
+
     /// Whether the cached summary is missing daily rows inside the visible window
     /// and should be quietly backfilled. Returns `false` once a scan has already
     /// run today (a genuinely zero-usage day shouldn't trigger constant rescans),
@@ -399,7 +489,10 @@ nonisolated public struct CostSummary: Codable, Sendable {
         guard !costs.isEmpty, totalTokens > 0 else { return false }
         guard !dailyUsage.isEmpty else { return true }
         guard dailyUsage.allSatisfy({
-            $0.modelBreakdowns != nil && $0.projectBreakdowns != nil && $0.sessionBreakdowns != nil
+            $0.cacheCreationTokensAreAuthoritative
+                && $0.modelBreakdowns != nil
+                && $0.projectBreakdowns != nil
+                && $0.sessionBreakdowns != nil
         }) else {
             return true
         }
@@ -473,9 +566,11 @@ nonisolated public struct CostSummary: Codable, Sendable {
 
     /// Aggregates the cached daily rows into per-provider totals over the last
     /// `days` calendar days (inclusive of today). Pure and rescan-free: it reads
-    /// only `dailyUsage`, so it can report input/output/cache-read tokens and
-    /// cost — not cache-creation tokens or session counts, which daily rows
-    /// don't carry. Powers `meterbar cost --days N` (issue #26).
+    /// only `dailyUsage`. Those rows now retain cache-creation tokens, but the
+    /// version-1 `ProviderDailyTotal` CLI boundary deliberately continues to
+    /// expose input/output/cache-read tokens and cost only. Session counts and
+    /// cache-creation tokens therefore remain absent from windowed CLI output.
+    /// Powers `meterbar cost --days N` (issue #26).
     ///
     /// `coveredDays` is bounded by the last scan window (`periodDays`) *and* the
     /// actual span of cached daily rows (earliest row → today). `periodDays`
@@ -566,7 +661,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         let visibleDailyUsage = dailyUsage.filter { enabledServices.contains($0.provider) }
         let visibleHourlyUsage = hourlyUsage?.filter { enabledServices.contains($0.provider) }
 
-        return CostSummary(
+        var filtered = CostSummary(
             costs: visibleCosts,
             totalCostUSD: visibleCosts.reduce(0) { $0 + $1.estimatedCostUSD },
             totalTokens: visibleCosts.reduce(0) { $0 + $1.totalTokens },
@@ -580,6 +675,8 @@ nonisolated public struct CostSummary: Codable, Sendable {
             // on `ModelPricing.tableProvenance`'s static date (issue #339).
             pricing: pricing
         )
+        filtered.localScanCompletion = localScanCompletion
+        return filtered
     }
 }
 
@@ -624,7 +721,9 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
         self.sessionBreakdowns = sessionBreakdowns
     }
 
-    /// Daily rows omit cache-creation tokens, so this is input + output + cache-read.
+    /// The version-1 windowed CLI DTO deliberately omits cache-creation tokens,
+    /// even though its source daily rows now retain them. Keep this sum aligned
+    /// with that published compatibility boundary.
     public var totalTokens: Int {
         inputTokens + outputTokens + cacheReadTokens
     }
