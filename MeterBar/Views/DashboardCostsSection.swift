@@ -167,7 +167,7 @@ struct DashboardCostsSection: View {
     private func contributingDeviceNames(for provider: ServiceType) -> [String] {
         guard iCloudSettings.showsAllMacs else { return [] }
         return iCloudAggregation.aggregate?
-            .contributingDevices(for: provider)
+            .contributingDevices(for: provider, startingAt: windowSelection.startDate())
             .map(\.name) ?? []
     }
 

@@ -181,6 +181,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     public let provider: ServiceType
     public let inputTokens: Int
     public let outputTokens: Int
+    public let cacheCreationTokens: Int
     public let cacheReadTokens: Int
     public let estimatedCostUSD: Double
     /// Day × model attribution from the v2 cost cache. `nil` means the row
@@ -201,6 +202,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         provider: ServiceType,
         inputTokens: Int,
         outputTokens: Int,
+        cacheCreationTokens: Int = 0,
         cacheReadTokens: Int,
         estimatedCostUSD: Double,
         modelBreakdowns: [TokenUsageBreakdown]? = nil,
@@ -211,6 +213,7 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.provider = provider
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
         self.cacheReadTokens = cacheReadTokens
         self.estimatedCostUSD = estimatedCostUSD
         self.modelBreakdowns = modelBreakdowns
@@ -219,7 +222,43 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }
 
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheReadTokens
+        inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case date
+        case provider
+        case inputTokens
+        case outputTokens
+        case cacheCreationTokens
+        case cacheReadTokens
+        case estimatedCostUSD
+        case modelBreakdowns
+        case projectBreakdowns
+        case sessionBreakdowns
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(Date.self, forKey: .date)
+        provider = try container.decode(ServiceType.self, forKey: .provider)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try container.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        cacheReadTokens = try container.decode(Int.self, forKey: .cacheReadTokens)
+        estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
+        modelBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .modelBreakdowns
+        )
+        projectBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .projectBreakdowns
+        )
+        sessionBreakdowns = try container.decodeIfPresent(
+            [TokenUsageBreakdown].self,
+            forKey: .sessionBreakdowns
+        )
     }
 
     private static let dayFormatter: DateFormatter = {

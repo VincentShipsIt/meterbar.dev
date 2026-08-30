@@ -26,6 +26,87 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(result.costSummary.dailyUsage.count, 1)
     }
 
+    func testOneMacRoundTripPreservesCacheCreationTokenParity() throws {
+        let localCost = TokenCost(
+            provider: .claudeCode,
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheCreationTokens: 30,
+            cacheReadTokens: 40,
+            estimatedCostUSD: 1.25,
+            sessionCount: 1,
+            periodStart: day,
+            periodEnd: day
+        )
+        let localSummary = CostSummary(
+            costs: [localCost],
+            totalCostUSD: 1.25,
+            totalTokens: localCost.totalTokens,
+            periodDays: 1,
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: day,
+                    provider: .claudeCode,
+                    inputTokens: 100,
+                    outputTokens: 20,
+                    cacheCreationTokens: 30,
+                    cacheReadTokens: 40,
+                    estimatedCostUSD: 1.25
+                )
+            ]
+        )
+
+        let rollups = ICloudUsageAggregation.localRollups(
+            deviceID: firstDeviceID,
+            summary: localSummary,
+            quotaSnapshots: [],
+            now: now
+        )
+        let aggregate = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID)],
+            rollups: rollups,
+            now: now
+        )
+        let aggregateCost = try XCTUnwrap(aggregate.costSummary.costs.first)
+
+        XCTAssertEqual(aggregateCost.cacheCreationTokens, localCost.cacheCreationTokens)
+        XCTAssertEqual(aggregate.totalTokens, localSummary.totalTokens)
+        XCTAssertEqual(aggregate.totalCostUSD, localSummary.totalCostUSD, accuracy: 0.000_001)
+    }
+
+    func testContributorsRespectSelectedWindowAndExcludeZeroRows() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let oldDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -8, to: day))
+        let recent = rollup(firstDeviceID, input: 10)
+        let old = rollup(secondDeviceID, day: oldDay, input: 20)
+        let zero = rollup(secondDeviceID)
+        let aggregate = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID, name: "Studio"), device(secondDeviceID, name: "Laptop")],
+            rollups: [recent, old, zero],
+            now: now,
+            calendar: calendar
+        )
+        let weekStart = try XCTUnwrap(calendar.date(byAdding: .day, value: -6, to: day))
+
+        let contributors = aggregate.contributingDevices(
+            for: .codexCli,
+            startingAt: weekStart,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(contributors.map(\.id), [firstDeviceID])
+    }
+
+    func testCloudKitResultCollectorPropagatesPerRecordFailure() {
+        let results: [String: Result<Int, Error>] = [
+            "good": .success(1),
+            "bad": .failure(TestError.unavailable),
+        ]
+
+        XCTAssertThrowsError(try CloudKitResultCollector.values(from: results))
+    }
+
     func testSameAccountQuotaUsesLatestSnapshotInsteadOfSumming() throws {
         let old = quota(account: "acct-shared", used: 90, capturedAt: now.addingTimeInterval(-60))
         let latest = quota(account: "acct-shared", used: 12, capturedAt: now)
@@ -232,6 +313,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let payload = try ICloudUsageRecordSchema.fields(for: rollup(firstDeviceID, input: 42, cost: 1.5))
 
         XCTAssertEqual(Set(payload.keys), ICloudUsageRecordSchema.rollupFieldNames)
+        XCTAssertEqual(payload["cacheCreationTokens"] as? Int, 0)
         XCTAssertFalse(payload.keys.contains { key in
             let forbiddenNames = [
                 "rawLog", "credential", "accessToken", "refreshToken", "cookie", "path", "project", "session", "model",
@@ -327,6 +409,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
 
     private func rollup(
         _ deviceID: UUID,
+        day: Date? = nil,
         input: Int = 0,
         output: Int = 0,
         cost: Double = 0,
@@ -336,7 +419,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
         ICloudDailyUsageRollup(
             deviceID: deviceID,
             provider: .codexCli,
-            day: day,
+            day: day ?? self.day,
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: 0,

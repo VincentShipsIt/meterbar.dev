@@ -79,6 +79,7 @@ enum TokenUsageAggregator {
                 provider: provider,
                 inputTokens: billableInput,
                 outputTokens: tokens.output + tokens.reasoning,
+                cacheCreationTokens: tokens.cacheCreation,
                 cacheReadTokens: tokens.cacheRead,
                 estimatedCostUSD: cost,
                 modelBreakdowns: modelsByDay[day].map {

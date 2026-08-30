@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-25
+last_verified: 2026-08-30
 status: active
 ---
 
@@ -22,3 +22,7 @@ Automatic Sparkle checks stay off until the user opts in. **Check Now** is alway
 ## Local vs CI
 
 This Mac Studio (`$HOME` `/Users/decod3rslabs`) may run `swift test` / `xcodebuild`. Do not treat Command Line Tools-only hosts as able to run XCTest.
+
+## CloudKit release gate
+
+The opt-in multi-Mac aggregation feature is not release-ready from a source build alone. Before shipping it, the release owner must provision the `iCloud.dev.meterbar.app` container for the distribution team, deploy the `MeterBarUsageDevice` and `MeterBarDailyUsageRollup` record schema (including every field in `ICloudUsageRecordSchema`) to CloudKit production, and regenerate/verify the Developer ID provisioning profile with the CloudKit/iCloud entitlements. Unsigned local and CI builds prove compilation only; they do not prove production-container access.

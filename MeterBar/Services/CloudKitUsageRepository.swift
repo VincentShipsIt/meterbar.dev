@@ -78,9 +78,8 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
                 inZoneWith: zoneID,
                 since: changeToken
             )
-            records += page.modificationResultsByID.values.compactMap {
-                try? $0.get().record
-            }
+            records += try CloudKitResultCollector.values(from: page.modificationResultsByID)
+                .map(\.record)
             changeToken = page.changeToken
             moreComing = page.moreComing
         }
@@ -128,6 +127,7 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
               let updatedAt = record["updatedAt"] as? Date else {
             return nil
         }
+        let cacheCreation = (record["cacheCreationTokens"] as? NSNumber)?.intValue ?? 0
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         guard let quotaSnapshots = try? decoder.decode([ICloudQuotaSnapshot].self, from: quotaData) else {
@@ -139,6 +139,7 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
             day: day,
             inputTokens: input,
             outputTokens: output,
+            cacheCreationTokens: cacheCreation,
             cacheReadTokens: cacheRead,
             estimatedCostUSD: cost,
             quotaSnapshots: quotaSnapshots,
@@ -154,5 +155,16 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     /// work behind the opt-in service guard so disabled is truly inert.
     private func privateDatabase() -> CKDatabase {
         CKContainer(identifier: Self.containerIdentifier).privateCloudDatabase
+    }
+}
+
+/// Turns CloudKit's per-record result map into an all-or-nothing page. A single
+/// failed record makes the service fall back to local totals instead of showing
+/// a plausible-looking partial aggregate.
+nonisolated enum CloudKitResultCollector {
+    static func values<Key: Hashable, Value>(
+        from results: [Key: Result<Value, Error>]
+    ) throws -> [Value] {
+        try results.values.map { try $0.get() }
     }
 }

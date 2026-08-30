@@ -122,13 +122,38 @@ nonisolated struct ICloudDailyUsageRollup: Codable, Equatable, Sendable {
     let day: Date
     let inputTokens: Int
     let outputTokens: Int
+    let cacheCreationTokens: Int
     let cacheReadTokens: Int
     let estimatedCostUSD: Double
     let quotaSnapshots: [ICloudQuotaSnapshot]
     let updatedAt: Date
 
     var totalTokens: Int {
-        max(0, inputTokens) + max(0, outputTokens) + max(0, cacheReadTokens)
+        max(0, inputTokens) + max(0, outputTokens) + max(0, cacheCreationTokens) + max(0, cacheReadTokens)
+    }
+
+    init(
+        deviceID: UUID,
+        provider: ServiceType,
+        day: Date,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationTokens: Int = 0,
+        cacheReadTokens: Int,
+        estimatedCostUSD: Double,
+        quotaSnapshots: [ICloudQuotaSnapshot],
+        updatedAt: Date
+    ) {
+        self.deviceID = deviceID
+        self.provider = provider
+        self.day = day
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.estimatedCostUSD = estimatedCostUSD
+        self.quotaSnapshots = quotaSnapshots
+        self.updatedAt = updatedAt
     }
 
     var recordName: String {
@@ -148,7 +173,8 @@ nonisolated enum ICloudUsageRecordSchema {
     ]
     static let rollupFieldNames: Set<String> = [
         "schemaVersion", "deviceID", "provider", "day", "inputTokens",
-        "outputTokens", "cacheReadTokens", "estimatedCostUSD", "quotaSnapshots", "updatedAt",
+        "outputTokens", "cacheCreationTokens", "cacheReadTokens", "estimatedCostUSD",
+        "quotaSnapshots", "updatedAt",
     ]
 
     static func fields(for device: ICloudUsageDevice) -> [String: Any] {
@@ -170,6 +196,7 @@ nonisolated enum ICloudUsageRecordSchema {
             "day": rollup.day,
             "inputTokens": max(0, rollup.inputTokens),
             "outputTokens": max(0, rollup.outputTokens),
+            "cacheCreationTokens": max(0, rollup.cacheCreationTokens),
             "cacheReadTokens": max(0, rollup.cacheReadTokens),
             "estimatedCostUSD": max(0, rollup.estimatedCostUSD),
             "quotaSnapshots": try encoder.encode(rollup.quotaSnapshots),
@@ -206,6 +233,27 @@ nonisolated struct ICloudUsageAggregationResult: Sendable {
 
     func contributingDevices(for provider: ServiceType) -> [ICloudUsageDevice] {
         let ids = Set(contributingDeviceIDsByProvider[provider] ?? [])
+        return devices.filter { ids.contains($0.id) }
+    }
+
+    func contributingDevices(
+        for provider: ServiceType,
+        startingAt startDate: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [ICloudUsageDevice] {
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.startOfDay(for: startDate)
+        let ids = Set(rollups.compactMap { rollup -> UUID? in
+            let day = calendar.startOfDay(for: rollup.day)
+            guard rollup.provider == provider,
+                  day >= start,
+                  day <= today,
+                  rollup.totalTokens > 0 || rollup.estimatedCostUSD > 0 else {
+                return nil
+            }
+            return rollup.deviceID
+        })
         return devices.filter { ids.contains($0.id) }
     }
 }
@@ -288,8 +336,9 @@ nonisolated enum ICloudUsageAggregation {
         }
         let activeCutoff = now.addingTimeInterval(-activeDeviceInterval)
         let activeDevices = sortedDevices.filter { $0.lastSeenAt >= activeCutoff }
-        let contributorIDs = Set(visible.map(\.deviceID))
-        let byProvider = Dictionary(grouping: visible, by: \.provider).mapValues { rows in
+        let contributingRows = visible.filter { $0.totalTokens > 0 || $0.estimatedCostUSD > 0 }
+        let contributorIDs = Set(contributingRows.map(\.deviceID))
+        let byProvider = Dictionary(grouping: contributingRows, by: \.provider).mapValues { rows in
             Array(Set(rows.map(\.deviceID))).sorted { $0.uuidString < $1.uuidString }
         }
 
@@ -326,6 +375,7 @@ nonisolated enum ICloudUsageAggregation {
                 day: day,
                 inputTokens: max(0, usage.inputTokens),
                 outputTokens: max(0, usage.outputTokens),
+                cacheCreationTokens: max(0, usage.cacheCreationTokens),
                 cacheReadTokens: max(0, usage.cacheReadTokens),
                 estimatedCostUSD: max(0, usage.estimatedCostUSD),
                 quotaSnapshots: [],
@@ -343,6 +393,7 @@ nonisolated enum ICloudUsageAggregation {
                     day: existing.day,
                     inputTokens: existing.inputTokens,
                     outputTokens: existing.outputTokens,
+                    cacheCreationTokens: existing.cacheCreationTokens,
                     cacheReadTokens: existing.cacheReadTokens,
                     estimatedCostUSD: existing.estimatedCostUSD,
                     quotaSnapshots: snapshots,
@@ -355,6 +406,7 @@ nonisolated enum ICloudUsageAggregation {
                     day: today,
                     inputTokens: 0,
                     outputTokens: 0,
+                    cacheCreationTokens: 0,
                     cacheReadTokens: 0,
                     estimatedCostUSD: 0,
                     quotaSnapshots: snapshots,
@@ -387,6 +439,7 @@ nonisolated enum ICloudUsageAggregation {
                     provider: key.provider,
                     inputTokens: rows.reduce(0) { $0 + max(0, $1.inputTokens) },
                     outputTokens: rows.reduce(0) { $0 + max(0, $1.outputTokens) },
+                    cacheCreationTokens: rows.reduce(0) { $0 + max(0, $1.cacheCreationTokens) },
                     cacheReadTokens: rows.reduce(0) { $0 + max(0, $1.cacheReadTokens) },
                     estimatedCostUSD: rows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) },
                     modelBreakdowns: [],
@@ -406,7 +459,7 @@ nonisolated enum ICloudUsageAggregation {
                     provider: provider,
                     inputTokens: rows.reduce(0) { $0 + $1.inputTokens },
                     outputTokens: rows.reduce(0) { $0 + $1.outputTokens },
-                    cacheCreationTokens: 0,
+                    cacheCreationTokens: rows.reduce(0) { $0 + $1.cacheCreationTokens },
                     cacheReadTokens: rows.reduce(0) { $0 + $1.cacheReadTokens },
                     estimatedCostUSD: rows.reduce(0) { $0 + $1.estimatedCostUSD },
                     sessionCount: 0,
@@ -437,7 +490,8 @@ nonisolated enum ICloudUsageAggregation {
             .map { "\($0.provider.rawValue):\($0.accountIdentity):\($0.capturedAt.timeIntervalSinceReferenceDate)" }
             .sorted()
             .joined(separator: "|")
-        return "\(rollup.inputTokens):\(rollup.outputTokens):\(rollup.cacheReadTokens):"
+        return "\(rollup.inputTokens):\(rollup.outputTokens):\(rollup.cacheCreationTokens):"
+            + "\(rollup.cacheReadTokens):"
             + "\(rollup.estimatedCostUSD):\(quota)"
     }
 }
