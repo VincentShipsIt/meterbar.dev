@@ -169,8 +169,11 @@ struct DashboardMetricTile: View {
   let value: String
   let caption: String
   let systemImage: String
+  var accessibilityTitle: String?
   var indicatorTint: Color = .secondary
   var style: Style = .regular
+
+  var accessibilityLabelText: String { accessibilityTitle ?? title }
 
   var body: some View {
     DashboardTile(minHeight: style.minHeight) {
@@ -206,7 +209,7 @@ struct DashboardMetricTile: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel(title)
+    .accessibilityLabel(accessibilityLabelText)
     .accessibilityValue("\(value), \(caption)")
   }
 }
