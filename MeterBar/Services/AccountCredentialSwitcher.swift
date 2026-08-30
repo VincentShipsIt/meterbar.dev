@@ -112,22 +112,34 @@ nonisolated struct CredentialCompletedAccountState: Codable, Equatable, Hashable
     let credentialIdentity: CredentialFileIdentity
 }
 
+nonisolated struct CredentialCompletedPathOwnership: Codable, Equatable, Hashable, Sendable {
+    let accountID: UUID
+    let credentialLocation: String?
+    let credentialPath: String
+
+    init(account: CredentialCompletedAccountState) {
+        accountID = account.accountID
+        credentialLocation = account.credentialLocation
+        credentialPath = account.credentialPath
+    }
+}
+
 nonisolated struct CredentialCompletedProviderState: Codable, Equatable, Sendable {
     let provider: AccountFailoverProvider
     let generation: UInt64
     let accounts: [CredentialCompletedAccountState]
-    let bindingHistory: [CredentialCompletedAccountState]
+    let pathOwnership: [CredentialCompletedPathOwnership]
 
     init(
         provider: AccountFailoverProvider,
         generation: UInt64,
         accounts: [CredentialCompletedAccountState],
-        bindingHistory: [CredentialCompletedAccountState]? = nil
+        pathOwnership: [CredentialCompletedPathOwnership]? = nil
     ) {
         self.provider = provider
         self.generation = generation
         self.accounts = accounts
-        self.bindingHistory = Self.mergedHistory(bindingHistory ?? [], with: accounts)
+        self.pathOwnership = Self.mergedPathOwnership(pathOwnership ?? [], with: accounts)
     }
 
     init(from decoder: Decoder) throws {
@@ -135,27 +147,47 @@ nonisolated struct CredentialCompletedProviderState: Codable, Equatable, Sendabl
         provider = try container.decode(AccountFailoverProvider.self, forKey: .provider)
         generation = try container.decode(UInt64.self, forKey: .generation)
         accounts = try container.decode([CredentialCompletedAccountState].self, forKey: .accounts)
-        bindingHistory = Self.mergedHistory(
-            try container.decodeIfPresent([CredentialCompletedAccountState].self, forKey: .bindingHistory) ?? [],
+        let legacyBindings = try container.decodeIfPresent(
+            [CredentialCompletedAccountState].self,
+            forKey: .bindingHistory
+        ) ?? []
+        pathOwnership = Self.mergedPathOwnership(
+            try container.decodeIfPresent(
+                [CredentialCompletedPathOwnership].self,
+                forKey: .pathOwnership
+            ) ?? legacyBindings.map(CredentialCompletedPathOwnership.init(account:)),
             with: accounts
         )
     }
 
-    private static func mergedHistory(
-        _ history: [CredentialCompletedAccountState],
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(generation, forKey: .generation)
+        try container.encode(accounts, forKey: .accounts)
+        try container.encode(pathOwnership, forKey: .pathOwnership)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case generation
+        case accounts
+        case pathOwnership
+        case bindingHistory
+    }
+
+    private static func mergedPathOwnership(
+        _ history: [CredentialCompletedPathOwnership],
         with accounts: [CredentialCompletedAccountState]
-    ) -> [CredentialCompletedAccountState] {
-        Array(Set(history + accounts)).sorted {
+    ) -> [CredentialCompletedPathOwnership] {
+        Array(Set(history + accounts.map(CredentialCompletedPathOwnership.init(account:)))).sorted {
             if $0.accountID != $1.accountID {
                 return $0.accountID.uuidString < $1.accountID.uuidString
             }
             if $0.credentialPath != $1.credentialPath {
                 return $0.credentialPath < $1.credentialPath
             }
-            if $0.credentialIdentity.device != $1.credentialIdentity.device {
-                return $0.credentialIdentity.device < $1.credentialIdentity.device
-            }
-            return $0.credentialIdentity.inode < $1.credentialIdentity.inode
+            return ($0.credentialLocation ?? "") < ($1.credentialLocation ?? "")
         }
     }
 }
@@ -798,20 +830,20 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try completedStateStore.save(completedState)
             return
         }
-        guard bindingsRespectHistory(currentAccounts, history: authoritative.bindingHistory) else {
+        guard pathsRespectOwnership(currentAccounts, history: authoritative.pathOwnership) else {
             throw CredentialExchangeError.authoritativeStateMismatch
         }
         guard authoritative.accounts != currentAccounts else { return }
         guard reconcileAccountSetChanges,
               authoritative.generation < UInt64.max,
-              accountSetChangeIsSafe(from: authoritative.accounts, to: currentAccounts) else {
+              accountSnapshotChangeIsSafe(from: authoritative.accounts, to: currentAccounts) else {
             throw CredentialExchangeError.authoritativeStateMismatch
         }
         completedState.setState(CredentialCompletedProviderState(
             provider: provider,
             generation: authoritative.generation + 1,
             accounts: currentAccounts,
-            bindingHistory: authoritative.bindingHistory
+            pathOwnership: authoritative.pathOwnership
         ))
         try completedStateStore.save(completedState)
     }
@@ -834,7 +866,15 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try completedStateStore.save(completedState)
             return
         }
-        guard bindingsRespectHistory(currentAccounts, history: authoritative.bindingHistory) else {
+        let transactionOwnership = currentAccounts.filter {
+            $0.accountID == record.event.fromAccountID || $0.accountID == record.event.toAccountID
+        }
+        .map(CredentialCompletedPathOwnership.init(account:))
+        guard pathsRespectOwnership(
+            currentAccounts,
+            history: authoritative.pathOwnership,
+            permittedNewOwnership: transactionOwnership
+        ) else {
             throw CredentialExchangeError.authoritativeStateMismatch
         }
         if authoritative.accounts == currentAccounts {
@@ -842,12 +882,12 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         }
         if transitionMatches(record: record, before: nil, after: authoritative.accounts),
            authoritative.generation < UInt64.max,
-           accountSetChangeIsSafe(from: authoritative.accounts, to: currentAccounts) {
+           accountSnapshotChangeIsSafe(from: authoritative.accounts, to: currentAccounts) {
             completedState.setState(CredentialCompletedProviderState(
                 provider: record.event.provider,
                 generation: authoritative.generation + 1,
                 accounts: currentAccounts,
-                bindingHistory: authoritative.bindingHistory
+                pathOwnership: authoritative.pathOwnership
             ))
             try completedStateStore.save(completedState)
             return
@@ -860,7 +900,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             provider: record.event.provider,
             generation: authoritative.generation + 1,
             accounts: currentAccounts,
-            bindingHistory: authoritative.bindingHistory
+            pathOwnership: authoritative.pathOwnership
         ))
         try completedStateStore.save(completedState)
     }
@@ -953,7 +993,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         }
     }
 
-    private func accountSetChangeIsSafe(
+    private func accountSnapshotChangeIsSafe(
         from authoritative: [CredentialCompletedAccountState],
         to current: [CredentialCompletedAccountState]
     ) -> Bool {
@@ -961,39 +1001,28 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         let currentByID = Dictionary(uniqueKeysWithValues: current.map { ($0.accountID, $0) })
         let authoritativeIDs = Set(authoritativeByID.keys)
         let currentIDs = Set(currentByID.keys)
-        guard authoritativeIDs != currentIDs,
-              authoritativeIDs.isSubset(of: currentIDs) || currentIDs.isSubset(of: authoritativeIDs) else {
+        guard authoritativeIDs.isSubset(of: currentIDs) || currentIDs.isSubset(of: authoritativeIDs) else {
             return false
         }
         return authoritativeIDs.intersection(currentIDs).allSatisfy {
-            authoritativeByID[$0] == currentByID[$0]
+            guard let before = authoritativeByID[$0], let after = currentByID[$0] else { return false }
+            return before.accountID == after.accountID
+                && before.credentialLocation == after.credentialLocation
+                && before.credentialPath == after.credentialPath
         }
     }
 
-    private func bindingsRespectHistory(
+    private func pathsRespectOwnership(
         _ accounts: [CredentialCompletedAccountState],
-        history: [CredentialCompletedAccountState]
+        history: [CredentialCompletedPathOwnership],
+        permittedNewOwnership: [CredentialCompletedPathOwnership] = []
     ) -> Bool {
-        var owners: [CredentialCompletedBindingKey: UUID] = [:]
-        for binding in history {
-            let key = CredentialCompletedBindingKey(
-                path: binding.credentialPath,
-                identity: binding.credentialIdentity
-            )
-            if let owner = owners[key], owner != binding.accountID { return false }
-            owners[key] = binding.accountID
-        }
+        let ownershipByPath = Dictionary(grouping: history, by: \.credentialPath)
+        let permitted = Set(permittedNewOwnership)
         return accounts.allSatisfy { account in
-            let key = CredentialCompletedBindingKey(
-                path: account.credentialPath,
-                identity: account.credentialIdentity
-            )
-            return owners[key].map { $0 == account.accountID } ?? true
+            let ownership = CredentialCompletedPathOwnership(account: account)
+            guard let priorOwners = ownershipByPath[account.credentialPath] else { return true }
+            return priorOwners.contains(ownership) || permitted.contains(ownership)
         }
     }
-}
-
-nonisolated private struct CredentialCompletedBindingKey: Hashable {
-    let path: String
-    let identity: CredentialFileIdentity
 }

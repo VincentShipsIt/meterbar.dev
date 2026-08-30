@@ -237,12 +237,15 @@ account metadata writes and retries an unacknowledged notification without
 repeating the credential exchange.
 
 After acknowledgement, a shared `completed-state.json` ledger durably retains
-the provider, generation, account UUIDs, credential locations and paths, and
-inode identities. Release and debug builds use this ledger to prevent stale
-account metadata from repeating a credential exchange and to ensure a removed
-credential-file binding cannot be reassigned to a new account UUID. It contains
-neither credential bytes nor account display names. Credential bytes are never
-copied into MeterBar storage or logs. Claude Keychain and mixed
+the provider, generation, current account UUID/location/path/inode snapshots,
+and immutable path-to-authorized-UUID ownership history. A provider may
+atomically replace an account's credential file; under the shared lock MeterBar
+accepts the new inode only when the UUID, location, and normalized path are
+unchanged. Release and debug builds use the ledger to prevent stale metadata
+from repeating an exchange and to ensure a removed path cannot be reassigned to
+a new account UUID. It contains neither credential bytes nor account display
+names. Credential bytes are never copied into MeterBar storage or logs. Claude
+Keychain and mixed
 Keychain/file layouts are intentionally ineligible: Security.framework does
 not provide an atomic multi-item transaction, so MeterBar refuses to risk a
 partial credential exchange.
