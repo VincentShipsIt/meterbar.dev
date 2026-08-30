@@ -375,7 +375,8 @@ nonisolated enum ICloudUsageAggregation {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [ICloudDailyUsageRollup] {
-        guard summary?.hasAuthoritativeDailyCacheCreationTokens != false else { return [] }
+        guard summary?.localScanCompletion != .incomplete,
+              summary?.hasAuthoritativeDailyCacheCreationTokens != false else { return [] }
         var rows: [String: ICloudDailyUsageRollup] = [:]
         for usage in summary?.dailyUsage ?? [] {
             let day = calendar.startOfDay(for: usage.date)

@@ -58,6 +58,7 @@ final class ICloudUsageAggregationService: ObservableObject {
                 return
             }
             guard case let .completed(prepared) = preparation,
+                  prepared.localScanCompletion != .incomplete,
                   prepared.hasAuthoritativeDailyCacheCreationTokens else {
                 aggregate = nil
                 lastError = "Local cost history needs a full scan before it can sync to iCloud."

@@ -213,6 +213,75 @@ final class ICloudUsageAggregationTests: XCTestCase {
     }
 
     @MainActor
+    func testPartialPreparationCannotPublishOnLaterLifecycleSync() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let tracker = CostTracker(demoMode: true)
+        let partialSummary = summary()
+        var preparationCount = 0
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { _ in
+                preparationCount += 1
+                if preparationCount == 1 {
+                    tracker.apply(
+                        CostSummaryBuilder.CostSummaryScan(
+                            summary: partialSummary,
+                            deferredProviders: [.claude]
+                        )
+                    )
+                }
+                return .partial
+            }
+        )
+
+        await service.sync(localSummary: nil, quotaSnapshots: [])
+        await service.sync(localSummary: tracker.costSummary, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        XCTAssertEqual(preparationCount, 2)
+        XCTAssertEqual(callCount, 0)
+        XCTAssertEqual(tracker.costSummary?.totalTokens, partialSummary.totalTokens)
+    }
+
+    @MainActor
+    func testCompletedEmptyScanDoesNotPrepareAgainOnLaterLifecycleSync() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let tracker = CostTracker(demoMode: true)
+        let emptySummary = CostSummary(
+            costs: [],
+            totalCostUSD: 0,
+            totalTokens: 0,
+            periodDays: 30,
+            dailyUsage: []
+        )
+        var preparationCount = 0
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            prepareLocalSummary: { _ in
+                preparationCount += 1
+                tracker.apply(CostSummaryBuilder.CostSummaryScan(summary: emptySummary))
+                guard let prepared = tracker.costSummary else { return .failed }
+                return .completed(prepared)
+            }
+        )
+
+        await service.sync(localSummary: nil, quotaSnapshots: [])
+        await service.sync(localSummary: tracker.costSummary, quotaSnapshots: [])
+
+        let callCount = await repository.callCount
+        let published = await repository.synchronizedRollups
+        XCTAssertEqual(preparationCount, 1)
+        XCTAssertEqual(callCount, 2)
+        XCTAssertTrue(published.isEmpty)
+    }
+
+    @MainActor
     func testDisablingDuringSuspendedPreparationMakesZeroRepositoryCalls() async {
         let repository = RepositorySpy()
         let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())

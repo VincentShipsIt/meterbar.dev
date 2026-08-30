@@ -30,8 +30,8 @@ final class CostSummaryStoreTests: XCTestCase {
             CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL)
         )
 
-        XCTAssertEqual(CostSummaryCache.currentSchemaVersion, 3)
-        XCTAssertEqual(migrated.schemaVersion, 3)
+        XCTAssertEqual(CostSummaryCache.currentSchemaVersion, 4)
+        XCTAssertEqual(migrated.schemaVersion, 4)
         XCTAssertEqual(migrated.summary.dailyUsage.count, 1)
         XCTAssertFalse(migrated.summary.dailyUsage[0].cacheCreationTokensAreAuthoritative)
         XCTAssertNil(migrated.summary.dailyUsage[0].modelBreakdowns)
@@ -50,7 +50,7 @@ final class CostSummaryStoreTests: XCTestCase {
         let persisted = try JSONSerialization.jsonObject(
             with: Data(contentsOf: currentURL)
         ) as? [String: Any]
-        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 3)
+        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 4)
 
         let reloaded = try XCTUnwrap(
             CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL)
@@ -124,6 +124,53 @@ final class CostSummaryStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.summary.hourlyUsage?.first?.date, hour)
         XCTAssertEqual(loaded.summary.hourlyUsage?.first?.provider, .codexCli)
+    }
+
+    func testCurrentCacheRoundTripsCompletedEmptyScanProvenance() throws {
+        let currentURL = tempDirectory.appendingPathComponent("cost-summary-v2.json")
+        let legacyURL = tempDirectory.appendingPathComponent("cost-summary-v1.json")
+        let completed = CostSummaryBuilder.CostSummaryScan(
+            summary: CostSummary(
+                costs: [],
+                totalCostUSD: 0,
+                totalTokens: 0,
+                periodDays: 30,
+                dailyUsage: []
+            )
+        ).summary
+        let current = CostSummaryCache(summary: completed, lastScanDate: Date())
+
+        try CostSummaryStore.save(current, to: currentURL)
+        let loaded = try XCTUnwrap(CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL))
+
+        XCTAssertTrue(loaded.summary.hasAuthoritativeICloudDailyCoverage)
+    }
+
+    func testVersionThreeEmptyCacheMigratesWithoutInventingScanCompletion() throws {
+        let currentURL = tempDirectory.appendingPathComponent("cost-summary-v2.json")
+        let legacyURL = tempDirectory.appendingPathComponent("cost-summary-v1.json")
+        let legacy = CostSummaryCache(
+            summary: CostSummary(
+                costs: [],
+                totalCostUSD: 0,
+                totalTokens: 0,
+                periodDays: 30,
+                dailyUsage: []
+            ),
+            lastScanDate: Date()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(legacy)) as? [String: Any]
+        )
+        object["schemaVersion"] = 3
+        try JSONSerialization.data(withJSONObject: object).write(to: currentURL)
+
+        let loaded = try XCTUnwrap(CostSummaryStore.load(currentURL: currentURL, legacyURL: legacyURL))
+
+        XCTAssertEqual(loaded.schemaVersion, CostSummaryCache.currentSchemaVersion)
+        XCTAssertFalse(loaded.summary.hasAuthoritativeICloudDailyCoverage)
     }
 
     private func legacyPayload(inputTokens: Int = 10) throws -> Data {

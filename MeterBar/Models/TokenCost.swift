@@ -391,6 +391,11 @@ nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
 }
 
 nonisolated public struct CostSummary: Codable, Sendable {
+    enum LocalScanCompletion: String, Codable, Sendable {
+        case complete
+        case incomplete
+    }
+
     public let costs: [TokenCost]
     public let totalCostUSD: Double
     public let totalTokens: Int
@@ -405,6 +410,10 @@ nonisolated public struct CostSummary: Codable, Sendable {
     /// that predate dated pricing still decode; readers fall back to
     /// `ModelPricing.tableProvenance`.
     public let pricing: PricingProvenance?
+    /// Nil identifies summaries written before scan provenance existed or
+    /// constructed outside `CostSummaryScan`. A completed empty scan needs an
+    /// explicit positive marker so it does not trigger another full scan.
+    private(set) var localScanCompletion: LocalScanCompletion?
 
     public init(
         costs: [TokenCost],
@@ -424,6 +433,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         self.hourlyUsage = hourlyUsage
         self.lifetime = lifetime
         self.pricing = pricing
+        localScanCompletion = nil
     }
 
     public var formattedTotalCost: String {
@@ -450,7 +460,20 @@ nonisolated public struct CostSummary: Codable, Sendable {
     /// An empty array needs a completed scan because `allSatisfy` is vacuously
     /// true and cannot distinguish "no usage" from "no cached daily history."
     var hasAuthoritativeICloudDailyCoverage: Bool {
-        !dailyUsage.isEmpty && hasAuthoritativeDailyCacheCreationTokens
+        switch localScanCompletion {
+        case .complete:
+            hasAuthoritativeDailyCacheCreationTokens
+        case .incomplete:
+            false
+        case nil:
+            !dailyUsage.isEmpty && hasAuthoritativeDailyCacheCreationTokens
+        }
+    }
+
+    func recordingLocalScanCompletion(_ isComplete: Bool) -> CostSummary {
+        var copy = self
+        copy.localScanCompletion = isComplete ? .complete : .incomplete
+        return copy
     }
 
     /// Whether the cached summary is missing daily rows inside the visible window
@@ -638,7 +661,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
         let visibleDailyUsage = dailyUsage.filter { enabledServices.contains($0.provider) }
         let visibleHourlyUsage = hourlyUsage?.filter { enabledServices.contains($0.provider) }
 
-        return CostSummary(
+        var filtered = CostSummary(
             costs: visibleCosts,
             totalCostUSD: visibleCosts.reduce(0) { $0 + $1.estimatedCostUSD },
             totalTokens: visibleCosts.reduce(0) { $0 + $1.totalTokens },
@@ -652,6 +675,8 @@ nonisolated public struct CostSummary: Codable, Sendable {
             // on `ModelPricing.tableProvenance`'s static date (issue #339).
             pricing: pricing
         )
+        filtered.localScanCompletion = localScanCompletion
+        return filtered
     }
 }
 

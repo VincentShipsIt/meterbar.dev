@@ -5,7 +5,7 @@ import Foundation
 /// `meterbar cost` (which reports the app's scan instead of re-implementing
 /// a divergent one).
 nonisolated public struct CostSummaryCache: Codable, Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public let schemaVersion: Int
     public let summary: CostSummary

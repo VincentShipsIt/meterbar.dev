@@ -176,8 +176,9 @@ Current daily rows retain `cacheCreationTokens`; legacy rows explicitly mark tha
 non-authoritative until the app completes a fresh local scan. The version-1 windowed CLI DTO still
 omits `cacheCreationTokens` and `sessionCount` to preserve its published JSON shape. Cost-cache
 schema v2 introduced day × model and day × project attribution; schema v3 adds the daily
-cache-creation authority marker used by iCloud preparation. When every included row has attribution,
-windowed providers may include `modelBreakdowns` and `projectBreakdowns`.
+cache-creation authority marker used by iCloud preparation; schema v4 adds local scan-completion
+provenance so completed zero-usage scans remain authoritative. When every included row has
+attribution, windowed providers may include `modelBreakdowns` and `projectBreakdowns`.
 `period.isTruncated` is true when the cache covers fewer days than requested.
 
 ### Month-to-date window

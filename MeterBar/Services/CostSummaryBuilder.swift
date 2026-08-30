@@ -23,8 +23,8 @@ enum CostSummaryBuilder {
         var isComplete: Bool { deferredProviders.isEmpty }
 
         init(summary: CostSummary, deferredProviders: Set<CostScanProvider> = []) {
-            self.summary = summary
             self.deferredProviders = deferredProviders
+            self.summary = summary.recordingLocalScanCompletion(deferredProviders.isEmpty)
         }
     }
 
