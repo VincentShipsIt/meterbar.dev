@@ -34,7 +34,9 @@ widget_binary="$widget_path/Contents/MacOS/MeterBarWidgetExtension"
 cli_binary="$app_path/Contents/Helpers/meterbar"
 session_wake_agent_plist="$app_path/Contents/Library/LaunchAgents/dev.meterbar.app.session-wake.plist"
 app_entitlements="$repository_root/MeterBar/MeterBar.entitlements"
+signed_app_entitlements="$app_entitlements"
 widget_entitlements="$repository_root/MeterBarWidget/MeterBarWidget.entitlements"
+cloudkit_entitlement_preparer="$repository_root/scripts/prepare-cloudkit-release-entitlements.sh"
 embedded_profile="$app_path/Contents/embedded.provisionprofile"
 
 if [ -n "$signing_identity" ] && [ ! -f "$embedded_profile" ]; then
@@ -75,7 +77,8 @@ for file in \
   "$cli_binary" \
   "$session_wake_agent_plist" \
   "$app_entitlements" \
-  "$widget_entitlements"; do
+  "$widget_entitlements" \
+  "$cloudkit_entitlement_preparer"; do
   if [ ! -f "$file" ]; then
     echo "Required release input not found: $file" >&2
     exit 1
@@ -94,6 +97,12 @@ if [ -n "$signing_identity" ]; then
     "$app_entitlements" \
     "$bundle_id" \
     "$signing_identity"
+  signed_app_entitlements="$temporary_directory/app-release.entitlements.plist"
+  "$cloudkit_entitlement_preparer" \
+    "$decoded_profile" \
+    "$app_entitlements" \
+    "$bundle_id" \
+    "$signed_app_entitlements"
 fi
 
 plutil -lint "$session_wake_agent_plist"
@@ -229,7 +238,7 @@ done
 
 sign_code "$cli_binary"
 sign_code "$widget_path" --entitlements "$widget_entitlements"
-sign_code "$app_path" --entitlements "$app_entitlements"
+sign_code "$app_path" --entitlements "$signed_app_entitlements"
 
 codesign --verify --strict --verbose=2 "$cli_binary"
 codesign --verify --strict --verbose=2 "$widget_path"
@@ -259,7 +268,7 @@ dump_entitlements "$app_path" "$actual_app_entitlements" "$temporary_directory/a
 dump_entitlements "$widget_path" "$actual_widget_entitlements" "$temporary_directory/widget.codesign.err"
 
 python3 - \
-  "$app_entitlements" "$actual_app_entitlements" \
+  "$signed_app_entitlements" "$actual_app_entitlements" \
   "$widget_entitlements" "$actual_widget_entitlements" <<'PY'
 import plistlib
 import sys

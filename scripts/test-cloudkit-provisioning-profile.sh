@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 validator="$script_dir/verify-cloudkit-provisioning-profile.sh"
+entitlement_preparer="$script_dir/prepare-cloudkit-release-entitlements.sh"
 profile="$script_dir/fixtures/cloudkit-profile-valid.plist"
 entitlements="$script_dir/../MeterBar/MeterBar.entitlements"
 mismatched_fingerprint="0000000000000000000000000000000000000000"
@@ -53,6 +54,52 @@ profile_with_certificate "$developer_prefix.der" "$developer_profile"
 matching_fingerprint=$(certificate_fingerprint "$developer_prefix.pem")
 
 "$validator" "$developer_profile" "$entitlements" "dev.meterbar.app" "$matching_fingerprint"
+
+prepared_entitlements="$temporary_directory/prepared-entitlements.plist"
+"$entitlement_preparer" \
+  "$developer_profile" \
+  "$entitlements" \
+  "dev.meterbar.app" \
+  "$prepared_entitlements"
+python3 - "$prepared_entitlements" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    entitlements = plistlib.load(source)
+
+expected = {
+    "com.apple.application-identifier": "C76R5DRH64.dev.meterbar.app",
+    "com.apple.developer.team-identifier": "C76R5DRH64",
+    "com.apple.developer.icloud-container-environment": "Production",
+    "com.apple.developer.icloud-container-identifiers": ["iCloud.dev.meterbar.app"],
+    "com.apple.developer.icloud-services": ["CloudKit"],
+    "com.apple.security.application-groups": ["group.dev.meterbar.app"],
+}
+for key, value in expected.items():
+    if entitlements.get(key) != value:
+        raise SystemExit(f"Prepared entitlement {key} was {entitlements.get(key)!r}, expected {value!r}")
+PY
+
+development_profile="$temporary_directory/development-profile.plist"
+python3 - "$developer_profile" "$development_profile" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    profile = plistlib.load(source)
+profile["Entitlements"]["com.apple.developer.icloud-container-environment"] = "Development"
+with open(sys.argv[2], "wb") as destination:
+    plistlib.dump(profile, destination)
+PY
+if "$entitlement_preparer" \
+  "$development_profile" \
+  "$entitlements" \
+  "dev.meterbar.app" \
+  "$temporary_directory/development-entitlements.plist" >/dev/null 2>&1; then
+  echo "CloudKit release entitlement preparation accepted the Development environment." >&2
+  exit 1
+fi
 
 if "$validator" \
   "$developer_profile" \
