@@ -8,6 +8,7 @@ final class ICloudUsageAggregationService: ObservableObject {
     static let shared = ICloudUsageAggregationService(
         settings: .shared,
         repository: CloudKitUsageRepository(),
+        quotaSnapshots: { await ICloudQuotaSnapshotSource.live() },
         prepareLocalSummary: { candidate in
             await CostTracker.shared.prepareSummaryForICloudPublication(candidate)
         }
@@ -22,20 +23,36 @@ final class ICloudUsageAggregationService: ObservableObject {
 
     private let repository: any ICloudUsageRepository
     private let now: () -> Date
+    private let quotaSnapshots: () async -> [ICloudQuotaSnapshot]
     private let prepareLocalSummary: (CostSummary?) async -> ICloudUsageSummaryPreparationResult
 
     init(
         settings: ICloudUsageSettingsStore,
         repository: any ICloudUsageRepository,
         now: @escaping () -> Date = Date.init,
+        quotaSnapshots: @escaping () async -> [ICloudQuotaSnapshot] = { [] },
         prepareLocalSummary: @escaping (CostSummary?) async -> ICloudUsageSummaryPreparationResult = { _ in .failed }
     ) {
         self.settings = settings
         self.repository = repository
         self.now = now
+        self.quotaSnapshots = quotaSnapshots
         self.prepareLocalSummary = prepareLocalSummary
     }
 
+    /// Production entry point. Quota collection lives here so no UI or
+    /// lifecycle caller can accidentally replace a current CloudKit record
+    /// with an empty quota payload.
+    func sync(localSummary: CostSummary?) async {
+        guard settings.isEnabled else {
+            await sync(localSummary: localSummary, quotaSnapshots: [])
+            return
+        }
+        let snapshots = await quotaSnapshots()
+        await sync(localSummary: localSummary, quotaSnapshots: snapshots)
+    }
+
+    /// Prepared-payload seam for deterministic repository tests.
     func sync(
         localSummary: CostSummary?,
         quotaSnapshots: [ICloudQuotaSnapshot]

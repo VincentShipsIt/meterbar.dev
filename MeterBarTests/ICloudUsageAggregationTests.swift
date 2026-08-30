@@ -425,19 +425,13 @@ final class ICloudUsageAggregationTests: XCTestCase {
         settings.setEnabled(true)
         let published = expectation(description: "app lifecycle published")
         let calls = MainActorCallCounter()
-        let identityReads = MainActorCallCounter()
         let coordinator = ICloudUsageAggregationCoordinator(
             settings: settings,
             refreshPublisher: refreshes.eraseToAnyPublisher(),
             costPublisher: costs.eraseToAnyPublisher(),
             minimumInterval: 900,
-            quotaSnapshots: {
-                identityReads.count += 1
-                return [self.quota(account: "pseudonym", used: 12, capturedAt: self.now)]
-            },
-            sync: { _, quotas in
+            sync: { _ in
                 calls.count += 1
-                XCTAssertEqual(quotas.count, 1)
                 published.fulfill()
             }
         )
@@ -446,7 +440,6 @@ final class ICloudUsageAggregationTests: XCTestCase {
         await fulfillment(of: [published], timeout: 1)
 
         XCTAssertEqual(calls.count, 1)
-        XCTAssertEqual(identityReads.count, 1)
     }
 
     @MainActor
@@ -455,17 +448,12 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let costs = PassthroughSubject<Void, Never>()
         let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
         let calls = MainActorCallCounter()
-        let identityReads = MainActorCallCounter()
         let coordinator = ICloudUsageAggregationCoordinator(
             settings: settings,
             refreshPublisher: refreshes.eraseToAnyPublisher(),
             costPublisher: costs.eraseToAnyPublisher(),
             minimumInterval: 0,
-            quotaSnapshots: {
-                identityReads.count += 1
-                return []
-            },
-            sync: { _, _ in calls.count += 1 }
+            sync: { _ in calls.count += 1 }
         )
 
         coordinator.activate()
@@ -474,7 +462,6 @@ final class ICloudUsageAggregationTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(calls.count, 0)
-        XCTAssertEqual(identityReads.count, 0)
     }
 
     @MainActor
@@ -493,7 +480,7 @@ final class ICloudUsageAggregationTests: XCTestCase {
             costPublisher: costs.eraseToAnyPublisher(),
             minimumInterval: 900,
             now: { clock.now },
-            sync: { _, _ in
+            sync: { _ in
                 calls.count += 1
                 if calls.count == 1 { first.fulfill() }
                 if calls.count == 2 { second.fulfill() }
@@ -621,13 +608,47 @@ final class ICloudUsageAggregationTests: XCTestCase {
     func testFeatureOffMakesZeroRepositoryCalls() async {
         let repository = RepositorySpy()
         let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
-        let service = ICloudUsageAggregationService(settings: settings, repository: repository)
+        let identityReads = MainActorCallCounter()
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            quotaSnapshots: {
+                identityReads.count += 1
+                return []
+            }
+        )
 
-        await service.sync(localSummary: summary(), quotaSnapshots: [])
+        await service.sync(localSummary: summary())
 
         let callCount = await repository.callCount
         XCTAssertEqual(callCount, 0)
+        XCTAssertEqual(identityReads.count, 0)
         XCTAssertNil(service.aggregate)
+    }
+
+    func testEveryProductionSyncPublishesCurrentQuotaSnapshots() async {
+        let repository = RepositorySpy()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let identityReads = MainActorCallCounter()
+        let currentQuota = quota(account: "pseudonym", used: 12, capturedAt: now)
+        let service = ICloudUsageAggregationService(
+            settings: settings,
+            repository: repository,
+            quotaSnapshots: {
+                identityReads.count += 1
+                return [currentQuota]
+            }
+        )
+
+        await service.sync(localSummary: summary())
+        await service.sync(localSummary: summary())
+
+        let published = await repository.synchronizedRollups
+        let callCount = await repository.callCount
+        XCTAssertEqual(identityReads.count, 2)
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(published.flatMap(\.quotaSnapshots), [currentQuota])
     }
 
     func testICloudFailureKeepsLocalOnlyFallback() async {

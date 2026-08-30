@@ -448,9 +448,6 @@ struct UsageDashboardView: View {
     }
 
     private func syncICloudUsage() async {
-        await iCloudAggregation.sync(
-            localSummary: costTracker.costSummary,
-            quotaSnapshots: []
-        )
+        await iCloudAggregation.sync(localSummary: costTracker.costSummary)
     }
 }

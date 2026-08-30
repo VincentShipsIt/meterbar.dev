@@ -118,12 +118,6 @@ struct ICloudUsageSettingsView: View {
     }
 
     private func syncNow() async {
-        let quotas = settings.isEnabled
-            ? await ICloudQuotaSnapshotSource.live()
-            : []
-        await aggregation.sync(
-            localSummary: costTracker.costSummary,
-            quotaSnapshots: quotas
-        )
+        await aggregation.sync(localSummary: costTracker.costSummary)
     }
 }

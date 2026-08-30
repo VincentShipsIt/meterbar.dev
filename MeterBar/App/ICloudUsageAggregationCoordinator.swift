@@ -17,12 +17,8 @@ final class ICloudUsageAggregationCoordinator {
             .eraseToAnyPublisher(),
         minimumInterval: 15 * 60,
         localSummary: { CostTracker.shared.costSummary },
-        quotaSnapshots: { await ICloudQuotaSnapshotSource.live() },
-        sync: { summary, quotas in
-            await ICloudUsageAggregationService.shared.sync(
-                localSummary: summary,
-                quotaSnapshots: quotas
-            )
+        sync: { summary in
+            await ICloudUsageAggregationService.shared.sync(localSummary: summary)
         }
     )
 
@@ -32,8 +28,7 @@ final class ICloudUsageAggregationCoordinator {
     private let minimumInterval: TimeInterval
     private let now: () -> Date
     private let localSummary: () -> CostSummary?
-    private let quotaSnapshots: () async -> [ICloudQuotaSnapshot]
-    private let sync: (CostSummary?, [ICloudQuotaSnapshot]) async -> Void
+    private let sync: (CostSummary?) async -> Void
 
     private var cancellables = Set<AnyCancellable>()
     private var syncTask: Task<Void, Never>?
@@ -47,8 +42,7 @@ final class ICloudUsageAggregationCoordinator {
         minimumInterval: TimeInterval,
         now: @escaping () -> Date = Date.init,
         localSummary: @escaping () -> CostSummary? = { nil },
-        quotaSnapshots: @escaping () async -> [ICloudQuotaSnapshot] = { [] },
-        sync: @escaping (CostSummary?, [ICloudQuotaSnapshot]) async -> Void
+        sync: @escaping (CostSummary?) async -> Void
     ) {
         self.settings = settings
         self.refreshPublisher = refreshPublisher
@@ -56,7 +50,6 @@ final class ICloudUsageAggregationCoordinator {
         self.minimumInterval = minimumInterval
         self.now = now
         self.localSummary = localSummary
-        self.quotaSnapshots = quotaSnapshots
         self.sync = sync
     }
 
@@ -96,9 +89,8 @@ final class ICloudUsageAggregationCoordinator {
 
         syncTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let quotas = await quotaSnapshots()
             if settings.isEnabled {
-                await sync(summary, quotas)
+                await sync(summary)
             }
             syncTask = nil
         }
