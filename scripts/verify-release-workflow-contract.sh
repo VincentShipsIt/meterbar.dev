@@ -15,6 +15,9 @@ e2e_path = repository_root / ".github/workflows/e2e.yml"
 nightly_path = repository_root / ".github/workflows/nightly.yml"
 release_path = repository_root / ".github/workflows/release.yml"
 signed_path = repository_root / ".github/workflows/_build-signed.yml"
+sign_release_path = repository_root / "scripts/sign-and-verify-release.sh"
+cloudkit_profile_validator_path = repository_root / "scripts/verify-cloudkit-provisioning-profile.sh"
+cloudkit_profile_test_path = repository_root / "scripts/test-cloudkit-provisioning-profile.sh"
 workflows_dir = repository_root / ".github/workflows"
 xcode_action_dir = ".github/actions/select-xcode"
 xcode_action_path = repository_root / xcode_action_dir / "action.yml"
@@ -143,6 +146,9 @@ e2e = read(e2e_path)
 nightly = read(nightly_path)
 release = read(release_path)
 signed = read(signed_path)
+sign_release = read(sign_release_path)
+cloudkit_profile_validator = read(cloudkit_profile_validator_path)
+cloudkit_profile_test = read(cloudkit_profile_test_path)
 nightly_version_job = job_block(nightly, "version", nightly_path)
 version_job = job_block(release, "version", release_path)
 nightly_build_job = job_block(nightly, "build", nightly_path)
@@ -208,14 +214,50 @@ for required_cloudkit_release_token in (
     "DEVELOPER_ID_PROVISIONING_PROFILE_BASE64",
     "Contents/embedded.provisionprofile",
     "security cms -D -i",
-    "ProvisionsAllDevices",
-    "com.apple.developer.icloud-container-identifiers",
-    "com.apple.developer.icloud-services",
+    "scripts/verify-cloudkit-provisioning-profile.sh",
+    "steps.identity.outputs.hash",
 ):
     if required_cloudkit_release_token not in build_job:
         raise SystemExit(
             f"{signed_path}: jobs.build must validate and embed the CloudKit "
             f"Developer ID profile ({required_cloudkit_release_token})"
+        )
+for required_profile_validator_token in (
+    "DeveloperCertificates",
+    "hashlib.sha1",
+    "ProvisionsAllDevices",
+    "com.apple.developer.icloud-container-identifiers",
+    "com.apple.developer.icloud-services",
+    "Signing certificate fingerprint must be exactly 40 hexadecimal SHA-1 characters",
+    "Developer ID signing certificate is not authorized by the provisioning profile",
+):
+    if required_profile_validator_token not in cloudkit_profile_validator:
+        raise SystemExit(
+            f"{cloudkit_profile_validator_path}: must reject a CloudKit profile "
+            f"that does not authorize the selected signing certificate "
+            f"({required_profile_validator_token})"
+        )
+for required_sign_release_token in (
+    'security cms -D -i "$embedded_profile"',
+    "scripts/verify-cloudkit-provisioning-profile.sh",
+    '"$signing_identity"',
+):
+    if required_sign_release_token not in sign_release:
+        raise SystemExit(
+            f"{sign_release_path}: Developer ID signing must independently validate "
+            f"the embedded CloudKit profile ({required_sign_release_token})"
+        )
+if "scripts/test-cloudkit-provisioning-profile.sh" not in ci:
+    raise SystemExit(f"{ci_path}: CI must run the CloudKit provisioning profile validator fixtures")
+for required_profile_test_token in (
+    "matching_fingerprint",
+    "mismatched_fingerprint",
+    "accepted a different Developer ID certificate",
+):
+    if required_profile_test_token not in cloudkit_profile_test:
+        raise SystemExit(
+            f"{cloudkit_profile_test_path}: must exercise matching and mismatched "
+            f"Developer ID certificate fingerprints ({required_profile_test_token})"
         )
 require_checkout_input(
     build_job,

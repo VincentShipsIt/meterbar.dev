@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>DeveloperCertificates</key>
+  <array>
+    <data>bWF0Y2hpbmctZGV2ZWxvcGVyLWlkLWNlcnRpZmljYXRlLWRlcg==</data>
+  </array>
+  <key>Entitlements</key>
+  <dict>
+    <key>com.apple.application-identifier</key>
+    <string>C76R5DRH64.dev.meterbar.app</string>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+      <string>iCloud.dev.meterbar.app</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+      <string>CloudKit</string>
+    </array>
+  </dict>
+  <key>ExpirationDate</key>
+  <date>2099-01-01T00:00:00Z</date>
+  <key>ProvisionsAllDevices</key>
+  <true/>
+  <key>TeamIdentifier</key>
+  <array>
+    <string>C76R5DRH64</string>
+  </array>
+</dict>
+</plist>

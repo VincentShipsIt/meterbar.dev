@@ -82,6 +82,20 @@ for file in \
   fi
 done
 
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/meterbar-release-entitlements.XXXXXX")
+trap 'rm -rf "$temporary_directory"' EXIT
+
+if [ -n "$signing_identity" ]; then
+  decoded_profile="$temporary_directory/embedded-profile.plist"
+  security cms -D -i "$embedded_profile" -o "$decoded_profile"
+  bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app_path/Contents/Info.plist")
+  "$repository_root/scripts/verify-cloudkit-provisioning-profile.sh" \
+    "$decoded_profile" \
+    "$app_entitlements" \
+    "$bundle_id" \
+    "$signing_identity"
+fi
+
 plutil -lint "$session_wake_agent_plist"
 agent_program=$(/usr/libexec/PlistBuddy -c "Print :BundleProgram" "$session_wake_agent_plist")
 agent_command=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:1" "$session_wake_agent_plist")
@@ -223,9 +237,6 @@ codesign --verify --deep --strict --verbose=2 "$app_path"
 if [ -d "$sparkle_framework" ]; then
   codesign --verify --deep --strict --verbose=2 "$sparkle_framework"
 fi
-
-temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/meterbar-release-entitlements.XXXXXX")
-trap 'rm -rf "$temporary_directory"' EXIT
 
 dump_entitlements() {
   local bundle="$1"
