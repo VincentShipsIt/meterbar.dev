@@ -652,12 +652,13 @@ struct ProviderSettingsView: View {
         provider: AccountFailoverProvider,
         accounts: [(id: UUID, name: String)]
     ) -> some View {
+        let eligibility = LiveAccountCredentialSwitcher.shared.eligibility(for: provider)
         SettingsRowView(
             title: "Automatic fallback",
             detail: "Use the account order below as the preferred → fallback chain. Off by default."
         ) {
             Toggle("Automatic fallback", isOn: Binding(
-                get: { failoverSettings.isEnabled(for: provider) },
+                get: { eligibility.isEligible && failoverSettings.isEnabled(for: provider) },
                 set: { enabled in
                     if enabled, failoverSettings.activeAccountIDs[provider] == nil {
                         failoverSettings.setActiveAccountID(accounts.first?.id, for: provider)
@@ -667,10 +668,12 @@ struct ProviderSettingsView: View {
             ))
             .labelsHidden()
             .meterBarSwitch()
-            .disabled(accounts.count < 2)
+            .disabled(accounts.count < 2 || !eligibility.isEligible)
         }
 
-        if failoverSettings.isEnabled(for: provider) {
+        if let reason = eligibility.reason {
+            SettingsNotice(text: reason, color: MeterBarTheme.warning)
+        } else if failoverSettings.isEnabled(for: provider) {
             let orderedIDs = accounts.map(\.id)
             let liveID = failoverSettings.activeAccountID(
                 for: provider,

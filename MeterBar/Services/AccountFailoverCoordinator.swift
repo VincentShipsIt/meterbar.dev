@@ -1,7 +1,6 @@
 import Foundation
 import MeterBarShared
 import os
-import UserNotifications
 
 nonisolated struct AccountFailoverEvent: Sendable {
     let provider: AccountFailoverProvider
@@ -47,6 +46,12 @@ final class AccountFailoverCoordinator {
         claudeMetrics: [UUID: UsageMetrics],
         codexMetrics: [UUID: UsageMetrics]
     ) async {
+        do {
+            try await credentialSwitcher.recoverPendingTransactions()
+        } catch {
+            AppLog.storage.error("Automatic account switch recovery requires attention.")
+            return
+        }
         await evaluateClaude(metrics: claudeMetrics)
         await evaluateCodex(metrics: codexMetrics)
     }
@@ -74,6 +79,10 @@ final class AccountFailoverCoordinator {
         accounts: [AccountIdentity],
         metrics: [UUID: UsageMetrics]
     ) async {
+        guard credentialSwitcher.eligibility(for: provider).isEligible else {
+            settings.setEnabled(false, for: provider)
+            return
+        }
         let orderedIDs = accounts.map(\.id)
         settings.reconcileAccounts(orderedIDs, for: provider)
         let activeID = settings.activeAccountID(for: provider, orderedAccountIDs: orderedIDs)
@@ -132,16 +141,17 @@ final class AccountFailoverCoordinator {
 final class LiveAccountFailoverNotifier: AccountFailoverNotifying {
     static let shared = LiveAccountFailoverNotifier()
 
+    private let notificationPoster: UserNotificationPosting
+
+    init(notificationPoster: UserNotificationPosting? = nil) {
+        self.notificationPoster = notificationPoster ?? LiveUserNotificationPoster.shared
+    }
+
     func notify(_ event: AccountFailoverEvent) async {
-        let content = UNMutableNotificationContent()
-        content.title = "\(event.provider.service.shortName) account switched"
-        content.body = "\(event.fromAccountName) → \(event.toAccountName)"
-        content.sound = .default
-        let request = UNNotificationRequest(
+        await notificationPoster.post(
             identifier: "account-failover-\(event.provider.rawValue)-\(event.timestamp.timeIntervalSince1970)",
-            content: content,
-            trigger: nil
+            title: "\(event.provider.service.shortName) account switched",
+            body: "\(event.fromAccountName) → \(event.toAccountName)"
         )
-        try? await UNUserNotificationCenter.current().add(request)
     }
 }

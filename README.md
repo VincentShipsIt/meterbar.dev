@@ -218,14 +218,19 @@ preferred, followed by each fallback. MeterBar evaluates the chain only when an
 existing usage refresh reports the live account's primary window exhausted; it
 does not add another poll. Each successful switch posts a macOS notification,
 and the live profile is marked in the menu-bar popover and provider settings.
-Configured Event Integrations receive the same triggering `exhausted` or
-`recovered` quota transition through their existing local/webhook delivery.
+Automatic switching is available only when every enabled profile uses a
+provider-owned credential file on the same volume. MeterBar exchanges those
+files with macOS's atomic `RENAME_SWAP` operation, verifies the inode mapping,
+and keeps only a secret-free recovery journal (provider, account ids, paths,
+and inode ids) until the logical account mapping commits. Credential bytes are
+never copied into MeterBar storage or logs. Claude Keychain and mixed
+Keychain/file layouts are intentionally ineligible: Security.framework does
+not provide an atomic multi-item transaction, so MeterBar refuses to risk a
+partial credential exchange.
 
-Credentials are exchanged only between the providers' own Keychain or profile
-auth-file locations. MeterBar does not write a backup credential, UserDefaults
-copy, or credential log. A request already in flight keeps the credential it
-started with and may fail; its next CLI request uses the newly live account.
-The preferred profile is restored once a later refresh observes its reset.
+A request already in flight keeps the credential it started with and may fail;
+its next CLI request uses the newly live account. The preferred profile is
+restored once a later refresh observes its reset.
 
 ### Session Wake
 

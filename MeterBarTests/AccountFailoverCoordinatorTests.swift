@@ -106,6 +106,55 @@ final class AccountFailoverCoordinatorTests: XCTestCase {
         XCTAssertTrue(notifier.events.isEmpty)
     }
 
+    func testIneligibleCredentialLayoutDisablesFailoverBeforeAnyMutation() async {
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/tmp/codex-fallback")
+        let ordered = accounts.enabledAccounts
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        settings.setEnabled(true, for: .codexCli)
+        let switcher = CoordinatorCredentialSwitcher(
+            eligibility: .ineligible("Atomic file exchange unavailable.")
+        )
+        let notifier = CoordinatorFailoverNotifier()
+        let coordinator = AccountFailoverCoordinator(
+            settings: settings,
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            credentialSwitcher: switcher,
+            notifier: notifier
+        )
+
+        await coordinator.evaluate(
+            claudeMetrics: [:],
+            codexMetrics: [ordered[0].id: metrics(.codexCli, used: 100), ordered[1].id: metrics(.codexCli, used: 1)]
+        )
+
+        XCTAssertFalse(settings.isEnabled(for: .codexCli))
+        XCTAssertTrue(switcher.calls.isEmpty)
+        XCTAssertTrue(notifier.events.isEmpty)
+    }
+
+    @MainActor
+    func testLiveNotifierUsesSharedPermissionAwareNotificationBoundary() async {
+        let poster = RecordingUserNotificationPoster()
+        let notifier = LiveAccountFailoverNotifier(notificationPoster: poster)
+        let timestamp = Date(timeIntervalSince1970: 123)
+
+        await notifier.notify(AccountFailoverEvent(
+            provider: .codexCli,
+            fromAccountID: UUID(),
+            fromAccountName: "Primary",
+            toAccountID: UUID(),
+            toAccountName: "Fallback",
+            reason: .activeAccountDepleted,
+            timestamp: timestamp
+        ))
+
+        XCTAssertEqual(poster.posts.count, 1)
+        XCTAssertEqual(poster.posts.first?.title, "Codex account switched")
+        XCTAssertEqual(poster.posts.first?.body, "Primary → Fallback")
+    }
+
     private func metrics(_ service: ServiceType, used: Double) -> UsageMetrics {
         UsageMetrics(
             service: service,
@@ -113,13 +162,42 @@ final class AccountFailoverCoordinatorTests: XCTestCase {
         )
     }
 }
+
+@MainActor
+private final class RecordingUserNotificationPoster: UserNotificationPosting {
+    struct Post {
+        let identifier: String
+        let title: String
+        let body: String
+    }
+
+    private(set) var posts: [Post] = []
+
+    func requestAuthorizationIfNeeded() {}
+
+    func post(identifier: String, title: String, body: String) async -> Bool {
+        posts.append(Post(identifier: identifier, title: title, body: body))
+        return true
+    }
+}
 private enum TestError: Error { case failed }
 
 private final class CoordinatorCredentialSwitcher: AccountCredentialSwitching {
     private(set) var calls: [AccountCredentialSwitch] = []
     private let error: Error?
+    private let switchEligibility: AccountCredentialSwitchEligibility
 
-    init(error: Error? = nil) { self.error = error }
+    init(
+        error: Error? = nil,
+        eligibility: AccountCredentialSwitchEligibility = .eligible
+    ) {
+        self.error = error
+        switchEligibility = eligibility
+    }
+
+    func eligibility(for _: AccountFailoverProvider) -> AccountCredentialSwitchEligibility {
+        switchEligibility
+    }
 
     func switchCredentials(provider: AccountFailoverProvider, from: UUID, to: UUID) async throws {
         if let error { throw error }

@@ -2,7 +2,81 @@ import Combine
 import Foundation
 import MeterBarShared
 import os
-import UserNotifications
+@preconcurrency import UserNotifications
+
+@MainActor
+protocol UserNotificationPosting {
+    func requestAuthorizationIfNeeded()
+    @discardableResult
+    func post(identifier: String, title: String, body: String) async -> Bool
+}
+
+/// Shared permission-aware notification boundary for quota, Session Wake, and
+/// account-failover banners.
+@MainActor
+final class LiveUserNotificationPoster: UserNotificationPosting {
+    static let shared = LiveUserNotificationPoster()
+
+    private let injectedCenter: UNUserNotificationCenter?
+
+    init(center: UNUserNotificationCenter? = nil) {
+        injectedCenter = center
+    }
+
+    func requestAuthorizationIfNeeded() {
+        let center = injectedCenter ?? .current()
+        center.getNotificationSettings { [center] settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+                    if let error {
+                        AppLog.app.error(
+                            "Notification permission error: \(error.localizedDescription, privacy: .public)"
+                        )
+                    } else if !granted {
+                        AppLog.app.info("Notification permission denied by user")
+                    }
+                }
+            case .denied:
+                AppLog.app.info("Notification permission previously denied; user can enable it in System Settings.")
+            case .authorized, .provisional, .ephemeral:
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    func post(identifier: String, title: String, body: String) async -> Bool {
+        let center = injectedCenter ?? .current()
+        let settings = await center.notificationSettings()
+        let allowed: Bool
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            allowed = true
+        case .notDetermined:
+            allowed = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
+        case .denied:
+            allowed = false
+        @unknown default:
+            allowed = false
+        }
+        guard allowed else { return false }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        do {
+            try await center.add(request)
+            return true
+        } catch {
+            AppLog.app.error("Notification delivery failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+}
 
 /// The shape `AccountNotificationPlanner` needs from a provider account.
 /// `ClaudeCodeAccount`, `CodexAccount`, and `GrokAccount` were mapped by
@@ -38,10 +112,12 @@ struct NotificationAccountBundle {
 /// fan-in, the threshold sweep, and the two notification posts keep their exact
 /// bodies. It holds its own `cancellables` and launch task so `AppDelegate` no
 /// longer has to.
+@MainActor
 final class UsageNotificationCoordinator {
     private let notificationPreferences = NotificationPreferencesStore.shared
     private let providerVisibilityStore = ProviderVisibilityStore.shared
     private var cancellables = Set<AnyCancellable>()
+    private let notificationPoster: UserNotificationPosting
 
     /// The launch refresh, held so it can be cancelled instead of orphaned.
     private var monitorTask: Task<Void, Never>?
@@ -55,6 +131,10 @@ final class UsageNotificationCoordinator {
     /// scoped providers fan out through `AccountNotificationPlanner` instead.
     static var flatNotificationServices: [ServiceType] {
         ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }
+    }
+
+    init(notificationPoster: UserNotificationPosting? = nil) {
+        self.notificationPoster = notificationPoster ?? LiveUserNotificationPoster.shared
     }
 
     /// Exhaustive account-scoped notification inputs. A new `ServiceType` with
@@ -128,29 +208,7 @@ final class UsageNotificationCoordinator {
     }
 
     func start() {
-        // Check current authorization status first
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .notDetermined:
-                // Request permission only if not yet determined
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-                    if let error = error {
-                        AppLog.app.error(
-                            "Notification permission error: \(error.localizedDescription, privacy: .public)"
-                        )
-                    } else if !granted {
-                        AppLog.app.info("Notification permission denied by user")
-                    }
-                }
-            case .denied:
-                AppLog.app.info("Notification permission previously denied; user can enable it in System Settings.")
-            case .authorized, .provisional, .ephemeral:
-                // Already authorized, no action needed
-                break
-            @unknown default:
-                break
-            }
-        }
+        notificationPoster.requestAuthorizationIfNeeded()
 
         // Subscribe before the first refresh so its committed snapshot is
         // observed rather than raced past.
@@ -332,19 +390,8 @@ final class UsageNotificationCoordinator {
     }
 
     private func sendNotification(identifier: String, title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-
-        // Stable identifier: re-posting the same id replaces the pending request
-        // rather than stacking a new banner every check.
-        let request = UNNotificationRequest(
-            identifier: identifier,
-            content: content,
-            trigger: nil
-        )
-
-        UNUserNotificationCenter.current().add(request)
+        Task {
+            await notificationPoster.post(identifier: identifier, title: title, body: body)
+        }
     }
 }
