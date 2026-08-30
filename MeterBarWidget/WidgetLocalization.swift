@@ -19,6 +19,9 @@ enum WidgetLocalizedContent {
         guard let limit = row.limit else {
             return String(localized: "widget.unavailable", defaultValue: "Unavailable")
         }
+        guard !row.isBlocked else {
+            return LocalizedUsageFormat.widgetBlockedBadge()
+        }
         if row.service == .openRouter {
             let amount: Double
             switch row.preservesLegacyOpenRouterBalance ? .remaining : row.displayMode {
@@ -40,6 +43,9 @@ enum WidgetLocalizedContent {
     }
 
     static func compactSummaryText(for row: WidgetPresentationRow) -> String {
+        guard !row.isBlocked else {
+            return LocalizedUsageFormat.widgetBlockedBadge()
+        }
         guard row.service == .openRouter,
               row.preservesLegacyOpenRouterBalance,
               let limit = row.limit else {
@@ -49,9 +55,12 @@ enum WidgetLocalizedContent {
     }
 
     static func accessibilityValue(for row: WidgetPresentationRow, compact: Bool = false) -> String {
+        let summary = row.isBlocked
+            ? LocalizedUsageFormat.widgetBlockedAccessibility()
+            : compact ? compactSummaryText(for: row) : summaryText(for: row)
         let leading = compact
-            ? [compactSummaryText(for: row)]
-            : [quotaTitle(for: row), summaryText(for: row)]
+            ? [summary]
+            : [quotaTitle(for: row), summary]
         return (leading + [healthDescription(row.health)].compactMap { $0 })
             .formatted(.list(type: .and, width: .short))
     }

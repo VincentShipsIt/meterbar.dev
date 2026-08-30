@@ -213,6 +213,7 @@ struct WidgetGlanceRow: View {
                 WidgetHealthIndicator(health: row.health, size: metrics.captionSize)
                 Text(WidgetLocalizedContent.summaryText(for: row))
                     .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.isBlocked ? Color.red : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -246,6 +247,7 @@ struct WidgetGlanceHero: View {
 
             Text(WidgetLocalizedContent.summaryText(for: row))
                 .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(row.isBlocked ? Color.red : Color.primary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)

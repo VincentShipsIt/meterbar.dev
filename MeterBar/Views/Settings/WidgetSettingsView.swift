@@ -917,15 +917,24 @@ struct WidgetSettingsPreviewRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue("\(quotaTitleText), \(row.summaryText)")
+        .accessibilityValue("\(quotaTitleText), \(accessibilitySummaryText)")
     }
 
     private var summary: some View {
-        Text(row.summaryText)
+        Text(summaryText)
             .font(.system(size: metrics.headlineSize, weight: .semibold, design: .rounded))
+            .foregroundStyle(row.isBlocked ? MeterBarTheme.danger : Color.primary)
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(isHero ? 0.6 : 0.7)
+    }
+
+    private var summaryText: String {
+        row.isBlocked ? LocalizedUsageFormat.widgetBlockedBadge() : row.summaryText
+    }
+
+    private var accessibilitySummaryText: String {
+        row.isBlocked ? LocalizedUsageFormat.widgetBlockedAccessibility() : row.summaryText
     }
 
     /// Only what the bar's tint cannot say. A healthy row draws nothing here.
@@ -1010,14 +1019,22 @@ struct WidgetSettingsPreviewRailRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: metrics.rowSpacing)
-            Text(row.compactSummaryText)
+            Text(summaryText)
                 .font(.system(size: metrics.captionSize, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(row.usageStatus?.color ?? .secondary)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.accountName)
-        .accessibilityValue(row.compactSummaryText)
+        .accessibilityValue(accessibilitySummaryText)
+    }
+
+    private var summaryText: String {
+        row.isBlocked ? LocalizedUsageFormat.widgetBlockedBadge() : row.compactSummaryText
+    }
+
+    private var accessibilitySummaryText: String {
+        row.isBlocked ? LocalizedUsageFormat.widgetBlockedAccessibility() : row.compactSummaryText
     }
 }
 

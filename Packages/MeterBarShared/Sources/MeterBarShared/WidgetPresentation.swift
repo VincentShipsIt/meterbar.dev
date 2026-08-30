@@ -63,6 +63,17 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// percent-pool bar titles as Grok Bot, not Other Models.
     public let isAdditionalLimit: Bool
 
+    /// The widget marks this account row OUT while the represented quota is
+    /// exhausted.
+    ///
+    /// This is deliberately separate from freshness: a stale snapshot can
+    /// still say that the last known state was blocked, while its health badge
+    /// explains that the snapshot needs refreshing.
+    public var isBlocked: Bool {
+        guard let limit else { return false }
+        return !limit.isEstimated && limit.isAtLimit
+    }
+
     /// Which quota title this row resolves to, before any language is chosen.
     ///
     /// The widget extension localizes *this*, rather than re-deriving the same
@@ -119,6 +130,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
 
     public var summaryText: String {
         guard let limit else { return "Unavailable" }
+        guard !isBlocked else { return "OUT" }
         if service == .openRouter {
             let amount: Double
             let suffix: String
@@ -142,6 +154,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     }
 
     public var compactSummaryText: String {
+        guard !isBlocked else { return "OUT" }
         guard service == .openRouter,
               preservesLegacyOpenRouterBalance,
               let limit else {
@@ -151,6 +164,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     }
 
     public var usageStatus: UsageStatus? {
+        if isBlocked { return .critical }
         guard health == .healthy else { return nil }
         return limit?.statusColor
     }
@@ -163,14 +177,18 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// phrase here is what puts "Stale usage data" back into VoiceOver's
     /// reading of a row that visibly carries the badge.
     public var accessibilityValueText: String {
-        joinedAccessibilityValue(leading: [quotaTitle, summaryText])
+        joinedAccessibilityValue(leading: [quotaTitle, accessibilitySummaryText])
     }
 
     /// The spoken value for a rail entry, which omits the quota title to stay
     /// on one line — and omits the health glyph too, making this the only place
     /// a stale or unavailable rail row can announce itself at all.
     public var compactAccessibilityValueText: String {
-        joinedAccessibilityValue(leading: [compactSummaryText])
+        joinedAccessibilityValue(leading: [accessibilitySummaryText])
+    }
+
+    private var accessibilitySummaryText: String {
+        isBlocked ? "Quota exhausted" : summaryText
     }
 
     private func joinedAccessibilityValue(leading: [String]) -> String {
@@ -242,6 +260,16 @@ public enum WidgetPresentationPlanner {
         let accountOrder: Int
         let name: String
         let metrics: UsageMetrics?
+    }
+
+    /// A quota row before widget-window preferences are applied. Exhausted
+    /// candidates are considered across all of these rows so a weekly-only
+    /// widget cannot hide a session blocker.
+    private struct LimitCandidate {
+        let idSuffix: String
+        let window: WidgetQuotaWindow
+        let limit: UsageLimit
+        let isAdditional: Bool
     }
 
     private static func availableSources(
@@ -334,6 +362,9 @@ public enum WidgetPresentationPlanner {
         visibleWindows: Set<WidgetQuotaWindow>
     ) -> Double {
         guard let metrics = source.metrics else { return -Double.infinity }
+        if blockingCandidate(in: metrics) != nil {
+            return 100
+        }
         let primary = WidgetQuotaWindow.allCases
             .filter { visibleWindows.contains($0) }
             .compactMap { limit(for: $0, metrics: metrics)?.percentage }
@@ -387,7 +418,30 @@ public enum WidgetPresentationPlanner {
             health: health,
             preferences: preferences
         )
-        return selectedRows + additionalRows
+        var rows = selectedRows + additionalRows
+        guard let blocker = blockingCandidate(in: metrics) else { return rows }
+
+        let blockedRow = row(
+            source: source,
+            idSuffix: blocker.idSuffix,
+            window: blocker.window,
+            limit: blocker.limit,
+            health: health,
+            preferences: preferences,
+            isAdditionalLimit: blocker.isAdditional
+        )
+        if let existingIndex = rows.firstIndex(where: { $0.id == blockedRow.id }) {
+            rows.remove(at: existingIndex)
+            rows.insert(blockedRow, at: 0)
+        } else if rows.isEmpty {
+            rows = [blockedRow]
+        } else {
+            // Keep this source's existing row count stable: the blocker takes
+            // the first selected slot instead of adding a row that could push
+            // every following account into the overflow summary.
+            rows[0] = blockedRow
+        }
+        return rows
     }
 
     private static func additionalRows(
@@ -431,13 +485,15 @@ public enum WidgetPresentationPlanner {
 
     private static func row(
         source: Source,
+        idSuffix: String? = nil,
         window: WidgetQuotaWindow,
         limit: UsageLimit?,
         health: WidgetDataHealth,
-        preferences: WidgetPreferences
+        preferences: WidgetPreferences,
+        isAdditionalLimit: Bool = false
     ) -> WidgetPresentationRow {
         WidgetPresentationRow(
-            id: "\(source.identifier.rawValue):\(window.rawValue)",
+            id: "\(source.identifier.rawValue):\(idSuffix ?? window.rawValue)",
             accountIdentifier: source.identifier,
             service: source.service,
             accountName: source.name,
@@ -450,8 +506,58 @@ public enum WidgetPresentationPlanner {
                 && preferences.preservesLegacyOpenRouterBalance,
             resetTime: preferences.showsResetTime ? limit?.resetTime : nil,
             freshnessDate: preferences.showsFreshness ? source.metrics?.lastUpdated : nil,
-            isAdditionalLimit: false
+            isAdditionalLimit: isAdditionalLimit
         )
+    }
+
+    /// Picks the exhausted period that gates the account for presentation.
+    /// When every blocker has a reset date, the latest reset wins because the
+    /// account cannot become usable before it. If any blocker has no known
+    /// reset, that candidate wins so the widget never displays a misleading
+    /// earlier countdown.
+    private static func blockingCandidate(in metrics: UsageMetrics) -> LimitCandidate? {
+        var candidates: [LimitCandidate] = []
+        if let limit = metrics.sessionLimit {
+            candidates.append(LimitCandidate(
+                idSuffix: WidgetQuotaWindow.session.rawValue,
+                window: .session,
+                limit: limit,
+                isAdditional: false
+            ))
+        }
+        if let limit = metrics.weeklyLimit {
+            candidates.append(LimitCandidate(
+                idSuffix: WidgetQuotaWindow.weekly.rawValue,
+                window: .weekly,
+                limit: limit,
+                isAdditional: false
+            ))
+        }
+        if let limit = metrics.codeReviewLimit {
+            candidates.append(LimitCandidate(
+                idSuffix: WidgetQuotaWindow.codeReview.rawValue,
+                window: .codeReview,
+                limit: limit,
+                isAdditional: false
+            ))
+        }
+        candidates += metrics.additionalLimits.enumerated().map { index, limit in
+            LimitCandidate(
+                idSuffix: "additional-\(index)",
+                window: widgetWindow(for: limit.periodKind),
+                limit: limit,
+                isAdditional: true
+            )
+        }
+
+        let exhausted = candidates.filter { !$0.limit.isEstimated && $0.limit.isAtLimit }
+        guard !exhausted.isEmpty else { return nil }
+        if let unknownReset = exhausted.first(where: { $0.limit.resetTime == nil }) {
+            return unknownReset
+        }
+        return exhausted.max {
+            ($0.limit.resetTime ?? .distantPast) < ($1.limit.resetTime ?? .distantPast)
+        }
     }
 
     private static func limit(

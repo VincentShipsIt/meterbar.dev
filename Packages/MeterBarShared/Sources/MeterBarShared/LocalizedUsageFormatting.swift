@@ -284,6 +284,32 @@ public enum LocalizedUsageFormat {
         )
     }
 
+    public static func widgetBlockedBadge(
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        String(
+            localized: "widget.blocked.badge",
+            defaultValue: "OUT",
+            bundle: bundle,
+            locale: locale,
+            comment: "Compact widget badge shown when an account quota is exhausted."
+        )
+    }
+
+    public static func widgetBlockedAccessibility(
+        bundle: Bundle = .main,
+        locale: Locale = .current
+    ) -> String {
+        String(
+            localized: "widget.blocked.accessibility",
+            defaultValue: "Quota exhausted",
+            bundle: bundle,
+            locale: locale,
+            comment: "VoiceOver description for a widget account whose quota is exhausted."
+        )
+    }
+
     /// Translates the shared row's already-decided quota title.
     ///
     /// Which title applies — the OpenRouter exceptions, Cursor's included-pool
