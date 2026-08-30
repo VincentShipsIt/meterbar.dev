@@ -3,6 +3,7 @@ import Foundation
 
 /// App-facing coordinator. The opt-in guard is deliberately before every
 /// repository call: disabled means zero CloudKit access, not merely zero writes.
+@MainActor
 final class ICloudUsageAggregationService: ObservableObject {
     static let shared = ICloudUsageAggregationService(
         settings: .shared,

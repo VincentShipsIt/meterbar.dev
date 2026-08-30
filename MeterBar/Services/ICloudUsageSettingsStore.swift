@@ -3,6 +3,7 @@ import Foundation
 
 /// Opt-in and stable per-install identity for private iCloud aggregation.
 /// Reading this store is local-only; CloudKit is not touched until `isEnabled`.
+@MainActor
 final class ICloudUsageSettingsStore: ObservableObject {
     static let shared = ICloudUsageSettingsStore()
 

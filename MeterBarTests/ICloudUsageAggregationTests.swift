@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import MeterBarShared
 import XCTest
@@ -40,6 +41,125 @@ final class ICloudUsageAggregationTests: XCTestCase {
         let snapshot = try XCTUnwrap(result.quotaSnapshots.first)
         XCTAssertEqual(result.quotaSnapshots.count, 1)
         XCTAssertEqual(snapshot.windows.first?.used, 12)
+    }
+
+    func testDifferentLocalProfileIDsWithSameExternalIdentityDeduplicateQuota() throws {
+        let first = providerSnapshot(
+            accountID: UUID(),
+            used: 90,
+            capturedAt: now.addingTimeInterval(-60)
+        )
+        let second = providerSnapshot(accountID: UUID(), used: 12, capturedAt: now)
+        let old = try XCTUnwrap(ICloudQuotaSnapshot(
+            snapshot: first,
+            externalAccountIdentity: "account-123"
+        ))
+        let latest = try XCTUnwrap(ICloudQuotaSnapshot(
+            snapshot: second,
+            externalAccountIdentity: "account-123"
+        ))
+
+        let result = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID), device(secondDeviceID)],
+            rollups: [
+                rollup(firstDeviceID, quota: [old]),
+                rollup(secondDeviceID, quota: [latest]),
+            ],
+            now: now
+        )
+
+        XCTAssertEqual(result.quotaSnapshots.count, 1)
+        XCTAssertEqual(result.quotaSnapshots.first?.windows.first?.used, 12)
+    }
+
+    func testQuotaSnapshotWithoutExternalIdentityIsNotPublishable() {
+        let snapshot = providerSnapshot(accountID: UUID(), used: 12, capturedAt: now)
+
+        XCTAssertNil(ICloudQuotaSnapshot(snapshot: snapshot, externalAccountIdentity: nil))
+    }
+
+    @MainActor
+    func testAppLifecycleCoordinatorPublishesWithoutDashboardOpening() async {
+        let refreshes = PassthroughSubject<Void, Never>()
+        let costs = PassthroughSubject<Void, Never>()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let published = expectation(description: "app lifecycle published")
+        let calls = MainActorCallCounter()
+        let coordinator = ICloudUsageAggregationCoordinator(
+            settings: settings,
+            refreshPublisher: refreshes.eraseToAnyPublisher(),
+            costPublisher: costs.eraseToAnyPublisher(),
+            minimumInterval: 900,
+            sync: { _, _ in
+                calls.count += 1
+                published.fulfill()
+            }
+        )
+
+        coordinator.activate()
+        await fulfillment(of: [published], timeout: 1)
+
+        XCTAssertEqual(calls.count, 1)
+    }
+
+    @MainActor
+    func testDisabledAppLifecycleMakesZeroSyncCalls() async {
+        let refreshes = PassthroughSubject<Void, Never>()
+        let costs = PassthroughSubject<Void, Never>()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        let calls = MainActorCallCounter()
+        let coordinator = ICloudUsageAggregationCoordinator(
+            settings: settings,
+            refreshPublisher: refreshes.eraseToAnyPublisher(),
+            costPublisher: costs.eraseToAnyPublisher(),
+            minimumInterval: 0,
+            sync: { _, _ in calls.count += 1 }
+        )
+
+        coordinator.activate()
+        refreshes.send(())
+        costs.send(())
+        await Task.yield()
+
+        XCTAssertEqual(calls.count, 0)
+    }
+
+    @MainActor
+    func testAppLifecycleCoalescesRefreshAndCostSignalsToCoarseCadence() async {
+        let refreshes = PassthroughSubject<Void, Never>()
+        let costs = PassthroughSubject<Void, Never>()
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let clock = MainActorClock(now: now)
+        let calls = MainActorCallCounter()
+        let first = expectation(description: "initial lifecycle sync")
+        let second = expectation(description: "next coarse lifecycle sync")
+        let coordinator = ICloudUsageAggregationCoordinator(
+            settings: settings,
+            refreshPublisher: refreshes.eraseToAnyPublisher(),
+            costPublisher: costs.eraseToAnyPublisher(),
+            minimumInterval: 900,
+            now: { clock.now },
+            sync: { _, _ in
+                calls.count += 1
+                if calls.count == 1 { first.fulfill() }
+                if calls.count == 2 { second.fulfill() }
+            }
+        )
+
+        coordinator.activate()
+        await fulfillment(of: [first], timeout: 1)
+        await Task.yield()
+        refreshes.send(())
+        costs.send(())
+        await Task.yield()
+        XCTAssertEqual(calls.count, 1)
+
+        clock.now = now.addingTimeInterval(901)
+        refreshes.send(())
+        await fulfillment(of: [second], timeout: 1)
+        XCTAssertEqual(calls.count, 2)
     }
 
     func testRemovedDeviceAndItsRollupsDoNotContribute() {
@@ -184,6 +304,27 @@ final class ICloudUsageAggregationTests: XCTestCase {
         )
     }
 
+    private func providerSnapshot(accountID: UUID, used: Double, capturedAt: Date) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: "codex-\(accountID.uuidString)",
+            title: "Codex",
+            service: .codexCli,
+            updatedAt: capturedAt,
+            limits: [
+                SnapshotLimit(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usageLimit: UsageLimit(used: used, total: 100, resetTime: nil)
+                )
+            ],
+            emptyDetail: "",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: accountID
+        )
+    }
+
     private func rollup(
         _ deviceID: UUID,
         input: Int = 0,
@@ -225,6 +366,20 @@ final class ICloudUsageAggregationTests: XCTestCase {
     }
 
     private enum TestError: Error { case unavailable }
+}
+
+@MainActor
+private final class MainActorCallCounter {
+    var count = 0
+}
+
+@MainActor
+private final class MainActorClock {
+    var now: Date
+
+    init(now: Date) {
+        self.now = now
+    }
 }
 
 private actor RepositorySpy: ICloudUsageRepository {

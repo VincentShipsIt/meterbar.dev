@@ -42,12 +42,18 @@ nonisolated struct ICloudQuotaSnapshot: Codable, Equatable, Sendable {
     }
 
     @MainActor
-    init?(snapshot: ProviderSnapshot) {
-        guard snapshot.isAccountCard, let capturedAt = snapshot.updatedAt, !snapshot.limits.isEmpty else {
+    init?(snapshot: ProviderSnapshot, externalAccountIdentity: String?) {
+        guard snapshot.isAccountCard,
+              let capturedAt = snapshot.updatedAt,
+              !snapshot.limits.isEmpty,
+              let accountIdentity = Self.accountIdentity(
+                  provider: snapshot.service,
+                  externalAccountIdentity: externalAccountIdentity
+              ) else {
             return nil
         }
         provider = snapshot.service
-        accountIdentity = "\(snapshot.service.rawValue):\(snapshot.accountID?.uuidString ?? "default")"
+        self.accountIdentity = accountIdentity
         self.capturedAt = capturedAt
         windows = snapshot.limits.map {
             ICloudQuotaWindow(
@@ -57,6 +63,51 @@ nonisolated struct ICloudQuotaSnapshot: Codable, Equatable, Sendable {
                 resetAt: $0.usageLimit.resetTime
             )
         }
+    }
+
+    init?(metrics: UsageMetrics, externalAccountIdentity: String?) {
+        guard let accountIdentity = Self.accountIdentity(
+            provider: metrics.service,
+            externalAccountIdentity: externalAccountIdentity
+        ) else {
+            return nil
+        }
+        let candidates: [(String, UsageLimit?)] = [
+            ("session", metrics.sessionLimit),
+            ("weekly", metrics.weeklyLimit),
+            ("codeReview", metrics.codeReviewLimit),
+        ] + metrics.additionalLimits.enumerated().map { index, limit in
+            ("additional-\(index)-\(limit.periodKind?.rawValue ?? "unknown")", limit)
+        }
+        let windows = candidates.compactMap { kind, limit -> ICloudQuotaWindow? in
+            guard let limit else { return nil }
+            return ICloudQuotaWindow(
+                kind: kind,
+                used: limit.used,
+                total: limit.total,
+                resetAt: limit.resetTime
+            )
+        }
+        guard !windows.isEmpty else { return nil }
+
+        provider = metrics.service
+        self.accountIdentity = accountIdentity
+        capturedAt = metrics.lastUpdated
+        self.windows = windows
+    }
+
+    private static func accountIdentity(
+        provider: ServiceType,
+        externalAccountIdentity: String?
+    ) -> String? {
+        guard let normalized = externalAccountIdentity?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !normalized.isEmpty,
+            normalized.utf8.count <= 256,
+            normalized.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            return nil
+        }
+        return "\(provider.rawValue):\(normalized)"
     }
 }
 
