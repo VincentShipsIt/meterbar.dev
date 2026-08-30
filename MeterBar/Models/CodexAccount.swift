@@ -240,15 +240,17 @@ final class CodexAccountStore: ObservableObject {
         guard sourceID != targetID,
               let source = accounts.first(where: { $0.id == sourceID }),
               let target = accounts.first(where: { $0.id == targetID }),
-              source.homeDirectory == expectedSource,
-              target.homeDirectory == expectedTarget else {
+              source.homeDirectory == expectedSource || source.homeDirectory == expectedTarget,
+              target.homeDirectory == expectedTarget || target.homeDirectory == expectedSource else {
             return false
         }
-        setCredentialLocation(target.homeDirectory, for: sourceID)
-        setCredentialLocation(source.homeDirectory, for: targetID)
+        setCredentialLocation(expectedTarget, for: sourceID)
+        setCredentialLocation(expectedSource, for: targetID)
         saveDefaultAccountHomeDirectory()
         saveCustomAccounts()
-        return true
+        guard userDefaults.synchronize() else { return false }
+        return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
+            && persistedCredentialLocationMatches(expectedSource, for: targetID)
     }
 
     private func setCredentialLocation(_ homeDirectory: String?, for id: UUID) {
@@ -260,6 +262,18 @@ final class CodexAccountStore: ObservableObject {
         var updated = customAccounts
         updated[index].homeDirectory = homeDirectory
         customAccounts = updated
+    }
+
+    private func persistedCredentialLocationMatches(_ expected: String?, for id: UUID) -> Bool {
+        if id == CodexAccount.defaultID {
+            return userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory) == expected
+        }
+        guard let data = userDefaults.data(forKey: StorageKeys.codexCustomAccounts),
+              let persisted = try? JSONDecoder().decode([CodexAccount].self, from: data),
+              let account = persisted.first(where: { $0.id == id }) else {
+            return false
+        }
+        return account.homeDirectory == expected
     }
 
     private func load() {

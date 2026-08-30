@@ -660,8 +660,8 @@ struct ProviderSettingsView: View {
             Toggle("Automatic fallback", isOn: Binding(
                 get: { eligibility.isEligible && failoverSettings.isEnabled(for: provider) },
                 set: { enabled in
-                    if enabled, failoverSettings.activeAccountIDs[provider] == nil {
-                        failoverSettings.setActiveAccountID(accounts.first?.id, for: provider)
+                    if enabled, let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider) {
+                        failoverSettings.setActiveAccountID(liveID, for: provider)
                     }
                     failoverSettings.setEnabled(enabled, for: provider)
                 }
@@ -674,11 +674,7 @@ struct ProviderSettingsView: View {
         if let reason = eligibility.reason {
             SettingsNotice(text: reason, color: MeterBarTheme.warning)
         } else if failoverSettings.isEnabled(for: provider) {
-            let orderedIDs = accounts.map(\.id)
-            let liveID = failoverSettings.activeAccountID(
-                for: provider,
-                orderedAccountIDs: orderedIDs
-            )
+            let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider)
             let liveName = accounts.first(where: { $0.id == liveID })?.name ?? "Unavailable"
             SettingsInfoRow(label: "Live CLI account", value: liveName)
             SettingsNotice(
@@ -687,7 +683,7 @@ struct ProviderSettingsView: View {
                     + "in flight may fail; the next CLI request uses the new credential.",
                 color: .secondary
             )
-        } else if let liveID = failoverSettings.activeAccountIDs[provider],
+        } else if let liveID = try? LiveAccountCredentialSwitcher.shared.liveAccountID(for: provider),
                   let liveName = accounts.first(where: { $0.id == liveID })?.name {
             SettingsInfoRow(label: "Live CLI account", value: liveName)
             SettingsNotice(

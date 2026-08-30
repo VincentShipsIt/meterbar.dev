@@ -8,7 +8,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         let fallback = UUID()
         let switcher = RecordingCredentialSwitcher()
 
-        try await switcher.switchCredentials(provider: .claudeCode, from: preferred, to: fallback)
+        try await switcher.switchCredentials(for: event(provider: .claudeCode, from: preferred, to: fallback))
 
         XCTAssertEqual(
             switcher.calls,
@@ -72,6 +72,79 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         XCTAssertEqual(fileOperator.exchangeCount, 0)
     }
 
+    func testDuplicateInodeIdentityIsRejectedBeforeJournalOrMutation() {
+        let fileOperator = TestCredentialFileOperator()
+        let journal = TestCredentialExchangeJournal()
+        fileOperator.seed("/provider/a", identity: .a)
+        fileOperator.seed("/provider/b", identity: .a)
+
+        XCTAssertThrowsError(try exchange(fileOperator: fileOperator, journal: journal)) { error in
+            XCTAssertEqual(error as? CredentialExchangeError, .duplicateCredentialIdentity)
+        }
+        XCTAssertNil(journal.record)
+        XCTAssertEqual(fileOperator.exchangeCount, 0)
+    }
+
+    func testExistingJournalIsRejectedBeforeAnyNewMutation() {
+        let fileOperator = TestCredentialFileOperator()
+        let journal = TestCredentialExchangeJournal()
+        fileOperator.seed("/provider/a", identity: .a)
+        fileOperator.seed("/provider/b", identity: .b)
+        journal.record = record(
+            sourcePath: "/provider/a",
+            targetPath: "/provider/b",
+            phase: .prepared
+        )
+
+        XCTAssertThrowsError(try exchange(fileOperator: fileOperator, journal: journal)) { error in
+            XCTAssertEqual(error as? CredentialExchangeError, .journalAlreadyPending)
+        }
+        XCTAssertEqual(fileOperator.exchangeCount, 0)
+    }
+
+    @MainActor
+    func testSwitcherRejectsPreparedJournalWithoutRecoveringOrReplacingIt() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let journal = TestCredentialExchangeJournal()
+        let existingRecord = CredentialFileExchangeRecord(
+            event: event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID),
+            phase: .prepared,
+            sourcePath: CodexHomeDirectory.authFilePath(),
+            targetPath: "/provider/fallback/auth.json",
+            sourceCredentialLocation: nil,
+            targetCredentialLocation: "/provider/fallback",
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+        journal.record = existingRecord
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal
+        )
+
+        do {
+            try await switcher.switchCredentials(
+                for: event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+            )
+            XCTFail("Expected a pending journal to reject the switch")
+        } catch {
+            XCTAssertEqual(error as? CredentialExchangeError, .journalAlreadyPending)
+        }
+        XCTAssertEqual(journal.record, existingRecord)
+        XCTAssertEqual(fileOperator.exchangeCount, 0)
+    }
+
     @MainActor
     func testClaudeKeychainLayoutIsExplicitlyIneligibleWithoutTouchingKeychain() throws {
         let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
@@ -99,6 +172,90 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         XCTAssertEqual(eligibility.reason?.contains("no atomic multi-item transaction"), true)
     }
 
+    @MainActor
+    func testCanonicalLiveAccountDoesNotChangeWhenFallbackOrderChanges() throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: TestCredentialExchangeJournal()
+        )
+
+        XCTAssertEqual(try switcher.liveAccountID(for: .codexCli), CodexAccount.defaultID)
+        accounts.moveAccounts(fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        XCTAssertEqual(try switcher.liveAccountID(for: .codexCli), CodexAccount.defaultID)
+    }
+
+    @MainActor
+    func testAmbiguousCanonicalLiveMappingIsIneligible() throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Duplicate", homeDirectory: CodexHomeDirectory.path())
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: TestCredentialExchangeJournal()
+        )
+
+        let eligibility = switcher.eligibility(for: .codexCli)
+
+        XCTAssertFalse(eligibility.isEligible)
+        XCTAssertEqual(eligibility.reason?.contains("Exactly one enabled account"), true)
+        XCTAssertThrowsError(try switcher.liveAccountID(for: .codexCli))
+    }
+
+    @MainActor
+    func testDisableEditAndRemovalNeverRetargetLiveMetadataByAccountOrder() throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let fallbackID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        settings.setActiveAccountID(CodexAccount.defaultID, for: .codexCli)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        fileOperator.seed("/provider/edited/auth.json", identity: .c)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: settings,
+            fileOperator: fileOperator,
+            journal: TestCredentialExchangeJournal()
+        )
+
+        XCTAssertEqual(accounts.setEnabled(false, for: CodexAccount.defaultID), .updated)
+        XCTAssertThrowsError(try switcher.liveAccountID(for: .codexCli))
+        XCTAssertEqual(settings.activeAccountIDs[.codexCli], CodexAccount.defaultID)
+
+        XCTAssertEqual(accounts.setEnabled(true, for: CodexAccount.defaultID), .updated)
+        accounts.updateAccount(id: CodexAccount.defaultID, name: "Edited", homeDirectory: "/provider/edited")
+        XCTAssertThrowsError(try switcher.liveAccountID(for: .codexCli))
+        XCTAssertEqual(settings.activeAccountIDs[.codexCli], CodexAccount.defaultID)
+
+        accounts.updateAccount(id: CodexAccount.defaultID, name: "Default", homeDirectory: "")
+        XCTAssertEqual(accounts.removeAccount(id: fallbackID), .updated)
+        XCTAssertEqual(try switcher.liveAccountID(for: .codexCli), CodexAccount.defaultID)
+        XCTAssertEqual(settings.activeAccountIDs[.codexCli], CodexAccount.defaultID)
+    }
+
     func testJournalFailureHappensBeforeAnyCredentialMutation() {
         let fileOperator = TestCredentialFileOperator()
         let journal = TestCredentialExchangeJournal(saveError: TestFailure.injected)
@@ -124,25 +281,20 @@ final class AccountCredentialSwitcherTests: XCTestCase {
     }
 
     @MainActor
-    func testJournalClearFailureAfterCommitDoesNotMisreportSuccessfulExchange() async throws {
+    func testSuccessfulSwitchRetainsCommittedNotificationOutboxUntilAcknowledged() async throws {
         let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let sourceDirectory = "/provider/codex-source"
+        let sourceDirectory = CodexHomeDirectory.path()
         let targetDirectory = "/provider/codex-target"
         let accounts = CodexAccountStore(userDefaults: defaults)
-        accounts.updateAccount(
-            id: CodexAccount.defaultID,
-            name: CodexAccount.defaultName,
-            homeDirectory: sourceDirectory
-        )
         accounts.addAccount(name: "Fallback", homeDirectory: targetDirectory)
         let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
         let settings = AccountFailoverSettingsStore(userDefaults: defaults)
         let fileOperator = TestCredentialFileOperator()
         fileOperator.seed("\(sourceDirectory)/auth.json", identity: .a)
         fileOperator.seed("\(targetDirectory)/auth.json", identity: .b)
-        let journal = TestCredentialExchangeJournal(clearError: TestFailure.injected)
+        let journal = TestCredentialExchangeJournal()
         let switcher = LiveAccountCredentialSwitcher(
             claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
             codexAccounts: accounts,
@@ -151,20 +303,21 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             journal: journal
         )
 
-        try await switcher.switchCredentials(
-            provider: .codexCli,
-            from: CodexAccount.defaultID,
-            to: targetID
-        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        try await switcher.switchCredentials(for: switchEvent)
 
         XCTAssertEqual(settings.activeAccountIDs[.codexCli], targetID)
         XCTAssertEqual(
             accounts.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
             targetDirectory
         )
-        XCTAssertEqual(accounts.accounts.first(where: { $0.id == targetID })?.homeDirectory, sourceDirectory)
+        XCTAssertNil(accounts.accounts.first(where: { $0.id == targetID })?.homeDirectory)
         XCTAssertEqual(Set(fileOperator.identities.values), [.a, .b])
-        XCTAssertNotNil(journal.record)
+        XCTAssertEqual(journal.record?.phase, .committed)
+        XCTAssertEqual(journal.record?.event, switchEvent)
+
+        try switcher.completeNotification(eventID: switchEvent.id)
+        XCTAssertNil(journal.record)
     }
 
     func testCrashImmediatelyAfterAtomicExchangeLeavesBothCredentialsRecoverablySwapped() throws {
@@ -185,26 +338,21 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let sourceDirectory = "/provider/codex-source"
+        let sourceDirectory = CodexHomeDirectory.path()
         let targetDirectory = "/provider/codex-target"
         let accounts = CodexAccountStore(userDefaults: defaults)
-        accounts.updateAccount(
-            id: CodexAccount.defaultID,
-            name: CodexAccount.defaultName,
-            homeDirectory: sourceDirectory
-        )
         accounts.addAccount(name: "Fallback", homeDirectory: targetDirectory)
         let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
         let settings = AccountFailoverSettingsStore(userDefaults: defaults)
         let fileOperator = TestCredentialFileOperator()
         let journal = TestCredentialExchangeJournal()
+        let pendingEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
         let record = CredentialFileExchangeRecord(
-            provider: .codexCli,
-            sourceAccountID: CodexAccount.defaultID,
-            targetAccountID: targetID,
+            event: pendingEvent,
+            phase: .prepared,
             sourcePath: "\(sourceDirectory)/auth.json",
             targetPath: "\(targetDirectory)/auth.json",
-            sourceCredentialLocation: sourceDirectory,
+            sourceCredentialLocation: nil,
             targetCredentialLocation: targetDirectory,
             sourceIdentity: .a,
             targetIdentity: .b
@@ -220,15 +368,16 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             journal: journal
         )
 
-        try await switcher.recoverPendingTransactions()
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
 
         XCTAssertEqual(
             accounts.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
             targetDirectory
         )
-        XCTAssertEqual(accounts.accounts.first(where: { $0.id == targetID })?.homeDirectory, sourceDirectory)
+        XCTAssertNil(accounts.accounts.first(where: { $0.id == targetID })?.homeDirectory)
         XCTAssertEqual(settings.activeAccountIDs[.codexCli], targetID)
-        XCTAssertNil(journal.record)
+        XCTAssertEqual(recoveredEvent, pendingEvent)
+        XCTAssertEqual(journal.record?.phase, .committed)
         XCTAssertEqual(Set(fileOperator.identities.values), [.a, .b])
     }
 
@@ -244,9 +393,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         let fileOperator = TestCredentialFileOperator()
         let journal = TestCredentialExchangeJournal()
         let record = CredentialFileExchangeRecord(
-            provider: .codexCli,
-            sourceAccountID: CodexAccount.defaultID,
-            targetAccountID: targetID,
+            event: event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID),
+            phase: .prepared,
             sourcePath: "/provider/source/auth.json",
             targetPath: "/provider/target/auth.json",
             sourceCredentialLocation: "/provider/source",
@@ -265,14 +413,94 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             journal: journal
         )
 
-        try await switcher.recoverPendingTransactions()
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
 
         XCTAssertEqual(
             accounts.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
             "/provider/source"
         )
         XCTAssertEqual(accounts.accounts.first(where: { $0.id == targetID })?.homeDirectory, "/provider/target")
+        XCTAssertNil(recoveredEvent)
         XCTAssertNil(journal.record)
+    }
+
+    @MainActor
+    func testFreshStoreRecoveryRepairsDefaultSidePersistedBeforeCustomSide() async throws {
+        try await assertFreshStorePartialRecovery(defaultSidePersisted: true)
+    }
+
+    @MainActor
+    func testFreshStoreRecoveryRepairsCustomSidePersistedBeforeDefaultSide() async throws {
+        try await assertFreshStorePartialRecovery(defaultSidePersisted: false)
+    }
+
+    func testDurableJournalRoundTripsAcrossFreshInstancesWithoutCredentialPayload() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeterBarFailoverJournalTests-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("transaction.json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let stored = record(sourcePath: "/provider/a", targetPath: "/provider/b", phase: .committed)
+
+        try DurableCredentialExchangeJournal(fileURL: fileURL).save(stored)
+
+        XCTAssertEqual(try DurableCredentialExchangeJournal(fileURL: fileURL).load(), stored)
+        let serialized = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertFalse(serialized.contains("source-credential"))
+        XCTAssertFalse(serialized.contains("target-credential"))
+
+        try DurableCredentialExchangeJournal(fileURL: fileURL).clear()
+        XCTAssertNil(try DurableCredentialExchangeJournal(fileURL: fileURL).load())
+    }
+
+    @MainActor
+    func testFreshProcessRecoversCommittedSwitchAndNotificationOutbox() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeterBarCommittedRecoveryTests-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("transaction.json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let targetDirectory = "/provider/target"
+        let originalStore = CodexAccountStore(userDefaults: defaults)
+        originalStore.addAccount(name: "Target", homeDirectory: targetDirectory)
+        let targetID = try XCTUnwrap(originalStore.customAccounts.first?.id)
+        XCTAssertTrue(originalStore.exchangeCredentialLocations(
+            from: CodexAccount.defaultID,
+            to: targetID,
+            expectedSource: nil,
+            expectedTarget: targetDirectory
+        ))
+        let pendingEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        let committed = CredentialFileExchangeRecord(
+            event: pendingEvent,
+            phase: .committed,
+            sourcePath: CodexHomeDirectory.authFilePath(),
+            targetPath: "\(targetDirectory)/auth.json",
+            sourceCredentialLocation: nil,
+            targetCredentialLocation: targetDirectory,
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+        try DurableCredentialExchangeJournal(fileURL: fileURL).save(committed)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(committed.sourcePath, identity: .b)
+        fileOperator.seed(committed.targetPath, identity: .a)
+
+        let freshSwitcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: DurableCredentialExchangeJournal(fileURL: fileURL)
+        )
+
+        let recoveredEvent = try await freshSwitcher.recoverPendingTransactions()
+        XCTAssertEqual(recoveredEvent, pendingEvent)
+        XCTAssertEqual(try freshSwitcher.liveAccountID(for: .codexCli), targetID)
+        try freshSwitcher.completeNotification(eventID: pendingEvent.id)
+        XCTAssertNil(try DurableCredentialExchangeJournal(fileURL: fileURL).load())
+        XCTAssertEqual(Set(fileOperator.identities.values), [.a, .b])
     }
 
     private func exchange(
@@ -293,13 +521,103 @@ final class AccountCredentialSwitcherTests: XCTestCase {
         targetLocation: String? = "/provider/b"
     ) -> CredentialFileExchangeRequest {
         CredentialFileExchangeRequest(
-            provider: .codexCli,
-            sourceAccountID: UUID(),
-            targetAccountID: UUID(),
+            event: event(provider: .codexCli, from: UUID(), to: UUID()),
             sourcePath: sourcePath,
             targetPath: targetPath,
             sourceCredentialLocation: sourceLocation,
             targetCredentialLocation: targetLocation
+        )
+    }
+
+    private func record(
+        sourcePath: String,
+        targetPath: String,
+        phase: CredentialFileExchangePhase
+    ) -> CredentialFileExchangeRecord {
+        CredentialFileExchangeRecord(
+            event: event(provider: .codexCli, from: UUID(), to: UUID()),
+            phase: phase,
+            sourcePath: sourcePath,
+            targetPath: targetPath,
+            sourceCredentialLocation: "/provider/a",
+            targetCredentialLocation: "/provider/b",
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+    }
+
+    @MainActor
+    private func assertFreshStorePartialRecovery(defaultSidePersisted: Bool) async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let targetDirectory = "/provider/target"
+        let initialStore = CodexAccountStore(userDefaults: defaults)
+        initialStore.addAccount(name: "Target", homeDirectory: targetDirectory)
+        let targetID = try XCTUnwrap(initialStore.customAccounts.first?.id)
+
+        if defaultSidePersisted {
+            defaults.set(targetDirectory, forKey: StorageKeys.codexDefaultHomeDirectory)
+        } else {
+            var partialCustomAccounts = initialStore.customAccounts
+            partialCustomAccounts[0].homeDirectory = nil
+            defaults.set(try JSONEncoder().encode(partialCustomAccounts), forKey: StorageKeys.codexCustomAccounts)
+        }
+
+        let freshStore = CodexAccountStore(userDefaults: defaults)
+        let fileOperator = TestCredentialFileOperator()
+        let journal = TestCredentialExchangeJournal()
+        let pendingEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        journal.record = CredentialFileExchangeRecord(
+            event: pendingEvent,
+            phase: .prepared,
+            sourcePath: CodexHomeDirectory.authFilePath(),
+            targetPath: "\(targetDirectory)/auth.json",
+            sourceCredentialLocation: nil,
+            targetCredentialLocation: targetDirectory,
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .b)
+        fileOperator.seed("\(targetDirectory)/auth.json", identity: .a)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: freshStore,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal
+        )
+
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
+        XCTAssertEqual(recoveredEvent, pendingEvent)
+        XCTAssertEqual(
+            freshStore.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
+            targetDirectory
+        )
+        XCTAssertNil(freshStore.accounts.first(where: { $0.id == targetID })?.homeDirectory)
+
+        let reloaded = CodexAccountStore(userDefaults: defaults)
+        XCTAssertEqual(
+            reloaded.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
+            targetDirectory
+        )
+        XCTAssertNil(reloaded.accounts.first(where: { $0.id == targetID })?.homeDirectory)
+    }
+
+    private func event(
+        provider: AccountFailoverProvider,
+        from: UUID,
+        to: UUID
+    ) -> AccountFailoverEvent {
+        AccountFailoverEvent(
+            id: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99)),
+            provider: provider,
+            fromAccountID: from,
+            fromAccountName: "Source",
+            toAccountID: to,
+            toAccountName: "Target",
+            reason: .activeAccountDepleted,
+            timestamp: Date(timeIntervalSince1970: 123)
         )
     }
 }
@@ -309,6 +627,7 @@ private enum TestFailure: Error { case injected }
 private extension CredentialFileIdentity {
     static let a = Self(device: 1, inode: 10)
     static let b = Self(device: 1, inode: 20)
+    static let c = Self(device: 1, inode: 30)
 }
 
 nonisolated private final class TestCredentialFileOperator: CredentialFileOperating {
@@ -365,7 +684,11 @@ nonisolated private final class TestCredentialExchangeJournal: CredentialExchang
 private final class RecordingCredentialSwitcher: AccountCredentialSwitching {
     private(set) var calls: [AccountCredentialSwitch] = []
 
-    func switchCredentials(provider: AccountFailoverProvider, from: UUID, to: UUID) async throws {
-        calls.append(AccountCredentialSwitch(provider: provider, fromAccountID: from, toAccountID: to))
+    func switchCredentials(for event: AccountFailoverEvent) async throws {
+        calls.append(AccountCredentialSwitch(
+            provider: event.provider,
+            fromAccountID: event.fromAccountID,
+            toAccountID: event.toAccountID
+        ))
     }
 }

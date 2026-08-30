@@ -24,17 +24,19 @@ nonisolated struct AccountCredentialSwitchEligibility: Equatable, Sendable {
 /// tests inject a recorder, so unit tests never read or write the real Keychain.
 protocol AccountCredentialSwitching {
     func eligibility(for provider: AccountFailoverProvider) -> AccountCredentialSwitchEligibility
-    func recoverPendingTransactions() async throws
-    func switchCredentials(
-        provider: AccountFailoverProvider,
-        from: UUID,
-        to: UUID
-    ) async throws
+    func liveAccountID(for provider: AccountFailoverProvider) throws -> UUID
+    func recoverPendingTransactions() async throws -> AccountFailoverEvent?
+    func switchCredentials(for event: AccountFailoverEvent) async throws
+    func completeNotification(eventID: UUID) throws
 }
 
 extension AccountCredentialSwitching {
     func eligibility(for _: AccountFailoverProvider) -> AccountCredentialSwitchEligibility { .eligible }
-    func recoverPendingTransactions() async throws {}
+    func liveAccountID(for _: AccountFailoverProvider) throws -> UUID {
+        throw CredentialExchangeError.liveAccountUnavailable
+    }
+    func recoverPendingTransactions() async throws -> AccountFailoverEvent? { nil }
+    func completeNotification(eventID _: UUID) throws {}
 }
 
 nonisolated enum CredentialExchangeError: Error, Equatable {
@@ -45,7 +47,11 @@ nonisolated enum CredentialExchangeError: Error, Equatable {
     case crossVolume
     case nonRegularFile
     case journalWriteFailed
+    case journalAlreadyPending
     case atomicExchangeFailed(Int32)
+    case duplicateCredentialIdentity
+    case liveAccountUnavailable
+    case notificationEventMismatch
     case postconditionFailed
     case recoveryRequired
 }
@@ -56,19 +62,21 @@ nonisolated struct CredentialFileIdentity: Codable, Equatable, Hashable, Sendabl
 }
 
 nonisolated struct CredentialFileExchangeRequest: Equatable, Sendable {
-    let provider: AccountFailoverProvider
-    let sourceAccountID: UUID
-    let targetAccountID: UUID
+    let event: AccountFailoverEvent
     let sourcePath: String
     let targetPath: String
     let sourceCredentialLocation: String?
     let targetCredentialLocation: String?
 }
 
+nonisolated enum CredentialFileExchangePhase: String, Codable, Equatable, Sendable {
+    case prepared
+    case committed
+}
+
 nonisolated struct CredentialFileExchangeRecord: Codable, Equatable, Sendable {
-    let provider: AccountFailoverProvider
-    let sourceAccountID: UUID
-    let targetAccountID: UUID
+    let event: AccountFailoverEvent
+    var phase: CredentialFileExchangePhase
     let sourcePath: String
     let targetPath: String
     let sourceCredentialLocation: String?
@@ -123,33 +131,107 @@ nonisolated struct DarwinCredentialFileOperator: CredentialFileOperating {
     }
 }
 
-/// Secret-free crash journal. Account ids, provider, file paths, and inode
-/// identities are configuration metadata; credential bytes are never encoded.
-nonisolated final class UserDefaultsCredentialExchangeJournal: CredentialExchangeJournaling {
-    private let userDefaults: UserDefaults
+/// Secret-free durable WAL and local-notification outbox. It contains only
+/// provider/account metadata, file paths, inode identities, and display-safe
+/// event metadata. Credential bytes never enter this app-owned file.
+nonisolated final class DurableCredentialExchangeJournal: CredentialExchangeJournaling {
+    private static let maximumBytes = 64 * 1024
+    private let fileURL: URL
 
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? Self.defaultFileURL()
     }
 
     func load() throws -> CredentialFileExchangeRecord? {
-        guard let data = userDefaults.data(forKey: StorageKeys.accountCredentialExchangeJournal) else { return nil }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        let data = try Data(contentsOf: fileURL)
+        guard data.count <= Self.maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
         return try JSONDecoder().decode(CredentialFileExchangeRecord.self, from: data)
     }
 
     func save(_ record: CredentialFileExchangeRecord) throws {
-        let data = try JSONEncoder().encode(record)
-        userDefaults.set(data, forKey: StorageKeys.accountCredentialExchangeJournal)
-        guard userDefaults.synchronize(), try load() == record else {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(record)
+        guard data.count <= Self.maximumBytes else { throw CredentialExchangeError.journalWriteFailed }
+        try Self.replaceDurably(data, at: fileURL)
+        guard try load() == record else { throw CredentialExchangeError.journalWriteFailed }
+    }
+
+    func clear() throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        guard unlink(fileURL.path) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+        try Self.syncDirectory(fileURL.deletingLastPathComponent())
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else {
             throw CredentialExchangeError.journalWriteFailed
         }
     }
 
-    func clear() throws {
-        userDefaults.removeObject(forKey: StorageKeys.accountCredentialExchangeJournal)
-        guard userDefaults.synchronize(), try load() == nil else {
-            throw CredentialExchangeError.journalWriteFailed
+    private static func defaultFileURL() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: "\(ServiceSupport.realHomeDirectory())/Library/Application Support")
+        return support
+            .appendingPathComponent("MeterBar", isDirectory: true)
+            .appendingPathComponent("account-failover", isDirectory: true)
+            .appendingPathComponent("transaction.json")
+    }
+
+    private static func replaceDurably(_ data: Data, at destination: URL) throws {
+        let directory = destination.deletingLastPathComponent()
+        try SecureFileWriter.ensurePrivateDirectory(directory)
+        let staging = directory.appendingPathComponent(".transaction.\(UUID().uuidString).partial")
+        let descriptor = open(staging.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+        var isOpen = true
+        var published = false
+        defer {
+            if isOpen { close(descriptor) }
+            if !published { try? FileManager.default.removeItem(at: staging) }
         }
+        guard fchmod(descriptor, 0o600) == 0 else {
+            throw CredentialExchangeError.atomicExchangeFailed(errno)
+        }
+        try writeAll(data, descriptor: descriptor)
+        try fullSync(descriptor)
+        guard close(descriptor) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+        isOpen = false
+        guard rename(staging.path, destination.path) == 0 else {
+            throw CredentialExchangeError.atomicExchangeFailed(errno)
+        }
+        published = true
+        try syncDirectory(directory)
+    }
+
+    private static func writeAll(_ data: Data, descriptor: Int32) throws {
+        try data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(descriptor, base + offset, bytes.count - offset)
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw CredentialExchangeError.atomicExchangeFailed(errno)
+                }
+                offset += count
+            }
+        }
+    }
+
+    private static func fullSync(_ descriptor: Int32) throws {
+        if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+        let fullSyncError = errno
+        if fullSyncError == EINVAL || fullSyncError == ENOTSUP {
+            guard fsync(descriptor) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+            return
+        }
+        throw CredentialExchangeError.atomicExchangeFailed(fullSyncError)
+    }
+
+    private static func syncDirectory(_ directory: URL) throws {
+        let descriptor = open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
+        defer { close(descriptor) }
+        guard fsync(descriptor) == 0 else { throw CredentialExchangeError.atomicExchangeFailed(errno) }
     }
 }
 
@@ -163,6 +245,7 @@ nonisolated enum CredentialFileExchangeTransaction {
         journal: CredentialExchangeJournaling
     ) throws -> CredentialFileExchangeRecord {
         guard request.sourcePath != request.targetPath else { throw CredentialExchangeError.sameLocation }
+        guard try journal.load() == nil else { throw CredentialExchangeError.journalAlreadyPending }
         let sourceIdentity = try fileOperator.identity(at: request.sourcePath)
         let targetIdentity: CredentialFileIdentity
         do {
@@ -173,10 +256,12 @@ nonisolated enum CredentialFileExchangeTransaction {
         guard sourceIdentity.device == targetIdentity.device else {
             throw CredentialExchangeError.crossVolume
         }
+        guard sourceIdentity != targetIdentity else {
+            throw CredentialExchangeError.duplicateCredentialIdentity
+        }
         let record = CredentialFileExchangeRecord(
-            provider: request.provider,
-            sourceAccountID: request.sourceAccountID,
-            targetAccountID: request.targetAccountID,
+            event: request.event,
+            phase: .prepared,
             sourcePath: request.sourcePath,
             targetPath: request.targetPath,
             sourceCredentialLocation: request.sourceCredentialLocation,
@@ -227,19 +312,26 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         self.codexAccounts = codexAccounts ?? .shared
         self.failoverSettings = failoverSettings ?? .shared
         self.fileOperator = fileOperator
-        self.journal = journal ?? UserDefaultsCredentialExchangeJournal()
+        self.journal = journal ?? DurableCredentialExchangeJournal()
         self.keychainItemProbe = keychainItemProbe ?? Self.keychainItemMayExist(service:)
     }
 
     func eligibility(for provider: AccountFailoverProvider) -> AccountCredentialSwitchEligibility {
         do {
-            let paths = try credentialPaths(for: provider)
-            guard paths.count >= 2 else {
+            let accounts = try credentialAccounts(for: provider)
+            guard accounts.count >= 2 else {
                 return .ineligible("Add and sign in to at least two accounts.")
             }
-            let identities = try paths.map(fileOperator.identity(at:))
+            _ = try liveAccountID(for: provider)
+            guard Set(accounts.map(\.path)).count == accounts.count else {
+                return .ineligible("Each account must use a distinct provider credential path.")
+            }
+            let identities = try accounts.map { try fileOperator.identity(at: $0.path) }
             guard Set(identities.map(\.device)).count == 1 else {
                 return .ineligible("Credential files must be on the same volume for an atomic switch.")
+            }
+            guard Set(identities).count == identities.count else {
+                return .ineligible("Each account must use a distinct provider credential file.")
             }
             return .eligible
         } catch CredentialExchangeError.unsupportedCredentialLayout {
@@ -247,39 +339,57 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
                 "Claude Keychain and mixed Keychain/file layouts are not switched automatically because "
                     + "Security.framework has no atomic multi-item transaction. Use file-backed profiles."
             )
+        } catch CredentialExchangeError.liveAccountUnavailable {
+            return .ineligible(
+                "Exactly one enabled account must map to the provider's live default credential path."
+            )
         } catch {
             return .ineligible("Every enabled account must have a readable provider credential file.")
         }
     }
 
-    func recoverPendingTransactions() async throws {
-        guard let record = try journal.load() else { return }
-        switch try CredentialFileExchangeTransaction.state(of: record, fileOperator: fileOperator) {
-        case .original:
+    func liveAccountID(for provider: AccountFailoverProvider) throws -> UUID {
+        let canonicalPath = canonicalCredentialPath(for: provider)
+        let matches = try credentialAccounts(for: provider).filter { $0.path == canonicalPath }
+        guard matches.count == 1, let accountID = matches.first?.id else {
+            throw CredentialExchangeError.liveAccountUnavailable
+        }
+        return accountID
+    }
+
+    func recoverPendingTransactions() async throws -> AccountFailoverEvent? {
+        guard var record = try journal.load() else { return nil }
+        let state = try CredentialFileExchangeTransaction.state(of: record, fileOperator: fileOperator)
+        switch (record.phase, state) {
+        case (.prepared, .original):
             try journal.clear()
-        case .swapped:
-            guard reconcileAccountLocations(for: record) else {
-                throw CredentialExchangeError.recoveryRequired
-            }
-            failoverSettings.setActiveAccountID(record.targetAccountID, for: record.provider)
-            try journal.clear()
-        case .inconsistent:
+            return nil
+        case (.prepared, .swapped):
+            try commitLogicalMapping(for: record)
+            record.phase = .committed
+            try journal.save(record)
+            return record.event
+        case (.committed, .swapped):
+            try commitLogicalMapping(for: record)
+            return record.event
+        case (_, .inconsistent), (.committed, .original):
             throw CredentialExchangeError.recoveryRequired
         }
     }
 
-    func switchCredentials(
-        provider: AccountFailoverProvider,
-        from sourceID: UUID,
-        to targetID: UUID
-    ) async throws {
-        try await recoverPendingTransactions()
-        let locations = try credentialLocations(provider: provider, sourceID: sourceID, targetID: targetID)
+    func switchCredentials(for event: AccountFailoverEvent) async throws {
+        guard try journal.load() == nil else { throw CredentialExchangeError.journalAlreadyPending }
+        guard try liveAccountID(for: event.provider) == event.fromAccountID else {
+            throw CredentialExchangeError.liveAccountUnavailable
+        }
+        let locations = try credentialLocations(
+            provider: event.provider,
+            sourceID: event.fromAccountID,
+            targetID: event.toAccountID
+        )
         let record = try CredentialFileExchangeTransaction.prepareAndExchange(
             CredentialFileExchangeRequest(
-                provider: provider,
-                sourceAccountID: sourceID,
-                targetAccountID: targetID,
+                event: event,
                 sourcePath: locations.sourcePath,
                 targetPath: locations.targetPath,
                 sourceCredentialLocation: locations.sourceLocation,
@@ -291,24 +401,47 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         guard reconcileAccountLocations(for: record) else {
             throw CredentialExchangeError.recoveryRequired
         }
-        failoverSettings.setActiveAccountID(targetID, for: provider)
-        do {
-            try journal.clear()
-        } catch {
-            // The credential exchange and logical mapping are already committed.
-            // Retaining the secret-free journal is safe and lets a later startup
-            // retry the idempotent cleanup without misreporting this switch.
-            AppLog.storage.error("Automatic account switch recovery journal cleanup will be retried.")
+        failoverSettings.setActiveAccountID(event.toAccountID, for: event.provider)
+        var committed = record
+        committed.phase = .committed
+        try journal.save(committed)
+    }
+
+    func completeNotification(eventID: UUID) throws {
+        guard let record = try journal.load(),
+              record.phase == .committed,
+              record.event.id == eventID else {
+            throw CredentialExchangeError.notificationEventMismatch
+        }
+        try journal.clear()
+    }
+
+    private func credentialAccounts(for provider: AccountFailoverProvider) throws -> [(id: UUID, path: String)] {
+        switch provider {
+        case .claudeCode:
+            return try claudeAccounts.enabledAccounts.map {
+                ($0.id, try claudeFileCredentialPath(for: $0))
+            }
+        case .codexCli:
+            return codexAccounts.enabledAccounts.map {
+                ($0.id, Self.standardized(CodexHomeDirectory.authFilePath(for: $0)))
+            }
         }
     }
 
-    private func credentialPaths(for provider: AccountFailoverProvider) throws -> [String] {
+    private func canonicalCredentialPath(for provider: AccountFailoverProvider) -> String {
         switch provider {
         case .claudeCode:
-            return try claudeAccounts.enabledAccounts.map(claudeFileCredentialPath(for:))
+            return Self.standardized(
+                (ClaudeCodeAccount.defaultConfigDirectory() as NSString).appendingPathComponent(".credentials.json")
+            )
         case .codexCli:
-            return codexAccounts.enabledAccounts.map(CodexHomeDirectory.authFilePath(for:))
+            return Self.standardized(CodexHomeDirectory.authFilePath())
         }
+    }
+
+    private static func standardized(_ path: String) -> String {
+        (path as NSString).standardizingPath
     }
 
     private func credentialLocations(
@@ -350,7 +483,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
                     throw CredentialExchangeError.unsupportedCredentialLayout
                 }
             case let .file(path):
-                if FileManager.default.fileExists(atPath: path) { return path }
+                if FileManager.default.fileExists(atPath: path) { return Self.standardized(path) }
             }
         }
         throw CredentialExchangeError.missingSourceCredential
@@ -372,29 +505,36 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     }
 
     private func reconcileAccountLocations(for record: CredentialFileExchangeRecord) -> Bool {
-        switch record.provider {
+        switch record.event.provider {
         case .claudeCode:
-            let source = claudeAccounts.accounts.first(where: { $0.id == record.sourceAccountID })
-            let target = claudeAccounts.accounts.first(where: { $0.id == record.targetAccountID })
+            let source = claudeAccounts.accounts.first(where: { $0.id == record.event.fromAccountID })
+            let target = claudeAccounts.accounts.first(where: { $0.id == record.event.toAccountID })
             if source?.configDirectory == record.targetCredentialLocation,
                target?.configDirectory == record.sourceCredentialLocation { return true }
             return claudeAccounts.exchangeCredentialLocations(
-                from: record.sourceAccountID,
-                to: record.targetAccountID,
+                from: record.event.fromAccountID,
+                to: record.event.toAccountID,
                 expectedSource: record.sourceCredentialLocation,
                 expectedTarget: record.targetCredentialLocation
             )
         case .codexCli:
-            let source = codexAccounts.accounts.first(where: { $0.id == record.sourceAccountID })
-            let target = codexAccounts.accounts.first(where: { $0.id == record.targetAccountID })
+            let source = codexAccounts.accounts.first(where: { $0.id == record.event.fromAccountID })
+            let target = codexAccounts.accounts.first(where: { $0.id == record.event.toAccountID })
             if source?.homeDirectory == record.targetCredentialLocation,
                target?.homeDirectory == record.sourceCredentialLocation { return true }
             return codexAccounts.exchangeCredentialLocations(
-                from: record.sourceAccountID,
-                to: record.targetAccountID,
+                from: record.event.fromAccountID,
+                to: record.event.toAccountID,
                 expectedSource: record.sourceCredentialLocation,
                 expectedTarget: record.targetCredentialLocation
             )
         }
+    }
+
+    private func commitLogicalMapping(for record: CredentialFileExchangeRecord) throws {
+        guard reconcileAccountLocations(for: record) else {
+            throw CredentialExchangeError.recoveryRequired
+        }
+        failoverSettings.setActiveAccountID(record.event.toAccountID, for: record.event.provider)
     }
 }

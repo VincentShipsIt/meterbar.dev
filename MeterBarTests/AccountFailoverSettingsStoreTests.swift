@@ -17,15 +17,15 @@ final class AccountFailoverSettingsStoreTests: XCTestCase {
         suiteName = nil
     }
 
-    func testBothProvidersDefaultOffAndPreferredAccountIsFirstEnabledProfile() {
+    func testBothProvidersDefaultOffAndLiveAccountIsNotInferredFromOrder() {
         let store = AccountFailoverSettingsStore(userDefaults: defaults)
         let claude = [UUID(), UUID()]
         let codex = [UUID(), UUID()]
 
         XCTAssertFalse(store.isEnabled(for: .claudeCode))
         XCTAssertFalse(store.isEnabled(for: .codexCli))
-        XCTAssertEqual(store.activeAccountID(for: .claudeCode, orderedAccountIDs: claude), claude.first)
-        XCTAssertEqual(store.activeAccountID(for: .codexCli, orderedAccountIDs: codex), codex.first)
+        XCTAssertNil(store.activeAccountID(for: .claudeCode, orderedAccountIDs: claude))
+        XCTAssertNil(store.activeAccountID(for: .codexCli, orderedAccountIDs: codex))
     }
 
     func testEnablementAndLiveAccountPersistIndependentlyPerProvider() {
@@ -44,7 +44,7 @@ final class AccountFailoverSettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.activeAccountID(for: .codexCli, orderedAccountIDs: [codex, UUID()]), codex)
     }
 
-    func testRemovedLiveAccountReconcilesToPreferred() {
+    func testRemovedLiveAccountReconciliationClearsMetadataWithoutRetargeting() {
         let preferred = UUID()
         let removed = UUID()
         let store = AccountFailoverSettingsStore(userDefaults: defaults)
@@ -52,6 +52,6 @@ final class AccountFailoverSettingsStoreTests: XCTestCase {
 
         store.reconcileAccounts([preferred], for: .claudeCode)
 
-        XCTAssertEqual(store.activeAccountID(for: .claudeCode, orderedAccountIDs: [preferred]), preferred)
+        XCTAssertNil(store.activeAccountID(for: .claudeCode, orderedAccountIDs: [preferred]))
     }
 }

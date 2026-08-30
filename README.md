@@ -214,16 +214,28 @@ limit-reached banner.
 
 Claude Code and Codex CLI can opt into automatic fallback from their provider
 settings. The enabled account order is the chain: the first profile is
-preferred, followed by each fallback. MeterBar evaluates the chain only when an
-existing usage refresh reports the live account's primary window exhausted; it
-does not add another poll. Each successful switch posts a macOS notification,
-and the live profile is marked in the menu-bar popover and provider settings.
+preferred, followed by each fallback. MeterBar identifies the live account from
+the one profile mapped to the provider's canonical credential path; it never
+infers the live account from list order. Missing or ambiguous mappings disable
+automatic fallback until the profile layout is repaired.
+
+MeterBar evaluates the chain only when the current refresh successfully reports
+the live account's non-estimated primary window exhausted; cached data from a
+failed fetch cannot trigger a switch, and it does not add another poll. For
+Codex, the session window is primary when present, otherwise the provider's
+weekly `primary_window` is used. Notification authorization is required before
+a new automatic switch. Each successful switch posts a stable-id macOS
+notification, and the live profile is marked in the menu-bar popover and
+provider settings.
 Automatic switching is available only when every enabled profile uses a
 provider-owned credential file on the same volume. MeterBar exchanges those
 files with macOS's atomic `RENAME_SWAP` operation, verifies the inode mapping,
-and keeps only a secret-free recovery journal (provider, account ids, paths,
-and inode ids) until the logical account mapping commits. Credential bytes are
-never copied into MeterBar storage or logs. Claude Keychain and mixed
+and keeps only a secret-free, atomically persisted recovery journal (provider,
+account ids, paths, inode ids, and notification metadata) until the switch
+notification is delivered. Startup recovery repairs interrupted account
+metadata writes and retries an unacknowledged notification without repeating
+the credential exchange. Credential bytes are never copied into MeterBar
+storage or logs. Claude Keychain and mixed
 Keychain/file layouts are intentionally ineligible: Security.framework does
 not provide an atomic multi-item transaction, so MeterBar refuses to risk a
 partial credential exchange.

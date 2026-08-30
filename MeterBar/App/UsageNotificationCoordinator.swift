@@ -7,6 +7,7 @@ import os
 @MainActor
 protocol UserNotificationPosting {
     func requestAuthorizationIfNeeded()
+    func ensureAuthorization() async -> Bool
     @discardableResult
     func post(identifier: String, title: String, body: String) async -> Bool
 }
@@ -49,19 +50,11 @@ final class LiveUserNotificationPoster: UserNotificationPosting {
 
     func post(identifier: String, title: String, body: String) async -> Bool {
         let center = injectedCenter ?? .current()
-        let settings = await center.notificationSettings()
-        let allowed: Bool
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            allowed = true
-        case .notDetermined:
-            allowed = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
-        case .denied:
-            allowed = false
-        @unknown default:
-            allowed = false
-        }
-        guard allowed else { return false }
+        guard await ensureAuthorization(using: center) else { return false }
+        let delivered = await center.deliveredNotifications()
+        if delivered.contains(where: { $0.request.identifier == identifier }) { return true }
+        let pending = await center.pendingNotificationRequests()
+        if pending.contains(where: { $0.identifier == identifier }) { return true }
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -75,6 +68,26 @@ final class LiveUserNotificationPoster: UserNotificationPosting {
             AppLog.app.error("Notification delivery failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    func ensureAuthorization() async -> Bool {
+        await ensureAuthorization(using: injectedCenter ?? .current())
+    }
+
+    private func ensureAuthorization(using center: UNUserNotificationCenter) async -> Bool {
+        let settings = await center.notificationSettings()
+        let allowed: Bool
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            allowed = true
+        case .notDetermined:
+            allowed = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
+        case .denied:
+            allowed = false
+        @unknown default:
+            allowed = false
+        }
+        return allowed
     }
 }
 

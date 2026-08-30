@@ -19,6 +19,59 @@ final class AccountFailoverDecisionTests: XCTestCase {
         )
     }
 
+    func testAvailabilityRejectsCachedMetricsWithoutCurrentRefreshSuccess() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil)
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .claudeCode,
+                metrics: metrics,
+                refreshedSuccessfully: false
+            ),
+            .unknown
+        )
+    }
+
+    func testAvailabilityRejectsEstimatedPrimaryLimit() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil, isEstimated: true)
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .claudeCode,
+                metrics: metrics,
+                refreshedSuccessfully: true
+            ),
+            .unknown
+        )
+    }
+
+    func testCodexWeeklyOnlyPrimaryWindowCanBeDepleted() {
+        let metrics = UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(
+                used: 100,
+                total: 100,
+                resetTime: nil,
+                periodKind: .weekly
+            )
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .codexCli,
+                metrics: metrics,
+                refreshedSuccessfully: true
+            ),
+            .depleted
+        )
+    }
+
     func testDepletedPreferredSwitchesToFirstAvailableFallbackInConfiguredOrder() {
         XCTAssertEqual(
             decide(

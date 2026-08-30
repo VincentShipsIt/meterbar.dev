@@ -37,7 +37,7 @@ final class AccountFailoverSettingsStore: ObservableObject {
         if let stored = activeAccountIDs[provider], orderedAccountIDs.contains(stored) {
             return stored
         }
-        return orderedAccountIDs.first
+        return nil
     }
 
     func setActiveAccountID(_ accountID: UUID?, for provider: AccountFailoverProvider) {
@@ -50,7 +50,7 @@ final class AccountFailoverSettingsStore: ObservableObject {
 
     func reconcileAccounts(_ orderedAccountIDs: [UUID], for provider: AccountFailoverProvider) {
         guard let stored = activeAccountIDs[provider], !orderedAccountIDs.contains(stored) else { return }
-        setActiveAccountID(orderedAccountIDs.first, for: provider)
+        setActiveAccountID(nil, for: provider)
     }
 
     private func load() {

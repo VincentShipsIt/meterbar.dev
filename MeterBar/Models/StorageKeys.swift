@@ -110,8 +110,6 @@ nonisolated enum StorageKeys {
     static let accountFailoverEnabledProviders = "AccountFailoverEnabledProviders"
     /// Last live logical account per failover-capable provider. Contains UUIDs only.
     static let accountFailoverActiveAccounts = "AccountFailoverActiveAccounts"
-    /// Secret-free crash-recovery metadata for an atomic provider-file exchange.
-    static let accountCredentialExchangeJournal = "AccountCredentialExchangeJournal"
     /// Extra Grok Build profiles (JSON-encoded [GrokAccount]).
     static let grokCustomAccounts = "GrokCustomAccounts"
     /// User-chosen display name for the default Grok Build profile.

@@ -25,8 +25,26 @@ nonisolated enum AccountFailoverAvailability: Equatable, Sendable {
     case depleted
     case unknown
 
-    init(metrics: UsageMetrics?) {
-        guard let primaryLimit = metrics?.sessionLimit else {
+    init(
+        provider: AccountFailoverProvider,
+        metrics: UsageMetrics?,
+        refreshedSuccessfully: Bool
+    ) {
+        guard refreshedSuccessfully, let metrics else {
+            self = .unknown
+            return
+        }
+        let primaryLimit: UsageLimit?
+        switch provider {
+        case .claudeCode:
+            primaryLimit = metrics.sessionLimit
+        case .codexCli:
+            // Codex maps windows by duration. When the API omits its short
+            // window, the weekly `primary_window` is the provider's actual
+            // primary and must still govern failover.
+            primaryLimit = metrics.sessionLimit ?? metrics.weeklyLimit
+        }
+        guard let primaryLimit, !primaryLimit.isEstimated else {
             self = .unknown
             return
         }
@@ -49,7 +67,7 @@ nonisolated enum AccountFailoverStayReason: Equatable, Sendable {
     case allAccountsDepleted
 }
 
-nonisolated enum AccountFailoverSwitchReason: Equatable, Sendable {
+nonisolated enum AccountFailoverSwitchReason: String, Codable, Equatable, Sendable {
     case activeAccountDepleted
     case preferredAccountRecovered
 }

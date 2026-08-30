@@ -254,15 +254,17 @@ final class ClaudeCodeAccountStore: ObservableObject {
         guard sourceID != targetID,
               let source = accounts.first(where: { $0.id == sourceID }),
               let target = accounts.first(where: { $0.id == targetID }),
-              source.configDirectory == expectedSource,
-              target.configDirectory == expectedTarget else {
+              source.configDirectory == expectedSource || source.configDirectory == expectedTarget,
+              target.configDirectory == expectedTarget || target.configDirectory == expectedSource else {
             return false
         }
-        setCredentialLocation(target.configDirectory, for: sourceID)
-        setCredentialLocation(source.configDirectory, for: targetID)
+        setCredentialLocation(expectedTarget, for: sourceID)
+        setCredentialLocation(expectedSource, for: targetID)
         saveDefaultAccountConfigDirectory()
         saveCustomAccounts()
-        return true
+        guard userDefaults.synchronize() else { return false }
+        return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
+            && persistedCredentialLocationMatches(expectedSource, for: targetID)
     }
 
     private func setCredentialLocation(_ configDirectory: String?, for id: UUID) {
@@ -274,6 +276,18 @@ final class ClaudeCodeAccountStore: ObservableObject {
         var updated = customAccounts
         updated[index].configDirectory = configDirectory
         customAccounts = updated
+    }
+
+    private func persistedCredentialLocationMatches(_ expected: String?, for id: UUID) -> Bool {
+        if id == ClaudeCodeAccount.defaultID {
+            return userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == expected
+        }
+        guard let data = userDefaults.data(forKey: storageKey),
+              let persisted = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data),
+              let account = persisted.first(where: { $0.id == id }) else {
+            return false
+        }
+        return account.configDirectory == expected
     }
 
     private func load() {

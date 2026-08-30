@@ -2,7 +2,8 @@ import Foundation
 import MeterBarShared
 import os
 
-nonisolated struct AccountFailoverEvent: Sendable {
+nonisolated struct AccountFailoverEvent: Codable, Equatable, Sendable {
+    let id: UUID
     let provider: AccountFailoverProvider
     let fromAccountID: UUID
     let fromAccountName: String
@@ -10,10 +11,45 @@ nonisolated struct AccountFailoverEvent: Sendable {
     let toAccountName: String
     let reason: AccountFailoverSwitchReason
     let timestamp: Date
+
+    init(
+        id: UUID = UUID(),
+        provider: AccountFailoverProvider,
+        fromAccountID: UUID,
+        fromAccountName: String,
+        toAccountID: UUID,
+        toAccountName: String,
+        reason: AccountFailoverSwitchReason,
+        timestamp: Date
+    ) {
+        self.id = id
+        self.provider = provider
+        self.fromAccountID = fromAccountID
+        self.fromAccountName = fromAccountName
+        self.toAccountID = toAccountID
+        self.toAccountName = toAccountName
+        self.reason = reason
+        self.timestamp = timestamp
+    }
 }
 
 protocol AccountFailoverNotifying {
-    func notify(_ event: AccountFailoverEvent) async
+    func prepareForAutomaticSwitch() async -> Bool
+    func notify(_ event: AccountFailoverEvent) async -> Bool
+}
+
+nonisolated struct AccountFailoverRefreshEvidence: Equatable, Sendable {
+    var claudeSuccessfulAccountIDs: Set<UUID> = []
+    var codexSuccessfulAccountIDs: Set<UUID> = []
+
+    static let none = Self()
+
+    func successfullyRefreshed(_ accountID: UUID, provider: AccountFailoverProvider) -> Bool {
+        switch provider {
+        case .claudeCode: claudeSuccessfulAccountIDs.contains(accountID)
+        case .codexCli: codexSuccessfulAccountIDs.contains(accountID)
+        }
+    }
 }
 
 /// Applies pure decisions only after an existing refresh has committed fresh
@@ -27,6 +63,7 @@ final class AccountFailoverCoordinator {
     private let codexAccounts: CodexAccountStore
     private let credentialSwitcher: AccountCredentialSwitching
     private let notifier: AccountFailoverNotifying
+    private var evaluationTail: Task<Void, Never>?
 
     init(
         settings: AccountFailoverSettingsStore? = nil,
@@ -44,50 +81,95 @@ final class AccountFailoverCoordinator {
 
     func evaluate(
         claudeMetrics: [UUID: UsageMetrics],
-        codexMetrics: [UUID: UsageMetrics]
+        codexMetrics: [UUID: UsageMetrics],
+        evidence: AccountFailoverRefreshEvidence = .none
+    ) async {
+        let previous = evaluationTail
+        let work = Task { @MainActor [weak self] in
+            await previous?.value
+            await self?.evaluateSerialized(
+                claudeMetrics: claudeMetrics,
+                codexMetrics: codexMetrics,
+                evidence: evidence
+            )
+        }
+        evaluationTail = work
+        await work.value
+    }
+
+    private func evaluateSerialized(
+        claudeMetrics: [UUID: UsageMetrics],
+        codexMetrics: [UUID: UsageMetrics],
+        evidence: AccountFailoverRefreshEvidence
     ) async {
         do {
-            try await credentialSwitcher.recoverPendingTransactions()
+            if let pendingEvent = try await credentialSwitcher.recoverPendingTransactions() {
+                await deliverAndAcknowledge(pendingEvent)
+                return
+            }
         } catch {
             AppLog.storage.error("Automatic account switch recovery requires attention.")
             return
         }
-        await evaluateClaude(metrics: claudeMetrics)
-        await evaluateCodex(metrics: codexMetrics)
+        await evaluateClaude(metrics: claudeMetrics, evidence: evidence)
+        await evaluateCodex(metrics: codexMetrics, evidence: evidence)
     }
 
-    private func evaluateClaude(metrics: [UUID: UsageMetrics]) async {
+    private func evaluateClaude(
+        metrics: [UUID: UsageMetrics],
+        evidence: AccountFailoverRefreshEvidence
+    ) async {
         let accounts = claudeAccounts.enabledAccounts
         await evaluate(
             provider: .claudeCode,
             accounts: accounts.map { AccountIdentity(id: $0.id, name: $0.name) },
-            metrics: metrics
+            metrics: metrics,
+            evidence: evidence
         )
     }
 
-    private func evaluateCodex(metrics: [UUID: UsageMetrics]) async {
+    private func evaluateCodex(
+        metrics: [UUID: UsageMetrics],
+        evidence: AccountFailoverRefreshEvidence
+    ) async {
         let accounts = codexAccounts.enabledAccounts
         await evaluate(
             provider: .codexCli,
             accounts: accounts.map { AccountIdentity(id: $0.id, name: $0.name) },
-            metrics: metrics
+            metrics: metrics,
+            evidence: evidence
         )
     }
 
     private func evaluate(
         provider: AccountFailoverProvider,
         accounts: [AccountIdentity],
-        metrics: [UUID: UsageMetrics]
+        metrics: [UUID: UsageMetrics],
+        evidence: AccountFailoverRefreshEvidence
     ) async {
+        guard settings.isEnabled(for: provider) else { return }
         guard credentialSwitcher.eligibility(for: provider).isEligible else {
             settings.setEnabled(false, for: provider)
             return
         }
         let orderedIDs = accounts.map(\.id)
-        settings.reconcileAccounts(orderedIDs, for: provider)
-        let activeID = settings.activeAccountID(for: provider, orderedAccountIDs: orderedIDs)
+        let activeID: UUID
+        do {
+            activeID = try credentialSwitcher.liveAccountID(for: provider)
+        } catch {
+            settings.setEnabled(false, for: provider)
+            return
+        }
+        settings.setActiveAccountID(activeID, for: provider)
         let availability = Dictionary(uniqueKeysWithValues: orderedIDs.map {
-            ($0, AccountFailoverAvailability(metrics: metrics[$0]))
+            (
+                $0,
+                AccountFailoverAvailability(
+                    provider: provider,
+                    metrics: metrics[$0],
+                    refreshedSuccessfully: evidence.successfullyRefreshed($0, provider: provider)
+                )
+            )
         })
         let decision = AccountFailoverDecisionEngine.decide(
             AccountFailoverDecisionInput(
@@ -101,15 +183,35 @@ final class AccountFailoverCoordinator {
         switch decision {
         case .stay:
             return
-        case let .adopt(accountID, _):
-            settings.setActiveAccountID(accountID, for: provider)
+        case .adopt:
+            return
         case let .switchAccount(from, to, reason):
             guard let fromAccount = accounts.first(where: { $0.id == from }),
                   let toAccount = accounts.first(where: { $0.id == to }) else {
                 return
             }
+            guard await notifier.prepareForAutomaticSwitch() else { return }
+            let currentAccounts = accountIdentities(for: provider)
+            guard settings.isEnabled(for: provider),
+                  currentAccounts.map(\.id) == orderedIDs,
+                  credentialSwitcher.eligibility(for: provider).isEligible,
+                  (try? credentialSwitcher.liveAccountID(for: provider)) == from else {
+                return
+            }
+            let event = AccountFailoverEvent(
+                provider: provider,
+                fromAccountID: from,
+                fromAccountName: fromAccount.name,
+                toAccountID: to,
+                toAccountName: toAccount.name,
+                reason: reason,
+                timestamp: Date()
+            )
             do {
-                try await credentialSwitcher.switchCredentials(provider: provider, from: from, to: to)
+                try await credentialSwitcher.switchCredentials(for: event)
+                guard try credentialSwitcher.liveAccountID(for: provider) == to else {
+                    throw CredentialExchangeError.recoveryRequired
+                }
             } catch {
                 AppLog.storage.error(
                     "Automatic account switch failed for \(provider.service.rawValue, privacy: .public)."
@@ -117,17 +219,25 @@ final class AccountFailoverCoordinator {
                 return
             }
             settings.setActiveAccountID(to, for: provider)
-            await notifier.notify(
-                AccountFailoverEvent(
-                    provider: provider,
-                    fromAccountID: from,
-                    fromAccountName: fromAccount.name,
-                    toAccountID: to,
-                    toAccountName: toAccount.name,
-                    reason: reason,
-                    timestamp: Date()
-                )
-            )
+            await deliverAndAcknowledge(event)
+        }
+    }
+
+    private func accountIdentities(for provider: AccountFailoverProvider) -> [AccountIdentity] {
+        switch provider {
+        case .claudeCode:
+            claudeAccounts.enabledAccounts.map { AccountIdentity(id: $0.id, name: $0.name) }
+        case .codexCli:
+            codexAccounts.enabledAccounts.map { AccountIdentity(id: $0.id, name: $0.name) }
+        }
+    }
+
+    private func deliverAndAcknowledge(_ event: AccountFailoverEvent) async {
+        guard await notifier.notify(event) else { return }
+        do {
+            try credentialSwitcher.completeNotification(eventID: event.id)
+        } catch {
+            AppLog.storage.error("Automatic account switch notification acknowledgement will be retried.")
         }
     }
 
@@ -147,9 +257,13 @@ final class LiveAccountFailoverNotifier: AccountFailoverNotifying {
         self.notificationPoster = notificationPoster ?? LiveUserNotificationPoster.shared
     }
 
-    func notify(_ event: AccountFailoverEvent) async {
+    func prepareForAutomaticSwitch() async -> Bool {
+        await notificationPoster.ensureAuthorization()
+    }
+
+    func notify(_ event: AccountFailoverEvent) async -> Bool {
         await notificationPoster.post(
-            identifier: "account-failover-\(event.provider.rawValue)-\(event.timestamp.timeIntervalSince1970)",
+            identifier: "account-failover-\(event.id.uuidString.lowercased())",
             title: "\(event.provider.service.shortName) account switched",
             body: "\(event.fromAccountName) → \(event.toAccountName)"
         )
