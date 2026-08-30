@@ -89,6 +89,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let refreshConfigurationDirectory: URL?
+    private let credentialPersistenceBarrier: (UserDefaults) -> Bool
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
     private let defaultConfigDirectoryStorageKey = StorageKeys.claudeCodeDefaultConfigDirectory
@@ -110,10 +111,15 @@ final class ClaudeCodeAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        refreshConfigurationDirectory: URL? = nil,
+        credentialPersistenceBarrier: ((UserDefaults) -> Bool)? = nil
+    ) {
         self.userDefaults = userDefaults
         self.refreshConfigurationDirectory = refreshConfigurationDirectory
             ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
+        self.credentialPersistenceBarrier = credentialPersistenceBarrier ?? { $0.synchronize() }
         load()
         persistRefreshConfiguration()
     }
@@ -122,6 +128,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
     init(accounts: [ClaudeCodeAccount]) {
         userDefaults = .standard
         refreshConfigurationDirectory = nil
+        credentialPersistenceBarrier = { _ in false }
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
         defaultAccountConfigDirectory = defaultAccount.configDirectory
@@ -262,7 +269,7 @@ final class ClaudeCodeAccountStore: ObservableObject {
         setCredentialLocation(expectedSource, for: targetID)
         saveDefaultAccountConfigDirectory()
         saveCustomAccounts()
-        guard userDefaults.synchronize() else { return false }
+        guard credentialPersistenceBarrier(userDefaults) else { return false }
         return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
             && persistedCredentialLocationMatches(expectedSource, for: targetID)
     }
@@ -288,6 +295,23 @@ final class ClaudeCodeAccountStore: ObservableObject {
             return false
         }
         return account.configDirectory == expected
+    }
+
+    func credentialLocationsMatchPersistedState() -> Bool {
+        guard userDefaults.synchronize() else { return false }
+        guard userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == defaultAccountConfigDirectory else {
+            return false
+        }
+        let persisted: [ClaudeCodeAccount]
+        if let data = userDefaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data) {
+            persisted = decoded.filter { !$0.isDefault }
+        } else {
+            persisted = []
+        }
+        guard Set(persisted.map(\.id)) == Set(customAccounts.map(\.id)) else { return false }
+        let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.configDirectory) })
+        return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.configDirectory }
     }
 
     private func load() {

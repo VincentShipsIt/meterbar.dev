@@ -60,6 +60,7 @@ final class CodexAccountStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let refreshConfigurationDirectory: URL?
+    private let credentialPersistenceBarrier: (UserDefaults) -> Bool
 
     var accounts: [CodexAccount] {
         orderedAccounts(from: [
@@ -76,10 +77,15 @@ final class CodexAccountStore: ObservableObject {
         accounts.filter(\.isEnabled)
     }
 
-    init(userDefaults: UserDefaults = .standard, refreshConfigurationDirectory: URL? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        refreshConfigurationDirectory: URL? = nil,
+        credentialPersistenceBarrier: ((UserDefaults) -> Bool)? = nil
+    ) {
         self.userDefaults = userDefaults
         self.refreshConfigurationDirectory = refreshConfigurationDirectory
             ?? (userDefaults === UserDefaults.standard ? SharedMetricsStore.containerURL : nil)
+        self.credentialPersistenceBarrier = credentialPersistenceBarrier ?? { $0.synchronize() }
         load()
         persistRefreshConfiguration()
     }
@@ -88,6 +94,7 @@ final class CodexAccountStore: ObservableObject {
     init(accounts: [CodexAccount]) {
         userDefaults = .standard
         refreshConfigurationDirectory = nil
+        credentialPersistenceBarrier = { _ in false }
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
         defaultAccountHomeDirectory = defaultAccount.homeDirectory
@@ -248,7 +255,7 @@ final class CodexAccountStore: ObservableObject {
         setCredentialLocation(expectedSource, for: targetID)
         saveDefaultAccountHomeDirectory()
         saveCustomAccounts()
-        guard userDefaults.synchronize() else { return false }
+        guard credentialPersistenceBarrier(userDefaults) else { return false }
         return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
             && persistedCredentialLocationMatches(expectedSource, for: targetID)
     }
@@ -274,6 +281,23 @@ final class CodexAccountStore: ObservableObject {
             return false
         }
         return account.homeDirectory == expected
+    }
+
+    func credentialLocationsMatchPersistedState() -> Bool {
+        guard userDefaults.synchronize() else { return false }
+        guard userDefaults.string(forKey: StorageKeys.codexDefaultHomeDirectory) == defaultAccountHomeDirectory else {
+            return false
+        }
+        let persisted: [CodexAccount]
+        if let data = userDefaults.data(forKey: StorageKeys.codexCustomAccounts),
+           let decoded = try? JSONDecoder().decode([CodexAccount].self, from: data) {
+            persisted = decoded.filter { !$0.isDefault }
+        } else {
+            persisted = []
+        }
+        guard Set(persisted.map(\.id)) == Set(customAccounts.map(\.id)) else { return false }
+        let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.homeDirectory) })
+        return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.homeDirectory }
     }
 
     private func load() {

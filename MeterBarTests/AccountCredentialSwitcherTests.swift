@@ -103,6 +103,115 @@ final class AccountCredentialSwitcherTests: XCTestCase {
     }
 
     @MainActor
+    func testIndependentSwitcherCannotDoubleSwapAcrossTransactionLock() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let firstDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { firstDefaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeterBarTransactionLockTests-\(UUID().uuidString)", isDirectory: true)
+        let journalURL = directory.appendingPathComponent("transaction.json")
+        let lockURL = directory.appendingPathComponent("transaction.lock")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let firstAccounts = CodexAccountStore(userDefaults: firstDefaults)
+        firstAccounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let targetID = try XCTUnwrap(firstAccounts.customAccounts.first?.id)
+        let secondDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let secondAccounts = CodexAccountStore(userDefaults: secondDefaults)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(CodexHomeDirectory.authFilePath(), identity: .a)
+        fileOperator.seed("/provider/fallback/auth.json", identity: .b)
+        let first = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: firstDefaults),
+            codexAccounts: firstAccounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: firstDefaults),
+            fileOperator: fileOperator,
+            journal: DurableCredentialExchangeJournal(fileURL: journalURL),
+            transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
+        )
+        let second = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: secondDefaults),
+            codexAccounts: secondAccounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: secondDefaults),
+            fileOperator: fileOperator,
+            journal: DurableCredentialExchangeJournal(fileURL: journalURL),
+            transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
+        )
+        let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+
+        try await first.switchCredentials(for: switchEvent)
+        do {
+            try await second.switchCredentials(for: switchEvent)
+            XCTFail("Expected the independent switcher to contend")
+        } catch {
+            XCTAssertEqual(error as? CredentialExchangeError, .transactionLockContended)
+        }
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
+
+        try first.completeNotification(eventID: switchEvent.id)
+        do {
+            try await second.switchCredentials(for: switchEvent)
+            XCTFail("Expected stale account metadata to fail closed after lock release")
+        } catch {
+            XCTAssertEqual(error as? CredentialExchangeError, .liveAccountUnavailable)
+        }
+        XCTAssertEqual(fileOperator.exchangeCount, 1)
+    }
+
+    @MainActor
+    func testCrashedProcessLockHolderReleasesOwnershipForDurableRecovery() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeterBarCrashedTransactionLockTests-\(UUID().uuidString)", isDirectory: true)
+        let journalURL = directory.appendingPathComponent("transaction.json")
+        let lockURL = directory.appendingPathComponent("transaction.lock")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let accounts = CodexAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", homeDirectory: "/provider/fallback")
+        let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let pendingEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        let record = CredentialFileExchangeRecord(
+            event: pendingEvent,
+            phase: .prepared,
+            sourcePath: CodexHomeDirectory.authFilePath(),
+            targetPath: "/provider/fallback/auth.json",
+            sourceCredentialLocation: nil,
+            targetCredentialLocation: "/provider/fallback",
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+        let journal = DurableCredentialExchangeJournal(fileURL: journalURL)
+        try journal.save(record)
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(record.sourcePath, identity: .b)
+        fileOperator.seed(record.targetPath, identity: .a)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal,
+            transactionLock: CredentialExchangeProcessLock(fileURL: lockURL)
+        )
+        let holder = try SpawnedCredentialExchangeLockHolder(lockURL: lockURL)
+        defer { holder.terminate() }
+
+        do {
+            _ = try await switcher.recoverPendingTransactions()
+            XCTFail("Expected recovery to contend with the independent process")
+        } catch {
+            XCTAssertEqual(error as? CredentialExchangeError, .transactionLockContended)
+        }
+
+        holder.terminate()
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
+        XCTAssertEqual(recoveredEvent, pendingEvent)
+        try switcher.completeNotification(eventID: pendingEvent.id)
+        XCTAssertNil(try journal.load())
+    }
+
+    @MainActor
     func testSwitcherRejectsPreparedJournalWithoutRecoveringOrReplacingIt() async throws {
         let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -130,7 +239,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: journal
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         do {
@@ -163,6 +273,7 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: TestCredentialFileOperator(),
             journal: TestCredentialExchangeJournal(),
+            transactionLock: TestCredentialExchangeProcessLock(),
             keychainItemProbe: { _ in true }
         )
 
@@ -187,7 +298,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: TestCredentialExchangeJournal()
+            journal: TestCredentialExchangeJournal(),
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         XCTAssertEqual(try switcher.liveAccountID(for: .codexCli), CodexAccount.defaultID)
@@ -209,7 +321,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: TestCredentialExchangeJournal()
+            journal: TestCredentialExchangeJournal(),
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let eligibility = switcher.eligibility(for: .codexCli)
@@ -238,7 +351,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: settings,
             fileOperator: fileOperator,
-            journal: TestCredentialExchangeJournal()
+            journal: TestCredentialExchangeJournal(),
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         XCTAssertEqual(accounts.setEnabled(false, for: CodexAccount.defaultID), .updated)
@@ -300,7 +414,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: settings,
             fileOperator: fileOperator,
-            journal: journal
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let switchEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
@@ -365,7 +480,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: settings,
             fileOperator: fileOperator,
-            journal: journal
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let recoveredEvent = try await switcher.recoverPendingTransactions()
@@ -410,7 +526,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: accounts,
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: journal
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let recoveredEvent = try await switcher.recoverPendingTransactions()
@@ -432,6 +549,73 @@ final class AccountCredentialSwitcherTests: XCTestCase {
     @MainActor
     func testFreshStoreRecoveryRepairsCustomSidePersistedBeforeDefaultSide() async throws {
         try await assertFreshStorePartialRecovery(defaultSidePersisted: false)
+    }
+
+    @MainActor
+    func testSameStoreRecoveryRetriesPersistenceAfterInMemorySwapFailedReadback() async throws {
+        let suite = "AccountCredentialSwitcherTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var persistenceAttempts = 0
+        let targetDirectory = "/provider/target"
+        let accounts = CodexAccountStore(
+            userDefaults: defaults,
+            credentialPersistenceBarrier: { persistedDefaults in
+                persistenceAttempts += 1
+                if persistenceAttempts == 1 {
+                    persistedDefaults.removeObject(forKey: StorageKeys.codexCustomAccounts)
+                    _ = persistedDefaults.synchronize()
+                    return false
+                }
+                return persistedDefaults.synchronize()
+            }
+        )
+        accounts.addAccount(name: "Target", homeDirectory: targetDirectory)
+        let targetID = try XCTUnwrap(accounts.customAccounts.first?.id)
+        let pendingEvent = event(provider: .codexCli, from: CodexAccount.defaultID, to: targetID)
+        let record = CredentialFileExchangeRecord(
+            event: pendingEvent,
+            phase: .prepared,
+            sourcePath: CodexHomeDirectory.authFilePath(),
+            targetPath: "\(targetDirectory)/auth.json",
+            sourceCredentialLocation: nil,
+            targetCredentialLocation: targetDirectory,
+            sourceIdentity: .a,
+            targetIdentity: .b
+        )
+        let journal = TestCredentialExchangeJournal()
+        journal.record = record
+        let fileOperator = TestCredentialFileOperator()
+        fileOperator.seed(record.sourcePath, identity: .b)
+        fileOperator.seed(record.targetPath, identity: .a)
+        let switcher = LiveAccountCredentialSwitcher(
+            claudeAccounts: ClaudeCodeAccountStore(userDefaults: defaults),
+            codexAccounts: accounts,
+            failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
+            fileOperator: fileOperator,
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
+        )
+
+        do {
+            _ = try await switcher.recoverPendingTransactions()
+            XCTFail("Expected the first persistence readback to fail")
+        } catch {
+            XCTAssertEqual(error as? CredentialExchangeError, .recoveryRequired)
+        }
+        XCTAssertEqual(persistenceAttempts, 1)
+        XCTAssertEqual(journal.record?.phase, .prepared)
+
+        let recoveredEvent = try await switcher.recoverPendingTransactions()
+        XCTAssertEqual(recoveredEvent, pendingEvent)
+        XCTAssertEqual(persistenceAttempts, 2)
+        XCTAssertEqual(journal.record?.phase, .committed)
+        let reloaded = CodexAccountStore(userDefaults: defaults)
+        XCTAssertEqual(
+            reloaded.accounts.first(where: { $0.id == CodexAccount.defaultID })?.homeDirectory,
+            targetDirectory
+        )
+        XCTAssertNil(reloaded.accounts.first(where: { $0.id == targetID })?.homeDirectory)
     }
 
     func testDurableJournalRoundTripsAcrossFreshInstancesWithoutCredentialPayload() throws {
@@ -492,7 +676,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: CodexAccountStore(userDefaults: defaults),
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: DurableCredentialExchangeJournal(fileURL: fileURL)
+            journal: DurableCredentialExchangeJournal(fileURL: fileURL),
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let recoveredEvent = try await freshSwitcher.recoverPendingTransactions()
@@ -585,7 +770,8 @@ final class AccountCredentialSwitcherTests: XCTestCase {
             codexAccounts: freshStore,
             failoverSettings: AccountFailoverSettingsStore(userDefaults: defaults),
             fileOperator: fileOperator,
-            journal: journal
+            journal: journal,
+            transactionLock: TestCredentialExchangeProcessLock()
         )
 
         let recoveredEvent = try await switcher.recoverPendingTransactions()
@@ -678,6 +864,82 @@ nonisolated private final class TestCredentialExchangeJournal: CredentialExchang
     func clear() throws {
         if let clearError { throw clearError }
         record = nil
+    }
+}
+
+nonisolated private final class TestCredentialExchangeProcessLock: CredentialExchangeProcessLocking {
+    private(set) var isHeld = false
+
+    func acquire() throws -> Bool {
+        let acquiredNow = !isHeld
+        isHeld = true
+        return acquiredNow
+    }
+
+    func release() {
+        isHeld = false
+    }
+}
+
+nonisolated private final class SpawnedCredentialExchangeLockHolder {
+    private let process: Process
+    private var hasTerminated = false
+
+    init(lockURL: URL) throws {
+        try FileManager.default.createDirectory(
+            at: lockURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let process = Process()
+        let output = Pipe()
+        let error = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [
+            "-c",
+            """
+            import fcntl, sys, time
+            with open(sys.argv[1], "a") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                sys.stdout.buffer.write(bytes([1]))
+                sys.stdout.buffer.flush()
+                while True:
+                    time.sleep(60)
+            """,
+            lockURL.path,
+        ]
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        let ready = output.fileHandleForReading.readData(ofLength: 1)
+        guard ready == Data([1]) else {
+            process.waitUntilExit()
+            let stderr = error.fileHandleForReading.readDataToEndOfFile()
+            throw SpawnedCredentialExchangeLockHolderError.failed(
+                status: process.terminationStatus,
+                stderr: String(data: stderr, encoding: .utf8) ?? "unreadable stderr"
+            )
+        }
+        self.process = process
+    }
+
+    func terminate() {
+        guard !hasTerminated else { return }
+        hasTerminated = true
+        if process.isRunning { process.terminate() }
+        process.waitUntilExit()
+    }
+
+    deinit { terminate() }
+}
+
+nonisolated private enum SpawnedCredentialExchangeLockHolderError: LocalizedError {
+    case failed(status: Int32, stderr: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .failed(status, stderr):
+            "spawned credential-lock holder exited with status \(status): \(stderr)"
+        }
     }
 }
 

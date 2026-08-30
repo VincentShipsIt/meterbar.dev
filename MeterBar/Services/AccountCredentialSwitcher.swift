@@ -48,6 +48,8 @@ nonisolated enum CredentialExchangeError: Error, Equatable {
     case nonRegularFile
     case journalWriteFailed
     case journalAlreadyPending
+    case transactionLockContended
+    case transactionLockUnavailable(Int32)
     case atomicExchangeFailed(Int32)
     case duplicateCredentialIdentity
     case liveAccountUnavailable
@@ -100,6 +102,76 @@ nonisolated protocol CredentialExchangeJournaling {
     func load() throws -> CredentialFileExchangeRecord?
     func save(_ record: CredentialFileExchangeRecord) throws
     func clear() throws
+}
+
+/// Cross-process ownership for the WAL, provider-file exchange, recovery, and
+/// notification acknowledgement. `flock` ownership is descriptor-scoped and
+/// the kernel releases it if a process exits or crashes.
+nonisolated protocol CredentialExchangeProcessLocking: AnyObject {
+    /// Returns `true` when this call acquired the descriptor and `false` when
+    /// the same lock object already owns it.
+    func acquire() throws -> Bool
+    func release()
+}
+
+nonisolated final class CredentialExchangeProcessLock: CredentialExchangeProcessLocking, @unchecked Sendable {
+    private let fileURL: URL
+    private let stateLock = NSLock()
+    private var descriptor: Int32 = -1
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? Self.defaultFileURL()
+    }
+
+    func acquire() throws -> Bool {
+        try stateLock.withLock {
+            guard descriptor < 0 else { return false }
+            do {
+                try SecureFileWriter.ensurePrivateDirectory(fileURL.deletingLastPathComponent())
+            } catch {
+                throw CredentialExchangeError.transactionLockUnavailable(Int32((error as NSError).code))
+            }
+            let candidate = open(fileURL.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+            guard candidate >= 0 else {
+                throw CredentialExchangeError.transactionLockUnavailable(errno)
+            }
+            guard fchmod(candidate, 0o600) == 0 else {
+                let code = errno
+                close(candidate)
+                throw CredentialExchangeError.transactionLockUnavailable(code)
+            }
+            guard flock(candidate, LOCK_EX | LOCK_NB) == 0 else {
+                let code = errno
+                close(candidate)
+                if code == EWOULDBLOCK || code == EAGAIN {
+                    throw CredentialExchangeError.transactionLockContended
+                }
+                throw CredentialExchangeError.transactionLockUnavailable(code)
+            }
+            descriptor = candidate
+            return true
+        }
+    }
+
+    func release() {
+        stateLock.withLock {
+            guard descriptor >= 0 else { return }
+            flock(descriptor, LOCK_UN)
+            close(descriptor)
+            descriptor = -1
+        }
+    }
+
+    private static func defaultFileURL() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: "\(ServiceSupport.realHomeDirectory())/Library/Application Support")
+        return support
+            .appendingPathComponent("MeterBar", isDirectory: true)
+            .appendingPathComponent("account-failover", isDirectory: true)
+            .appendingPathComponent("transaction.lock")
+    }
+
+    deinit { release() }
 }
 
 /// Uses Darwin's same-volume `RENAME_SWAP`. The syscall is the only credential
@@ -298,6 +370,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     private let failoverSettings: AccountFailoverSettingsStore
     private let fileOperator: CredentialFileOperating
     private let journal: CredentialExchangeJournaling
+    private let transactionLock: CredentialExchangeProcessLocking
     private let keychainItemProbe: (String) -> Bool
 
     init(
@@ -306,6 +379,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         failoverSettings: AccountFailoverSettingsStore? = nil,
         fileOperator: CredentialFileOperating = DarwinCredentialFileOperator(),
         journal: CredentialExchangeJournaling? = nil,
+        transactionLock: CredentialExchangeProcessLocking? = nil,
         keychainItemProbe: ((String) -> Bool)? = nil
     ) {
         self.claudeAccounts = claudeAccounts ?? .shared
@@ -313,6 +387,7 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         self.failoverSettings = failoverSettings ?? .shared
         self.fileOperator = fileOperator
         self.journal = journal ?? DurableCredentialExchangeJournal()
+        self.transactionLock = transactionLock ?? CredentialExchangeProcessLock()
         self.keychainItemProbe = keychainItemProbe ?? Self.keychainItemMayExist(service:)
     }
 
@@ -349,6 +424,14 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     }
 
     func liveAccountID(for provider: AccountFailoverProvider) throws -> UUID {
+        let mappingIsCurrent: Bool
+        switch provider {
+        case .claudeCode:
+            mappingIsCurrent = claudeAccounts.credentialLocationsMatchPersistedState()
+        case .codexCli:
+            mappingIsCurrent = codexAccounts.credentialLocationsMatchPersistedState()
+        }
+        guard mappingIsCurrent else { throw CredentialExchangeError.liveAccountUnavailable }
         let canonicalPath = canonicalCredentialPath(for: provider)
         let matches = try credentialAccounts(for: provider).filter { $0.path == canonicalPath }
         guard matches.count == 1, let accountID = matches.first?.id else {
@@ -358,6 +441,11 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     }
 
     func recoverPendingTransactions() async throws -> AccountFailoverEvent? {
+        _ = try transactionLock.acquire()
+        var retainOwnership = false
+        defer {
+            if !retainOwnership { transactionLock.release() }
+        }
         guard var record = try journal.load() else { return nil }
         let state = try CredentialFileExchangeTransaction.state(of: record, fileOperator: fileOperator)
         switch (record.phase, state) {
@@ -368,9 +456,11 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
             try commitLogicalMapping(for: record)
             record.phase = .committed
             try journal.save(record)
+            retainOwnership = true
             return record.event
         case (.committed, .swapped):
             try commitLogicalMapping(for: record)
+            retainOwnership = true
             return record.event
         case (_, .inconsistent), (.committed, .original):
             throw CredentialExchangeError.recoveryRequired
@@ -378,6 +468,11 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     }
 
     func switchCredentials(for event: AccountFailoverEvent) async throws {
+        let acquiredNow = try transactionLock.acquire()
+        var retainOwnership = false
+        defer {
+            if acquiredNow, !retainOwnership { transactionLock.release() }
+        }
         guard try journal.load() == nil else { throw CredentialExchangeError.journalAlreadyPending }
         guard try liveAccountID(for: event.provider) == event.fromAccountID else {
             throw CredentialExchangeError.liveAccountUnavailable
@@ -405,15 +500,19 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
         var committed = record
         committed.phase = .committed
         try journal.save(committed)
+        retainOwnership = true
     }
 
     func completeNotification(eventID: UUID) throws {
+        let acquiredNow = try transactionLock.acquire()
         guard let record = try journal.load(),
               record.phase == .committed,
               record.event.id == eventID else {
+            if acquiredNow { transactionLock.release() }
             throw CredentialExchangeError.notificationEventMismatch
         }
         try journal.clear()
+        transactionLock.release()
     }
 
     private func credentialAccounts(for provider: AccountFailoverProvider) throws -> [(id: UUID, path: String)] {
@@ -507,10 +606,6 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
     private func reconcileAccountLocations(for record: CredentialFileExchangeRecord) -> Bool {
         switch record.event.provider {
         case .claudeCode:
-            let source = claudeAccounts.accounts.first(where: { $0.id == record.event.fromAccountID })
-            let target = claudeAccounts.accounts.first(where: { $0.id == record.event.toAccountID })
-            if source?.configDirectory == record.targetCredentialLocation,
-               target?.configDirectory == record.sourceCredentialLocation { return true }
             return claudeAccounts.exchangeCredentialLocations(
                 from: record.event.fromAccountID,
                 to: record.event.toAccountID,
@@ -518,10 +613,6 @@ final class LiveAccountCredentialSwitcher: AccountCredentialSwitching {
                 expectedTarget: record.targetCredentialLocation
             )
         case .codexCli:
-            let source = codexAccounts.accounts.first(where: { $0.id == record.event.fromAccountID })
-            let target = codexAccounts.accounts.first(where: { $0.id == record.event.toAccountID })
-            if source?.homeDirectory == record.targetCredentialLocation,
-               target?.homeDirectory == record.sourceCredentialLocation { return true }
             return codexAccounts.exchangeCredentialLocations(
                 from: record.event.fromAccountID,
                 to: record.event.toAccountID,
