@@ -94,6 +94,17 @@ final class LocalizationResourceContractTests: XCTestCase {
         }
     }
 
+    func testWidgetBlockedCopyIsCarriedByBothCatalogsWithMatchingEnglish() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let widgetStrings = try strings(in: loadCatalog(at: widgetCatalogURL))
+
+        for key in ["widget.blocked.badge", "widget.blocked.accessibility"] {
+            let appValue = try englishValue(for: key, in: appStrings)
+            let widgetValue = try englishValue(for: key, in: widgetStrings)
+            XCTAssertEqual(appValue, widgetValue, "\(key) must read identically in both bundles")
+        }
+    }
+
     /// The Settings preview draws widget quota titles from the app bundle, so
     /// both catalogs have to carry the same `widget.quota.*` keys with the
     /// same English words. Translated only on one side, the preview would
@@ -156,6 +167,23 @@ final class LocalizationResourceContractTests: XCTestCase {
         let appKeys = Set(try strings(in: loadCatalog(at: appCatalogURL)).keys)
         for key in Self.appQuotaTitleCatalogKeys.map(\.catalogKey) {
             XCTAssertTrue(appKeys.contains(key), "\(key) missing from the app catalog")
+        }
+    }
+
+    func testOptimizationCostTierAccessibilityLabelsAreLocalizedInTheAppCatalog() throws {
+        let appStrings = try strings(in: loadCatalog(at: appCatalogURL))
+        let expectedEnglish = [
+            "optimize.cost_tier.high": "High-cost model",
+            "optimize.cost_tier.high_plural": "High-cost models",
+            "optimize.cost_tier.mid": "Mid-cost model",
+            "optimize.cost_tier.mid_plural": "Mid-cost models",
+            "optimize.cost_tier.low": "Low-cost model",
+            "optimize.cost_tier.low_plural": "Low-cost models",
+            "optimize.cost_tier.unknown": "Unknown cost tier",
+        ]
+
+        for (key, expectedValue) in expectedEnglish {
+            XCTAssertEqual(try englishValue(for: key, in: appStrings), expectedValue, key)
         }
     }
 

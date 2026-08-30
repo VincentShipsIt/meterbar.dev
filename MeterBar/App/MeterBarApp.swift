@@ -95,6 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// lifecycle stays here; the presenter never creates or removes one.
     private lazy var statusItemPresenter = StatusItemPresenter(
         isPopoverOpen: { [weak self] in self?.menuPanel?.isShown ?? false },
+        showsStayAwakeIndicator: { PowerAssertionManager.shared.isAssertionHeld },
         applyDescriptors: { [weak self] descriptors in
             self?.applyStatusItemDescriptors(descriptors)
         }
@@ -107,6 +108,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // IOKit assertions are process-owned, but release explicitly so quit is
+        // deterministic and never relies on process teardown for cleanup.
+        PowerAssertionManager.shared.shutdown()
         // A quit that lands mid-refresh must not leave a `grok` agent behind:
         // the subprocess is spawned into its own process group precisely so it
         // can be reaped as a tree from here.
@@ -132,6 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         statusItemIDs = [MenuBarStatusItemPlanner.mergedItemID]
+        observeStayAwakeStatusItem()
 
         menuPanel = MeterBarMenuPanelController(
             statusButtonProvider: { [weak self] in
@@ -159,6 +164,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Bring the Session Wake watcher online: it re-arms if the toggle was
             // left on and starts/stops as the user flips it.
             SessionWakeController.shared.activate()
+            // Reconcile the opt-in Stay Awake assertion against every usage and
+            // provider-visibility update.
+            PowerAssertionManager.shared.activate()
             // Watches the follow-focused-app opt-in; observes NSWorkspace only
             // while that preference is on (issue #341).
             FrontmostAppMonitor.shared.activate()
@@ -461,6 +469,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { _ in
                 Task { @MainActor in
                     await UsageDataManager.shared.refreshAfterWakeIfNeeded()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Re-renders the existing status-item image when the assertion changes so
+    /// the flame indicator is visible even while the popover is closed.
+    private func observeStayAwakeStatusItem() {
+        PowerAssertionManager.shared.$isAssertionHeld
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.statusItemPresenter.apply(candidates: self.statusItemPresenter.latestCandidates)
                 }
             }
             .store(in: &cancellables)

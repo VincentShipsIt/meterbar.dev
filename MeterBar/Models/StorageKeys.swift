@@ -22,6 +22,9 @@ nonisolated enum StorageKeys {
     static let grokProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
+    /// Explicit opt-in for holding a user-idle system-sleep assertion while a
+    /// tracked provider still has session quota. Missing means off.
+    static let stayAwakeEnabled = "StayAwakeEnabled"
     /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
     static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
     /// `MenuBarPresentationMode` raw value: one merged status item or one per provider.

@@ -7,6 +7,7 @@ import AppKit
 /// different template/non-template images and the dot is rendered per menu item.
 enum MenuBarIconRenderer {
     static let iconSize = NSSize(width: 18, height: 18)
+    static let stayAwakeIconSize = NSSize(width: 31, height: 18)
     static let statusDotSize = NSSize(width: 10, height: 10)
 
     /// The three-bar meter shown as the status item's image. Template so macOS
@@ -31,6 +32,20 @@ enum MenuBarIconRenderer {
                 NSColor.black.setFill()
                 path.fill()
             }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// Adds a compact flame to the status item while MeterBar holds a power
+    /// assertion. The combined image remains a template, so it follows native
+    /// menu-bar tinting in light, dark, and high-contrast appearances.
+    static func stayAwakeIndicator(baseImage: NSImage) -> NSImage {
+        let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "Stay Awake active")
+        let image = NSImage(size: stayAwakeIconSize, flipped: false) { _ in
+            baseImage.draw(in: NSRect(x: 0, y: 0, width: iconSize.width, height: iconSize.height))
+            flame?.draw(in: NSRect(x: 20, y: 3.5, width: 11, height: 11))
             return true
         }
         image.isTemplate = true

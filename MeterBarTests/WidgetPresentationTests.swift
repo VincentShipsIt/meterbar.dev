@@ -128,7 +128,7 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(uniqueServices(in: result), [.cursor, .claudeCode])
     }
 
-    func testUrgencyOrderingIgnoresAdditionalLimitsOutsideVisibleWindows() {
+    func testSecondaryAdditionalExhaustionDoesNotOverrideProviderUrgency() {
         var preferences = WidgetPreferences.defaults
         preferences.accountOrdering = .urgency
         preferences.visibleQuotaWindows = [.weekly]
@@ -150,6 +150,7 @@ final class WidgetPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(result.rows.map(\.service), [.claudeCode, .cursor])
+        XCTAssertFalse(result.rows.contains(where: \.isBlocked))
     }
 
     func testUrgencyOrderingUsesWidgetWindowForAdditionalLimitPeriod() {
@@ -312,6 +313,343 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertNotNil(healthy.usageStatus)
         XCTAssertEqual(stale.health, .stale)
         XCTAssertNil(stale.usageStatus)
+    }
+
+    // MARK: - Blocked accounts
+
+    func testHiddenSessionBlockerReplacesWeeklyOnlyRowInEveryFamily() throws {
+        let resetTime = now.addingTimeInterval(27 * 60)
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(
+                .claudeCode,
+                sessionUsed: 100,
+                weeklyUsed: 39,
+                resetTime: resetTime
+            )
+        ]
+
+        for family in WidgetPresentationFamily.allCases {
+            let result = presentation(metrics: metrics, family: family)
+            let row = try XCTUnwrap(result.rows.first, "\(family)")
+
+            XCTAssertEqual(result.rows.count, 1, "\(family)")
+            XCTAssertEqual(result.hiddenRowCount, 0, "\(family)")
+            XCTAssertEqual(row.quotaWindow, .session, "\(family)")
+            XCTAssertEqual(row.limit?.used, 100, "\(family)")
+            XCTAssertTrue(row.isBlocked, "\(family)")
+            XCTAssertEqual(row.summaryText, "OUT", "\(family)")
+            XCTAssertEqual(row.accessibilityValueText, "Session, Quota exhausted", "\(family)")
+            XCTAssertNil(row.resetTime, "the reset preference remains authoritative")
+        }
+    }
+
+    func testVisibleExhaustedWindowUsesExplicitBlockedStateInEveryFamily() throws {
+        let metrics: [ServiceType: UsageMetrics] = [
+            .codexCli: makeMetrics(.codexCli, weeklyUsed: 100)
+        ]
+
+        for family in WidgetPresentationFamily.allCases {
+            let row = try XCTUnwrap(presentation(metrics: metrics, family: family).rows.first)
+
+            XCTAssertEqual(row.quotaWindow, .weekly, "\(family)")
+            XCTAssertTrue(row.isBlocked, "\(family)")
+            XCTAssertEqual(row.summaryText, "OUT", "\(family)")
+            XCTAssertEqual(row.compactSummaryText, "OUT", "\(family)")
+            XCTAssertEqual(row.usageStatus, .critical, "\(family)")
+        }
+    }
+
+    func testBlockedRowKeepsSelectedRowCountAndLeadsTheAccount() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.session, .weekly, .codeReview]
+        let result = presentation(
+            metrics: [
+                .claudeCode: makeMetrics(
+                    .claudeCode,
+                    sessionUsed: 20,
+                    weeklyUsed: 100,
+                    codeReviewUsed: 30
+                )
+            ],
+            preferences: preferences
+        )
+
+        XCTAssertEqual(result.rows.count, 3)
+        XCTAssertEqual(result.hiddenRowCount, 0)
+        XCTAssertEqual(result.rows.map(\.quotaWindow), [.weekly, .session, .codeReview])
+        XCTAssertEqual(result.rows.map(\.isBlocked), [true, false, false])
+    }
+
+    func testBlockedStatePreservesFreshAndStaleHealthMeaning() throws {
+        let fresh = try XCTUnwrap(
+            presentation(
+                metrics: [.claudeCode: makeMetrics(.claudeCode, sessionUsed: 100, weeklyUsed: 39)]
+            ).rows.first
+        )
+        let stale = try XCTUnwrap(
+            presentation(
+                metrics: [
+                    .claudeCode: makeMetrics(
+                        .claudeCode,
+                        sessionUsed: 100,
+                        weeklyUsed: 39,
+                        lastUpdated: now.addingTimeInterval(-24 * 60 * 60)
+                    )
+                ]
+            ).rows.first
+        )
+
+        XCTAssertEqual(fresh.health, .healthy)
+        XCTAssertEqual(fresh.usageStatus, .critical)
+        XCTAssertEqual(fresh.accessibilityValueText, "Session, Quota exhausted")
+        XCTAssertEqual(stale.health, .stale)
+        XCTAssertEqual(stale.usageStatus, .critical)
+        XCTAssertEqual(stale.accessibilityValueText, "Session, Quota exhausted, Stale usage data")
+    }
+
+    func testEstimatedAtLimitWindowDoesNotClaimTheAccountIsBlocked() throws {
+        let result = presentation(
+            metrics: [
+                .claudeCode: UsageMetrics(
+                    service: .claudeCode,
+                    sessionLimit: UsageLimit(
+                        used: 100,
+                        total: 100,
+                        resetTime: now.addingTimeInterval(60 * 60),
+                        isEstimated: true
+                    ),
+                    weeklyLimit: UsageLimit(used: 39, total: 100, resetTime: nil),
+                    lastUpdated: now
+                )
+            ]
+        )
+        let row = try XCTUnwrap(result.rows.first)
+
+        XCTAssertEqual(row.quotaWindow, .weekly)
+        XCTAssertFalse(row.isBlocked)
+        XCTAssertEqual(row.summaryText, "39% used")
+    }
+
+    func testSecondaryExhaustionRemainsVisibleWithoutClaimingProviderIsOut() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
+        let result = presentation(
+            metrics: [
+                .codexCli: UsageMetrics(
+                    service: .codexCli,
+                    sessionLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil),
+                    codeReviewLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                    additionalLimits: [
+                        UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily)
+                    ],
+                    lastUpdated: now
+                )
+            ],
+            preferences: preferences
+        )
+
+        XCTAssertEqual(result.rows.count, 4)
+        XCTAssertTrue(result.rows.filter { $0.limit?.isAtLimit == true }.allSatisfy { !$0.isBlocked })
+        XCTAssertFalse(result.rows.map(\.summaryText).contains("OUT"))
+    }
+
+    func testEnabledExtraUsageKeepsExhaustedPrimaryWindowNonblocking() throws {
+        let metrics = UsageMetrics(
+            service: .codexCli,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+            extraUsage: ExtraUsageStatus(state: .on),
+            lastUpdated: now
+        )
+
+        let row = try XCTUnwrap(presentation(metrics: [.codexCli: metrics]).rows.first)
+
+        XCTAssertEqual(row.quotaWindow, .weekly)
+        XCTAssertFalse(row.isBlocked)
+        XCTAssertNotEqual(row.summaryText, "OUT")
+    }
+
+    func testOneDepletedCursorSpilloverPoolDoesNotBlockEitherPool() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.session, .weekly]
+        let result = presentation(
+            metrics: [.cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 20)],
+            preferences: preferences
+        )
+
+        XCTAssertEqual(result.rows.count, 2)
+        XCTAssertFalse(result.rows.contains(where: \.isBlocked))
+    }
+
+    func testBothDepletedCursorSpilloverPoolsBlockTheProvider() {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.session, .weekly]
+        let result = presentation(
+            metrics: [.cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 100)],
+            preferences: preferences
+        )
+
+        XCTAssertEqual(result.rows.count, 2)
+        XCTAssertTrue(result.rows.allSatisfy(\.isBlocked))
+        XCTAssertTrue(result.rows.allSatisfy { $0.summaryText == "OUT" })
+    }
+
+    func testExhaustedGrokBotPoolIsBlockedSeparatelyFromCursorProvider() throws {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.session, .weekly]
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+            additionalLimits: [
+                UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly)
+            ],
+            lastUpdated: now
+        )
+        let result = presentation(metrics: [.cursor: metrics], preferences: preferences)
+
+        let grokBot = try XCTUnwrap(result.rows.first { $0.quotaTitleKey == .grokBot })
+        XCTAssertTrue(grokBot.isBlocked)
+        XCTAssertEqual(grokBot.summaryText, "OUT")
+        XCTAssertTrue(grokBot.isAdditionalLimit)
+        XCTAssertTrue(result.rows.filter { !$0.isAdditionalLimit }.allSatisfy { !$0.isBlocked })
+    }
+
+    func testProviderBlockerLeadsWhenIndependentPoolHasLaterReset() throws {
+        let sessionReset = now.addingTimeInterval(60 * 60)
+        let weeklyReset = now.addingTimeInterval(2 * 60 * 60)
+        let grokBotReset = now.addingTimeInterval(3 * 60 * 60)
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: sessionReset),
+            weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: weeklyReset),
+            additionalLimits: [
+                UsageLimit(used: 100, total: 100, resetTime: grokBotReset, periodKind: .weekly)
+            ],
+            lastUpdated: now
+        )
+
+        var hiddenPreferences = WidgetPreferences.defaults
+        hiddenPreferences.visibleQuotaWindows = [.session]
+        hiddenPreferences.showsResetTime = true
+        let hidden = presentation(
+            metrics: [.cursor: metrics],
+            preferences: hiddenPreferences,
+            family: .small
+        )
+        let hiddenHeadline = try XCTUnwrap(hidden.rows.first)
+
+        XCTAssertEqual(hidden.rows.count, 1, "the blocker must keep the selected row budget")
+        XCTAssertFalse(hiddenHeadline.isAdditionalLimit)
+        XCTAssertTrue(hiddenHeadline.isBlocked)
+        XCTAssertEqual(hiddenHeadline.quotaTitleKey, .otherModels)
+        XCTAssertEqual(hiddenHeadline.resetTime, weeklyReset)
+
+        var visiblePreferences = hiddenPreferences
+        visiblePreferences.visibleQuotaWindows = [.session, .weekly]
+        let visible = presentation(
+            metrics: [.cursor: metrics],
+            preferences: visiblePreferences,
+            family: .small
+        )
+        let grokBot = try XCTUnwrap(visible.rows.first { $0.quotaTitleKey == .grokBot })
+
+        XCTAssertFalse(visible.rows[0].isAdditionalLimit, "the parent provider outage must lead")
+        XCTAssertEqual(visible.rows[0].quotaTitleKey, .otherModels)
+        XCTAssertTrue(grokBot.isBlocked, "headline precedence must not clear the independent blocked state")
+        XCTAssertEqual(grokBot.resetTime, grokBotReset)
+    }
+
+    func testBlockedResetTimeHonorsRecentDueGraceAndHidesExpiredDates() throws {
+        var preferences = WidgetPreferences.defaults
+        preferences.showsResetTime = true
+        let recentReset = now.addingTimeInterval(-ProviderBlockingPolicy.resetDueGracePeriod + 1)
+        let expiredReset = now.addingTimeInterval(-ProviderBlockingPolicy.resetDueGracePeriod - 1)
+
+        let recent = try XCTUnwrap(
+            presentation(
+                metrics: [
+                    .claudeCode: makeMetrics(
+                        .claudeCode,
+                        sessionUsed: 100,
+                        weeklyUsed: 20,
+                        resetTime: recentReset
+                    )
+                ],
+                preferences: preferences
+            ).rows.first
+        )
+        let expired = try XCTUnwrap(
+            presentation(
+                metrics: [
+                    .claudeCode: makeMetrics(
+                        .claudeCode,
+                        sessionUsed: 100,
+                        weeklyUsed: 20,
+                        resetTime: expiredReset
+                    )
+                ],
+                preferences: preferences
+            ).rows.first
+        )
+
+        XCTAssertTrue(recent.isBlocked)
+        XCTAssertEqual(recent.resetTime, recentReset)
+        XCTAssertTrue(expired.isBlocked)
+        XCTAssertNil(expired.resetTime)
+    }
+
+    func testHiddenAdditionalLimitCanBlockAnAccount() throws {
+        var preferences = WidgetPreferences.defaults
+        preferences.visibleQuotaWindows = [.session]
+        preferences.showsResetTime = true
+        let resetTime = now.addingTimeInterval(3 * 60 * 60)
+        let result = presentation(
+            metrics: [
+                .cursor: UsageMetrics(
+                    service: .cursor,
+                    sessionLimit: UsageLimit(used: 12, total: 100, resetTime: nil),
+                    weeklyLimit: UsageLimit(used: 23, total: 100, resetTime: nil),
+                    additionalLimits: [
+                        UsageLimit(
+                            used: 100,
+                            total: ServiceType.cursorIncludedPoolTotal,
+                            resetTime: resetTime,
+                            periodKind: .weekly
+                        )
+                    ],
+                    lastUpdated: now
+                )
+            ],
+            preferences: preferences
+        )
+        let row = try XCTUnwrap(result.rows.first)
+
+        XCTAssertEqual(result.rows.count, 1)
+        XCTAssertTrue(row.isBlocked)
+        XCTAssertTrue(row.isAdditionalLimit)
+        XCTAssertEqual(row.quotaWindow, .weekly)
+        XCTAssertEqual(row.quotaTitle, "Grok Bot")
+        XCTAssertEqual(row.resetTime, resetTime)
+    }
+
+    func testUrgencyAndOverflowAccountForBlockersHiddenByWindowPreferences() {
+        var preferences = WidgetPreferences.defaults
+        preferences.accountOrdering = .urgency
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: makeMetrics(.claudeCode, sessionUsed: 100, weeklyUsed: 10),
+            .codexCli: makeMetrics(.codexCli, sessionUsed: 100, weeklyUsed: 20),
+            .cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 30),
+            .grok: makeMetrics(.grok, sessionUsed: nil, weeklyUsed: 99)
+        ]
+
+        let result = presentation(metrics: metrics, preferences: preferences, family: .medium)
+
+        XCTAssertEqual(result.rows.count, 2)
+        XCTAssertEqual(result.hiddenRowCount, 2)
+        XCTAssertTrue(result.rows.allSatisfy(\.isBlocked))
+        XCTAssertFalse(result.rows.contains { $0.service == .grok })
     }
 
     func testExplicitMissingSelectionIsUnavailableRatherThanHealthy() throws {

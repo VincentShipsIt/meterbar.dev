@@ -93,11 +93,9 @@ struct ProviderSnapshot: Identifiable {
         return providerLimits.min { $0.percentLeft < $1.percentLeft }
     }
 
-    /// Two or more included Cursor pools (Cursor Models / Other Models). Only the
-    /// percent-of-100 pools spill into each other, so the check is the pool
-    /// denominator, not the window count: a legacy on-demand + monthly pair is
-    /// two blocking windows that do NOT share a budget and keeps the normal
-    /// tightest-window rules, as does a lone monthly bar.
+    /// Two or more included Cursor pools (Cursor Models / Other Models). This
+    /// remains local to primary-limit selection; provider blocking itself uses
+    /// `ProviderBlockingPolicy` below so widgets and app cards cannot drift.
     private var hasCursorSpilloverPools: Bool {
         guard service == .cursor else { return false }
         let providerLimits = limits.filter(\.isProviderBlocking)
@@ -114,20 +112,20 @@ struct ProviderSnapshot: Identifiable {
     /// model/code-review quotas remain visible but must not collapse the entire
     /// provider card or claim the provider is unavailable.
     var blockingLimits: [SnapshotLimit] {
-        guard extraUsage?.state != .on else { return [] }
-        let exhausted = limits.filter {
-            $0.isProviderBlocking
-                && !$0.usageLimit.isEstimated
-                && $0.usageLimit.isAtLimit
+        let candidates = limits.map {
+            ProviderBlockingCandidate(
+                id: $0.id,
+                role: $0.blockingRole,
+                limit: $0.usageLimit
+            )
         }
-        if hasCursorSpilloverPools {
-            // Spillover: emptying Cursor Models still leaves Other Models, and
-            // the reverse. Collapse the card only when every included pool is
-            // gone. A lone legacy monthly bar still blocks on its own.
-            let pools = limits.filter(\.isProviderBlocking)
-            return exhausted.count == pools.count ? exhausted : []
-        }
-        return exhausted
+        let evaluation = ProviderBlockingPolicy.evaluate(
+            service: service,
+            extraUsage: extraUsage,
+            candidates: candidates
+        )
+        let blockerIDs = Set(evaluation.providerBlockers.map(\.id))
+        return limits.filter { blockerIDs.contains($0.id) }
     }
 
     /// Reset windows used by blocking-state UI. Filtering here prevents a
@@ -257,6 +255,17 @@ struct SnapshotLimit: Identifiable {
 
     var isProviderBlocking: Bool {
         kind == .session || kind == .weekly
+    }
+
+    var blockingRole: ProviderBlockingCandidate.Role {
+        switch kind {
+        case .session:
+            return .session
+        case .weekly:
+            return .weekly
+        case .codeReview, .additional:
+            return .secondary
+        }
     }
 
     /// Pace copy differs for rolling session windows vs weekly/billing windows.
