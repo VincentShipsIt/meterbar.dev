@@ -309,13 +309,84 @@ echo "Embedded CLI Session Wake dry-run verified from the signed bundle."
 # notice a bundle dyld will refuse to load. Start the app for real and make it
 # answer before AppKit does. This is what catches a signing option that verifies
 # clean and then fails library validation at map time.
-"$script_dir/verify-app-launch.sh" "$app_path" "$expected_short" "$expected_build"
+#
+# CloudKit entitlements are restricted: macOS kills an ad-hoc process carrying
+# them because no provisioning profile can authorize the entitlement. PR CI has
+# no Apple credentials by design, so launch an otherwise-identical temporary
+# copy whose top-level ad-hoc signature omits only those restricted grants. The
+# real artifact above keeps its complete entitlement signature and parity check;
+# Developer ID releases launch the real, provisioned artifact below.
+launch_app_path="$app_path"
+if [ -z "$signing_identity" ]; then
+  smoke_entitlements="$temporary_directory/app-launch-smoke.entitlements.plist"
+  restricted_entitlement_count=$(python3 - "$app_entitlements" "$smoke_entitlements" <<'PY'
+import plistlib
+import sys
+
+source_path, output_path = sys.argv[1:3]
+with open(source_path, "rb") as source_file:
+    entitlements = plistlib.load(source_file)
+
+restricted_keys = (
+    "com.apple.developer.icloud-container-identifiers",
+    "com.apple.developer.icloud-services",
+)
+expected_restricted = {
+    "com.apple.developer.icloud-container-identifiers": ["iCloud.dev.meterbar.app"],
+    "com.apple.developer.icloud-services": ["CloudKit"],
+}
+actual_restricted = {key: entitlements.get(key) for key in restricted_keys}
+if actual_restricted != expected_restricted:
+    raise SystemExit(
+        "ad-hoc launch filtering requires the exact MeterBar CloudKit grants: "
+        f"expected={expected_restricted!r} actual={actual_restricted!r}"
+    )
+removed = sum(entitlements.pop(key, None) is not None for key in restricted_keys)
+
+with open(output_path, "wb") as output_file:
+    plistlib.dump(entitlements, output_file, fmt=plistlib.FMT_XML, sort_keys=True)
+
+print(removed)
+PY
+  )
+
+  if [ "$restricted_entitlement_count" -gt 0 ]; then
+    launch_app_path="$temporary_directory/MeterBarLaunchSmoke.app"
+    ditto "$app_path" "$launch_app_path"
+    sign_code "$launch_app_path" --entitlements "$smoke_entitlements"
+    codesign --verify --deep --strict --verbose=2 "$launch_app_path"
+
+    actual_smoke_entitlements="$temporary_directory/app-launch-smoke.actual.plist"
+    dump_entitlements \
+      "$launch_app_path" \
+      "$actual_smoke_entitlements" \
+      "$temporary_directory/app-launch-smoke.codesign.err"
+    python3 - "$smoke_entitlements" "$actual_smoke_entitlements" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as expected_file:
+    expected = plistlib.load(expected_file)
+with open(sys.argv[2], "rb") as actual_file:
+    actual = plistlib.load(actual_file)
+if actual != expected:
+    raise SystemExit(
+        "ad-hoc launch-smoke entitlements differ from the restricted-free source: "
+        f"expected={expected!r} actual={actual!r}"
+    )
+PY
+    echo "Ad-hoc launch copy omits only CloudKit's restricted entitlements."
+  fi
+fi
+
+"$script_dir/verify-app-launch.sh" "$launch_app_path" "$expected_short" "$expected_build"
 
 if [ -n "$signing_identity" ]; then
   echo "Developer ID nested signature integrity verified (identity: $signing_identity)."
   echo "Notarization and stapling run as separate release steps."
 else
-  echo "Ad-hoc signing verified: nested signature integrity, entitlement parity, and launch."
+  echo "Ad-hoc signing verified: nested signature integrity and entitlement parity."
+  echo "Launch verified on an otherwise-identical copy without restricted CloudKit grants."
   echo "This is NOT release-grade: ad-hoc bundles carry no Team ID and are signed"
   echo "without hardened runtime, so library validation is not exercised here."
   echo "Developer ID, hardened runtime, notarization, and authorized app-group access"

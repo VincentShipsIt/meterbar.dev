@@ -76,6 +76,12 @@ if ! grep -qF "different Team IDs" "$(log_for dyld-failure)"; then
 fi
 
 expect_rejection silent-failure silent-failure "exited with status 3" "$app"
+expect_rejection immediate-sigkill sigkill "was killed before completing" "$app"
+if grep -qF "did not answer" "$(log_for immediate-sigkill)"; then
+  echo "Launch smoke mislabeled an immediate kernel SIGKILL as a timeout." >&2
+  cat "$(log_for immediate-sigkill)" >&2
+  exit 1
+fi
 expect_rejection malformed malformed "is not one JSON document" "$app"
 expect_rejection unknown-schema unknown-schema "schemaVersion must equal 1" "$app"
 expect_rejection missing-marker not-a-smoke-response "launchSmoke must be true" "$app"

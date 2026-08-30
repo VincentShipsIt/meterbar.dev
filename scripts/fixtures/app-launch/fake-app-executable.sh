@@ -32,6 +32,11 @@ DYLD
   silent-failure)
     exit 3
     ;;
+  sigkill)
+    # Mirrors AMFI killing an ad-hoc process whose restricted entitlement has
+    # no authorizing provisioning profile.
+    kill -9 "$$"
+    ;;
   malformed)
     printf '%s\n' 'debug output that contaminates stdout'
     printf '%s\n' "$ok_document"
