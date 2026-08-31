@@ -593,10 +593,13 @@ final class ICloudUsageAggregationTests: XCTestCase {
     }
 
     func testSchemaContainsOnlyReviewedAggregateFields() throws {
-        let payload = try ICloudUsageRecordSchema.fields(for: rollup(firstDeviceID, input: 42, cost: 1.5))
+        let source = rollup(firstDeviceID, input: 42, cost: 1.5)
+        let payload = try ICloudUsageRecordSchema.fields(for: source)
 
         XCTAssertEqual(Set(payload.keys), ICloudUsageRecordSchema.rollupFieldNames)
         XCTAssertEqual(payload["cacheCreationTokens"] as? Int, 0)
+        let encodedDay = try XCTUnwrap(payload["day"] as? String)
+        XCTAssertEqual(ICloudUsageRecordSchema.date(fromDayString: encodedDay), source.day)
         XCTAssertFalse(payload.keys.contains { key in
             let forbiddenNames = [
                 "rawLog", "credential", "accessToken", "refreshToken", "cookie", "path", "project", "session", "model",
