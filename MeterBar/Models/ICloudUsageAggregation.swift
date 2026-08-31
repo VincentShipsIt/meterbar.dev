@@ -197,7 +197,7 @@ nonisolated enum ICloudUsageRecordSchema {
             "schemaVersion": ICloudDailyUsageRollup.schemaVersion,
             "deviceID": rollup.deviceID.uuidString,
             "provider": rollup.provider.rawValue,
-            "day": rollup.day,
+            "day": dayString(from: rollup.day),
             "inputTokens": max(0, rollup.inputTokens),
             "outputTokens": max(0, rollup.outputTokens),
             "cacheCreationTokens": max(0, rollup.cacheCreationTokens),
@@ -206,6 +206,18 @@ nonisolated enum ICloudUsageRecordSchema {
             "quotaSnapshots": try encoder.encode(rollup.quotaSnapshots),
             "updatedAt": rollup.updatedAt,
         ]
+    }
+
+    static func dayString(from day: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: day)
+    }
+
+    static func date(fromDayString day: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: day)
     }
 }
 

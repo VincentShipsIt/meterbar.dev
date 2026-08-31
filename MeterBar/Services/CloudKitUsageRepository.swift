@@ -32,12 +32,14 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
             apply(try ICloudUsageRecordSchema.fields(for: rollup), to: record)
             return record
         }
-        _ = try await database.modifyRecords(
+        let modificationResults = try await database.modifyRecords(
             saving: [deviceRecord] + rollupRecords,
             deleting: [],
             savePolicy: .changedKeys,
             atomically: true
         )
+        _ = try CloudKitResultCollector.values(from: modificationResults.saveResults)
+        _ = try CloudKitResultCollector.values(from: modificationResults.deleteResults)
 
         return try await fetchSnapshot()
     }
@@ -118,7 +120,8 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
               let deviceID = UUID(uuidString: rawDeviceID),
               let rawProvider = record["provider"] as? String,
               let provider = ServiceType(rawValue: rawProvider),
-              let day = record["day"] as? Date,
+              let rawDay = record["day"] as? String,
+              let day = ICloudUsageRecordSchema.date(fromDayString: rawDay),
               let input = (record["inputTokens"] as? NSNumber)?.intValue,
               let output = (record["outputTokens"] as? NSNumber)?.intValue,
               let cacheRead = (record["cacheReadTokens"] as? NSNumber)?.intValue,
