@@ -17,6 +17,10 @@ struct MenuBarStatusItemDescriptor: Equatable, Identifiable, Sendable {
     /// `previousKey` on the next refresh, so the 5-point hysteresis survives.
     /// Nil for per-provider items, which are nailed to one window already.
     let selectionKey: String?
+    /// Glyph for the button. Derived from the winning window, not just its
+    /// service, so Cursor's Grok Bot pool shows Grok's logo. `nil` before any
+    /// data exists (the placeholder item).
+    let logoKind: ProviderLogoKind?
     /// Menu bar label. Empty renders icon-only, and a non-empty title carries
     /// the leading space that separates it from the icon.
     let title: String
@@ -137,6 +141,7 @@ enum MenuBarStatusItemPlanner {
             id: mergedItemID,
             service: nil,
             selectionKey: nil,
+            logoKind: nil,
             title: content.visible.map { " \($0)" } ?? "",
             tooltip: content.spoken.map { "MeterBar: \($0)" } ?? "MeterBar",
             accessibilityLabel: content.spoken.map { "MeterBar \($0)" } ?? "MeterBar",
@@ -321,6 +326,7 @@ enum MenuBarStatusItemPlanner {
             id: id,
             service: candidate.service,
             selectionKey: selectionKey,
+            logoKind: .forStatusItem(service: candidate.service, windowID: candidate.windowID),
             title: segments.isEmpty ? "" : " " + segments.joined(separator: " "),
             tooltip: "MeterBar: \(suffix)",
             accessibilityLabel: "MeterBar \(suffix)",

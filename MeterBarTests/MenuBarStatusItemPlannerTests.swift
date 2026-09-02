@@ -32,6 +32,31 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         )
     }
 
+    /// The menu-bar glyph follows the winning window, not just its service:
+    /// Cursor's Grok Bot pool must show Grok's logo, everything else keeps the
+    /// provider logo, and the placeholder before first data carries none.
+    func testDescriptorCarriesGrokLogoForCursorGrokBotWindow() {
+        let grokBot = StatusLimitCandidate(
+            key: "cursor:grokBot",
+            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
+            service: .cursor,
+            accountKey: nil,
+            displayName: "Cursor",
+            windowID: "grokBot",
+            windowName: "Grok Bot",
+            limit: UsageLimit(used: 17, total: 100, resetTime: nil),
+            lastActivity: nil,
+            isAutoSelectable: true
+        )
+        let cursorWeekly = candidate(key: "cursor", service: .cursor, percentUsed: 100, windowName: "Weekly")
+
+        let descriptors = plan([cursorWeekly, grokBot])
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["cursor:grokBot"])
+        XCTAssertEqual(descriptors.map(\.logoKind), [.grok])
+        XCTAssertEqual(plan([cursorWeekly]).map(\.logoKind), [.cursor])
+    }
+
     private func plan(
         _ candidates: [StatusLimitCandidate],
         mode: MenuBarPresentationMode = .merged,

@@ -30,6 +30,16 @@ enum ProviderLogoKind: Equatable {
         }
     }
 
+    /// Logo for a status-item window. Follows the service except for Cursor
+    /// Ultra's Grok Bot pool, which is branded as Grok in the popover and must
+    /// match in the menu bar.
+    static func forStatusItem(service: ServiceType, windowID: String?) -> ProviderLogoKind {
+        if service == .cursor, windowID == ProviderSnapshotBuilder.grokBotLimitID {
+            return .grok
+        }
+        return forService(service)
+    }
+
     static func forApiProvider(_ provider: ApiProvider) -> ProviderLogoKind {
         switch provider {
         case .anthropic:
