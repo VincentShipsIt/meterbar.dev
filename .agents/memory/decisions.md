@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-25
+last_verified: 2026-09-02
 status: active
 ---
 
@@ -34,6 +34,16 @@ Live ADRs only.
 ## The Xcode pin lives in one file
 
 **Accepted 2026-08-26.** `.github/actions/select-xcode/action.yml` holds the version; workflows say `uses: ./.github/actions/select-xcode` and never name a toolchain path. Bumping is a one-line edit to that action's `default`, not the five-workflow, six-literal sweep the 26.2 → 26.6 bump required. The action fails loudly when the version is absent from the runner image, and exports `DEVELOPER_DIR` so later steps — including the `swift test` inside `check-coverage.sh` — cannot fall back to the image default. `verify-release-workflow-contract.sh` rejects any workflow that pins Xcode itself, and any job running `xcodebuild` or `check-coverage.sh` that skips the action.
+
+## CloudKit zone change tokens stay in memory
+
+**Accepted 2026-09-02.** `CloudKitUsageRepository.zoneStates` (PR #515) caches each zone's `CKServerChangeToken` *and* the records that token is a delta against, for the life of the process. It is not persisted to `group.dev.meterbar.app`, and one full resync per launch is accepted.
+
+The token alone cannot be persisted. `fetchSnapshot()` rebuilds the whole snapshot from `records(in:)`, so a restored token with no restored records would return an incomplete snapshot — every other Mac's history missing until it happened to change. Persisting means archiving every device's `CKRecord`s, including other Macs' `quotaSnapshots` blobs, into a second on-disk copy of data CloudKit already owns.
+
+The waste it would remove is small. `ICloudUsageAggregationCoordinator` floors syncs at `minimumInterval: 15 * 60`, so a running process syncs up to 96 times a day; relaunches are roughly daily (login, plus Sparkle — 15 releases shipped in August 2026). The in-process cache already turns ~96 full fetches a day into one full fetch and ~95 deltas. Persisting would remove that last one, and it would remove it least often in the case that motivates it: after a long gap between launches, the stored token is the most likely to come back `.changeTokenExpired` and force the full resync anyway.
+
+Against that it buys a new invalidation surface — archive schema drift, a corrupt archive, and an iCloud account switch that reuses the same zone name because `deviceID` is per-install in `UserDefaults.standard`. Revisit only if the zone record count stops being bounded by the 30-day window; see the retention item in [deferred.md](deferred.md).
 
 ## Singletons for services
 
