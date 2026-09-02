@@ -187,44 +187,78 @@ final class AccountFailoverCoordinator {
         switch decision {
         case .stay:
             return
-        case .adopt:
-            return
-        case let .switchAccount(from, to, reason):
-            guard let fromAccount = accounts.first(where: { $0.id == from }),
-                  let toAccount = accounts.first(where: { $0.id == to }) else {
-                return
-            }
-            guard await notifier.prepareForAutomaticSwitch() else { return }
-            let currentAccounts = accountIdentities(for: provider)
-            guard settings.isEnabled(for: provider),
-                  currentAccounts.map(\.id) == orderedIDs,
-                  credentialSwitcher.eligibility(for: provider).isEligible,
-                  (try? credentialSwitcher.liveAccountID(for: provider)) == from else {
-                return
-            }
-            let event = AccountFailoverEvent(
+        case let .adopt(adopted, _):
+            // The live credential belongs to an account that left the enabled
+            // list while its credential file stayed installed. Adopting means
+            // actually exchanging credentials; returning here would strand the
+            // app on the departed account with nothing surfaced.
+            await performSwitch(
                 provider: provider,
-                fromAccountID: from,
-                fromAccountName: fromAccount.name,
-                toAccountID: to,
-                toAccountName: toAccount.name,
-                reason: reason,
-                timestamp: Date()
+                from: activeID,
+                to: adopted,
+                reason: .activeAccountUnavailable,
+                orderedIDs: orderedIDs
             )
-            do {
-                try await credentialSwitcher.switchCredentials(for: event)
-                guard try credentialSwitcher.liveAccountID(for: provider) == to else {
-                    throw CredentialExchangeError.recoveryRequired
-                }
-            } catch {
-                AppLog.storage.error(
-                    "Automatic account switch failed for \(provider.service.rawValue, privacy: .public)."
-                )
-                return
-            }
-            settings.setActiveAccountID(to, for: provider)
-            await deliverAndAcknowledge(event)
+        case let .switchAccount(from, to, reason):
+            await performSwitch(
+                provider: provider,
+                from: from,
+                to: to,
+                reason: reason,
+                orderedIDs: orderedIDs
+            )
         }
+    }
+
+    /// The single credential-exchange path. Every precondition is re-checked
+    /// after the notification-authorization await, and the new active account is
+    /// only recorded once the switcher confirms the live credential moved.
+    ///
+    /// Names resolve against the full account list, not the enabled one: an
+    /// adoption switches away from an account that is by definition no longer
+    /// enabled.
+    private func performSwitch(
+        provider: AccountFailoverProvider,
+        from: UUID,
+        to: UUID,
+        reason: AccountFailoverSwitchReason,
+        orderedIDs: [UUID]
+    ) async {
+        let knownAccounts = allAccountIdentities(for: provider)
+        guard let fromAccount = knownAccounts.first(where: { $0.id == from }),
+              let toAccount = knownAccounts.first(where: { $0.id == to }) else {
+            return
+        }
+        guard await notifier.prepareForAutomaticSwitch() else { return }
+        let currentAccounts = accountIdentities(for: provider)
+        guard settings.isEnabled(for: provider),
+              currentAccounts.map(\.id) == orderedIDs,
+              credentialSwitcher.eligibility(for: provider).isEligible,
+              (try? credentialSwitcher.liveAccountID(for: provider)) == from else {
+            return
+        }
+        let event = AccountFailoverEvent(
+            provider: provider,
+            fromAccountID: from,
+            fromAccountName: fromAccount.name,
+            toAccountID: to,
+            toAccountName: toAccount.name,
+            reason: reason,
+            timestamp: Date()
+        )
+        do {
+            try await credentialSwitcher.switchCredentials(for: event)
+            guard try credentialSwitcher.liveAccountID(for: provider) == to else {
+                throw CredentialExchangeError.recoveryRequired
+            }
+        } catch {
+            AppLog.storage.error(
+                "Automatic account switch failed for \(provider.service.rawValue, privacy: .public)."
+            )
+            return
+        }
+        settings.setActiveAccountID(to, for: provider)
+        await deliverAndAcknowledge(event)
     }
 
     private func accountIdentities(for provider: AccountFailoverProvider) -> [AccountIdentity] {
@@ -233,6 +267,15 @@ final class AccountFailoverCoordinator {
             claudeAccounts.enabledAccounts.map { AccountIdentity(id: $0.id, name: $0.name) }
         case .codexCli:
             codexAccounts.enabledAccounts.map { AccountIdentity(id: $0.id, name: $0.name) }
+        }
+    }
+
+    private func allAccountIdentities(for provider: AccountFailoverProvider) -> [AccountIdentity] {
+        switch provider {
+        case .claudeCode:
+            claudeAccounts.accounts.map { AccountIdentity(id: $0.id, name: $0.name) }
+        case .codexCli:
+            codexAccounts.accounts.map { AccountIdentity(id: $0.id, name: $0.name) }
         }
     }
 
