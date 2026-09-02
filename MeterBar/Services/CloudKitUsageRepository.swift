@@ -54,7 +54,44 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         _ = try CloudKitResultCollector.values(from: modificationResults.saveResults)
         _ = try CloudKitResultCollector.values(from: modificationResults.deleteResults)
 
-        return try await fetchSnapshot()
+        // After `fetchSnapshot`, not before the save: `zoneStates` is empty on a
+        // cold process until the fetch fills it, so pruning here lets the first
+        // sync of a launch prune too. The snapshot needs no re-filtering —
+        // everything dropped is older than `retentionDayCount`, which is already
+        // outside the window `ICloudUsageAggregation.fold` renders.
+        let snapshot = try await fetchSnapshot()
+        await pruneExpiredRollups(in: zone.zoneID, now: Date())
+        return snapshot
+    }
+
+    /// Deletes this Mac's own rollups that have aged out of `retentionDayCount`.
+    ///
+    /// Scoped to our own zone on purpose: every install prunes its own history,
+    /// so a Mac that has been offline for months never has its records deleted
+    /// by a peer that merely holds a newer clock.
+    private func pruneExpiredRollups(in zoneID: CKRecordZone.ID, now: Date) async {
+        guard let cached = zoneStates[zoneID]?.records.keys else { return }
+        let expired = Self.expiredRollupRecordIDs(
+            among: cached,
+            now: now,
+            retentionDayCount: ICloudUsageAggregation.retentionDayCount,
+            calendar: .current
+        )
+        guard !expired.isEmpty else { return }
+
+        // Non-atomic and best effort, unlike the save above: one stubborn record
+        // must not block the rest of the prune, and housekeeping must never fail
+        // the sync the user is waiting on. Only CloudKit-confirmed deletions
+        // leave the cache, so anything that failed is retried next sync.
+        guard let results = try? await privateDatabase().modifyRecords(
+            saving: [],
+            deleting: expired,
+            savePolicy: .changedKeys,
+            atomically: false
+        ) else { return }
+        for (recordID, result) in results.deleteResults where (try? result.get()) != nil {
+            zoneStates[zoneID]?.records[recordID] = nil
+        }
     }
 
     func removeDevice(id: UUID) async throws {
@@ -148,6 +185,66 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         }
         state.changeToken = changeToken
         return state
+    }
+
+    /// Which of `recordIDs` fall outside the retention window ending on the
+    /// local day containing `now`.
+    ///
+    /// Expiry is derived from the record *name* rather than the decoded body so
+    /// that a rollup written by a future schema version — which `decodeRollup`
+    /// returns `nil` for — still ages out instead of accumulating forever.
+    nonisolated static func expiredRollupRecordIDs(
+        among recordIDs: some Sequence<CKRecord.ID>,
+        now: Date,
+        retentionDayCount: Int,
+        calendar: Calendar
+    ) -> [CKRecord.ID] {
+        // A misconfigured window fails closed rather than wiping the zone.
+        guard retentionDayCount > 0,
+              let cutoff = calendar.date(
+                  byAdding: .day,
+                  value: -(retentionDayCount - 1),
+                  to: calendar.startOfDay(for: now)
+              ) else {
+            return []
+        }
+        return recordIDs.filter { recordID in
+            guard let day = rollupDay(fromRecordName: recordID.recordName, calendar: calendar) else {
+                return false
+            }
+            return day < cutoff
+        }
+    }
+
+    /// Inverse of `ICloudDailyUsageRollup.recordName(provider:day:calendar:)`.
+    ///
+    /// Strict on purpose. Deleting from the user's iCloud is irreversible, so
+    /// anything that is not exactly `rollup-<provider>-<yyyy-MM-dd>` returns
+    /// `nil` and is therefore never a deletion candidate — the device record and
+    /// any record type added later stay inert. The provider segment is skipped
+    /// rather than parsed because raw values contain spaces and hyphens.
+    nonisolated static func rollupDay(fromRecordName name: String, calendar: Calendar) -> Date? {
+        let prefix = "rollup-"
+        let dayKeyLength = 10
+        guard name.hasPrefix(prefix) else { return nil }
+        let suffix = name.dropFirst(prefix.count)
+        // Needs at least one provider character plus its separator.
+        guard suffix.count > dayKeyLength + 1,
+              suffix.dropLast(dayKeyLength).last == "-" else {
+            return nil
+        }
+        let parts = suffix.suffix(dayKeyLength)
+            .split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else {
+            return nil
+        }
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        return calendar.date(from: components)
     }
 
     nonisolated static func apply(_ fields: [String: Any], to record: CKRecord) {
