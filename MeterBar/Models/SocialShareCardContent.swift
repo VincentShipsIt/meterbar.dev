@@ -27,6 +27,12 @@ struct SocialShareCardContent: Equatable {
     static let websiteURL = "https://meterbar.dev"
     static let websiteDisplay = "meterbar.dev"
 
+    /// The single copy-pasteable install line. Homebrew auto-taps a fully
+    /// qualified cask name, so the README's separate `brew tap` step is not
+    /// needed here — this one command is enough on a clean Mac, which is the
+    /// whole point of printing it on a card someone sees in a feed.
+    static let installCommand = "brew install --cask VincentShipsIt/tap/meterbar"
+
     /// Days the sparkline covers. The hero number stays a 30-day total — it
     /// comes from `CostSummary`, not from these buckets — but a 30-bar chart at
     /// card width is a texture rather than a trend, so the chart reads the last

@@ -45,6 +45,13 @@ final class SocialShareCardContentTests: XCTestCase {
     func testPublicWebsiteMetadataMatchesReadme() {
         XCTAssertEqual(SocialShareCardContent.websiteURL, "https://meterbar.dev")
         XCTAssertEqual(SocialShareCardContent.websiteDisplay, "meterbar.dev")
+        // The card prints one line someone can paste on a clean Mac. A bare
+        // cask name would need the tap first; the fully qualified name taps
+        // implicitly, so this must stay fully qualified.
+        XCTAssertEqual(
+            SocialShareCardContent.installCommand,
+            "brew install --cask VincentShipsIt/tap/meterbar"
+        )
     }
 
     func testShareCaptionSharesUsageWithoutInstallPitch() {

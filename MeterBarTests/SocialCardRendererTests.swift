@@ -137,6 +137,74 @@ final class SocialCardRendererTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testLimitsImageAndPNGRenderAtExportSize() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let snapshot = ProviderSnapshot(
+            id: "claude",
+            title: "Claude Code",
+            service: .claudeCode,
+            updatedAt: now,
+            limits: [
+                SnapshotLimit(
+                    id: "session",
+                    kind: .session,
+                    title: "Session",
+                    usageLimit: UsageLimit(
+                        used: 81,
+                        total: 100,
+                        resetTime: now.addingTimeInterval(3_600),
+                        windowSeconds: 18_000
+                    )
+                ),
+                SnapshotLimit(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usageLimit: UsageLimit(
+                        used: 47,
+                        total: 100,
+                        resetTime: now.addingTimeInterval(198_000),
+                        windowSeconds: 604_800
+                    )
+                ),
+            ],
+            emptyDetail: "",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+        let content = SocialLimitsCardContent(snapshot: snapshot, now: now, generatedAt: now)
+
+        guard let image = SocialCardRenderer.image(for: content) else {
+            XCTFail("Expected limits-card image")
+            return
+        }
+        XCTAssertEqual(image.size, SocialShareCardLayout.exportSize)
+
+        guard let pngData = SocialCardRenderer.pngData(for: content) else {
+            XCTFail("Expected limits-card PNG data")
+            return
+        }
+        XCTAssertEqual(
+            Array(pngData.prefix(8)),
+            [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        )
+    }
+
+    @MainActor
+    func testEmptyLimitsCardStillRenders() {
+        let content = SocialLimitsCardContent(
+            providerName: "Codex",
+            updatedText: "No data",
+            headline: nil,
+            rows: [],
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
+
+        XCTAssertNotNil(SocialCardRenderer.pngData(for: content))
+    }
+
     private func makeCost(
         provider: ServiceType,
         inputTokens: Int,
