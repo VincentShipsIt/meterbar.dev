@@ -4,7 +4,8 @@ import MeterBarShared
 
 // MARK: - ClaudeCodeAccount
 
-nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable {
+nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable,
+    CredentialLocationAccount {
     static let defaultName = "Default CLI Profile"
 
     /// Fixed sentinel id for the default CLI profile. Built from raw bytes
@@ -42,6 +43,13 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
         id == Self.defaultID
     }
 
+    /// `CredentialLocationAccount` spelling of `configDirectory`, so the shared
+    /// exchange logic works against both providers' location fields.
+    var credentialLocation: String? {
+        get { configDirectory }
+        set { configDirectory = newValue }
+    }
+
     /// Resolves the default Claude CLI profile directory for user-facing paths
     /// and Finder actions without mutating the process environment in tests.
     static func defaultConfigDirectory(
@@ -72,7 +80,7 @@ nonisolated struct ClaudeCodeAccount: Codable, Equatable, Identifiable, Sendable
 
 // MARK: - ClaudeCodeAccountStore
 
-final class ClaudeCodeAccountStore: ObservableObject {
+final class ClaudeCodeAccountStore: ObservableObject, CredentialLocationStoring {
     /// In demo mode the store is projected from the default account only, so
     /// provider cards title generically ("Claude") and never surface the owner's
     /// real custom-account names. The `init(accounts:)` projection reads and
@@ -87,9 +95,9 @@ final class ClaudeCodeAccountStore: ObservableObject {
     @Published private(set) var defaultAccountIsEnabled = true
     @Published private(set) var accountOrder: [UUID] = []
 
-    private let userDefaults: UserDefaults
+    let userDefaults: UserDefaults
     private let refreshConfigurationDirectory: URL?
-    private let credentialPersistenceBarrier: (UserDefaults) -> Bool
+    let credentialPersistenceBarrier: (UserDefaults) -> Bool
     private let storageKey = StorageKeys.claudeCodeCustomAccounts
     private let defaultNameStorageKey = StorageKeys.claudeCodeDefaultAccountName
     private let defaultConfigDirectoryStorageKey = StorageKeys.claudeCodeDefaultConfigDirectory
@@ -248,76 +256,26 @@ final class ClaudeCodeAccountStore: ObservableObject {
         saveAccountOrder()
     }
 
-    /// Keeps logical account identity attached to its credential after the
-    /// provider-native stores exchange payloads. `nil` means the CLI's live
-    /// default location, and is valid for either logical profile after a swap.
-    @discardableResult
-    func exchangeCredentialLocations(
-        from sourceID: UUID,
-        to targetID: UUID,
-        expectedSource: String?,
-        expectedTarget: String?
-    ) -> Bool {
-        guard sourceID != targetID,
-              let source = accounts.first(where: { $0.id == sourceID }),
-              let target = accounts.first(where: { $0.id == targetID }),
-              source.configDirectory == expectedSource || source.configDirectory == expectedTarget,
-              target.configDirectory == expectedTarget || target.configDirectory == expectedSource else {
-            return false
-        }
-        setCredentialLocation(expectedTarget, for: sourceID)
-        setCredentialLocation(expectedSource, for: targetID)
+    // MARK: - CredentialLocationStoring
+
+    static var defaultAccountID: UUID { ClaudeCodeAccount.defaultID }
+
+    var defaultAccountCredentialLocation: String? {
+        get { defaultAccountConfigDirectory }
+        set { defaultAccountConfigDirectory = newValue }
+    }
+
+    var defaultCredentialLocationStorageKey: String { defaultConfigDirectoryStorageKey }
+
+    var customAccountsStorageKey: String { storageKey }
+
+    func replaceCustomAccounts(_ accounts: [ClaudeCodeAccount]) {
+        customAccounts = accounts
+    }
+
+    func saveCredentialLocations() {
         saveDefaultAccountConfigDirectory()
         saveCustomAccounts()
-        guard credentialPersistenceBarrier(userDefaults) else { return false }
-        return persistedCredentialLocationMatches(expectedTarget, for: sourceID)
-            && persistedCredentialLocationMatches(expectedSource, for: targetID)
-    }
-
-    private func setCredentialLocation(_ configDirectory: String?, for id: UUID) {
-        if id == ClaudeCodeAccount.defaultID {
-            defaultAccountConfigDirectory = configDirectory
-            return
-        }
-        guard let index = customAccounts.firstIndex(where: { $0.id == id }) else { return }
-        var updated = customAccounts
-        updated[index].configDirectory = configDirectory
-        customAccounts = updated
-    }
-
-    private func persistedCredentialLocationMatches(_ expected: String?, for id: UUID) -> Bool {
-        if id == ClaudeCodeAccount.defaultID {
-            return userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == expected
-        }
-        guard let data = userDefaults.data(forKey: storageKey),
-              let persisted = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data),
-              let account = persisted.first(where: { $0.id == id }) else {
-            return false
-        }
-        return account.configDirectory == expected
-    }
-
-    func credentialLocationsMatchPersistedState() -> Bool {
-        _ = userDefaults.synchronize()
-        guard userDefaults.string(forKey: defaultConfigDirectoryStorageKey) == defaultAccountConfigDirectory else {
-            return false
-        }
-        let persisted: [ClaudeCodeAccount]
-        if let data = userDefaults.data(forKey: storageKey),
-           let decoded = try? JSONDecoder().decode([ClaudeCodeAccount].self, from: data) {
-            persisted = decoded.filter { !$0.isDefault }
-        } else {
-            persisted = []
-        }
-        let persistedIDs = persisted.map(\.id)
-        let currentIDs = customAccounts.map(\.id)
-        guard Set(persistedIDs).count == persistedIDs.count,
-              Set(currentIDs).count == currentIDs.count,
-              Set(persistedIDs) == Set(currentIDs) else {
-            return false
-        }
-        let persistedLocations = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0.configDirectory) })
-        return customAccounts.allSatisfy { persistedLocations[$0.id] == $0.configDirectory }
     }
 
     private func load() {

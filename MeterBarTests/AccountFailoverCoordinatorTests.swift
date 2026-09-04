@@ -406,6 +406,44 @@ final class AccountFailoverCoordinatorTests: XCTestCase {
         XCTAssertEqual(Set(poster.posts.map(\.identifier)), ["account-failover-\(event.id.uuidString.lowercased())"])
     }
 
+    func testAdoptExchangesCredentialsAwayFromADisabledLiveAccount() async {
+        let accounts = ClaudeCodeAccountStore(userDefaults: defaults)
+        accounts.addAccount(name: "Fallback", configDirectory: "/tmp/claude-fallback")
+        let ordered = accounts.accounts
+        let departed = ordered[0]
+        let adopted = ordered[1]
+        // The live credential file stays installed after its account leaves the
+        // enabled list, which is exactly when the engine returns `.adopt`.
+        accounts.setEnabled(false, for: departed.id)
+        let settings = AccountFailoverSettingsStore(userDefaults: defaults)
+        settings.setEnabled(true, for: .claudeCode)
+        let switcher = CoordinatorCredentialSwitcher(liveAccountID: departed.id)
+        let notifier = CoordinatorFailoverNotifier()
+        let coordinator = AccountFailoverCoordinator(
+            settings: settings,
+            claudeAccounts: accounts,
+            codexAccounts: CodexAccountStore(userDefaults: defaults),
+            credentialSwitcher: switcher,
+            notifier: notifier
+        )
+
+        await coordinator.evaluate(
+            claudeMetrics: [adopted.id: metrics(.claudeCode, used: 12)],
+            codexMetrics: [:],
+            evidence: evidence(claude: [adopted.id])
+        )
+
+        XCTAssertEqual(accounts.enabledAccounts.map(\.id), [adopted.id])
+        XCTAssertEqual(switcher.calls.count, 1)
+        XCTAssertEqual(switcher.calls.first?.fromAccountID, departed.id)
+        XCTAssertEqual(switcher.calls.first?.toAccountID, adopted.id)
+        XCTAssertEqual(notifier.events.map(\.reason), [.activeAccountUnavailable])
+        XCTAssertEqual(
+            settings.activeAccountID(for: .claudeCode, orderedAccountIDs: [adopted.id]),
+            adopted.id
+        )
+    }
+
     private func metrics(_ service: ServiceType, used: Double) -> UsageMetrics {
         UsageMetrics(
             service: service,
