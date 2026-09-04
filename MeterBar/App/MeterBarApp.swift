@@ -236,6 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     id: MenuBarStatusItemPlanner.mergedItemID,
                     service: nil,
                     selectionKey: nil,
+                    logoKind: nil,
                     title: "",
                     tooltip: "MeterBar",
                     accessibilityLabel: "MeterBar",

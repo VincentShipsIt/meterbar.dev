@@ -80,6 +80,62 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(seeds.first(where: \.isAutoSelectable)?.windowName, "Weekly")
     }
 
+    private func cursorMetricsWithGrokBot(weeklyUsed: Double, grokBotUsed: Double) -> UsageMetrics {
+        UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .monthly),
+            weeklyLimit: UsageLimit(used: weeklyUsed, total: 100, resetTime: nil, periodKind: .monthly),
+            additionalLimits: [
+                UsageLimit(used: grokBotUsed, total: 100, resetTime: now.addingTimeInterval(3_600), periodKind: .weekly)
+            ]
+        )
+    }
+
+    /// Cursor Ultra's Grok Bot pool is its own card in the popover, so it must
+    /// also be its own automatic menu-bar candidate instead of hiding as a
+    /// never-selectable "additional" limit behind Cursor's weekly pool.
+    func testCursorGrokBotPoolProducesItsOwnAutomaticCandidate() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: cursorMetricsWithGrokBot(weeklyUsed: 100, grokBotUsed: 17),
+            service: .cursor
+        )
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: .cursor,
+            accountID: nil,
+            autoSelectionKey: "cursor",
+            displayName: "Cursor",
+            limits: limits
+        )
+
+        let auto = seeds.filter(\.isAutoSelectable)
+        XCTAssertEqual(auto.map(\.windowID), ["weekly", "grokBot"])
+        XCTAssertEqual(auto.map(\.key), ["cursor", "cursor:grokBot"])
+        XCTAssertEqual(
+            auto.last?.pinKey,
+            StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot")
+        )
+        XCTAssertEqual(auto.last?.windowName, "Grok Bot")
+    }
+
+    /// With Claude, Codex and Cursor's weekly pool all spent, the Grok Bot pool
+    /// is the only quota left and must win instead of the pool falling back to
+    /// a spent Claude window.
+    func testGrokBotWinsWhenEveryOtherAutomaticCandidateIsSpent() {
+        let claude = candidate(key: "claude:default", percentUsed: 100, activeMinutesAgo: 1)
+        let codex = candidate(key: "codex:default", percentUsed: 100, service: .codexCli)
+        let cursorWeekly = candidate(key: "cursor", percentUsed: 100, windowName: "Weekly", service: .cursor)
+        let grokBot = candidate(
+            key: "cursor:grokBot",
+            percentUsed: 17,
+            displayName: "Cursor",
+            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
+            windowName: "Grok Bot",
+            service: .cursor
+        )
+
+        XCTAssertEqual(select([claude, codex, cursorWeekly, grokBot])?.key, "cursor:grokBot")
+    }
+
     /// When OpenAI temporarily disables the 5-hour window, Codex still reports a
     /// weekly window. Auto must fall back to weekly so the menu bar is not left
     /// without a Codex candidate.
