@@ -35,20 +35,39 @@ nonisolated enum AccountFailoverAvailability: Equatable, Sendable {
             return
         }
         let primaryLimit: UsageLimit?
+        let role: ProviderBlockingCandidate.Role
         switch provider {
         case .claudeCode:
             primaryLimit = metrics.sessionLimit
+            role = .session
         case .codexCli:
             // Codex maps windows by duration. When the API omits its short
             // window, the weekly `primary_window` is the provider's actual
             // primary and must still govern failover.
-            primaryLimit = metrics.sessionLimit ?? metrics.weeklyLimit
+            if let sessionLimit = metrics.sessionLimit {
+                primaryLimit = sessionLimit
+                role = .session
+            } else {
+                primaryLimit = metrics.weeklyLimit
+                role = .weekly
+            }
         }
         guard let primaryLimit, !primaryLimit.isEstimated else {
             self = .unknown
             return
         }
-        self = primaryLimit.isAtLimit ? .depleted : .available
+        // The same policy the popover and menu bar use. Reading `isAtLimit`
+        // directly would let failover swap away from an account every other
+        // surface shows as available, because active overage billing
+        // (`extraUsage == .on`) keeps a maxed window usable.
+        let evaluation = ProviderBlockingPolicy.evaluate(
+            service: provider.service,
+            extraUsage: metrics.extraUsage,
+            candidates: [
+                ProviderBlockingCandidate(id: "primary", role: role, limit: primaryLimit),
+            ]
+        )
+        self = evaluation.providerBlockers.isEmpty ? .available : .depleted
     }
 }
 
@@ -70,6 +89,9 @@ nonisolated enum AccountFailoverStayReason: Equatable, Sendable {
 nonisolated enum AccountFailoverSwitchReason: String, Codable, Equatable, Sendable {
     case activeAccountDepleted
     case preferredAccountRecovered
+    /// The live credential belongs to an account that is no longer enabled, so
+    /// the preferred account is adopted by exchanging credentials.
+    case activeAccountUnavailable
 }
 
 nonisolated enum AccountFailoverAdoptionReason: Equatable, Sendable {
