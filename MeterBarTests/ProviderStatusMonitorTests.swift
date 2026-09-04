@@ -121,7 +121,7 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertEqual(ServiceType.codexCli.statusPageDisplayName, "OpenAI")
         XCTAssertEqual(ServiceType.cursor.statusPageDisplayName, "Cursor")
         XCTAssertEqual(ServiceType.openRouter.statusPageDisplayName, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.statusPageDisplayName, "Grok")
+        XCTAssertEqual(ServiceType.grok.statusPageDisplayName, "SpaceXAI")
 
         XCTAssertEqual(try XCTUnwrap(ServiceType.claudeCode.statusPageURL).absoluteString, "https://status.claude.com/")
         XCTAssertEqual(try XCTUnwrap(ServiceType.codexCli.statusPageURL).absoluteString, "https://status.openai.com/")
@@ -209,5 +209,139 @@ final class ProviderStatusMonitorTests: XCTestCase {
         await monitor.refreshAll(services: [.claudeCode])
         XCTAssertNil(monitor.reports[.claudeCode])
         XCTAssertNotNil(monitor.errors[.claudeCode])
+    }
+
+    // MARK: - SpaceXAI (status.x.ai)
+
+    /// status.x.ai is a custom Next.js page, not Atlassian Statuspage — its
+    /// `api/v2/status.json` is a 404 HTML page. Service state is server-rendered
+    /// as one `<a>` card per service with a coloured chip.
+    private static let spaceXAIHealthyHTML = """
+    <html><body><main class="grow"><h1 class="title">Service Status</h1>
+    <section class="mt-8"><div class="card"><div class="flex flex-col grow">
+    <h3 class="heading-3">No incidents declared</h3>
+    <p class="text-text-secondary">We are not actively mitigating any known incidents at this time.</p>
+    </div></div></section>
+    <section class="space-y-6 mt-10"><h2 class="subtitle">Services</h2><div class="grid">
+    <a class="w-full card" href="/ios-app"><div class="flex"><div class="heading-2">Grok (iOS)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/grok-com"><div class="flex"><div class="heading-2">Grok (Web)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/grok-build"><div class="flex"><div class="heading-2">Grok Build</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/api-us-east-1"><div class="flex">\
+    <div class="heading-2">API (us-east-1.api.x.ai)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    </div></section></main></body></html>
+    """
+
+    private static let spaceXAIIncidentHTML = """
+    <html><body><main class="grow"><h1 class="title">Service Status</h1>
+    <section class="mt-8"><div class="card"><div class="flex flex-col grow">
+    <h3 class="heading-3">Active incidents</h3>
+    <p class="text-text-secondary">We are investigating an issue with our models.</p>
+    </div></div></section>
+    <section class="space-y-6 mt-10"><h2 class="subtitle">Services</h2><div class="grid">
+    <a class="w-full card" href="/grok-com"><div class="flex"><div class="heading-2">Grok (Web)</div></div>\
+    <div class="shrink-0 capitalize bg-status-danger/20 border-status-danger/20 text-text-danger">outage</div></a>
+    <a class="w-full card" href="/grok-build"><div class="flex"><div class="heading-2">Grok Build</div></div>\
+    <div class="shrink-0 capitalize bg-status-caution/20 border-status-caution/20 text-text-caution">degraded</div></a>
+    <a class="w-full card" href="/api-console"><div class="flex"><div class="heading-2">API Console</div></div>\
+    <div class="shrink-0 capitalize bg-status-info/20 border-status-info/20 text-text-info">maintenance</div></a>
+    <a class="w-full card" href="/docs"><div class="flex"><div class="heading-2">Docs</div></div>\
+    <div class="shrink-0 capitalize bg-status-unavailable/20 text-text-unavailable">unavailable</div></a>
+    <a class="w-full card" href="/ios-app"><div class="flex"><div class="heading-2">Grok (iOS)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    </div></section></main></body></html>
+    """
+
+    func testParsesSpaceXAIStatusPageWhenHealthy() throws {
+        let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAIHealthyHTML)
+
+        XCTAssertEqual(parsed.summary.indicator, .none)
+        XCTAssertEqual(parsed.summary.description, "No incidents declared")
+        XCTAssertEqual(
+            parsed.components.map(\.name),
+            ["Grok (iOS)", "Grok (Web)", "Grok Build", "API (us-east-1.api.x.ai)"]
+        )
+        XCTAssertEqual(parsed.components.map(\.id), ["ios-app", "grok-com", "grok-build", "api-us-east-1"])
+        XCTAssertTrue(parsed.components.allSatisfy { $0.indicator == .none })
+        XCTAssertTrue(parsed.components.allSatisfy { $0.statusLabel == "Healthy" })
+        XCTAssertFalse(parsed.components.contains { $0.hasIssue })
+    }
+
+    func testParsesSpaceXAIStatusPageWithIncident() throws {
+        let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAIIncidentHTML)
+
+        // The headline is not "No incidents declared", so the worst chip wins.
+        XCTAssertEqual(parsed.summary.indicator, .critical)
+        XCTAssertEqual(parsed.summary.description, "Active incidents")
+
+        let byID = Dictionary(uniqueKeysWithValues: parsed.components.map { ($0.id, $0) })
+        XCTAssertEqual(byID["grok-com"]?.indicator, .major)
+        XCTAssertEqual(byID["grok-com"]?.statusLabel, "Outage")
+        XCTAssertEqual(byID["grok-build"]?.indicator, .minor)
+        XCTAssertEqual(byID["grok-build"]?.statusLabel, "Degraded")
+        XCTAssertEqual(byID["api-console"]?.indicator, .maintenance)
+        XCTAssertEqual(byID["api-console"]?.statusLabel, "Maintenance")
+        XCTAssertEqual(byID["docs"]?.indicator, .critical)
+        XCTAssertEqual(byID["docs"]?.statusLabel, "Down")
+        XCTAssertEqual(byID["ios-app"]?.indicator, ProviderStatusIndicator.none)
+    }
+
+    func testSpaceXAIStatusPageWithoutServicesIsParsingError() {
+        let blocked = "<html><body>Attention Required!</body></html>"
+        XCTAssertThrowsError(try SpaceXAIStatusPageParser.parse(html: blocked)) { error in
+            guard case ServiceError.parsingError = error else {
+                return XCTFail("Expected parsingError, got \(error)")
+            }
+        }
+    }
+
+    func testGrokReportReadsSpaceXAIStatusPageNotStatuspageJSON() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let client = ProviderStatusClient(session: URLSession(configuration: configuration))
+
+        let requestedPaths = LockedBox<[String]>([])
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            requestedPaths.mutate { $0.append(url.path) }
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            return (response, Data(Self.spaceXAIHealthyHTML.utf8))
+        }
+
+        let report = try await client.fetchReport(for: .grok)
+
+        XCTAssertEqual(requestedPaths.value, ["/"])
+        XCTAssertEqual(report.service, .grok)
+        XCTAssertEqual(report.pageName, "SpaceXAI")
+        XCTAssertEqual(report.pageURL.absoluteString, "https://status.x.ai/")
+        XCTAssertEqual(report.summary.indicator, .none)
+        XCTAssertEqual(report.components.count, 4)
+        XCTAssertFalse(report.hasIssue)
+    }
+
+    private final class LockedBox<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: Value
+
+        init(_ value: Value) {
+            storage = value
+        }
+
+        var value: Value {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+
+        func mutate(_ body: (inout Value) -> Void) {
+            lock.lock()
+            defer { lock.unlock() }
+            body(&storage)
+        }
     }
 }
