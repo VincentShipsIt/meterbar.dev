@@ -161,8 +161,23 @@ nonisolated struct ICloudDailyUsageRollup: Codable, Equatable, Sendable {
     }
 
     var recordName: String {
-        let epochDay = Int(day.timeIntervalSince1970 / 86_400)
-        return "rollup-\(provider.rawValue)-\(epochDay)"
+        Self.recordName(provider: provider, day: day, calendar: .current)
+    }
+
+    /// Keyed by calendar year-month-day rather than `timeIntervalSince1970 / 86_400`.
+    /// `day` is a local `startOfDay` instant, so a fixed-length division collides
+    /// across a DST spring-forward (two local days share one epoch day) and shifts
+    /// every name by a day in east-of-UTC zones. The name becomes a `CKRecord.ID`,
+    /// so a collision silently overwrites a day's usage.
+    static func recordName(provider: ServiceType, day: Date, calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: day)
+        let key = String(
+            format: "%04d-%02d-%02d",
+            parts.year ?? 0,
+            parts.month ?? 0,
+            parts.day ?? 0
+        )
+        return "rollup-\(provider.rawValue)-\(key)"
     }
 }
 
@@ -290,6 +305,12 @@ nonisolated struct ICloudUsageAggregationResult: Sendable {
 nonisolated enum ICloudUsageAggregation {
     static let activeDeviceInterval: TimeInterval = 14 * 24 * 60 * 60
     static let visibleDayCount = 30
+
+    /// How many local days of rollups each install keeps in its own CloudKit
+    /// zone. Deliberately three times `visibleDayCount`: nothing the dashboard
+    /// can render is ever a deletion candidate, so multi-day clock skew between
+    /// Macs — or a later widening of the visible window — cannot destroy data.
+    static let retentionDayCount = 90
 
     private struct RollupKey: Hashable {
         let deviceID: UUID
