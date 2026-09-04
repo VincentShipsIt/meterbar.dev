@@ -8,6 +8,19 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     static let containerIdentifier = "iCloud.dev.meterbar.app"
     static let zonePrefix = "MeterBarUsage-"
 
+    /// Per-zone change token plus the records it is a delta against. Without this
+    /// every 15-minute sync re-downloads every rollup in every device zone.
+    ///
+    /// Deliberately process-scoped: persisting the token would also require
+    /// persisting the decoded records, and one full resync per launch is cheaper
+    /// than that invalidation surface.
+    private var zoneStates: [CKRecordZone.ID: ZoneState] = [:]
+
+    struct ZoneState {
+        var changeToken: CKServerChangeToken?
+        var records: [CKRecord.ID: CKRecord] = [:]
+    }
+
     init() {}
 
     func synchronize(
@@ -22,14 +35,14 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
             recordType: ICloudUsageRecordSchema.deviceRecordType,
             recordID: CKRecord.ID(recordName: "device", zoneID: zone.zoneID)
         )
-        apply(ICloudUsageRecordSchema.fields(for: device), to: deviceRecord)
+        Self.apply(ICloudUsageRecordSchema.fields(for: device), to: deviceRecord)
 
         let rollupRecords = try rollups.map { rollup -> CKRecord in
             let record = CKRecord(
                 recordType: ICloudUsageRecordSchema.rollupRecordType,
                 recordID: CKRecord.ID(recordName: rollup.recordName, zoneID: zone.zoneID)
             )
-            apply(try ICloudUsageRecordSchema.fields(for: rollup), to: record)
+            Self.apply(try ICloudUsageRecordSchema.fields(for: rollup), to: record)
             return record
         }
         let modificationResults = try await database.modifyRecords(
@@ -47,22 +60,29 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     func removeDevice(id: UUID) async throws {
         let database = privateDatabase()
         let zoneID = CKRecordZone.ID(zoneName: zoneName(for: id), ownerName: CKCurrentUserDefaultName)
-        _ = try await database.modifyRecordZones(saving: [], deleting: [zoneID])
+        let zoneResults = try await database.modifyRecordZones(saving: [], deleting: [zoneID])
+        // CloudKit reports per-zone failures inside the result map rather than by
+        // throwing, so an ignored `deleteResults` would let the caller clear local
+        // state for a zone that still exists.
+        _ = try CloudKitResultCollector.values(from: zoneResults.deleteResults)
+        zoneStates[zoneID] = nil
     }
 
     private func fetchSnapshot() async throws -> ICloudUsageRepositorySnapshot {
         let database = privateDatabase()
         let zones = try await database.allRecordZones()
             .filter { $0.zoneID.zoneName.hasPrefix(Self.zonePrefix) }
+        let liveZoneIDs = Set(zones.map(\.zoneID))
+        zoneStates = zoneStates.filter { liveZoneIDs.contains($0.key) }
         var devices: [ICloudUsageDevice] = []
         var rollups: [ICloudDailyUsageRollup] = []
 
         for zone in zones {
             let zoneRecords = try await records(in: zone.zoneID)
             for record in zoneRecords {
-                if let device = decodeDevice(record) {
+                if let device = Self.decodeDevice(record) {
                     devices.append(device)
-                } else if let rollup = decodeRollup(record) {
+                } else if let rollup = Self.decodeRollup(record) {
                     rollups.append(rollup)
                 }
             }
@@ -71,24 +91,66 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     }
 
     private func records(in zoneID: CKRecordZone.ID) async throws -> [CKRecord] {
+        do {
+            return try await fetchChanges(in: zoneID, resuming: zoneStates[zoneID] ?? ZoneState())
+        } catch let error as CKError where error.code == .changeTokenExpired {
+            // The server dropped history behind our token, so the cached records it
+            // was a delta against are no longer trustworthy either. Full resync.
+            zoneStates[zoneID] = nil
+            return try await fetchChanges(in: zoneID, resuming: ZoneState())
+        }
+    }
+
+    /// Applies one delta pass on top of the zone's cached records. State is only
+    /// committed once every page unwraps, so a partial failure leaves the previous
+    /// token in place rather than acknowledging changes that were never decoded.
+    private func fetchChanges(
+        in zoneID: CKRecordZone.ID,
+        resuming state: ZoneState
+    ) async throws -> [CKRecord] {
         let database = privateDatabase()
-        var records: [CKRecord] = []
-        var changeToken: CKServerChangeToken?
+        var state = state
         var moreComing = true
         while moreComing {
             let page = try await database.recordZoneChanges(
                 inZoneWith: zoneID,
-                since: changeToken
+                since: state.changeToken
             )
-            records += try CloudKitResultCollector.values(from: page.modificationResultsByID)
-                .map(\.record)
-            changeToken = page.changeToken
+            state = Self.merging(
+                state,
+                changed: try CloudKitResultCollector.values(from: page.modificationResultsByID)
+                    .map(\.record),
+                deletedIDs: page.deletions.map(\.recordID),
+                changeToken: page.changeToken
+            )
             moreComing = page.moreComing
         }
-        return records
+        zoneStates[zoneID] = state
+        return Array(state.records.values)
     }
 
-    private func apply(_ fields: [String: Any], to record: CKRecord) {
+    /// The pure half of one delta page. Extracted because the page type itself
+    /// cannot be faked — neither `CKDatabase.RecordZoneChange.Modification` nor
+    /// `CKServerChangeToken` has a public initializer — so this is the only
+    /// seam where the delta bookkeeping is directly testable.
+    nonisolated static func merging(
+        _ state: ZoneState,
+        changed: [CKRecord],
+        deletedIDs: [CKRecord.ID],
+        changeToken: CKServerChangeToken?
+    ) -> ZoneState {
+        var state = state
+        for record in changed {
+            state.records[record.recordID] = record
+        }
+        for id in deletedIDs {
+            state.records[id] = nil
+        }
+        state.changeToken = changeToken
+        return state
+    }
+
+    nonisolated static func apply(_ fields: [String: Any], to record: CKRecord) {
         for (key, value) in fields {
             switch value {
             case let value as String: record[key] = value as CKRecordValue
@@ -101,7 +163,7 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         }
     }
 
-    private func decodeDevice(_ record: CKRecord) -> ICloudUsageDevice? {
+    nonisolated static func decodeDevice(_ record: CKRecord) -> ICloudUsageDevice? {
         guard record.recordType == ICloudUsageRecordSchema.deviceRecordType,
               (record["schemaVersion"] as? NSNumber)?.intValue == ICloudUsageDevice.schemaVersion,
               let rawID = record["deviceID"] as? String,
@@ -113,7 +175,7 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         return ICloudUsageDevice(id: id, name: name, lastSeenAt: lastSeenAt)
     }
 
-    private func decodeRollup(_ record: CKRecord) -> ICloudDailyUsageRollup? {
+    nonisolated static func decodeRollup(_ record: CKRecord) -> ICloudDailyUsageRollup? {
         guard record.recordType == ICloudUsageRecordSchema.rollupRecordType,
               (record["schemaVersion"] as? NSNumber)?.intValue == ICloudDailyUsageRollup.schemaVersion,
               let rawDeviceID = record["deviceID"] as? String,
