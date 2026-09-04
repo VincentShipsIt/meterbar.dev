@@ -306,6 +306,12 @@ nonisolated enum ICloudUsageAggregation {
     static let activeDeviceInterval: TimeInterval = 14 * 24 * 60 * 60
     static let visibleDayCount = 30
 
+    /// How many local days of rollups each install keeps in its own CloudKit
+    /// zone. Deliberately three times `visibleDayCount`: nothing the dashboard
+    /// can render is ever a deletion candidate, so multi-day clock skew between
+    /// Macs — or a later widening of the visible window — cannot destroy data.
+    static let retentionDayCount = 90
+
     private struct RollupKey: Hashable {
         let deviceID: UUID
         let provider: ServiceType
