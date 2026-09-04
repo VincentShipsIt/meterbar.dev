@@ -147,7 +147,8 @@ extension ServiceType {
         case .openRouter:
             return "OpenRouter"
         case .grok:
-            return "Grok"
+            // Grok's status page is operated under the SpaceXAI brand.
+            return "SpaceXAI"
         }
     }
 
@@ -288,6 +289,9 @@ struct ProviderStatusClient {
         if service == .openRouter {
             return try await fetchOpenRouterReport()
         }
+        if service == .grok {
+            return try await fetchSpaceXAIReport()
+        }
         guard let baseURL = service.statusPageURL else {
             throw ServiceError.invalidURL
         }
@@ -324,6 +328,29 @@ struct ProviderStatusClient {
                 updatedAt: nil
             ),
             components: [],
+            fetchedAt: Date()
+        )
+    }
+
+    /// status.x.ai is not Statuspage — see `SpaceXAIStatusPageParser`.
+    private func fetchSpaceXAIReport() async throws -> ProviderStatusReport {
+        guard let url = ServiceType.grok.statusPageURL else {
+            throw ServiceError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        let (data, response) = try await fetch(request)
+        try ServiceSupport.validate(response, data: data)
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw ServiceError.parsingError(nil)
+        }
+        let parsed = try SpaceXAIStatusPageParser.parse(html: html)
+        return ProviderStatusReport(
+            service: .grok,
+            pageName: ServiceType.grok.statusPageDisplayName,
+            pageURL: url,
+            summary: parsed.summary,
+            components: parsed.components,
             fetchedAt: Date()
         )
     }
