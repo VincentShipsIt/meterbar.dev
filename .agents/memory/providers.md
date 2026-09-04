@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-17
+last_verified: 2026-09-04
 status: active
 ---
 
@@ -16,6 +16,10 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 | Grok | `.grok` | On by default (opt-out). Official Grok Build CLI ACP stdio maps `_x.ai/billing` for the weekly gauge. Usage-limit resets (display + Redeem) come from unofficial grok.com `ConsumerUiSvc/GetRemainingResets` and `RedeemReset` using the cached OIDC token in `$GROK_HOME/auth.json` — same class as Codex wham. The token is not logged. Exhausted accounts can spend a banked reset after explicit confirmation. |
 | Claude admin | `.claude` | User Anthropic Admin key → `/v1/organizations/usage_report/messages` (50-page cap). |
 | OpenAI admin | `.openai` | User OpenAI Admin key → `/v1/organization/usage/completions` (50-page cap). |
+
+## Status pages
+
+`ProviderStatusMonitor` polls each provider's public status page. Claude, OpenAI and Cursor are Atlassian Statuspage (`api/v2/status.json` + `components.json`). OpenRouter is an HTML "All Systems Operational" check. **Grok is `https://status.x.ai/`, branded "SpaceXAI Status" — a custom Next.js page, not Statuspage.** Its `api/v2/status.json` is a 404 HTML page (verified 2026-09-04). `SpaceXAIStatusPageParser` reads the server-rendered service cards (`heading-2` name + `text-text-success|caution|danger|info|unavailable` chip) and the "No incidents declared" banner. The incident RSS at `feed.xml` (`ttl` 30) lists incidents only, not current service state; live API probe data lives at `data.x.ai/status/<region>.json`. Display name for the Grok status row is "SpaceXAI".
 
 ## Cost scan
 

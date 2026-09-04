@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-16
+last_verified: 2026-09-02
 status: active
 ---
 
@@ -20,4 +20,4 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 ## Done — do not re-open as debt
 
-MeterBarShared extraction. CI test/lint hard gates. View-file split of the old dashboard monolith. Signing/notarization. Aug 8 correctness batch (#374–#386, #422). Localization groundwork (#431). Burn-down widget family (#432). Burn-down widget catalog (#433). Costs dashboard MTD/rollup (#387). CodeRabbit rate-limit reporting (#434).
+MeterBarShared extraction. CI test/lint hard gates. View-file split of the old dashboard monolith. Signing/notarization. Aug 8 correctness batch (#374–#386, #422). Localization groundwork (#431). Burn-down widget family (#432). Burn-down widget catalog (#433). Costs dashboard MTD/rollup (#387). CodeRabbit rate-limit reporting (#434). iCloud rollup retention pruning (#518).
