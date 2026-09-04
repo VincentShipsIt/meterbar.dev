@@ -43,7 +43,7 @@ The token alone cannot be persisted. `fetchSnapshot()` rebuilds the whole snapsh
 
 The waste it would remove is small. `ICloudUsageAggregationCoordinator` floors syncs at `minimumInterval: 15 * 60`, so a running process syncs up to 96 times a day; relaunches are roughly daily (login, plus Sparkle — 15 releases shipped in August 2026). The in-process cache already turns ~96 full fetches a day into one full fetch and ~95 deltas. Persisting would remove that last one, and it would remove it least often in the case that motivates it: after a long gap between launches, the stored token is the most likely to come back `.changeTokenExpired` and force the full resync anyway.
 
-Against that it buys a new invalidation surface — archive schema drift, a corrupt archive, and an iCloud account switch that reuses the same zone name because `deviceID` is per-install in `UserDefaults.standard`. Revisit only if the zone record count stops being bounded by the 30-day window; see the retention item in [deferred.md](deferred.md).
+Against that it buys a new invalidation surface — archive schema drift, a corrupt archive, and an iCloud account switch that reuses the same zone name because `deviceID` is per-install in `UserDefaults.standard`. Revisit if retention pruning (#518) stops bounding a zone: a steady-state zone should hold at most `retentionDayCount` days x provider count records, so more than ~450 records in one zone across five providers means the prune is not running and the full resync is no longer cheap.
 
 ## Singletons for services
 
