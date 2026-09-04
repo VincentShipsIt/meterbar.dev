@@ -139,8 +139,13 @@ struct SocialShareCard: View {
                 .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.25))
                 .padding(.top, 3 * scale)
 
-            SocialShareTierSticker(tier: content.usageTier, scale: scale)
-                .padding(.top, 30 * scale)
+            SocialShareTierSticker(
+                caption: "30-DAY CLASS",
+                title: content.usageTier.title,
+                symbolName: content.usageTier.symbolName,
+                scale: scale
+            )
+            .padding(.top, 30 * scale)
 
             Text("“\(content.usageTier.joke)”")
                 .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
@@ -179,21 +184,25 @@ struct SocialShareCard: View {
     }
 }
 
-private struct SocialShareTierSticker: View {
-    let tier: SocialShareUsageTier
+/// The rotated "class" badge both share cards wear. Shared so the limits card
+/// and the token card cannot drift into two slightly different stickers.
+struct SocialShareTierSticker: View {
+    let caption: String
+    let title: String
+    let symbolName: String
     let scale: CGFloat
 
     var body: some View {
         HStack(spacing: 13 * scale) {
-            Image(systemName: tier.symbolName)
+            Image(systemName: symbolName)
                 .font(.system(size: 24 * scale, weight: .black))
 
             VStack(alignment: .leading, spacing: 1 * scale) {
-                Text("30-DAY CLASS")
+                Text(caption)
                     .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
                     .tracking(0.8 * scale)
                     .opacity(0.62)
-                Text(tier.title)
+                Text(title)
                     .font(.system(size: 21 * scale, weight: .black, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -202,15 +211,18 @@ private struct SocialShareTierSticker: View {
         .foregroundStyle(Color(red: 0.13, green: 0.05, blue: 0.20))
         .padding(.horizontal, 18 * scale)
         .padding(.vertical, 11 * scale)
-        .background(
-            Color(red: 1.0, green: 0.78, blue: 0.25),
-            in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-        )
+        .background {
+            // The hard offset shadow lives on the plate, not the composite:
+            // `ImageRenderer` shadows every child individually, which stamped
+            // a ghost copy of the label behind the text in exported PNGs.
+            RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                .fill(Color(red: 1.0, green: 0.78, blue: 0.25))
+                .shadow(color: .black.opacity(0.22), radius: 0, x: 5 * scale, y: 6 * scale)
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
                 .stroke(Color.black.opacity(0.24), lineWidth: max(1, 2 * scale))
         }
-        .shadow(color: .black.opacity(0.22), radius: 0, x: 5 * scale, y: 6 * scale)
         .rotationEffect(.degrees(-1.3))
     }
 }
@@ -362,7 +374,9 @@ private struct SocialShareTokenChart: View {
     }
 }
 
-private struct SocialShareCardBackground: View {
+/// Shared backdrop for every share card, so the limits card and the token
+/// card read as one family when they sit next to each other in a feed.
+struct SocialShareCardBackground: View {
     let scale: CGFloat
 
     private let sparklePositions: [CGPoint] = [

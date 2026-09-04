@@ -11,7 +11,9 @@ import MeterBarShared
 /// `UsageLimit.resetCountdownText`, `QuotaBand.shortLabel`) rather than
 /// recomputed, so a card someone posts cannot disagree with the app it was
 /// taken from. Copy stays English like the token card: the artwork is a
-/// bitmap for social, not a localized UI surface.
+/// bitmap for social, not a localized UI surface, so rows read
+/// `SnapshotLimit.title` (the routed English words) rather than
+/// `localizedTitle`.
 struct SocialLimitsCardContent: Equatable {
     // MARK: Lifecycle
 
@@ -104,7 +106,7 @@ struct SocialLimitsCardContent: Equatable {
         let usageLimit = limit.usageLimit
         return Row(
             id: limit.id,
-            title: limit.localizedTitle,
+            title: limit.title,
             percentLeft: limit.percentLeft,
             usedFraction: usageLimit.clampedUsed / usageLimit.clampedTotal,
             isEstimated: usageLimit.isEstimated,

@@ -311,7 +311,7 @@ struct UsageDashboardView: View {
         case .share:
             DashboardShareSection(
                 costSummary: visibleCostSummary,
-                providerTitles: providerSnapshots.map(\.title),
+                providerSnapshots: providerSnapshots,
                 viewportWidth: viewportWidth,
                 horizontalInsets: Self.detailHorizontalPadding * 2,
                 generatedAt: $socialCardGeneratedAt,

@@ -26,7 +26,7 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertEqual(row.usedPercentText, "81% used")
         XCTAssertEqual(row.usedFraction, 0.81, accuracy: 0.0001)
         XCTAssertEqual(row.resetText, "1h")
-        XCTAssertEqual(row.percentLeftValueText, "19%")
+        XCTAssertEqual(row.heroValueText, "19%")
         XCTAssertNotNil(row.pace)
     }
 
@@ -51,7 +51,7 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertTrue(row.isEstimated)
         XCTAssertNil(row.pace)
         XCTAssertEqual(row.percentLeftText, "~50% left")
-        XCTAssertEqual(row.percentLeftValueText, "~50%")
+        XCTAssertEqual(row.heroValueText, "~50%")
     }
 
     // MARK: - Snapshot derivation
@@ -125,7 +125,7 @@ final class SocialLimitsCardContentTests: XCTestCase {
         )
 
         XCTAssertEqual(content.rows.count, SocialLimitsCardContent.maxRowCount)
-        XCTAssertEqual(content.rows.map(\.title), ["Pool 5", "Pool 1", "Pool 3", "Pool 4"])
+        XCTAssertEqual(content.rows.map(\.title), ["Pool 1", "Pool 3", "Pool 4", "Pool 5"])
     }
 
     func testSnapshotWithoutLimitsRendersTheHonestEmptyState() {

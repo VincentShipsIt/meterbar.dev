@@ -14,26 +14,31 @@ import UniformTypeIdentifiers
 
 struct DashboardShareSection: View {
     private let costSummary: CostSummary?
-    private let providerTitles: [String]
+    private let providerSnapshots: [ProviderSnapshot]
     private let viewportWidth: CGFloat
     private let horizontalInsets: CGFloat
 
     @Binding private var generatedAt: Date
     @Binding private var shareStatus: String?
 
+    /// Which provider the limits card shows. Page-local on purpose: unlike the
+    /// toast, a picker that snaps back to the first provider on revisit is the
+    /// expected default, not lost state.
+    @State private var limitsProviderID: String?
+
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var costTracker = CostTracker.shared
 
     init(
         costSummary: CostSummary?,
-        providerTitles: [String],
+        providerSnapshots: [ProviderSnapshot],
         viewportWidth: CGFloat,
         horizontalInsets: CGFloat,
         generatedAt: Binding<Date>,
         shareStatus: Binding<String?>
     ) {
         self.costSummary = costSummary
-        self.providerTitles = providerTitles
+        self.providerSnapshots = providerSnapshots
         self.viewportWidth = viewportWidth
         self.horizontalInsets = horizontalInsets
         self._generatedAt = generatedAt
@@ -93,6 +98,19 @@ struct DashboardShareSection: View {
     /// chronologically regardless of which button produced each file.
     static func costJSONFilename(generatedAt: Date) -> String {
         "meterbar-cost-\(SocialShareCardDateFormat.filename(generatedAt)).json"
+    }
+
+    /// The snapshot the limits card renders: the picked one when it still
+    /// exists, else the first provider that has reported anything. `nil` only
+    /// when nothing has metrics, which the card draws as an honest empty state.
+    static func limitsSnapshot(
+        selectedID: String?,
+        in snapshots: [ProviderSnapshot]
+    ) -> ProviderSnapshot? {
+        if let selectedID, let match = snapshots.first(where: { $0.id == selectedID }) {
+            return match
+        }
+        return snapshots.first
     }
 
     var body: some View {
@@ -188,8 +206,150 @@ struct DashboardShareSection: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            DashboardCard(title: "Limits Card", trailing: limitsSnapshot?.updatedText) {
+                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+                    if providerSnapshots.count > 1 {
+                        Picker("Provider", selection: limitsProviderBinding) {
+                            ForEach(providerSnapshots) { snapshot in
+                                Text(snapshot.title).tag(Optional(snapshot.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                    }
+
+                    SocialLimitsCardPreview(content: limitsCardContent, size: previewSize)
+                        .accessibilityLabel("MeterBar quota limits card preview")
+
+                    HStack(spacing: 10) {
+                        Button {
+                            copyLimitsCardImage()
+                        } label: {
+                            Label("Copy PNG", systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(.glassProminent)
+
+                        Button {
+                            saveLimitsCardImage()
+                        } label: {
+                            Label("Save PNG", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            copyLimitsCaption()
+                        } label: {
+                            Label("Copy Caption", systemImage: "text.quote")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        if let shareStatus {
+                            Text(shareStatus)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .transition(.opacity)
+                        }
+                    }
+                }
+            }
+
+            DashboardCard(title: "Limits Caption") {
+                Text(limitsCardContent.shareCaption)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Limits card
+
+    private var limitsSnapshot: ProviderSnapshot? {
+        Self.limitsSnapshot(selectedID: limitsProviderID, in: providerSnapshots)
+    }
+
+    private var limitsProviderBinding: Binding<String?> {
+        Binding(
+            get: { limitsSnapshot?.id },
+            set: { limitsProviderID = $0 }
+        )
+    }
+
+    private var limitsCardContent: SocialLimitsCardContent {
+        makeLimitsCardContent(generatedAt: generatedAt)
+    }
+
+    private func makeLimitsCardContent(generatedAt: Date) -> SocialLimitsCardContent {
+        guard let limitsSnapshot else {
+            return SocialLimitsCardContent(
+                providerName: providerSnapshots.first?.title ?? SocialShareCardContent.appName,
+                updatedText: "No data",
+                headline: nil,
+                rows: [],
+                generatedAt: generatedAt
+            )
+        }
+        return SocialLimitsCardContent(snapshot: limitsSnapshot, now: generatedAt, generatedAt: generatedAt)
+    }
+
+    private func stampedLimitsContent() -> SocialLimitsCardContent {
+        let now = Date()
+        let content = makeLimitsCardContent(generatedAt: now)
+        generatedAt = now
+        return content
+    }
+
+    private func copyLimitsCardImage() {
+        guard let image = SocialCardRenderer.image(for: stampedLimitsContent()) else {
+            setShareStatus("PNG render failed")
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.writeObjects([image]) {
+            setShareStatus("PNG copied")
+        } else {
+            setShareStatus("Copy failed")
+        }
+    }
+
+    private func saveLimitsCardImage() {
+        let content = stampedLimitsContent()
+        guard let pngData = SocialCardRenderer.pngData(for: content) else {
+            setShareStatus("PNG render failed")
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = content.defaultFilename
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                // Same reasoning as the token card: a user-picked share
+                // destination wants normal umask semantics, not the owner-only
+                // default `SecureFileWriter` applies to app state.
+                try pngData.write(to: url, options: .atomic)
+                setShareStatus("PNG saved")
+            } catch {
+                setShareStatus("Save failed")
+            }
+        }
+    }
+
+    private func copyLimitsCaption() {
+        let content = stampedLimitsContent()
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content.shareCaption, forType: .string)
+        setShareStatus("Caption copied")
     }
 
     private var cardContent: SocialShareCardContent {
@@ -199,7 +359,7 @@ struct DashboardShareSection: View {
     private func makeCardContent(generatedAt: Date) -> SocialShareCardContent {
         SocialCardRenderer.content(
             costSummary: costSummary,
-            providerSnapshotTitles: providerTitles,
+            providerSnapshotTitles: providerSnapshots.map(\.title),
             enabledSourceLabels: Self.enabledSourceLabels(for: providerVisibility.enabledServices),
             generatedAt: generatedAt
         )

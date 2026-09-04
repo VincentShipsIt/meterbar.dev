@@ -652,11 +652,44 @@ final class DashboardSectionSplitTests: XCTestCase {
         assertRenders(DashboardDiagnosticsSection(reports: .constant([]), isRunning: .constant(false)))
     }
 
+    /// The limits card follows the picker while the pick still exists and
+    /// falls back to the first reporting provider otherwise — an account that
+    /// was removed must not leave the card stuck on a blank snapshot.
+    func testLimitsSnapshotFollowsSelectionThenFallsBackToFirst() {
+        let snapshots = ["codex", "claude"].map { id in
+            ProviderSnapshot(
+                id: id,
+                title: id,
+                service: .claudeCode,
+                updatedAt: Date(timeIntervalSince1970: 0),
+                limits: [],
+                emptyDetail: "",
+                extraUsage: nil,
+                resetCreditsAvailable: nil,
+                accountID: nil
+            )
+        }
+
+        XCTAssertEqual(
+            DashboardShareSection.limitsSnapshot(selectedID: "claude", in: snapshots)?.id,
+            "claude"
+        )
+        XCTAssertEqual(
+            DashboardShareSection.limitsSnapshot(selectedID: "gone", in: snapshots)?.id,
+            "codex"
+        )
+        XCTAssertEqual(
+            DashboardShareSection.limitsSnapshot(selectedID: nil, in: snapshots)?.id,
+            "codex"
+        )
+        XCTAssertNil(DashboardShareSection.limitsSnapshot(selectedID: nil, in: []))
+    }
+
     func testShareSectionRenders() {
         assertRenders(
             DashboardShareSection(
                 costSummary: nil,
-                providerTitles: ["Codex"],
+                providerSnapshots: [],
                 viewportWidth: 900,
                 horizontalInsets: 48,
                 generatedAt: .constant(Date(timeIntervalSince1970: 1_700_000_000)),
@@ -676,7 +709,7 @@ final class DashboardSectionSplitTests: XCTestCase {
 
         let share = DashboardShareSection(
             costSummary: nil,
-            providerTitles: [],
+            providerSnapshots: [],
             viewportWidth: 900,
             horizontalInsets: 48,
             generatedAt: .constant(Date(timeIntervalSince1970: 1_700_000_000)),
