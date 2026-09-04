@@ -75,30 +75,36 @@ struct SocialLimitsCard: View {
     }
 
     private func header(scale: CGFloat) -> some View {
-        HStack(spacing: 12 * scale) {
+        HStack(spacing: 15 * scale) {
             Image(systemName: "gauge.with.needle.fill")
-                .font(.system(size: 22 * scale, weight: .black))
+                .font(.system(size: 30 * scale, weight: .black))
                 .foregroundStyle(accent)
 
             Text(SocialShareCardContent.appName)
-                .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
+                .font(.system(size: 32 * scale, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
             Text("· \(content.providerName)")
-                .font(.system(size: 21 * scale, weight: .medium, design: .rounded))
+                .font(.system(size: 28 * scale, weight: .medium, design: .rounded))
                 .foregroundStyle(SocialLimitsPalette.secondaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             Spacer(minLength: 12 * scale)
 
+            Text(content.updatedText)
+                .font(.system(size: 20 * scale, weight: .medium, design: .rounded))
+                .foregroundStyle(SocialLimitsPalette.tertiaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
             Text(content.statusLabel.uppercased())
-                .font(.system(size: 14 * scale, weight: .black, design: .monospaced))
+                .font(.system(size: 18 * scale, weight: .black, design: .monospaced))
                 .tracking(1.6 * scale)
                 .foregroundStyle(SocialLimitsPalette.onAccentText)
                 .lineLimit(1)
-                .padding(.horizontal, 16 * scale)
-                .padding(.vertical, 9 * scale)
+                .padding(.horizontal, 19 * scale)
+                .padding(.vertical, 11 * scale)
                 .background(accent, in: Capsule())
         }
     }
@@ -131,24 +137,47 @@ struct SocialLimitsCard: View {
         }
     }
 
+    /// The card's call to action. A copy-pasteable install line converts a
+    /// feed screenshot into an installed app in one hop, which a repo URL
+    /// cannot; the site name stays on the right for anyone who wants to read
+    /// before they run anything.
     private func footer(scale: CGFloat) -> some View {
-        HStack(spacing: 8 * scale) {
-            Text(SocialShareCardContent.websiteDisplay)
-                .font(.system(size: 19 * scale, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+        HStack(alignment: .center, spacing: 20 * scale) {
+            VStack(alignment: .leading, spacing: 9 * scale) {
+                HStack(spacing: 10 * scale) {
+                    Text("$")
+                        .font(.system(size: 21 * scale, weight: .bold, design: .monospaced))
+                        .foregroundStyle(accent)
+                    Text(SocialShareCardContent.installCommand)
+                        .font(.system(size: 21 * scale, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .padding(.horizontal, 20 * scale)
+                .padding(.vertical, 13 * scale)
+                .background(
+                    SocialLimitsPalette.commandPlate,
+                    in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                        .stroke(SocialLimitsPalette.track, lineWidth: max(1, scale))
+                }
 
-            Text("· \(content.updatedText)")
-                .font(.system(size: 17 * scale, weight: .medium, design: .rounded))
-                .foregroundStyle(SocialLimitsPalette.tertiaryText)
-                .lineLimit(1)
+                Text("Read from your own account. Nothing leaves the Mac.")
+                    .font(.system(size: 17 * scale, weight: .medium, design: .rounded))
+                    .foregroundStyle(SocialLimitsPalette.tertiaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
 
             Spacer(minLength: 12 * scale)
 
-            Text("Read from your own account. Nothing leaves the Mac.")
-                .font(.system(size: 17 * scale, weight: .medium, design: .rounded))
-                .foregroundStyle(SocialLimitsPalette.tertiaryText)
+            Text(SocialShareCardContent.websiteDisplay)
+                .font(.system(size: 26 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
         }
     }
 }
@@ -159,6 +188,9 @@ struct SocialLimitsCard: View {
 enum SocialLimitsPalette {
     static let surface = Color(white: 0.05)
     static let track = Color(white: 0.18)
+    /// Ground for the install command, a touch above the card surface so the
+    /// line reads as a terminal snippet rather than as body copy.
+    static let commandPlate = Color(white: 0.10)
     static let secondaryText = Color(white: 0.62)
     static let tertiaryText = Color(white: 0.42)
     /// Ink for text sitting on top of a filled accent, never pure black.
