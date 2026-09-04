@@ -139,13 +139,8 @@ struct SocialShareCard: View {
                 .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.25))
                 .padding(.top, 3 * scale)
 
-            SocialShareTierSticker(
-                caption: "30-DAY CLASS",
-                title: content.usageTier.title,
-                symbolName: content.usageTier.symbolName,
-                scale: scale
-            )
-            .padding(.top, 30 * scale)
+            SocialShareTierSticker(tier: content.usageTier, scale: scale)
+                .padding(.top, 30 * scale)
 
             Text("“\(content.usageTier.joke)”")
                 .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
@@ -184,25 +179,21 @@ struct SocialShareCard: View {
     }
 }
 
-/// The rotated "class" badge both share cards wear. Shared so the limits card
-/// and the token card cannot drift into two slightly different stickers.
-struct SocialShareTierSticker: View {
-    let caption: String
-    let title: String
-    let symbolName: String
+private struct SocialShareTierSticker: View {
+    let tier: SocialShareUsageTier
     let scale: CGFloat
 
     var body: some View {
         HStack(spacing: 13 * scale) {
-            Image(systemName: symbolName)
+            Image(systemName: tier.symbolName)
                 .font(.system(size: 24 * scale, weight: .black))
 
             VStack(alignment: .leading, spacing: 1 * scale) {
-                Text(caption)
+                Text("30-DAY CLASS")
                     .font(.system(size: 10 * scale, weight: .black, design: .monospaced))
                     .tracking(0.8 * scale)
                     .opacity(0.62)
-                Text(title)
+                Text(tier.title)
                     .font(.system(size: 21 * scale, weight: .black, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -374,9 +365,7 @@ private struct SocialShareTokenChart: View {
     }
 }
 
-/// Shared backdrop for every share card, so the limits card and the token
-/// card read as one family when they sit next to each other in a feed.
-struct SocialShareCardBackground: View {
+private struct SocialShareCardBackground: View {
     let scale: CGFloat
 
     private let sparklePositions: [CGPoint] = [
