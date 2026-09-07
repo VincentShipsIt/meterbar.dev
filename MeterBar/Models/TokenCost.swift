@@ -476,13 +476,50 @@ nonisolated public struct CostSummary: Codable, Sendable {
         return copy
     }
 
+    /// How long a scan may go without disk evidence before the "already
+    /// scanned" gate below treats it as possibly stale (issue #517). Applies
+    /// only when `newTranscriptsSinceLastScan` is `nil` — an enabled
+    /// provider's root could not be walked, so time is the only signal left.
+    /// Long enough that a healthy walk (the common case) is what actually
+    /// drives the gate; short enough that a broken root does not pin a frozen
+    /// sparkline for the rest of the day.
+    static let staleWithoutEvidenceInterval: TimeInterval = 15 * 60
+
+    /// Whether a scan from `lastScanDate` still describes the corpus.
+    ///
+    /// Replaces a `startOfDay(lastScanDate) >= startOfDay(now)` comparison:
+    /// "a scan ran today" is not the same claim as "the cache is current," and
+    /// treating it as one froze the daily-usage sparkline for the rest of the
+    /// day after the first scan (issue #517). `newTranscriptsSinceLastScan` is
+    /// the real answer — evidence from walking the enabled providers' roots
+    /// for files modified after `lastScanDate`, computed once by the caller
+    /// (see `CostScanFreshnessProbe`) and threaded through every `needsMissing*`
+    /// check below. `nil` means that walk could not tell (an unreadable root),
+    /// so this falls back to `staleWithoutEvidenceInterval`.
+    private static func isCacheStillCurrent(
+        lastScanDate: Date,
+        newTranscriptsSinceLastScan: Bool?,
+        now: Date
+    ) -> Bool {
+        switch newTranscriptsSinceLastScan {
+        case .some(true):
+            false
+        case .some(false):
+            true
+        case nil:
+            now.timeIntervalSince(lastScanDate) <= staleWithoutEvidenceInterval
+        }
+    }
+
     /// Whether the cached summary is missing daily rows inside the visible window
-    /// and should be quietly backfilled. Returns `false` once a scan has already
-    /// run today (a genuinely zero-usage day shouldn't trigger constant rescans),
-    /// but `true` for legacy caches that have costs/tokens yet no daily rows.
+    /// and should be quietly backfilled. Returns `false` while the cache is still
+    /// current per `isCacheStillCurrent` (a genuinely quiet stretch shouldn't
+    /// trigger constant rescans), but `true` for legacy caches that have
+    /// costs/tokens yet no daily rows.
     func needsMissingDailyUsageRefresh(
         days: Int,
         lastScanDate: Date?,
+        newTranscriptsSinceLastScan: Bool? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Bool {
@@ -497,12 +534,16 @@ nonisolated public struct CostSummary: Codable, Sendable {
             return true
         }
 
-        let today = calendar.startOfDay(for: now)
         if let lastScanDate,
-           calendar.startOfDay(for: lastScanDate) >= today {
+           Self.isCacheStillCurrent(
+               lastScanDate: lastScanDate,
+               newTranscriptsSinceLastScan: newTranscriptsSinceLastScan,
+               now: now
+           ) {
             return false
         }
 
+        let today = calendar.startOfDay(for: now)
         let daysToCheck = max(1, days)
         let startDate = calendar.date(byAdding: .day, value: -(daysToCheck - 1), to: today) ?? today
         let populatedDays = Set(dailyUsage.compactMap { usage -> Date? in
@@ -515,19 +556,23 @@ nonisolated public struct CostSummary: Codable, Sendable {
     }
 
     /// Whether a cache that should cover the seven-day activity window still
-    /// predates hourly rows. A completed scan today is authoritative even when
+    /// predates hourly rows. A still-current cache is authoritative even when
     /// it found no hourly usage, preventing an empty week from rescanning on
     /// every Costs-page appearance.
     func needsMissingHourlyUsageRefresh(
         lastScanDate: Date?,
+        newTranscriptsSinceLastScan: Bool? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Bool {
         guard !costs.isEmpty, totalTokens > 0, periodDays >= 7 else { return false }
 
-        let today = calendar.startOfDay(for: now)
         if let lastScanDate,
-           calendar.startOfDay(for: lastScanDate) >= today {
+           Self.isCacheStillCurrent(
+               lastScanDate: lastScanDate,
+               newTranscriptsSinceLastScan: newTranscriptsSinceLastScan,
+               now: now
+           ) {
             return false
         }
 
@@ -539,11 +584,12 @@ nonisolated public struct CostSummary: Codable, Sendable {
     /// Adding Grok (or any later log scanner) must not wait for the user to
     /// open Costs and hit Scan. A Claude/Codex-only cache can look complete
     /// to `needsMissingDailyUsageRefresh` while the popover sparkline for the
-    /// new provider stays empty. A completed scan today stays authoritative so
+    /// new provider stays empty. A still-current cache stays authoritative so
     /// a provider with genuinely no logs does not rescan on every hover.
     func needsMissingEnabledProviderRefresh(
         enabledServices: Set<ServiceType>,
         lastScanDate: Date?,
+        newTranscriptsSinceLastScan: Bool? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Bool {
@@ -554,9 +600,12 @@ nonisolated public struct CostSummary: Codable, Sendable {
         )
         guard !enabledScanServices.isEmpty else { return false }
 
-        let today = calendar.startOfDay(for: now)
         if let lastScanDate,
-           calendar.startOfDay(for: lastScanDate) >= today {
+           Self.isCacheStillCurrent(
+               lastScanDate: lastScanDate,
+               newTranscriptsSinceLastScan: newTranscriptsSinceLastScan,
+               now: now
+           ) {
             return false
         }
 
