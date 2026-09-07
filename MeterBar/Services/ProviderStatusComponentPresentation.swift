@@ -20,12 +20,13 @@ struct ProviderStatusComponentPresentation: Equatable {
         expanded: Bool = false
     ) -> ProviderStatusComponentPresentation {
         let ordered = prioritized(components)
-        guard !expanded, ordered.count > limit else {
+        let displayLimit = max(0, limit)
+        guard !expanded, ordered.count > displayLimit else {
             return ProviderStatusComponentPresentation(visible: ordered, hiddenCount: 0)
         }
         return ProviderStatusComponentPresentation(
-            visible: Array(ordered.prefix(limit)),
-            hiddenCount: ordered.count - limit
+            visible: Array(ordered.prefix(displayLimit)),
+            hiddenCount: ordered.count - displayLimit
         )
     }
 

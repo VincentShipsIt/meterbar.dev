@@ -80,4 +80,13 @@ final class ProviderStatusComponentPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.visible.map(\.id), ["c1", "c2"])
         XCTAssertEqual(presentation.hiddenCount, 2)
     }
+
+    func testNegativeLimitHidesEverythingInsteadOfTrapping() {
+        let components = (1...4).map { component("c\($0)") }
+
+        let presentation = ProviderStatusComponentPresentation.make(components: components, limit: -1)
+
+        XCTAssertEqual(presentation.visible.count, 0)
+        XCTAssertEqual(presentation.hiddenCount, components.count)
+    }
 }
