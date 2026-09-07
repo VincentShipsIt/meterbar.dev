@@ -43,7 +43,23 @@ struct LimitRow: View {
     /// dashboard must all speak an identical reading. Exposed so tests can assert
     /// the wiring per density without a rendered-view accessibility harness.
     var accessibilityLabelText: String { limit.localizedAccessibilityLabel }
-    var accessibilityValueText: String { limit.localizedAccessibilityValue }
+    var accessibilityValueText: String { accessibilityValueText(now: Date()) }
+
+    /// The footer's reset countdown is the only thing `.compact` shows below
+    /// the bar, so VoiceOver must speak it too instead of a used figure the
+    /// row never draws. `now` is injected so tests can pin the countdown.
+    func accessibilityValueText(now: Date) -> String {
+        let usage = limit.localizedAccessibilityValue
+        guard content.showsFooter(density: density),
+              content.showsReset,
+              let reset = ResetCountdownLabel.counterText(
+                title: nil,
+                limit: limit.usageLimit,
+                format: resetTimeFormat,
+                now: now
+              ) else { return usage }
+        return "\(usage), \(reset)"
+    }
 
     // Every surface that draws a `LimitRow` already sits inside a card, so the
     // row never draws one of its own. The detail panel used to, which is exactly

@@ -142,7 +142,10 @@ final class LimitRowTests: XCTestCase {
     /// the spoken reading. #190 added these strings to the (now-deleted) separate
     /// rows; this guards that the reconciliation kept them on the one component.
     func testExposesCombinedAccessibilityPerDensity() {
-        let limit = quotaLimit(used: 40, resetTime: future)
+        let now = Date()
+        let limit = quotaLimit(used: 40, resetTime: now.addingTimeInterval(3600))
+        let reset = ResetCountdownLabel.counterText(title: nil, limit: limit.usageLimit, now: now)
+        XCTAssertNotNil(reset)
         for density in [LimitRow.Density.compact, .detail, .regular] {
             let row = LimitRow(limit: limit, accentColor: .blue, density: density)
             XCTAssertEqual(
@@ -151,11 +154,27 @@ final class LimitRowTests: XCTestCase {
                 "LimitRow(\(density)) should speak the shared limit label"
             )
             XCTAssertEqual(
-                row.accessibilityValueText,
-                "60% left, 40% used",
-                "LimitRow(\(density)) should speak left+used as one combined value"
+                row.accessibilityValueText(now: now),
+                "60% left, 40% used, \(reset ?? "")",
+                "LimitRow(\(density)) should speak left+used and the reset the footer shows"
             )
         }
+    }
+
+    func testAccessibilityValueOmitsResetWhenTheRowHasNone() {
+        let limit = quotaLimit(used: 40)
+        for density in [LimitRow.Density.compact, .detail, .regular] {
+            let row = LimitRow(limit: limit, accentColor: .blue, density: density)
+            XCTAssertEqual(row.accessibilityValueText, "60% left, 40% used")
+        }
+    }
+
+    func testAccessibilityValueFollowsTheResetTimeFormat() {
+        let now = Date()
+        let limit = quotaLimit(used: 40, resetTime: now.addingTimeInterval(3600))
+        let row = LimitRow(limit: limit, accentColor: .blue, density: .compact, resetTimeFormat: .clock)
+        let clock = ResetCountdownLabel.counterText(title: nil, limit: limit.usageLimit, format: .clock, now: now)
+        XCTAssertEqual(row.accessibilityValueText(now: now), "60% left, 40% used, \(clock ?? "")")
     }
 
     /// Estimated limits append "estimated" to the label and never say a hard
