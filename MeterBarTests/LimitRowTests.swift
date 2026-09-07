@@ -142,7 +142,10 @@ final class LimitRowTests: XCTestCase {
     /// the spoken reading. #190 added these strings to the (now-deleted) separate
     /// rows; this guards that the reconciliation kept them on the one component.
     func testExposesCombinedAccessibilityPerDensity() {
-        let limit = quotaLimit(used: 40, resetTime: future)
+        let now = Date()
+        let limit = quotaLimit(used: 40, resetTime: now.addingTimeInterval(3600))
+        let reset = ResetCountdownLabel.counterText(title: nil, limit: limit.usageLimit, now: now)
+        XCTAssertNotNil(reset)
         for density in [LimitRow.Density.compact, .detail, .regular] {
             let row = LimitRow(limit: limit, accentColor: .blue, density: density)
             XCTAssertEqual(
@@ -151,11 +154,27 @@ final class LimitRowTests: XCTestCase {
                 "LimitRow(\(density)) should speak the shared limit label"
             )
             XCTAssertEqual(
-                row.accessibilityValueText,
-                "60% left, 40% used",
-                "LimitRow(\(density)) should speak left+used as one combined value"
+                row.accessibilityValueText(now: now),
+                "60% left, 40% used, \(reset ?? "")",
+                "LimitRow(\(density)) should speak left+used and the reset the footer shows"
             )
         }
+    }
+
+    func testAccessibilityValueOmitsResetWhenTheRowHasNone() {
+        let limit = quotaLimit(used: 40)
+        for density in [LimitRow.Density.compact, .detail, .regular] {
+            let row = LimitRow(limit: limit, accentColor: .blue, density: density)
+            XCTAssertEqual(row.accessibilityValueText, "60% left, 40% used")
+        }
+    }
+
+    func testAccessibilityValueFollowsTheResetTimeFormat() {
+        let now = Date()
+        let limit = quotaLimit(used: 40, resetTime: now.addingTimeInterval(3600))
+        let row = LimitRow(limit: limit, accentColor: .blue, density: .compact, resetTimeFormat: .clock)
+        let clock = ResetCountdownLabel.counterText(title: nil, limit: limit.usageLimit, format: .clock, now: now)
+        XCTAssertEqual(row.accessibilityValueText(now: now), "60% left, 40% used, \(clock ?? "")")
     }
 
     /// Estimated limits append "estimated" to the label and never say a hard
@@ -183,12 +202,11 @@ final class LimitRowTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
-    /// The popover card now carries one shared reset line below all rows
-    /// (`NextResetCountdownLabel` in `ProviderStatusCard`), so the per-row
-    /// footer must disappear entirely at `.compact` density — not just when
-    /// there's nothing to show. Height must match whether or not the limit
-    /// reports a reset time, since neither case renders a footer any more.
-    func testCompactDensityRendersNoFooterRegardlessOfResetTime() {
+    /// Every quota window resets on its own clock, so the popover row carries
+    /// its own countdown: a compact row with a reset time must be taller than
+    /// the same row without one, since the reset is the only thing in its
+    /// footer.
+    func testCompactDensityGrowsForItsOwnResetCountdown() {
         let withReset = LimitRow(
             limit: quotaLimit(used: 40, resetTime: future),
             accentColor: .blue,
@@ -203,12 +221,49 @@ final class LimitRowTests: XCTestCase {
         let withoutResetHost = NSHostingView(rootView: withoutReset.frame(width: 320))
         withResetHost.layoutSubtreeIfNeeded()
         withoutResetHost.layoutSubtreeIfNeeded()
-        XCTAssertEqual(
+        XCTAssertGreaterThan(
             withResetHost.fittingSize.height,
             withoutResetHost.fittingSize.height,
-            accuracy: 0.5,
-            "compact density must never render a per-row footer, reset time or not"
+            "compact row should grow by one reset line when the limit reports a reset time"
         )
+    }
+
+    /// Used-percent and pace text are what the hover detail panel adds on top
+    /// of the popover row, so only the wider densities render them. The
+    /// compact footer exists purely for the reset countdown.
+    func testOnlyWiderDensitiesShowUsedAndPace() {
+        XCTAssertFalse(LimitRow.Density.compact.showsUsedAndPace)
+        XCTAssertTrue(LimitRow.Density.detail.showsUsedAndPace)
+        XCTAssertTrue(LimitRow.Density.regular.showsUsedAndPace)
+
+        let withReset = LimitRow.RowContent(limit: quotaLimit(used: 40, resetTime: future))
+        let withoutReset = LimitRow.RowContent(limit: quotaLimit(used: 40))
+        XCTAssertTrue(withReset.showsFooter(density: .compact))
+        XCTAssertFalse(withoutReset.showsFooter(density: .compact))
+        XCTAssertTrue(withoutReset.showsFooter(density: .detail))
+        XCTAssertTrue(withoutReset.showsFooter(density: .regular))
+    }
+
+    /// The compacted-out row never grows a footer on any density.
+    func testCompactedOutRowShowsNoFooterOnAnyDensity() {
+        let out = LimitRow.RowContent(limit: quotaLimit(used: 100, resetTime: future))
+        for density in [LimitRow.Density.compact, .detail, .regular] {
+            XCTAssertFalse(out.showsFooter(density: density), "\(density)")
+        }
+    }
+
+    /// The row honours the clock-time preference the same way the blocked-card
+    /// counter does, so the popover and hover can never disagree with Settings.
+    func testCompactRowRendersWithClockFormat() {
+        let row = LimitRow(
+            limit: quotaLimit(used: 40, resetTime: future),
+            accentColor: .blue,
+            density: .compact,
+            resetTimeFormat: .clock
+        )
+        let host = NSHostingView(rootView: row.frame(width: 320))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
     func testCompactOutRowIsShorterThanActiveRow() {
@@ -289,12 +344,9 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
-    /// The popover card carries one shared reset line below all rows now that
-    /// individual `.compact` rows never render a footer (see
-    /// `LimitRowTests.testCompactDensityRendersNoFooterRegardlessOfResetTime`).
-    /// A card whose limits report a reset time must be taller than one whose
-    /// limits don't, since only the former has anything to show on that line.
-    func testCompactCardGrowsForSharedResetLineWhenAResetTimeExists() {
+    /// Each `.compact` row carries its own reset countdown, so a card whose
+    /// limits report a reset time must be taller than one whose limits don't.
+    func testCompactCardGrowsForPerRowResetWhenAResetTimeExists() {
         let withReset = ProviderStatusCard(snapshot: snapshot(exhausted: false), limitDensity: .compact)
         let withoutReset = ProviderStatusCard(
             snapshot: snapshot(exhausted: false, hasResetTime: false),
@@ -307,7 +359,7 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         XCTAssertGreaterThan(
             withResetHost.fittingSize.height,
             withoutResetHost.fittingSize.height,
-            "compact card should grow by one shared reset line when a limit reports a reset time"
+            "compact card should grow by one reset line per limit that reports a reset time"
         )
     }
 

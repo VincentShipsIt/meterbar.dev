@@ -12,11 +12,11 @@ import MeterBarShared
 /// type so it can be unit-tested without hosting the view.
 struct LimitRow: View {
     /// Per-surface sizing only — no surface chrome, since every caller already
-    /// draws the card the row sits in. `.compact` = popover provider card (terse,
-    /// no per-row footer — the card renders one shared reset line below all rows
-    /// instead, via `NextResetCountdownLabel`), `.detail` = menu-bar detail panel
-    /// (same chrome as the card, full footer), `.regular` = dashboard & settings
-    /// (largest type).
+    /// draws the card the row sits in. `.compact` = popover provider card (terse:
+    /// title, percent left, bar, and the row's own reset countdown — no used or
+    /// pace text), `.detail` = menu-bar detail panel (same chrome as the card,
+    /// full footer with used/pace), `.regular` = dashboard & settings (largest
+    /// type).
     enum Density {
         case compact
         case detail
@@ -26,6 +26,11 @@ struct LimitRow: View {
     let limit: SnapshotLimit
     let accentColor: Color
     var density: Density = .regular
+    /// Countdown vs. clock-time rendering for the row's reset label. The caller
+    /// resolves this from `MenuBarDisplayPreferencesStore` and passes it in —
+    /// the same division of responsibility `BlockingLimitResetCounter.format`
+    /// uses — so the row never observes the store itself.
+    var resetTimeFormat: ResetTimeFormat = .countdown
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -38,7 +43,23 @@ struct LimitRow: View {
     /// dashboard must all speak an identical reading. Exposed so tests can assert
     /// the wiring per density without a rendered-view accessibility harness.
     var accessibilityLabelText: String { limit.localizedAccessibilityLabel }
-    var accessibilityValueText: String { limit.localizedAccessibilityValue }
+    var accessibilityValueText: String { accessibilityValueText(now: Date()) }
+
+    /// The footer's reset countdown is the only thing `.compact` shows below
+    /// the bar, so VoiceOver must speak it too instead of a used figure the
+    /// row never draws. `now` is injected so tests can pin the countdown.
+    func accessibilityValueText(now: Date) -> String {
+        let usage = limit.localizedAccessibilityValue
+        guard content.showsFooter(density: density),
+              content.showsReset,
+              let reset = ResetCountdownLabel.counterText(
+                title: nil,
+                limit: limit.usageLimit,
+                format: resetTimeFormat,
+                now: now
+              ) else { return usage }
+        return "\(usage), \(reset)"
+    }
 
     // Every surface that draws a `LimitRow` already sits inside a card, so the
     // row never draws one of its own. The detail panel used to, which is exactly
@@ -54,12 +75,10 @@ struct LimitRow: View {
                     paceContext: limit.paceContext
                 )
             }
-            // Compact never shows a per-row footer — the card draws one shared
-            // reset line below all its rows instead (`ProviderStatusCard`'s
-            // `NextResetCountdownLabel`), so a duplicate title/countdown per
-            // row isn't what distinguishes the popover from the hover detail
-            // panel anymore.
-            if density != .compact && content.showsFooter {
+            // Every quota window resets on its own clock, so each row carries
+            // its own countdown on every surface. Compact keeps only that
+            // countdown; used/pace text is what the hover detail panel adds.
+            if content.showsFooter(density: density) {
                 footer
             }
         }
@@ -115,19 +134,21 @@ struct LimitRow: View {
             .foregroundColor(.secondary)
     }
 
-    /// Reached only by `.detail`/`.regular` — `body` never draws this for
-    /// `.compact` (see the density check around the `footer` call).
+    /// `.detail`/`.regular`: used + pace on the left, reset on the right.
+    /// `.compact`: the reset countdown alone, right-aligned under the bar.
     private var footer: some View {
         HStack(spacing: density.footerSpacing) {
-            Text(content.usedText)
-                .font(density.footerFont)
-                .foregroundColor(.secondary)
-                .numericRefreshTransition(value: content.usedText, reduceMotion: reduceMotion)
-
-            if let pace = content.pace {
-                Text(pace.leftLabel)
+            if density.showsUsedAndPace {
+                Text(content.usedText)
                     .font(density.footerFont)
-                    .foregroundColor(Self.paceLabelColor(pace))
+                    .foregroundColor(.secondary)
+                    .numericRefreshTransition(value: content.usedText, reduceMotion: reduceMotion)
+
+                if let pace = content.pace {
+                    Text(pace.leftLabel)
+                        .font(density.footerFont)
+                        .foregroundColor(Self.paceLabelColor(pace))
+                }
             }
 
             Spacer(minLength: 6)
@@ -138,7 +159,8 @@ struct LimitRow: View {
                     limit: limit.usageLimit,
                     font: density.resetFont,
                     foregroundColor: .secondary,
-                    iconSize: density.resetIconSize
+                    iconSize: density.resetIconSize,
+                    format: resetTimeFormat
                 )
             }
         }
@@ -181,11 +203,16 @@ extension LimitRow {
 
         /// Density-independent: true whenever the row isn't compacted-out, so
         /// `.detail`/`.regular` keep their used/pace footer even without a
-        /// reset timestamp. `.compact` never renders a footer regardless of
-        /// this value — `LimitRow.body` gates the `footer` call to non-compact
-        /// densities, since the popover card shows one shared reset line for
-        /// all its rows instead.
+        /// reset timestamp. See `showsFooter(density:)` for the compact rule.
         var showsFooter: Bool { !compactsWhenOut }
+
+        /// `.compact` carries nothing but the reset countdown in its footer, so
+        /// it only earns the extra line when the limit reports a reset time.
+        /// The wider densities keep used/pace text regardless.
+        func showsFooter(density: LimitRow.Density) -> Bool {
+            guard showsFooter else { return false }
+            return density.showsUsedAndPace || showsReset
+        }
 
         var showsEstimatedTag: Bool { isEstimated }
 
@@ -234,6 +261,18 @@ extension LimitRow {
 }
 
 // MARK: - Density metrics
+
+extension LimitRow.Density {
+    /// Used-percent and pace labels belong to the wider surfaces. The popover
+    /// row keeps only its reset countdown, which is what leaves the hover
+    /// detail panel something meaningful to add.
+    var showsUsedAndPace: Bool {
+        switch self {
+        case .compact: return false
+        case .detail, .regular: return true
+        }
+    }
+}
 
 private extension LimitRow.Density {
     var rowSpacing: CGFloat {

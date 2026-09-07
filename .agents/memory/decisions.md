@@ -1,11 +1,15 @@
 ---
-last_verified: 2026-09-02
+last_verified: 2026-09-07
 status: active
 ---
 
 # Decisions
 
 Live ADRs only.
+
+## Every quota row shows its own reset countdown
+
+**Accepted 2026-09-07.** Reverses the part of PR #502 that collapsed the popover card's `.compact` rows to one shared "next reset" line. Each quota window resets on its own clock, so the popover row shows title, percent left, bar, and that row's own countdown (`LimitRow` footer at `.compact`), and `NextResetCountdownLabel` is gone. What separates the hover detail panel from the popover is what it adds, not the reset: used percent and pace beside each row's countdown (`.detail`), and the seven-day sparkline. Every row honours the countdown/clock preference through `LimitRow.resetTimeFormat`.
 
 ## Agent memory lives in `.agents/memory/`
 
