@@ -38,6 +38,12 @@ struct ProviderSnapshot: Identifiable {
     /// existing memberwise construction (previews, tests, every other
     /// provider's cards) keeps meaning "a real account" without restating it.
     var cardRole: CardRole = .account
+    /// Logo to draw instead of `service`'s own, for sub-pool cards that
+    /// borrow a provider's data but represent a differently branded
+    /// entitlement (Cursor's Grok Bot pool). `nil` means "use the service
+    /// logo". A `var` for the same memberwise-initializer reason as
+    /// `authNotice`.
+    var logoKindOverride: ProviderLogoKind?
 
     /// The two things a `ProviderSnapshot` can represent. See `cardRole`'s
     /// doc comment for why this needs to be modeled explicitly instead of
@@ -60,7 +66,7 @@ struct ProviderSnapshot: Identifiable {
     /// as an enum comparison repeated at every filter.
     var isAccountCard: Bool { cardRole == .account }
 
-    var logoKind: ProviderLogoKind { .forService(service) }
+    var logoKind: ProviderLogoKind { logoKindOverride ?? .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
 
     var displayedExtraUsage: ExtraUsageStatus? {
@@ -794,7 +800,7 @@ enum ProviderSnapshotBuilder {
             // `isProviderBlocking` — the whole point of the split.
             limits: [
                 SnapshotLimit(
-                    id: "grokBot",
+                    id: grokBotLimitID,
                     kind: .weekly,
                     quotaTitleKey: .weekly,
                     usageLimit: grokBotLimit.usageLimit
@@ -805,7 +811,10 @@ enum ProviderSnapshotBuilder {
             resetCreditsAvailable: nil,
             accountID: cursor.accountID,
             authNotice: cursor.authNotice,
-            cardRole: .subPool
+            cardRole: .subPool,
+            // Cursor's accent color, Grok's glyph: otherwise this card and the
+            // Cursor card are identical twins in the popover.
+            logoKindOverride: .grok
         )
         return [cursorWithoutGrokBot, grokBot]
     }
@@ -850,15 +859,23 @@ enum ProviderSnapshotBuilder {
             ))
         }
         for (index, additional) in metrics.additionalLimits.enumerated() {
+            let quotaTitleKey = service.additionalQuotaTitleKey(for: additional)
             result.append(SnapshotLimit(
-                id: "additional-\(index)",
+                // Cursor's Grok Bot pool keeps a stable id so the menu-bar
+                // candidate builder, its pin key, and the split-out card in
+                // `cursorSnapshots` all agree on which window it is.
+                id: quotaTitleKey == .grokBot ? grokBotLimitID : "additional-\(index)",
                 kind: .additional,
-                quotaTitleKey: service.additionalQuotaTitleKey(for: additional),
+                quotaTitleKey: quotaTitleKey,
                 usageLimit: additional
             ))
         }
         return result
     }
+
+    /// Window id of Cursor Ultra's weekly Grok Bot pool, shared by the raw
+    /// limit list, the Grok Bot card's single row, and status-item pin keys.
+    static let grokBotLimitID = "grokBot"
 }
 
 extension Array where Element == ProviderSnapshot {

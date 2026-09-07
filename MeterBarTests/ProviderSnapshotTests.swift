@@ -1013,6 +1013,35 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshots.map(\.title), ["Cursor", "Grok Bot"])
     }
 
+    /// The Grok Bot card borrows Cursor's `service` for data and accent color,
+    /// but the popover should show Grok's own glyph so the two cards are not
+    /// visually identical twins.
+    func testGrokBotSnapshotWearsGrokLogoWhileCursorKeepsItsOwn() {
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+
+        XCTAssertEqual(snapshots.map(\.logoKind), [.cursor, .grok])
+        XCTAssertEqual(snapshots.map(\.service), [.cursor, .cursor])
+    }
+
+    /// The raw limit list feeds the menu-bar candidate builder, so the Grok
+    /// Bot pool must carry the same stable id there as the popover's pin option.
+    func testCursorGrokBotLimitUsesStableIDInRawLimits() {
+        let limits = ProviderSnapshotBuilder.limits(for: makeCursorMetricsWithGrokBot(), service: .cursor)
+
+        XCTAssertEqual(limits.map(\.id), ["session", "weekly", "grokBot"])
+        XCTAssertEqual(limits.last?.quotaTitleKey, .grokBot)
+
+        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
+            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
+            enabledServices: [.cursor]
+        ))
+        let pinIDs = snapshots.statusItemPinOptions.map(\.id)
+        XCTAssertTrue(pinIDs.contains(StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot")))
+    }
+
     func testCursorSnapshotStaysSingularWhenNoGrokBotPoolIsReported() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],

@@ -93,6 +93,7 @@ private struct ProviderStatusDisclosureRow: View {
     let toggle: () -> Void
     let openStatusPage: () -> Void
 
+    @State private var showsAllComponents = false
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
@@ -176,11 +177,10 @@ private struct ProviderStatusDisclosureRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(report.components) { component in
-                        ProviderStatusComponentRows(component: component)
-                    }
-                }
+                ProviderStatusComponentList(
+                    components: report.components,
+                    showsAll: $showsAllComponents
+                )
             }
         } else {
             Text("Fetching provider status.")
@@ -208,6 +208,51 @@ private struct ProviderStatusDisclosureRow: View {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Component rows capped at `ProviderStatusComponentPresentation.defaultLimit`
+/// with a "+N more" / "Show less" toggle, shared by the dashboard table and
+/// the popover status card. Issues sort first so the cap never hides them.
+private struct ProviderStatusComponentList: View {
+    let components: [ProviderStatusComponent]
+    @Binding var showsAll: Bool
+    var compact = false
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
+    private var presentation: ProviderStatusComponentPresentation {
+        .make(components: components, expanded: showsAll)
+    }
+
+    private var canCollapse: Bool {
+        components.count > ProviderStatusComponentPresentation.defaultLimit
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 5 : 7) {
+            ForEach(presentation.visible) { component in
+                ProviderStatusComponentRows(component: component, compact: compact)
+            }
+
+            if presentation.isTruncated || (showsAll && canCollapse) {
+                Button {
+                    withAnimation(reduceMotion ? nil : MeterBarTheme.Motion.disclosure) {
+                        showsAll.toggle()
+                    }
+                } label: {
+                    Label(
+                        showsAll ? "Show less" : "+\(presentation.hiddenCount) more",
+                        systemImage: showsAll ? "chevron.up.circle" : "ellipsis.circle"
+                    )
+                    .font(compact ? .caption2 : .caption)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(showsAll ? "Collapse component list" : "Show all components")
+            }
         }
     }
 }
@@ -368,6 +413,8 @@ private struct MenuBarStatusDetailProviderSection: View {
     let report: ProviderStatusReport?
     let error: String?
 
+    @State private var showsAllComponents = false
+
     private var indicator: ProviderStatusIndicator {
         report?.summary.indicator ?? (error == nil ? .unknown : .critical)
     }
@@ -437,11 +484,11 @@ private struct MenuBarStatusDetailProviderSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach(report.components) { component in
-                            ProviderStatusComponentRows(component: component, compact: true)
-                        }
-                    }
+                    ProviderStatusComponentList(
+                        components: report.components,
+                        showsAll: $showsAllComponents,
+                        compact: true
+                    )
                 }
             } else {
                 Text("Fetching provider status.")

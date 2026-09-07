@@ -50,6 +50,23 @@ enum ProviderCardPresentation {
     /// already shows its only actionable reset information inline. A collapsed
     /// stale-login row is terminal too: its detail panel would present hours-old
     /// gauges as if they were live.
+    /// "Live" marks the account automatic failover is currently routing the
+    /// CLI to. The coordinator records the signed-in credential on every
+    /// refresh even while failover is off, so the chip must also check that
+    /// failover is enabled — otherwise it just restates which credential the
+    /// CLI happens to hold, which is noise (and confusing next to "Out").
+    static func showsLiveAccount(
+        for snapshot: ProviderSnapshot,
+        failoverSettings: AccountFailoverSettingsStore
+    ) -> Bool {
+        guard snapshot.isAccountCard,
+              let accountID = snapshot.accountID,
+              let provider = AccountFailoverProvider(service: snapshot.service),
+              failoverSettings.isEnabled(for: provider)
+        else { return false }
+        return failoverSettings.activeAccountIDs[provider] == accountID
+    }
+
     static func allowsDetailNavigation(
         hasSelectionHandler: Bool,
         snapshot: ProviderSnapshot,

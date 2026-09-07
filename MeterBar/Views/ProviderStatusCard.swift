@@ -55,12 +55,7 @@ struct ProviderStatusCard: View {
     }
 
     private var isLiveAccount: Bool {
-        guard snapshot.isAccountCard,
-              let accountID = snapshot.accountID,
-              let provider = AccountFailoverProvider(service: snapshot.service) else {
-            return false
-        }
-        return failoverSettings.activeAccountIDs[provider] == accountID
+        ProviderCardPresentation.showsLiveAccount(for: snapshot, failoverSettings: failoverSettings)
     }
 
     /// Cards without usage data and exhausted cards are terminal summaries. A
