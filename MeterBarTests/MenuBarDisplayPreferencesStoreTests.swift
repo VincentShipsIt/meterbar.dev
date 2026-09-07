@@ -22,6 +22,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
     func testDefaultsPreserveCurrentPresentation() {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
+        XCTAssertEqual(store.presentationMode, .merged)
         XCTAssertNil(store.pinnedCandidateKey)
         XCTAssertEqual(store.labelMetric, .percentLeft)
         XCTAssertEqual(store.labelSize, .compact)
@@ -35,6 +36,44 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(store.followsFocusedApp)
         XCTAssertFalse(store.rotatesProviders)
         XCTAssertEqual(store.rotationInterval, .fifteenSeconds)
+    }
+
+    // MARK: - Presentation mode (issue #512)
+
+    /// `setPresentationMode` backs both the Settings picker and the status-item
+    /// right-click "Menu Bar Shows" submenu (`MeterBarApp.selectMenuBar*`), so
+    /// it is a real durable menu-bar control even though it had no dedicated
+    /// relaunch coverage before this issue.
+    func testPresentationModePersistsAcrossRelaunch() {
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        store.setPresentationMode(.perAccount)
+
+        XCTAssertEqual(
+            MenuBarDisplayPreferencesStore(userDefaults: defaults).presentationMode,
+            .perAccount
+        )
+    }
+
+    /// Every case round-trips, not just one — the raw value is what survives on
+    /// disk, so a mismatch between a case name and its stored string would only
+    /// surface on the case that changed.
+    func testEveryPresentationModeCaseSurvivesRelaunch() {
+        for mode in MenuBarPresentationMode.allCases {
+            let suite = "MenuBarDisplayPreferencesStoreTests.presentationMode.\(mode.rawValue)"
+            guard let isolatedDefaults = UserDefaults(suiteName: suite) else {
+                return XCTFail("Could not create isolated defaults for \(mode)")
+            }
+            defer { isolatedDefaults.removePersistentDomain(forName: suite) }
+
+            let store = MenuBarDisplayPreferencesStore(userDefaults: isolatedDefaults)
+            store.setPresentationMode(mode)
+
+            XCTAssertEqual(
+                MenuBarDisplayPreferencesStore(userDefaults: isolatedDefaults).presentationMode,
+                mode
+            )
+        }
     }
 
     // MARK: - Follow focused app (#341)
