@@ -359,7 +359,23 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
 
     nonisolated private static func normalizedPin(_ key: String) -> String? {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : Self.migratedLegacyPin(trimmed)
+    }
+
+    /// Cursor's Grok Bot pool used to derive its pin key from its index in
+    /// `additionalLimits` (`additional-0`, since it is always Cursor's only
+    /// additional window) rather than the stable `grokBot` window id
+    /// `StatusItemLimitCandidateBuilder` now uses (`ProviderSnapshot.
+    /// grokBotLimitID`). `StatusItemLimitSelector.select` compares pins by
+    /// exact string equality, so a pin persisted under the old key would stop
+    /// matching any live candidate after upgrade and silently fall back to
+    /// Auto. Remap it once here so an existing pin survives.
+    nonisolated private static func migratedLegacyPin(_ key: String) -> String {
+        let legacySuffix = ":additional-0"
+        guard key.hasPrefix("\(ServiceType.cursor.rawValue):"), key.hasSuffix(legacySuffix) else {
+            return key
+        }
+        return String(key.dropLast(legacySuffix.count)) + ":grokBot"
     }
 
     /// Unreadable payloads fall back to the shipped defaults rather than to an

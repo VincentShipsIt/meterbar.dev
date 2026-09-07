@@ -241,13 +241,25 @@ enum StatusItemLimitSelector {
         pinnedKey: String? = nil,
         now: Date = Date(),
         activityWindow: TimeInterval = Self.activityWindow,
-        hysteresisPoints: Int = Self.hysteresisPoints
+        hysteresisPoints: Int = Self.hysteresisPoints,
+        windowMode: StatusItemWindowMode = .selected
     ) -> StatusLimitCandidate? {
         if let pinnedKey, let pinned = candidates.first(where: { $0.pinKey == pinnedKey }) {
             return pinned
         }
 
-        let autoCandidates = candidates.filter(\.isAutoSelectable)
+        var autoCandidates = candidates.filter(\.isAutoSelectable)
+        // Combined mode renders one anchor's Session/Weekly pair side by side
+        // (`combinedContent`). Cursor's Grok Bot pool is a third, differently
+        // shaped window (its own weekly-only quota, branded with Grok's logo)
+        // that does not fit that S/W pairing, so it must not win automatic
+        // selection here — only Selected mode, and an explicit pin, can show
+        // it. See PR #514 review.
+        if windowMode == .combined {
+            autoCandidates = autoCandidates.filter {
+                !StatusItemAutoSelectionPolicy.additionalAutoWindowIDs(for: $0.service).contains($0.windowID)
+            }
+        }
         guard !autoCandidates.isEmpty else { return nil }
 
         // A spent quota is always the tightest, so without this it wins every

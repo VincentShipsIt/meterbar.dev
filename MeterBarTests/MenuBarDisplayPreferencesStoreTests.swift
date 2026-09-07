@@ -279,6 +279,38 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: StorageKeys.statusItemPinnedCandidate))
     }
 
+    /// `StatusItemLimitCandidateBuilder` used to derive Cursor's Grok Bot pin
+    /// key from its index in `additionalLimits` (`additional-0`, since it is
+    /// always Cursor's only additional window). It now derives it from the
+    /// stable `grokBot` window id instead. `StatusItemLimitSelector.select`
+    /// matches pins by exact string equality, so a pin persisted under the
+    /// old key would otherwise stop matching any live candidate after
+    /// upgrade and silently reset to Auto. See PR #514 review.
+    func testLegacyGrokBotAdditionalPinMigratesToTheStableWindowIDOnLoad() {
+        defaults.set(
+            "\(ServiceType.cursor.rawValue):account-id:additional-0",
+            forKey: StorageKeys.statusItemPinnedCandidate
+        )
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.pinnedCandidateKey, "\(ServiceType.cursor.rawValue):account-id:grokBot")
+    }
+
+    /// The legacy suffix only ever applied to Cursor's Grok Bot pool. Any
+    /// other provider's `additional-0` pin (e.g. Grok's own additional
+    /// windows) must pass through untouched.
+    func testNonCursorAdditionalPinIsNotRewritten() {
+        defaults.set(
+            "\(ServiceType.grok.rawValue):account-id:additional-0",
+            forKey: StorageKeys.statusItemPinnedCandidate
+        )
+
+        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.pinnedCandidateKey, "\(ServiceType.grok.rawValue):account-id:additional-0")
+    }
+
     func testLabelFormatterCoversMetricAndDensityOptions() {
         let limit = UsageLimit(used: 42.4, total: 100, resetTime: nil)
 

@@ -218,7 +218,8 @@ enum MenuBarStatusItemPlanner {
             candidates: candidates,
             previousKey: context.previousKey(forItem: mergedItemID),
             pinnedKey: context.pinnedKey,
-            now: context.now
+            now: context.now,
+            windowMode: context.windowMode
         ) else {
             return placeholderDescriptor(context: context)
         }
@@ -279,7 +280,8 @@ enum MenuBarStatusItemPlanner {
                 candidates: scoped,
                 previousKey: context.previousKey(forItem: entry.id),
                 pinnedKey: context.pinnedKey,
-                now: context.now
+                now: context.now,
+                windowMode: context.windowMode
             ) else { return nil }
             // Same rule as the merged item: Auto already means "whichever
             // window matters", but a pin is a deliberate choice and says which.
