@@ -218,7 +218,7 @@ final class CostSummaryStalenessTests: XCTestCase {
 
         let evidence = CostScanFreshnessProbe.hasNewTranscripts(in: [root], since: cutoff)
 
-        XCTAssertEqual(evidence, true)
+        XCTAssertTrue(try XCTUnwrap(evidence))
     }
 
     /// Anti-thrash at the probe level: a fully walkable root with nothing
@@ -230,7 +230,7 @@ final class CostSummaryStalenessTests: XCTestCase {
 
         let evidence = CostScanFreshnessProbe.hasNewTranscripts(in: [root], since: cutoff)
 
-        XCTAssertEqual(evidence, false)
+        XCTAssertFalse(try XCTUnwrap(evidence))
     }
 
     func testProbeReturnsNilWhenARootCannotBeWalked() throws {
@@ -260,7 +260,10 @@ final class CostSummaryStalenessTests: XCTestCase {
             fileNames: ["updates.jsonl"]
         )
 
-        XCTAssertEqual(evidence, false, "a newer file that doesn't match the provider's own filter is not evidence")
+        XCTAssertFalse(
+            try XCTUnwrap(evidence),
+            "a newer file that doesn't match the provider's own filter is not evidence"
+        )
     }
 
     // MARK: - Fixtures
