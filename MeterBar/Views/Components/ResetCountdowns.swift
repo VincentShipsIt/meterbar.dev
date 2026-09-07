@@ -49,19 +49,24 @@ struct ResetCountdownLabel: View {
     let font: Font
     let foregroundColor: Color
     let iconSize: CGFloat
+    /// Countdown vs. clock-time rendering, resolved by the caller from
+    /// `MenuBarDisplayPreferencesStore` like every other reset label.
+    let format: ResetTimeFormat
 
     init(
         title: String?,
         limit: UsageLimit,
         font: Font = .caption,
         foregroundColor: Color = .secondary,
-        iconSize: CGFloat = 10
+        iconSize: CGFloat = 10,
+        format: ResetTimeFormat = .countdown
     ) {
         self.title = title
         self.limit = limit
         self.font = font
         self.foregroundColor = foregroundColor
         self.iconSize = iconSize
+        self.format = format
     }
 
     @Environment(\.accessibilityReduceMotion)
@@ -73,7 +78,7 @@ struct ResetCountdownLabel: View {
                 if let text = Self.counterText(
                     title: title,
                     limit: limit,
-                    format: .countdown,
+                    format: format,
                     now: timeline.date
                 ) {
                     HStack(spacing: 4) {
@@ -158,97 +163,6 @@ struct ResetCountdownLabel: View {
     }
 }
 
-struct NextResetCountdownLabel: View {
-    let windows: [ResetCountdownWindow]
-    var font: Font = .caption
-    var foregroundColor: Color = .secondary
-    var iconSize: CGFloat = 10
-    /// Countdown vs. clock-time rendering. The caller resolves this from
-    /// `MenuBarDisplayPreferencesStore` and passes the value in — the same
-    /// division of responsibility `BlockingLimitResetCounter.format` uses —
-    /// rather than this view observing the store itself, since its one caller
-    /// (`ProviderStatusCard`) already resolves the preference once per render
-    /// for that sibling component.
-    var format: ResetTimeFormat = .countdown
-
-    @Environment(\.accessibilityReduceMotion)
-    private var reduceMotion
-
-    /// How long after a window's reset time we keep showing "reset due" before
-    /// treating the data as stale and hiding the label (until a refresh repopulates
-    /// a future reset time). Prevents a perpetual "reset due" when a provider goes offline.
-    static let resetDueGracePeriod = ProviderBlockingPolicy.resetDueGracePeriod
-
-    var body: some View {
-        TimelineView(.periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)) { timeline in
-            Group {
-                if let window = Self.selectNextWindow(windows, now: timeline.date),
-                   let text = Self.counterText(for: window, now: timeline.date, format: format) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: iconSize, weight: .semibold))
-                        Text(text)
-                            .font(font)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .numericRefreshTransition(value: text, reduceMotion: reduceMotion)
-                    }
-                    .foregroundColor(foregroundColor)
-                }
-            }
-        }
-    }
-
-    /// Reset text for the selected window, titled by its reset cadence (e.g.
-    /// "Monthly reset in 3d") rather than the raw window name — matching
-    /// `BlockingLimitResetCounter.titleText`'s blocked-card headline so the
-    /// popover's healthy- and blocked-card reset lines read the same way.
-    static func counterText(
-        for window: ResetCountdownWindow,
-        now: Date,
-        format: ResetTimeFormat = .countdown,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> String? {
-        ResetCountdownLabel.counterText(
-            title: window.cadenceTitle,
-            limit: window.limit,
-            format: format,
-            now: now,
-            locale: locale,
-            timeZone: timeZone
-        )
-    }
-
-    /// Picks the window each provider card should count down to: the soonest
-    /// upcoming reset, or — if every window has already passed — the most recently
-    /// due one, but only while it is within `gracePeriod` of now. Beyond that the
-    /// data is treated as stale and `nil` is returned so the label hides instead of
-    /// showing "reset due" indefinitely.
-    static func selectNextWindow(
-        _ windows: [ResetCountdownWindow],
-        now: Date,
-        gracePeriod: TimeInterval = resetDueGracePeriod
-    ) -> ResetCountdownWindow? {
-        let candidates = windows.compactMap { window -> (window: ResetCountdownWindow, seconds: TimeInterval)? in
-            guard let seconds = window.limit.secondsUntilReset(now: now) else { return nil }
-            return (window, seconds)
-        }
-
-        let futureCandidates = candidates.filter { $0.seconds > 0 }
-        if let next = futureCandidates.min(by: { $0.seconds < $1.seconds }) {
-            return next.window
-        }
-
-        if let mostRecent = candidates.max(by: { $0.seconds < $1.seconds }),
-           mostRecent.seconds >= -gracePeriod {
-            return mostRecent.window
-        }
-
-        return nil
-    }
-}
-
 struct BlockingLimitResetCounter: View {
     let windows: [ResetCountdownWindow]
     let accentColor: Color
@@ -305,7 +219,7 @@ struct BlockingLimitResetCounter: View {
     static func selectBlockingWindow(
         _ windows: [ResetCountdownWindow],
         now: Date,
-        gracePeriod: TimeInterval = NextResetCountdownLabel.resetDueGracePeriod
+        gracePeriod: TimeInterval = ProviderBlockingPolicy.resetDueGracePeriod
     ) -> ResetCountdownWindow? {
         let candidates = windows.map {
             ProviderBlockingCandidate(id: $0.id, role: .weekly, limit: $0.limit)

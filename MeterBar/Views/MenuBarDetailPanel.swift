@@ -292,8 +292,8 @@ struct MenuBarProviderDetailContent: View {
 
   // Same order and same spacings as `ProviderStatusCard.expandedCardBody`: the
   // reset counter and the limit rows are drawn flat inside this one surface, not
-  // wrapped in cards of their own. The only thing the extra width buys is the
-  // fuller `.detail` row footer.
+  // wrapped in cards of their own. The extra width buys the fuller `.detail`
+  // row footer (used + pace beside each row's reset) and the sparkline below.
   private var detailRows: some View {
     VStack(alignment: .leading, spacing: 10) {
       if detailLimits.isEmpty {
@@ -311,7 +311,12 @@ struct MenuBarProviderDetailContent: View {
       } else {
         VStack(alignment: .leading, spacing: 9) {
           ForEach(detailLimits) { limit in
-            LimitRow(limit: limit, accentColor: snapshot.accentColor, density: .detail)
+            LimitRow(
+              limit: limit,
+              accentColor: snapshot.accentColor,
+              density: .detail,
+              resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+            )
           }
         }
       }
