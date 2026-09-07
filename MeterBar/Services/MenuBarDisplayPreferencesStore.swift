@@ -192,8 +192,8 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        pinnedCandidateKey = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
-            .flatMap(Self.normalizedPin)
+        let storedPin = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
+        pinnedCandidateKey = storedPin.flatMap(Self.normalizedPin)
         presentationMode = userDefaults.string(forKey: StorageKeys.statusItemPresentationMode)
             .flatMap(MenuBarPresentationMode.init(rawValue:)) ?? .merged
         labelMetric = userDefaults.string(forKey: StorageKeys.statusItemLabelMetric)
@@ -223,6 +223,11 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         // either opt-in, because rotation was only ever suppressed at read time.
         // Repair it here rather than at read time, so clearing the pin later
         // cannot hand back a mode the user never re-enabled.
+        // Write a migrated legacy pin back so the rewrite happens once,
+        // not on every relaunch.
+        if let migratedPin = pinnedCandidateKey, migratedPin != storedPin {
+            userDefaults.set(migratedPin, forKey: StorageKeys.statusItemPinnedCandidate)
+        }
         if pinnedCandidateKey != nil {
             if followsFocusedApp {
                 followsFocusedApp = false

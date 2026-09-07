@@ -295,6 +295,10 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
         XCTAssertEqual(store.pinnedCandidateKey, "\(ServiceType.cursor.rawValue):account-id:grokBot")
+        XCTAssertEqual(
+            defaults.string(forKey: StorageKeys.statusItemPinnedCandidate),
+            "\(ServiceType.cursor.rawValue):account-id:grokBot"
+        )
     }
 
     /// The legacy suffix only ever applied to Cursor's Grok Bot pool. Any
