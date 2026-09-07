@@ -132,7 +132,7 @@ final class AccountFailoverDecisionTests: XCTestCase {
         )
     }
 
-    func testMissingActiveAccountFallsBackToPreferredIdentityWithoutCredentialMutation() {
+    func testMissingActiveAccountAdoptsPreferredIdentity() {
         XCTAssertEqual(
             AccountFailoverDecisionEngine.decide(
                 AccountFailoverDecisionInput(
@@ -143,6 +143,64 @@ final class AccountFailoverDecisionTests: XCTestCase {
                 )
             ),
             .adopt(preferred, reason: .activeAccountUnavailable)
+        )
+    }
+
+    func testActiveOverageKeepsAMaxedPrimaryWindowAvailable() {
+        // The popover and menu bar suppress the blocker while overage billing is
+        // on, so failover must not swap away from an account they show as usable.
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$4.00 used")
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .claudeCode,
+                metrics: metrics,
+                refreshedSuccessfully: true
+            ),
+            .available
+        )
+    }
+
+    func testDisabledOverageStillLeavesAMaxedPrimaryWindowDepleted() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+            extraUsage: ExtraUsageStatus(state: .off, detail: nil)
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .claudeCode,
+                metrics: metrics,
+                refreshedSuccessfully: true
+            ),
+            .depleted
+        )
+    }
+
+    func testActiveOverageKeepsAMaxedCodexWeeklyWindowAvailable() {
+        let metrics = UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(
+                used: 100,
+                total: 100,
+                resetTime: nil,
+                periodKind: .weekly
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits")
+        )
+
+        XCTAssertEqual(
+            AccountFailoverAvailability(
+                provider: .codexCli,
+                metrics: metrics,
+                refreshedSuccessfully: true
+            ),
+            .available
         )
     }
 

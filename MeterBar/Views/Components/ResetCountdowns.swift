@@ -49,26 +49,19 @@ struct ResetCountdownLabel: View {
     let font: Font
     let foregroundColor: Color
     let iconSize: CGFloat
-    let usesPopoverPreference: Bool
-
-    @ObservedObject private var preferences: MenuBarDisplayPreferencesStore
 
     init(
         title: String?,
         limit: UsageLimit,
         font: Font = .caption,
         foregroundColor: Color = .secondary,
-        iconSize: CGFloat = 10,
-        usesPopoverPreference: Bool = false,
-        preferences: MenuBarDisplayPreferencesStore? = nil
+        iconSize: CGFloat = 10
     ) {
         self.title = title
         self.limit = limit
         self.font = font
         self.foregroundColor = foregroundColor
         self.iconSize = iconSize
-        self.usesPopoverPreference = usesPopoverPreference
-        _preferences = ObservedObject(wrappedValue: preferences ?? .shared)
     }
 
     @Environment(\.accessibilityReduceMotion)
@@ -80,7 +73,7 @@ struct ResetCountdownLabel: View {
                 if let text = Self.counterText(
                     title: title,
                     limit: limit,
-                    format: usesPopoverPreference ? preferences.resetTimeFormat : .countdown,
+                    format: .countdown,
                     now: timeline.date
                 ) {
                     HStack(spacing: 4) {
