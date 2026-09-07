@@ -124,10 +124,19 @@ struct SocialLimitsCardContent: Equatable {
         let rows = snapshot.limits.map { row(for: $0, now: now) }
         guard rows.count > maxRowCount else { return rows }
         // Trim by tightness but render in the provider's own order, so the card
-        // reads like the popover it was taken from.
-        let kept = Set(
-            rows.sorted { $0.percentLeft < $1.percentLeft }
-                .prefix(maxRowCount)
+        // reads like the popover it was taken from. The headline always reads
+        // `snapshot.primaryLimit`, so that window must always survive the trim
+        // — reserve its slot before ranking the rest by tightness.
+        let primaryID = snapshot.primaryLimit?.id
+        var kept = Set<String>()
+        if let primaryID {
+            kept.insert(primaryID)
+        }
+        let remainingSlots = maxRowCount - kept.count
+        let others = rows.filter { $0.id != primaryID }
+        kept.formUnion(
+            others.sorted { $0.percentLeft < $1.percentLeft }
+                .prefix(remainingSlots)
                 .map(\.id)
         )
         return rows.filter { kept.contains($0.id) }
@@ -175,6 +184,25 @@ extension SocialLimitsCardContent {
             case .quota:
                 return usedPercentText
             }
+        }
+
+        /// Used share on the left of the pair, reset on the right — the same
+        /// facts the popover's `LimitRow` prints, in the same order. Starts
+        /// from `usedText` (not the raw percent) so a currency row shows its
+        /// "$… spent" label instead of a percentage, and folds in the pace
+        /// overlay `LimitRow` renders in its footer.
+        var detailText: String {
+            var parts: [String] = [usedText]
+            if isEstimated {
+                parts.append("estimated")
+            }
+            if let pace {
+                parts.append(pace.leftLabel)
+            }
+            if let resetText {
+                parts.append("resets in \(resetText)")
+            }
+            return parts.joined(separator: " · ")
         }
 
         /// The hero number, without the "left" suffix the row label carries.

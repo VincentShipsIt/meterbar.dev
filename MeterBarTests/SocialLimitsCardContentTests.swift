@@ -54,6 +54,68 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertEqual(row.heroValueText, "~50%")
     }
 
+    // MARK: - Row detail text
+
+    /// `detailText` drives the card's exported row copy — it must start from
+    /// the value-style-specific `usedText` (a "$… spent" label for currency
+    /// rows, not a bare percentage) and fold in the pace overlay before the
+    /// reset text, the same two facts `LimitRow`'s footer prints.
+    func testDetailTextUsesValueStyleUsedTextAndPace() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let limit = snapshotLimit(
+            kind: .session,
+            title: "Session",
+            usageLimit: UsageLimit(
+                used: 81,
+                total: 100,
+                resetTime: now.addingTimeInterval(3_600),
+                windowSeconds: 18_000
+            )
+        )
+
+        let row = SocialLimitsCardContent.row(for: limit, now: now)
+
+        XCTAssertNotNil(row.pace)
+        guard let pace = row.pace else { return }
+        XCTAssertEqual(row.detailText, "\(row.usedText) · \(pace.leftLabel) · resets in \(row.resetText ?? "")")
+    }
+
+    func testDetailTextForCurrencyRowShowsSpentLabelNotPercent() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let limit = snapshotLimit(
+            kind: .additional,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 4.5, total: 20, resetTime: nil),
+            valueStyle: .currency
+        )
+
+        let row = SocialLimitsCardContent.row(for: limit, now: now)
+
+        XCTAssertEqual(row.usedText, "$4.50 spent")
+        XCTAssertTrue(row.detailText.hasPrefix("$4.50 spent"))
+        XCTAssertFalse(row.detailText.contains("%"))
+    }
+
+    func testDetailTextMarksEstimatedRowsBeforePace() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let limit = snapshotLimit(
+            kind: .weekly,
+            title: "Weekly",
+            usageLimit: UsageLimit(
+                used: 50,
+                total: 100,
+                resetTime: now.addingTimeInterval(7_200),
+                windowSeconds: 18_000,
+                isEstimated: true
+            )
+        )
+
+        let row = SocialLimitsCardContent.row(for: limit, now: now)
+
+        XCTAssertNil(row.pace)
+        XCTAssertEqual(row.detailText, "\(row.usedText) · estimated · resets in \(row.resetText ?? "")")
+    }
+
     // MARK: - Snapshot derivation
 
     func testHeadlineFollowsTheSnapshotPrimaryLimit() {
@@ -126,6 +188,42 @@ final class SocialLimitsCardContentTests: XCTestCase {
 
         XCTAssertEqual(content.rows.count, SocialLimitsCardContent.maxRowCount)
         XCTAssertEqual(content.rows.map(\.title), ["Pool 1", "Pool 3", "Pool 4", "Pool 5"])
+    }
+
+    /// The headline always reads `snapshot.primaryLimit`, so that window must
+    /// survive the trim even when four secondary limits are individually
+    /// tighter — otherwise the hero/status describe a window the card never
+    /// renders.
+    func testRowsRetainThePrimaryLimitEvenWhenSecondariesAreTighter() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let session = snapshotLimit(
+            kind: .session,
+            title: "Session",
+            usageLimit: UsageLimit(used: 20, total: 100, resetTime: nil)
+        )
+        let pools = [5, 10, 15, 20].enumerated().map { index, percentLeft in
+            snapshotLimit(
+                kind: .additional,
+                title: "Pool \(index)",
+                usageLimit: UsageLimit(used: Double(100 - percentLeft), total: 100, resetTime: nil)
+            )
+        }
+        let snapshot = providerSnapshot(
+            title: "Cursor",
+            updatedAt: now,
+            limits: [session] + pools
+        )
+
+        let content = SocialLimitsCardContent(
+            snapshot: snapshot,
+            now: now,
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
+
+        XCTAssertEqual(content.headline?.title, "Session")
+        XCTAssertEqual(content.rows.count, SocialLimitsCardContent.maxRowCount)
+        // Original provider order, primary kept, tightest three secondaries kept.
+        XCTAssertEqual(content.rows.map(\.title), ["Session", "Pool 0", "Pool 1", "Pool 2"])
     }
 
     func testSnapshotWithoutLimitsRendersTheHonestEmptyState() {
@@ -213,9 +311,10 @@ final class SocialLimitsCardContentTests: XCTestCase {
     private func snapshotLimit(
         kind: SnapshotLimit.Kind,
         title: String,
-        usageLimit: UsageLimit
+        usageLimit: UsageLimit,
+        valueStyle: SnapshotLimit.ValueStyle = .quota
     ) -> SnapshotLimit {
-        SnapshotLimit(id: "\(title)-id", kind: kind, title: title, usageLimit: usageLimit)
+        SnapshotLimit(id: "\(title)-id", kind: kind, title: title, usageLimit: usageLimit, valueStyle: valueStyle)
     }
 
     private func providerSnapshot(

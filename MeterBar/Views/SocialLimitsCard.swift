@@ -249,19 +249,6 @@ private struct SocialLimitsRowView: View {
 
     private var band: QuotaBand { QuotaBand.forPercentLeft(row.percentLeft) }
 
-    /// Used share on the left of the pair, reset on the right — the same two
-    /// facts the popover's `LimitRow` prints, in the same order.
-    private var detailText: String {
-        var parts: [String] = [row.usedPercentText]
-        if row.isEstimated {
-            parts.append("estimated")
-        }
-        if let resetText = row.resetText {
-            parts.append("resets in \(resetText)")
-        }
-        return parts.joined(separator: " · ")
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 11 * scale) {
             HStack(alignment: .firstTextBaseline, spacing: 12 * scale) {
@@ -273,7 +260,7 @@ private struct SocialLimitsRowView: View {
 
                 Spacer(minLength: 8 * scale)
 
-                Text(detailText)
+                Text(row.detailText)
                     .font(.system(size: 18 * scale, weight: .medium, design: .rounded))
                     .foregroundStyle(SocialLimitsPalette.accent(for: band))
                     .lineLimit(1)
