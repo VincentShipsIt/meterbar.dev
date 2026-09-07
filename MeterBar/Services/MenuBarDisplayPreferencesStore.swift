@@ -192,8 +192,8 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        pinnedCandidateKey = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
-            .flatMap(Self.normalizedPin)
+        let storedPin = userDefaults.string(forKey: StorageKeys.statusItemPinnedCandidate)
+        pinnedCandidateKey = storedPin.flatMap(Self.normalizedPin)
         presentationMode = userDefaults.string(forKey: StorageKeys.statusItemPresentationMode)
             .flatMap(MenuBarPresentationMode.init(rawValue:)) ?? .merged
         labelMetric = userDefaults.string(forKey: StorageKeys.statusItemLabelMetric)
@@ -223,6 +223,11 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         // either opt-in, because rotation was only ever suppressed at read time.
         // Repair it here rather than at read time, so clearing the pin later
         // cannot hand back a mode the user never re-enabled.
+        // Write a migrated legacy pin back so the rewrite happens once,
+        // not on every relaunch.
+        if let migratedPin = pinnedCandidateKey, migratedPin != storedPin {
+            userDefaults.set(migratedPin, forKey: StorageKeys.statusItemPinnedCandidate)
+        }
         if pinnedCandidateKey != nil {
             if followsFocusedApp {
                 followsFocusedApp = false
@@ -359,7 +364,23 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
 
     nonisolated private static func normalizedPin(_ key: String) -> String? {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : Self.migratedLegacyPin(trimmed)
+    }
+
+    /// Cursor's Grok Bot pool used to derive its pin key from its index in
+    /// `additionalLimits` (`additional-0`, since it is always Cursor's only
+    /// additional window) rather than the stable `grokBot` window id
+    /// `StatusItemLimitCandidateBuilder` now uses (`ProviderSnapshot.
+    /// grokBotLimitID`). `StatusItemLimitSelector.select` compares pins by
+    /// exact string equality, so a pin persisted under the old key would stop
+    /// matching any live candidate after upgrade and silently fall back to
+    /// Auto. Remap it once here so an existing pin survives.
+    nonisolated private static func migratedLegacyPin(_ key: String) -> String {
+        let legacySuffix = ":additional-0"
+        guard key.hasPrefix("\(ServiceType.cursor.rawValue):"), key.hasSuffix(legacySuffix) else {
+            return key
+        }
+        return String(key.dropLast(legacySuffix.count)) + ":grokBot"
     }
 
     /// Unreadable payloads fall back to the shipped defaults rather than to an

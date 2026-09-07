@@ -193,7 +193,7 @@ final class StatusItemPresenter {
 
     @MainActor
     func apply(_ descriptor: MenuBarStatusItemDescriptor, to button: NSStatusBarButton) {
-        let baseImage = image(for: descriptor.service)
+        let baseImage = image(for: descriptor.logoKind)
         let resolvedImage = showsStayAwakeIndicator()
             ? MenuBarIconRenderer.stayAwakeIndicator(baseImage: baseImage)
             : baseImage
@@ -220,8 +220,8 @@ final class StatusItemPresenter {
     /// Provider glyph for the item, so a bare `52%` says *whose* 52% it is.
     /// Providers without a bundled logo keep MeterBar's own bars mark.
     @MainActor
-    func image(for service: ServiceType?) -> NSImage {
-        guard let resourceName = service.flatMap({ ProviderLogoKind.forService($0).resourceName }) else {
+    func image(for logoKind: ProviderLogoKind?) -> NSImage {
+        guard let resourceName = logoKind?.resourceName else {
             return fallbackImage()
         }
 

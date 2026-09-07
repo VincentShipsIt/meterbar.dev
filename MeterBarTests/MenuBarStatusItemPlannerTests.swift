@@ -32,13 +32,82 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         )
     }
 
+    /// The menu-bar glyph follows the winning window, not just its service:
+    /// Cursor's Grok Bot pool must show Grok's logo, everything else keeps the
+    /// provider logo, and the placeholder before first data carries none.
+    func testDescriptorCarriesGrokLogoForCursorGrokBotWindow() {
+        let grokBot = StatusLimitCandidate(
+            key: "cursor:grokBot",
+            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
+            service: .cursor,
+            accountKey: nil,
+            displayName: "Cursor",
+            windowID: "grokBot",
+            windowName: "Grok Bot",
+            limit: UsageLimit(used: 17, total: 100, resetTime: nil),
+            lastActivity: nil,
+            isAutoSelectable: true
+        )
+        let cursorWeekly = candidate(key: "cursor", service: .cursor, percentUsed: 100, windowName: "Weekly")
+
+        let descriptors = plan([cursorWeekly, grokBot])
+
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["cursor:grokBot"])
+        XCTAssertEqual(descriptors.map(\.logoKind), [.grok])
+        XCTAssertEqual(plan([cursorWeekly]).map(\.logoKind), [.cursor])
+    }
+
+    /// Combined mode renders one anchor's Session/Weekly pair
+    /// (`combinedContent` only ever looks up `windowID == "session"` /
+    /// `"weekly"` for the winning service+account). Cursor's Grok Bot pool is
+    /// a third, differently shaped window that used to be able to win
+    /// automatic selection whenever Cursor's own weekly quota ran out —
+    /// pairing the Grok logo with Cursor's own (unrelated) S/W numbers and
+    /// never actually showing the Grok Bot quota. Grok Bot must not win
+    /// automatic selection in Combined mode; Cursor's own S/W stays selected
+    /// even though it is the exhausted one. See PR #514 review.
+    func testCombinedModeDoesNotLetGrokBotWinOverExhaustedCursorWeekly() {
+        let cursorSession = candidate(
+            key: "cursor",
+            service: .cursor,
+            percentUsed: 40,
+            windowName: "Session",
+            isAutoSelectable: false
+        )
+        let cursorWeekly = candidate(
+            key: "cursor",
+            service: .cursor,
+            percentUsed: 100,
+            windowName: "Weekly"
+        )
+        let grokBot = StatusLimitCandidate(
+            key: "cursor:grokBot",
+            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
+            service: .cursor,
+            accountKey: nil,
+            displayName: "Cursor",
+            windowID: "grokBot",
+            windowName: "Grok Bot",
+            limit: UsageLimit(used: 20, total: 100, resetTime: nil),
+            lastActivity: nil,
+            isAutoSelectable: true
+        )
+
+        let descriptors = plan([cursorSession, cursorWeekly, grokBot], windowMode: .combined)
+
+        XCTAssertEqual(descriptors.map(\.logoKind), [.cursor])
+        XCTAssertEqual(descriptors.map(\.selectionKey), ["cursor"])
+        XCTAssertEqual(descriptors.first?.title, " S60% · W0%")
+    }
+
     private func plan(
         _ candidates: [StatusLimitCandidate],
         mode: MenuBarPresentationMode = .merged,
         previousKey: String? = nil,
         pinnedKey: String? = nil,
         metric: StatusItemLabelMetric = .percentLeft,
-        size: StatusItemLabelSize = .compact
+        size: StatusItemLabelSize = .compact,
+        windowMode: StatusItemWindowMode = .selected
     ) -> [MenuBarStatusItemDescriptor] {
         MenuBarStatusItemPlanner.plan(
             mode: mode,
@@ -47,6 +116,7 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
             pinnedKey: pinnedKey,
             metric: metric,
             size: size,
+            windowMode: windowMode,
             now: now
         )
     }
