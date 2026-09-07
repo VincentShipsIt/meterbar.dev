@@ -202,15 +202,18 @@ private struct SocialShareTierSticker: View {
         .foregroundStyle(Color(red: 0.13, green: 0.05, blue: 0.20))
         .padding(.horizontal, 18 * scale)
         .padding(.vertical, 11 * scale)
-        .background(
-            Color(red: 1.0, green: 0.78, blue: 0.25),
-            in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-        )
+        .background {
+            // The hard offset shadow lives on the plate, not the composite:
+            // `ImageRenderer` shadows every child individually, which stamped
+            // a ghost copy of the label behind the text in exported PNGs.
+            RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                .fill(Color(red: 1.0, green: 0.78, blue: 0.25))
+                .shadow(color: .black.opacity(0.22), radius: 0, x: 5 * scale, y: 6 * scale)
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
                 .stroke(Color.black.opacity(0.24), lineWidth: max(1, 2 * scale))
         }
-        .shadow(color: .black.opacity(0.22), radius: 0, x: 5 * scale, y: 6 * scale)
         .rotationEffect(.degrees(-1.3))
     }
 }

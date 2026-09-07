@@ -47,20 +47,39 @@ enum SocialCardRenderer {
 
     @MainActor
     static func image(for content: SocialShareCardContent) -> NSImage? {
+        image(of: SocialShareCard(content: content))
+    }
+
+    @MainActor
+    static func pngData(for content: SocialShareCardContent) -> Data? {
+        image(for: content).flatMap(pngData(from:))
+    }
+
+    /// Same pipeline as the token card, so both PNGs come out at
+    /// `SocialShareCardLayout.exportSize` with identical encoding.
+    @MainActor
+    static func image(for content: SocialLimitsCardContent) -> NSImage? {
+        image(of: SocialLimitsCard(content: content))
+    }
+
+    @MainActor
+    static func pngData(for content: SocialLimitsCardContent) -> Data? {
+        image(for: content).flatMap(pngData(from:))
+    }
+
+    @MainActor
+    private static func image(of card: some View) -> NSImage? {
         let exportSize = SocialShareCardLayout.exportSize
         let renderer = ImageRenderer(
-            content: SocialShareCard(content: content)
-                .frame(width: exportSize.width, height: exportSize.height)
+            content: card.frame(width: exportSize.width, height: exportSize.height)
         )
         renderer.proposedSize = ProposedViewSize(width: exportSize.width, height: exportSize.height)
         renderer.scale = 1
         return renderer.nsImage
     }
 
-    @MainActor
-    static func pngData(for content: SocialShareCardContent) -> Data? {
+    private static func pngData(from image: NSImage) -> Data? {
         guard
-            let image = image(for: content),
             let tiffData = image.tiffRepresentation,
             let bitmap = NSBitmapImageRep(data: tiffData)
         else {
