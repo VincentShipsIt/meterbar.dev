@@ -351,6 +351,105 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         XCTAssertGreaterThan(decoded.totalTokens, 0)
     }
 
+    // MARK: - Ingress numeric validation before conversion (issue #568)
+
+    /// `NSNumber.intValue` on a non-integral value truncates rather than
+    /// failing — `NSNumber(1.5)` becomes the plausible-looking `1`. A range
+    /// check running only *after* that conversion can never see the
+    /// fractional part; `decodeRollup` must reject it before `.intValue`
+    /// ever runs.
+    func testDecodeRollupRejectsANonIntegralRequiredTokenField() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-fractional", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["inputTokens"] = NSNumber(value: 1.5)
+
+        XCTAssertNil(CloudKitUsageRepository.decodeRollup(record))
+    }
+
+    /// A NaN or infinite `NSNumber` must be rejected outright rather than
+    /// reaching `.intValue`, whose result for a non-finite source is
+    /// documented by Apple as erroneous rather than defined.
+    func testDecodeRollupRejectsANonFiniteRequiredTokenField() throws {
+        for nonFinite: NSNumber in [NSNumber(value: Double.nan), NSNumber(value: Double.infinity)] {
+            let record = CKRecord(
+                recordType: ICloudUsageRecordSchema.rollupRecordType,
+                recordID: CKRecord.ID(recordName: "rollup-nonfinite-\(nonFinite)", zoneID: zoneID)
+            )
+            CloudKitUsageRepository.apply(
+                try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+                to: record
+            )
+            record["outputTokens"] = nonFinite
+
+            XCTAssertNil(CloudKitUsageRepository.decodeRollup(record), "did not reject \(nonFinite)")
+        }
+    }
+
+    /// A floating-point `NSNumber` carrying a value far outside `Int`'s range
+    /// — the shape a peer would actually be able to write: `CKRecord` itself
+    /// rejects an `NSNumber(value: UInt64.max)` integer literal outright
+    /// (`"CloudKit does not support unsigned long long values with the high
+    /// order bit set"`), so a hostile double is the realistic out-of-range
+    /// attack surface a record can actually carry. Must be rejected before
+    /// `.intValue`, not silently wrapped or truncated.
+    func testDecodeRollupRejectsARequiredTokenFieldFarAboveIntMaxAsADouble() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-double-overflow", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["cacheReadTokens"] = NSNumber(value: 1e20)
+
+        XCTAssertNil(CloudKitUsageRepository.decodeRollup(record))
+    }
+
+    /// The optional `cacheCreationTokens` field falls back to `0` rather than
+    /// rejecting the whole row (matching the existing out-of-range-clamp
+    /// behavior above) — but only once `validatedInt` has proven the value
+    /// unsafe to convert, not by feeding a fractional value through `.intValue`.
+    func testDecodeRollupTreatsANonIntegralOptionalCacheCreationFieldAsInvalidAndFallsBackToZero() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-cache-fractional", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["cacheCreationTokens"] = NSNumber(value: 2.5)
+
+        let decoded = try XCTUnwrap(CloudKitUsageRepository.decodeRollup(record))
+
+        XCTAssertEqual(decoded.cacheCreationTokens, 0)
+    }
+
+    // MARK: - validatedInt (issue #568)
+
+    func testValidatedIntAcceptsOrdinaryIntegersAtTheExtremesOfIntsRange() {
+        XCTAssertEqual(CloudKitUsageRepository.validatedInt(NSNumber(value: 0)), 0)
+        XCTAssertEqual(CloudKitUsageRepository.validatedInt(NSNumber(value: 100)), 100)
+        XCTAssertEqual(CloudKitUsageRepository.validatedInt(Int.max as NSNumber), Int.max)
+        XCTAssertEqual(CloudKitUsageRepository.validatedInt(Int.min as NSNumber), Int.min)
+    }
+
+    func testValidatedIntRejectsNilNonIntegralNonFiniteAndOutOfRangeValues() {
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(nil))
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(NSNumber(value: 1.5)))
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(NSNumber(value: Double.nan)))
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(NSNumber(value: Double.infinity)))
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(NSNumber(value: -Double.infinity)))
+        XCTAssertNil(CloudKitUsageRepository.validatedInt(NSNumber(value: UInt64.max)))
+    }
+
     func testEgressClampsATokenFieldAboveTheSaneRangeRatherThanPassingItThrough() throws {
         let hostile = ICloudDailyUsageRollup(
             deviceID: deviceID,

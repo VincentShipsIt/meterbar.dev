@@ -210,6 +210,302 @@ final class CostAccumulationSafetyTests: XCTestCase {
         XCTAssertEqual(sum.output, 150)
     }
 
+    // MARK: - Codex: makeCost combining two already-saturated totals (issue #568)
+
+    /// `CostScanWindowContext.totals` is a `TokenAccumulator` whose individual
+    /// fields each saturate independently (`TokenAccumulator.add`), but never
+    /// combine with each other. `CodexCostScanner.makeCost` is the first place
+    /// `output` and `reasoning` — each already possibly `Int.max` — are added
+    /// together, and the first place `input` and `cacheRead` are subtracted.
+    /// Both used a plain operator before issue #568.
+    func testCodexMakeCostSurvivesOutputAndReasoningBothIndependentlySaturated() {
+        var context = CostScanWindowContext(
+            earliestDate: Date(timeIntervalSince1970: 0),
+            latestDate: Date(timeIntervalSince1970: 1)
+        )
+        context.totals.add(input: 100, output: Int.max, cacheCreation: 0, cacheRead: 0, reasoning: 100)
+        context.sessionIDs = ["session-hostile"]
+
+        let result = CodexCostScanner.makeCost(from: context)
+
+        XCTAssertEqual(result?.0.outputTokens, Int.max, "output + reasoning must saturate, not trap")
+    }
+
+    /// Same window, but `input` is already saturated and `cacheRead` is a huge
+    /// (non-saturated) value — the exact "clamp before subtracting" shape
+    /// `apply`'s own event-level guard documents, now asserted at `makeCost`.
+    func testCodexMakeCostClampsBillableInputWhenCacheReadExceedsSaturatedInput() {
+        var context = CostScanWindowContext(
+            earliestDate: Date(timeIntervalSince1970: 0),
+            latestDate: Date(timeIntervalSince1970: 1)
+        )
+        context.totals.add(input: Int.max, output: 10, cacheCreation: 0, cacheRead: Int.max, reasoning: 0)
+        context.sessionIDs = ["session-hostile"]
+
+        let result = CodexCostScanner.makeCost(from: context)
+
+        XCTAssertEqual(result?.0.inputTokens, 0, "clamped, not a trapping subtraction of two saturated values")
+    }
+
+    // MARK: - TokenUsageAggregator: the same combine, shared by every scanner (issue #568)
+
+    func testMakeDailyUsageSurvivesOutputAndReasoningBothIndependentlySaturated() {
+        var tokens = TokenAccumulator()
+        tokens.add(input: 10, output: Int.max, cacheCreation: 0, cacheRead: 0, reasoning: 50)
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let daily = TokenUsageAggregator.makeDailyUsage(
+            from: [day: tokens],
+            provider: .codexCli,
+            pricing: TokenPricing(input: 0, output: 0, cacheCreation: 0, cacheRead: 0)
+        )
+
+        XCTAssertEqual(daily.first?.outputTokens, Int.max)
+    }
+
+    func testMakeBreakdownsSurvivesOutputAndReasoningBothIndependentlySaturated() {
+        var tokens = TokenAccumulator()
+        tokens.add(input: 10, output: Int.max, cacheCreation: 0, cacheRead: 0, reasoning: 50)
+
+        let breakdowns = TokenUsageAggregator.makeBreakdowns(
+            from: ["gpt-5.5": tokens],
+            provider: .codexCli,
+            pricing: TokenPricing(input: 0, output: 0, cacheCreation: 0, cacheRead: 0)
+        )
+
+        XCTAssertEqual(breakdowns.first?.outputTokens, Int.max)
+    }
+
+    // MARK: - TokenCost.swift: the remaining aggregation boundaries (issue #568)
+
+    /// `ProviderDailyTotal.totalTokens` combines three already-summed fields.
+    func testProviderDailyTotalTotalTokensSurvivesTwoSaturatedFields() {
+        let total = ProviderDailyTotal(
+            provider: .claudeCode,
+            inputTokens: Int.max,
+            outputTokens: Int.max,
+            cacheReadTokens: 10,
+            estimatedCostUSD: 1
+        )
+
+        XCTAssertEqual(total.totalTokens, Int.max)
+    }
+
+    /// `CostSummary.dailyCostWindow` reduces many `DailyTokenUsage` rows per
+    /// provider with a plain `reduce(0, +)` before issue #568 — each row's own
+    /// token fields can already be saturated from an earlier corrupt scan.
+    func testDailyCostWindowSurvivesMultipleRowsEachCarryingASaturatedField() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+
+        let summary = CostSummary(
+            costs: [],
+            totalCostUSD: 0,
+            totalTokens: 0,
+            periodDays: 30,
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: today,
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1
+                ),
+                DailyTokenUsage(
+                    date: yesterday,
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1
+                )
+            ]
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 7, now: now, calendar: calendar)
+
+        XCTAssertEqual(window.providers.first?.inputTokens, Int.max)
+        XCTAssertEqual(window.totalTokens, Int.max)
+    }
+
+    /// `CostSummary.filtered` sums each remaining `TokenCost.totalTokens` with
+    /// a plain `+` before issue #568 — every one of those can already be
+    /// saturated (`TokenCost.totalTokens` itself saturates, but combining two
+    /// saturated totals is a second, separate trap site).
+    func testFilteredCostSummarySurvivesMultipleAlreadySaturatedProviderTotals() {
+        let cost = { (provider: ServiceType) in
+            TokenCost(
+                provider: provider,
+                inputTokens: Int.max,
+                outputTokens: 0,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 1,
+                sessionCount: 1,
+                periodStart: Date(timeIntervalSince1970: 0),
+                periodEnd: Date(timeIntervalSince1970: 1)
+            )
+        }
+        let summary = CostSummary(
+            costs: [cost(.claudeCode), cost(.codexCli)],
+            totalCostUSD: 2,
+            totalTokens: Int.max,
+            periodDays: 30
+        )
+
+        let filtered = summary.filtered(to: [.claudeCode, .codexCli])
+
+        XCTAssertEqual(filtered.totalTokens, Int.max)
+    }
+
+    /// `dailyCostWindow`'s model-breakdown merge (`TokenUsageBreakdownAggregation.merge`)
+    /// folds two days' worth of the same model name together with a plain `+`
+    /// before issue #568.
+    func testDailyCostWindowModelBreakdownMergeSurvivesTwoSaturatedRowsSharingAName() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        let model = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "claude-sonnet-4-5",
+            inputTokens: Int.max,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1,
+            sessionCount: 1
+        )
+        let summary = CostSummary(
+            costs: [],
+            totalCostUSD: 0,
+            totalTokens: 0,
+            periodDays: 30,
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: today,
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1,
+                    modelBreakdowns: [model]
+                ),
+                DailyTokenUsage(
+                    date: yesterday,
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1,
+                    modelBreakdowns: [model]
+                )
+            ]
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 7, now: now, calendar: calendar)
+
+        XCTAssertEqual(window.providers.first?.modelBreakdowns?.first?.inputTokens, Int.max)
+    }
+
+    // MARK: - CLIJSONOutput: rolled-up model breakdowns across providers (issue #568)
+
+    /// `meterbar cost --json`'s `models` field rolls up each provider's model
+    /// breakdowns by name (`ModelBreakdown.merge`) — reading persisted
+    /// `TokenCost` data straight back, exactly the shape `SafeAccumulate`'s own
+    /// doc comment names as the original crash's second life.
+    func testCLIJSONRolledUpModelsSurviveTwoProvidersSharingAModelNameBothSaturated() throws {
+        let sharedModel = TokenUsageBreakdown(
+            provider: .claudeCode,
+            name: "shared-model",
+            inputTokens: Int.max,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1,
+            sessionCount: 1
+        )
+        let costs = [ServiceType.claudeCode, .codexCli].map { provider in
+            TokenCost(
+                provider: provider,
+                inputTokens: Int.max,
+                outputTokens: 0,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 1,
+                sessionCount: 1,
+                periodStart: Date(timeIntervalSince1970: 0),
+                periodEnd: Date(timeIntervalSince1970: 1),
+                modelBreakdowns: [sharedModel]
+            )
+        }
+        let cache = CostSummaryCache(
+            summary: CostSummary(costs: costs, totalCostUSD: 2, totalTokens: Int.max, periodDays: 30),
+            lastScanDate: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        // Must not trap building or encoding the response.
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: CostCLIJSONResponse(cache: cache).jsonData()) as? [String: Any]
+        )
+        let models = try XCTUnwrap(object["models"] as? [[String: Any]])
+
+        XCTAssertEqual(models.first?["inputTokens"] as? Int, Int.max)
+    }
+
+    // MARK: - ICloudUsageAggregation: the #572 window-token aggregation path (issue #568)
+
+    /// `CostSummary.dailyCostWindow`'s `totalTokensIncludingCacheCreation`
+    /// (added by #572, the dashboard headline for every window) sums every
+    /// windowed row's own `totalTokens` — each of which can already be
+    /// saturated.
+    func testTotalTokensIncludingCacheCreationSurvivesMultipleSaturatedRows() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+
+        let summary = CostSummary(
+            costs: [],
+            totalCostUSD: 0,
+            totalTokens: 0,
+            periodDays: 30,
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: today,
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheCreationTokens: Int.max,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1
+                ),
+                DailyTokenUsage(
+                    date: yesterday,
+                    provider: .codexCli,
+                    inputTokens: Int.max,
+                    outputTokens: 0,
+                    cacheCreationTokens: Int.max,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1
+                )
+            ]
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 7, now: now, calendar: calendar)
+
+        XCTAssertEqual(window.totalTokensIncludingCacheCreation, Int.max)
+    }
+
+    private func utcCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return calendar
+    }
+
     // MARK: - Persisted saturated row: the crash that moved to the Costs page
 
     /// A saturated field persisted to `cost-summary-v2.json` (or read from an

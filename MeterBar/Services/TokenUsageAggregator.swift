@@ -13,8 +13,13 @@ enum TokenUsageAggregator {
     ) -> [HourlyTokenUsage] {
         hourlyTotals.map { hour, tokens in
             let rowPricing = pricingAt?(hour) ?? pricing
-            let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
-            let output = tokens.output + tokens.reasoning
+            // Saturating (issue #568): `tokens` is a `TokenAccumulator` whose
+            // fields can each already sit at `Int.max` independently — see
+            // `CodexCostScanner.makeCost`, which has the identical shape.
+            let billableInput = provider == .codexCli
+                ? SafeAccumulate.clampedNonNegativeDifference(tokens.input, tokens.cacheRead)
+                : tokens.input
+            let output = SafeAccumulate.add(tokens.output, tokens.reasoning)
             let cost = tokens.estimatedCostUSD > 0
                 ? tokens.estimatedCostUSD
                 : TokenCostMath.calculateCost(
@@ -53,12 +58,16 @@ enum TokenUsageAggregator {
         dailyTotals.map { day, tokens in
             let dayPricing = pricingAt?(nil, day) ?? pricing
             let pricingForName = pricingAt.map { resolve in { (name: String) in resolve(name, day) } }
-            let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
+            // Saturating (issue #568) — see `makeHourlyUsage` above.
+            let billableInput = provider == .codexCli
+                ? SafeAccumulate.clampedNonNegativeDifference(tokens.input, tokens.cacheRead)
+                : tokens.input
+            let dailyOutput = SafeAccumulate.add(tokens.output, tokens.reasoning)
             let cost = tokens.estimatedCostUSD > 0
                 ? tokens.estimatedCostUSD
                 : TokenCostMath.calculateCost(
                     input: billableInput,
-                    output: tokens.output + tokens.reasoning,
+                    output: dailyOutput,
                     cacheCreation: tokens.cacheCreation,
                     cacheRead: tokens.cacheRead,
                     pricing: dayPricing
@@ -78,7 +87,7 @@ enum TokenUsageAggregator {
                 date: day,
                 provider: provider,
                 inputTokens: billableInput,
-                outputTokens: tokens.output + tokens.reasoning,
+                outputTokens: dailyOutput,
                 cacheCreationTokens: tokens.cacheCreation,
                 cacheReadTokens: tokens.cacheRead,
                 estimatedCostUSD: cost,
@@ -115,8 +124,11 @@ enum TokenUsageAggregator {
     ) -> [TokenUsageBreakdown] {
         totals.map { name, tokens in
             let rowPricing = pricingForName?(name) ?? pricing
-            let billableInput = provider == .codexCli ? max(0, tokens.input - tokens.cacheRead) : tokens.input
-            let output = tokens.output + tokens.reasoning
+            // Saturating (issue #568) — see `makeHourlyUsage` above.
+            let billableInput = provider == .codexCli
+                ? SafeAccumulate.clampedNonNegativeDifference(tokens.input, tokens.cacheRead)
+                : tokens.input
+            let output = SafeAccumulate.add(tokens.output, tokens.reasoning)
             let cost = tokens.estimatedCostUSD > 0
                 ? tokens.estimatedCostUSD
                 : TokenCostMath.calculateCost(

@@ -64,8 +64,14 @@ enum CodexCostScanner {
         // what the window reports as `periodEnd`. Daily rows resolve per day.
         let windowEnd = context.latestDate
         let pricing = pricingAt(nil, windowEnd)
-        let billableInput = max(0, totals.input - totals.cacheRead)
-        let output = totals.output + totals.reasoning
+        // Saturating (issue #568): `totals` is a `TokenAccumulator` whose
+        // individual fields can each independently already sit at `Int.max`
+        // after folding many events (`TokenAccumulator.add` saturates each
+        // field on its own, but never combines two of them) — the same shape
+        // as `apply`'s per-event clamp just below in this file. `max(0, a - b)`
+        // and a plain `+` here would trap on exactly that combination.
+        let billableInput = SafeAccumulate.clampedNonNegativeDifference(totals.input, totals.cacheRead)
+        let output = SafeAccumulate.add(totals.output, totals.reasoning)
         // Prefer the sum of per-event costs, each priced at its own timestamp's
         // rate; fall back to the rate in effect when the tokens were recorded
         // only for totals that carry no per-event cost (issue #339).
