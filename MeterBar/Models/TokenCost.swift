@@ -693,9 +693,12 @@ nonisolated public struct CostSummary: Codable, Sendable {
                 let hasCompleteSessions = rows.allSatisfy { $0.sessionBreakdowns != nil }
                 return ProviderDailyTotal(
                     provider: provider,
-                    inputTokens: rows.reduce(0) { $0 + $1.inputTokens },
-                    outputTokens: rows.reduce(0) { $0 + $1.outputTokens },
-                    cacheReadTokens: rows.reduce(0) { $0 + $1.cacheReadTokens },
+                    // Saturating (issue #568): each row's own token fields can
+                    // already be saturated from an earlier fold, so a plain
+                    // `reduce(0, +)` across many days would trap here instead.
+                    inputTokens: SafeAccumulate.sum(rows.map(\.inputTokens)),
+                    outputTokens: SafeAccumulate.sum(rows.map(\.outputTokens)),
+                    cacheReadTokens: SafeAccumulate.sum(rows.map(\.cacheReadTokens)),
                     estimatedCostUSD: rows.reduce(0) { $0 + $1.estimatedCostUSD },
                     modelBreakdowns: hasCompleteModels
                         ? TokenUsageBreakdownAggregation.merge(rows.flatMap { $0.modelBreakdowns ?? [] })
@@ -740,7 +743,10 @@ nonisolated public struct CostSummary: Codable, Sendable {
             coveredDays: min(requestedDays, min(periodDays, cachedSpanDays)),
             providers: providers,
             totalCostUSD: providers.reduce(0) { $0 + $1.estimatedCostUSD },
-            totalTokens: providers.reduce(0) { $0 + $1.totalTokens },
+            // Saturating (issue #568): each provider's own `totalTokens` can
+            // already be saturated (see `ProviderDailyTotal.totalTokens`
+            // above), so summing several providers with a plain `+` traps.
+            totalTokens: SafeAccumulate.sum(providers.map(\.totalTokens)),
             totalTokensIncludingCacheCreation: totalTokensIncludingCacheCreation
         )
     }
@@ -770,7 +776,9 @@ nonisolated public struct CostSummary: Codable, Sendable {
         var filtered = CostSummary(
             costs: visibleCosts,
             totalCostUSD: visibleCosts.reduce(0) { $0 + $1.estimatedCostUSD },
-            totalTokens: visibleCosts.reduce(0) { $0 + $1.totalTokens },
+            // Saturating (issue #568): each cost's own `totalTokens` can
+            // already be saturated, so filtering must not re-trap on it.
+            totalTokens: SafeAccumulate.sum(visibleCosts.map(\.totalTokens)),
             periodDays: periodDays,
             dailyUsage: visibleDailyUsage,
             hourlyUsage: visibleHourlyUsage,
@@ -830,8 +838,13 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
     /// The version-1 windowed CLI DTO deliberately omits cache-creation tokens,
     /// even though its source daily rows now retain them. Keep this sum aligned
     /// with that published compatibility boundary.
+    ///
+    /// Saturating (issue #568, follow-up to #541): each field is already a
+    /// `SafeAccumulate`-folded sum of many daily rows and can independently
+    /// sit at `Int.max`, so a plain `+` combining two of them here would trap
+    /// on the very next read of a windowed CLI total.
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheReadTokens
+        SafeAccumulate.sum([inputTokens, outputTokens, cacheReadTokens])
     }
 
     public var formattedCost: String {
@@ -905,17 +918,21 @@ nonisolated private enum TokenUsageBreakdownAggregation {
     static func merge(_ rows: [TokenUsageBreakdown]) -> [TokenUsageBreakdown] {
         var byName: [String: TokenUsageBreakdown] = [:]
 
+        // Saturating (issue #568): a persisted breakdown row can already carry
+        // a saturated field from an earlier corrupt scan, and this merge runs
+        // every time cached daily attribution is windowed — a plain `+` would
+        // trap on the very next row that shares a name with a poisoned one.
         for row in rows {
             let existing = byName[row.name]
             byName[row.name] = TokenUsageBreakdown(
                 provider: row.provider,
                 name: row.name,
-                inputTokens: (existing?.inputTokens ?? 0) + row.inputTokens,
-                outputTokens: (existing?.outputTokens ?? 0) + row.outputTokens,
-                cacheCreationTokens: (existing?.cacheCreationTokens ?? 0) + row.cacheCreationTokens,
-                cacheReadTokens: (existing?.cacheReadTokens ?? 0) + row.cacheReadTokens,
+                inputTokens: SafeAccumulate.add(existing?.inputTokens ?? 0, row.inputTokens),
+                outputTokens: SafeAccumulate.add(existing?.outputTokens ?? 0, row.outputTokens),
+                cacheCreationTokens: SafeAccumulate.add(existing?.cacheCreationTokens ?? 0, row.cacheCreationTokens),
+                cacheReadTokens: SafeAccumulate.add(existing?.cacheReadTokens ?? 0, row.cacheReadTokens),
                 estimatedCostUSD: (existing?.estimatedCostUSD ?? 0) + row.estimatedCostUSD,
-                sessionCount: (existing?.sessionCount ?? 0) + row.sessionCount,
+                sessionCount: SafeAccumulate.add(existing?.sessionCount ?? 0, row.sessionCount),
                 modelBreakdowns: merge((existing?.modelBreakdowns ?? []) + row.modelBreakdowns),
                 sessionBreakdowns: merge((existing?.sessionBreakdowns ?? []) + row.sessionBreakdowns)
             )

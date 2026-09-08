@@ -321,9 +321,35 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         }
     }
 
+    /// Validates `number` as finite, integral, and representable as `Int`
+    /// *before* touching `.intValue` (issue #568, follow-up to #541).
+    ///
+    /// Apple documents `NSNumber.intValue` as producing "erroneous results"
+    /// for a value outside the target type's range, and a non-integral
+    /// `NSNumber` (e.g. `1.5`) truncates to a plausible-looking, silently
+    /// wrong `Int` rather than failing. Checking a field's range only *after*
+    /// calling `.intValue` — the previous shape of this decoder — cannot
+    /// catch either case: the out-of-range conversion has already produced
+    /// garbage, and a fractional value converts to an in-range `Int` that
+    /// looks perfectly valid. Every check below runs on the untouched
+    /// `NSNumber`; `.intValue` is only called once every check has passed,
+    /// matching the fail-closed stance `decodeRollup`/`rollupDay` already
+    /// take toward malformed peer data.
+    nonisolated static func validatedInt(_ number: NSNumber?) -> Int? {
+        guard let number else { return nil }
+        let double = number.doubleValue
+        guard double.isFinite,
+              double.rounded(.towardZero) == double,
+              double >= Double(Int.min),
+              double <= Double(Int.max) else {
+            return nil
+        }
+        return number.intValue
+    }
+
     nonisolated static func decodeDevice(_ record: CKRecord) -> ICloudUsageDevice? {
         guard record.recordType == ICloudUsageRecordSchema.deviceRecordType,
-              (record["schemaVersion"] as? NSNumber)?.intValue == ICloudUsageDevice.schemaVersion,
+              Self.validatedInt(record["schemaVersion"] as? NSNumber) == ICloudUsageDevice.schemaVersion,
               let rawID = record["deviceID"] as? String,
               let id = UUID(uuidString: rawID),
               let name = record["deviceName"] as? String,
@@ -334,33 +360,36 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     }
 
     nonisolated static func decodeRollup(_ record: CKRecord) -> ICloudDailyUsageRollup? {
-        // Range-validated at both ends (issue #541): a poisoned rollup can
-        // arrive from another Mac, and `NSNumber.intValue` on an out-of-range
-        // number is undefined behavior, not a trap this guard can catch by
-        // itself — so every token field is also checked against
-        // `tokenFieldRange` before it is trusted. A required field outside
-        // that range makes the whole rollup corrupt input: excluded here,
-        // never folded into a total read as real.
+        // Range-validated at both ends (issue #541), and every field's
+        // NSNumber is validated as finite/integral/in-Int-range *before*
+        // `.intValue` ever runs (issue #568) — see `validatedInt`. A required
+        // field that fails either check makes the whole rollup corrupt input:
+        // excluded here, never folded into a total read as real.
         guard record.recordType == ICloudUsageRecordSchema.rollupRecordType,
-              (record["schemaVersion"] as? NSNumber)?.intValue == ICloudDailyUsageRollup.schemaVersion,
+              Self.validatedInt(record["schemaVersion"] as? NSNumber) == ICloudDailyUsageRollup.schemaVersion,
               let rawDeviceID = record["deviceID"] as? String,
               let deviceID = UUID(uuidString: rawDeviceID),
               let rawProvider = record["provider"] as? String,
               let provider = ServiceType(rawValue: rawProvider),
               let rawDay = record["day"] as? String,
               let day = ICloudUsageRecordSchema.date(fromDayString: rawDay),
-              let input = (record["inputTokens"] as? NSNumber)?.intValue,
+              let input = Self.validatedInt(record["inputTokens"] as? NSNumber),
               ICloudUsageRecordSchema.tokenFieldRange.contains(input),
-              let output = (record["outputTokens"] as? NSNumber)?.intValue,
+              let output = Self.validatedInt(record["outputTokens"] as? NSNumber),
               ICloudUsageRecordSchema.tokenFieldRange.contains(output),
-              let cacheRead = (record["cacheReadTokens"] as? NSNumber)?.intValue,
+              let cacheRead = Self.validatedInt(record["cacheReadTokens"] as? NSNumber),
               ICloudUsageRecordSchema.tokenFieldRange.contains(cacheRead),
               let cost = (record["estimatedCostUSD"] as? NSNumber)?.doubleValue,
               let quotaData = record["quotaSnapshots"] as? Data,
               let updatedAt = record["updatedAt"] as? Date else {
             return nil
         }
-        let cacheCreation = ((record["cacheCreationTokens"] as? NSNumber)?.intValue ?? 0)
+        // Optional field: an invalid value (non-integral, non-finite,
+        // out-of-`Int`-range) falls back to 0 rather than rejecting the
+        // whole otherwise-valid row, matching the pre-existing
+        // required-vs-optional split — but the fallback only ever sees a
+        // value `validatedInt` already proved safe to convert.
+        let cacheCreation = (Self.validatedInt(record["cacheCreationTokens"] as? NSNumber) ?? 0)
             .clamped(to: ICloudUsageRecordSchema.tokenFieldRange)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970

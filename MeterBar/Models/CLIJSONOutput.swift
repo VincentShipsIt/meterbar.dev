@@ -424,14 +424,19 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             sessionCount = breakdown.sessionCount
         }
 
+        // Saturating (issue #568): rolls up model attribution across every
+        // provider for `meterbar cost --json` — reading persisted `TokenCost`
+        // data straight back (see `SafeAccumulate`'s own doc comment, which
+        // names this exact CLI path), so a field already saturated by an
+        // earlier corrupt scan must not trap the very next provider merged in.
         mutating func merge(_ other: ModelBreakdown) {
-            inputTokens += other.inputTokens
-            outputTokens += other.outputTokens
-            cacheCreationTokens += other.cacheCreationTokens
-            cacheReadTokens += other.cacheReadTokens
-            totalTokens += other.totalTokens
+            inputTokens = SafeAccumulate.add(inputTokens, other.inputTokens)
+            outputTokens = SafeAccumulate.add(outputTokens, other.outputTokens)
+            cacheCreationTokens = SafeAccumulate.add(cacheCreationTokens, other.cacheCreationTokens)
+            cacheReadTokens = SafeAccumulate.add(cacheReadTokens, other.cacheReadTokens)
+            totalTokens = SafeAccumulate.add(totalTokens, other.totalTokens)
             estimatedCostUSD += other.estimatedCostUSD
-            sessionCount += other.sessionCount
+            sessionCount = SafeAccumulate.add(sessionCount, other.sessionCount)
         }
     }
 }
