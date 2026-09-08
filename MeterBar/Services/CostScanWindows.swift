@@ -227,10 +227,12 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
         eventKeys.formUnion(other.eventKeys)
         guard other.hasUsage else { return }
 
-        input += other.input
-        output += other.output
-        cacheCreation += other.cacheCreation
-        cacheRead += other.cacheRead
+        // Saturating (issue #541): a saturated field from a corrupt upstream
+        // record must not trap the very next merge that touches it.
+        SafeAccumulate.accumulate(&input, other.input)
+        SafeAccumulate.accumulate(&output, other.output)
+        SafeAccumulate.accumulate(&cacheCreation, other.cacheCreation)
+        SafeAccumulate.accumulate(&cacheRead, other.cacheRead)
         estimatedCost += other.estimatedCost
         sessions += other.sessions
 
@@ -575,11 +577,15 @@ nonisolated struct TokenAccumulator: Sendable, Codable {
         estimatedCostUSD: Double = 0,
         events: Int = 1
     ) {
-        self.input += input
-        self.output += output
-        self.cacheCreation += cacheCreation
-        self.cacheRead += cacheRead
-        self.reasoning += reasoning
+        // Saturating (issue #541): every one of these can arrive already
+        // saturated to `Int.max`/`Int.min` from a hostile or corrupt log line
+        // (`CostScanValues.int(_:)`), and a plain `+=` would trap on the very
+        // next fold instead of on the poisoned value itself.
+        SafeAccumulate.accumulate(&self.input, input)
+        SafeAccumulate.accumulate(&self.output, output)
+        SafeAccumulate.accumulate(&self.cacheCreation, cacheCreation)
+        SafeAccumulate.accumulate(&self.cacheRead, cacheRead)
+        SafeAccumulate.accumulate(&self.reasoning, reasoning)
         self.estimatedCostUSD += estimatedCostUSD
         self.events += events
     }

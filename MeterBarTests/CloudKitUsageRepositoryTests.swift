@@ -293,6 +293,84 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         XCTAssertNil(CloudKitUsageRepository.decodeRollup(record))
     }
 
+    // MARK: - Ingress range validation (issue #541)
+
+    /// The write side (`ICloudUsageRecordSchema.fields(for:)`) now clamps both
+    /// ends, but a poisoned rollup can still arrive from another Mac — a peer
+    /// running an older build, a buggy fork, or a corrupted zone. `decodeRollup`
+    /// has to reject it on its own rather than trust `NSNumber.intValue`
+    /// unbounded, or the very next fold that sums this row with a normal one
+    /// traps.
+    func testDecodeRollupRejectsARequiredTokenFieldSaturatedByAHostilePeer() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-poisoned", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["inputTokens"] = Int.max as NSNumber
+
+        XCTAssertNil(CloudKitUsageRepository.decodeRollup(record))
+    }
+
+    func testDecodeRollupRejectsANegativeRequiredTokenField() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-negative", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["outputTokens"] = -1 as NSNumber
+
+        XCTAssertNil(CloudKitUsageRepository.decodeRollup(record))
+    }
+
+    /// The optional `cacheCreationTokens` field predates issue #270 and is
+    /// missing from older rollups, so a bad value there clamps rather than
+    /// rejecting the whole (otherwise valid) row.
+    func testDecodeRollupClampsAnOutOfRangeOptionalCacheCreationField() throws {
+        let record = CKRecord(
+            recordType: ICloudUsageRecordSchema.rollupRecordType,
+            recordID: CKRecord.ID(recordName: "rollup-cache-clamped", zoneID: zoneID)
+        )
+        CloudKitUsageRepository.apply(
+            try ICloudUsageRecordSchema.fields(for: sampleRollup()),
+            to: record
+        )
+        record["cacheCreationTokens"] = Int.max as NSNumber
+
+        let decoded = try XCTUnwrap(CloudKitUsageRepository.decodeRollup(record))
+
+        XCTAssertEqual(decoded.cacheCreationTokens, ICloudUsageRecordSchema.tokenFieldRange.upperBound)
+        // Must not trap computing the total from a row carrying a clamped
+        // near-`Int.max` field alongside three ordinary ones.
+        XCTAssertGreaterThan(decoded.totalTokens, 0)
+    }
+
+    func testEgressClampsATokenFieldAboveTheSaneRangeRatherThanPassingItThrough() throws {
+        let hostile = ICloudDailyUsageRollup(
+            deviceID: deviceID,
+            provider: .codexCli,
+            day: Date(timeIntervalSince1970: 1_799_971_200),
+            inputTokens: Int.max,
+            outputTokens: -5,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1,
+            quotaSnapshots: [],
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        let fields = try ICloudUsageRecordSchema.fields(for: hostile)
+
+        XCTAssertEqual(fields["inputTokens"] as? Int, ICloudUsageRecordSchema.tokenFieldRange.upperBound)
+        XCTAssertEqual(fields["outputTokens"] as? Int, 0)
+    }
+
     // MARK: - Retention pruning
 
     /// 2026-09-02T00:00:00Z. With `retentionDayCount = 90` the oldest retained

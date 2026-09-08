@@ -330,12 +330,20 @@ private enum Proto {
                 guard offset + 8 <= data.count else { throw GrokResetCreditsRPC.Error.invalidResponse }
                 offset += 8
             case 2:
+                // `readVarint` accepts any value up to 2^64-1 (issue #541): a
+                // hostile grpc-web body with bit 63 set in this length varint
+                // made `Int(length)` trap outright. Convert with `exactly:`
+                // and reject rather than trap, and check the bound as
+                // `lenEnd <= data.count - byteCount` instead of
+                // `lenEnd + byteCount <= data.count` so the comparison itself
+                // cannot overflow either.
                 guard let (length, lenEnd) = readVarint(data, at: offset),
-                      lenEnd + Int(length) <= data.count else {
+                      let byteCount = Int(exactly: length),
+                      lenEnd <= data.count - byteCount else {
                     throw GrokResetCreditsRPC.Error.invalidResponse
                 }
-                result.append((field, data.subdata(in: lenEnd..<(lenEnd + Int(length)))))
-                offset = lenEnd + Int(length)
+                result.append((field, data.subdata(in: lenEnd..<(lenEnd + byteCount))))
+                offset = lenEnd + byteCount
             case 5:
                 guard offset + 4 <= data.count else { throw GrokResetCreditsRPC.Error.invalidResponse }
                 offset += 4

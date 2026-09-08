@@ -388,6 +388,11 @@ enum GrokCostScanner {
         let output = CostScanValues.int(usage["outputTokens"])
         let reasoning = CostScanValues.int(usage["reasoningTokens"])
         guard input > 0 || output > 0 || cached > 0 else { return nil }
+        // A saturated count (issue #541) came from a JSON number out of Int's
+        // range — corrupt input, not a real figure. Drop the whole record
+        // rather than fold a sentinel into a total the user reads as real, the
+        // same as the unparseable-timestamp guard above.
+        guard ![input, cached, output, reasoning].contains(where: SafeAccumulate.isSaturated) else { return nil }
 
         return GrokUsageEvent(
             timestamp: Date(timeIntervalSince1970: seconds),
@@ -450,7 +455,11 @@ enum GrokCostScanner {
         // `totalTokens == inputTokens + outputTokens` exactly. Unpacking here —
         // rather than in `makeCost` — means every downstream consumer, including
         // the shared aggregator, sees the same already-correct figures.
-        let freshInput = max(0, event.input - event.cached)
+        // Clamp before subtracting, not after (issue #541): `max(0, a - b)`
+        // evaluates the subtraction first, so a hostile negative `input`
+        // paired with a huge `cached` underflows and traps before the outer
+        // `max(0, ...)` ever runs.
+        let freshInput = SafeAccumulate.clampedNonNegativeDifference(event.input, event.cached)
         let cost = Double(event.ticks) * Self.usdPerCostTick
 
         // The shared Codex/Grok key, with the cost ticks appended. Parsing

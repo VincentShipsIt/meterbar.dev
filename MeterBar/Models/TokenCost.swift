@@ -83,8 +83,13 @@ nonisolated public struct TokenCost: Codable, Identifiable, Sendable {
         ) ?? []
     }
 
+    // Saturating (issue #541): a persisted row can already carry a saturated
+    // field from a corrupt scan (see `SafeAccumulate`) — a plain `+` here
+    // would move the trap from log parsing to opening the Costs page, the
+    // heatmap, or `meterbar cost --json`, every time the poisoned cache is
+    // read back.
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+        SafeAccumulate.sum([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
     }
 
     public var formattedCost: String {
@@ -161,8 +166,9 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         ) ?? []
     }
 
+    // Saturating (issue #541) — see `TokenCost.totalTokens`.
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+        SafeAccumulate.sum([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
     }
 
     public var formattedCost: String {
@@ -227,8 +233,9 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
         self.sessionBreakdowns = sessionBreakdowns
     }
 
+    // Saturating (issue #541) — see `TokenCost.totalTokens`.
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+        SafeAccumulate.sum([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -314,8 +321,9 @@ nonisolated public struct HourlyTokenUsage: Codable, Identifiable, Sendable {
         self.estimatedCostUSD = estimatedCostUSD
     }
 
+    // Saturating (issue #541) — see `TokenCost.totalTokens`.
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheReadTokens
+        SafeAccumulate.sum([inputTokens, outputTokens, cacheReadTokens])
     }
 }
 

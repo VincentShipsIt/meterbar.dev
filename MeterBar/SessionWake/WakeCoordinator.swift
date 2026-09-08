@@ -32,7 +32,7 @@ actor WakeCoordinator {
         bounds: WakeBounds = .default,
         now: @escaping @Sendable () -> Date = { Date() },
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
-            try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            try await Task.sleep(nanoseconds: WakeCoordinator.clampedNanoseconds(seconds))
         },
         onState: (@Sendable (WakeWatcherState) -> Void)? = nil
     ) {
@@ -232,5 +232,25 @@ actor WakeCoordinator {
         state = next
         stateHistory.append(next)
         onState?(next)
+    }
+
+    /// `TimeInterval` seconds to whole nanoseconds, saturating at `UInt64`'s
+    /// bound instead of trapping (issue #541).
+    ///
+    /// `WakeBounds` already clamps every *preference*-sourced delay into a sane
+    /// range, but `sleepUntilRetry` computes its own delay from `until` — a
+    /// reset instant that arrives verbatim from provider quota data (a Codex
+    /// `resetAt` decoded as milliseconds, a Claude `resets_at` of
+    /// `9999-12-31T23:59:59Z`) and is never run through those bounds. Past
+    /// roughly 585 years, `UInt64(seconds * 1e9)` traps outright.
+    nonisolated static func clampedNanoseconds(_ seconds: TimeInterval) -> UInt64 {
+        let nanosecondsPerSecond: Double = 1_000_000_000
+        // NaN has no sane wait; anything else (including +infinity) is at
+        // least ordered against zero, so only NaN fails closed to "no wait"
+        // here rather than saturating to the maximum.
+        guard !seconds.isNaN else { return 0 }
+        let rawNanoseconds = max(0, seconds) * nanosecondsPerSecond
+        guard rawNanoseconds.isFinite, rawNanoseconds < Double(UInt64.max) else { return .max }
+        return UInt64(rawNanoseconds)
     }
 }
