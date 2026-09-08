@@ -103,19 +103,55 @@ nonisolated struct SessionWakeAgentConfiguration: Codable, Equatable, Sendable {
         case eventHooks
     }
 
+    /// Decodes field by field, matching `WidgetPreferences.init(from:)`.
+    ///
+    /// `provider` and `permissionMode` used to decode with a plain `try`, and
+    /// `eventHooks` used `decodeIfPresent`, which still throws when the key is
+    /// present but undecodable rather than yielding `nil`. One raw value this
+    /// build did not know — anywhere in the payload — failed the whole
+    /// decode. `SessionWakeAgentStateStore.loadConfiguration()`'s `try?` then
+    /// returned `nil`, `SessionWakeAgent` treated that as "not configured" and
+    /// exited, and `syncAgentControlFlags` also early-returned on `nil` — so
+    /// nothing ever repaired it and Session Wake silently never ran again.
+    /// Every field now degrades to a fail-closed default alone: `provider`
+    /// falls back to `.claude`, the original default (and only) provider;
+    /// `permissionMode` falls back to `.safe`, the documented v1 default that
+    /// never silently escalates to `.bypass`; the two control-flag Bools fall
+    /// back to `false` so a document this build cannot fully read is never
+    /// treated as still armed.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        featureEnabled = try values.decode(Bool.self, forKey: .featureEnabled)
-        isArmed = try values.decode(Bool.self, forKey: .isArmed)
-        provider = try values.decode(WakeProvider.self, forKey: .provider)
-        accountDirectory = try values.decodeIfPresent(String.self, forKey: .accountDirectory)
-        permissionMode = try values.decode(WakePermissionMode.self, forKey: .permissionMode)
-        bypassAcknowledged = try values.decode(Bool.self, forKey: .bypassAcknowledged)
-        prompt = try values.decode(String.self, forKey: .prompt)
-        notifyOnCompletion = try values.decode(Bool.self, forKey: .notifyOnCompletion)
-        maxSessionsPerRun = try values.decode(Int.self, forKey: .maxSessionsPerRun)
-        maxTurns = try values.decode(Int.self, forKey: .maxTurns)
-        eventHooks = try values.decodeIfPresent(WakeEventHookConfiguration.self, forKey: .eventHooks) ?? .disabled
+        featureEnabled = values.decodeTolerantly(Bool.self, forKey: .featureEnabled) ?? false
+        isArmed = values.decodeTolerantly(Bool.self, forKey: .isArmed) ?? false
+        provider = values.decodeCaseTolerantly(WakeProvider.self, forKey: .provider) ?? .claude
+        accountDirectory = values.decodeTolerantly(String.self, forKey: .accountDirectory)
+        permissionMode = values.decodeCaseTolerantly(WakePermissionMode.self, forKey: .permissionMode) ?? .safe
+        bypassAcknowledged = values.decodeTolerantly(Bool.self, forKey: .bypassAcknowledged) ?? false
+        prompt = values.decodeTolerantly(String.self, forKey: .prompt) ?? WakeCommandBuilder.defaultPrompt
+        notifyOnCompletion = values.decodeTolerantly(Bool.self, forKey: .notifyOnCompletion) ?? false
+        maxSessionsPerRun = values.decodeTolerantly(
+            Int.self,
+            forKey: .maxSessionsPerRun
+        ) ?? WakeBounds.default.maxSessionsPerRun
+        maxTurns = values.decodeTolerantly(Int.self, forKey: .maxTurns) ?? WakeBounds.default.maxTurns
+        eventHooks = values.decodeTolerantly(WakeEventHookConfiguration.self, forKey: .eventHooks) ?? .disabled
+    }
+}
+
+private extension KeyedDecodingContainer {
+    /// Decodes a value, treating one this build cannot read as absent so the
+    /// caller can substitute its own default instead of failing the document.
+    func decodeTolerantly<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        try? decodeIfPresent(T.self, forKey: key)
+    }
+
+    /// Decodes an enum through its raw value so a case written by a different
+    /// app version degrades to `nil` instead of failing the whole payload.
+    func decodeCaseTolerantly<T: RawRepresentable>(
+        _ type: T.Type,
+        forKey key: Key
+    ) -> T? where T.RawValue: Decodable {
+        decodeTolerantly(T.RawValue.self, forKey: key).flatMap(T.init(rawValue:))
     }
 }
 

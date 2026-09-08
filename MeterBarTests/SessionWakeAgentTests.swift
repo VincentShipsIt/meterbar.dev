@@ -84,6 +84,71 @@ final class SessionWakeAgentTests: XCTestCase {
         XCTAssertTrue(restored.canRun)
     }
 
+    /// An unknown provider, permission mode, or hook event raw value must
+    /// degrade only that field, never fail the whole document.
+    ///
+    /// Before this fix, `provider` and `permissionMode` decoded with a plain
+    /// `try`, and `eventHooks` used `decodeIfPresent`, which still throws
+    /// when the key is present but undecodable rather than yielding `nil`.
+    /// One unknown raw value anywhere in the payload failed the whole decode:
+    /// `SessionWakeAgentStateStore.loadConfiguration()`'s `try?` returned
+    /// `nil`, `SessionWakeAgent.run` treated that as "not configured" and
+    /// exited, and `SessionWakeSettingsStore.syncAgentControlFlags` also
+    /// early-returned on `nil` — so nothing ever repaired it and Session Wake
+    /// silently never ran again.
+    func testUnknownProviderPermissionModeAndHookEventDegradeInPlace() throws {
+        let configuration = SessionWakeAgentConfiguration(
+            featureEnabled: true,
+            isArmed: true,
+            provider: .codex,
+            accountDirectory: "/tmp/codex-profile",
+            permissionMode: .bypass,
+            bypassAcknowledged: true,
+            prompt: "continue safely",
+            notifyOnCompletion: true,
+            maxSessionsPerRun: 3,
+            maxTurns: 20,
+            eventHooks: WakeEventHookConfiguration(
+                executablePath: "/usr/bin/true",
+                arguments: ["--literal"],
+                enabledEvents: [.quotaReset, .wakeComplete]
+            )
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any]
+        )
+        object["provider"] = "futureProvider"
+        object["permissionMode"] = "futureMode"
+        if var eventHooks = object["eventHooks"] as? [String: Any] {
+            eventHooks["enabledEvents"] = [WakeEventHookEvent.quotaReset.rawValue, "future-event"]
+            object["eventHooks"] = eventHooks
+        }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        defaults.set(data, forKey: SessionWakeAgentStateStore.configurationKey)
+
+        let restored = try XCTUnwrap(SessionWakeAgentStateStore(userDefaults: defaults).loadConfiguration())
+
+        // The two unreadable enum fields fail closed to their safest default
+        // rather than failing the document...
+        XCTAssertEqual(restored.provider, .claude)
+        XCTAssertEqual(restored.permissionMode, .safe)
+        // ...and everything else this build does understand survives,
+        // including the hook event this build does recognize.
+        XCTAssertTrue(restored.featureEnabled)
+        XCTAssertTrue(restored.isArmed)
+        XCTAssertEqual(restored.accountDirectory, "/tmp/codex-profile")
+        XCTAssertTrue(restored.bypassAcknowledged)
+        XCTAssertEqual(restored.prompt, "continue safely")
+        XCTAssertTrue(restored.notifyOnCompletion)
+        XCTAssertEqual(restored.maxSessionsPerRun, 3)
+        XCTAssertEqual(restored.maxTurns, 20)
+        XCTAssertEqual(restored.eventHooks.executablePath, "/usr/bin/true")
+        XCTAssertEqual(restored.eventHooks.arguments, ["--literal"])
+        XCTAssertEqual(restored.eventHooks.enabledEvents, [.quotaReset])
+        // permissionMode's fail-closed default never silently escalates.
+        XCTAssertTrue(restored.canRun)
+    }
+
     func testDisarmSynchronouslyUpdatesRunningAgentConfiguration() throws {
         let agentState = SessionWakeAgentStateStore(userDefaults: defaults)
         agentState.saveConfiguration(

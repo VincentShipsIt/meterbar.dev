@@ -136,27 +136,50 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         self.enabledWakeEvents = enabledWakeEvents
     }
 
+    /// Decodes field by field so an unreadable one degrades alone, following
+    /// `WidgetPreferences.init(from:)`.
+    ///
+    /// Every scalar Set here (`Set<QuotaEventKind>`, `Set<ServiceType>`,
+    /// `Set<QuotaEventAccountSelection>`, `Set<WakeEventHookEvent>`) used to
+    /// decode with a plain `try`: one raw value this build does not know threw
+    /// through the whole document, the store's `try?` fell back to `.disabled`,
+    /// and `persist()` immediately wrote that fallback back over both the
+    /// versioned key and the legacy `sessionWakeEventHooks` mirror — losing the
+    /// webhook URL, executable path, arguments, and every explicit selection
+    /// with no recovery path. Now an unrecognized member is simply dropped from
+    /// its set and every other field, including the rest of that same set,
+    /// survives.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
-        localDeliveryEnabled = try values.decodeIfPresent(Bool.self, forKey: .localDeliveryEnabled) ?? false
-        localExecutablePath = try values.decodeIfPresent(String.self, forKey: .localExecutablePath) ?? ""
-        localArguments = try values.decodeIfPresent([String].self, forKey: .localArguments) ?? []
-        webhookDeliveryEnabled = try values.decodeIfPresent(Bool.self, forKey: .webhookDeliveryEnabled) ?? false
-        webhookURLString = try values.decodeIfPresent(String.self, forKey: .webhookURLString) ?? ""
-        enabledQuotaEvents = try values.decodeIfPresent(
-            Set<QuotaEventKind>.self,
-            forKey: .enabledQuotaEvents
-        ) ?? []
-        enabledProviders = try values.decodeIfPresent(Set<ServiceType>.self, forKey: .enabledProviders) ?? []
-        enabledAccounts = try values.decodeIfPresent(
-            Set<QuotaEventAccountSelection>.self,
+        version = values.decodeTolerantly(Int.self, forKey: .version) ?? Self.currentVersion
+        localDeliveryEnabled = values.decodeTolerantly(Bool.self, forKey: .localDeliveryEnabled) ?? false
+        localExecutablePath = values.decodeTolerantly(String.self, forKey: .localExecutablePath) ?? ""
+        localArguments = values.decodeTolerantly([String].self, forKey: .localArguments) ?? []
+        webhookDeliveryEnabled = values.decodeTolerantly(Bool.self, forKey: .webhookDeliveryEnabled) ?? false
+        webhookURLString = values.decodeTolerantly(String.self, forKey: .webhookURLString) ?? ""
+        enabledQuotaEvents = values.decodeSetTolerantly(QuotaEventKind.self, forKey: .enabledQuotaEvents) ?? []
+        enabledProviders = values.decodeSetTolerantly(ServiceType.self, forKey: .enabledProviders) ?? []
+        enabledAccounts = values.decodeSetTolerantly(
+            QuotaEventAccountSelection.self,
             forKey: .enabledAccounts
         ) ?? []
-        enabledWakeEvents = try values.decodeIfPresent(
-            Set<WakeEventHookEvent>.self,
-            forKey: .enabledWakeEvents
-        ) ?? []
+        enabledWakeEvents = values.decodeSetTolerantly(WakeEventHookEvent.self, forKey: .enabledWakeEvents) ?? []
+    }
+}
+
+private extension KeyedDecodingContainer {
+    /// Decodes a value, treating one this build cannot read as absent so the
+    /// caller can substitute its own default instead of failing the document.
+    func decodeTolerantly<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        try? decodeIfPresent(T.self, forKey: key)
+    }
+
+    /// Decodes a set element by element so one raw value this build does not
+    /// recognize is dropped instead of failing every member. `FailableBox`
+    /// degrades the unreadable element to `nil` under Swift's per-element
+    /// container advancement; this only drops that member, never the field.
+    func decodeSetTolerantly<T: Decodable & Hashable>(_ type: T.Type, forKey key: Key) -> Set<T>? {
+        decodeTolerantly([FailableBox<T>].self, forKey: key).map { Set($0.compactMap(\.value)) }
     }
 }
 
@@ -174,7 +197,15 @@ final class QuotaEventSettingsStore: ObservableObject {
            let decoded = try? JSONDecoder().decode(QuotaEventIntegrationConfiguration.self, from: data) {
             let migrated = decoded.migratingLegacyGrokDefaultSelection()
             configuration = migrated
-            if migrated != decoded {
+            // `version` gates the one write-back a plain load can trigger. A
+            // document written by a build newer than this one may carry a
+            // shape this build only partially understood (that is what the
+            // tolerant decode above is for); this build must never persist its
+            // own normalized view of that document over the original bytes; a
+            // future build that does understand it all needs those bytes
+            // intact. Only rewrite when this build's schema understanding is
+            // at least as new as the document's.
+            if migrated != decoded, decoded.version <= QuotaEventIntegrationConfiguration.currentVersion {
                 persist()
             }
         } else {
