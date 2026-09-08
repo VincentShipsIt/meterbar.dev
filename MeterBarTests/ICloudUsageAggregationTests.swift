@@ -592,6 +592,68 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(result.rollups.count, 2)
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing the
+    /// 30-day `visibleCutoff` by stepping back from that instant without
+    /// re-normalizing every hop preserves 01:00 on the earlier day, pushing a
+    /// rollup that is really inside the window outside the `>=` bound —
+    /// underreporting the dashboard total by exactly the oldest visible day.
+    /// The `Calendar(identifier: .gregorian)` fixture above (no explicit time
+    /// zone) cannot reliably exercise this.
+    func testVisibleWindowSurvivesTheSantiagoMidnightTransition() throws {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        let device = ICloudUsageDevice(id: firstDeviceID, name: "Studio", lastSeenAt: dstNow)
+        // The 29th day back is the oldest day the 30-day window still owes —
+        // exactly the boundary the bug drops first.
+        let oldestVisibleDay = exactDay(2026, 8, 8)
+        let recentRollup = ICloudDailyUsageRollup(
+            deviceID: firstDeviceID,
+            provider: .codexCli,
+            day: exactDay(2026, 9, 6),
+            inputTokens: 10,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1,
+            quotaSnapshots: [],
+            updatedAt: dstNow
+        )
+        let oldestRollup = ICloudDailyUsageRollup(
+            deviceID: firstDeviceID,
+            provider: .codexCli,
+            day: oldestVisibleDay,
+            inputTokens: 20,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 2,
+            quotaSnapshots: [],
+            updatedAt: dstNow
+        )
+
+        let result = ICloudUsageAggregation.fold(
+            devices: [device],
+            rollups: [recentRollup, oldestRollup],
+            now: dstNow,
+            calendar: santiago
+        )
+
+        XCTAssertEqual(result.totalTokens, 30)
+        XCTAssertEqual(result.totalCostUSD, 3, accuracy: 0.000_001)
+    }
+
     func testSchemaContainsOnlyReviewedAggregateFields() throws {
         let source = rollup(firstDeviceID, input: 42, cost: 1.5)
         let payload = try ICloudUsageRecordSchema.fields(for: source)

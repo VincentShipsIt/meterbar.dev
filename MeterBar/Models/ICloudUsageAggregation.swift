@@ -361,11 +361,7 @@ nonisolated enum ICloudUsageAggregation {
 
         let selected = Array(winners.values)
         let today = calendar.startOfDay(for: now)
-        let visibleCutoff = calendar.date(
-            byAdding: .day,
-            value: -(visibleDayCount - 1),
-            to: today
-        ) ?? today
+        let visibleCutoff = CalendarDayStep.day(today, offsetBy: -(visibleDayCount - 1), calendar: calendar)
         let visible = selected.filter {
             let day = calendar.startOfDay(for: $0.day)
             return day >= visibleCutoff && day <= today

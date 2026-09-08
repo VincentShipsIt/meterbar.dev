@@ -545,7 +545,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
 
         let today = calendar.startOfDay(for: now)
         let daysToCheck = max(1, days)
-        let startDate = calendar.date(byAdding: .day, value: -(daysToCheck - 1), to: today) ?? today
+        let startDate = CalendarDayStep.day(today, offsetBy: -(daysToCheck - 1), calendar: calendar)
         let populatedDays = Set(dailyUsage.compactMap { usage -> Date? in
             let day = calendar.startOfDay(for: usage.date)
             guard day >= startDate, day <= today else { return nil }
@@ -633,7 +633,7 @@ nonisolated public struct CostSummary: Codable, Sendable {
     ) -> DailyCostWindow {
         let requestedDays = max(1, days)
         let today = calendar.startOfDay(for: now)
-        let startDate = calendar.date(byAdding: .day, value: -(requestedDays - 1), to: today) ?? today
+        let startDate = CalendarDayStep.day(today, offsetBy: -(requestedDays - 1), calendar: calendar)
 
         let windowRows = dailyUsage.filter { row in
             let day = calendar.startOfDay(for: row.date)

@@ -64,6 +64,61 @@ final class DailyUsageChartBucketingTests: XCTestCase {
         XCTAssertEqual(days.last?.date, day(0))
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day returns 01:00 (00:00–01:00 does not
+    /// exist). Building the 30-day window by stepping from that instant
+    /// without re-normalizing every hop preserves 01:00 on every earlier day,
+    /// so their bucket keys never match a real row's `startOfDay` and the
+    /// chart renders 29 of 30 bars empty. The UTC fixture above cannot
+    /// exercise this — UTC never observes DST.
+    func testWindowSurvivesTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        let todayRow = DailyTokenUsage(
+            date: exactDay(2026, 9, 6).addingTimeInterval(3600 * 3),
+            provider: .claudeCode,
+            inputTokens: 100,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1
+        )
+        let sixDaysAgoRow = DailyTokenUsage(
+            date: exactDay(2026, 8, 31).addingTimeInterval(3600 * 5),
+            provider: .claudeCode,
+            inputTokens: 100,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1
+        )
+
+        let days = DailyUsageChart.buildDays(
+            from: [todayRow, sixDaysAgoRow],
+            daysToShow: 7,
+            now: dstNow,
+            calendar: santiago
+        )
+
+        XCTAssertEqual(days.count, 7)
+        XCTAssertEqual(days.first?.date, exactDay(2026, 8, 31))
+        XCTAssertEqual(days.last?.date, exactDay(2026, 9, 6))
+        XCTAssertEqual(days[0].cost, 1, accuracy: 0.000_001)
+        XCTAssertEqual(days[6].cost, 1, accuracy: 0.000_001)
+        XCTAssertEqual(days[1...5].map(\.cost), [0, 0, 0, 0, 0])
+    }
+
     /// A provider with nothing that day gets no segment, so the stacked column
     /// does not draw a zero-height slab in its colour.
     func testProvidersWithoutUsageAreOmittedFromTheDay() {

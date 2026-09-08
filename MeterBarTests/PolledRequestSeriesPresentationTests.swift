@@ -80,6 +80,60 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
         XCTAssertEqual(series.total, 6, accuracy: 0.000_001)
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing
+    /// `windowStart` by stepping back from that instant without
+    /// re-normalizing every hop preserves 01:00 on the earlier day, pushing a
+    /// day that is really inside the requested window outside the `>=`
+    /// bound. `self.calendar` above has no explicit time zone and cannot
+    /// reliably exercise this.
+    func testDaysOutsideTheRequestedWindowAreExcludedAcrossTheSantiagoMidnightTransition() throws {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? Date()
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        var ledger = ProviderUsageLedger()
+        // Baseline poll, one day before the window opens: establishes the
+        // counter without emitting a row.
+        ledger.record(
+            observation(.cursor, unit: .requests, total: 0, at: exactDay(2026, 8, 7)),
+            calendar: santiago
+        )
+        // The oldest day a 30-day window anchored on 9/6 still owes —
+        // exactly the boundary a raw, un-renormalized step drifts off.
+        ledger.record(
+            observation(.cursor, unit: .requests, total: 500, at: exactDay(2026, 8, 8)),
+            calendar: santiago
+        )
+        ledger.record(
+            observation(.cursor, unit: .requests, total: 520, at: exactDay(2026, 9, 6)),
+            calendar: santiago
+        )
+
+        let series = try XCTUnwrap(
+            PolledRequestSeriesPresentation(
+                ledger: ledger,
+                requestedDays: 30,
+                now: dstNow,
+                calendar: santiago
+            ).providers.first
+        )
+
+        XCTAssertEqual(series.days.map(\.date), [exactDay(2026, 8, 8), exactDay(2026, 9, 6)])
+        XCTAssertEqual(series.total, 520, accuracy: 0.000_001)
+    }
+
     func testDaysAreOrderedOldestFirst() throws {
         var ledger = ProviderUsageLedger()
         ledger.record(observation(.cursor, unit: .requests, total: 0, at: day(-3)))

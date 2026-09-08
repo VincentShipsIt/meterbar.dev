@@ -71,7 +71,7 @@ nonisolated struct PolledRequestSeriesPresentation: Sendable, Equatable {
     ) {
         let normalizedDays = max(1, requestedDays)
         let today = calendar.startOfDay(for: now)
-        let windowStart = calendar.date(byAdding: .day, value: -(normalizedDays - 1), to: today) ?? today
+        let windowStart = CalendarDayStep.day(today, offsetBy: -(normalizedDays - 1), calendar: calendar)
 
         self.requestedDays = normalizedDays
         // `nonUSDProviders` is already sorted by raw value, so the card order is

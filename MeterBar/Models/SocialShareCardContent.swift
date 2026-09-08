@@ -129,15 +129,13 @@ struct SocialShareCardContent: Equatable {
     ) -> [Int] {
         let dayCount = max(1, days)
         let today = calendar.startOfDay(for: now)
-        let startDate = calendar.date(byAdding: .day, value: -(dayCount - 1), to: today) ?? today
+        let startDate = CalendarDayStep.day(today, offsetBy: -(dayCount - 1), calendar: calendar)
         let grouped = Dictionary(grouping: dailyUsage) { usage in
             calendar.startOfDay(for: usage.date)
         }
 
         return (0 ..< dayCount).map { offset in
-            guard let day = calendar.date(byAdding: .day, value: offset, to: startDate) else {
-                return 0
-            }
+            let day = CalendarDayStep.day(startDate, offsetBy: offset, calendar: calendar)
             return grouped[day]?.reduce(0) { $0 + $1.totalTokens } ?? 0
         }
     }

@@ -356,6 +356,34 @@ final class TokenActivityCalendarTests: XCTestCase {
         XCTAssertEqual(activity.endDate, losAngeles.startOfDay(for: dstNow))
     }
 
+    /// `America/Los_Angeles` transitions at 02:00 local, so its `startOfDay`
+    /// is always midnight and the test above cannot reproduce the hazard
+    /// this type's own doc comment warns about. `America/Santiago` springs
+    /// forward *at* local midnight on 2026-09-06 (00:00–01:00 does not
+    /// exist), so this is the zone that actually exercises it — including
+    /// after the day-stepping helper moved out to the shared
+    /// `CalendarDayStep` utility.
+    func testGridSurvivesTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        santiago.locale = Locale(identifier: "en_US_POSIX")
+        santiago.firstWeekday = 1
+        let formatter = ISO8601DateFormatter()
+        let dstNow = formatter.date(from: "2026-09-06T13:00:00Z") ?? now
+
+        XCTAssertEqual(santiago.component(.hour, from: santiago.startOfDay(for: dstNow)), 1)
+
+        let activity = TokenActivityCalendar(summary: makeSummary(), weeks: 4, now: dstNow, calendar: santiago)
+        let dates = activity.days.map(\.date)
+
+        XCTAssertTrue(activity.weeks.allSatisfy { $0.days.count == 7 })
+        XCTAssertTrue(dates.allSatisfy { santiago.startOfDay(for: $0) == $0 })
+        for (previous, next) in zip(dates, dates.dropFirst()) {
+            XCTAssertEqual(santiago.dateComponents([.day], from: previous, to: next).day, 1)
+        }
+        XCTAssertEqual(activity.endDate, santiago.startOfDay(for: dstNow))
+    }
+
     func testDaysAreGroupedInTheSuppliedTimeZone() {
         var tokyo = Calendar(identifier: .gregorian)
         tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo") ?? .current

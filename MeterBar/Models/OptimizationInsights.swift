@@ -505,7 +505,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
     ) -> Int {
         guard days > 0 else { return 0 }
         let today = calendar.startOfDay(for: now)
-        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return 0 }
+        let start = CalendarDayStep.day(today, offsetBy: -(days - 1), calendar: calendar)
         return dailyUsage
             .filter { usage in
                 let day = calendar.startOfDay(for: usage.date)

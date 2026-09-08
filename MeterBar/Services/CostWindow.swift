@@ -16,11 +16,7 @@ enum CostWindow {
     ) -> Date {
         let normalizedDays = max(1, days)
         let today = calendar.startOfDay(for: now)
-        return calendar.date(
-            byAdding: .day,
-            value: -(normalizedDays - 1),
-            to: today
-        ) ?? today
+        return CalendarDayStep.day(today, offsetBy: -(normalizedDays - 1), calendar: calendar)
     }
 
     /// Midnight on the 1st of `now`'s local calendar month (issue #270). Takes
