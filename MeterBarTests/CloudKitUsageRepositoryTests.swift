@@ -82,6 +82,29 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         XCTAssertEqual(try CloudKitResultCollector.values(from: results).count, 1)
     }
 
+    /// `synchronize` creates the device's zone via `modifyRecordZones` before
+    /// saving any records into it. CloudKit reports that per-zone failure
+    /// inside `saveResults` rather than by throwing, so this pins the same
+    /// `CloudKitResultCollector` guard `removeDevice` already has, applied to
+    /// zone *creation* — the one site issue #548 found it missing from.
+    func testZoneCreationFailureIsSurfacedFromTheResultMap() {
+        let results: [CKRecordZone.ID: Result<CKRecordZone, Error>] = [
+            zoneID: .failure(TestError.rejected)
+        ]
+
+        XCTAssertThrowsError(try CloudKitResultCollector.values(from: results)) { error in
+            XCTAssertEqual(error as? TestError, .rejected)
+        }
+    }
+
+    func testSuccessfulZoneCreationCollectsWithoutThrowing() throws {
+        let results: [CKRecordZone.ID: Result<CKRecordZone, Error>] = [
+            zoneID: .success(CKRecordZone(zoneID: zoneID))
+        ]
+
+        XCTAssertEqual(try CloudKitResultCollector.values(from: results).count, 1)
+    }
+
     // MARK: - Delta bookkeeping
 
     func testMergingAppliesChangedRecordsAndCarriesTheToken() {
@@ -158,6 +181,58 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
 
         XCTAssertEqual(state.records.count, 1)
         XCTAssertEqual(state.records[updated.recordID]?["deviceName"] as? String, "Laptop")
+    }
+
+    // MARK: - iCloud account change
+
+    /// A switched-away-from account's cached records and delta token must not
+    /// leak into the newly signed-in account's snapshot. `invalidateForAccountChange`
+    /// is the seam `observeAccountChanges` calls on `.CKAccountChanged`;
+    /// tested directly here since the notification hop itself is
+    /// fire-and-forget.
+    func testInvalidateForAccountChangeDropsAllCachedZoneState() async {
+        let repository = CloudKitUsageRepository(notificationCenter: NotificationCenter())
+        let seeded = CloudKitUsageRepository.merging(
+            CloudKitUsageRepository.ZoneState(),
+            changed: [record(named: "device"), record(named: "rollup-a")],
+            deletedIDs: [],
+            changeToken: nil
+        )
+        await repository.setZoneStateForTesting(seeded, zoneID: zoneID)
+        let seededCount = await repository.cachedZoneCount()
+        XCTAssertEqual(seededCount, 1)
+
+        await repository.invalidateForAccountChange()
+
+        let remainingCount = await repository.cachedZoneCount()
+        XCTAssertEqual(remainingCount, 0)
+    }
+
+    /// Wiring test: a real `.CKAccountChanged` notification, delivered on an
+    /// injected center rather than the process-wide default, must reach the
+    /// actor and clear its cache — not just the directly-called method above.
+    func testCKAccountChangedNotificationInvalidatesTheZoneCache() async throws {
+        let center = NotificationCenter()
+        let repository = CloudKitUsageRepository(notificationCenter: center)
+        let seeded = CloudKitUsageRepository.merging(
+            CloudKitUsageRepository.ZoneState(),
+            changed: [record(named: "device")],
+            deletedIDs: [],
+            changeToken: nil
+        )
+        await repository.setZoneStateForTesting(seeded, zoneID: zoneID)
+
+        center.post(name: .CKAccountChanged, object: nil)
+
+        // The notification is handled via a detached `Task`, so poll with a
+        // bounded timeout instead of asserting immediately after `post`.
+        let deadline = Date().addingTimeInterval(2)
+        while await repository.cachedZoneCount() != 0, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let remainingCount = await repository.cachedZoneCount()
+        XCTAssertEqual(remainingCount, 0)
     }
 
     // MARK: - Encode / decode round trips

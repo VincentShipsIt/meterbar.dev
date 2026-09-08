@@ -21,7 +21,57 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
         var records: [CKRecord.ID: CKRecord] = [:]
     }
 
-    init() {}
+    private let notificationCenter: NotificationCenter
+    private var accountChangeObserver: NSObjectProtocol?
+
+    /// `notificationCenter` is injectable so tests can post `.CKAccountChanged`
+    /// without touching the process-wide default center.
+    ///
+    /// Every zone's cached delta token and decoded records are only valid for
+    /// whichever iCloud account was signed in when they were fetched. If the
+    /// user switches accounts without quitting, `synchronize` would otherwise
+    /// recreate the same-named zone in the new account while `fetchSnapshot`
+    /// kept serving the previous account's cached records and resumed with its
+    /// change token. There is no per-account subset worth keeping, so the
+    /// whole cache is dropped rather than filtered.
+    ///
+    /// Registered synchronously here rather than via a follow-up `Task`: an
+    /// actor initializer may assign its own stored properties directly, and
+    /// doing so keeps the observer live for every notification posted after
+    /// `init` returns instead of racing whichever caller posts first.
+    init(notificationCenter: NotificationCenter = .default) {
+        self.notificationCenter = notificationCenter
+        accountChangeObserver = notificationCenter.addObserver(
+            forName: .CKAccountChanged,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { await self?.invalidateForAccountChange() }
+        }
+    }
+
+    deinit {
+        if let accountChangeObserver {
+            notificationCenter.removeObserver(accountChangeObserver)
+        }
+    }
+
+    /// Drops every zone's cached records and delta token. Called on
+    /// `CKAccountChanged`; also directly testable since the notification hop
+    /// is otherwise fire-and-forget.
+    func invalidateForAccountChange() {
+        zoneStates = [:]
+    }
+
+    /// Test/diagnostic accessor for the number of zones with cached state.
+    func cachedZoneCount() -> Int {
+        zoneStates.count
+    }
+
+    /// Test seam: seeds cached zone state without a live CloudKit round trip.
+    func setZoneStateForTesting(_ state: ZoneState, zoneID: CKRecordZone.ID) {
+        zoneStates[zoneID] = state
+    }
 
     func synchronize(
         device: ICloudUsageDevice,
@@ -29,7 +79,11 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     ) async throws -> ICloudUsageRepositorySnapshot {
         let database = privateDatabase()
         let zone = CKRecordZone(zoneName: zoneName(for: device.id))
-        _ = try await database.modifyRecordZones(saving: [zone], deleting: [])
+        let zoneResults = try await database.modifyRecordZones(saving: [zone], deleting: [])
+        // CloudKit reports per-zone failures inside the result map rather than by
+        // throwing, so an ignored `saveResults` would let the atomic record save
+        // below proceed against a zone that was never actually created.
+        _ = try CloudKitResultCollector.values(from: zoneResults.saveResults)
 
         let deviceRecord = CKRecord(
             recordType: ICloudUsageRecordSchema.deviceRecordType,
