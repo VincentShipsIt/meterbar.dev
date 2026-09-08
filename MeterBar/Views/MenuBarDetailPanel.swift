@@ -238,17 +238,30 @@ struct MenuBarProviderDetailContent: View {
   /// layout tests exercise.
   let dailyUsage: ProviderDailyUsageSeries?
   let isRefreshingUsage: Bool
+  /// `CostTracker.lastScanDate` — the cost-scan pipeline's own freshness,
+  /// independent of the quota poll `snapshot.updatedAt` reflects. `nil` means
+  /// no cost scan has ever run. See `CostScanFreshnessNote` (#530).
+  let costScanDate: Date?
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
   init(
     snapshot: ProviderSnapshot,
     dailyUsage: ProviderDailyUsageSeries? = nil,
-    isRefreshingUsage: Bool = false
+    isRefreshingUsage: Bool = false,
+    costScanDate: Date? = nil
   ) {
     self.snapshot = snapshot
     self.dailyUsage = dailyUsage
     self.isRefreshingUsage = isRefreshingUsage
+    self.costScanDate = costScanDate
+  }
+
+  /// Distinguishes the sparkline's cost-scan freshness from the header's
+  /// quota-poll freshness. Exposed (not private) so it can be asserted
+  /// directly against the wiring, matching `headerContent`.
+  var costScanFreshnessNote: CostScanFreshnessNote {
+    CostScanFreshnessNote(quotaPollUpdatedAt: snapshot.updatedAt, costScanDate: costScanDate)
   }
 
   private var detailLimits: [SnapshotLimit] {
@@ -333,7 +346,8 @@ struct MenuBarProviderDetailContent: View {
         ProviderDailyUsageSparkline(
           series: dailyUsage,
           accentColor: snapshot.accentColor,
-          isRefreshing: isRefreshingUsage
+          isRefreshing: isRefreshingUsage,
+          scanFreshness: costScanFreshnessNote
         )
           .padding(.top, MeterBarTheme.Spacing.xxs)
       }
