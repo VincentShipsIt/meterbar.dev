@@ -255,6 +255,69 @@ final class ProviderStatusMonitorTests: XCTestCase {
     </div></section></main></body></html>
     """
 
+    /// Issue #535, defect 1: the Grok (Web) chip carries a drifted class
+    /// family (`chip chip-danger`) instead of `text-text-<tone>`. An
+    /// unbounded `.*?` between a card's heading and its chip would cross
+    /// this card's `</a>` and pair "Grok (Web)" with Grok Build's healthy
+    /// chip, silently erasing Grok Build. The fix must instead drop the
+    /// unparseable card and leave its healthy neighbours intact.
+    private static let spaceXAIDriftedChipHTML = """
+    <html><body><main class="grow"><h1 class="title">Service Status</h1>
+    <section class="mt-8"><div class="card"><div class="flex flex-col grow">
+    <h3 class="heading-3">Active incidents</h3>
+    <p class="text-text-secondary">We are investigating an issue with our models.</p>
+    </div></div></section>
+    <section class="space-y-6 mt-10"><h2 class="subtitle">Services</h2><div class="grid">
+    <a class="w-full card" href="/ios-app"><div class="flex"><div class="heading-2">Grok (iOS)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/grok-com"><div class="flex"><div class="heading-2">Grok (Web)</div></div>\
+    <div class="shrink-0 chip chip-danger">outage</div></a>
+    <a class="w-full card" href="/grok-build"><div class="flex"><div class="heading-2">Grok Build</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    </div></section></main></body></html>
+    """
+
+    /// Issue #535, defect 2: the "No incidents declared" banner tracks
+    /// declared incidents, not current component state. Grok (Web) is
+    /// degraded with no incident filed against it, so the banner must not
+    /// paper over that in `summary.indicator`.
+    private static let spaceXAINoIncidentsWithDegradedCardHTML = """
+    <html><body><main class="grow"><h1 class="title">Service Status</h1>
+    <section class="mt-8"><div class="card"><div class="flex flex-col grow">
+    <h3 class="heading-3">No incidents declared</h3>
+    <p class="text-text-secondary">We are not actively mitigating any known incidents at this time.</p>
+    </div></div></section>
+    <section class="space-y-6 mt-10"><h2 class="subtitle">Services</h2><div class="grid">
+    <a class="w-full card" href="/ios-app"><div class="flex"><div class="heading-2">Grok (iOS)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/grok-com"><div class="flex"><div class="heading-2">Grok (Web)</div></div>\
+    <div class="shrink-0 capitalize bg-status-caution/20 border-status-caution/20 text-text-caution">degraded</div></a>
+    </div></section></main></body></html>
+    """
+
+    /// Issue #535, defect 3: a fully well-formed "card" sits in a `<nav>`
+    /// above the service grid (e.g. a promo link styled the same as a
+    /// status card). Card matching must be anchored to the grid heading so
+    /// this earlier anchor cannot supply the first real card's slug —
+    /// `ProviderStatusComponent.id` is the `Identifiable` key.
+    private static let spaceXAINavAnchorBeforeGridHTML = """
+    <html><body><nav class="topnav">
+    <a href="/pricing"><div class="heading-2">Pricing</div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">Live</div></a>
+    </nav>
+    <main class="grow"><h1 class="title">Service Status</h1>
+    <section class="mt-8"><div class="card"><div class="flex flex-col grow">
+    <h3 class="heading-3">No incidents declared</h3>
+    <p class="text-text-secondary">We are not actively mitigating any known incidents at this time.</p>
+    </div></div></section>
+    <section class="space-y-6 mt-10"><h2 class="subtitle">Services</h2><div class="grid">
+    <a class="w-full card" href="/ios-app"><div class="flex"><div class="heading-2">Grok (iOS)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    <a class="w-full card" href="/grok-com"><div class="flex"><div class="heading-2">Grok (Web)</div></div>\
+    <div class="shrink-0 capitalize bg-status-success/20 border-status-success/20 text-text-success">available</div></a>
+    </div></section></main></body></html>
+    """
+
     func testParsesSpaceXAIStatusPageWhenHealthy() throws {
         let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAIHealthyHTML)
 
@@ -296,6 +359,45 @@ final class ProviderStatusMonitorTests: XCTestCase {
                 return XCTFail("Expected parsingError, got \(error)")
             }
         }
+    }
+
+    /// A card with drifted chip markup must be dropped, never merged with a
+    /// neighbouring card's chip — the previously-severe defect swallowed
+    /// Grok Build's healthy state and reported Grok (Web) as available
+    /// during its outage.
+    func testSpaceXAIDriftedChipCardIsDroppedNotMergedWithNeighbour() throws {
+        let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAIDriftedChipHTML)
+
+        XCTAssertEqual(parsed.components.map(\.id), ["ios-app", "grok-build"])
+        XCTAssertEqual(parsed.components.map(\.name), ["Grok (iOS)", "Grok Build"])
+        XCTAssertEqual(parsed.components.map(\.indicator), [.none, .none])
+        XCTAssertFalse(parsed.components.contains { $0.id == "grok-com" })
+        XCTAssertFalse(parsed.components.contains { $0.name == "Grok (Web)" && $0.indicator == .none })
+    }
+
+    /// A "No incidents declared" banner must not override a degraded
+    /// component that has no incident filed against it — the summary
+    /// indicator has to agree with `hasIssue` on the component.
+    func testSpaceXAINoIncidentsBannerDoesNotOverrideDegradedComponent() throws {
+        let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAINoIncidentsWithDegradedCardHTML)
+
+        XCTAssertEqual(parsed.summary.indicator, .minor)
+        XCTAssertNotEqual(parsed.summary.indicator, ProviderStatusIndicator.none)
+        XCTAssertEqual(parsed.components.map(\.id), ["ios-app", "grok-com"])
+        XCTAssertEqual(parsed.components.map(\.indicator), [.none, .minor])
+        XCTAssertTrue(parsed.components.contains { $0.id == "grok-com" && $0.hasIssue })
+    }
+
+    /// Card matching must be anchored to the service grid so an earlier,
+    /// well-formed "card" (e.g. a nav promo link) cannot supply the first
+    /// real card's slug — `ProviderStatusComponent.id` is the SwiftUI
+    /// `Identifiable` key.
+    func testSpaceXAINavAnchorBeforeGridDoesNotStealSlug() throws {
+        let parsed = try SpaceXAIStatusPageParser.parse(html: Self.spaceXAINavAnchorBeforeGridHTML)
+
+        XCTAssertEqual(parsed.components.map(\.id), ["ios-app", "grok-com"])
+        XCTAssertEqual(parsed.components.map(\.name), ["Grok (iOS)", "Grok (Web)"])
+        XCTAssertFalse(parsed.components.contains { $0.id == "pricing" })
     }
 
     func testGrokReportReadsSpaceXAIStatusPageNotStatuspageJSON() async throws {
