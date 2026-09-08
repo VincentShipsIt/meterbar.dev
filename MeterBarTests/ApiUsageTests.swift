@@ -26,6 +26,63 @@ final class ApiUsageTests: XCTestCase {
         XCTAssertEqual(cost, 5.0, accuracy: 0.0001)
     }
 
+    /// Regression for #537: a linear `"opus-4".contains` match tried before
+    /// `"opus"` priced every `claude-opus-4*` model — including the
+    /// still-$15/$75 Opus 4 and 4.1 — at the reduced 4.8 rate. Only the
+    /// explicitly reduced 4-6/4-7/4-8 snapshots should get $5/$25; a bare
+    /// "opus-4" or "opus-4-1" must fall through to the legacy $15/$75 rate.
+    func testAnthropicOpus4WithoutAReducedSnapshotUsesLegacyRate() {
+        for model in ["claude-opus-4", "claude-opus-4-1", "claude-opus-4-20260214"] {
+            let cost = ApiUsagePricing.cost(
+                provider: .anthropic, model: model, inputTokens: 1_000_000, outputTokens: 0
+            )
+            XCTAssertEqual(cost, 15.0, accuracy: 0.0001, "\(model) should price at the legacy opus rate")
+        }
+    }
+
+    /// Worked example from #537: an admin key dominated by cache reads (the
+    /// common shape for a Claude Code workload) must price the cache-read
+    /// tokens at the cache-read rate, not the full uncached-input rate.
+    /// 100M cache-read + 1M uncached input + 1M output on claude-sonnet-4-5
+    /// is 100 * $0.30 + 1 * $3 + 1 * $15 = $48.00, not (101 * $3) + (1 * $15)
+    /// = $318.00.
+    func testCacheReadTokensPriceAtTheCacheReadRateNotTheInputRate() {
+        let cost = ApiUsagePricing.cost(
+            provider: .anthropic,
+            model: "claude-sonnet-4-5",
+            tokens: ApiUsagePricing.TokenBreakdown(
+                uncachedInput: 1_000_000,
+                cacheRead: 100_000_000,
+                output: 1_000_000
+            )
+        )
+        XCTAssertEqual(cost, 48.0, accuracy: 0.0001)
+    }
+
+    /// Anthropic's 1h/5m cache-creation tiers must each price at their own
+    /// rate too, not fold into the input rate.
+    func testCacheCreationTiersPriceIndependently() {
+        let cost = ApiUsagePricing.cost(
+            provider: .anthropic,
+            model: "claude-sonnet-4-5",
+            tokens: ApiUsagePricing.TokenBreakdown(
+                cacheCreationFiveMinute: 1_000_000,
+                cacheCreationOneHour: 1_000_000
+            )
+        )
+        // Sonnet 4.5: 5m cache-creation $3.75, 1h cache-creation $6.00.
+        XCTAssertEqual(cost, 3.75 + 6.00, accuracy: 0.0001)
+    }
+
+    func testUnknownModelPricingIsMarkedUnverified() {
+        XCTAssertFalse(ApiUsagePricing.isPricingUnverified(provider: .anthropic, model: "claude-sonnet-4-5"))
+        XCTAssertTrue(ApiUsagePricing.isPricingUnverified(provider: .anthropic, model: "totally-unknown"))
+        XCTAssertTrue(ApiUsagePricing.isPricingUnverified(provider: .anthropic, model: nil))
+
+        XCTAssertFalse(ApiUsagePricing.isPricingUnverified(provider: .openai, model: "gpt-4o"))
+        XCTAssertTrue(ApiUsagePricing.isPricingUnverified(provider: .openai, model: "totally-unknown"))
+    }
+
     func testOpenAIPricingMatchesModel() {
         // gpt-4o = $2.50 in / $10 out.
         let cost = ApiUsagePricing.cost(
@@ -134,6 +191,46 @@ final class ApiUsageTests: XCTestCase {
         XCTAssertEqual(usage.inputTokens, 1900)
         XCTAssertEqual(usage.outputTokens, 500)
         XCTAssertEqual(usage.models.first?.model, "claude-sonnet-4-5")
+        XCTAssertFalse(usage.hasIncompleteInputData)
+        XCTAssertFalse(usage.hasUnverifiedPricing)
+        XCTAssertFalse(usage.isTruncated)
+
+        // Sonnet 4.5: 1000 uncached-input * $3 + 400 cache-read * $0.30 +
+        // 200 5m cache-creation * $3.75 + 300 1h cache-creation * $6.00 +
+        // 500 output * $15, all per-million. This is the flattening bug's
+        // regression test: pre-fix, all 1900 input tokens were billed at the
+        // uncached $3 rate for $0.0195 instead of $0.01317.
+        XCTAssertEqual(usage.estimatedCostUSD, 0.01317, accuracy: 0.000_001)
+    }
+
+    /// #537's field-rename scenario: every input-token key is absent (not
+    /// present-and-zero) while `output_tokens` survives. The row must not be
+    /// reported as a confident zero-input cost — it has to be flagged.
+    func testAnthropicUsageWithNoInputKeysIsFlaggedNotSilentlyZero() throws {
+        let json = """
+        {
+          "data": [
+            { "results": [
+              { "output_tokens": 500, "model": "claude-sonnet-4-5" }
+            ] }
+          ],
+          "has_more": false,
+          "next_page": null
+        }
+        """
+        let response = try JSONDecoder().decode(AnthropicUsageResponse.self, from: Data(json.utf8))
+        let result = try XCTUnwrap(response.data.first?.results.first)
+        XCTAssertTrue(result.hasNoInputTokenData)
+
+        let usage = ApiUsageService.aggregateAnthropic(
+            buckets: response.data,
+            start: date(year: 2026, month: 7, day: 1),
+            end: date(year: 2026, month: 7, day: 2)
+        )
+        XCTAssertEqual(usage.inputTokens, 0)
+        XCTAssertEqual(usage.outputTokens, 500)
+        XCTAssertTrue(usage.hasIncompleteInputData)
+        XCTAssertTrue(usage.models.first?.hasIncompleteInputData ?? false)
     }
 
     func testOpenAIUsageResponseDecodes() throws {
@@ -141,7 +238,7 @@ final class ApiUsageTests: XCTestCase {
         {
           "data": [
             { "results": [
-              { "model": "gpt-4o", "input_tokens": 800, "output_tokens": 400 }
+              { "model": "gpt-4o", "input_tokens": 800, "input_cached_tokens": 300, "output_tokens": 400 }
             ] }
           ],
           "has_more": true,
@@ -150,8 +247,62 @@ final class ApiUsageTests: XCTestCase {
         """
         let response = try JSONDecoder().decode(OpenAIUsageResponse.self, from: Data(json.utf8))
         XCTAssertEqual(response.data.first?.results.first?.model, "gpt-4o")
+        XCTAssertEqual(response.data.first?.results.first?.inputTokens, 800)
+        XCTAssertEqual(response.data.first?.results.first?.inputCachedTokens, 300)
         XCTAssertEqual(response.data.first?.results.first?.outputTokens, 400)
         XCTAssertEqual(response.nextPage, "abc")
+    }
+
+    // MARK: - Pagination
+
+    /// Regression for #537: a window whose usage paginates past the safety
+    /// cap must surface that its total is partial, not return the partial
+    /// sum silently as the window total.
+    func testPaginationBeyondTheCapIsSurfacedAsTruncated() async throws {
+        var pagesRequested = 0
+        let result = try await ApiUsageService.paginate(maxPages: 3) { pageToken -> (data: [Int], hasMore: Bool, nextPage: String?) in
+            pagesRequested += 1
+            let page = Int(pageToken ?? "0") ?? 0
+            // Always reports more data available — a well-behaved provider
+            // that simply has more pages than the cap allows.
+            return ([page], true, String(page + 1))
+        }
+        XCTAssertEqual(pagesRequested, 3)
+        XCTAssertEqual(result.pages, [0, 1, 2])
+        XCTAssertTrue(result.isTruncated)
+    }
+
+    func testPaginationThatEndsBeforeTheCapIsNotTruncated() async throws {
+        let result = try await ApiUsageService.paginate(maxPages: 50) { pageToken -> (data: [Int], hasMore: Bool, nextPage: String?) in
+            let page = Int(pageToken ?? "0") ?? 0
+            if page >= 2 {
+                return ([page], false, nil)
+            }
+            return ([page], true, String(page + 1))
+        }
+        XCTAssertEqual(result.pages, [0, 1, 2])
+        XCTAssertFalse(result.isTruncated)
+    }
+
+    /// A truncated Anthropic fetch threads through to the aggregated
+    /// `ApiUsage` the UI reads, not just the internal pagination helper.
+    func testTruncatedAnthropicAggregationMarksApiUsage() {
+        let bucket = AnthropicUsageBucket(results: [
+            AnthropicUsageResult(
+                uncachedInputTokens: 100,
+                cacheReadInputTokens: 0,
+                cacheCreation: nil,
+                outputTokens: 50,
+                model: "claude-sonnet-4-5"
+            )
+        ])
+        let usage = ApiUsageService.aggregateAnthropic(
+            buckets: [bucket],
+            start: date(year: 2026, month: 7, day: 1),
+            end: date(year: 2026, month: 7, day: 2),
+            isTruncated: true
+        )
+        XCTAssertTrue(usage.isTruncated)
     }
 
     // MARK: - Safe errors
