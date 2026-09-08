@@ -212,7 +212,14 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
             guard let day = rollupDay(fromRecordName: recordID.recordName, calendar: calendar) else {
                 return false
             }
-            return day < cutoff
+            // Compared by calendar day rather than by raw `Date` ordering: in a
+            // zone whose DST transition falls at local midnight, `startOfDay`
+            // for the transitioning day lands on 01:00 (midnight does not
+            // exist), so `cutoff` can carry a non-zero wall-clock time while
+            // `rollupDay` always reconstructs an exact midnight. Comparing
+            // instants directly would then misclassify the cutoff's own day —
+            // the oldest day the window is supposed to keep — as expired.
+            return calendar.compare(day, to: cutoff, toGranularity: .day) == .orderedAscending
         }
     }
 

@@ -282,14 +282,25 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         )
     }
 
-    func testRetentionSpansTheSameNumberOfLocalDaysAcrossADSTTransition() {
-        // Europe/London springs forward inside this window. Counting by calendar
-        // days rather than by 86,400-second strides keeps the boundary on the
-        // day it names instead of sliding an hour short.
-        let calendar = calendar(for: "Europe/London")
-        let now = Date(timeIntervalSince1970: 1_774_915_200) // 2026-03-31T00:00:00Z
-        let oldestRetained = recordID("rollup-\(ServiceType.claudeCode.rawValue)-2026-01-01")
-        let firstExpired = recordID("rollup-\(ServiceType.claudeCode.rawValue)-2025-12-31")
+    func testRetentionSpansTheSameNumberOfLocalDaysAcrossADSTTransition() throws {
+        // Europe/London springs forward at 01:00, so `startOfDay` never moves
+        // off midnight there and this test cannot distinguish a correct
+        // comparison from a naive one — it passes identically before and
+        // after a same-day-boundary fix. America/Santiago springs forward at
+        // local *midnight* instead, so `now`'s `startOfDay` (and any cutoff
+        // derived from it) lands on 01:00, one hour after the exact midnight
+        // `rollupDay` reconstructs for the same calendar day. Counting by
+        // calendar day rather than by raw `Date` ordering keeps the boundary
+        // on the day it names instead of sliding an hour short.
+        let calendar = calendar(for: "America/Santiago")
+        var nowComponents = DateComponents()
+        nowComponents.year = 2026
+        nowComponents.month = 9
+        nowComponents.day = 6
+        nowComponents.hour = 10
+        let now = try XCTUnwrap(calendar.date(from: nowComponents))
+        let oldestRetained = recordID("rollup-\(ServiceType.claudeCode.rawValue)-2026-06-09")
+        let firstExpired = recordID("rollup-\(ServiceType.claudeCode.rawValue)-2026-06-08")
 
         let expired = CloudKitUsageRepository.expiredRollupRecordIDs(
             among: [oldestRetained, firstExpired],
@@ -299,6 +310,34 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         )
 
         XCTAssertEqual(expired, [firstExpired])
+    }
+
+    func testRetentionKeepsTheOldestDayAcrossAMidnightDSTTransition() throws {
+        // America/Santiago springs forward at local midnight (2026-09-06),
+        // so the wall-clock midnight for that day does not exist and
+        // `startOfDay` resolves to 01:00 instead of 00:00. If the cutoff
+        // carries that 01:00 forward while `rollupDay` reconstructs an exact
+        // midnight, the oldest retained day compares as expired even though
+        // it names the boundary itself. Constructed from components (rather
+        // than a hardcoded epoch) so the transition math is Foundation's,
+        // not a manually computed offset.
+        let calendar = calendar(for: "America/Santiago")
+        var nowComponents = DateComponents()
+        nowComponents.year = 2026
+        nowComponents.month = 9
+        nowComponents.day = 6
+        nowComponents.hour = 10
+        let now = try XCTUnwrap(calendar.date(from: nowComponents))
+        let oldestRetained = recordID("rollup-\(ServiceType.cursor.rawValue)-2026-06-09")
+
+        let expired = CloudKitUsageRepository.expiredRollupRecordIDs(
+            among: [oldestRetained],
+            now: now,
+            retentionDayCount: 90,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(expired.isEmpty, "boundary day was deleted: \(expired)")
     }
 
     func testDeviceRecordIsNeverADeletionCandidate() {
