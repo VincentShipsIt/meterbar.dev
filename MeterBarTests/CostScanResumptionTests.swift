@@ -33,6 +33,36 @@ final class CostScanResumptionTests: XCTestCase {
         XCTAssertNil(resumableRecord(record, for: makeFile(size: 70, modified: 2_000, fileID: 42)))
     }
 
+    /// A log truncated in place and regrown past its old size keeps its
+    /// `fileID`, so inode-plus-nondecreasing-size alone would read it as an
+    /// ordinary append and resume from the stale offset into what is now a
+    /// different record (issue #550). The one thing that combination cannot
+    /// produce is a modification stamp older than the one already on
+    /// record — every legitimate write moves `modified` forward — so a
+    /// stamp that moved backward despite the larger size and matching inode
+    /// is treated as identity that could not be established, and the file
+    /// falls back to a full re-read instead of resuming.
+    func testRejectsGrowthWhenModificationStampMovesBackward() {
+        let stamp = CostScanFileStamp(size: 100, modified: 5_000, fileID: 42)
+        let record = makeRecord(offset: 100, stamp: stamp, isComplete: true)
+
+        let truncatedAndRegrown = makeFile(size: 150, modified: 4_000, fileID: 42)
+
+        XCTAssertNil(resumableRecord(record, for: truncatedAndRegrown))
+    }
+
+    /// The mirror of the rejection above: growth with a modification stamp
+    /// that only ever moves forward — the ordinary append case — must keep
+    /// resuming rather than paying for a full re-read on every refresh.
+    func testAllowsGrowthWhenModificationStampMovesForward() throws {
+        let stamp = CostScanFileStamp(size: 100, modified: 5_000, fileID: 42)
+        let record = makeRecord(offset: 100, stamp: stamp, isComplete: true)
+
+        let appended = makeFile(size: 150, modified: 6_000, fileID: 42)
+
+        XCTAssertNotNil(resumableRecord(record, for: appended))
+    }
+
     func testEqualCutoffReturnsRecordWithoutRebasing() throws {
         let file = makeFile(size: 100)
         var record = makeRecord(stamp: file.stamp)
