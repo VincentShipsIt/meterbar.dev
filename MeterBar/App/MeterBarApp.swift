@@ -116,6 +116,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // the subprocess is spawned into its own process group precisely so it
         // can be reaped as a tree from here.
         GrokAgentProcess.terminateAll()
+        // `UserDefaults` debounces its write-back to disk. This is the normal
+        // quit path, so force pending preference writes out now rather than
+        // trusting process teardown to finish them (issue #531).
+        TerminationPreferencesFlush.shared.flush()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
