@@ -26,6 +26,12 @@ nonisolated struct WakeEventHookConfiguration: Codable, Equatable, Sendable {
 
     static let disabled = Self(executablePath: "", arguments: [], enabledEvents: [])
 
+    init(executablePath: String, arguments: [String], enabledEvents: Set<WakeEventHookEvent>) {
+        self.executablePath = executablePath
+        self.arguments = arguments
+        self.enabledEvents = enabledEvents
+    }
+
     var normalizedExecutablePath: String {
         executablePath.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -36,6 +42,44 @@ nonisolated struct WakeEventHookConfiguration: Codable, Equatable, Sendable {
 
     func isEnabled(for event: WakeEventHookEvent) -> Bool {
         isConfigured && enabledEvents.contains(event)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case executablePath
+        case arguments
+        case enabledEvents
+    }
+
+    /// Decodes field by field, matching `WidgetPreferences.init(from:)`.
+    ///
+    /// This is the payload `QuotaEventIntegrationConfiguration.persist()` also
+    /// mirrors into the legacy `sessionWakeEventHooks` key, and it is what
+    /// `SessionWakeAgentConfiguration.eventHooks` embeds for the managed
+    /// launch agent. Under the previous synthesized decoder, one hook event
+    /// raw value this build did not know threw through `enabledEvents`, which
+    /// threw the whole configuration — dropping the executable path and
+    /// arguments along with it, and (via `SessionWakeAgentConfiguration`)
+    /// failing that document too. An unrecognized event now only drops out of
+    /// `enabledEvents`.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        executablePath = values.decodeTolerantly(String.self, forKey: .executablePath) ?? ""
+        arguments = values.decodeTolerantly([String].self, forKey: .arguments) ?? []
+        enabledEvents = values.decodeSetTolerantly(WakeEventHookEvent.self, forKey: .enabledEvents) ?? []
+    }
+}
+
+private extension KeyedDecodingContainer {
+    /// Decodes a value, treating one this build cannot read as absent so the
+    /// caller can substitute its own default instead of failing the document.
+    func decodeTolerantly<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        try? decodeIfPresent(T.self, forKey: key)
+    }
+
+    /// Decodes a set element by element so one raw value this build does not
+    /// recognize is dropped instead of failing every member.
+    func decodeSetTolerantly<T: Decodable & Hashable>(_ type: T.Type, forKey key: Key) -> Set<T>? {
+        decodeTolerantly([FailableBox<T>].self, forKey: key).map { Set($0.compactMap(\.value)) }
     }
 }
 

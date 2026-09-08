@@ -63,6 +63,34 @@ final class WakeEventHookTests: XCTestCase {
         XCTAssertEqual(reloaded.eventHookConfiguration.enabledEvents, [.quotaReset, .wakeComplete])
     }
 
+    /// An unknown hook event raw value must degrade only that entry in
+    /// `enabledEvents`, never fail the whole configuration.
+    ///
+    /// Before this fix, `WakeEventHookConfiguration` relied on the
+    /// synthesized `Codable` conformance: one raw value `WakeEventHookEvent`
+    /// did not recognize threw through `enabledEvents`, which threw the whole
+    /// struct — dropping the executable path and arguments along with it,
+    /// and (via `SessionWakeAgentConfiguration.eventHooks`) failing that
+    /// document too.
+    func testUnknownHookEventDegradesInPlaceWithoutFailingTheWholeConfiguration() throws {
+        let configuration = WakeEventHookConfiguration(
+            executablePath: "/usr/bin/true",
+            arguments: ["--literal", "$(never-expanded)"],
+            enabledEvents: [.quotaExhausted, .wakeComplete]
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any]
+        )
+        object["enabledEvents"] = [WakeEventHookEvent.quotaExhausted.rawValue, "future-event"]
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(WakeEventHookConfiguration.self, from: data)
+
+        XCTAssertEqual(decoded.executablePath, "/usr/bin/true")
+        XCTAssertEqual(decoded.arguments, ["--literal", "$(never-expanded)"])
+        XCTAssertEqual(decoded.enabledEvents, [.quotaExhausted])
+    }
+
     func testTransitionTrackerDeduplicatesRetriesAndDetectsReset() {
         var tracker = WakeEventHookTransitionTracker()
 

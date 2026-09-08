@@ -203,6 +203,101 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
         })
     }
 
+    /// An unknown quota-event kind or provider raw value must degrade only
+    /// that one entry, never fail the whole document — and since nothing
+    /// meaningful changed, the store must not rewrite the stored bytes on
+    /// load either.
+    ///
+    /// Before this fix, `init(from:)` decoded `Set<QuotaEventKind>`,
+    /// `Set<ServiceType>`, and `Set<WakeEventHookEvent>` with a plain `try`.
+    /// One unknown raw value threw through the whole document, the store's
+    /// `try?` fell back to `.disabled`, and `persist()` immediately wrote
+    /// that fallback back over both the versioned key and the legacy
+    /// `sessionWakeEventHooks` mirror — losing the webhook URL, executable
+    /// path, arguments, and every explicit selection with no recovery path.
+    func testUnknownEventKindAndProviderDegradeInPlaceWithoutOverwritingStorage() throws {
+        let account = QuotaEventAccountSelection(provider: .codexCli, accountID: "work-account")
+        let written = QuotaEventIntegrationConfiguration(
+            localDeliveryEnabled: true,
+            localExecutablePath: "/usr/bin/printf",
+            localArguments: ["--literal"],
+            webhookDeliveryEnabled: true,
+            webhookURLString: "https://hooks.example.com/meterbar",
+            enabledQuotaEvents: [.warning, .critical],
+            enabledProviders: [.codexCli, .cursor],
+            enabledAccounts: [account],
+            enabledWakeEvents: [.quotaExhausted]
+        )
+        let data = try encoded(written) { object in
+            object["enabledQuotaEvents"] = [QuotaEventKind.warning.rawValue, "futureEventKind"]
+            object["enabledProviders"] = [ServiceType.codexCli.rawValue, "futureProvider"]
+        }
+        defaults.set(data, forKey: StorageKeys.quotaEventIntegrations)
+
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.configuration.enabledQuotaEvents, [.warning])
+        XCTAssertEqual(store.configuration.enabledProviders, [.codexCli])
+        XCTAssertEqual(store.configuration.enabledAccounts, [account])
+        XCTAssertEqual(store.configuration.enabledWakeEvents, [.quotaExhausted])
+        XCTAssertTrue(store.configuration.localDeliveryEnabled)
+        XCTAssertEqual(store.configuration.localExecutablePath, "/usr/bin/printf")
+        XCTAssertEqual(store.configuration.localArguments, ["--literal"])
+        XCTAssertTrue(store.configuration.webhookDeliveryEnabled)
+        XCTAssertEqual(store.configuration.webhookURLString, "https://hooks.example.com/meterbar")
+
+        // Nothing was overwritten: neither the versioned key nor the legacy
+        // mirror was touched by the load.
+        XCTAssertEqual(defaults.data(forKey: StorageKeys.quotaEventIntegrations), data)
+        XCTAssertNil(defaults.data(forKey: StorageKeys.sessionWakeEventHooks))
+    }
+
+    /// A document written by a newer build (`version` ahead of what this
+    /// build knows) must never be rewritten on load, even when this build's
+    /// own normalization (the Grok default-account migration) would otherwise
+    /// change it — the unread parts of a future schema must reach a build
+    /// that does understand them intact.
+    func testFutureVersionedConfigurationIsNeverPersistedOnLoad() throws {
+        let legacyGrokDefault = QuotaEventAccountSelection(provider: .grok, accountID: "default")
+        let written = QuotaEventIntegrationConfiguration(
+            version: QuotaEventIntegrationConfiguration.currentVersion + 1,
+            localDeliveryEnabled: false,
+            localExecutablePath: "",
+            localArguments: [],
+            webhookDeliveryEnabled: false,
+            webhookURLString: "",
+            enabledQuotaEvents: [],
+            enabledProviders: [.grok],
+            enabledAccounts: [legacyGrokDefault],
+            enabledWakeEvents: []
+        )
+        let data = try JSONEncoder().encode(written)
+        defaults.set(data, forKey: StorageKeys.quotaEventIntegrations)
+
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+
+        // In memory the normalization still runs, so matching behaves
+        // correctly for the rest of this launch...
+        XCTAssertTrue(store.configuration.enabledAccounts.contains {
+            $0.accountID == GrokAccount.defaultID.uuidString
+        })
+        // ...but a build older than the document's version never rewrites it.
+        XCTAssertEqual(defaults.data(forKey: StorageKeys.quotaEventIntegrations), data)
+    }
+
+    /// Re-encodes a known-good value and edits the JSON, so the fixture can
+    /// never drift from the real wire format.
+    private func encoded(
+        _ configuration: QuotaEventIntegrationConfiguration,
+        _ mutate: (inout [String: Any]) -> Void
+    ) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any]
+        )
+        mutate(&object)
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
     private func payloadMetrics() -> UsageMetrics {
         UsageMetrics(
             service: .grok,
