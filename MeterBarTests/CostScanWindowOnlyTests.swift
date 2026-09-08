@@ -105,13 +105,18 @@ final class CostScanWindowOnlyTests: XCTestCase {
             lifetime: nil
         )
 
+        // Stubbed rather than left at the real disk-walking default: the
+        // probe is only exercised here to prove the missing-lifetime case
+        // doesn't trigger a refresh, and a fixed non-nil answer keeps this
+        // test hermetic (see CostSummaryStalenessTests for the probe itself).
         XCTAssertFalse(
             CostTracker.needsBackgroundRefresh(
                 summary: summary,
                 lastScanDate: today,
                 enabledServices: [.claudeCode],
                 days: 30,
-                now: today
+                now: today,
+                newTranscriptsSinceLastScan: { _, _ in false }
             )
         )
     }

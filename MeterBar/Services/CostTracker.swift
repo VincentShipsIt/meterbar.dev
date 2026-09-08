@@ -163,27 +163,43 @@ class CostTracker: ObservableObject {
     ///
     /// Extracted so the "lifetime is gone on purpose" rule is unit-testable
     /// without constructing a full tracker.
+    ///
+    /// `newTranscriptsSinceLastScan` is the mtime-evidence probe backing
+    /// `CostSummary`'s "already scanned" gate (issue #517): injectable so
+    /// tests can drive the gate without touching real files on disk.
+    /// Production leaves it at `CostScanFreshnessProbe.hasNewTranscripts`,
+    /// which walks the enabled providers' roots; the same evidence is reused
+    /// for all three `needsMissing*` checks below rather than walking the
+    /// corpus three times.
     static func needsBackgroundRefresh(
         summary: CostSummary?,
         lastScanDate: Date?,
         enabledServices: Set<ServiceType>,
         days: Int,
-        now: Date = Date()
+        now: Date = Date(),
+        newTranscriptsSinceLastScan: (Date, Set<ServiceType>) -> Bool? = CostScanFreshnessProbe.hasNewTranscripts
     ) -> Bool {
         let hasEnabled = hasEnabledCostScanProvider(in: enabledServices)
         guard let summary else { return hasEnabled }
 
         let visibleSummary = summary.filtered(to: enabledServices)
+        let evidence = lastScanDate.flatMap { newTranscriptsSinceLastScan($0, enabledServices) }
         return visibleSummary.needsMissingDailyUsageRefresh(
             days: days,
             lastScanDate: lastScanDate,
+            newTranscriptsSinceLastScan: evidence,
             now: now
         )
             || (hasEnabled
-                && visibleSummary.needsMissingHourlyUsageRefresh(lastScanDate: lastScanDate, now: now))
+                && visibleSummary.needsMissingHourlyUsageRefresh(
+                    lastScanDate: lastScanDate,
+                    newTranscriptsSinceLastScan: evidence,
+                    now: now
+                ))
             || visibleSummary.needsMissingEnabledProviderRefresh(
                 enabledServices: enabledServices,
                 lastScanDate: lastScanDate,
+                newTranscriptsSinceLastScan: evidence,
                 now: now
             )
     }

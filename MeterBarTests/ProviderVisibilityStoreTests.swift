@@ -16,6 +16,34 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    /// Claude Code, Codex CLI, and Cursor have no dedicated opt-in/opt-out key
+    /// (`set` deliberately does nothing extra for them — see the `switch` in
+    /// `ProviderVisibilityStore.set`); they persist solely through the generic
+    /// `hiddenProviderServices` list. Unlike OpenRouter and Grok, that path had
+    /// no relaunch coverage of its own.
+    func testCoreProviderVisibilityTogglesPersistAcrossRelaunch() {
+        withIsolatedDefaults { defaults in
+            let store = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(store.isEnabled(.claudeCode))
+            XCTAssertTrue(store.isEnabled(.codexCli))
+            XCTAssertTrue(store.isEnabled(.cursor))
+
+            store.set(.claudeCode, isEnabled: false)
+            store.set(.cursor, isEnabled: false)
+
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(reloaded.isEnabled(.claudeCode))
+            XCTAssertTrue(reloaded.isEnabled(.codexCli))
+            XCTAssertFalse(reloaded.isEnabled(.cursor))
+
+            reloaded.set(.claudeCode, isEnabled: true)
+            let relaunchedAgain = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(relaunchedAgain.isEnabled(.claudeCode))
+            // Re-showing Claude Code must not resurrect the still-hidden Cursor.
+            XCTAssertFalse(relaunchedAgain.isEnabled(.cursor))
+        }
+    }
+
     func testGrokIsAFirstClassProviderAndIsOnByDefault() {
         withIsolatedDefaults { defaults in
             let store = ProviderVisibilityStore(userDefaults: defaults)
