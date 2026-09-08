@@ -177,7 +177,7 @@ struct DashboardShareSection: View {
                         if costSummary?.dailyUsage.isEmpty ?? true {
                             Button {
                                 Task {
-                                    if await costTracker.scanCosts(days: 30).isAuthoritative {
+                                    if await costTracker.scanCosts(days: CostWindow.scanWindowDays).isAuthoritative {
                                         generatedAt = Date()
                                     }
                                 }

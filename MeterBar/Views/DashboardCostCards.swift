@@ -44,9 +44,14 @@ struct CostOverviewStatusCard: View {
   }
 
   /// The figures the card renders for the selected window. The month view keeps
-  /// the scan's own totals; the week view aggregates the compatibility-shaped
-  /// `ProviderDailyTotal`, which omits cache-creation tokens even though its
-  /// source daily rows retain them.
+  /// the scan's own totals; the week/Month-to-Date views aggregate the
+  /// compatibility-shaped `ProviderDailyTotal` for cost and provider count, but
+  /// read tokens from `totalTokensIncludingCacheCreation` rather than
+  /// `ProviderDailyTotal.totalTokens` — the latter omits cache-creation tokens
+  /// for CLI schema compatibility, which used to make the same headline drop by
+  /// an order of magnitude on a cache-heavy account purely from tapping "7
+  /// days" (issue #544). All three windows now report the same definition of
+  /// "tokens" as `formattedTokens`/`summary.totalTokens` does.
   private var figures: (cost: String, tokens: String, providers: Int) {
     guard let summary else { return ("", formattedTokens, 0) }
     guard windowSelection != .month else {
@@ -55,7 +60,7 @@ struct CostOverviewStatusCard: View {
     let window = windowSelection.costWindow(from: summary)
     return (
       UsageFormat.cost(window.totalCostUSD),
-      UsageFormat.tokens(window.totalTokens),
+      UsageFormat.tokens(window.totalTokensIncludingCacheCreation),
       window.providers.count
     )
   }

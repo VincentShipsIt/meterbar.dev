@@ -216,6 +216,100 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         XCTAssertTrue(scan.summary.dailyUsage.isEmpty)
     }
 
+    // MARK: - Day boundary (issue #543)
+
+    /// East of UTC (Berlin, UTC+2): local "today" trails the UTC bucket key by
+    /// up to 22 hours, so windowing against the *local* calendar makes the
+    /// "clock moved backwards" guard (`$0.date <= today`) discard today's
+    /// legitimately UTC-keyed row for most of the day — a user spending
+    /// $12.40/day on OpenRouter sees $0.00. The fix windows each provider
+    /// against its own `dayBoundary`, matching `ProviderDailyUsageSeries`.
+    func testUTCKeyedTodayIsNotDroppedEastOfUTC() throws {
+        var berlin = Calendar(identifier: .gregorian)
+        berlin.timeZone = TimeZone(secondsFromGMT: 2 * 3_600) ?? .gmt
+
+        // 2026-09-08 00:00 UTC and 2026-09-07 00:00 UTC — the ledger's own
+        // bucket keys, independent of any calendar under test.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let day7UTC = utc.date(from: DateComponents(year: 2026, month: 9, day: 7))!
+        let day8UTC = utc.date(from: DateComponents(year: 2026, month: 9, day: 8))!
+
+        var ledger = ProviderUsageLedger()
+        // Baseline poll: contributes nothing on its own (issue-unrelated rule).
+        ledger.record(utcObservation(total: 10, at: day7UTC.addingTimeInterval(3_600 * 12)), calendar: berlin)
+        // Delta of 5 lands in the Sept 7 UTC bucket.
+        ledger.record(utcObservation(total: 15, at: day7UTC.addingTimeInterval(3_600 * 20)), calendar: berlin)
+        // Delta of 7.4 lands in the Sept 8 UTC bucket — observed at 08:00 UTC,
+        // which is 10:00 local in Berlin: well inside the ~22-hour window the
+        // bug zeroed out.
+        ledger.record(utcObservation(total: 22.4, at: day8UTC.addingTimeInterval(3_600 * 8)), calendar: berlin)
+
+        let now = day8UTC.addingTimeInterval(3_600 * 8)
+        let windowStart = day7UTC.addingTimeInterval(-3_600 * 24 * 28)
+        let built = try XCTUnwrap(
+            ProviderUsageCostBuilder.makeCost(
+                from: ledger,
+                provider: .openRouter,
+                windowStart: windowStart,
+                now: now,
+                calendar: berlin
+            )
+        )
+
+        XCTAssertEqual(built.1.map(\.date), [day7UTC, day8UTC], "today's UTC-keyed row must not be dropped")
+        XCTAssertEqual(built.0.estimatedCostUSD, 12.4, accuracy: 0.000_001)
+        XCTAssertEqual(built.0.periodEnd, day8UTC)
+    }
+
+    /// West of UTC (Los Angeles, UTC-7): a UTC-keyed day's bucket instant sits
+    /// *before* the local calendar's start-of-day for the "same" nominal date,
+    /// so windowing against the local calendar drops the oldest UTC-keyed day
+    /// from every window — on the 1st of the month this reads Month-to-Date
+    /// OpenRouter spend as $0.00 all day (issue #543).
+    func testUTCKeyedOldestDayIsNotDroppedWestOfUTC() throws {
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = TimeZone(secondsFromGMT: -7 * 3_600) ?? .gmt
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let day1UTC = utc.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let day2UTC = utc.date(from: DateComponents(year: 2026, month: 9, day: 2))!
+
+        var ledger = ProviderUsageLedger()
+        // Baseline poll, before the window: contributes nothing on its own.
+        ledger.record(
+            utcObservation(total: 0, at: day1UTC.addingTimeInterval(-3_600 * 6)),
+            calendar: losAngeles
+        )
+        // Delta of 1 lands in the Sept 1 UTC bucket — the oldest day in the
+        // window below.
+        ledger.record(utcObservation(total: 1, at: day1UTC.addingTimeInterval(3_600 * 6)), calendar: losAngeles)
+        // Delta of 3 lands in the Sept 2 UTC bucket.
+        ledger.record(utcObservation(total: 4, at: day2UTC.addingTimeInterval(3_600 * 6)), calendar: losAngeles)
+
+        // The window starts exactly at the local calendar's midnight for
+        // "September 1st" — 2026-09-01T00:00:00 in Los Angeles, seven hours
+        // *after* the UTC bucket key for that same nominal day. `now` sits
+        // solidly inside Sept 2 local (13:00) so only the start-of-window
+        // comparison is under test here, not the "today" guard.
+        let windowStart = losAngeles.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let now = day2UTC.addingTimeInterval(3_600 * 20)
+
+        let built = try XCTUnwrap(
+            ProviderUsageCostBuilder.makeCost(
+                from: ledger,
+                provider: .openRouter,
+                windowStart: windowStart,
+                now: now,
+                calendar: losAngeles
+            )
+        )
+
+        XCTAssertEqual(built.1.map(\.date), [day1UTC, day2UTC], "the oldest UTC-keyed day must not be dropped")
+        XCTAssertEqual(built.0.estimatedCostUSD, 4, accuracy: 0.000_001)
+    }
+
     // MARK: - Helpers
 
     private func observation(
@@ -225,6 +319,16 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         at date: Date
     ) -> ProviderUsageObservation {
         ProviderUsageObservation(provider: provider, unit: unit, runningTotal: total, observedAt: date)
+    }
+
+    private func utcObservation(total: Double, at date: Date) -> ProviderUsageObservation {
+        ProviderUsageObservation(
+            provider: .openRouter,
+            unit: .usd,
+            runningTotal: total,
+            dayBoundary: .utc,
+            observedAt: date
+        )
     }
 
     /// Start of the day `offset` days after a fixed epoch.

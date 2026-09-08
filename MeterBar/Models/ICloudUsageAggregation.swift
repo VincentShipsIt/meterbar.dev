@@ -325,10 +325,16 @@ nonisolated struct ICloudUsageAggregationResult: Sendable {
 /// offline in unit tests.
 nonisolated enum ICloudUsageAggregation {
     static let activeDeviceInterval: TimeInterval = 14 * 24 * 60 * 60
-    static let visibleDayCount = 30
+    /// Matches `CostWindow.scanWindowDays`: the aggregate "All Macs" path folds
+    /// straight into a `CostSummary` (`makeCostSummary` below) that the
+    /// dashboard swaps in for the local one wholesale, so it needs the same
+    /// one-day margin the local scan does for Month-to-Date on the 31st of a
+    /// 31-day month (issue #544) — otherwise "All Macs" drops the 1st for
+    /// every Mac at once even though CloudKit retains far more than this.
+    static let visibleDayCount = CostWindow.scanWindowDays
 
     /// How many local days of rollups each install keeps in its own CloudKit
-    /// zone. Deliberately three times `visibleDayCount`: nothing the dashboard
+    /// zone. Comfortably larger than `visibleDayCount`: nothing the dashboard
     /// can render is ever a deletion candidate, so multi-day clock skew between
     /// Macs — or a later widening of the visible window — cannot destroy data.
     static let retentionDayCount = 90

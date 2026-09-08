@@ -423,7 +423,7 @@ struct UsageDashboardView: View {
         case .providerStatus:
             await providerStatusMonitor.refreshAll()
         case .costs:
-            let outcome = await costTracker.scanCosts(days: 30)
+            let outcome = await costTracker.scanCosts(days: CostWindow.scanWindowDays)
             if activeSection.refreshesApiUsage,
                apiUsageStore.hasAnyAuthenticated,
                !apiUsageStore.isLoading {
@@ -444,7 +444,7 @@ struct UsageDashboardView: View {
 
     private func refreshCostsIfMissingDays() async {
         guard activeSection.refreshTarget == .costs else { return }
-        await costTracker.refreshMissingDaysInBackground(days: 30)
+        await costTracker.refreshMissingDaysInBackground(days: CostWindow.scanWindowDays)
     }
 
     private func syncICloudUsage() async {

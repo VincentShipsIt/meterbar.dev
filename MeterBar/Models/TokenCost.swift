@@ -398,6 +398,25 @@ nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
     }
 }
 
+/// Which calendar a provider's `DailyTokenUsage.date` values are keyed in.
+///
+/// `DailyTokenUsage` itself carries no boundary marker — only `ProviderUsageLedgerEntry`
+/// does, and `CostSummary` no longer has the ledger by the time it is windowing
+/// cached rows. OpenRouter is the one provider whose dollar rows come from
+/// `ProviderUsageCostBuilder`, which buckets them in UTC to match `usage_daily`'s
+/// own boundary (see `ProviderUsageDayBoundary`); every log-scanning provider
+/// dates its rows in the calendar the scan ran in. Cursor never reaches
+/// `dailyUsage` at all — it is denominated in requests, not dollars, and
+/// `ProviderUsageLedger.dailyUSDSeries` is the guard between the two.
+extension ServiceType {
+    fileprivate var dailyUsageDayBoundary: ProviderUsageDayBoundary {
+        switch self {
+        case .openRouter: return .utc
+        case .claudeCode, .codexCli, .cursor, .grok: return .local
+        }
+    }
+}
+
 nonisolated public struct CostSummary: Codable, Sendable {
     enum LocalScanCompletion: String, Codable, Sendable {
         case complete
@@ -643,10 +662,29 @@ nonisolated public struct CostSummary: Codable, Sendable {
         let today = calendar.startOfDay(for: now)
         let startDate = CalendarDayStep.day(today, offsetBy: -(requestedDays - 1), calendar: calendar)
 
-        let windowRows = dailyUsage.filter { row in
-            let day = calendar.startOfDay(for: row.date)
-            return day >= startDate && day <= today
+        // A row is dated in its *own* provider's boundary, not necessarily
+        // `calendar` (issue #543). Re-normalizing a UTC-keyed row through the
+        // local `calendar.startOfDay` compares two different absolute instants
+        // for "the same" calendar day: west of UTC that pushes the row's day
+        // number backward by one, and on the 1st of the month that is enough to
+        // drop it out of a month-to-date window entirely, reading $0.00 for the
+        // whole day. `ProviderDailyUsageSeries` avoids this by windowing each
+        // provider against a `today`/`start` recomputed in its own boundary
+        // calendar from the same `now` instant rather than the local one; this
+        // mirrors that per-row instead of per-series.
+        func isWithinWindow(_ row: DailyTokenUsage) -> Bool {
+            let boundaryCalendar = row.provider.dailyUsageDayBoundary.calendar(local: calendar)
+            let boundaryToday = boundaryCalendar.startOfDay(for: now)
+            let boundaryStart = CalendarDayStep.day(
+                boundaryToday,
+                offsetBy: -(requestedDays - 1),
+                calendar: boundaryCalendar
+            )
+            let day = boundaryCalendar.startOfDay(for: row.date)
+            return day >= boundaryStart && day <= boundaryToday
         }
+
+        let windowRows = dailyUsage.filter(isWithinWindow)
 
         let providers = Dictionary(grouping: windowRows, by: \.provider)
             .map { provider, rows in
@@ -675,10 +713,13 @@ nonisolated public struct CostSummary: Codable, Sendable {
         // Days the cache demonstrably spans: earliest daily row through today,
         // inclusive. Zero-usage days inside that span carry no row, so this is
         // a conservative lower bound — better a spurious "only N days" notice
-        // than silently presenting 2 days of data as a 30-day total.
+        // than silently presenting 2 days of data as a 30-day total. Each row's
+        // own boundary calendar decides its day, matching the window filter
+        // above; the upper bound stays the local `today` — this is a coverage
+        // estimate across every provider at once, not a single provider's window.
         let cachedSpanDays: Int
         let pastDays = dailyUsage
-            .map { calendar.startOfDay(for: $0.date) }
+            .map { row in row.provider.dailyUsageDayBoundary.calendar(local: calendar).startOfDay(for: row.date) }
             .filter { $0 <= today }
         if let earliestDay = pastDays.min() {
             let dayGap = calendar.dateComponents([.day], from: earliestDay, to: today).day ?? 0
@@ -687,12 +728,20 @@ nonisolated public struct CostSummary: Codable, Sendable {
             cachedSpanDays = 0
         }
 
+        // Cache-creation tokens are retained on every current daily row, but
+        // `ProviderDailyTotal.totalTokens` deliberately omits them to preserve
+        // the published version-1 windowed CLI DTO shape (issue #544). A caller
+        // that wants "the same total-tokens definition as the unwindowed 30-day
+        // card" — the dashboard headline, not the CLI — reads this field instead.
+        let totalTokensIncludingCacheCreation = SafeAccumulate.sum(windowRows.map(\.totalTokens))
+
         return DailyCostWindow(
             requestedDays: requestedDays,
             coveredDays: min(requestedDays, min(periodDays, cachedSpanDays)),
             providers: providers,
             totalCostUSD: providers.reduce(0) { $0 + $1.estimatedCostUSD },
-            totalTokens: providers.reduce(0) { $0 + $1.totalTokens }
+            totalTokens: providers.reduce(0) { $0 + $1.totalTokens },
+            totalTokensIncludingCacheCreation: totalTokensIncludingCacheCreation
         )
     }
 
@@ -791,8 +840,10 @@ nonisolated public struct ProviderDailyTotal: Codable, Sendable, Identifiable {
 }
 
 /// Result of windowing the cached daily cost rows to the last N days
-/// (`CostSummary.dailyCostWindow`). Codable so `meterbar cost --days N --json`
-/// can emit it directly.
+/// (`CostSummary.dailyCostWindow`). The CLI's `--days N --json` DTO
+/// (`CostCLIJSONResponse`) reads `totalTokens` from this type explicitly rather
+/// than encoding it directly, so `totalTokensIncludingCacheCreation` below
+/// never reaches the published v1 JSON shape.
 nonisolated public struct DailyCostWindow: Codable, Sendable {
     /// Days requested via `--days N` (clamped to ≥ 1).
     public let requestedDays: Int
@@ -802,20 +853,38 @@ nonisolated public struct DailyCostWindow: Codable, Sendable {
     /// Per-provider totals over the window, sorted by provider raw value.
     public let providers: [ProviderDailyTotal]
     public let totalCostUSD: Double
+    /// Sum of `providers`' `totalTokens`, which — matching the published v1 CLI
+    /// shape — omits cache-creation tokens. Not the dashboard headline metric;
+    /// see `totalTokensIncludingCacheCreation`.
     public let totalTokens: Int
+    /// The same total, but denominated the way the unwindowed (30-day) card's
+    /// `CostSummary.totalTokens` is: input + output + cache-creation +
+    /// cache-read. Switching the Costs page between 7-day/30-day/Month-to-Date
+    /// used to change what "Tokens" meant — the 30-day card included
+    /// cache-creation and the windowed ones silently didn't — dropping a
+    /// cache-heavy user's headline by an order of magnitude on tap (issue
+    /// #544). The dashboard headline reads this field for every window so the
+    /// number means the same thing regardless of which one is selected;
+    /// `totalTokens` keeps its narrower, already-published meaning for the CLI.
+    public let totalTokensIncludingCacheCreation: Int
 
     public init(
         requestedDays: Int,
         coveredDays: Int,
         providers: [ProviderDailyTotal],
         totalCostUSD: Double,
-        totalTokens: Int
+        totalTokens: Int,
+        totalTokensIncludingCacheCreation: Int? = nil
     ) {
         self.requestedDays = requestedDays
         self.coveredDays = coveredDays
         self.providers = providers
         self.totalCostUSD = totalCostUSD
         self.totalTokens = totalTokens
+        // Defaults to `totalTokens` for callers that predate cache-creation
+        // parity (there are none left in-tree, but this keeps the memberwise
+        // initializer source-compatible rather than a hidden behavior change).
+        self.totalTokensIncludingCacheCreation = totalTokensIncludingCacheCreation ?? totalTokens
     }
 
     /// The cache spans fewer days than requested — output should say so rather
