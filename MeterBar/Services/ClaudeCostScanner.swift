@@ -283,7 +283,13 @@ enum ClaudeCostScanner {
             cacheRead: CostScanValues.int(usage["cache_read_input_tokens"]),
             origin: Self.usageOrigin(json: json, message: message, url: url)
         )
-        return event.hasUsage ? event : nil
+        // A saturated token count (issue #541) is corrupt input, not a real
+        // figure — CostScanValues.int(_:) only reaches Int.max/Int.min when the
+        // source JSON number was out of Int's range. Drop the whole record
+        // rather than fold a sentinel into a total the user reads as real; a
+        // hostile line costs only its own event, the same as an unparseable
+        // timestamp already does.
+        return event.hasUsage && !event.isCorrupt ? event : nil
     }
 
     // MARK: - Budgeted, resumable scan
@@ -572,10 +578,15 @@ enum ClaudeCostScanner {
                 pricing: pricing
             )
 
-            totals.input += event.input
-            totals.output += event.output
-            totals.cacheCreation += event.cacheCreation
-            totals.cacheRead += event.cacheRead
+            // Saturating (issue #541): `event.input` etc. can already sit at
+            // `Int.max`/`Int.min` when a hostile record slipped past parsing
+            // (belt-and-suspenders alongside the `isCorrupt` guard in
+            // `usageEvent`), and a plain `+=` here traps on the very next
+            // normal record folded in after it.
+            SafeAccumulate.accumulate(&totals.input, event.input)
+            SafeAccumulate.accumulate(&totals.output, event.output)
+            SafeAccumulate.accumulate(&totals.cacheCreation, event.cacheCreation)
+            SafeAccumulate.accumulate(&totals.cacheRead, event.cacheRead)
             totals.estimatedCost += eventCost
             totals.note(event.timestamp)
             totals.record(
@@ -675,6 +686,17 @@ nonisolated private struct ClaudeUsageEvent: Sendable {
 
     var hasUsage: Bool {
         input > 0 || output > 0 || cacheCreation > 0 || cacheRead > 0
+    }
+
+    /// Any token count sitting exactly on the `Int.max`/`Int.min` saturation
+    /// bound came from an out-of-range JSON number (issue #541), not a real
+    /// figure — see `SafeAccumulate.isSaturated`.
+    var isCorrupt: Bool {
+        SafeAccumulate.isSaturated(input)
+            || SafeAccumulate.isSaturated(output)
+            || SafeAccumulate.isSaturated(cacheCreation)
+            || SafeAccumulate.isSaturated(cacheCreationOneHour)
+            || SafeAccumulate.isSaturated(cacheRead)
     }
 
     func deduplicationKey(projectID: String) -> String {

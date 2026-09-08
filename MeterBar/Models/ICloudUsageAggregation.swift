@@ -132,8 +132,18 @@ nonisolated struct ICloudDailyUsageRollup: Codable, Equatable, Sendable {
     let quotaSnapshots: [ICloudQuotaSnapshot]
     let updatedAt: Date
 
+    // Saturating (issue #541): a poisoned rollup can arrive from another Mac —
+    // CloudKit ingress is range-validated (see `ICloudUsageRecordSchema.tokenFieldRange`
+    // and `CloudKitUsageRepository.decodeRollup`), but this getter stays safe
+    // on its own regardless, since a value can also reach here straight from a
+    // public initializer that bypassed that validation.
     var totalTokens: Int {
-        max(0, inputTokens) + max(0, outputTokens) + max(0, cacheCreationTokens) + max(0, cacheReadTokens)
+        SafeAccumulate.sum([
+            max(0, inputTokens),
+            max(0, outputTokens),
+            max(0, cacheCreationTokens),
+            max(0, cacheReadTokens)
+        ])
     }
 
     init(
@@ -196,6 +206,17 @@ nonisolated enum ICloudUsageRecordSchema {
         "quotaSnapshots", "updatedAt",
     ]
 
+    /// The sane range a single token-count field may occupy on CloudKit egress
+    /// or ingress (issue #541). Values arrive from another install's scan, so
+    /// they must be validated at both ends, not only the lower one — the write
+    /// side used to clamp negatives with `max(0, ...)` but let an out-of-range
+    /// (possibly `Int.max`-saturated) count straight through.
+    ///
+    /// `Int.max / 4` leaves headroom so that summing all four token fields on
+    /// one rollup (`ICloudDailyUsageRollup.totalTokens`) can never itself
+    /// overflow, even before any saturating add runs.
+    static let tokenFieldRange: ClosedRange<Int> = 0...(Int.max / 4)
+
     static func fields(for device: ICloudUsageDevice) -> [String: Any] {
         [
             "schemaVersion": ICloudUsageDevice.schemaVersion,
@@ -213,10 +234,10 @@ nonisolated enum ICloudUsageRecordSchema {
             "deviceID": rollup.deviceID.uuidString,
             "provider": rollup.provider.rawValue,
             "day": dayString(from: rollup.day),
-            "inputTokens": max(0, rollup.inputTokens),
-            "outputTokens": max(0, rollup.outputTokens),
-            "cacheCreationTokens": max(0, rollup.cacheCreationTokens),
-            "cacheReadTokens": max(0, rollup.cacheReadTokens),
+            "inputTokens": rollup.inputTokens.clamped(to: tokenFieldRange),
+            "outputTokens": rollup.outputTokens.clamped(to: tokenFieldRange),
+            "cacheCreationTokens": rollup.cacheCreationTokens.clamped(to: tokenFieldRange),
+            "cacheReadTokens": rollup.cacheReadTokens.clamped(to: tokenFieldRange),
             "estimatedCostUSD": max(0, rollup.estimatedCostUSD),
             "quotaSnapshots": try encoder.encode(rollup.quotaSnapshots),
             "updatedAt": rollup.updatedAt,
@@ -422,10 +443,10 @@ nonisolated enum ICloudUsageAggregation {
                 deviceID: deviceID,
                 provider: usage.provider,
                 day: day,
-                inputTokens: max(0, usage.inputTokens),
-                outputTokens: max(0, usage.outputTokens),
-                cacheCreationTokens: max(0, usage.cacheCreationTokens),
-                cacheReadTokens: max(0, usage.cacheReadTokens),
+                inputTokens: usage.inputTokens.clamped(to: ICloudUsageRecordSchema.tokenFieldRange),
+                outputTokens: usage.outputTokens.clamped(to: ICloudUsageRecordSchema.tokenFieldRange),
+                cacheCreationTokens: usage.cacheCreationTokens.clamped(to: ICloudUsageRecordSchema.tokenFieldRange),
+                cacheReadTokens: usage.cacheReadTokens.clamped(to: ICloudUsageRecordSchema.tokenFieldRange),
                 estimatedCostUSD: max(0, usage.estimatedCostUSD),
                 quotaSnapshots: [],
                 updatedAt: now
@@ -481,15 +502,20 @@ nonisolated enum ICloudUsageAggregation {
         let dailyGroups = Dictionary(grouping: rollups) {
             DailyKey(provider: $0.provider, day: calendar.startOfDay(for: $0.day))
         }
+        // Saturating (issue #541): several rollups can each carry a
+        // near-`Int.max` field (a poisoned one, or several legitimately large
+        // ones from a long-lived install) and a plain `reduce(0, +)` would
+        // trap folding them together even when every individual field is
+        // in-range.
         let daily = dailyGroups
             .map { key, rows in
                 DailyTokenUsage(
                     date: key.day,
                     provider: key.provider,
-                    inputTokens: rows.reduce(0) { $0 + max(0, $1.inputTokens) },
-                    outputTokens: rows.reduce(0) { $0 + max(0, $1.outputTokens) },
-                    cacheCreationTokens: rows.reduce(0) { $0 + max(0, $1.cacheCreationTokens) },
-                    cacheReadTokens: rows.reduce(0) { $0 + max(0, $1.cacheReadTokens) },
+                    inputTokens: SafeAccumulate.sum(rows.map { max(0, $0.inputTokens) }),
+                    outputTokens: SafeAccumulate.sum(rows.map { max(0, $0.outputTokens) }),
+                    cacheCreationTokens: SafeAccumulate.sum(rows.map { max(0, $0.cacheCreationTokens) }),
+                    cacheReadTokens: SafeAccumulate.sum(rows.map { max(0, $0.cacheReadTokens) }),
                     estimatedCostUSD: rows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) },
                     modelBreakdowns: [],
                     projectBreakdowns: [],
@@ -506,10 +532,10 @@ nonisolated enum ICloudUsageAggregation {
             .map { provider, rows in
                 TokenCost(
                     provider: provider,
-                    inputTokens: rows.reduce(0) { $0 + $1.inputTokens },
-                    outputTokens: rows.reduce(0) { $0 + $1.outputTokens },
-                    cacheCreationTokens: rows.reduce(0) { $0 + $1.cacheCreationTokens },
-                    cacheReadTokens: rows.reduce(0) { $0 + $1.cacheReadTokens },
+                    inputTokens: SafeAccumulate.sum(rows.map(\.inputTokens)),
+                    outputTokens: SafeAccumulate.sum(rows.map(\.outputTokens)),
+                    cacheCreationTokens: SafeAccumulate.sum(rows.map(\.cacheCreationTokens)),
+                    cacheReadTokens: SafeAccumulate.sum(rows.map(\.cacheReadTokens)),
                     estimatedCostUSD: rows.reduce(0) { $0 + $1.estimatedCostUSD },
                     sessionCount: 0,
                     periodStart: rows.map(\.date).min() ?? Date.distantPast,
@@ -528,7 +554,7 @@ nonisolated enum ICloudUsageAggregation {
         return CostSummary(
             costs: costs,
             totalCostUSD: costs.reduce(0) { $0 + $1.estimatedCostUSD },
-            totalTokens: costs.reduce(0) { $0 + $1.totalTokens },
+            totalTokens: SafeAccumulate.sum(costs.map(\.totalTokens)),
             periodDays: coveredDays,
             dailyUsage: daily
         )

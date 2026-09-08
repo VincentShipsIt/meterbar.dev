@@ -96,6 +96,45 @@ final class GrokResetCreditsTests: XCTestCase {
         )
     }
 
+    /// `readVarint` permits any value up to `2^64 - 1` in a wire-type-2 length
+    /// field. Before issue #541, `Int(length)` on a value with bit 63 set
+    /// trapped outright — the `try?` at `GrokCLIUsageService.swift:47` cannot
+    /// catch a Swift trap, so a hostile (or merely corrupted) grpc-web body
+    /// from grok.com killed the app on a routine refresh. This must now throw
+    /// a decode error instead.
+    func testProtobufVarintLengthAboveIntMaxIsRejectedRatherThanTrapping() {
+        let tag: UInt8 = 0x52 // field 10 (tokens), wire type 2 (length-delimited)
+        // Varint encoding of UInt64.max: nine continuation bytes then a
+        // terminal 0x01 for the 64th bit.
+        let hostileLengthVarint: [UInt8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        let message: [UInt8] = [tag] + hostileLengthVarint
+        var frame = Data([0x00])
+        let length = UInt32(message.count).bigEndian
+        withUnsafeBytes(of: length) { frame.append(contentsOf: $0) }
+        frame.append(contentsOf: message)
+
+        XCTAssertThrowsError(try GrokResetCredits.decode(grpcWeb: frame)) { error in
+            XCTAssertEqual(error as? GrokResetCreditsRPC.Error, .invalidResponse)
+        }
+    }
+
+    /// A length that fits in `Int` but still overruns the buffer must be
+    /// rejected the same tolerant way a malformed record already is,
+    /// regardless of the fix to the `Int(exactly:)` conversion above.
+    func testProtobufVarintLengthThatOverrunsTheBufferIsRejected() {
+        let tag: UInt8 = 0x52
+        // A length that fits comfortably in Int but wildly exceeds the
+        // (empty) payload that follows.
+        let overrunLength: [UInt8] = [0xE8, 0x07] // varint(1000)
+        let message: [UInt8] = [tag] + overrunLength
+        var frame = Data([0x00])
+        let length = UInt32(message.count).bigEndian
+        withUnsafeBytes(of: length) { frame.append(contentsOf: $0) }
+        frame.append(contentsOf: message)
+
+        XCTAssertThrowsError(try GrokResetCredits.decode(grpcWeb: frame))
+    }
+
     func testAccessTokenIsReadFromTheCachedLoginWithoutRequiringAJWTShape() {
         let data = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token","auth_mode":"oidc"}}"#.utf8)
 

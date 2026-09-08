@@ -21,6 +21,31 @@ final class WakeCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
+    // MARK: - Safe nanosecond conversion (issue #541)
+
+    /// `WakeBounds` clamps every *preference*-sourced delay, but
+    /// `sleepUntilRetry` computes its own delay from a provider `resetAt` that
+    /// never passes through those bounds. A `resetAt` decoded verbatim as
+    /// milliseconds, or a Claude `resets_at` of `9999-12-31T23:59:59Z`, used to
+    /// trap `UInt64(seconds * 1e9)` past roughly 585 years.
+    func testClampedNanosecondsSaturatesInsteadOfTrappingOnAnAbsurdlyFarDelay() {
+        let farFuture: TimeInterval = 60 * 60 * 24 * 365 * 8_000 // ~8,000 years
+
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(farFuture), .max)
+    }
+
+    func testClampedNanosecondsTreatsNonFiniteAndNegativeAsZero() {
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(.nan), 0)
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(.infinity), .max)
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(-.infinity), 0)
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(-5), 0)
+    }
+
+    func testClampedNanosecondsMatchesTheOrdinaryCase() {
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(60), 60_000_000_000)
+        XCTAssertEqual(WakeCoordinator.clampedNanoseconds(0), 0)
+    }
+
     // MARK: - Fixtures
 
     /// Write `count` blocked transcripts with existing cwds ⇒ executable.

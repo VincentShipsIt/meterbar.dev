@@ -856,6 +856,10 @@ enum CodexCostScanner {
         let output = CostScanValues.int(usage["output_tokens"])
         let reasoning = CostScanValues.int(usage["reasoning_output_tokens"])
         guard input > 0 || output > 0 || cached > 0 || reasoning > 0 else { return nil }
+        // A saturated count (issue #541) came from a JSON number out of Int's
+        // range — corrupt input, not a real figure. Drop the whole record
+        // rather than fold a sentinel into a total the user reads as real.
+        guard ![input, cached, output, reasoning].contains(where: SafeAccumulate.isSaturated) else { return nil }
 
         return CodexUsageEvent(
             timestamp: timestamp,
@@ -911,9 +915,17 @@ enum CodexCostScanner {
         // rate card. Cached input is already billed by `cacheRead`, so it is
         // subtracted from the billable input exactly as the aggregate did.
         let resolved = Self.resolvePricing(for: event.attribution.modelName, at: timestamp)
+        // Clamp before subtracting, not after (issue #541): `max(0, a - b)`
+        // evaluates the subtraction first, so a hostile negative `input`
+        // paired with a huge `cached` underflows and traps before the outer
+        // `max(0, ...)` ever runs. `output + reasoning` is likewise saturating
+        // — both can independently sit at `Int.max` after `makeUsageEvent`'s
+        // own guard, and this is the first place they are combined.
+        let billableInput = SafeAccumulate.clampedNonNegativeDifference(input, cached)
+        let combinedOutput = SafeAccumulate.add(output, reasoning)
         let eventCost = TokenCostMath.calculateCost(
-            input: max(0, input - cached),
-            output: output + reasoning,
+            input: billableInput,
+            output: combinedOutput,
             cacheCreation: 0,
             cacheRead: cached,
             pricing: resolved.pricing
@@ -923,7 +935,7 @@ enum CodexCostScanner {
         // `totals`, which keeps them broken out.
         let breakdown = CostScanEventTotals(
             input: input,
-            output: output + reasoning,
+            output: combinedOutput,
             cacheCreation: 0,
             cacheRead: cached,
             estimatedCostUSD: eventCost
@@ -1036,11 +1048,16 @@ nonisolated struct CodexTokenCounters: Sendable, Codable {
     }
 
     func adding(_ other: CodexTokenCounters) -> CodexTokenCounters {
+        // Saturating (issue #541): these counters are clamped to be
+        // non-negative at construction but not capped at `Int.max`, and the
+        // result is persisted in `cumulativeUsageBySession` — a plain `+`
+        // would trap here once, then trap again on every later refresh that
+        // reads the poisoned cache back.
         CodexTokenCounters(
-            input: input + other.input,
-            cached: cached + other.cached,
-            output: output + other.output,
-            reasoning: reasoning + other.reasoning
+            input: SafeAccumulate.add(input, other.input),
+            cached: SafeAccumulate.add(cached, other.cached),
+            output: SafeAccumulate.add(output, other.output),
+            reasoning: SafeAccumulate.add(reasoning, other.reasoning)
         )
     }
 
@@ -1052,7 +1069,7 @@ nonisolated struct CodexTokenCounters: Sendable, Codable {
     }
 
     private static func nonnegativeDifference(_ current: Int, _ previous: Int) -> Int {
-        current >= previous ? current - previous : 0
+        SafeAccumulate.clampedNonNegativeDifference(current, previous)
     }
 }
 

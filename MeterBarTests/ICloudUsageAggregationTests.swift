@@ -26,6 +26,40 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(result.costSummary.dailyUsage.count, 1)
     }
 
+    /// A poisoned rollup can arrive from another Mac — a peer on an older
+    /// build, a buggy fork, or a corrupted zone — carrying a token count at
+    /// (or near) the `Int` bound. Before issue #541, folding two such rows
+    /// together, or folding one against an ordinary row, trapped in
+    /// `ICloudDailyUsageRollup.totalTokens` or in `ICloudUsageAggregation`'s
+    /// own summation. The fold must survive and produce a summary the
+    /// dashboard can still render, not crash the app that receives it.
+    func testFoldSurvivesAPoisonedRollupCarryingNearIntMaxTokenCounts() {
+        let poisoned = rollup(firstDeviceID, input: Int.max, output: Int.max, cost: 1)
+        let ordinary = rollup(secondDeviceID, input: 100, output: 20, cost: 0.5)
+
+        let result = ICloudUsageAggregation.fold(
+            devices: [device(firstDeviceID, name: "Poisoned"), device(secondDeviceID, name: "Laptop")],
+            rollups: [poisoned, ordinary],
+            now: now
+        )
+
+        // Saturates rather than traps or silently wraps negative.
+        XCTAssertEqual(result.totalTokens, Int.max)
+        XCTAssertEqual(result.contributingDeviceIDs, [firstDeviceID, secondDeviceID])
+    }
+
+    /// The write side (`ICloudUsageRecordSchema.fields(for:)`) now clamps a
+    /// rollup's token fields into a sane range before it ever reaches
+    /// CloudKit, so a value this device publishes cannot itself poison a peer.
+    func testEgressClampsBothEndsOfEveryTokenField() throws {
+        let hostile = rollup(firstDeviceID, input: Int.max, output: -5, cost: 1)
+
+        let fields = try ICloudUsageRecordSchema.fields(for: hostile)
+
+        XCTAssertEqual(fields["inputTokens"] as? Int, ICloudUsageRecordSchema.tokenFieldRange.upperBound)
+        XCTAssertEqual(fields["outputTokens"] as? Int, 0)
+    }
+
     func testOneMacRoundTripPreservesCacheCreationTokenParity() throws {
         let localCost = TokenCost(
             provider: .claudeCode,

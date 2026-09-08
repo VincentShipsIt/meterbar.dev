@@ -334,6 +334,13 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
     }
 
     nonisolated static func decodeRollup(_ record: CKRecord) -> ICloudDailyUsageRollup? {
+        // Range-validated at both ends (issue #541): a poisoned rollup can
+        // arrive from another Mac, and `NSNumber.intValue` on an out-of-range
+        // number is undefined behavior, not a trap this guard can catch by
+        // itself — so every token field is also checked against
+        // `tokenFieldRange` before it is trusted. A required field outside
+        // that range makes the whole rollup corrupt input: excluded here,
+        // never folded into a total read as real.
         guard record.recordType == ICloudUsageRecordSchema.rollupRecordType,
               (record["schemaVersion"] as? NSNumber)?.intValue == ICloudDailyUsageRollup.schemaVersion,
               let rawDeviceID = record["deviceID"] as? String,
@@ -343,14 +350,18 @@ actor CloudKitUsageRepository: ICloudUsageRepository {
               let rawDay = record["day"] as? String,
               let day = ICloudUsageRecordSchema.date(fromDayString: rawDay),
               let input = (record["inputTokens"] as? NSNumber)?.intValue,
+              ICloudUsageRecordSchema.tokenFieldRange.contains(input),
               let output = (record["outputTokens"] as? NSNumber)?.intValue,
+              ICloudUsageRecordSchema.tokenFieldRange.contains(output),
               let cacheRead = (record["cacheReadTokens"] as? NSNumber)?.intValue,
+              ICloudUsageRecordSchema.tokenFieldRange.contains(cacheRead),
               let cost = (record["estimatedCostUSD"] as? NSNumber)?.doubleValue,
               let quotaData = record["quotaSnapshots"] as? Data,
               let updatedAt = record["updatedAt"] as? Date else {
             return nil
         }
-        let cacheCreation = (record["cacheCreationTokens"] as? NSNumber)?.intValue ?? 0
+        let cacheCreation = ((record["cacheCreationTokens"] as? NSNumber)?.intValue ?? 0)
+            .clamped(to: ICloudUsageRecordSchema.tokenFieldRange)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         guard let quotaSnapshots = try? decoder.decode([ICloudQuotaSnapshot].self, from: quotaData) else {
