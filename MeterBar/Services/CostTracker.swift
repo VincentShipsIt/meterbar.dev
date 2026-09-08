@@ -135,13 +135,38 @@ class CostTracker: ObservableObject {
     /// walked multi-gigabyte archives on every Costs open.
     func refreshMissingDaysInBackground(days: Int = 30) async {
         guard !demoMode else { return }
+
+        guard let snapshot = await MainActor.run(body: { () -> (CostSummary?, Date?, Set<ServiceType>)? in
+            guard !isRefreshInProgress else { return nil }
+            return (costSummary, lastScanDate, providerVisibilityStore.enabledServices)
+        }) else { return }
+        let (summary, scanDate, enabledServices) = snapshot
+
+        // The filesystem walk `needsBackgroundRefresh` can require is the
+        // expensive half of this gate (issue #545): resolve it off the main
+        // actor, on the dedicated I/O queue real scans use, before taking the
+        // lock below that starts a refresh. Skipped when the decision would
+        // not consult it anyway — a fresh install with no summary yet, or no
+        // prior scan to compare against — matching `needsBackgroundRefresh`'s
+        // own early-outs so an unnecessary walk is never kicked off.
+        let evidence: Bool?
+        if summary != nil, let scanDate {
+            evidence = await Self.evidenceOfNewTranscripts(
+                since: scanDate,
+                enabledServices: enabledServices
+            )
+        } else {
+            evidence = nil
+        }
+
         let shouldStart = await MainActor.run {
             guard !isRefreshInProgress else { return false }
             guard Self.needsBackgroundRefresh(
-                summary: costSummary,
-                lastScanDate: lastScanDate,
-                enabledServices: providerVisibilityStore.enabledServices,
-                days: days
+                summary: summary,
+                lastScanDate: scanDate,
+                enabledServices: enabledServices,
+                days: days,
+                newTranscriptsSinceLastScan: { _, _ in evidence }
             ) else {
                 return false
             }
@@ -202,6 +227,38 @@ class CostTracker: ObservableObject {
                 newTranscriptsSinceLastScan: evidence,
                 now: now
             )
+    }
+
+    /// Runs the disk-evidence probe behind `needsBackgroundRefresh` off the
+    /// main actor, on the same dedicated I/O queue real scans use
+    /// (`CostScanExecutor`).
+    ///
+    /// Issue #545: `CostScanFreshnessProbe.hasNewTranscripts` recursively
+    /// walks every enabled provider's roots — roughly 10 GB / 10k files in a
+    /// working corpus (see `CostScanExecutor`'s header for why that work
+    /// belongs off the cooperative pool) — and used to run synchronously
+    /// *inside* `MainActor.run` from `refreshMissingDaysInBackground`, so the
+    /// popover's own `.task` — and everything else queued behind the main
+    /// actor — blocked on the walk.
+    ///
+    /// `probe` is injectable, mirroring `needsBackgroundRefresh`'s own seam,
+    /// so tests can drive this without touching real files, the real home
+    /// directory, or the main actor at all. Production leaves it at
+    /// `CostScanFreshnessProbe.hasNewTranscripts`. A cancelled or failed hop
+    /// to the scan queue answers `nil` — "unknown," the same value the probe
+    /// itself returns for a root it could not finish walking — rather than
+    /// silently claiming there is no new evidence.
+    static func evidenceOfNewTranscripts(
+        since lastScanDate: Date,
+        enabledServices: Set<ServiceType>,
+        probe: @escaping @Sendable (Date, Set<ServiceType>) -> Bool? = { date, services in
+            CostScanFreshnessProbe.hasNewTranscripts(since: date, enabledServices: services)
+        }
+    ) async -> Bool? {
+        guard let evidence = try? await CostScanExecutor.run({ _ in probe(lastScanDate, enabledServices) }) else {
+            return nil
+        }
+        return evidence
     }
 
     /// Hourly rows come from local log scanners, not from providers whose

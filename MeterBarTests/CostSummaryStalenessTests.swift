@@ -266,6 +266,105 @@ final class CostSummaryStalenessTests: XCTestCase {
         )
     }
 
+    // MARK: - Directory-mtime pruning (issue #545)
+
+    /// The pruning itself, proven by an observable side effect rather than a
+    /// timing measurement: a subdirectory untouched since the cutoff holds an
+    /// unreadable nested directory that would flip the whole walk to `nil`
+    /// (`testProbeReturnsNilWhenARootCannotBeWalked`'s own setup) *if* the
+    /// probe ever descended into it. A pruned walk never gets that far, so
+    /// the answer stays the cheap, definite `false` instead of degrading to
+    /// "unknown."
+    func testProbeSkipsAnOldSubtreeWithoutDescendingIntoIt() throws {
+        let root = try makeCorpusDirectory()
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+
+        let staleProject = root.appendingPathComponent("stale-project", isDirectory: true)
+        try FileManager.default.createDirectory(at: staleProject, withIntermediateDirectories: true)
+        let locked = staleProject.appendingPathComponent("locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try writeCorpusFile(in: locked, name: "hidden.jsonl", modified: cutoff.addingTimeInterval(60))
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        }
+        // Creating `locked/` just bumped `staleProject`'s own mtime — set it
+        // back to older than the cutoff now that the fixture is built, so the
+        // directory this test actually exercises reads as untouched.
+        try FileManager.default.setAttributes(
+            [.modificationDate: cutoff.addingTimeInterval(-3_600)],
+            ofItemAtPath: staleProject.path
+        )
+
+        let evidence = CostScanFreshnessProbe.hasNewTranscripts(in: [root], since: cutoff)
+
+        XCTAssertFalse(
+            try XCTUnwrap(evidence),
+            "a directory untouched since the cutoff must be pruned without descending, even though a" +
+                " deeper, unreadable subtree inside it would otherwise mark the whole walk incomplete"
+        )
+    }
+
+    /// Pruning is per-directory, not root-wide: a stale sibling next to a
+    /// freshly-touched one must not hide the evidence in the fresh one.
+    func testProbeStillFindsEvidenceBesideAPrunedStaleSubtree() throws {
+        let root = try makeCorpusDirectory()
+        let cutoff = Date(timeIntervalSince1970: 1_780_000_000)
+
+        let staleProject = root.appendingPathComponent("stale-project", isDirectory: true)
+        try FileManager.default.createDirectory(at: staleProject, withIntermediateDirectories: true)
+        try writeCorpusFile(in: staleProject, name: "old.jsonl", modified: cutoff.addingTimeInterval(-60))
+        try FileManager.default.setAttributes(
+            [.modificationDate: cutoff.addingTimeInterval(-3_600)],
+            ofItemAtPath: staleProject.path
+        )
+
+        let freshProject = root.appendingPathComponent("fresh-project", isDirectory: true)
+        try FileManager.default.createDirectory(at: freshProject, withIntermediateDirectories: true)
+        try writeCorpusFile(in: freshProject, name: "new.jsonl", modified: cutoff.addingTimeInterval(60))
+
+        let evidence = CostScanFreshnessProbe.hasNewTranscripts(in: [root], since: cutoff)
+
+        XCTAssertTrue(try XCTUnwrap(evidence))
+    }
+
+    // MARK: - Off-main-actor evidence (issue #545)
+
+    /// The regression this issue asks for directly: the popover's own
+    /// `.task` used to block on this walk because `CostTracker` ran it
+    /// synchronously inside `MainActor.run`. `evidenceOfNewTranscripts` is
+    /// the seam that now hops it onto `CostScanExecutor`'s dedicated queue —
+    /// this asserts the injected probe genuinely executes off the main
+    /// thread, not merely that the async function compiles.
+    func testEvidenceOfNewTranscriptsRunsTheProbeOffTheMainActor() async {
+        let evidence = await CostTracker.evidenceOfNewTranscripts(
+            since: Date(),
+            enabledServices: [.claudeCode],
+            probe: { _, _ in
+                XCTAssertFalse(Thread.isMainThread, "the freshness probe must not run on the main actor (issue #545)")
+                return true
+            }
+        )
+
+        XCTAssertEqual(evidence, true)
+    }
+
+    func testEvidenceOfNewTranscriptsPassesThroughTheProbesAnswer() async {
+        let noEvidence = await CostTracker.evidenceOfNewTranscripts(
+            since: Date(),
+            enabledServices: [.claudeCode],
+            probe: { _, _ in false }
+        )
+        XCTAssertEqual(noEvidence, false)
+
+        let unknown = await CostTracker.evidenceOfNewTranscripts(
+            since: Date(),
+            enabledServices: [.claudeCode],
+            probe: { _, _ in nil }
+        )
+        XCTAssertNil(unknown)
+    }
+
     // MARK: - Fixtures
 
     private func makeDailySummary(rowsForDaysAgo daysAgo: [Int], days: Int, periodDays: Int? = nil) -> CostSummary {
