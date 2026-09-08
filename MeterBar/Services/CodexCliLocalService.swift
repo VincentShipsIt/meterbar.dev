@@ -577,16 +577,16 @@ nonisolated struct CodexCliUsageResponse: Codable {
     var extraUsageStatus: ExtraUsageStatus {
         // Positive evidence that overage spending is possible / enabled.
         if let credits {
-            if credits.unlimited {
+            if credits.unlimited == true {
                 return ExtraUsageStatus(state: .on, detail: "Unlimited credits")
             }
 
             let balance = credits.balance ?? 0
-            if credits.hasCredits || balance > 0 {
+            if credits.hasCredits == true || balance > 0 {
                 return ExtraUsageStatus(state: .on, detail: onDetail(balance: balance))
             }
 
-            if credits.overageLimitReached {
+            if credits.overageLimitReached == true {
                 return ExtraUsageStatus(state: .on, detail: "Overage in use")
             }
         }
@@ -599,17 +599,19 @@ nonisolated struct CodexCliUsageResponse: Codable {
             return ExtraUsageStatus(state: .on, detail: "Overage in use")
         }
 
-        // Authoritative evidence overage is disabled: credits object present and explicitly
-        // empty (no balance, not unlimited, overage not in use).
+        // Authoritative evidence overage is disabled: all three flags decoded to an
+        // explicit `false` (not merely absent or undecodable — see `Credits.decodeBool`)
+        // and no balance.
         if let credits,
-           !credits.unlimited,
-           !credits.hasCredits,
+           credits.unlimited == false,
+           credits.hasCredits == false,
            (credits.balance ?? 0) == 0,
-           !credits.overageLimitReached {
+           credits.overageLimitReached == false {
             return ExtraUsageStatus(state: .off, detail: nil)
         }
 
-        // No credits object at all → we cannot determine the state. Never report a false "Off".
+        // No credits object, or one whose flags could not be positively established
+        // either way → we cannot determine the state. Never report a false "Off".
         return ExtraUsageStatus(state: .unknown, detail: nil)
     }
 
@@ -756,9 +758,14 @@ nonisolated struct LimitWindow: Codable {
 }
 
 nonisolated struct Credits: Codable {
-    let hasCredits: Bool
-    let unlimited: Bool
-    let overageLimitReached: Bool
+    /// `nil` when the key is absent from the payload *or* its value cannot be
+    /// decoded as `Bool` (renamed field, retyped to a string/number). Neither
+    /// case is evidence of `false` — collapsing them to `false` is exactly what
+    /// made a decode failure read as "Extra usage: Off" (issue #536). Only an
+    /// explicitly decoded `true`/`false` may answer these three questions.
+    let hasCredits: Bool?
+    let unlimited: Bool?
+    let overageLimitReached: Bool?
     let balance: Double?
     let approxLocalMessages: Int?
     let approxCloudMessages: Int?
@@ -774,9 +781,9 @@ nonisolated struct Credits: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        hasCredits = (try? container.decode(Bool.self, forKey: .hasCredits)) ?? false
-        unlimited = (try? container.decode(Bool.self, forKey: .unlimited)) ?? false
-        overageLimitReached = (try? container.decode(Bool.self, forKey: .overageLimitReached)) ?? false
+        hasCredits = Self.decodeBool(container, forKey: .hasCredits)
+        unlimited = Self.decodeBool(container, forKey: .unlimited)
+        overageLimitReached = Self.decodeBool(container, forKey: .overageLimitReached)
 
         if let doubleBalance = try? container.decode(Double.self, forKey: .balance) {
             balance = doubleBalance
@@ -792,12 +799,22 @@ nonisolated struct Credits: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(hasCredits, forKey: .hasCredits)
-        try container.encode(unlimited, forKey: .unlimited)
-        try container.encode(overageLimitReached, forKey: .overageLimitReached)
+        try container.encodeIfPresent(hasCredits, forKey: .hasCredits)
+        try container.encodeIfPresent(unlimited, forKey: .unlimited)
+        try container.encodeIfPresent(overageLimitReached, forKey: .overageLimitReached)
         try container.encodeIfPresent(balance, forKey: .balance)
         try container.encodeIfPresent(approxLocalMessages, forKey: .approxLocalMessages)
         try container.encodeIfPresent(approxCloudMessages, forKey: .approxCloudMessages)
+    }
+
+    /// Decodes a boolean flag, returning `nil` — never `false` — when the key
+    /// is absent or its value isn't a `Bool`. Mirrors `decodeMessageEstimate`'s
+    /// "give up, don't guess" shape below.
+    private static func decodeBool(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Bool? {
+        try? container.decodeIfPresent(Bool.self, forKey: key)
     }
 
     private static func decodeMessageEstimate(

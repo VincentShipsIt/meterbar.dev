@@ -438,7 +438,26 @@ class CursorLocalService: ObservableObject {
             )
         }
 
-        let planUsed = Double(plan?.used ?? 0)
+        guard let usedCount = plan?.used else {
+            // Missing counter: zero is not unknown. `observation()` above refuses
+            // this exact shape for the same reason — a renamed or dropped `used`
+            // field (even one that still carries `limit`/`serverQuota`) must not
+            // render as a confident "0 used" gauge. Report no weekly window at
+            // all rather than invent one.
+            return UsageMetrics(
+                service: .cursor,
+                sessionLimit: onDemandLimit(
+                    from: usage.onDemand,
+                    resetTime: cycle.resetTime,
+                    windowSeconds: cycle.windowSeconds
+                ),
+                weeklyLimit: nil,
+                codeReviewLimit: nil,
+                additionalLimits: additionalLimits
+            )
+        }
+
+        let planUsed = Double(usedCount)
         let serverQuota = plan?.serverQuota
         let planTotalIsEstimated = serverQuota == nil
         let planTotal = Double(serverQuota ?? Int(defaultPlanTotal))
@@ -465,17 +484,27 @@ class CursorLocalService: ObservableObject {
         )
     }
 
+    /// A dashboard percent is only plausible in `0...100`. This is deliberately
+    /// conservative hardening, not a fix for an observed break: it catches an
+    /// obviously-wrong shape (negative, `NaN`, or a value that overshot 100 —
+    /// e.g. a units mixup), but a payload that switched to a 0-to-1 fraction
+    /// (`0.85` meaning 85%) numerically survives this check like any small,
+    /// legitimately-low percent would, and still renders wrong. See PR notes.
+    nonisolated private static func plausiblePercent(_ value: Double) -> Double? {
+        guard value.isFinite, value >= 0, value <= 100 else { return nil }
+        return value
+    }
+
     /// Cursor Ultra weekly Grok Bot pool. Matches Grok Bot.app's omit rules
     /// plus MeterBar's "no phantom 0% bar without a grant" rule.
     nonisolated static func mapSandUsage(_ status: CursorSandUsageStatusResponse?) -> UsageLimit? {
         guard let status else { return nil }
-        guard let usagePercent = status.usagePercent, usagePercent.isFinite else {
+        guard let used = status.usagePercent.flatMap(plausiblePercent) else {
             return nil
         }
         if status.usesPooledEnterpriseAllowance == true {
             return nil
         }
-        let used = max(0, usagePercent)
         if status.hasNonZeroIncludedLimit == false, used <= 0 {
             return nil
         }
@@ -522,13 +551,17 @@ class CursorLocalService: ObservableObject {
     /// The pool resets with the monthly billing cycle, so `periodKind` is
     /// always `.monthly` — that cadence drives the shared "Monthly reset in
     /// Xd" blocked-card headline (see `ResetCountdownWindow.cadenceTitle`).
+    /// Returns `nil` — rather than a plausible-looking clamped gauge — when
+    /// `percentUsed` fails the `plausiblePercent` range check. See that
+    /// function's doc for the shape of drift this can and cannot catch.
     nonisolated private static func percentPoolLimit(
         _ percentUsed: Double,
         resetTime: Date?,
         windowSeconds: TimeInterval?
-    ) -> UsageLimit {
-        UsageLimit(
-            used: max(0, percentUsed),
+    ) -> UsageLimit? {
+        guard let used = plausiblePercent(percentUsed) else { return nil }
+        return UsageLimit(
+            used: used,
             total: ServiceType.cursorIncludedPoolTotal,
             resetTime: resetTime,
             windowSeconds: windowSeconds,

@@ -97,6 +97,25 @@ final class ExtraUsageStatusTests: XCTestCase {
         XCTAssertEqual(response.extraUsageStatus.state, .off)
     }
 
+    func testCodexEmptyCreditsObjectIsUnknownNotOff() throws {
+        // Issue #536 site 2: a `credits` object present but with none of its
+        // fields (a decode-failure or a schema-narrowing shape, not proof
+        // overage is off) must not collapse to the false confidence of "Off".
+        let response = try decodeCodex(#"{"plan_type":"pro","credits":{}}"#)
+        XCTAssertEqual(response.extraUsageStatus.state, .unknown)
+        XCTAssertNil(response.extraUsageStatus.detail)
+    }
+
+    func testCodexRetypedCreditsFlagsAreUnknownNotOff() throws {
+        // Issue #536 site 2: a retyped/renamed boolean must decode to nil
+        // (undecodable), never silently to `false` via `try?`.
+        let response = try decodeCodex(#"""
+        {"plan_type":"pro","credits":{"has_credits":"yes","unlimited":"no","overage_limit_reached":"no"}}
+        """#)
+        XCTAssertEqual(response.extraUsageStatus.state, .unknown)
+        XCTAssertNil(response.extraUsageStatus.detail)
+    }
+
     func testCodexOverageLimitReachedIsOn() throws {
         let response = try decodeCodex(#"""
         {"plan_type":"pro","credits":{"has_credits":false,"unlimited":false,"overage_limit_reached":true,"balance":"0"}}
