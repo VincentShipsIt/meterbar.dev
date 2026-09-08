@@ -30,8 +30,19 @@ nonisolated enum ProviderUsageCostBuilder {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> (TokenCost, [DailyTokenUsage], [HourlyTokenUsage])? {
-        let cutoff = calendar.startOfDay(for: windowStart)
-        let today = calendar.startOfDay(for: now)
+        // The ledger buckets this provider's days in its own boundary, not
+        // necessarily `calendar` — OpenRouter's are UTC midnights
+        // (`ProviderUsageDayBoundary`, `ProviderUsageLedger.record`). Windowing
+        // against the local calendar instead is issue #543: east of UTC, local
+        // "today" trails the UTC key, so the "clock moved backwards" guard below
+        // discards a legitimately UTC-keyed current day for most of the day;
+        // west of UTC, the local cutoff sits ahead of the UTC key, dropping the
+        // oldest day from every window. `ProviderDailyUsageSeries` already
+        // honours `entry.dayBoundary.calendar(local:)` for this same ledger —
+        // matching that contract here is the fix, not a new one.
+        let bucketCalendar = ledger.entry(for: provider)?.dayBoundary.calendar(local: calendar) ?? calendar
+        let cutoff = bucketCalendar.startOfDay(for: windowStart)
+        let today = bucketCalendar.startOfDay(for: now)
         // Days are only ever written by an observation, so a future-dated one
         // means the clock moved backwards; it is dropped rather than drawn off
         // the right edge of the chart.

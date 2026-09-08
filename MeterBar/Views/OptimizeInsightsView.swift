@@ -375,7 +375,7 @@ struct OptimizeInsightsView: View {
         .foregroundColor(.secondary)
 
         Button {
-          Task { await costTracker.scanCosts(days: 30) }
+          Task { await costTracker.scanCosts(days: CostWindow.scanWindowDays) }
         } label: {
           Label("Scan 30 Days", systemImage: "magnifyingglass")
         }

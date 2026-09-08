@@ -603,7 +603,12 @@ final class ICloudUsageAggregationTests: XCTestCase {
 
     func testHistoryOutsideVisibleWindowDoesNotInflateDashboardTotals() throws {
         let calendar = Calendar(identifier: .gregorian)
-        let oldDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -30, to: day))
+        // `visibleDayCount` is `CostWindow.scanWindowDays` (31, issue #544), so
+        // the oldest day still inside the window is 30 days back; one day
+        // further than that is the first day genuinely outside it.
+        let oldDay = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -ICloudUsageAggregation.visibleDayCount, to: day)
+        )
         let oldRollup = ICloudDailyUsageRollup(
             deviceID: firstDeviceID,
             provider: .codexCli,
@@ -628,12 +633,12 @@ final class ICloudUsageAggregationTests: XCTestCase {
 
     /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
     /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing the
-    /// 30-day `visibleCutoff` by stepping back from that instant without
-    /// re-normalizing every hop preserves 01:00 on the earlier day, pushing a
-    /// rollup that is really inside the window outside the `>=` bound —
-    /// underreporting the dashboard total by exactly the oldest visible day.
-    /// The `Calendar(identifier: .gregorian)` fixture above (no explicit time
-    /// zone) cannot reliably exercise this.
+    /// `visibleDayCount`-day `visibleCutoff` by stepping back from that
+    /// instant without re-normalizing every hop preserves 01:00 on the earlier
+    /// day, pushing a rollup that is really inside the window outside the
+    /// `>=` bound — underreporting the dashboard total by exactly the oldest
+    /// visible day. The `Calendar(identifier: .gregorian)` fixture above (no
+    /// explicit time zone) cannot reliably exercise this.
     func testVisibleWindowSurvivesTheSantiagoMidnightTransition() throws {
         var santiago = Calendar(identifier: .gregorian)
         santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
@@ -651,9 +656,10 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
 
         let device = ICloudUsageDevice(id: firstDeviceID, name: "Studio", lastSeenAt: dstNow)
-        // The 29th day back is the oldest day the 30-day window still owes —
-        // exactly the boundary the bug drops first.
-        let oldestVisibleDay = exactDay(2026, 8, 8)
+        // The (`visibleDayCount` - 1)th day back — the 30th, since
+        // `visibleDayCount` is 31 (issue #544) — is the oldest day the window
+        // still owes, exactly the boundary the bug drops first.
+        let oldestVisibleDay = exactDay(2026, 8, 7)
         let recentRollup = ICloudDailyUsageRollup(
             deviceID: firstDeviceID,
             provider: .codexCli,
@@ -686,6 +692,57 @@ final class ICloudUsageAggregationTests: XCTestCase {
 
         XCTAssertEqual(result.totalTokens, 30)
         XCTAssertEqual(result.totalCostUSD, 3, accuracy: 0.000_001)
+    }
+
+    /// The "All Macs" aggregate path folds straight into a `CostSummary` that
+    /// `UsageDashboardView` swaps in for the local one wholesale, so it needs
+    /// the same one-day margin the local scan does for Month-to-Date on the
+    /// 31st of a 31-day month (issue #544) — otherwise "All Macs" drops the
+    /// 1st for every Mac at once even though CloudKit retains far more than
+    /// `visibleDayCount`. Companion to `CostWindowTests`'s local-path assertion
+    /// of the same scenario.
+    func testMonthToDateOnThe31stCoversTheFirstInTheAggregatePath() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let thirtyFirst = utc.date(from: DateComponents(year: 2026, month: 1, day: 31, hour: 12))!
+        let firstOfMonth = utc.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+
+        let device = ICloudUsageDevice(id: firstDeviceID, name: "Studio", lastSeenAt: thirtyFirst)
+        let firstRollup = ICloudDailyUsageRollup(
+            deviceID: firstDeviceID,
+            provider: .claudeCode,
+            day: firstOfMonth,
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 5,
+            estimatedCostUSD: 2,
+            quotaSnapshots: [],
+            updatedAt: thirtyFirst
+        )
+        let lastRollup = ICloudDailyUsageRollup(
+            deviceID: firstDeviceID,
+            provider: .claudeCode,
+            day: thirtyFirst,
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 1,
+            estimatedCostUSD: 1,
+            quotaSnapshots: [],
+            updatedAt: thirtyFirst
+        )
+
+        let result = ICloudUsageAggregation.fold(
+            devices: [device],
+            rollups: [firstRollup, lastRollup],
+            now: thirtyFirst,
+            calendar: utc
+        )
+
+        let window = result.costSummary.monthToDateCostWindow(now: thirtyFirst, calendar: utc)
+
+        XCTAssertEqual(window.requestedDays, 31)
+        XCTAssertFalse(window.isTruncated, "the aggregate path must cover the same span the local path does")
+        XCTAssertEqual(window.totalCostUSD, 3, accuracy: 0.000_001, "the 1st must not read $0.00")
     }
 
     func testSchemaContainsOnlyReviewedAggregateFields() throws {

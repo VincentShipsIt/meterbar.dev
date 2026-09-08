@@ -555,7 +555,7 @@ struct CostSettingsView: View {
 
             Button {
                 Task {
-                    await costTracker.scanCosts(days: 30)
+                    await costTracker.scanCosts(days: CostWindow.scanWindowDays)
                 }
             } label: {
                 HStack(spacing: 7) {

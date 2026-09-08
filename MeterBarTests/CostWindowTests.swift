@@ -387,6 +387,168 @@ final class CostWindowTests: XCTestCase {
         XCTAssertEqual(Set(project.modelBreakdowns.map(\.name)), ["claude-opus-5", "claude-fable-5"])
     }
 
+    // MARK: - Provider day boundaries (issue #543)
+
+    /// West of UTC (Los Angeles, UTC-7): re-normalizing a UTC-keyed row through
+    /// the *local* calendar's `startOfDay` maps it onto the local calendar day
+    /// before the one OpenRouter itself reports, so it can fall out of a window
+    /// it legitimately belongs in. Windowing each row against its own provider
+    /// boundary (matching `ProviderDailyUsageSeries`) fixes it.
+    func testDailyCostWindowKeepsUTCKeyedOpenRouterRowsWestOfUTC() throws {
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = TimeZone(secondsFromGMT: -7 * 3_600) ?? .gmt
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+
+        // Solidly the 2nd locally in Los Angeles.
+        let now = losAngeles.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 13))!
+        // OpenRouter's own UTC-midnight bucket key for "September 1st".
+        let openRouterFirst = utc.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        // Claude's row for the same nominal day, dated at *local* midnight.
+        let claudeFirst = losAngeles.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+
+        let summary = summary(
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: openRouterFirst,
+                    provider: .openRouter,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 5.0
+                ),
+                DailyTokenUsage(
+                    date: claudeFirst,
+                    provider: .claudeCode,
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    cacheReadTokens: 1,
+                    estimatedCostUSD: 1.0
+                ),
+            ],
+            periodDays: 2
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 2, now: now, calendar: losAngeles)
+
+        let openRouter = try XCTUnwrap(window.providers.first { $0.provider == .openRouter })
+        XCTAssertEqual(openRouter.estimatedCostUSD, 5.0, accuracy: 0.0001)
+        XCTAssertEqual(window.totalCostUSD, 6.0, accuracy: 0.0001)
+    }
+
+    /// The Month-to-Date read on the 31st of a 31-day month, west of UTC — the
+    /// exact combination from issue #543 ("MTD OpenRouter spend reads $0.00 all
+    /// day" on the 1st) and issue #544 (a 31-day month needs 31 covered days).
+    /// `periodDays: 31` simulates the widened `CostWindow.scanWindowDays` scan.
+    func testMonthToDateOnThe31stIncludesUTCKeyedFirstOfMonthWestOfUTC() throws {
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = TimeZone(secondsFromGMT: -7 * 3_600) ?? .gmt
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+
+        let thirtyFirst = losAngeles.date(from: DateComponents(year: 2026, month: 1, day: 31, hour: 12))!
+        let openRouterFirst = utc.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let claudeThirtyFirst = losAngeles.date(from: DateComponents(year: 2026, month: 1, day: 31))!
+
+        let summary = summary(
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: openRouterFirst,
+                    provider: .openRouter,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 12.4
+                ),
+                DailyTokenUsage(
+                    date: claudeThirtyFirst,
+                    provider: .claudeCode,
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    cacheReadTokens: 5,
+                    estimatedCostUSD: 2.0
+                ),
+            ],
+            periodDays: 31
+        )
+
+        let window = summary.monthToDateCostWindow(now: thirtyFirst, calendar: losAngeles)
+
+        XCTAssertEqual(window.requestedDays, 31)
+        XCTAssertFalse(window.isTruncated)
+        let openRouter = try XCTUnwrap(window.providers.first { $0.provider == .openRouter })
+        XCTAssertEqual(openRouter.estimatedCostUSD, 12.4, accuracy: 0.0001, "the 1st must not read $0.00")
+        XCTAssertEqual(window.totalCostUSD, 14.4, accuracy: 0.0001)
+    }
+
+    // MARK: - Token metric parity across windows (issue #544)
+
+    /// A window request must not change what "tokens" means. The 30-day card
+    /// reads `CostSummary.totalTokens` (cache-creation included); the 7-day and
+    /// Month-to-Date cards used to read `ProviderDailyTotal.totalTokens`, which
+    /// deliberately omits cache-creation for CLI schema compatibility — so a
+    /// cache-heavy account's headline fell by an order of magnitude on tapping
+    /// "7 days". `totalTokensIncludingCacheCreation` is the field the dashboard
+    /// now reads for every window instead.
+    func testTokenMetricIncludingCacheCreationIsConsistentAcrossWindowSelections() {
+        func row(_ offset: Int) -> DailyTokenUsage {
+            let today = calendar.startOfDay(for: now)
+            let date = CalendarDayStep.day(today, offsetBy: -offset, calendar: calendar)
+            return DailyTokenUsage(
+                date: date,
+                provider: .claudeCode,
+                inputTokens: 100,
+                outputTokens: 50,
+                cacheCreationTokens: 40,
+                cacheReadTokens: 10,
+                estimatedCostUSD: 1.0
+            )
+        }
+        let perDayTokens = 100 + 50 + 40 + 10
+        let dailyUsage = (0..<30).map(row)
+        let costs = [
+            TokenCost(
+                provider: .claudeCode,
+                inputTokens: 100 * 30,
+                outputTokens: 50 * 30,
+                cacheCreationTokens: 40 * 30,
+                cacheReadTokens: 10 * 30,
+                estimatedCostUSD: 30,
+                sessionCount: 30,
+                periodStart: dailyUsage.last!.date,
+                periodEnd: dailyUsage.first!.date
+            ),
+        ]
+        let summary = CostSummary(
+            costs: costs,
+            totalCostUSD: 30,
+            totalTokens: costs[0].totalTokens,
+            periodDays: 30,
+            dailyUsage: dailyUsage
+        )
+        XCTAssertEqual(summary.totalTokens, perDayTokens * 30)
+
+        let week = summary.dailyCostWindow(lastDays: 7, now: now, calendar: calendar)
+        let monthToDate = summary.monthToDateCostWindow(now: now, calendar: calendar)
+
+        // Sanity check that this fixture actually exercises the gap: the
+        // CLI-compatibility figure still omits cache-creation tokens.
+        XCTAssertNotEqual(week.totalTokens, week.totalTokensIncludingCacheCreation)
+
+        XCTAssertEqual(week.totalTokensIncludingCacheCreation, perDayTokens * 7)
+        XCTAssertEqual(monthToDate.totalTokensIncludingCacheCreation, perDayTokens * monthToDate.requestedDays)
+
+        // The per-day rate every window implies is identical — "tokens" is the
+        // same metric whether 7, 30, or Month-to-Date days are selected.
+        let unwindowedPerDay = Double(summary.totalTokens) / 30
+        XCTAssertEqual(Double(week.totalTokensIncludingCacheCreation) / 7, unwindowedPerDay, accuracy: 0.0001)
+        XCTAssertEqual(
+            Double(monthToDate.totalTokensIncludingCacheCreation) / Double(monthToDate.requestedDays),
+            unwindowedPerDay,
+            accuracy: 0.0001
+        )
+    }
+
     func testMonthToDateOmitsAttributionWhenAnyIncludedLegacyRowLacksIt() throws {
         let model = breakdown(name: "claude-opus-5", input: 10, cost: 1)
         let summary = summary(

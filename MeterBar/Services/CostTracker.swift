@@ -86,7 +86,7 @@ class CostTracker: ObservableObject {
     }
 
     @discardableResult
-    func scanCosts(days: Int = 30) async -> ScanOutcome {
+    func scanCosts(days: Int = CostWindow.scanWindowDays) async -> ScanOutcome {
         guard !demoMode else { return .skipped }
         let shouldStart = await MainActor.run {
             guard !isRefreshInProgress else { return false }
@@ -112,7 +112,9 @@ class CostTracker: ObservableObject {
     func prepareSummaryForICloudPublication(
         _ candidate: CostSummary?
     ) async -> ICloudUsageSummaryPreparationResult {
-        let outcome = await scanCosts(days: max(30, candidate?.periodDays ?? 30))
+        let outcome = await scanCosts(
+            days: max(CostWindow.scanWindowDays, candidate?.periodDays ?? CostWindow.scanWindowDays)
+        )
         switch outcome {
         case .skipped:
             return .skipped
@@ -133,7 +135,7 @@ class CostTracker: ObservableObject {
     /// A missing lifetime snapshot is not a reason to rescan. Lifetime is no
     /// longer published; treating `lifetime == nil` as incomplete was what
     /// walked multi-gigabyte archives on every Costs open.
-    func refreshMissingDaysInBackground(days: Int = 30) async {
+    func refreshMissingDaysInBackground(days: Int = CostWindow.scanWindowDays) async {
         guard !demoMode else { return }
 
         guard let snapshot = await MainActor.run(body: { () -> (CostSummary?, Date?, Set<ServiceType>)? in

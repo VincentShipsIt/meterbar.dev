@@ -67,7 +67,7 @@ struct DashboardCostsSection: View {
                 windowSelection: windowSelection,
                 isScanning: costTracker.isScanning,
                 isScanDisabled: costTracker.isRefreshInProgress,
-                scan: { Task { await costTracker.scanCosts(days: 30) } }
+                scan: { Task { await costTracker.scanCosts(days: CostWindow.scanWindowDays) } }
             )
 
             // Directly under the spend chart, because it answers the question
@@ -221,7 +221,7 @@ struct DashboardCostsSection: View {
                             .foregroundColor(.secondary)
                         Button {
                             Task {
-                                await costTracker.scanCosts(days: 30)
+                                await costTracker.scanCosts(days: CostWindow.scanWindowDays)
                             }
                         } label: {
                             Label("Scan 30 Days", systemImage: "magnifyingglass")

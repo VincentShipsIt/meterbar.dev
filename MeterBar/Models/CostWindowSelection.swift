@@ -3,10 +3,13 @@ import Foundation
 /// The Costs page's reporting-window toggle: last 7 days, last 30 days, or
 /// calendar month-to-date.
 ///
-/// Presentation-only — every window is cut from the one cached 30-day scan
+/// Presentation-only — every window is cut from the one cached scan
 /// (`CostSummary.dailyCostWindow` / `monthToDateCostWindow`), so switching
-/// never triggers a rescan. Stored `7` and `30` keep working; `-1` is the
-/// calendar month. An unknown stored count falls back to the rolling month.
+/// never triggers a rescan. The scan itself requests `CostWindow.scanWindowDays`
+/// (31, not 30): a plain 30-day scan is one day short of Month-to-Date read on
+/// the 31st of a 31-day month (issue #544). Stored `7` and `30` keep working;
+/// `-1` is the calendar month. An unknown stored count falls back to the
+/// rolling month.
 nonisolated enum CostWindowSelection: Int, CaseIterable, Identifiable {
     case week = 7
     case month = 30
