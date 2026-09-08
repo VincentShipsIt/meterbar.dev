@@ -28,13 +28,18 @@ enum SpaceXAIStatusPageParser {
         let headline = firstMatch(of: headlinePattern, in: html)
             .map(cleanText)
             .flatMap { $0.isEmpty ? nil : $0 }
-        let indicator: ProviderStatusIndicator
-        if headline?.caseInsensitiveCompare(noIncidentsHeadline) == .orderedSame {
-            indicator = .none
-        } else {
-            let worst = components.map(\.indicator).max { $0.rank < $1.rank } ?? .unknown
-            indicator = worst == .none ? .unknown : worst
-        }
+
+        // The banner tracks *declared incidents*; the service grid tracks
+        // *current state*. They are independent sections of the page, so a
+        // "No incidents declared" banner must never override a component
+        // that is reporting degraded or unavailable (issue #535). Component
+        // state is authoritative for the indicator whenever the banner is
+        // the healthy one; otherwise an incident is declared but couldn't be
+        // attributed to a specific component, so an all-healthy component
+        // read is not trusted either.
+        let isNoIncidentsBanner = headline?.caseInsensitiveCompare(noIncidentsHeadline) == .orderedSame
+        let worst = components.map(\.indicator).max { $0.rank < $1.rank } ?? .unknown
+        let indicator: ProviderStatusIndicator = isNoIncidentsBanner ? worst : (worst == .none ? .unknown : worst)
 
         return Parsed(
             summary: ProviderStatusSummary(
@@ -52,7 +57,15 @@ enum SpaceXAIStatusPageParser {
         guard let regex = try? NSRegularExpression(pattern: cardPattern, options: [.dotMatchesLineSeparators]) else {
             return []
         }
-        let range = NSRange(html.startIndex..., in: html)
+        // Anchor matching to the service grid so an unrelated `<a href>` in
+        // navigation or footer markup earlier on the page cannot supply a
+        // card's slug — `ProviderStatusComponent.id` is the SwiftUI
+        // `Identifiable` key (issue #535). A page whose grid heading has
+        // drifted beyond recognition yields no components, which surfaces as
+        // `parsingError` rather than a guess.
+        guard let range = serviceGridRange(in: html) else {
+            return []
+        }
         return regex.matches(in: html, range: range).compactMap { match in
             guard match.numberOfRanges == 5,
                   let slug = substring(html, match.range(at: 1)),
@@ -75,12 +88,45 @@ enum SpaceXAIStatusPageParser {
     }
 
     /// One service card: `<a … href="/slug">…<div class="heading-2">Name</div>…<div class="… text-text-tone">label</div></a>`.
+    ///
+    /// Every wildcard is written as `(?:(?!</a>).)*?` rather than a bare
+    /// `.*?` so the match can never cross a `</a>` boundary. Without that
+    /// bound, a card whose chip markup has drifted (no `text-text-*` class)
+    /// makes the lazy `.*?` skip forward past that card's own `</a>` close
+    /// and the next card's `<a>` open to find the *next* card's chip,
+    /// pairing this card's name with a neighbour's status and silently
+    /// dropping the neighbour (issue #535). Bounding to the card region
+    /// means a drifted card simply fails to match at all — it is dropped,
+    /// never merged — which is the fail-toward-unavailable behaviour
+    /// unofficial provider surfaces require.
     private static let cardPattern =
-        #"<a\b[^>]*\bhref="/([A-Za-z0-9_-]+)"[^>]*>.*?<div class="heading-2">(.*?)</div>.*?"#
-        + #"<div class="([^"]*\btext-text-[a-z]+[^"]*)"[^>]*>(.*?)</div>\s*</a>"#
+        #"<a\b[^>]*\bhref="/([A-Za-z0-9_-]+)"[^>]*>(?:(?!</a>).)*?<div class="heading-2">((?:(?!</a>).)*?)</div>"#
+        + #"(?:(?!</a>).)*?<div class="([^"]*\btext-text-[a-z]+[^"]*)"[^>]*>((?:(?!</a>).)*?)</div>\s*</a>"#
+
+    /// Heading that marks the start of the service grid: `<h2 …>Services</h2>`.
+    /// Card matching is restricted to everything after this heading so an
+    /// earlier `<a href>` (nav, footer) cannot supply a card's slug.
+    private static let serviceGridAnchorPattern = #"<h2\b[^>]*>\s*Services\s*</h2>"#
 
     /// Headline of the incident banner above the service grid.
     private static let headlinePattern = #"<h3 class="heading-3">(.*?)</h3>"#
+
+    /// The portion of the page at and after the service grid heading, or
+    /// `nil` if that heading cannot be found — in which case no cards are
+    /// parsed rather than risking a card matched against unrelated markup.
+    private static func serviceGridRange(in html: String) -> NSRange? {
+        guard let anchor = try? NSRegularExpression(pattern: serviceGridAnchorPattern) else {
+            return nil
+        }
+        let fullRange = NSRange(html.startIndex..., in: html)
+        guard let anchorMatch = anchor.firstMatch(in: html, range: fullRange) else {
+            return nil
+        }
+        let start = anchorMatch.range.location + anchorMatch.range.length
+        let length = fullRange.length - start
+        guard length > 0 else { return nil }
+        return NSRange(location: start, length: length)
+    }
 
     private static func statuspageStatus(chipClasses: String, label: String) -> String {
         let tone = firstMatch(of: #"text-text-([a-z]+)"#, in: chipClasses) ?? ""
