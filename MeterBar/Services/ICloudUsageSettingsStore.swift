@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import IOKit
+import os
 
 /// Not sourced from `StorageKeys` (`MeterBar/Models/StorageKeys.swift`)
 /// because issue #548's fix is scoped to only this file and
