@@ -113,6 +113,16 @@ class UsageDataManager: ObservableObject {
     /// the moment a refresh lands instead of up to five minutes later.
     @Published private(set) var refreshGeneration: UInt64 = 0
 
+    /// Per-account write generation for `codexAccountMetrics` /
+    /// `grokAccountMetrics`, bumped by every write to that account's entry —
+    /// a full-refresh phase's commit or a targeted reset-credit apply. Lets a
+    /// refresh phase that started fetching before a redemption landed detect,
+    /// at commit time, that its result is now stale for that one account —
+    /// see `mergeAccountMetrics`. Claude and OpenRouter have no targeted
+    /// writer racing their refresh, so they carry no generation of their own.
+    private var codexAccountMetricsGeneration: [UUID: UInt64] = [:]
+    private var grokAccountMetricsGeneration: [UUID: UInt64] = [:]
+
     @Published private var refreshIntervalRaw: Int {
         didSet {
             preferences.set(refreshIntervalRaw, forKey: StorageKeys.refreshInterval)
@@ -368,8 +378,19 @@ class UsageDataManager: ObservableObject {
         foldUniformAccountPhase(
             .codexCli,
             result: codexResult,
-            representative: { representativeCodexMetrics(from: $0.metrics) },
-            storeAccountMetrics: { codexAccountMetrics = $0?.metrics ?? [:] },
+            // Reads the property rather than `$0.metrics`: `storeAccountMetrics`
+            // below runs first and may have preserved a newer targeted write
+            // for one account, and the representative must reflect that
+            // merged snapshot, not this fetch's raw (possibly now-stale) result.
+            representative: { _ in representativeCodexMetrics(from: codexAccountMetrics) },
+            storeAccountMetrics: { result in
+                codexAccountMetrics = mergeAccountMetrics(
+                    fetched: result?.metrics ?? [:],
+                    current: codexAccountMetrics,
+                    startGenerations: result?.metricsGenerationAtStart,
+                    currentGenerations: codexAccountMetricsGeneration
+                )
+            },
             newMetrics: &newMetrics,
             states: &states
         )
@@ -377,8 +398,16 @@ class UsageDataManager: ObservableObject {
         foldUniformAccountPhase(
             .grok,
             result: grokResult,
-            representative: { representativeGrokMetrics(from: $0.metrics) },
-            storeAccountMetrics: { grokAccountMetrics = $0?.metrics ?? [:] },
+            // See the matching comment on the Codex phase above.
+            representative: { _ in representativeGrokMetrics(from: grokAccountMetrics) },
+            storeAccountMetrics: { result in
+                grokAccountMetrics = mergeAccountMetrics(
+                    fetched: result?.metrics ?? [:],
+                    current: grokAccountMetrics,
+                    startGenerations: result?.metricsGenerationAtStart,
+                    currentGenerations: grokAccountMetricsGeneration
+                )
+            },
             newMetrics: &newMetrics,
             states: &states
         )
@@ -465,6 +494,40 @@ class UsageDataManager: ObservableObject {
                 providerVisibilityStore.isEnabled(service) ? Self.noEnabledAccountsReason : Self.disabledReason
             )
         }
+    }
+
+    /// Commits a fetched account-metrics dictionary without discarding a
+    /// targeted write — a reset-credit redemption applied via
+    /// `applyCodexResetCreditRefresh` / `applyGrokResetCreditRefresh` — that
+    /// landed for one account while this fetch was in flight.
+    ///
+    /// `startGenerations` is the per-account write-generation snapshot the
+    /// fetch captured right before it began polling; `currentGenerations` is
+    /// read now, at commit time. An account whose generation moved in
+    /// between was written by something else after this fetch had already
+    /// read its (now stale) value, so the current value is kept instead of
+    /// being overwritten by the fetch's result — the whole-dictionary replace
+    /// this used to be must not silently discard the newer write. A missing
+    /// entry in `startGenerations` means the account had never been written
+    /// through this generation before the fetch started, i.e. generation 0 —
+    /// not "unprotected" — so it defaults to 0 rather than skipping the
+    /// account. `nil` `startGenerations` itself (Claude, OpenRouter — no
+    /// targeted writer races their refresh) falls back to a plain replace,
+    /// matching prior behavior.
+    private func mergeAccountMetrics(
+        fetched: [UUID: UsageMetrics],
+        current: [UUID: UsageMetrics],
+        startGenerations: [UUID: UInt64]?,
+        currentGenerations: [UUID: UInt64]
+    ) -> [UUID: UsageMetrics] {
+        guard let startGenerations else { return fetched }
+        var merged = fetched
+        for (accountID, currentGeneration) in currentGenerations {
+            let startGeneration = startGenerations[accountID] ?? 0
+            guard startGeneration != currentGeneration, let preserved = current[accountID] else { continue }
+            merged[accountID] = preserved
+        }
+        return merged
     }
 
     private enum RefreshLockLease {
@@ -817,9 +880,17 @@ class UsageDataManager: ObservableObject {
     /// Installs the post-redemption Codex usage response into the same caches
     /// used by the popover, dashboard, widget, and CLI. The service has already
     /// performed the network refresh; this method only publishes that result.
+    ///
+    /// Bumping this account's write generation is what protects the redemption
+    /// from a concurrent `refreshAll`/`refresh(service:)` whole-dictionary
+    /// commit: a phase that started fetching before this landed will see its
+    /// captured start generation no longer match at commit time and keep this
+    /// value instead of overwriting it with its now-stale result — see
+    /// `mergeAccountMetrics`.
     func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
         guard !demoMode else { return }
         codexAccountMetrics[accountID] = refreshedMetrics
+        codexAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
             metrics[.codexCli] = representative
         }
@@ -828,10 +899,12 @@ class UsageDataManager: ObservableObject {
     }
 
     /// Installs the post-redemption Grok usage response into the same caches
-    /// used by the popover, dashboard, widget, and CLI.
+    /// used by the popover, dashboard, widget, and CLI. See
+    /// `applyCodexResetCreditRefresh` for why the generation bump matters.
     func applyGrokResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
         guard !demoMode else { return }
         grokAccountMetrics[accountID] = refreshedMetrics
+        grokAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeGrokMetrics(from: grokAccountMetrics) {
             metrics[.grok] = representative
         }
@@ -875,15 +948,25 @@ class UsageDataManager: ObservableObject {
             if let representative = representativeClaudeCodeMetrics(from: fetch.metrics) { return representative }
         case .codexCli:
             let fetch = await fetchCodexAccountMetrics()
-            codexAccountMetrics = fetch.metrics
+            codexAccountMetrics = mergeAccountMetrics(
+                fetched: fetch.metrics,
+                current: codexAccountMetrics,
+                startGenerations: fetch.metricsGenerationAtStart,
+                currentGenerations: codexAccountMetricsGeneration
+            )
             if let failure = fetch.firstFailure { lastError = failure }
-            if let representative = representativeCodexMetrics(from: fetch.metrics) { return representative }
+            if let representative = representativeCodexMetrics(from: codexAccountMetrics) { return representative }
             throw ServiceError.notAuthenticated
         case .grok:
             let fetch = await fetchGrokAccountMetrics()
-            grokAccountMetrics = fetch.metrics
+            grokAccountMetrics = mergeAccountMetrics(
+                fetched: fetch.metrics,
+                current: grokAccountMetrics,
+                startGenerations: fetch.metricsGenerationAtStart,
+                currentGenerations: grokAccountMetricsGeneration
+            )
             if let failure = fetch.firstFailure { lastError = failure }
-            if let representative = representativeGrokMetrics(from: fetch.metrics) { return representative }
+            if let representative = representativeGrokMetrics(from: grokAccountMetrics) { return representative }
             throw ServiceError.notAuthenticated
         case .openRouter:
             let fetch = await fetchOpenRouterAccountMetrics()
@@ -1214,6 +1297,12 @@ class UsageDataManager: ObservableObject {
         /// Claude-only; defaulted because the Codex path shares this type and
         /// has no per-account auth state of its own.
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
+        /// Per-account write-generation snapshot captured right before this
+        /// fetch began — Codex and Grok only, where a reset-credit redemption
+        /// can race the fetch. `nil` for Claude/OpenRouter, whose commit sites
+        /// then fall back to a plain whole-dictionary replace. See
+        /// `mergeAccountMetrics`.
+        var metricsGenerationAtStart: [UUID: UInt64]?
     }
 
     /// Sentinel that lets the `canAccess` probe move inside the concurrent leg
@@ -1326,6 +1415,11 @@ class UsageDataManager: ObservableObject {
 
     private func fetchCodexAccountMetrics() async -> AccountFetchResult {
         let enabledAccounts = codexAccountStore.enabledAccounts
+        // Captured before any network leg starts: if a reset-credit redemption
+        // writes this account mid-fetch, the commit site compares this
+        // snapshot to the generation at commit time and keeps the redemption
+        // instead of overwriting it with this fetch's now-stale result.
+        let metricsGenerationAtStart = codexAccountMetricsGeneration
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
@@ -1367,7 +1461,8 @@ class UsageDataManager: ObservableObject {
             metrics: refreshedMetrics,
             successCount: successCount,
             firstFailure: firstFailure,
-            successfulAccountIDs: successfulAccountIDs
+            successfulAccountIDs: successfulAccountIDs,
+            metricsGenerationAtStart: metricsGenerationAtStart
         )
     }
 
@@ -1381,6 +1476,8 @@ class UsageDataManager: ObservableObject {
 
     private func fetchGrokAccountMetrics() async -> AccountFetchResult {
         let enabledAccounts = grokAccountStore.enabledAccounts
+        // See the matching comment in `fetchCodexAccountMetrics`.
+        let metricsGenerationAtStart = grokAccountMetricsGeneration
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
         var successCount = 0
@@ -1415,7 +1512,8 @@ class UsageDataManager: ObservableObject {
         return AccountFetchResult(
             metrics: refreshedMetrics,
             successCount: successCount,
-            firstFailure: firstFailure
+            firstFailure: firstFailure,
+            metricsGenerationAtStart: metricsGenerationAtStart
         )
     }
 
