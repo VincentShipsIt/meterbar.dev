@@ -57,16 +57,14 @@ nonisolated struct CostChartPresentation: Sendable {
             calendar: calendar
         )
         let coverageStart = costWindow.coveredDays > 0
-            ? calendar.date(byAdding: .day, value: -(costWindow.coveredDays - 1), to: today)
+            ? CalendarDayStep.day(today, offsetBy: -(costWindow.coveredDays - 1), calendar: calendar)
             : nil
 
         let rowsByDay = Dictionary(grouping: windowRows) { row in
             calendar.startOfDay(for: row.date)
         }
-        dailyBuckets = (0..<normalizedDays).compactMap { offset in
-            guard let date = calendar.date(byAdding: .day, value: offset, to: startDate) else {
-                return nil
-            }
+        dailyBuckets = (0..<normalizedDays).map { offset in
+            let date = CalendarDayStep.day(startDate, offsetBy: offset, calendar: calendar)
             let isCovered = coverageStart.map { date >= $0 } ?? false
             let costUSD = isCovered
                 ? rowsByDay[date, default: []].reduce(0) { $0 + max(0, $1.estimatedCostUSD) }

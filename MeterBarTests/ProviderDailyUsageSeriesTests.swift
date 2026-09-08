@@ -101,6 +101,65 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         XCTAssertEqual(series.totalValue, 25)
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `calendar.startOfDay(for: now)` on that day returns 01:00 rather
+    /// than 00:00 (the 00:00–01:00 hour does not exist). A day-stepping
+    /// window built from that instant without re-normalizing every hop would
+    /// preserve 01:00 for the other six days, so their bucket keys would
+    /// never match `startOfDay` of the real rows and every bar but today's
+    /// would read zero. UTC-pinned fixtures elsewhere in this file cannot
+    /// exercise this: UTC never observes DST.
+    func testSeriesSurvivesTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        // The seven trailing days, independently dated (not via the helper
+        // under test) so the fixture cannot mask a regression in it.
+        let windowDays = [
+            exactDay(2026, 8, 31),
+            exactDay(2026, 9, 1),
+            exactDay(2026, 9, 2),
+            exactDay(2026, 9, 3),
+            exactDay(2026, 9, 4),
+            exactDay(2026, 9, 5),
+            exactDay(2026, 9, 6),
+        ]
+        let rows = windowDays.enumerated().map { offset, date in
+            DailyTokenUsage(
+                date: date,
+                provider: .claudeCode,
+                inputTokens: 10 * (offset + 1),
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0
+            )
+        }
+
+        let series = ProviderDailyUsageSeries(
+            service: .claudeCode,
+            dailyUsage: rows,
+            accountCount: 1,
+            dayCount: 7,
+            now: dstNow,
+            calendar: santiago
+        )
+
+        XCTAssertEqual(series.days.map(\.value), [10, 20, 30, 40, 50, 60, 70])
+        XCTAssertEqual(series.totalValue, 280)
+    }
+
     // MARK: - Provider scoping
 
     /// The panel opens from one provider's card. Summing the whole cache here

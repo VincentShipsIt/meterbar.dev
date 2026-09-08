@@ -55,6 +55,66 @@ final class CostSummaryStalenessTests: XCTestCase {
         )
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing the
+    /// window's `startDate` by stepping back from that instant without
+    /// re-normalizing every hop preserves 01:00 on the earlier day, so a row
+    /// that really is inside the window falls outside the `>=` bound and the
+    /// cache reports itself as under-covered when it is not — triggering a
+    /// rescan on every appearance. The UTC-pinned fixtures above cannot
+    /// exercise this — UTC never observes DST.
+    func testNeedsMissingDailyUsageRefreshDoesNotMisreportCoverageAcrossTheSantiagoTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        let rows = [
+            DailyTokenUsage(
+                date: exactDay(2026, 9, 6).addingTimeInterval(3600 * 2),
+                provider: .claudeCode,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0.05,
+                modelBreakdowns: [],
+                projectBreakdowns: [],
+                sessionBreakdowns: []
+            ),
+            DailyTokenUsage(
+                date: exactDay(2026, 9, 5).addingTimeInterval(3600 * 5),
+                provider: .claudeCode,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0.05,
+                modelBreakdowns: [],
+                projectBreakdowns: [],
+                sessionBreakdowns: []
+            ),
+        ]
+        let summary = makeSummary(periodDays: 2, dailyUsage: rows, hourlyUsage: nil)
+
+        XCTAssertFalse(
+            summary.needsMissingDailyUsageRefresh(
+                days: 2,
+                lastScanDate: nil,
+                now: dstNow,
+                calendar: santiago
+            )
+        )
+    }
+
     // MARK: - needsMissingHourlyUsageRefresh
 
     func testNeedsMissingHourlyUsageRefreshReturnsTrueWhenATranscriptChangedAfterLastScan() {

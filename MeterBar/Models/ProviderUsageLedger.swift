@@ -352,8 +352,8 @@ nonisolated struct ProviderUsageLedger: Codable, Sendable, Equatable {
     }
 
     private static func prune(_ entry: inout ProviderUsageLedgerEntry, calendar: Calendar) {
-        guard let newest = entry.daily.keys.max(),
-              let cutoff = calendar.date(byAdding: .day, value: -retainedDays, to: newest) else { return }
+        guard let newest = entry.daily.keys.max() else { return }
+        let cutoff = CalendarDayStep.day(newest, offsetBy: -retainedDays, calendar: calendar)
         entry.daily = entry.daily.filter { $0.key >= cutoff }
         // Coverage cannot start earlier than the oldest day still retained,
         // otherwise the UI would draw a gap where data was pruned as if it were

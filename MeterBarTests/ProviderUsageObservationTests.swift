@@ -455,6 +455,57 @@ final class ProviderUsageObservationTests: XCTestCase {
         XCTAssertEqual(series.map(\.date), [day(ProviderUsageLedger.retainedDays + 5)])
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00 (00:00–01:00
+    /// does not exist). Pruning steps the retention cutoff back from that
+    /// instant; without re-normalizing every hop it preserves 01:00 on the
+    /// cutoff day, so a day that is exactly `retainedDays` old — and should
+    /// be kept — reads as `00:00 < 01:00` and is wrongly discarded.
+    /// `self.calendar` above has no explicit time zone and cannot reliably
+    /// exercise this.
+    func testRetentionCutoffLandsOnMidnightAcrossTheSantiagoTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? Date()
+            return santiago.startOfDay(for: date)
+        }
+
+        // 2026-09-06 is the newest poll and the retention cutoff is computed
+        // from it; confirm it is really the transition day.
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+        // The day exactly `retainedDays` (400) before it is an ordinary day.
+        XCTAssertEqual(ProviderUsageLedger.retainedDays, 400)
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2025, 8, 2)), 0)
+
+        var ledger = ProviderUsageLedger()
+        // Baseline, one day before the boundary: establishes the counter
+        // without emitting a row of its own.
+        ledger.record(
+            observation(.openRouter, unit: .usd, total: 0, at: exactDay(2025, 8, 1)),
+            calendar: santiago
+        )
+        // Exactly `retainedDays` before the newest poll — the oldest day
+        // retention must still keep.
+        ledger.record(
+            observation(.openRouter, unit: .usd, total: 10, at: exactDay(2025, 8, 2)),
+            calendar: santiago
+        )
+        ledger.record(
+            observation(.openRouter, unit: .usd, total: 30, at: exactDay(2026, 9, 6)),
+            calendar: santiago
+        )
+
+        let series = ledger.dailySeries(for: .openRouter)
+
+        XCTAssertEqual(series.map(\.date), [exactDay(2025, 8, 2), exactDay(2026, 9, 6)])
+    }
+
     // MARK: - Helpers
 
     private func observation(

@@ -190,6 +190,72 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertGreaterThan(insights.tokens30Day, insights.tokens7Day)
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing the
+    /// 7/30-day windows by stepping back from that instant without
+    /// re-normalizing every hop preserves 01:00 on earlier days, so their
+    /// rows fall outside the `>=` bound and both windows undercount. The
+    /// fixed `Self.referenceNow` used elsewhere in this file is UTC-pinned
+    /// and cannot exercise this.
+    func testSevenAndThirtyDayWindowsSurviveTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? Date()
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        func row(_ date: Date, tokens: Int) -> DailyTokenUsage {
+            DailyTokenUsage(
+                date: date,
+                provider: .claudeCode,
+                inputTokens: tokens,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0
+            )
+        }
+
+        let cost = TokenCost(
+            provider: .claudeCode,
+            inputTokens: 100,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 1,
+            sessionCount: 1,
+            periodStart: exactDay(2026, 9, 6),
+            periodEnd: exactDay(2026, 9, 6)
+        )
+        let summary = CostSummary(
+            costs: [cost],
+            totalCostUSD: 1,
+            totalTokens: 100,
+            periodDays: 30,
+            dailyUsage: [
+                // Inside both windows.
+                row(exactDay(2026, 9, 6), tokens: 100),
+                // Inside the 7-day window (6 days back) and the 30-day one.
+                row(exactDay(2026, 8, 31), tokens: 100),
+                // Inside only the 30-day window (29 days back).
+                row(exactDay(2026, 8, 8), tokens: 100),
+            ]
+        )
+
+        let insights = OptimizationInsights(summary: summary, now: dstNow, calendar: santiago)
+
+        XCTAssertEqual(insights.tokens7Day, 200)
+        XCTAssertEqual(insights.tokens30Day, 300)
+    }
+
     func testCacheReuseRatioFromSummary() {
         let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
         // Aggregate cacheRead 8,000,000 / (cacheRead 8,000,000 + cacheCreation 2,000,000) = 0.8

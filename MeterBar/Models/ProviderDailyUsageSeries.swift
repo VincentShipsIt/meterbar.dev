@@ -274,8 +274,8 @@ struct ProviderDailyUsageSeries: Equatable {
     private static func window(dayCount: Int, now: Date, calendar: Calendar) -> [Date] {
         let normalized = max(1, dayCount)
         let today = calendar.startOfDay(for: now)
-        return (0..<normalized).reversed().compactMap { offset in
-            calendar.date(byAdding: .day, value: -offset, to: today)
+        return (0..<normalized).reversed().map { offset in
+            CalendarDayStep.day(today, offsetBy: -offset, calendar: calendar)
         }
     }
 

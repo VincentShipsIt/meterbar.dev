@@ -334,27 +334,77 @@ final class CostChartPresentationTests: XCTestCase {
         XCTAssertFalse(presentation.modelWindowMatchesRequested)
     }
 
+    /// `America/Los_Angeles` transitions at 02:00 local, so its `startOfDay`
+    /// is always midnight and this zone cannot reproduce the day-stepping bug
+    /// at all — the original version of this test asserted only bucket count
+    /// and day span, so it kept passing even while every bucket read as an
+    /// empty/zero day. `America/Santiago` on 2026-09-06 transitions *at*
+    /// local midnight (00:00–01:00 does not exist that day), so
+    /// `calendar.startOfDay(for: now)` returns 01:00 instead of 00:00. A
+    /// day-stepping helper that does not re-normalize after every hop
+    /// preserves that 01:00 wall clock on every other day, so a bucket key
+    /// never equals `startOfDay` of the day it is meant to represent and the
+    /// row filed under that day is silently dropped.
     func testCalendarDayMathSurvivesDSTTransition() {
-        var losAngeles = Calendar(identifier: .gregorian)
-        losAngeles.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
         let formatter = ISO8601DateFormatter()
-        let dstNow = formatter.date(from: "2026-03-09T12:00:00Z") ?? now
+        // 10:00 local on the transition day, well after the 01:00 jump.
+        let dstNow = formatter.date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        // The transition day itself lands on 01:00, not midnight — the
+        // premise this test depends on.
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        func row(_ date: Date, costUSD: Double) -> DailyTokenUsage {
+            DailyTokenUsage(
+                date: date,
+                provider: .claudeCode,
+                inputTokens: 1,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: costUSD
+            )
+        }
+
+        let summary = makeSummary(
+            dailyUsage: [
+                row(exactDay(2026, 9, 4), costUSD: 7),
+                row(exactDay(2026, 9, 5), costUSD: 5),
+                row(exactDay(2026, 9, 6), costUSD: 3),
+            ]
+        )
+
         let presentation = CostChartPresentation(
-            summary: makeSummary(),
+            summary: summary,
             requestedDays: 3,
             now: dstNow,
-            calendar: losAngeles
+            calendar: santiago
         )
 
         XCTAssertEqual(presentation.dailyBuckets.count, 3)
         XCTAssertEqual(
-            losAngeles.dateComponents(
+            santiago.dateComponents(
                 [.day],
                 from: presentation.startDate,
                 to: presentation.endDate
             ).day,
             2
         )
+        // The regression itself: every day's real spend must land in its own
+        // bucket, oldest first, rather than reading as an empty/zero day
+        // because its key drifted off the exact `startOfDay` boundary.
+        XCTAssertEqual(presentation.dailyBuckets.map(\.costUSD), [7, 5, 3])
+        XCTAssertEqual(presentation.dailyTotalUSD, 15, accuracy: 0.000_001)
     }
 
     func testEmptySummaryDoesNotFabricateChartData() {
@@ -376,6 +426,25 @@ final class CostChartPresentationTests: XCTestCase {
 
         XCTAssertEqual(start, dailyDate(daysAgo: 29))
         XCTAssertEqual(calendar.component(.hour, from: start), 0)
+    }
+
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00. A single
+    /// `byAdding(.day, -29)` hop from that instant preserves 01:00 on the
+    /// resulting day, which would never equal `startOfDay` for that day's
+    /// rows — turning a "30 days" window into an off-by-one that silently
+    /// drops the oldest day. The UTC-pinned test above cannot exercise this.
+    func testCostWindowStartLandsOnMidnightAcrossTheSantiagoTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        XCTAssertEqual(santiago.component(.hour, from: santiago.startOfDay(for: dstNow)), 1)
+
+        let start = CostWindow.start(days: 30, now: dstNow, calendar: santiago)
+
+        XCTAssertEqual(santiago.component(.hour, from: start), 0)
+        XCTAssertEqual(start, santiago.startOfDay(for: start))
     }
 
     private func makeSummary(

@@ -183,6 +183,58 @@ final class SocialShareCardContentTests: XCTestCase {
         XCTAssertEqual(totals, [0, 0, 0, 0, 0, 0, 10])
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day returns 01:00 instead of 00:00 (the
+    /// 00:00–01:00 hour does not exist). Building the trailing-week window by
+    /// stepping from that instant without re-normalizing every hop preserves
+    /// 01:00 on every earlier day, so the share card would post a flat-zero
+    /// week even though real usage exists. The UTC fixtures above cannot
+    /// exercise this — UTC never observes DST.
+    func testDailyTokenTotalsSurviveTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? Date()
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        let usage = [
+            DailyTokenUsage(
+                date: exactDay(2026, 8, 31).addingTimeInterval(3600 * 4),
+                provider: .claudeCode,
+                inputTokens: 100,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0
+            ),
+            DailyTokenUsage(
+                date: exactDay(2026, 9, 6).addingTimeInterval(3600 * 2),
+                provider: .claudeCode,
+                inputTokens: 700,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0
+            ),
+        ]
+
+        let totals = SocialShareCardContent.dailyTokenTotals(
+            from: usage,
+            days: 7,
+            now: dstNow,
+            calendar: santiago
+        )
+
+        XCTAssertEqual(totals, [100, 0, 0, 0, 0, 0, 700])
+    }
+
     func testDefaultFilenameUsesGeneratedTimestampAndKeepsTheChartWeek() {
         let content = SocialShareCardContent(
             tokenTotal: 1,

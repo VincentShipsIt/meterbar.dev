@@ -98,6 +98,68 @@ final class CostWindowTests: XCTestCase {
         XCTAssertFalse(window.isTruncated)
     }
 
+    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
+    /// so `startOfDay(now)` on that day is 01:00, not 00:00 (00:00–01:00 does
+    /// not exist). A day-stepping window built from that instant without
+    /// re-normalizing every hop would preserve 01:00 for the earlier day too,
+    /// so its rows would land outside the `>=` bound and a "3 day" total
+    /// would silently cover only 2. The UTC fixtures above cannot exercise
+    /// this — UTC never observes DST.
+    func testKeepsOnlyRowsInsideTheWindowAcrossTheSantiagoMidnightTransition() {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
+        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? now
+
+        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            let date = santiago.date(from: components) ?? dstNow
+            return santiago.startOfDay(for: date)
+        }
+
+        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
+
+        let summary = summary(
+            dailyUsage: [
+                DailyTokenUsage(
+                    date: exactDay(2026, 9, 6).addingTimeInterval(3600 * 2),
+                    provider: .claudeCode,
+                    inputTokens: 10,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 1.0
+                ),
+                DailyTokenUsage(
+                    date: exactDay(2026, 9, 4).addingTimeInterval(3600 * 5),
+                    provider: .claudeCode,
+                    inputTokens: 20,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 2.0
+                ),
+                // One day before the 3-day window (today + 2 prior days).
+                DailyTokenUsage(
+                    date: exactDay(2026, 9, 3).addingTimeInterval(3600 * 5),
+                    provider: .claudeCode,
+                    inputTokens: 99,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 9.0
+                ),
+            ],
+            periodDays: 30
+        )
+
+        let window = summary.dailyCostWindow(lastDays: 3, now: dstNow, calendar: santiago)
+
+        let claude = window.providers.first { $0.provider == .claudeCode }
+        XCTAssertEqual(claude?.inputTokens, 30)
+        XCTAssertEqual(window.totalCostUSD, 3.0, accuracy: 0.0001)
+        XCTAssertFalse(window.isTruncated)
+    }
+
     // MARK: - Aggregation across providers
 
     func testAggregatesPerProviderSortedByRawValue() {

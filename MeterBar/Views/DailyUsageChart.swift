@@ -41,14 +41,11 @@ struct DailyUsageChart: View {
   ) -> [DailyUsageDay] {
     let normalizedDaysToShow = max(1, daysToShow)
     let endDate = calendar.startOfDay(for: now)
-    let startDate =
-      calendar.date(byAdding: .day, value: -(normalizedDaysToShow - 1), to: endDate) ?? endDate
+    let startDate = CalendarDayStep.day(endDate, offsetBy: -(normalizedDaysToShow - 1), calendar: calendar)
     let grouped = Dictionary(grouping: dailyUsage) { calendar.startOfDay(for: $0.date) }
 
-    return (0..<normalizedDaysToShow).compactMap { offset in
-      guard let date = calendar.date(byAdding: .day, value: offset, to: startDate) else {
-        return nil
-      }
+    return (0..<normalizedDaysToShow).map { offset in
+      let date = CalendarDayStep.day(startDate, offsetBy: offset, calendar: calendar)
 
       let rows = grouped[date] ?? []
       let segments = providerOrder.compactMap { provider -> DailyUsageProviderSegment? in

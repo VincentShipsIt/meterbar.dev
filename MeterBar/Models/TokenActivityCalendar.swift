@@ -175,8 +175,8 @@ struct TokenActivityCalendar {
         let today = calendar.startOfDay(for: now)
         let weekdayOffset = (calendar.component(.weekday, from: today) - calendar.firstWeekday + Self.weekdayCount)
             % Self.weekdayCount
-        let currentWeekStart = Self.day(today, offsetBy: -weekdayOffset, calendar: calendar)
-        let gridStart = Self.day(
+        let currentWeekStart = CalendarDayStep.day(today, offsetBy: -weekdayOffset, calendar: calendar)
+        let gridStart = CalendarDayStep.day(
             currentWeekStart,
             offsetBy: -(requestedWeeks - 1) * Self.weekdayCount,
             calendar: calendar
@@ -188,7 +188,7 @@ struct TokenActivityCalendar {
         let coverageStartDate = rowsByDay.keys.min()
 
         let slots: [(date: Date, isFuture: Bool)] = (0..<(requestedWeeks * Self.weekdayCount)).map { offset in
-            let date = Self.day(gridStart, offsetBy: offset, calendar: calendar)
+            let date = CalendarDayStep.day(gridStart, offsetBy: offset, calendar: calendar)
             return (date, date > today)
         }
 
@@ -278,12 +278,6 @@ struct TokenActivityCalendar {
     }
 
     // MARK: - Construction helpers
-
-    private static func day(_ date: Date, offsetBy days: Int, calendar: Calendar) -> Date {
-        guard let shifted = calendar.date(byAdding: .day, value: days, to: date) else { return date }
-        // Zones that shift at midnight can return 01:00; re-normalise every hop.
-        return calendar.startOfDay(for: shifted)
-    }
 
     private static func providerTotals(for rows: [DailyTokenUsage]) -> [TokenActivityProviderTotal] {
         Dictionary(grouping: rows, by: \.provider)
@@ -422,7 +416,7 @@ struct TokenActivityHourlyCalendar {
         calendar: Calendar = .current
     ) {
         let today = calendar.startOfDay(for: now)
-        let startDate = Self.day(today, offsetBy: -(Self.dayCount - 1), calendar: calendar)
+        let startDate = CalendarDayStep.day(today, offsetBy: -(Self.dayCount - 1), calendar: calendar)
         let rows = hourlyUsage.filter { row in
             let day = calendar.startOfDay(for: row.date)
             return day >= startDate && day <= today
@@ -435,7 +429,7 @@ struct TokenActivityHourlyCalendar {
             )
         }
         let coordinates = (0..<Self.dayCount).flatMap { dayOffset in
-            let day = Self.day(startDate, offsetBy: dayOffset, calendar: calendar)
+            let day = CalendarDayStep.day(startDate, offsetBy: dayOffset, calendar: calendar)
             return (0..<Self.hourCount).map { TokenActivityHourKey(day: day, hour: $0) }
         }
         let totals = coordinates.map { key in
@@ -460,7 +454,7 @@ struct TokenActivityHourlyCalendar {
         }
         let hoursByKey = Dictionary(uniqueKeysWithValues: hours.map { ($0.id, $0) })
         let days = (0..<Self.dayCount).map { dayOffset in
-            let day = Self.day(startDate, offsetBy: dayOffset, calendar: calendar)
+            let day = CalendarDayStep.day(startDate, offsetBy: dayOffset, calendar: calendar)
             return TokenActivityHourDay(
                 date: day,
                 hours: (0..<Self.hourCount).compactMap {
@@ -513,11 +507,6 @@ struct TokenActivityHourlyCalendar {
                 + String(format: "%02d:00", busiestHour.hour)
                 + " (\(UsageFormat.tokens(busiestHour.totalTokens)))",
         ].joined(separator: " · ")
-    }
-
-    private static func day(_ date: Date, offsetBy days: Int, calendar: Calendar) -> Date {
-        guard let shifted = calendar.date(byAdding: .day, value: days, to: date) else { return date }
-        return calendar.startOfDay(for: shifted)
     }
 
     private static func providerTotals(for rows: [HourlyTokenUsage]) -> [TokenActivityProviderTotal] {
