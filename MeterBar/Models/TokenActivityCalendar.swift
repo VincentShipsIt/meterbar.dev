@@ -198,7 +198,10 @@ struct TokenActivityCalendar {
             return (
                 slot.date,
                 coverageStartDate.map { slot.date >= $0 } ?? false,
-                providers.reduce(0) { $0 + $1.tokens },
+                // Saturating (issue #575): each provider total is already a
+                // saturating sum over cache rows, so folding several of them
+                // with a plain `+` traps on the heatmap's own re-render.
+                SafeAccumulate.sum(providers.map(\.tokens)),
                 providers.reduce(0) { $0 + $1.costUSD },
                 providers
             )
@@ -252,7 +255,9 @@ struct TokenActivityCalendar {
 
     var hasActivity: Bool { !activeDays.isEmpty }
 
-    var totalTokens: Int { days.reduce(0) { $0 + $1.totalTokens } }
+    /// Saturating (issue #575): a single poisoned day saturates its own total,
+    /// and the next day's plain `+` would trap on the window caption.
+    var totalTokens: Int { SafeAccumulate.sum(days.map(\.totalTokens)) }
 
     var totalCostUSD: Double { days.reduce(0) { $0 + $1.estimatedCostUSD } }
 
@@ -284,7 +289,10 @@ struct TokenActivityCalendar {
             .map { provider, rows in
                 TokenActivityProviderTotal(
                     provider: provider,
-                    tokens: rows.reduce(0) { $0 + max(0, $1.totalTokens) },
+                    // Saturating (issue #575): `max(0, …)` bounds a row from
+                    // below but not from above — a saturated row still traps
+                    // the next addition.
+                    tokens: SafeAccumulate.sum(rows.map { max(0, $0.totalTokens) }),
                     costUSD: rows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) }
                 )
             }
@@ -436,7 +444,9 @@ struct TokenActivityHourlyCalendar {
             let providers = Self.providerTotals(for: rowsByKey[key] ?? [])
             return (
                 key: key,
-                tokens: providers.reduce(0) { $0 + $1.tokens },
+                // Saturating (issue #575): same shape as the daily grid, one
+                // bucket finer.
+                tokens: SafeAccumulate.sum(providers.map(\.tokens)),
                 cost: providers.reduce(0) { $0 + $1.costUSD },
                 providers: providers
             )
@@ -484,7 +494,8 @@ struct TokenActivityHourlyCalendar {
 
     var activeHours: [TokenActivityHour] { hours.filter(\.hasUsage) }
 
-    var totalTokens: Int { hours.reduce(0) { $0 + $1.totalTokens } }
+    /// Saturating (issue #575): see `TokenActivityCalendar.totalTokens`.
+    var totalTokens: Int { SafeAccumulate.sum(hours.map(\.totalTokens)) }
 
     var totalCostUSD: Double { hours.reduce(0) { $0 + $1.estimatedCostUSD } }
 
@@ -514,7 +525,9 @@ struct TokenActivityHourlyCalendar {
             .map { provider, rows in
                 TokenActivityProviderTotal(
                     provider: provider,
-                    tokens: rows.reduce(0) { $0 + max(0, $1.totalTokens) },
+                    // Saturating (issue #575): the hourly twin of the daily
+                    // `providerTotals` fold above.
+                    tokens: SafeAccumulate.sum(rows.map { max(0, $0.totalTokens) }),
                     costUSD: rows.reduce(0) { $0 + max(0, $1.estimatedCostUSD) }
                 )
             }

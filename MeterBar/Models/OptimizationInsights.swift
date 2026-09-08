@@ -262,17 +262,22 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         let modelBreakdowns = costs.flatMap(\.modelBreakdowns)
         let originBreakdowns = costs.flatMap(\.originBreakdowns)
 
-        let modelTokenTotal = modelBreakdowns.reduce(0) { $0 + $1.totalTokens }
-        let originTokenTotal = originBreakdowns.reduce(0) { $0 + $1.totalTokens }
+        // Saturating (issue #575): every breakdown's own `totalTokens` is
+        // already a saturating sum, and these fold hundreds of them flattened
+        // across providers.
+        let modelTokenTotal = SafeAccumulate.sum(modelBreakdowns.map(\.totalTokens))
+        let originTokenTotal = SafeAccumulate.sum(originBreakdowns.map(\.totalTokens))
 
         self.topModels = Self.rank(modelBreakdowns, groupTotal: modelTokenTotal)
         self.topOrigins = Self.rank(originBreakdowns, groupTotal: originTokenTotal)
 
         // Aggregate token buckets across providers.
-        let input = costs.reduce(0) { $0 + $1.inputTokens }
-        let output = costs.reduce(0) { $0 + $1.outputTokens }
-        let cacheCreation = costs.reduce(0) { $0 + $1.cacheCreationTokens }
-        let cacheRead = costs.reduce(0) { $0 + $1.cacheReadTokens }
+        // Saturating (issue #575): per-provider `TokenCost` fields come
+        // straight off the persisted cache and may already sit at the bound.
+        let input = SafeAccumulate.sum(costs.map(\.inputTokens))
+        let output = SafeAccumulate.sum(costs.map(\.outputTokens))
+        let cacheCreation = SafeAccumulate.sum(costs.map(\.cacheCreationTokens))
+        let cacheRead = SafeAccumulate.sum(costs.map(\.cacheReadTokens))
 
         self.totalTokens = summary.totalTokens
         self.periodDays = summary.periodDays
@@ -280,7 +285,9 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         self.premiumTokenShare = Self.premiumShare(of: modelBreakdowns, groupTotal: modelTokenTotal)
         self.inputOutputRatio = output > 0 ? Double(input) / Double(output) : nil
 
-        let cacheDenominator = cacheRead + cacheCreation
+        // Saturating (issue #575): both operands are themselves saturating
+        // sums, so a plain `+` here can trap even though each is well-formed.
+        let cacheDenominator = SafeAccumulate.add(cacheRead, cacheCreation)
         self.cacheReuseRatio = cacheDenominator > 0 ? Double(cacheRead) / Double(cacheDenominator) : nil
 
         self.tokens7Day = Self.windowTokens(summary.dailyUsage, days: 7, now: now, calendar: calendar)
@@ -313,11 +320,15 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
     // MARK: - Pure computations
 
     static func premiumShare(of models: [TokenUsageBreakdown], groupTotal: Int? = nil) -> Double {
-        let total = groupTotal ?? models.reduce(0) { $0 + $1.totalTokens }
+        // Saturating (issue #575): both folds run over already-saturating
+        // per-model totals.
+        let total = groupTotal ?? SafeAccumulate.sum(models.map(\.totalTokens))
         guard total > 0 else { return 0 }
-        let premiumTokens = models
-            .filter { ModelTier.classify($0.name).isPremium }
-            .reduce(0) { $0 + $1.totalTokens }
+        let premiumTokens = SafeAccumulate.sum(
+            models
+                .filter { ModelTier.classify($0.name).isPremium }
+                .map(\.totalTokens)
+        )
         return Double(premiumTokens) / Double(total)
     }
 
@@ -506,12 +517,16 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         guard days > 0 else { return 0 }
         let today = calendar.startOfDay(for: now)
         let start = CalendarDayStep.day(today, offsetBy: -(days - 1), calendar: calendar)
-        return dailyUsage
-            .filter { usage in
-                let day = calendar.startOfDay(for: usage.date)
-                return day >= start && day <= today
-            }
-            .reduce(0) { $0 + $1.totalTokens }
+        // Saturating (issue #575): the 7/30-day insight windows fold the same
+        // cache rows the Costs page renders.
+        return SafeAccumulate.sum(
+            dailyUsage
+                .filter { usage in
+                    let day = calendar.startOfDay(for: usage.date)
+                    return day >= start && day <= today
+                }
+                .map(\.totalTokens)
+        )
     }
 
     private static func clamp01(_ value: Double) -> Double {
