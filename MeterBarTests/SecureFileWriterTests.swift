@@ -217,6 +217,35 @@ final class SecureFileWriterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), existing)
     }
 
+    /// Regression guard for #564: two concurrent *first* writers to a path
+    /// that does not exist yet must not be able to truncate one another.
+    ///
+    /// The original bug was in `ensurePrivateFile` itself: "does the file
+    /// exist? then `createFile`" is two steps, and `createFile` unconditionally
+    /// (re)creates an empty file. Two writers whose existence checks both land
+    /// before either's `createFile` runs can each believe they are the
+    /// creator, and the second `createFile` truncates whatever the first had
+    /// already appended — a `flock` taken by the writers afterward does not
+    /// help, because the truncation already happened here, before either
+    /// writer reached the lock. This races many writers through exactly that
+    /// shape — `ensurePrivateFile` immediately followed by a locked append,
+    /// mirroring `WakeRunLogger.append` — against a single brand-new path and
+    /// asserts every line survives whole.
+    func testConcurrentFirstWritersThroughEnsurePrivateFileLoseNoData() throws {
+        let url = tempDirectory.appendingPathComponent("first-writer-race.log")
+        let writerCount = 40
+
+        DispatchQueue.concurrentPerform(iterations: writerCount) { index in
+            SecureFileWriter.ensurePrivateFile(at: url)
+            appendLocked("line-\(index)\n", to: url)
+        }
+
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, writerCount, "every concurrent first-write must land as its own, whole line")
+        XCTAssertEqual(Set(lines).count, writerCount, "no line was corrupted into, or replaced, another writer's line")
+    }
+
     // MARK: - Log redaction
 
     /// `errorDescription` names the file, which is right in front of a human
@@ -285,6 +314,35 @@ final class SecureFileWriterTests: XCTestCase {
     private func permissions(of url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return try XCTUnwrap(attributes[.posixPermissions] as? Int)
+    }
+
+    /// Appends `string` to `url` under an exclusive `flock`, mirroring
+    /// `WakeRunLogger.appendData`'s open→lock→write→unlock shape. Isolates the
+    /// concurrency test above to the bug under test — truncation inside
+    /// `ensurePrivateFile` — rather than the interleaved-write tearing that a
+    /// held `flock` already prevents.
+    private func appendLocked(_ string: String, to url: URL) {
+        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else { return }
+        defer { flock(descriptor, LOCK_UN) }
+
+        let data = Data(string.utf8)
+        data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+            guard let base = buffer.baseAddress else { return }
+            var offset = 0
+            while offset < buffer.count {
+                let written = Darwin.write(descriptor, base + offset, buffer.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if written == -1, errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+        }
     }
 
     /// Toggles `UF_IMMUTABLE` (`uchg`). A user flag, so the owner can both set

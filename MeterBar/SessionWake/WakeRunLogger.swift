@@ -71,16 +71,23 @@ nonisolated struct WakeRunLogger: Sendable {
     /// current end, and interleave their `write(2)` calls, tearing a line in
     /// half. Holding the flock across open→write→close closes that window.
     ///
-    /// Deliberately does NOT call `SecureFileWriter.ensurePrivateFile`: that
-    /// helper's "does it exist? then `createFile`" check is itself racy —
-    /// `createFile(atPath:contents:nil,…)` unconditionally (re)creates an
-    /// empty file, so two writers whose existence checks both land before
-    /// either's `createFile` runs can truncate a file a third writer already
-    /// appended to. `open(…, O_CREAT)` has no such window (it creates only if
-    /// still absent, never truncates an existing file), so private-mode
-    /// enforcement is done here on the already-open descriptor via `fchmod`
-    /// instead — the same "act on the descriptor, not the path" technique
-    /// `SecureFileWriter.write` itself uses.
+    /// Deliberately does not call `SecureFileWriter.ensurePrivateFile` as a
+    /// separate step before opening the file: that would add a second
+    /// open/close/`fchmod` round trip that buys nothing here, since this
+    /// method has to open the file itself anyway to hold the `flock` across
+    /// the write. So private-mode enforcement is done in one open, on the
+    /// same already-open descriptor via `fchmod` — the same "act on the
+    /// descriptor, not the path" technique `SecureFileWriter.write` itself
+    /// uses, and `ensurePrivateFile` now also uses internally.
+    ///
+    /// (Historical note: this split from `ensurePrivateFile` originally
+    /// because that helper's "does it exist? then `createFile`" check was
+    /// itself racy — `createFile(atPath:contents:nil,…)` unconditionally
+    /// (re)created an empty file, so two writers whose existence checks both
+    /// landed before either's `createFile` ran could truncate a file a third
+    /// writer had already appended to. `ensurePrivateFile` is fixed now — see
+    /// `SecureFileWriter.ensurePrivateFile` — but this method still has no
+    /// reason to call it separately.)
     private func appendData(_ data: Data, to fileURL: URL) {
         let descriptor = open(fileURL.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
         guard descriptor >= 0 else { return }
