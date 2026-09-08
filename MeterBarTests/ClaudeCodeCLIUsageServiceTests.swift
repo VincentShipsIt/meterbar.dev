@@ -161,6 +161,54 @@ final class ClaudeCodeCLIUsageServiceTests: XCTestCase {
         XCTAssertTrue(recorded.contains("CFG:/tmp/claude-alt"), "recorded=\(recorded)")
     }
 
+    /// #549 (1): the async wrapper wires a `ManagedProcess.Cancellation`
+    /// through `withTaskCancellationHandler`, the same way
+    /// `WakeProcessRunner.spawn` does. Cancelling the enclosing task must kill
+    /// the child's process group immediately rather than waiting out the 12s
+    /// `commandTimeout` — otherwise toggling Session Wake off, or quitting,
+    /// stalls for up to 12 seconds and holds any cross-process lock the
+    /// caller took around this call.
+    func testTaskCancellationKillsTheSubprocessAndThrowsPromptly() async throws {
+        let pidFile = tempDirectory.appendingPathComponent("cancel-child.pid")
+        let binary = try makeFakeCLI(named: "cancel-hang.sh", body: """
+        echo $$ > "\(pidFile.path)"
+        sleep 30
+        """)
+
+        let task = Task<String, Error> {
+            try await ClaudeCodeCLIUsageService.shared.runClaudeUsage(binaryPath: binary, account: .defaultAccount)
+        }
+
+        // Wait for the child to actually spawn and record its pid before
+        // cancelling, so the assertion below observes a real kill rather than
+        // racing the spawn.
+        let spawnDeadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: pidFile.path), Date() < spawnDeadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pidFile.path), "child never spawned")
+
+        let cancelledAt = Date()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("expected task cancellation to surface as a thrown error")
+        } catch {
+            // Any error is acceptable here — the shape of the error is
+            // covered by testTimeoutIsReportedWithoutWaitingOutTheChild;
+            // what this test asserts is promptness and process cleanup.
+        }
+        XCTAssertLessThan(
+            Date().timeIntervalSince(cancelledAt), 5,
+            "cancellation must not wait out the 12s commandTimeout"
+        )
+
+        let childPid = try pid(from: pidFile)
+        try await waitForProcessGone(childPid)
+        XCTAssertFalse(processAlive(childPid), "subprocess leaked after task cancellation")
+    }
+
     func testStatusRunnerUsesStatusCommandAndScopedEnvironment() async throws {
         let marker = tempDirectory.appendingPathComponent("status-env.txt")
         let binary = try makeFakeCLI(named: "status.sh", body: """

@@ -189,6 +189,46 @@ final class WakeCLIEngineTests: XCTestCase {
         XCTAssertNil(rescan.first?.skipReason, "denied session must not be marked handled")
     }
 
+    /// #549 (2): `meterbar wake --limit=-1` used to reach `Array.prefix(_:)`
+    /// with a negative count and trap. A negative (or zero) `--limit` must be
+    /// rejected at the boundary with a distinguishable outcome and a clear
+    /// message instead — this is the CLI-facing counterpart to
+    /// `MeterBarCLI/Sources/Wake.swift`'s `validate()`, exercised directly here
+    /// since the engine can be driven by more than the CLI's arg parser.
+    func testNegativeLimitIsRejectedRatherThanTrapping() async throws {
+        try writeBlockedSession()
+        let runner = RecordingRunner()
+        let engine = makeEngine(provider: FixedProvider(.open), runner: runner)
+        let response = await engine.run(provider: "claude", account: account(), dryRun: false, limit: -1)
+        XCTAssertEqual(response.outcome, .validationFailure)
+        let message = try XCTUnwrap(response.message)
+        XCTAssertTrue(message.contains("--limit"), "message should name the offending flag: \(message)")
+        let ran = await runner.ran
+        XCTAssertTrue(ran.isEmpty, "a rejected limit must launch nothing")
+    }
+
+    /// Zero is equally nonsensical for "resume at least one session" — reject
+    /// it the same way rather than silently treating it as "resume nothing".
+    func testZeroLimitIsRejectedRatherThanSilentlyResumingNothing() async throws {
+        try writeBlockedSession()
+        let runner = RecordingRunner()
+        let engine = makeEngine(provider: FixedProvider(.open), runner: runner)
+        let response = await engine.run(provider: "claude", account: account(), dryRun: false, limit: 0)
+        XCTAssertEqual(response.outcome, .validationFailure)
+        let ran = await runner.ran
+        XCTAssertTrue(ran.isEmpty)
+    }
+
+    /// A negative limit must also be rejected under `--dry-run`: it is a CLI
+    /// usage error independent of whether anything would actually launch.
+    func testNegativeLimitIsRejectedEvenUnderDryRun() async throws {
+        try writeBlockedSession()
+        let runner = RecordingRunner()
+        let engine = makeEngine(provider: FixedProvider(.open), runner: runner)
+        let response = await engine.run(provider: "claude", account: account(), dryRun: true, limit: -5)
+        XCTAssertEqual(response.outcome, .validationFailure)
+    }
+
     func testLockContentionNamesTheHolder() async throws {
         try writeBlockedSession()
         // Pre-hold the engine's lock file as a CLI-kind holder.

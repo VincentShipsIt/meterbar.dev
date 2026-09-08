@@ -73,6 +73,23 @@ struct WakeCLIEngine {
         let ledger = ledgerFactory()
         let candidates = await runtime.discover(ledger: ledger)
 
+        // A caller-supplied `--limit` is a raw, unvalidated CLI flag (unlike
+        // `bounds.maxSessionsPerRun`, which `WakeBounds` clamps into
+        // `sessionsRange` at construction). Reject a non-positive value here
+        // with a clear message instead of letting it reach `resume`, where
+        // `Array.prefix(_:)` traps on a negative count — a poor failure mode
+        // for a command documented for cron and hook use.
+        if let limit, limit < 1 {
+            return .from(
+                candidates: candidates,
+                outcome: .validationFailure,
+                provider: providerToken,
+                dryRun: dryRun,
+                account: accountLabel,
+                message: "--limit must be 1 or greater (got \(limit))."
+            )
+        }
+
         // Dry-run / preview: strictly read-only. No lock, no quota fetch, no
         // subprocess, no mutation.
         if dryRun {
@@ -168,7 +185,11 @@ struct WakeCLIEngine {
         provider: String,
         accountLabel: String?
     ) async -> WakeCLIResponse {
-        let cap = min(limit ?? bounds.maxSessionsPerRun, bounds.maxSessionsPerRun)
+        // `limit` reaching here is already validated non-negative by `run`
+        // above; `max(0, …)` is defense in depth so this method — which other
+        // callers could invoke directly — can never trap on `prefix` even if
+        // that guarantee is bypassed.
+        let cap = max(0, min(limit ?? bounds.maxSessionsPerRun, bounds.maxSessionsPerRun))
         let queue = Array(candidates.filter(\.isExecutable).prefix(cap))
 
         var summary = WakeCLIResponse.Summary()

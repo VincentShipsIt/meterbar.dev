@@ -43,16 +43,35 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
     /// Async wrapper that runs the blocking process invocation on `processQueue`
     /// and bridges the result back via a continuation, so the calling task
     /// suspends instead of blocking a cooperative thread on the semaphore.
-    private func runClaudeUsage(binaryPath: String, account: ClaudeCodeAccount) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            processQueue.async {
-                do {
-                    let output = try self.runClaudeUsageBlocking(binaryPath: binaryPath, account: account)
-                    continuation.resume(returning: output)
-                } catch {
-                    continuation.resume(throwing: error)
+    ///
+    /// Wired the same way as `WakeProcessRunner.spawn`: a `Cancellation` handle
+    /// is created before launch and wired through `withTaskCancellationHandler`,
+    /// so a caller's `task.cancel()` (Session Wake toggled off, app quitting)
+    /// kills the child's whole process group immediately instead of waiting out
+    /// `commandTimeout`, and releases whatever cross-process lock the caller is
+    /// holding around this call.
+    ///
+    /// Internal (not private) so tests can cancel the enclosing task and assert
+    /// the spawned process is actually torn down.
+    func runClaudeUsage(binaryPath: String, account: ClaudeCodeAccount) async throws -> String {
+        let cancellation = ManagedProcess.Cancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                processQueue.async {
+                    do {
+                        let output = try self.runClaudeUsageBlocking(
+                            binaryPath: binaryPath,
+                            account: account,
+                            cancellation: cancellation
+                        )
+                        continuation.resume(returning: output)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
+        } onCancel: {
+            cancellation.cancel()
         }
     }
 
@@ -66,7 +85,8 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
     func runClaudeUsageBlocking(
         binaryPath: String,
         account: ClaudeCodeAccount,
-        timeout: TimeInterval = ClaudeCodeCLIUsageService.commandTimeout
+        timeout: TimeInterval = ClaudeCodeCLIUsageService.commandTimeout,
+        cancellation: ManagedProcess.Cancellation = ManagedProcess.Cancellation()
     ) throws -> String {
         let result = ManagedProcess.run(
             executable: binaryPath,
@@ -74,7 +94,8 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
             environment: processEnvironment(account: account),
             workingDirectory: ServiceSupport.realHomeDirectory(),
             timeout: timeout,
-            maxCaptureBytes: Self.maxCaptureBytes
+            maxCaptureBytes: Self.maxCaptureBytes,
+            cancellation: cancellation
         )
 
         // Lossy decode (same rationale as WakeProcessRunner): a capture truncated
@@ -99,8 +120,14 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
         case .timedOut:
             throw ClaudeCodeCLIUsageError.timedOut
         case .cancelled:
-            // No cancellation handle is passed, so this is unreachable today;
-            // an aborted run is indistinguishable from a timeout to the caller.
+            // Reachable via `runClaudeUsage`'s `withTaskCancellationHandler`:
+            // the caller's enclosing task was cancelled (Session Wake toggled
+            // off, app quitting) and the process group was killed before it
+            // could exit on its own. `ClaudeCodeCLIUsageError` has no
+            // dedicated case for this — every caller already treats a timeout
+            // as "no answer this time, try again" — so an aborted run is
+            // deliberately reported the same way rather than adding a new
+            // error case only this one branch would produce.
             throw ClaudeCodeCLIUsageError.timedOut
         case let .launchFailed(message):
             throw ClaudeCodeCLIUsageError.launchFailed(message)
