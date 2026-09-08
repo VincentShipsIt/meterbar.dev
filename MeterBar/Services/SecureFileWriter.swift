@@ -70,20 +70,28 @@ nonisolated enum SecureFileWriter {
     /// For append-only files — logs — where a whole-file replace is the wrong
     /// shape. Best-effort: a log line is never worth failing the work that
     /// produced it.
+    ///
+    /// This used to be a `fileExists` check followed by `createFile`. Those two
+    /// steps were not atomic: two concurrent first-writers could each observe
+    /// "absent" and both proceed to `createFile`, and `createFile` unconditionally
+    /// (re)creates an empty file, so the second call truncated whatever the first
+    /// had already appended. A `flock` taken by the writers afterward did not
+    /// help, because the truncation already happened here, before either writer
+    /// reached the lock.
+    ///
+    /// `open` with `O_CREAT` and no `O_EXCL`/`O_TRUNC` closes that window: it
+    /// either creates the file or opens the existing one, and never truncates
+    /// one that is already there, so there is no instant at which a second
+    /// concurrent caller can decide the file is still absent. Permissions are
+    /// then hardened with `fchmod` on that descriptor rather than a path-based
+    /// `chmod` — acting on the descriptor, not the path, is the same technique
+    /// `write(_:to:permissions:)` uses, and it keeps the mode change atomic with
+    /// respect to anyone else racing to open the same path.
     static func ensurePrivateFile(at fileURL: URL) {
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.setAttributes(
-                [.posixPermissions: Int(privateFile)],
-                ofItemAtPath: fileURL.path
-            )
-        } else {
-            fileManager.createFile(
-                atPath: fileURL.path,
-                contents: nil,
-                attributes: [.posixPermissions: Int(privateFile)]
-            )
-        }
+        let descriptor = open(fileURL.path, O_WRONLY | O_CREAT, privateFile)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        _ = fchmod(descriptor, privateFile)
     }
 
     static func write(
