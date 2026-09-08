@@ -16,6 +16,61 @@ final class PricingScheduleContractTests: XCTestCase {
 
     // MARK: - Single source of truth (a forked table must break CI)
 
+    /// Issue #554: `ApiUsagePricing`'s OpenAI leg used to carry its own local,
+    /// undated rate table (matched by ambiguous substring order) instead of
+    /// resolving through `ModelPricing` the way the Anthropic leg does. Any
+    /// future fork back to a local table must break this test.
+    func testOpenAIAdminUsagePricingResolvesThroughTheSharedTable() {
+        let timestamps = [
+            DatedTokenPricing.utcDay(2019, 1, 1),
+            DatedTokenPricing.utcDay(2026, 9, 8),
+            Date()
+        ]
+        let openAIModels: [String?] = [
+            nil, "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
+            "o1", "o1-mini", "o3-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
+            "gpt-4o-2024-08-06", "  O1-MINI  ", "gpt-9-unreleased"
+        ]
+
+        for timestamp in timestamps {
+            for model in openAIModels {
+                let expectedPricing = ModelPricing.openAI(for: model, at: timestamp)
+                let expectedCost = TokenCostMath.calculateCost(
+                    input: 1_000_000,
+                    output: 500_000,
+                    cacheCreation: 0,
+                    cacheRead: 250_000,
+                    pricing: expectedPricing
+                )
+                let actualCost = ApiUsagePricing.cost(
+                    provider: .openai,
+                    model: model,
+                    tokens: ApiUsagePricing.TokenBreakdown(
+                        uncachedInput: 1_000_000, cacheRead: 250_000, output: 500_000
+                    ),
+                    at: timestamp
+                )
+                XCTAssertEqual(actualCost, expectedCost, accuracy: 0.000_001, "\(model ?? "nil") at \(timestamp)")
+            }
+        }
+    }
+
+    /// Issue #554: an unmatched OpenAI model must be flagged unverified, the
+    /// same standard #537 already holds Anthropic to — never a confidently
+    /// wrong dollar figure with no signal that it was a guess.
+    func testUnmatchedOpenAIModelIsFlaggedUnverifiedThroughTheSharedTable() {
+        XCTAssertEqual(
+            ApiUsagePricing.isPricingUnverified(provider: .openai, model: "gpt-4o"),
+            !ModelPricing.isKnownOpenAIModel("gpt-4o")
+        )
+        XCTAssertEqual(
+            ApiUsagePricing.isPricingUnverified(provider: .openai, model: "gpt-9-unreleased"),
+            !ModelPricing.isKnownOpenAIModel("gpt-9-unreleased")
+        )
+        XCTAssertFalse(ApiUsagePricing.isPricingUnverified(provider: .openai, model: "gpt-4o"))
+        XCTAssertTrue(ApiUsagePricing.isPricingUnverified(provider: .openai, model: "gpt-9-unreleased"))
+    }
+
     func testScannersResolvePricingThroughTheSharedTable() {
         let timestamps = [
             DatedTokenPricing.utcDay(2019, 1, 1),

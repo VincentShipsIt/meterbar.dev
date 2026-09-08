@@ -177,17 +177,28 @@ public struct PricingProvenance: Codable, Equatable, Sendable {
 /// estimates. Every model key maps to date-ranged rates; look-ups take the
 /// event's timestamp so historical sessions keep the price they were billed at.
 ///
-/// Sources, all checked 2026-07-02:
-///   - Anthropic — https://www.anthropic.com/pricing#api
-///   - OpenAI (Codex) — https://openai.com/api/pricing/
+/// Sources:
+///   - Anthropic, checked 2026-07-02 — https://www.anthropic.com/pricing#api
+///   - OpenAI (Codex CLI slugs), checked 2026-07-02 — https://openai.com/api/pricing/
+///   - OpenAI (admin-usage-API models: `openai-*` keys below), checked
+///     2026-09-08 against each model's own page under
+///     https://developers.openai.com/api/docs/models/ (redirected from
+///     platform.openai.com/docs/pricing) — issue #554. `gpt-4-turbo`,
+///     `gpt-4`, and `gpt-3.5-turbo` predate prompt caching and list no cached
+///     rate on their pages, so their `cacheRead` is set equal to `input`
+///     (no discount) rather than guessed.
 ///
 /// The seeded entries are deliberately open-ended backwards: we never verified
 /// what these models cost before that check, and inventing effective dates
 /// would mis-price old sessions while looking authoritative. When a rate
 /// changes, append a dated entry — costs before its `effectiveFrom` stay put.
 public enum ModelPricing {
-    /// Day the seeded entries were checked against the pricing pages above.
+    /// Day the seeded Anthropic/Codex entries were checked against the
+    /// pricing pages above.
     private static let seedVerification = "2026-07-02"
+    /// Day the seeded OpenAI admin-usage-API entries (`openai-*` keys) were
+    /// checked against their model pages (issue #554).
+    private static let openAIVerification = "2026-09-08"
 
     private static let table: [String: PricingSchedule] = [
         "claude-sonnet": .constant(
@@ -240,7 +251,53 @@ public enum ModelPricing {
             verifiedOn: seedVerification),
         "default": .constant(
             TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30),
-            verifiedOn: seedVerification)
+            verifiedOn: seedVerification),
+        // OpenAI admin-usage-API models (issue #554) — distinct keys from the
+        // `codex`/`gpt-5.6-*` rows above, which price Codex CLI's own slugs,
+        // not the raw model names the org usage API reports. OpenAI's usage
+        // API has no cache-write charge, so `cacheCreation` is always 0.
+        "openai-gpt-4o-mini": .constant(
+            TokenPricing(input: 0.15, output: 0.60, cacheCreation: 0, cacheRead: 0.075),
+            verifiedOn: openAIVerification),
+        "openai-gpt-4o": .constant(
+            TokenPricing(input: 2.50, output: 10.0, cacheCreation: 0, cacheRead: 1.25),
+            verifiedOn: openAIVerification),
+        "openai-gpt-4.1-mini": .constant(
+            // Cached input is 75% off for the gpt-4.1 family, not the 50%
+            // uniform discount the pre-#554 local table guessed.
+            TokenPricing(input: 0.40, output: 1.60, cacheCreation: 0, cacheRead: 0.10),
+            verifiedOn: openAIVerification),
+        "openai-gpt-4.1": .constant(
+            TokenPricing(input: 2.0, output: 8.0, cacheCreation: 0, cacheRead: 0.50),
+            verifiedOn: openAIVerification),
+        "openai-o1-mini": .constant(
+            TokenPricing(input: 1.10, output: 4.40, cacheCreation: 0, cacheRead: 0.55),
+            verifiedOn: openAIVerification),
+        "openai-o1": .constant(
+            TokenPricing(input: 15.0, output: 60.0, cacheCreation: 0, cacheRead: 7.5),
+            verifiedOn: openAIVerification),
+        "openai-o3-mini": .constant(
+            TokenPricing(input: 1.10, output: 4.40, cacheCreation: 0, cacheRead: 0.55),
+            verifiedOn: openAIVerification),
+        "openai-gpt-4-turbo": .constant(
+            // No cached-input tier on this model's pricing page — billed at
+            // the full input rate rather than an invented discount.
+            TokenPricing(input: 10.0, output: 30.0, cacheCreation: 0, cacheRead: 10.0),
+            verifiedOn: openAIVerification),
+        "openai-gpt-4": .constant(
+            TokenPricing(input: 30.0, output: 60.0, cacheCreation: 0, cacheRead: 30.0),
+            verifiedOn: openAIVerification),
+        "openai-gpt-3.5": .constant(
+            TokenPricing(input: 0.50, output: 1.50, cacheCreation: 0, cacheRead: 0.50),
+            verifiedOn: openAIVerification),
+        // Fallback for an OpenAI admin-usage model matching none of the keys
+        // above — same rate the pre-#554 local table used as its default
+        // (gpt-4o's rate, the family's long-standing flagship). `isKnownOpenAIModel`
+        // is what actually drives the "unverified" marker shown to the user;
+        // this row only keeps the estimate roughly in the right neighborhood.
+        "openai-default": .constant(
+            TokenPricing(input: 2.50, output: 10.0, cacheCreation: 0, cacheRead: 1.25),
+            verifiedOn: openAIVerification)
     ]
 
     /// Verification dates of the shipped table itself — what the UI and CLI show
@@ -321,6 +378,65 @@ public enum ModelPricing {
             return "claude-sonnet"
         }
         return "default"
+    }
+
+    // MARK: - OpenAI admin-usage-API models (issue #554)
+
+    public static var openAI: TokenPricing {
+        openAI(for: nil)
+    }
+
+    /// Per-model OpenAI admin-usage-API rate at `timestamp`, falling back to
+    /// `openai-default` for a model the table does not carry.
+    public static func openAI(for model: String?, at timestamp: Date = Date()) -> TokenPricing {
+        resolveOpenAI(for: model, at: timestamp).pricing
+    }
+
+    public static func resolveOpenAI(for model: String?, at timestamp: Date = Date()) -> ResolvedPricing {
+        resolve(key: openAIKey(for: model) ?? "openai-default", at: timestamp)
+    }
+
+    /// `true` when `model` matched a specific `openai-*` entry rather than
+    /// falling through to `openai-default` — the signal `ApiUsagePricing`
+    /// surfaces to the UI as unverified pricing, mirroring the Anthropic path.
+    public static func isKnownOpenAIModel(_ model: String?) -> Bool {
+        openAIKey(for: model) != nil
+    }
+
+    /// Trims, lowercases, and strips a trailing dated-snapshot suffix (e.g.
+    /// `-2024-08-06`, `-0613`, `-0125`) so a versioned slug the usage API
+    /// reports normalizes to the same key as its bare model name.
+    public static func normalizeOpenAIModel(_ raw: String) -> String {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let longDate = trimmed.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) {
+            trimmed.removeSubrange(longDate)
+        } else if let shortDate = trimmed.range(of: #"-\d{4}$"#, options: .regularExpression) {
+            trimmed.removeSubrange(shortDate)
+        }
+        return trimmed
+    }
+
+    /// Model name → table key, exact match only (issue #554). OpenAI's
+    /// admin-usage-API model names are ambiguous under substring matching in
+    /// list order — `"gpt-4"` is a prefix of `"gpt-4o"`, `"gpt-4.1"`, and
+    /// `"gpt-4-turbo"` — the exact defect class that mispriced Anthropic's
+    /// Opus 4 before #537. Every recognized slug is normalized, then looked
+    /// up with `switch` equality; nothing here is matched with `.contains`.
+    private static func openAIKey(for model: String?) -> String? {
+        guard let model else { return nil }
+        switch normalizeOpenAIModel(model) {
+        case "gpt-4o-mini": return "openai-gpt-4o-mini"
+        case "gpt-4o": return "openai-gpt-4o"
+        case "gpt-4.1-mini": return "openai-gpt-4.1-mini"
+        case "gpt-4.1": return "openai-gpt-4.1"
+        case "o1-mini": return "openai-o1-mini"
+        case "o1": return "openai-o1"
+        case "o3-mini": return "openai-o3-mini"
+        case "gpt-4-turbo": return "openai-gpt-4-turbo"
+        case "gpt-4": return "openai-gpt-4"
+        case "gpt-3.5-turbo", "gpt-3.5": return "openai-gpt-3.5"
+        default: return nil
+        }
     }
 
     private static func resolve(key: String, at timestamp: Date) -> ResolvedPricing {

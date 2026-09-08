@@ -94,6 +94,42 @@ final class ApiUsageTests: XCTestCase {
         XCTAssertEqual(cost, 2 * 2.50 + 0.5 * 10.0, accuracy: 0.0001)
     }
 
+    /// Regression for #554: gpt-4.1's cached input is 75% off, not the 50%
+    /// uniform discount the old local table guessed for every OpenAI model.
+    func testOpenAIGpt41CacheReadPricesAtItsOwnDiscountNotTheGpt4oRate() {
+        let cost = ApiUsagePricing.cost(
+            provider: .openai,
+            model: "gpt-4.1",
+            tokens: ApiUsagePricing.TokenBreakdown(cacheRead: 1_000_000)
+        )
+        // $0.50 per million at the verified 75%-off rate, not $1.00 (the old
+        // uniform-50%-off guess) or $2.00 (the uncached input rate).
+        XCTAssertEqual(cost, 0.50, accuracy: 0.0001)
+    }
+
+    /// Regression for #554: substring matching in list order could mis-price
+    /// a model — the same defect class that priced Anthropic's Opus 4 at a
+    /// third of its rate before #537. "gpt-4" must never shadow "gpt-4o",
+    /// "gpt-4.1", or "gpt-4-turbo".
+    func testOpenAIExactMatchNeverLetsAShorterSlugShadowAMoreSpecificOne() {
+        XCTAssertEqual(
+            ApiUsagePricing.cost(provider: .openai, model: "gpt-4", inputTokens: 1_000_000, outputTokens: 0),
+            30.0, accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            ApiUsagePricing.cost(provider: .openai, model: "gpt-4o", inputTokens: 1_000_000, outputTokens: 0),
+            2.50, accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            ApiUsagePricing.cost(provider: .openai, model: "gpt-4-turbo", inputTokens: 1_000_000, outputTokens: 0),
+            10.0, accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            ApiUsagePricing.cost(provider: .openai, model: "gpt-4.1", inputTokens: 1_000_000, outputTokens: 0),
+            2.0, accuracy: 0.0001
+        )
+    }
+
     func testUnknownModelFallsBackToProviderDefault() {
         let anthropic = ApiUsagePricing.cost(
             provider: .anthropic, model: "totally-unknown", inputTokens: 1_000_000, outputTokens: 0
@@ -251,6 +287,46 @@ final class ApiUsageTests: XCTestCase {
         XCTAssertEqual(response.data.first?.results.first?.inputCachedTokens, 300)
         XCTAssertEqual(response.data.first?.results.first?.outputTokens, 400)
         XCTAssertEqual(response.nextPage, "abc")
+
+        // #554: OpenAI's `input_tokens` includes the cached portion, so the
+        // aggregation must bill the cached 300 tokens at gpt-4o's cache-read
+        // rate ($1.25) and only the remaining 500 uncached tokens at the full
+        // input rate ($2.50), not all 800 at the uncached rate.
+        let usage = ApiUsageService.aggregateOpenAI(
+            buckets: response.data,
+            start: date(year: 2026, month: 7, day: 1),
+            end: date(year: 2026, month: 7, day: 2)
+        )
+        XCTAssertEqual(usage.inputTokens, 800)
+        XCTAssertEqual(usage.outputTokens, 400)
+        XCTAssertFalse(usage.hasUnverifiedPricing)
+        let expectedCost = 500.0 / 1_000_000 * 2.50 + 300.0 / 1_000_000 * 1.25 + 400.0 / 1_000_000 * 10.0
+        XCTAssertEqual(usage.estimatedCostUSD, expectedCost, accuracy: 0.000_001)
+    }
+
+    /// Regression for #554: an OpenAI model the shared table does not know
+    /// must be flagged unverified — never a confidently wrong dollar figure
+    /// from a silent default, the same standard #537 holds Anthropic to.
+    func testUnmatchedOpenAIModelAggregatesAsUnverified() throws {
+        let json = """
+        {
+          "data": [
+            { "results": [
+              { "model": "gpt-9-unreleased", "input_tokens": 1000, "output_tokens": 200 }
+            ] }
+          ],
+          "has_more": false,
+          "next_page": null
+        }
+        """
+        let response = try JSONDecoder().decode(OpenAIUsageResponse.self, from: Data(json.utf8))
+        let usage = ApiUsageService.aggregateOpenAI(
+            buckets: response.data,
+            start: date(year: 2026, month: 7, day: 1),
+            end: date(year: 2026, month: 7, day: 2)
+        )
+        XCTAssertTrue(usage.hasUnverifiedPricing)
+        XCTAssertTrue(usage.models.first?.isPricingUnverified ?? false)
     }
 
     // MARK: - Pagination

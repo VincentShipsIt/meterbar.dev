@@ -152,11 +152,15 @@ final class DatedModelPricingTests: XCTestCase {
             XCTAssertEqual(resolved.pricing, ModelPricing.claude(for: model), "\(model ?? "nil") drifted by date")
         }
         XCTAssertFalse(ModelPricing.resolveCodex(for: "gpt-5.6-sol", at: ancient).precedesFirstEntry)
+        for model in ["gpt-4o", "gpt-4.1", "o1", nil] {
+            XCTAssertFalse(ModelPricing.resolveOpenAI(for: model, at: ancient).precedesFirstEntry)
+        }
     }
 
     func testDefaultTimestampArgumentPricesAtTodaysRate() {
         XCTAssertEqual(ModelPricing.claude(for: "claude-opus"), ModelPricing.claude(for: "claude-opus", at: Date()))
         XCTAssertEqual(ModelPricing.codex, ModelPricing.codex(for: nil, at: Date()))
+        XCTAssertEqual(ModelPricing.openAI, ModelPricing.openAI(for: nil, at: Date()))
     }
 
     // MARK: - Provenance
@@ -202,9 +206,12 @@ final class DatedModelPricingTests: XCTestCase {
     }
 
     func testTableProvenanceDescribesTheShippedEntries() {
+        // OpenAI admin-usage-API entries (issue #554) were verified on a
+        // later date than the Anthropic/Codex seed, so the shipped table now
+        // spans both dates.
         XCTAssertFalse(ModelPricing.tableProvenance.isEmpty)
         XCTAssertEqual(ModelPricing.tableProvenance.eventsBeforeFirstEntry, 0)
-        XCTAssertEqual(ModelPricing.tableProvenance.label, "Rates verified 2026-07-02")
+        XCTAssertEqual(ModelPricing.tableProvenance.label, "Rates verified 2026-07-02–2026-09-08")
     }
 
     /// Every dashboard consumer filters the summary to the enabled services
