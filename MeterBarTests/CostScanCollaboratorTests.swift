@@ -514,6 +514,22 @@ final class CostScanCollaboratorTests: XCTestCase {
         )
     }
 
+    /// Issue #539: unanchored key matching let a longer key ending in the
+    /// requested key match first, so `cached_input_token_count` fed its value
+    /// through as uncached `input_token_count` and `reasoning_model` fed its
+    /// value through as `model`. Both bodies put the colliding longer key
+    /// first, which is exactly the case an unanchored `firstMatch` gets
+    /// wrong (it returns the leftmost match in the string).
+    func testLogValueAnchorsKeysSoALongerKeyCannotMatchInsideAnother() {
+        let cacheCollision = "cached_input_token_count=1500 input_token_count=200"
+        XCTAssertEqual(CodexCostScanner.logInt("input_token_count", in: cacheCollision), 200)
+        XCTAssertEqual(CodexCostScanner.logInt("cached_input_token_count", in: cacheCollision), 1_500)
+
+        let modelCollision = "reasoning_model=o1-preview model=gpt-5.6-sol"
+        XCTAssertEqual(CodexCostScanner.logValue("model", in: modelCollision), "gpt-5.6-sol")
+        XCTAssertEqual(CodexCostScanner.logValue("reasoning_model", in: modelCollision), "o1-preview")
+    }
+
     func testSQLiteFallbackReadsOnlyRecentOpenTelemetryUsageRows() throws {
         let database = FileManager.default.temporaryDirectory
             .appendingPathComponent("meterbar-codex-log-\(UUID().uuidString).sqlite")

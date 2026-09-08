@@ -18,13 +18,24 @@ enum CodexCostScanner {
         ]
         var result: [String: NSRegularExpression] = [:]
         for key in keys {
-            let pattern = NSRegularExpression.escapedPattern(for: key) + #"=([^\s}]+)"#
+            let pattern = Self.logValuePattern(for: key)
             if let regex = try? NSRegularExpression(pattern: pattern) {
                 result[key] = regex
             }
         }
         return result
     }()
+
+    /// A key=value pattern anchored so a longer key ending in the requested
+    /// key cannot match first (issue #539): unanchored, `input_token_count`
+    /// matched inside `cached_input_token_count`, feeding a cache-read count
+    /// through the full input rate instead of the cache-read rate. The
+    /// leading negative lookbehind rejects a match whose preceding character
+    /// is a word character or `.`, which is exactly the boundary Codex's
+    /// flat `key=value key=value` bodies never put in front of a real key.
+    nonisolated private static func logValuePattern(for key: String) -> String {
+        #"(?<![\w.])"# + NSRegularExpression.escapedPattern(for: key) + #"=([^\s}]+)"#
+    }
 
     /// The rate card in effect for `model` at `timestamp`. Every Codex price
     /// resolution goes through the shared table so the app, the widget, and the
@@ -964,7 +975,7 @@ enum CodexCostScanner {
         if let cached = Self.logValueRegexes[key] {
             regex = cached
         } else {
-            let pattern = NSRegularExpression.escapedPattern(for: key) + #"=([^\s}]+)"#
+            let pattern = Self.logValuePattern(for: key)
             guard let built = try? NSRegularExpression(pattern: pattern) else { return nil }
             regex = built
         }
