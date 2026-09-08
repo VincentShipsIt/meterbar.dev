@@ -436,7 +436,7 @@ struct WidgetProviderIcon: View {
         } else {
             Image(service.assetName)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                 .frame(width: size, height: size)
         }
     }
