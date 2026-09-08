@@ -206,6 +206,31 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         )
     }
 
+    /// The panel's own freshness note (#530) must reflect the cost scan it was
+    /// given, not the quota poll the header already speaks for — asserted
+    /// directly on the computed property rather than a rendered strip.
+    func testCostScanFreshnessNoteComparesTheInjectedScanDateToTheSnapshotsPoll() {
+        let providerSnapshot = snapshot()
+        guard let pollTime = providerSnapshot.updatedAt else {
+            return XCTFail("snapshot() should always report a quota-poll time")
+        }
+        let staleScan = pollTime.addingTimeInterval(-(CostScanFreshnessNote.materiallyOlderThreshold + 60))
+        let content = MenuBarProviderDetailContent(snapshot: providerSnapshot, costScanDate: staleScan)
+
+        XCTAssertEqual(
+            content.costScanFreshnessNote,
+            CostScanFreshnessNote(quotaPollUpdatedAt: pollTime, costScanDate: staleScan)
+        )
+        XCTAssertNotNil(content.costScanFreshnessNote.text)
+    }
+
+    /// No cost scan was ever wired in (the default): the note says so rather
+    /// than silently agreeing with a fresh header.
+    func testCostScanFreshnessNoteDefaultsToNeverScannedWhenNoScanDateIsProvided() {
+        let content = MenuBarProviderDetailContent(snapshot: snapshot())
+        XCTAssertEqual(content.costScanFreshnessNote.text, "Not scanned yet")
+    }
+
     func testDetailPanelRendersAtPanelWidth() {
         let content = MenuBarProviderDetailContent(snapshot: snapshot())
         let host = NSHostingView(

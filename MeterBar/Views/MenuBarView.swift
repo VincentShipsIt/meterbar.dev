@@ -263,7 +263,8 @@ struct MenuBarView: View {
             ledger: costTracker.usageLedger,
             accountCount: accountCardCount(for: snapshot.service)
           ),
-          isRefreshingUsage: costTracker.isRefreshingMissingDays || costTracker.isScanning
+          isRefreshingUsage: costTracker.isRefreshingMissingDays || costTracker.isScanning,
+          costScanDate: costTracker.lastScanDate
         )
       )
     )

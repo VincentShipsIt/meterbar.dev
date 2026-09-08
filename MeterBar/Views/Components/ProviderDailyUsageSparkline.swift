@@ -21,6 +21,11 @@ struct ProviderDailyUsageSparkline: View {
     let series: ProviderDailyUsageSeries
     let accentColor: Color
     var isRefreshing: Bool = false
+    /// Distinguishes this strip's own cost-scan freshness from the
+    /// quota-poll freshness the card header already shows above it (#530).
+    /// Defaulted to "no scan known" so existing previews/tests that don't
+    /// care about the scan clock keep compiling.
+    var scanFreshness = CostScanFreshnessNote(quotaPollUpdatedAt: nil, costScanDate: nil)
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -54,22 +59,42 @@ struct ProviderDailyUsageSparkline: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(series.accessibilityLabel)
-        .accessibilityValue(series.accessibilityValue)
+        .accessibilityValue(accessibilityValueText)
+    }
+
+    /// Folds the scan-freshness note into the strip's spoken value so a
+    /// VoiceOver user gets the same distinction sighted users see, rather
+    /// than only the silent visual cue of an extra line.
+    private var accessibilityValueText: String {
+        guard let scanFreshnessText = scanFreshness.text else { return series.accessibilityValue }
+        return "\(series.accessibilityValue). \(scanFreshnessText)."
     }
 
     // MARK: - Pieces
 
     private var sectionHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Last \(series.days.count) days")
-                .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Last \(series.days.count) days")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.secondary)
 
-            Spacer(minLength: MeterBarTheme.Spacing.sm)
+                Spacer(minLength: MeterBarTheme.Spacing.sm)
 
-            if series.hasHistory {
-                Text(series.headerTotalText)
-                    .font(.caption2.monospacedDigit())
+                if series.hasHistory {
+                    Text(series.headerTotalText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Only drawn when the scan trails the poll enough to matter (or
+            // never ran at all) — the common case adds nothing here, because
+            // the card header just above already states a freshness the two
+            // pipelines agree on closely enough.
+            if let scanFreshnessText = scanFreshness.text {
+                Text(scanFreshnessText)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
         }
