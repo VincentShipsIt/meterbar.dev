@@ -34,7 +34,8 @@ nonisolated struct CostScanFileRecord<Payload: Codable & Sendable>: Codable, Sen
 ///
 /// The validation order is correctness-critical: offsets are bounded before
 /// any stamp comparison, complete files require an exact stamp, and incomplete
-/// files may resume only when the same inode has grown or stayed the same size.
+/// or grown files may resume only when the same inode has grown or stayed the
+/// same size *and* its modification stamp has not moved backward.
 nonisolated enum CostScanResumption {
     static func resumableRecord<Payload>(
         existing: CostScanFileRecord<Payload>?,
@@ -47,8 +48,21 @@ nonisolated enum CostScanResumption {
         if record.isComplete, record.stamp.size == file.size {
             guard record.stamp.matches(file.stamp) else { return nil }
         } else {
+            // A same-size, same-inode file that grows further is the common
+            // steady state, and size plus inode alone cannot rule out an
+            // in-place truncate that raced back past the old size before
+            // this scan looked again — the file keeps its `fileID` either
+            // way. What it cannot do is report a modification stamp *older*
+            // than the one already on record: every legitimate write moves
+            // `modified` forward (or, at worst, leaves it exactly where it
+            // was), so a stamp that goes backward can only mean the bytes
+            // this offset was trusted against no longer exist. Treat that as
+            // identity that could not be established and fall back to a
+            // full re-read (issue #550) rather than seek a stale offset into
+            // whatever now occupies those bytes.
             guard record.stamp.isSameFile(as: file.stamp),
-                  file.size >= record.stamp.size else { return nil }
+                  file.size >= record.stamp.size,
+                  file.stamp.modified >= record.stamp.modified else { return nil }
         }
         guard record.cutoff != cutoff else { return record }
         guard rebase(&record.payload, cutoff) else { return nil }
