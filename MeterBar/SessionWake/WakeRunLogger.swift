@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 
@@ -53,12 +54,55 @@ nonisolated struct WakeRunLogger: Sendable {
         }
     }
 
+    /// Appends `data` atomically with respect to every other writer to the
+    /// same file — same-process (`WakeProcessRunner.record` and
+    /// `WakeEventHookRunner.record` both fire from the same state transition)
+    /// and cross-process alike.
+    ///
+    /// `WakeRunLogger` is a `struct`: every caller holds an independent value
+    /// with no shared in-process state, so an `NSLock` on `self` would not
+    /// help here — the actual writers are separate `WakeRunLogger` instances,
+    /// sometimes in separate processes. `flock(LOCK_EX)` (blocking, not the
+    /// `LOCK_NB` `WakeLock` uses — a logger write must wait its turn, not fail)
+    /// around an `O_APPEND` write is the same primitive `WakeLock` already
+    /// uses for cross-process mutual exclusion, applied here as a plain
+    /// critical section rather than a held lock. `O_APPEND` alone (as before)
+    /// is not enough: two writers can each open the file, both seek to the
+    /// current end, and interleave their `write(2)` calls, tearing a line in
+    /// half. Holding the flock across open→write→close closes that window.
+    ///
+    /// Deliberately does NOT call `SecureFileWriter.ensurePrivateFile`: that
+    /// helper's "does it exist? then `createFile`" check is itself racy —
+    /// `createFile(atPath:contents:nil,…)` unconditionally (re)creates an
+    /// empty file, so two writers whose existence checks both land before
+    /// either's `createFile` runs can truncate a file a third writer already
+    /// appended to. `open(…, O_CREAT)` has no such window (it creates only if
+    /// still absent, never truncates an existing file), so private-mode
+    /// enforcement is done here on the already-open descriptor via `fchmod`
+    /// instead — the same "act on the descriptor, not the path" technique
+    /// `SecureFileWriter.write` itself uses.
     private func appendData(_ data: Data, to fileURL: URL) {
-        SecureFileWriter.ensurePrivateFile(at: fileURL)
-        guard let handle = try? FileHandle(forWritingTo: fileURL) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
+        let descriptor = open(fileURL.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        _ = fchmod(descriptor, SecureFileWriter.privateFile)
+        guard flock(descriptor, LOCK_EX) == 0 else { return }
+        defer { flock(descriptor, LOCK_UN) }
+
+        data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) in
+            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+            var written = 0
+            while written < rawBuffer.count {
+                let n = write(descriptor, base + written, rawBuffer.count - written)
+                if n > 0 {
+                    written += n
+                } else if n == -1, errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+        }
     }
 
     private func pruneOldLogs() {

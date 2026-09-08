@@ -51,6 +51,18 @@ struct Wake: AsyncParsableCommand {
     @Flag(name: .long, help: "Acknowledge permission-bypass mode (required for --permission-mode bypass).")
     var yesBypass: Bool = false
 
+    // A negative (or zero) --limit used to reach `WakeCLIEngine.resume`'s
+    // `Array.prefix(_:)` with an invalid count and trap — a poor failure mode
+    // for a command documented for cron and hook use (#549). Reject it here,
+    // at the boundary, the same way `ResetCredit`/`MeterBarCLI`/`Serve`
+    // validate their own numeric flags. `WakeCLIEngine` also rejects a
+    // non-positive limit defensively for callers that reach it directly.
+    func validate() throws {
+        if let limit, limit < 1 {
+            throw ValidationError("--limit must be 1 or greater.")
+        }
+    }
+
     func run() async throws {
         // SIGINT only: the #99 contract is that Ctrl-C releases the shared lock
         // and leaves no child process behind. SIGTERM keeps its default
