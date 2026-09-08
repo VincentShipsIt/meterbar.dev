@@ -144,6 +144,12 @@ final class UsageDataManagerTests: XCTestCase {
         var metricsByAccount: [UUID: UsageMetrics]
         var failingAccountIDs: Set<UUID> = []
         var probe: ConcurrencyProbe?
+        /// Mirrors `StubProvider.suspendsFetch`: lets a test pause the fetch
+        /// mid-flight to simulate a refresh that is still in progress while a
+        /// targeted write (e.g. reset-credit redemption) lands.
+        var suspendsFetch = false
+        private(set) var fetchCount = 0
+        private var fetchContinuation: CheckedContinuation<Void, Never>?
 
         init(metricsByAccount: [UUID: UsageMetrics]) {
             self.metricsByAccount = metricsByAccount
@@ -154,10 +160,22 @@ final class UsageDataManagerTests: XCTestCase {
         }
 
         func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
+            fetchCount += 1
+            if suspendsFetch {
+                await withCheckedContinuation { continuation in
+                    fetchContinuation = continuation
+                }
+            }
             await probe?.recordFetch()
             if failingAccountIDs.contains(account.id) { throw StubError.fetchFailed }
             guard let metrics = metricsByAccount[account.id] else { throw StubError.fetchFailed }
             return metrics
+        }
+
+        func resumeFetch() {
+            suspendsFetch = false
+            fetchContinuation?.resume()
+            fetchContinuation = nil
         }
     }
 
@@ -1896,5 +1914,114 @@ final class UsageDataManagerTests: XCTestCase {
         XCTAssertEqual(manager.codexAccountMetrics[work.id]?.resetCreditsAvailable, 1)
         XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 20)
         XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 2)
+    }
+
+    // MARK: - Reset-credit vs. concurrent full-refresh race (#546)
+
+    /// A full refresh that started *before* a reset-credit redemption but
+    /// commits *after* it used to win: `codexAccountMetrics = result.metrics`
+    /// was a whole-dictionary replace, so the refresh's pre-redemption
+    /// snapshot silently overwrote the correct post-redemption numbers the
+    /// instant it landed — resurrecting a spent credit and reverting the
+    /// usage the redemption had just cleared. `cursor.suspendsFetch` is the
+    /// harness that already exists for exactly this shape of race
+    /// (`testRefreshAllSkipsOverlappingCycle`); it was simply never pointed
+    /// at the Codex account phase, which is why this went uncaught.
+    func testApplyCodexResetCreditRefreshSurvivesAConcurrentFullRefreshThatCommitsAfterIt() async {
+        let staleMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 80, resetCreditsAvailable: 1)
+        let codex = StubProvider(hasAccess: true, result: .success(staleMetrics))
+        codex.suspendsFetch = true
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(codex: codex, cursor: cursor)
+
+        // Start a refresh and let it suspend inside the Codex fetch, exactly
+        // as if the timer's poll began before the user redeemed a credit.
+        let refreshTask = Task { await manager.refreshAll() }
+        for _ in 0..<100 where codex.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard codex.fetchCount == 1, manager.isLoading else {
+            codex.resumeFetch()
+            _ = await refreshTask.value
+            return XCTFail("the refresh should be suspended inside the Codex fetch")
+        }
+
+        // While that refresh is still in flight, the user's redemption
+        // finishes and applies the authoritative post-redemption numbers.
+        let redeemed = MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 0)
+        manager.applyCodexResetCreditRefresh(redeemed, accountID: CodexAccount.defaultID)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 0)
+
+        // The suspended refresh now completes and commits its stale,
+        // pre-redemption snapshot. It must not resurrect the spent credit.
+        codex.resumeFetch()
+        _ = await refreshTask.value
+
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.sessionLimit?.used, 0)
+        XCTAssertEqual(manager.metrics[.codexCli]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(manager.metrics[.codexCli]?.sessionLimit?.used, 0)
+
+        // The widget/CLI cache must agree, since a stale commit there would
+        // re-offer the credit just as badly as a stale in-memory value would.
+        sharedStore.flushPendingWrites()
+        XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.resetCreditsAvailable, 0)
+    }
+
+    /// Same race, on the Grok path: `applyGrokResetCreditRefresh` and the
+    /// Grok phase's whole-dictionary replace share the identical bug.
+    func testApplyGrokResetCreditRefreshSurvivesAConcurrentFullRefreshThatCommitsAfterIt() async throws {
+        let accountSuite = "UsageDataManagerTests-grok-reset-credit-race-\(UUID().uuidString)"
+        createdSuiteNames.append(accountSuite)
+        let accountDefaults = try XCTUnwrap(UserDefaults(suiteName: accountSuite))
+        let accountStore = GrokAccountStore(userDefaults: accountDefaults)
+        let staleMetrics = MetricsFixtures.grok(weeklyUsedPercent: 80)
+        let grok = MultiAccountGrokProvider(metricsByAccount: [GrokAccount.defaultID: staleMetrics])
+        grok.suspendsFetch = true
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            grok: grok,
+            grokAccountStore: accountStore
+        )
+
+        let refreshTask = Task { await manager.refreshAll() }
+        for _ in 0..<100 where grok.fetchCount == 0 {
+            await Task.yield()
+        }
+        guard grok.fetchCount == 1, manager.isLoading else {
+            grok.resumeFetch()
+            _ = await refreshTask.value
+            return XCTFail("the refresh should be suspended inside the Grok fetch")
+        }
+
+        // `MetricsFixtures.grok` hardcodes `resetCreditsAvailable: 1`, so the
+        // post-redemption fixture is built by hand here to show the spent
+        // credit going to zero, matching what a real redemption reports.
+        let redeemed = UsageMetrics(
+            service: .grok,
+            weeklyLimit: UsageLimit(
+                used: 0,
+                total: 100,
+                resetTime: MetricsFixtures.referenceDate.addingTimeInterval(7 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
+            resetCreditsAvailable: 0,
+            lastUpdated: MetricsFixtures.referenceDate
+        )
+        manager.applyGrokResetCreditRefresh(redeemed, accountID: GrokAccount.defaultID)
+        XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.resetCreditsAvailable, 0)
+
+        grok.resumeFetch()
+        _ = await refreshTask.value
+
+        XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 0)
+        XCTAssertEqual(manager.metrics[.grok]?.resetCreditsAvailable, 0)
+        sharedStore.flushPendingWrites()
+        XCTAssertEqual(sharedStore.loadMetrics()[.grok]?.resetCreditsAvailable, 0)
     }
 }
