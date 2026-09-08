@@ -272,6 +272,17 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
     }
 
+    func testMapSummaryTreatsMissingUsedCounterAsUnknownNotZero() throws {
+        // Issue #536 site 1: Cursor renames `used` while keeping `limit`. Zero
+        // is not unknown — `observation()` above already refuses this exact
+        // shape; `mapSummary` must follow it instead of defaulting the missing
+        // counter to 0 and reporting a confident "0% used, 500 left".
+        let json = #"{"individualUsage":{"plan":{"limit":500}}}"#
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertNil(metrics.weeklyLimit, "A missing counter must yield no weekly window, not a confident 0/500")
+    }
+
     func testMapSummaryUsesAutoAndApiPercentsAsTwoIncludedPools() throws {
         let json = """
         {
@@ -421,6 +432,21 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
+    func testMapSummaryRejectsOutOfRangeIncludedPoolPercent() throws {
+        // Issue #536 site 4 (speculative hardening, no observed trigger): an
+        // implausible percent — here an out-of-range 150 — must not be trusted
+        // into a plausible-looking clamped gauge. The in-range 0-to-1 fraction
+        // shape described in the issue is not caught by this range check; see
+        // `plausiblePercent`'s doc comment.
+        let json = #"""
+        { "individualUsage": { "plan": { "autoPercentUsed": 150, "apiPercentUsed": 40 } } }
+        """#
+        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+
+        XCTAssertNil(metrics.sessionLimit, "An out-of-range percent must be reported unknown, not clamped")
+        XCTAssertEqual(metrics.weeklyLimit?.used, 40)
+    }
+
     func testMapSummaryWithoutSandStatusLeavesAdditionalLimitsEmpty() throws {
         let json = """
         {
@@ -542,6 +568,20 @@ final class CursorLocalServiceTests: XCTestCase {
             )
             let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
             XCTAssertNil(grokBot.windowSeconds)
+        }
+    }
+
+    func testMapSandOmitsBarWhenUsagePercentIsOutOfRange() throws {
+        // Issue #536 site 4 (speculative hardening): a negative or >100 percent
+        // must not render at all rather than clamp into a plausible-looking bar.
+        for outOfRange in [-25.0, 150.0] {
+            let sand = """
+            {
+              "usagePercent": \(outOfRange),
+              "hasNonZeroIncludedLimit": true
+            }
+            """
+            XCTAssertNil(CursorLocalService.mapSandUsage(try decodeSand(sand)))
         }
     }
 

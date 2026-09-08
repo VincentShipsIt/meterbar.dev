@@ -381,6 +381,12 @@ nonisolated struct GrokCodingKey: CodingKey, Sendable {
 nonisolated struct GrokNumber: Decodable, Sendable {
     private static let wrapperKeys = ["val", "value", "amount", "usd", "cents"]
 
+    /// Wrapper keys whose nested number is a *minor* unit and must be scaled
+    /// down to match every other money field MeterBar reads in major units
+    /// (dollars). Reading `{"cents": 2500}` as `2500` is a 100x money error —
+    /// mirrors `ClaudeMoney.amount`'s `amountMinor / 10^exponent` conversion.
+    private static let minorUnitDivisors: [String: Double] = ["cents": 100]
+
     let value: Double
 
     init(from decoder: Decoder) throws {
@@ -398,7 +404,8 @@ nonisolated struct GrokNumber: Decodable, Sendable {
         if let keyed = try? decoder.container(keyedBy: GrokCodingKey.self) {
             for key in Self.wrapperKeys {
                 if let nested = try? keyed.decode(GrokNumber.self, forKey: GrokCodingKey(key)) {
-                    value = nested.value
+                    let divisor = Self.minorUnitDivisors[key] ?? 1
+                    value = nested.value / divisor
                     return
                 }
             }

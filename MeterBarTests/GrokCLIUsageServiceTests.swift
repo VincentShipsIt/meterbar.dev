@@ -323,6 +323,52 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertEqual(try GrokCLIUsageService.map(result).weeklyLimit?.used, 61)
     }
 
+    /// Issue #536 site 3: `GrokNumber.wrapperKeys` includes `"cents"`, and the
+    /// nested value used to be returned unconverted — a 100x money error. Every
+    /// other money field MeterBar reads is in major units (dollars), so a
+    /// `{"cents": 2500}` wrapper must divide down to $25.00, not read as $2,500.
+    func testOnDemandUsedCentsWrapperConvertsToDollars() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "onDemandCap": { "val": 50 },
+                "onDemandUsed": { "cents": 2500 }
+              }
+            }
+            """
+        )
+
+        let status = result.config.extraUsageStatus
+        XCTAssertEqual(status.detail?.contains("$25.00"), true)
+        XCTAssertEqual(status.detail?.contains("$2,500.00"), false)
+    }
+
+    /// Issue #536 site 3 (mixed-unit case): if `monthlyLimit` arrives in
+    /// dollars and `totalUsed` arrives wrapped in cents, failing to convert the
+    /// cents value overshoots 100% of the allowance and the gauge clamps to a
+    /// solid "out of quota" for someone who has actually spent 1%.
+    func testMixedUnitCreditsDoNotOvershootThePercentClamp() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "currentPeriod": {
+                  "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                  "start": "2026-07-01T00:00:00Z",
+                  "end": "2026-08-01T00:00:00Z"
+                },
+                "monthlyLimit": { "val": 100 },
+                "usage": { "totalUsed": { "cents": 100 } }
+              }
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 1, "$1.00 of a $100 allowance is 1%, not a clamped 100%")
+    }
+
     func testPercentagesAreClampedIntoRange() throws {
         let result = try decodeResult(
             """
