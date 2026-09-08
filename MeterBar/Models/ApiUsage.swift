@@ -124,20 +124,12 @@ nonisolated struct ApiUsage: Sendable {
 /// (USD per million tokens). Separate from `CostTracker`'s subscription pricing
 /// so the two can drift independently; covers Anthropic + OpenAI API models.
 ///
-/// Anthropic rates are resolved through `MeterBarShared.ModelPricing` — the
-/// same dated, cache-aware schedule the Costs page uses — rather than a
-/// second table here, so cache-read and cache-creation tokens are never
-/// billed at the uncached input rate (#537) and an opus-4-shaped substring
-/// can never shadow a more specific entry the way the old linear table did.
-///
-/// OpenAI's admin usage API reports models `ModelPricing` does not carry
-/// (`gpt-4o`, `o1`, …), so those rates stay local. That table's cache-read
-/// column is a 50% "cached input" discount applied uniformly — the industry
-/// convention across the GPT-4 family — not a per-model verified figure like
-/// the Anthropic schedule; see the consolidation follow-up filed with #537.
-///
-/// Prices are approximate list rates verified 2026-07-02 — they rot; update
-/// against the providers' pricing pages.
+/// Both providers resolve through `MeterBarShared.ModelPricing` — the same
+/// dated, cache-aware schedule the Costs page uses — rather than a local
+/// table, so cache-read and cache-creation tokens are never billed at the
+/// uncached input rate (#537), and a model name is only ever matched exactly
+/// or most-specific-first, never by an ambiguous substring the way the old
+/// linear tables did (#537, #554).
 nonisolated enum ApiUsagePricing {
     /// A model's usage split into the components each carries its own rate,
     /// mirroring `TokenPricing`'s tiers so no component is ever folded into
@@ -150,29 +142,6 @@ nonisolated enum ApiUsagePricing {
         var output = 0
     }
 
-    private struct OpenAIRate {
-        let input: Double
-        let output: Double
-        let cacheRead: Double
-    }
-
-    // Keyed by a normalized model-name fragment (matched as a substring, most
-    // specific first).
-    private static let openai: [(match: String, rate: OpenAIRate)] = [
-        ("gpt-4o-mini", OpenAIRate(input: 0.15, output: 0.60, cacheRead: 0.075)),
-        ("gpt-4o", OpenAIRate(input: 2.50, output: 10.0, cacheRead: 1.25)),
-        ("gpt-4.1-mini", OpenAIRate(input: 0.40, output: 1.60, cacheRead: 0.20)),
-        ("gpt-4.1", OpenAIRate(input: 2.0, output: 8.0, cacheRead: 1.0)),
-        ("o1-mini", OpenAIRate(input: 1.10, output: 4.40, cacheRead: 0.55)),
-        ("o1", OpenAIRate(input: 15.0, output: 60.0, cacheRead: 7.5)),
-        ("o3-mini", OpenAIRate(input: 1.10, output: 4.40, cacheRead: 0.55)),
-        ("gpt-4-turbo", OpenAIRate(input: 10.0, output: 30.0, cacheRead: 5.0)),
-        ("gpt-4", OpenAIRate(input: 30.0, output: 60.0, cacheRead: 15.0)),
-        ("gpt-3.5", OpenAIRate(input: 0.50, output: 1.50, cacheRead: 0.25))
-    ]
-
-    private static let openaiDefault = OpenAIRate(input: 2.50, output: 10.0, cacheRead: 1.25)
-
     /// Anthropic model families `ModelPricing` prices explicitly. A model
     /// matching none of these took `ModelPricing`'s undated "default" rate —
     /// the unverified-pricing signal, since `ModelPricing` itself does not
@@ -182,20 +151,13 @@ nonisolated enum ApiUsagePricing {
     /// `model` matched no known rate-table entry for `provider`, so its cost
     /// used a default rate rather than a verified one.
     static func isPricingUnverified(provider: ApiProvider, model: String?) -> Bool {
-        let name = (model ?? "").lowercased()
         switch provider {
         case .anthropic:
+            let name = (model ?? "").lowercased()
             return !knownAnthropicFamilies.contains { name.contains($0) }
         case .openai:
-            return !openai.contains { name.contains($0.match) }
+            return !ModelPricing.isKnownOpenAIModel(model)
         }
-    }
-
-    private static func openAIPricing(for model: String?) -> TokenPricing {
-        let name = (model ?? "").lowercased()
-        let rate = openai.first { name.contains($0.match) }?.rate ?? openaiDefault
-        // OpenAI's usage API has no cache-write charge, unlike Anthropic's.
-        return TokenPricing(input: rate.input, output: rate.output, cacheCreation: 0, cacheRead: rate.cacheRead)
     }
 
     /// Cost in USD for a model's input/output token counts, with no cache
@@ -225,12 +187,13 @@ nonisolated enum ApiUsagePricing {
                 pricing: pricing
             )
         case .openai:
+            let pricing = ModelPricing.openAI(for: model, at: timestamp)
             return TokenCostMath.calculateCost(
                 input: tokens.uncachedInput,
                 output: tokens.output,
                 cacheCreation: 0,
                 cacheRead: tokens.cacheRead,
-                pricing: openAIPricing(for: model)
+                pricing: pricing
             )
         }
     }

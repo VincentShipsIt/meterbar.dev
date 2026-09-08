@@ -126,15 +126,7 @@ enum ApiUsageService {
             return (response.data, response.hasMore == true, response.nextPage)
         }
 
-        var perModel: [String: ModelTokenAccumulator] = [:]
-        for bucket in buckets {
-            for result in bucket.results {
-                let model = result.model ?? "unknown"
-                perModel[model, default: ModelTokenAccumulator()].addOpenAI(result)
-            }
-        }
-
-        return aggregate(provider: .openai, perModel: perModel, start: start, end: end, isTruncated: isTruncated)
+        return aggregateOpenAI(buckets: buckets, start: start, end: end, isTruncated: isTruncated)
     }
 
     // MARK: - Aggregation
@@ -154,6 +146,23 @@ enum ApiUsageService {
         }
 
         return aggregate(provider: .anthropic, perModel: perModel, start: start, end: end, isTruncated: isTruncated)
+    }
+
+    static func aggregateOpenAI(
+        buckets: [OpenAIUsageBucket],
+        start: Date,
+        end: Date,
+        isTruncated: Bool = false
+    ) -> ApiUsage {
+        var perModel: [String: ModelTokenAccumulator] = [:]
+        for bucket in buckets {
+            for result in bucket.results {
+                let model = result.model ?? "unknown"
+                perModel[model, default: ModelTokenAccumulator()].addOpenAI(result)
+            }
+        }
+
+        return aggregate(provider: .openai, perModel: perModel, start: start, end: end, isTruncated: isTruncated)
     }
 
     private static func aggregate(
