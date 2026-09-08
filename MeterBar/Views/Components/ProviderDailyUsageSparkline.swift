@@ -169,18 +169,7 @@ struct ProviderDailyUsageSparkline: View {
 
     /// Only shown when the strip is drawing something, so it qualifies the bars
     /// rather than replacing them.
-    private var caption: String? {
-        if series.isCombinedAcrossAccounts {
-            // The honest version of a limitation that would otherwise be
-            // invisible: the cost cache has no account dimension, so a
-            // per-account card's panel shows every account's usage.
-            return "Across all \(series.service.shortName) accounts"
-        }
-        if series.hasPartialCoverage, let start = series.coverageStart {
-            return "Tracked since \(ProviderDailyUsageFormat.weekdayAndDate(start, calendar: .current))"
-        }
-        return nil
-    }
+    private var caption: String? { Self.captionText(for: series) }
 
     private func helpText(for day: ProviderDailyUsageSeries.Day) -> String {
         guard day.isMeasured else { return "\(day.longLabel): not tracked yet" }
@@ -195,5 +184,39 @@ struct ProviderDailyUsageSparkline: View {
         let peak = series.peakValue
         guard peak > 0 else { return 0 }
         return max(2, barHeight * CGFloat(day.value / peak))
+    }
+}
+
+extension ProviderDailyUsageSparkline {
+    /// Pure caption text — no SwiftUI, so the coverage-caption zone hazard
+    /// (issue #534) is directly testable without hosting the view. The same
+    /// reason `LimitRow.RowContent` and `UsageBar.BarGeometry` exist.
+    ///
+    /// `viewerCalendar` stands in for `Calendar.current` and is only ever
+    /// reached as a last resort — see below. Injectable so tests can pin a
+    /// zone that provably disagrees with the bucket zone, rather than relying
+    /// on whatever real zone happens to run the test host.
+    static func captionText(for series: ProviderDailyUsageSeries, viewerCalendar: Calendar = .current) -> String? {
+        if series.isCombinedAcrossAccounts {
+            // The honest version of a limitation that would otherwise be
+            // invisible: the cost cache has no account dimension, so a
+            // per-account card's panel shows every account's usage.
+            return "Across all \(series.service.shortName) accounts"
+        }
+        if series.hasPartialCoverage, let start = series.coverageStart {
+            // `start` is a bucket boundary, not necessarily local midnight — a
+            // `.utc`-boundary provider's `coverageStart` is UTC midnight, and
+            // formatting it in the viewer's zone prints the previous evening's
+            // weekday for anyone west of Greenwich (see the hazard documented
+            // on `ProviderDailyUsageFormat`). The matching `Day` was already
+            // labelled in the correct bucket zone when the series was built,
+            // so reuse that instead of reformatting in the viewer's zone; the
+            // viewer's zone is only a fallback for the day this doesn't find
+            // a match, which should not happen in practice.
+            let label = series.days.first { $0.date == start }?.longLabel
+                ?? ProviderDailyUsageFormat.weekdayAndDate(start, calendar: viewerCalendar)
+            return "Tracked since \(label)"
+        }
+        return nil
     }
 }

@@ -132,7 +132,16 @@ nonisolated final class ClaudeCodeCLIUsageService: Sendable {
 }
 
 nonisolated enum ClaudeCodeCLIUsageParser {
-    static func parseMetrics(from text: String, now: Date = Date()) throws -> UsageMetrics {
+    /// `regionCalendar` stands in for `Calendar.current`: it carries the
+    /// user's region calendar (Buddhist, islamic-umalqura, …), which must
+    /// never leak into the Gregorian date arithmetic below — see
+    /// `parseResetDate`. Injectable so tests can pin a non-Gregorian region
+    /// calendar without mutating process-global locale state.
+    static func parseMetrics(
+        from text: String,
+        now: Date = Date(),
+        regionCalendar: Calendar = .current
+    ) throws -> UsageMetrics {
         let sanitized = stripANSICodes(from: text)
         let lines = sanitized
             .components(separatedBy: .newlines)
@@ -143,15 +152,17 @@ nonisolated enum ClaudeCodeCLIUsageParser {
             from: lines,
             labelPrefixes: ["current session"],
             windowMinutes: 5 * 60,
-            now: now)
+            now: now,
+            regionCalendar: regionCalendar)
         let weeklyLimit = parseLimit(
             from: lines,
             labelPrefixes: ["current week (all models)", "current week"],
             windowMinutes: 7 * 24 * 60,
-            now: now)
+            now: now,
+            regionCalendar: regionCalendar)
         // The CLI's model-specific window label has changed over time
         // ("Sonnet only" → "Fable", observed claude 2.1.205); match all knowns.
-        let modelWindow = parseModelLimit(from: lines, now: now)
+        let modelWindow = parseModelLimit(from: lines, now: now, regionCalendar: regionCalendar)
 
         guard sessionLimit != nil || weeklyLimit != nil || modelWindow != nil else {
             // A headless (non-TTY) spawn of `claude /usage` renders a session
@@ -173,7 +184,8 @@ nonisolated enum ClaudeCodeCLIUsageParser {
 
     private static func parseModelLimit(
         from lines: [String],
-        now: Date
+        now: Date,
+        regionCalendar: Calendar
     ) -> (limit: UsageLimit, label: String)? {
         let definitions = [
             (label: "Fable", prefixes: ["current week (fable)", "fable"]),
@@ -184,7 +196,8 @@ nonisolated enum ClaudeCodeCLIUsageParser {
                 from: lines,
                 labelPrefixes: definition.prefixes,
                 windowMinutes: 7 * 24 * 60,
-                now: now
+                now: now,
+                regionCalendar: regionCalendar
             ) {
                 return (limit, definition.label)
             }
@@ -196,7 +209,8 @@ nonisolated enum ClaudeCodeCLIUsageParser {
         from lines: [String],
         labelPrefixes: [String],
         windowMinutes: Int,
-        now: Date) -> UsageLimit? {
+        now: Date,
+        regionCalendar: Calendar) -> UsageLimit? {
         guard let line = lines.first(where: { line in
             let normalized = line.lowercased()
             return labelPrefixes.contains { normalized.hasPrefix($0) }
@@ -211,7 +225,7 @@ nonisolated enum ClaudeCodeCLIUsageParser {
         return UsageLimit(
             used: usage.usedPercent,
             total: 100,
-            resetTime: parseResetDate(from: line, now: now),
+            resetTime: parseResetDate(from: line, now: now, regionCalendar: regionCalendar),
             windowSeconds: TimeInterval(windowMinutes * 60))
     }
 
@@ -227,7 +241,7 @@ nonisolated enum ClaudeCodeCLIUsageParser {
         return (max(0, min(100, usedPercent)), mode)
     }
 
-    private static func parseResetDate(from line: String, now: Date) -> Date? {
+    private static func parseResetDate(from line: String, now: Date, regionCalendar: Calendar) -> Date? {
         let pattern = #"(?i)\breset(?:s)?\s+(.+)$"#
         guard let match = firstMatch(pattern: pattern, in: line),
               let rawReset = match[safe: 1] else {
@@ -244,17 +258,27 @@ nonisolated enum ClaudeCodeCLIUsageParser {
             return nil
         }
 
-        let year = Calendar.current.component(.year, from: now)
+        // The CLI's reset text is a fixed Gregorian date, regardless of the
+        // user's region calendar. Reading `.year` from `regionCalendar`
+        // directly (Buddhist, islamic-umalqura, …) and splicing it into this
+        // `en_US_POSIX` Gregorian string sends the reset centuries away.
+        // `TranscriptResetParser` pins a `Calendar(identifier: .gregorian)`
+        // for the same reason; this follows that established pattern, only
+        // borrowing `regionCalendar`'s time zone.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = regionCalendar.timeZone
+
+        let year = calendar.component(.year, from: now)
         let dateText = "\(year) \(cleaned)"
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
+        formatter.timeZone = calendar.timeZone
 
         for format in ["yyyy MMM d 'at' h:mma", "yyyy MMM d 'at' ha"] {
             formatter.dateFormat = format
             if let parsed = formatter.date(from: dateText) {
                 if parsed < now.addingTimeInterval(-24 * 60 * 60),
-                   let adjusted = Calendar.current.date(byAdding: .year, value: 1, to: parsed) {
+                   let adjusted = calendar.date(byAdding: .year, value: 1, to: parsed) {
                     return adjusted
                 }
                 return parsed

@@ -89,6 +89,67 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
         XCTAssertEqual(calendar.component(.day, from: reset), 2)
     }
 
+    /// Reproduces GitHub issue #534, defect 1: `Calendar.current.component(.year,
+    /// from:)` returns the year in the user's *region* calendar. Thailand's
+    /// macOS default is Buddhist (Gregorian + 543), so under `th_TH` the old
+    /// code spliced "2569" into an `en_US_POSIX` Gregorian date string and the
+    /// reset landed 198,331 days in the future. `regionCalendar` must never
+    /// leak its identity into this Gregorian parse — only its time zone.
+    func testResetDateStaysGregorianUnderBuddhistRegionCalendar() throws {
+        var regionCalendar = Calendar(identifier: .buddhist)
+        regionCalendar.locale = Locale(identifier: "th_TH")
+        regionCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+
+        var gregorianUTC = Calendar(identifier: .gregorian)
+        gregorianUTC.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 8, hour: 12)))
+
+        // Sanity check the reproduction: this is genuinely the Buddhist-era
+        // year the old code would have read from `now`.
+        XCTAssertEqual(regionCalendar.component(.year, from: now), 2569)
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: "Current session: 10% used · resets Sep 12 at 3pm",
+            now: now,
+            regionCalendar: regionCalendar)
+        let reset = try XCTUnwrap(metrics.sessionLimit?.resetTime)
+
+        XCTAssertEqual(gregorianUTC.component(.year, from: reset), 2026)
+        XCTAssertEqual(gregorianUTC.component(.month, from: reset), 9)
+        XCTAssertEqual(gregorianUTC.component(.day, from: reset), 12)
+    }
+
+    /// Same defect, `ar_SA` (islamic-umalqura): a reset date that falls behind
+    /// `now` in the wall-clock sense must roll to *next Gregorian year*, not
+    /// next Hijri year. The old code used `Calendar.current` for both the
+    /// year splice and the rollover `.year` add, so under this calendar the
+    /// limit read as permanently "reset due" (issue #534: −210,742 days).
+    func testResetDateStaysGregorianUnderIslamicUmAlQuraRegionCalendarAcrossYearRollover() throws {
+        var regionCalendar = Calendar(identifier: .islamicUmmAlQura)
+        regionCalendar.locale = Locale(identifier: "ar_SA")
+        regionCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+
+        var gregorianUTC = Calendar(identifier: .gregorian)
+        gregorianUTC.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 8, hour: 12)))
+
+        // Sanity check the reproduction: the Hijri year the old code would
+        // have read from `now` is nowhere near 2026.
+        XCTAssertNotEqual(regionCalendar.component(.year, from: now), 2026)
+
+        // "Sep 1" is already behind `now` (Sep 8), so this exercises the
+        // reset-in-the-past → roll-to-next-year branch.
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: "Current session: 10% used · resets Sep 1 at 3pm",
+            now: now,
+            regionCalendar: regionCalendar)
+        let reset = try XCTUnwrap(metrics.sessionLimit?.resetTime)
+
+        XCTAssertEqual(gregorianUTC.component(.year, from: reset), 2027)
+        XCTAssertEqual(gregorianUTC.component(.month, from: reset), 9)
+        XCTAssertEqual(gregorianUTC.component(.day, from: reset), 1)
+    }
+
     func testStripsANSICodesBeforeParsing() throws {
         let output = "\u{001B}[31mCurrent session: 42% used · resets Jul 24 at 6pm\u{001B}[0m"
 
