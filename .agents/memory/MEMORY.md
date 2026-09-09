@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-07
+last_verified: 2026-09-09
 status: active
 ---
 
@@ -23,8 +23,8 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 
 - Repo: `VincentShipsIt/meterbar.dev`. Public. Default branch `master`.
 - Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server.
-- Latest release tag at last verify: **v1.8.45** (`ff989e4`); master at `817bffd`. Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
-- The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` therefore lags the tags (1.8.41 while v1.8.45 shipped) and is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
+- Latest release tag at last verify: **v1.8.46** (`d79fe53`); master at `d79fe53`. Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
+- The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` therefore lags the tags (1.8.41 while v1.8.46 shipped) and is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
 - Providers: Claude Code, Codex CLI, Cursor, OpenRouter, Grok, plus optional Anthropic/OpenAI admin keys.
 - Shared models live in `Packages/MeterBarShared`. App group `group.dev.meterbar.app`.
 - Release bundle ids `dev.meterbar.app` / `dev.meterbar.app.Widget`. Debug uses `dev.meterbar.app.debug` so local builds cannot shadow the installed app.
@@ -44,4 +44,6 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 ## Do not follow
 
 - `.agents/SYSTEM/` and `.agents/docs/` — removed. This directory replaced them.
-- `docs/audits/00-repo-map.md` and `01-dry-slop-audit.md` — **superseded 2026-08-12**. Historical only.
+- `.agents/TASKS/` — never existed here. Delivery state is GitHub issues.
+- `docs/audits/` — deleted 2026-09-09. The superseded repo-map and DRY-slop audits live in git history only.
+- Do not restore `/start`, `/validate`, `/bug`, `/inbox`, `/task`, `/end`. They were generic-template commands wired to `.agents/TASKS/` and a `session-documenter` skill this repo does not have, and `/start` taught rules this repo contradicts.
