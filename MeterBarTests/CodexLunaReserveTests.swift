@@ -286,6 +286,33 @@ final class CodexLunaReserveTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
+    /// The upsell is a marketing surface, so OpenAI retyping it whole — to the
+    /// banner's own slug, say — must cost the gate its leading signal and
+    /// nothing else. A keyed container is only one of the shapes that value can
+    /// arrive as, and the plan's windows do not depend on it.
+    func testARateLimitUpsellThatIsNotAnObjectIsIgnored() throws {
+        let json = """
+        {
+            "plan_type": "pro",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 506362,
+                    "reset_at": 1789447116
+                }
+            },
+            "rate_limit_upsell": "luna_reserve"
+        }
+        """
+
+        let metrics = try decode(json).toUsageMetrics()
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 100)
+    }
+
     /// Free accounts carry a null `rate_limit`, and the upsell banner is then
     /// the only signal that a reserve is serving.
     func testSurfacesReserveOnAnAccountWithNoPlanWindows() throws {

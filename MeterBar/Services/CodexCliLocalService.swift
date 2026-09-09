@@ -868,10 +868,13 @@ nonisolated struct CodexRateLimitUpsell: Codable {
     }
 
     /// A retyped discriminator costs the gate its leading signal, not the whole
-    /// usage decode — `limit_reached` still answers the same question.
+    /// usage decode — `limit_reached` still answers the same question. That
+    /// holds for the banner arriving as something other than an object at all,
+    /// not just for a retyped `banner_type`: this is a marketing surface, so
+    /// the keyed container is itself only one shape it may show up as.
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        bannerType = try? container.decodeIfPresent(String.self, forKey: .bannerType)
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        bannerType = try? container?.decodeIfPresent(String.self, forKey: .bannerType)
     }
 
     /// Banner shown while requests are being served from the Luna reserve.
