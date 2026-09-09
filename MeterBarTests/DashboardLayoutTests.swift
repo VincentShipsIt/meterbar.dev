@@ -31,6 +31,41 @@ final class DashboardLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - Content width
+
+    /// The cap is the whole point on an ultrawide: a page handed 3000pt lays
+    /// out for 1328, not 3000.
+    func testContentWidthIsCappedOnWideWindowsAndUntouchedOnNarrowOnes() {
+        let capped = UsageDashboardView.contentViewportWidth(3_000)
+
+        XCTAssertLessThanOrEqual(capped, UsageDashboardView.maximumContentWidth + 48)
+        XCTAssertEqual(capped, UsageDashboardView.contentViewportWidth(10_000), "the cap must not drift with the window")
+        XCTAssertEqual(UsageDashboardView.contentViewportWidth(900), 900, "a normal window is not narrowed")
+        XCTAssertEqual(UsageDashboardView.contentViewportWidth(500), 500)
+    }
+
+    /// A page doing its own column math has to see the capped width. Measuring
+    /// the raw viewport, the gallery would deal columns for a width it is never
+    /// given and every card would be squeezed.
+    func testGalleryColumnsAreDealtForTheCappedWidthNotTheWindow() {
+        let ultrawide: CGFloat = 3_440
+        let capped = UsageDashboardView.contentViewportWidth(ultrawide)
+
+        let cardAtCappedWidth = ShareGalleryLayout.previewSize(
+            contentWidth: ShareGalleryLayout.contentWidth(viewportWidth: capped, horizontalInsets: 48),
+            columnCount: ShareGalleryLayout.columnCount(
+                contentWidth: ShareGalleryLayout.contentWidth(viewportWidth: capped, horizontalInsets: 48)
+            )
+        )
+
+        XCTAssertGreaterThanOrEqual(cardAtCappedWidth.width, ShareGalleryLayout.minimumTileWidth)
+        XCTAssertLessThanOrEqual(
+            cardAtCappedWidth.width,
+            SocialShareCardLayout.exportSize.width,
+            "a preview wider than the PNG it previews is upscaled artwork"
+        )
+    }
+
     // MARK: - DashboardCard trailing view slot
 
     func testDashboardCardAcceptsTrailingControl() {
