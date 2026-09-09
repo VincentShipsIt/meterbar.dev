@@ -1116,6 +1116,103 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(context.modelTotals["gpt-5.6-sol"]?.input, 100)
     }
 
+    // MARK: - Compressed rollout detection (issue #570)
+
+    /// Codex's `codex.rollout_compression` job writes `rollout-*.jsonl.zst`
+    /// and deletes the `.jsonl` source it archived. MeterBar's scanners glob
+    /// `.jsonl` only (`CostScanCorpus.listing`), so a compressed rollout still
+    /// inside the window would otherwise vanish from the corpus with no
+    /// error and no truncation signal — this proves the detector catches it
+    /// instead of decoding it.
+    func testCompressedRolloutGapCountsAZstRolloutWithNoReadableCopy() throws {
+        let root = try makeCodexHome()
+        let archived = root.appendingPathComponent("archived_sessions", isDirectory: true)
+        // Inside the window: exactly the shape the compression job leaves —
+        // only the `.zst` remains.
+        try writeCodexRollout(
+            in: archived,
+            path: codexRolloutName(sessionID: UUID()) + ".zst",
+            modifiedAgo: 0,
+            lines: ["not real zstd bytes"]
+        )
+        // Outside the window: touched well before `modifiedSince`, so it
+        // cannot describe an in-window day and must not inflate the count —
+        // the same mtime filter `CostScanCorpus.listing` applies to `.jsonl`.
+        try writeCodexRollout(
+            in: archived,
+            path: codexRolloutName(sessionID: UUID()) + ".zst",
+            modifiedAgo: 60 * 24 * 60 * 60,
+            lines: ["not real zstd bytes"]
+        )
+        // Not a Codex rollout at all — an unrelated `.zst` sitting in the same
+        // tree must not be swept into the count.
+        try writeCodexRollout(in: archived, path: "notes.txt.zst", modifiedAgo: 0, lines: ["unrelated"])
+
+        let gap = CodexCostScanner.compressedRolloutGap(
+            in: [archived],
+            excluding: [],
+            modifiedSince: Date().addingTimeInterval(-60 * 60)
+        )
+
+        XCTAssertEqual(gap.count, 1)
+    }
+
+    /// A session archived as `.zst` on one side of the live/archived split is
+    /// not actually lost if the other side still holds a readable `.jsonl`
+    /// for the same session — the same identity `distinctRollouts` already
+    /// uses to dedup a live/archived pair.
+    func testCompressedRolloutGapExcludesASessionStillReadableElsewhere() throws {
+        let root = try makeCodexHome()
+        let archived = root.appendingPathComponent("archived_sessions", isDirectory: true)
+        let id = UUID()
+        try writeCodexRollout(
+            in: archived,
+            path: codexRolloutName(sessionID: id) + ".zst",
+            modifiedAgo: 0,
+            lines: ["not real zstd bytes"]
+        )
+
+        let gap = CodexCostScanner.compressedRolloutGap(
+            in: [archived],
+            excluding: [id.uuidString.lowercased()],
+            modifiedSince: Date().addingTimeInterval(-60 * 60)
+        )
+
+        XCTAssertEqual(gap.count, 0)
+    }
+
+    /// End to end through the budgeted scan: a compressed rollout with no
+    /// readable twin surfaces on the session without changing the totals a
+    /// readable rollout in the same corpus contributes.
+    func testScanRolloutsSurfacesCompressedRolloutGapWithoutAffectingReadableTotals() throws {
+        let root = try makeCodexHome()
+        let archived = root.appendingPathComponent("archived_sessions", isDirectory: true)
+        let live = root.appendingPathComponent("sessions", isDirectory: true)
+        try writeCodexRollout(in: live, path: codexRolloutName(sessionID: UUID()), modifiedAgo: 0, lines: [
+            codexTokenLine(timestamp: "2026-06-15T09:00:00Z")
+        ])
+        try writeCodexRollout(
+            in: archived,
+            path: codexRolloutName(sessionID: UUID()) + ".zst",
+            modifiedAgo: 0,
+            lines: ["not real zstd bytes"]
+        )
+        let cutoff = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
+        let session = CostScanSession(cutoff: cutoff, options: .unlimited)
+
+        let windows = CodexCostScanner.scanRollouts(
+            directories: CodexCostScanner.rolloutDirectories(in: root), session: session
+        )
+
+        XCTAssertEqual(windows.period.totals.input, 1_000)
+        XCTAssertEqual(session.codexCompressedRolloutGap.count, 1)
+        XCTAssertEqual(session.progress(windowDays: 30).codexCompressedRolloutCount, 1)
+        XCTAssertTrue(session.progress(windowDays: 30).hasCodexCompressedRolloutGap)
+        // The gap is a correctness caveat surfaced alongside the scan, not a
+        // reason to keep re-reading a corpus that was otherwise read in full.
+        XCTAssertTrue(session.isComplete)
+    }
+
     // MARK: - Budgeted Codex rollout scan
 
     /// Names a rollout the way Codex does: the session UUID trails an ISO

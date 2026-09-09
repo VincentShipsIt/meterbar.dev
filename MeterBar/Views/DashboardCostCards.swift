@@ -203,6 +203,14 @@ private struct CostHeadlineAmount: View {
 struct CostScanScopeBanner: View {
   let progress: CostScanProgress
 
+  /// A compressed-rollout gap (issue #570) is a correctness caveat, not a
+  /// scale caveat, but it earns the same visual treatment `isLargeCorpus`
+  /// already has: this is the one banner every scan renders, so it is the
+  /// "same place" the existing partial-scan signal surfaces to the user.
+  private var hasDataQualityWarning: Bool {
+    progress.isLargeCorpus || progress.hasCodexCompressedRolloutGap
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
@@ -223,16 +231,16 @@ struct CostScanScopeBanner: View {
           .progressViewStyle(.linear)
       }
 
-      Label(progress.detailText, systemImage: progress.isLargeCorpus ? "exclamationmark.triangle.fill" : "info.circle")
+      Label(progress.detailText, systemImage: hasDataQualityWarning ? "exclamationmark.triangle.fill" : "info.circle")
         .font(.caption)
-        .foregroundStyle(progress.isLargeCorpus ? Color.orange : Color.secondary)
+        .foregroundStyle(hasDataQualityWarning ? Color.orange : Color.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       RoundedRectangle(cornerRadius: MeterBarTheme.Radius.medium, style: .continuous)
-        .fill(progress.isLargeCorpus ? Color.orange.opacity(0.12) : Color.primary.opacity(0.05))
+        .fill(hasDataQualityWarning ? Color.orange.opacity(0.12) : Color.primary.opacity(0.05))
     )
     .accessibilityElement(children: .combine)
     .accessibilityLabel(progress.statusText)
