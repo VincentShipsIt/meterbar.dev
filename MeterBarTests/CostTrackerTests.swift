@@ -2116,6 +2116,198 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(windows.period.sessions, fileCount)
     }
 
+    // MARK: - In-flight flag accuracy under cancellation (issue #547 part 3)
+
+    /// `CostScanExecutor.run`'s own cancellation handler resumes its
+    /// continuation the instant the calling task is cancelled, whether or not
+    /// the queued closure has started — so calling `run` again from that same
+    /// (already-cancelled) task cannot be used to learn when the orphaned
+    /// closure is actually done: it would resolve immediately too, without
+    /// waiting its turn. `waitForIdle()` exists because of that gap; this
+    /// proves it actually blocks on the orphan rather than returning early.
+    func testWaitForIdleBlocksUntilAnOrphanedCancelledSliceActuallyFinishes() async throws {
+        // `releaseGate` is only ever waited on *inside* the closures below,
+        // which run on `CostScanExecutor`'s own dedicated queue thread — never
+        // from this test's own async task. Blocking there is exactly what
+        // that dedicated thread is for; blocking a cooperative-pool thread
+        // (this test's) with a semaphore `.wait()` would risk starving the
+        // pool instead, so this test polls with `Task.sleep` rather than
+        // waiting on a semaphore of its own.
+        let releaseGate = DispatchSemaphore(value: 0)
+        let stateLock = NSLock()
+        var orphanStarted = false
+        var orphanFinished = false
+        var drainReturned = false
+
+        let orphan = Task {
+            try await CostScanExecutor.run { _ in
+                stateLock.lock()
+                orphanStarted = true
+                stateLock.unlock()
+                releaseGate.wait()
+                stateLock.lock()
+                orphanFinished = true
+                stateLock.unlock()
+            }
+        }
+        // Don't cancel until the closure has actually started running — this
+        // is what forces the "while the work runs" shape rather than the
+        // "still queued" one; both are documented on `CostScanExecutor.run`,
+        // but only the first is the one `waitForIdle()` exists to handle.
+        while true {
+            stateLock.lock()
+            let started = orphanStarted
+            stateLock.unlock()
+            if started { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        orphan.cancel()
+        // Resumes right away; the closure above is still parked on the gate.
+        _ = try? await orphan.value
+
+        let drain = Task {
+            await CostScanExecutor.waitForIdle()
+            stateLock.lock()
+            drainReturned = true
+            stateLock.unlock()
+        }
+
+        // Give `drain` a moment to actually reach the executor's queue.
+        try await Task.sleep(nanoseconds: 30_000_000)
+        stateLock.lock()
+        let stillWaiting = !orphanFinished && !drainReturned
+        stateLock.unlock()
+        XCTAssertTrue(stillWaiting, "waitForIdle() must not return before the orphaned closure it is waiting on")
+
+        releaseGate.signal()
+        await drain.value
+
+        stateLock.lock()
+        let orphanDoneOnceDrained = orphanFinished
+        stateLock.unlock()
+        XCTAssertTrue(orphanDoneOnceDrained, "waitForIdle() returned before the orphaned closure actually finished")
+    }
+
+    /// The integration this all exists for: `scanCosts` must not clear
+    /// `isScanning` while the scan queue is still busy with work a cancelled
+    /// slice is waiting on. A synthetic blocker stands in for "still walking
+    /// the corpus" — it occupies the same shared scan queue `makeCostSummary`
+    /// itself uses, without touching any real account or transcript, so
+    /// `scanCosts`'s own (empty, near-instant) slice call queues up behind it
+    /// exactly the way a real slice would queue up behind a still-running
+    /// orphan.
+    @MainActor
+    func testScanCostsKeepsIsScanningTrueUntilAnOrphanedCancelledSliceActuallyFinishes() async throws {
+        // `releaseGate` is only ever waited on inside the closure below, on
+        // `CostScanExecutor`'s own dedicated queue thread — see the note on
+        // `testWaitForIdleBlocksUntilAnOrphanedCancelledSliceActuallyFinishes`
+        // above for why this test never blocks its own (cooperative-pool)
+        // task on a semaphore.
+        let releaseGate = DispatchSemaphore(value: 0)
+        let stateLock = NSLock()
+        var blockerStarted = false
+        let blocker = Task {
+            try await CostScanExecutor.run { _ in
+                stateLock.lock()
+                blockerStarted = true
+                stateLock.unlock()
+                releaseGate.wait()
+            }
+        }
+        while true {
+            stateLock.lock()
+            let started = blockerStarted
+            stateLock.unlock()
+            if started { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        let tracker = CostTracker()
+        let scan = Task { await tracker.scanCosts(days: 30) }
+
+        // Let `scanCosts` reach its own `CostScanExecutor.run` call, which
+        // queues up behind the blocker rather than running.
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertTrue(tracker.isScanning, "sanity: the scan should have started")
+
+        scan.cancel()
+        // `scanCosts`'s own call was still queued behind the blocker, never
+        // dequeued, so it resumes with `CancellationError` immediately and
+        // its closure never runs at all. Without the fix, `isScanning` would
+        // already be false by the time this sleep elapses.
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertTrue(
+            tracker.isScanning,
+            "isScanning must stay true while the scan queue is still busy with work this cancelled scan is waiting on"
+        )
+
+        releaseGate.signal()
+        _ = await scan.value
+        _ = try? await blocker.value
+
+        XCTAssertFalse(tracker.isScanning, "isScanning must clear once the queue this scan depended on goes idle")
+    }
+
+    /// The second bug in the same place: a progress milestone for a slice that
+    /// is already cancelled by the time its main-actor hop lands must be
+    /// dropped, not rendered — otherwise it flashes a stale value at the start
+    /// of the next scan.
+    func testProgressBridgeDropsAPublishForAnAlreadyCancelledSlice() {
+        let tracker = CostTracker(demoMode: true)
+        let bridge = CostScanProgressBridge(tracker: tracker)
+        let token = CostScanCancellationToken()
+        bridge.attach(token: token)
+        let stale = CostScanProgress(
+            windowDays: 30,
+            listedFiles: 4,
+            listedBytes: 2_048,
+            processedFiles: 0,
+            isComplete: false
+        )
+
+        // The slice this progress belongs to is already cancelled by the time
+        // it is published — the exact race `CostTracker.makeCostSummary` can
+        // hit between a slice's cancellation and its progress bridge's
+        // dispatched hop landing.
+        token.cancel()
+        let checked = expectation(description: "publish's main-actor hop ran and was checked")
+
+        bridge.publish(stale)
+
+        DispatchQueue.main.async {
+            XCTAssertNil(tracker.scanProgress, "a publish for an already-cancelled slice must be dropped")
+            checked.fulfill()
+        }
+
+        wait(for: [checked], timeout: 1)
+    }
+
+    /// A publish for a slice that is still live must still reach the tracker —
+    /// guards against the drop check above swallowing everything.
+    func testProgressBridgeStillPublishesForALiveSlice() {
+        let tracker = CostTracker(demoMode: true)
+        let bridge = CostScanProgressBridge(tracker: tracker)
+        bridge.attach(token: CostScanCancellationToken())
+        let live = CostScanProgress(
+            windowDays: 30,
+            listedFiles: 2,
+            listedBytes: 1_024,
+            processedFiles: 1,
+            isComplete: false
+        )
+        let checked = expectation(description: "publish's main-actor hop ran and was checked")
+
+        bridge.publish(live)
+
+        DispatchQueue.main.async {
+            XCTAssertEqual(tracker.scanProgress?.listedFiles, 2)
+            XCTAssertEqual(tracker.scanProgress?.processedFiles, 1)
+            checked.fulfill()
+        }
+
+        wait(for: [checked], timeout: 1)
+    }
+
     // MARK: - Applying a slice's result
 
     /// Demo mode is the vehicle rather than the subject: it stubs out the cache

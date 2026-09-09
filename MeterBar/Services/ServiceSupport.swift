@@ -271,9 +271,19 @@ nonisolated enum ServiceSupport {
         return .apiError("Request failed")
     }
 
-    /// Runs `block` on the main thread — synchronously when already there, so
-    /// callers on the main thread observe the state change immediately
-    /// (SettingsView reads `hasAccess` right after calling `checkAccess()`).
+    /// Runs `block` on the main thread — synchronously when already there.
+    ///
+    /// Every production caller (`checkAccess()` on each local provider
+    /// service) is invoked from inside `Task.detached`, so in production this
+    /// always takes the asynchronous branch: Settings never actually reads
+    /// `hasAccess` synchronously right after calling `checkAccess()`, despite
+    /// what an earlier version of this comment claimed. The synchronous
+    /// fast path is not dead, though — it is what test code relies on when it
+    /// calls `checkAccess()` directly from XCTest's main thread and asserts on
+    /// the result on the very next line (e.g. `CodexAccountAccessTests`).
+    /// Deleting it would silently break those assertions, so it stays; this
+    /// comment now describes what actually depends on it instead of a
+    /// production invariant that never held.
     /// `@MainActor` on the closure lets nonisolated service code mutate
     /// main-actor `@Published` state through here without isolation warnings.
     static func applyOnMain(_ block: @escaping @MainActor () -> Void) {

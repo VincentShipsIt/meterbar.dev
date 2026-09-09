@@ -251,6 +251,53 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         XCTAssertTrue(ClaudeCodeLocalService.isOAuthUsageEnabled(defaults: defaults))
     }
 
+    // MARK: - Auth-state generation ordering (issue #547 part 2)
+
+    /// `checkAccess()` and the OAuth/CLI fetch path both write `hasAccess`/
+    /// `authState` for the default profile through this ticket. The two
+    /// writers race with genuinely overlapping timing here: the "older"
+    /// writer claims its ticket first, then suspends mid-probe (like
+    /// `checkAccess()`'s blocking Keychain/CLI work), while a "newer" writer
+    /// claims a ticket and finishes immediately (like a fast OAuth 200) before
+    /// the older one resumes. Recency must be decided by *start* order, so
+    /// the older writer's stale commit must be rejected even though it
+    /// finishes last.
+    func testGenerationRejectsAWriterThatStartedBeforeANewerOneEvenIfItFinishesLast() async {
+        let generation = ClaudeAuthStateGeneration()
+        let gate = ResumableGate()
+
+        let olderStarted = expectation(description: "older ticket claimed")
+        let olderTask = Task { () -> Bool in
+            let olderTicket = generation.next()
+            olderStarted.fulfill()
+            await gate.wait()
+            return generation.isCurrent(olderTicket)
+        }
+        await fulfillment(of: [olderStarted], timeout: 1)
+
+        // The newer writer starts and commits while the older one is still
+        // suspended mid-probe — a genuine overlap, not a sequential replay.
+        let newerTicket = generation.next()
+        XCTAssertTrue(generation.isCurrent(newerTicket), "the writer that started most recently must be current")
+
+        await gate.resume()
+        let olderWasStillCurrentWhenItFinished = await olderTask.value
+
+        XCTAssertFalse(
+            olderWasStillCurrentWhenItFinished,
+            "a probe that started before a newer one must not win just because it finished later"
+        )
+        XCTAssertTrue(generation.isCurrent(newerTicket), "the newer writer's ticket must still be current")
+    }
+
+    func testGenerationAcceptsASingleWriterWithNoContention() {
+        let generation = ClaudeAuthStateGeneration()
+
+        let ticket = generation.next()
+
+        XCTAssertTrue(generation.isCurrent(ticket))
+    }
+
     // MARK: - Helpers
 
     private func decodeUsage(_ json: String) throws -> ClaudeCodeUsageResponse {
@@ -280,6 +327,22 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return defaults
+    }
+
+    /// Suspends `wait()` callers until `resume()` is called, so a test can
+    /// force one Task to genuinely overlap another instead of racing on
+    /// scheduler timing.
+    private actor ResumableGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func resume() {
+            continuation?.resume()
+            continuation = nil
+        }
     }
 
     private final class StubURLProtocol: URLProtocol {

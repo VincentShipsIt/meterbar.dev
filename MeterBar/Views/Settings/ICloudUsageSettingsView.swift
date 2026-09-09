@@ -102,6 +102,11 @@ struct ICloudUsageSettingsView: View {
                             Task { await aggregation.removeDevice(device) }
                         }
                         .buttonStyle(.borderless)
+                        // removeDevice serializes against an in-flight sync
+                        // (ICloudUsageAggregationService.removeDevice); disable
+                        // the button too so the user isn't left waiting on a
+                        // tap that silently no-ops.
+                        .disabled(aggregation.isSyncing)
                     } else {
                         Text("Current")
                             .font(.caption)

@@ -13,6 +13,42 @@ nonisolated private enum ClaudeCredentialReadBarrier: Error {
     case unavailable
 }
 
+/// Thread-safe monotonic ticket for the default-profile auth-state writers
+/// below (`checkAccess()`, `fetchUsageViaOAuth`, `fetchUsageViaCLI`).
+///
+/// Mirrors `ApiUsageStore.refreshGeneration` / `StatusItemPresenter
+/// .updateGeneration`, but nonisolated rather than `@MainActor`: `checkAccess()`
+/// starts its blocking Keychain/CLI probes on a background thread, before any
+/// MainActor hop, so a generation captured only after reaching MainActor could
+/// not order it against a competing writer that started later but reached
+/// MainActor first. Every writer calls `next()` as its very first action —
+/// before any probe or network call — and only commits if `isCurrent(_:)`
+/// still holds when the result comes back. That makes recency about *start*
+/// order, not completion order, so a probe that began before a newer one
+/// cannot overwrite it just by finishing later.
+///
+/// Internal (not `private`/`fileprivate`) so `ClaudeAuthStateGenerationTests`
+/// can exercise the ordering guarantee directly with real overlapping Tasks —
+/// `ClaudeCodeLocalService` itself is a hardwired singleton with real
+/// Keychain/CLI/network dependencies and no injectable initializer, so its
+/// concurrency is exercised by CI/integration rather than a unit test here
+/// (see the file doc on `ClaudeCodeOAuthUsageTests`).
+nonisolated final class ClaudeAuthStateGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func next() -> Int {
+        lock.withLock {
+            value += 1
+            return value
+        }
+    }
+
+    func isCurrent(_ generation: Int) -> Bool {
+        lock.withLock { generation == value }
+    }
+}
+
 class ClaudeCodeLocalService: ObservableObject {
     // nonisolated: lets nonisolated code such as the readiness inspector
     // reference the singleton (methods keep their own isolation).
@@ -39,6 +75,11 @@ class ClaudeCodeLocalService: ObservableObject {
     private let tokenRefresher = ClaudeTokenRefresher.shared
 
     private let urlSession = ServiceSupport.session
+
+    /// See `ClaudeAuthStateGeneration`. Guards `hasAccess`/`authState`/
+    /// `lastError` for the default profile against `checkAccess()` and the
+    /// OAuth/CLI fetch paths racing each other (issue #547 part 2).
+    private let authStateGeneration = ClaudeAuthStateGeneration()
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
@@ -206,6 +247,10 @@ class ClaudeCodeLocalService: ObservableObject {
     /// `nonisolated`: file stats + (with the OAuth fallback) a no-UI Keychain
     /// read — call from a detached task.
     nonisolated func checkAccess() {
+        // Claimed before any probe runs, so a probe that started before a
+        // newer writer (another checkAccess() or a fetch) loses the race even
+        // if this one finishes first. See `ClaudeAuthStateGeneration`.
+        let generation = authStateGeneration.next()
         let newHasAccess: Bool
         let newAuthState: ClaudeCodeAuthState
         let clearsSubscription: Bool
@@ -225,7 +270,7 @@ class ClaudeCodeLocalService: ObservableObject {
         }
 
         ServiceSupport.applyOnMain { [weak self] in
-            guard let self else { return }
+            guard let self, self.authStateGeneration.isCurrent(generation) else { return }
             self.hasAccess = newHasAccess
             self.authState = newAuthState
             if clearsSubscription {
@@ -292,6 +337,10 @@ class ClaudeCodeLocalService: ObservableObject {
         account: ClaudeCodeAccount,
         trigger: ClaudeTokenRefreshTrigger
     ) async throws -> UsageMetrics? {
+        // Claimed before the first probe, like `checkAccess()`'s ticket, so
+        // this call's eventual commit is rejected if a newer writer started
+        // in the meantime. See `ClaudeAuthStateGeneration`.
+        let generation = authStateGeneration.next()
         // Keychain read — off the main actor (it can raise a blocking approval
         // dialog, and the app target runs async bodies on the main actor).
         // The state-updating read also refreshes `subscriptionType`/`hasAccess`.
@@ -330,7 +379,7 @@ class ClaudeCodeLocalService: ObservableObject {
         case .unavailable:
             throw ClaudeCredentialReadBarrier.unavailable
         case .refreshFailed:
-            publishNeedsLogin(account: account, publishesSharedState: publishesSharedState)
+            publishNeedsLogin(account: account, publishesSharedState: publishesSharedState, generation: generation)
             throw ServiceError.notAuthenticated
         }
 
@@ -339,8 +388,10 @@ class ClaudeCodeLocalService: ObservableObject {
             await MainActor.run {
                 // Same rule as the CLI path: this observable service describes
                 // the default Claude connection, so a secondary profile must not
-                // overwrite provider-wide state.
-                if publishesSharedState {
+                // overwrite provider-wide state. The generation check further
+                // guards against a newer writer (another fetch or checkAccess())
+                // having started since this call began.
+                if publishesSharedState, self.authStateGeneration.isCurrent(generation) {
                     self.lastError = nil
                     self.hasAccess = true
                     self.authState = .connected(.oauth)
@@ -360,7 +411,7 @@ class ClaudeCodeLocalService: ObservableObject {
             await MainActor.run {
                 self.accountErrors[account.id] = serviceError
                 self.accountAuthStates[account.id] = state
-                guard publishesSharedState else { return }
+                guard publishesSharedState, self.authStateGeneration.isCurrent(generation) else { return }
                 self.lastError = serviceError
                 if case .needsLogin = state {
                     self.hasAccess = false
@@ -373,11 +424,12 @@ class ClaudeCodeLocalService: ObservableObject {
 
     private func publishNeedsLogin(
         account: ClaudeCodeAccount,
-        publishesSharedState: Bool
+        publishesSharedState: Bool,
+        generation: Int
     ) {
         accountErrors[account.id] = .notAuthenticated
         accountAuthStates[account.id] = .needsLogin
-        guard publishesSharedState else { return }
+        guard publishesSharedState, authStateGeneration.isCurrent(generation) else { return }
         lastError = .notAuthenticated
         hasAccess = false
         authState = .needsLogin
@@ -497,13 +549,17 @@ class ClaudeCodeLocalService: ObservableObject {
         account: ClaudeCodeAccount,
         isLoggedOut: Bool = false
     ) async throws -> UsageMetrics {
+        // Same ticket discipline as `fetchUsageViaOAuth`/`checkAccess()`: claim
+        // it before the CLI call starts, commit only if still current.
+        let generation = authStateGeneration.next()
         do {
             let metrics = try await cliUsageService.fetchUsageMetrics(account: account)
             await MainActor.run {
                 // This observable service describes the default Claude
                 // connection. A logged-out secondary profile must not overwrite
                 // the provider-wide state after the default profile refreshed.
-                if Self.publishesSharedConnectionState(for: account) {
+                if Self.publishesSharedConnectionState(for: account),
+                   self.authStateGeneration.isCurrent(generation) {
                     self.lastError = nil
                     self.hasAccess = true
                     self.authState = .connected(.cli)
@@ -529,11 +585,11 @@ class ClaudeCodeLocalService: ObservableObject {
             await MainActor.run {
                 self.accountErrors[account.id] = serviceError
                 self.accountAuthStates[account.id] = state
-                if Self.publishesSharedConnectionState(for: account) {
-                    self.lastError = serviceError
-                    self.hasAccess = false
-                    self.authState = state
-                }
+                guard Self.publishesSharedConnectionState(for: account),
+                      self.authStateGeneration.isCurrent(generation) else { return }
+                self.lastError = serviceError
+                self.hasAccess = false
+                self.authState = state
             }
             throw serviceError
         }
