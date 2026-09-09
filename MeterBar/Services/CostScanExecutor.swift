@@ -59,6 +59,28 @@ nonisolated enum CostScanExecutor {
             handoff.cancel()
         }
     }
+
+    /// Waits until every block already enqueued on the scan queue — including
+    /// one that kept running past its own cancellation, per `run`'s "while the
+    /// work runs" shape above — has actually finished.
+    ///
+    /// `run` ties its continuation to the *calling* task's cancellation, so
+    /// calling it directly from a task that is itself already cancelled
+    /// resumes immediately without waiting for anything: the cancellation
+    /// handler above fires before the queued block ever gets a turn. A caller
+    /// that just observed its own slice get cancelled therefore cannot learn
+    /// "is the orphan actually done?" by calling `run` again on its own task.
+    ///
+    /// This runs the same probe from a detached task instead. A detached task
+    /// has no parent to inherit cancellation from, so its call parks normally
+    /// behind whatever is still running on the serial queue — including the
+    /// orphan — and only returns once that has genuinely finished.
+    static func waitForIdle() async {
+        let drain = Task.detached {
+            _ = try? await run { _ in () }
+        }
+        await drain.value
+    }
 }
 
 /// A cancellation flag the scan can poll from a non-`async` context.
