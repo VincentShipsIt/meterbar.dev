@@ -423,6 +423,18 @@ private struct ShareGalleryTile: View {
     var body: some View {
         preview
             .overlay { actionOverlay }
+            // The same exports, named. The corner capsule is icons only, which
+            // is right for a control that sits on artwork but wrong as the only
+            // way to learn what the icons do — and right-clicking an image to
+            // copy it is what people already try first.
+            .contextMenu {
+                ForEach(shareActions) { action in
+                    Button(action: action.run) {
+                        Label(action.title, systemImage: action.symbol)
+                    }
+                    .disabled(action.isDisabled)
+                }
+            }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(entry.title) share card")
             .onHover { hovering in
@@ -474,13 +486,24 @@ private struct ShareGalleryTile: View {
     /// Dimmed rather than removed when the pointer leaves, so they stay in the
     /// accessibility tree instead of being unreachable without a mouse.
     private var actionOverlay: some View {
-        VStack {
+        VStack(spacing: 0) {
             Spacer(minLength: 0)
-            HStack(spacing: MeterBarTheme.Spacing.sm) {
+
+            HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                ForEach(shareActions) { action in
-                    button(action)
+
+                // One capsule around the whole group, not one per button —
+                // `MenuBarView` builds its dashboard/refresh pair exactly this
+                // way, and it is what the window toolbar's Refresh + Settings
+                // pair looks like. Per-button `.buttonStyle(.glass)` gave six
+                // separate pills with gutters between them, which reads as six
+                // controls rather than one toolbar.
+                HStack(spacing: 0) {
+                    ForEach(shareActions) { action in
+                        button(action)
+                    }
                 }
+                .glassEffect(.regular.interactive(), in: .capsule)
             }
         }
         .padding(MeterBarTheme.Spacing.md)
@@ -527,17 +550,21 @@ private struct ShareGalleryTile: View {
         return actions
     }
 
-    /// Icon-only and `.glass`, matching the window toolbar. A title would not
-    /// fit six of these across a card corner, and every button carries its
-    /// `help` text for the tooltip and for VoiceOver.
+    /// One segment of the capsule: a plain button whose fixed frame is the hit
+    /// target, so the glass belongs to the group and the buttons sit inside it.
+    /// Same metrics as `MenuBarView`'s overlay controls.
     private func button(_ action: ShareAction) -> some View {
         Button(action: action.run) {
-            Label(action.title, systemImage: action.symbol)
-                .labelStyle(.iconOnly)
+            Image(systemName: action.symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 32, height: 30)
+                .contentShape(Rectangle())
+                .accessibilityHidden(true)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
         .disabled(action.isDisabled)
         .help(action.title)
+        .accessibilityLabel(action.title)
     }
 }
 
