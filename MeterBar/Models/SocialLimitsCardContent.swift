@@ -22,12 +22,16 @@ struct SocialLimitsCardContent: Equatable {
         updatedText: String,
         headline: Row?,
         rows: [Row],
+        providerLogo: ProviderLogoKind? = nil,
+        providerQualifier: String? = nil,
         generatedAt: Date = Date()
     ) {
         self.providerName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.updatedText = updatedText
         self.headline = headline
         self.rows = rows
+        self.providerLogo = providerLogo
+        self.providerQualifier = providerQualifier
         self.generatedAt = generatedAt
     }
 
@@ -44,6 +48,8 @@ struct SocialLimitsCardContent: Equatable {
             updatedText: snapshot.updatedText,
             headline: headlineLimit ?? rows.min { $0.percentLeft < $1.percentLeft },
             rows: rows,
+            providerLogo: snapshot.logoKind,
+            providerQualifier: Self.qualifier(for: snapshot),
             generatedAt: generatedAt
         )
     }
@@ -58,6 +64,12 @@ struct SocialLimitsCardContent: Equatable {
     let updatedText: String
     let headline: Row?
     let rows: [Row]
+    /// The provider's own mark for the card masthead, beside MeterBar's. `nil`
+    /// on the placeholder card, which speaks for no provider.
+    let providerLogo: ProviderLogoKind?
+    /// Which account a sub-pool card is carved out of, when the card does not
+    /// speak for an account of its own. `nil` for ordinary provider cards.
+    let providerQualifier: String?
     let generatedAt: Date
 
     var hasQuotaData: Bool { headline != nil }
@@ -89,8 +101,9 @@ struct SocialLimitsCardContent: Equatable {
             ].joined(separator: "\n")
         }
         let reset = headline.resetText.map { " Resets in \($0)." } ?? ""
+        let attribution = providerQualifier.map { "\(providerName) on \($0)" } ?? providerName
         return [
-            "\(headline.trailingText) on \(headline.title) — \(providerName).\(reset)",
+            "\(headline.trailingText) on \(headline.title) — \(attribution).\(reset)",
             "\(tier.title): \(tier.joke)",
             SocialShareCardContent.websiteURL,
         ].joined(separator: "\n")
@@ -98,6 +111,21 @@ struct SocialLimitsCardContent: Equatable {
 
     var defaultFilename: String {
         "meterbar-limits-card-\(SocialShareCardDateFormat.filename(generatedAt)).png"
+    }
+
+    /// Names the parent account of a sub-pool card.
+    ///
+    /// Cursor Ultra's Grok Bot entitlement is branded Grok and titled "Grok
+    /// Bot", so a gallery showing it next to a real Grok account has two cards
+    /// with the same mark, near-identical names and — routinely — opposite
+    /// statuses. In the app that ambiguity is survivable because the cards sit
+    /// in a page you already understand. Posted as a standalone image it is
+    /// simply wrong: nothing on the card says which Grok is out. Only sub-pool
+    /// cards get a qualifier; an ordinary card naming its own service would be
+    /// saying the same thing twice.
+    static func qualifier(for snapshot: ProviderSnapshot) -> String? {
+        guard snapshot.cardRole == .subPool else { return nil }
+        return snapshot.service.displayName
     }
 
     /// Projects one quota window onto the card, honoring the popover's rule
@@ -186,13 +214,23 @@ extension SocialLimitsCardContent {
             }
         }
 
-        /// Used share on the left of the pair, reset on the right — the same
-        /// facts the popover's `LimitRow` prints, in the same order. Starts
-        /// from `usedText` (not the raw percent) so a currency row shows its
-        /// "$… spent" label instead of a percentage, and folds in the pace
-        /// overlay `LimitRow` renders in its footer.
+        /// The row's supporting facts, in the popover's order, minus whatever
+        /// the bar beneath the row already says.
+        ///
+        /// The card draws a filled bar under every row, so on a quota row
+        /// "93% used" is the bar restated in words — and it was crowding out
+        /// the two things the bar cannot show: where you are against pace, and
+        /// when the window resets. It is dropped only when a pace label is
+        /// there to carry the story; an estimated row has no pace, and would
+        /// otherwise be left with nothing but a countdown.
+        ///
+        /// A currency row keeps its "$… spent": the bar shows the proportion,
+        /// but the absolute amount is a fact no bar encodes.
         var detailText: String {
-            var parts: [String] = [usedText]
+            var parts: [String] = []
+            if valueStyle == .currency || pace == nil {
+                parts.append(usedText)
+            }
             if isEstimated {
                 parts.append("estimated")
             }

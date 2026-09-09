@@ -26,8 +26,17 @@ let package = Package(
                 "App/MeterBarApp.swift",
                 "Info.plist",
                 "MeterBar.entitlements",
-                "Assets.xcassets",
-                "Resources"
+                "Assets.xcassets"
+            ],
+            // The provider logos ship as loose SVGs the app reads from its own
+            // bundle. Excluding `Resources` here meant `swift test` had no
+            // logos at all, so anything that drew one silently fell back to an
+            // SF Symbol and no test could tell the difference — which is
+            // exactly how a share card ended up with a terminal glyph where
+            // Codex's mark belongs. Copied (not processed) so the lookup path
+            // is the same subdirectory in both builds.
+            resources: [
+                .copy("Resources")
             ],
             // Match the Xcode app target (SWIFT_VERSION = 5.0,
             // SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor). The views target

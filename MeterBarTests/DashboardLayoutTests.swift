@@ -10,25 +10,66 @@ import XCTest
 final class DashboardLayoutTests: XCTestCase {
     // MARK: - Sidebar groups
 
-    func testSidebarGroupsCoverEveryDashboardSection() {
-        let flattened = DashboardSection.sidebarGroups.flatMap(\.sections)
+    func testSidebarOrderCoversEveryDashboardSection() {
+        let order = DashboardSection.sidebarOrder
 
-        XCTAssertEqual(Set(flattened).count, flattened.count, "sidebar must not repeat a section")
+        XCTAssertEqual(Set(order).count, order.count, "sidebar must not repeat a section")
         XCTAssertEqual(
-            Set(flattened),
+            Set(order),
             Set(DashboardSection.allCases),
             "every dashboard section must stay reachable from the sidebar"
         )
     }
 
-    func testSidebarGroupOrderLeadsWithMonitoringPages() {
-        let groups = DashboardSection.sidebarGroups
+    /// The sidebar is one flat run — no groups, so no headers and no uneven
+    /// gaps between clusters — but the reading order still goes monitoring,
+    /// then health, then utilities.
+    func testSidebarOrderLeadsWithMonitoringPagesThenHealthThenUtilities() {
+        XCTAssertEqual(
+            DashboardSection.sidebarOrder,
+            [.overview, .limits, .costs, .optimize, .status, .diagnostics, .share]
+        )
+    }
 
-        XCTAssertEqual(groups.first?.sections.first, .overview)
-        XCTAssertEqual(groups.first?.sections, [.overview, .limits, .costs, .optimize])
-        XCTAssertTrue(
-            groups.contains { $0.sections == [.status, .diagnostics] },
-            "health pages group together"
+    // MARK: - Content width
+
+    /// The cap is the whole point on an ultrawide: a page handed 3000pt lays
+    /// out for 1328, not 3000.
+    func testContentWidthIsCappedOnWideWindowsAndUntouchedOnNarrowOnes() {
+        let capped = UsageDashboardView.contentViewportWidth(3_000)
+
+        // Equality, not an upper bound: a cap that had drifted *smaller* would
+        // narrow every page and still satisfy `<=`. Expressed as the content
+        // width plus the page's own gutters rather than as 48, so the two
+        // cannot drift apart either.
+        XCTAssertEqual(
+            capped,
+            UsageDashboardView.maximumContentWidth + MeterBarTheme.Spacing.xxl * 2
+        )
+        XCTAssertEqual(capped, UsageDashboardView.contentViewportWidth(10_000), "the cap must not drift with the window")
+        XCTAssertEqual(UsageDashboardView.contentViewportWidth(900), 900, "a normal window is not narrowed")
+        XCTAssertEqual(UsageDashboardView.contentViewportWidth(500), 500)
+    }
+
+    /// A page doing its own column math has to see the capped width. Measuring
+    /// the raw viewport, the gallery would deal columns for a width it is never
+    /// given and every card would be squeezed.
+    func testGalleryColumnsAreDealtForTheCappedWidthNotTheWindow() {
+        let ultrawide: CGFloat = 3_440
+        let capped = UsageDashboardView.contentViewportWidth(ultrawide)
+
+        let cardAtCappedWidth = ShareGalleryLayout.previewSize(
+            contentWidth: ShareGalleryLayout.contentWidth(viewportWidth: capped, horizontalInsets: 48),
+            columnCount: ShareGalleryLayout.columnCount(
+                contentWidth: ShareGalleryLayout.contentWidth(viewportWidth: capped, horizontalInsets: 48)
+            )
+        )
+
+        XCTAssertGreaterThanOrEqual(cardAtCappedWidth.width, ShareGalleryLayout.minimumTileWidth)
+        XCTAssertLessThanOrEqual(
+            cardAtCappedWidth.width,
+            SocialShareCardLayout.exportSize.width,
+            "a preview wider than the PNG it previews is upscaled artwork"
         )
     }
 
