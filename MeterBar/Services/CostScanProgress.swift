@@ -13,6 +13,13 @@ nonisolated struct CostScanProgress: Equatable, Sendable {
     var processedFiles: Int
     var bytesRead: Int
     var isComplete: Bool
+    /// `.zst` Codex rollouts found inside the window with no readable copy
+    /// anywhere in the corpus (issue #570) — Codex's `codex.rollout_compression`
+    /// job archives a rollout by deleting the `.jsonl` source MeterBar's
+    /// scanners read. Defaults to 0 so every existing call site still compiles
+    /// unchanged; a scan that never looked for the gap reports none, not one
+    /// it ruled out.
+    var codexCompressedRolloutCount: Int
 
     /// 1 GiB. Above this the banner warns that even the windowed corpus is huge.
     static let largeCorpusBytes: Int64 = 1_073_741_824
@@ -23,7 +30,8 @@ nonisolated struct CostScanProgress: Equatable, Sendable {
         listedBytes: Int64 = 0,
         processedFiles: Int = 0,
         bytesRead: Int = 0,
-        isComplete: Bool = false
+        isComplete: Bool = false,
+        codexCompressedRolloutCount: Int = 0
     ) {
         self.windowDays = windowDays
         self.listedFiles = listedFiles
@@ -31,9 +39,14 @@ nonisolated struct CostScanProgress: Equatable, Sendable {
         self.processedFiles = processedFiles
         self.bytesRead = bytesRead
         self.isComplete = isComplete
+        self.codexCompressedRolloutCount = codexCompressedRolloutCount
     }
 
     var isLargeCorpus: Bool { listedBytes >= Self.largeCorpusBytes }
+
+    /// A short total is a silent under-count without this — see
+    /// `CodexCostScanner.compressedRolloutGap`.
+    var hasCodexCompressedRolloutGap: Bool { codexCompressedRolloutCount > 0 }
 
     var fraction: Double? {
         guard listedFiles > 0 else { return nil }
@@ -62,6 +75,11 @@ nonisolated struct CostScanProgress: Equatable, Sendable {
     }
 
     var detailText: String {
+        if hasCodexCompressedRolloutGap {
+            let plural = codexCompressedRolloutCount == 1 ? "rollout" : "rollouts"
+            return "\(codexCompressedRolloutCount) compressed Codex \(plural) in this window " +
+                "aren't counted — MeterBar reads .jsonl logs only."
+        }
         if isLargeCorpus {
             return "This \(windowDays)-day window is still \(formattedListedSize). Older archives are not scanned."
         }

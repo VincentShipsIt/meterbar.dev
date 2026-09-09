@@ -222,6 +222,65 @@ enum CodexCostScanner {
         )
     }
 
+    /// Finds `.zst` rollouts Codex's compression job left behind after
+    /// deleting the `.jsonl` source it archived (issue #566/#570), still
+    /// inside the visible window and with no readable copy elsewhere.
+    ///
+    /// This is detection, not decompression. Apple's Compression framework
+    /// (`compression_algorithm` in the macOS 26 SDK) implements LZ4, ZLIB,
+    /// LZMA, LZ4_RAW, BROTLI, LZFSE, and LZBITMAP — no ZSTD case — so reading
+    /// these files would mean vendoring a third-party zstd decoder for one
+    /// upstream maintenance job in a codebase that deliberately stays
+    /// dependency-light. Surfacing the gap instead keeps a short total
+    /// visibly short rather than quietly wrong, the same choice this codebase
+    /// already made for truncated lines (`CostScanTruncationTally`) and a
+    /// budget-limited scan (`CostScanSession.isComplete`).
+    ///
+    /// - Parameter excluding: session IDs a companion `.jsonl` was already
+    ///   found for — same identity `rolloutSessionID` gives the live/archived
+    ///   dedup in `distinctRollouts`. A session compressed on one side of that
+    ///   split but still readable on the other lost nothing.
+    /// - Parameter modifiedSince: mirrors `CostScanCorpus.listing`'s own
+    ///   filter — a `.zst` untouched since before the window cannot describe
+    ///   an in-window day.
+    nonisolated static func compressedRolloutGap(
+        in directories: [URL],
+        excluding readableSessionIDs: Set<String>,
+        modifiedSince: Date? = nil
+    ) -> CodexCompressedRolloutGap {
+        var count = 0
+        var latestModified: Date?
+
+        for directory in directories {
+            guard CostScanFileSystem.isLocalDirectory(directory) else { continue }
+            guard let enumerator = FileManager.default.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+
+            for case let url as URL in enumerator where url.pathExtension == "zst" {
+                // Codex's job only ever produces `<rollout name>.jsonl.zst`; a
+                // hand-placed or unrelated `.zst` under a different name is
+                // not this gap.
+                guard url.deletingPathExtension().pathExtension == "jsonl" else { continue }
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                      values.isRegularFile == true else { continue }
+                guard let stamp = CostScanFileStamp.read(at: url) else { continue }
+                if let modifiedSince, stamp.modified < modifiedSince.timeIntervalSince1970 { continue }
+
+                let sessionID = Self.rolloutSessionID(for: url.deletingPathExtension())
+                guard !readableSessionIDs.contains(sessionID) else { continue }
+
+                count += 1
+                let modified = Date(timeIntervalSince1970: stamp.modified)
+                latestModified = [latestModified, modified].compactMap { $0 }.max()
+            }
+        }
+
+        return CodexCompressedRolloutGap(count: count, latestModified: latestModified)
+    }
+
     // swiftlint:disable contains_over_range_nil_comparison
     /// The byte-level equivalent of the old `line.contains("\"token_count\"")`
     /// prefilter. Rollout files are mostly non-usage events, so skipping
@@ -339,6 +398,24 @@ enum CodexCostScanner {
         var coverage = CostScanCorpusCoverage()
         coverage.add(listing)
         session.noteListing(listing)
+
+        // Codex's `codex.rollout_compression` job (issue #570) writes
+        // `rollout-*.jsonl.zst` and deletes the `.jsonl` source it archived.
+        // `distinctRollouts` above only ever globs `.jsonl`, so a compressed
+        // rollout still inside the window would otherwise vanish from the
+        // corpus with no error and no truncation signal. Detected rather than
+        // decoded — see `compressedRolloutGap` — and excluded against the
+        // session IDs `listing` already resolved a readable copy for, so a
+        // session archived before compression touched its live twin is not
+        // double-flagged as lost.
+        let readableSessionIDs = Set(listing.files.map { Self.rolloutSessionID(for: $0.url) })
+        let compressedGap = Self.compressedRolloutGap(
+            in: directories,
+            excluding: readableSessionIDs,
+            modifiedSince: session.listingCutoff
+        )
+        compressedGap.log()
+        session.noteCompressedRolloutGap(compressedGap)
 
         for file in listing.files {
             coverage.keep(file.cacheKey)
@@ -1119,4 +1196,45 @@ nonisolated struct CodexUsageEvent: Sendable {
     let output: Int
     let reasoning: Int
     let attribution: CodexUsageAttribution
+}
+
+/// How many `.zst` rollouts Codex's compression job left inside the visible
+/// window with no readable copy anywhere in the corpus (issue #570), and the
+/// most recent one — enough to say something concrete in a log line without
+/// naming a path.
+nonisolated struct CodexCompressedRolloutGap: Sendable, Equatable {
+    static let empty = CodexCompressedRolloutGap(count: 0, latestModified: nil)
+
+    let count: Int
+    let latestModified: Date?
+
+    // Equivalent to `count == 0` given how every path below constructs this
+    // type — `latestModified` is set exactly when `count` is incremented —
+    // and phrased this way instead of comparing `count` to zero directly to
+    // stay clear of SwiftLint's `empty_count` rule.
+    var isEmpty: Bool { latestModified == nil }
+
+    /// Combines gaps found across the several rollout directories, or
+    /// several slices of the same budgeted refresh.
+    func merged(with other: CodexCompressedRolloutGap) -> CodexCompressedRolloutGap {
+        CodexCompressedRolloutGap(
+            count: count + other.count,
+            latestModified: [latestModified, other.latestModified].compactMap { $0 }.max()
+        )
+    }
+
+    /// Emits at most one line, only when the gap is non-empty — the same
+    /// silent-unless-affected shape as `CostScanTruncationTally.log(url:)`.
+    /// Never logs a path: the count and the most recent date are enough to
+    /// diagnose this from the log alone.
+    func log() {
+        guard !isEmpty else { return }
+        AppLog.cost.warning(
+            """
+            Codex compression left \(count, privacy: .public) \".zst\" rollout(s) inside the cost \
+            window with no readable copy; MeterBar reads \".jsonl\" only, so totals for those days \
+            are short. Most recent: \(latestModified?.description ?? "unknown", privacy: .public)
+            """
+        )
+    }
 }

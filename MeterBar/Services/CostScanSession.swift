@@ -47,6 +47,12 @@ nonisolated final class CostScanSession: @unchecked Sendable {
     private var lastEmittedProcessed = 0
     private var progressWindowDays = 30
     private var onProgress: (@Sendable (CostScanProgress) -> Void)?
+    /// Compressed Codex rollouts detected inside the window with no readable
+    /// copy anywhere in the corpus (issue #570). `CodexCostScanner.scanRollouts`
+    /// recomputes this fresh from disk on every call and merges it in here, so
+    /// a session that scans more than one root (or is asked to scan the same
+    /// root twice) still reports the true count rather than the last call's.
+    private var codexCompressedRolloutGapValue = CodexCompressedRolloutGap.empty
 
     init(
         cutoff: Date,
@@ -166,6 +172,27 @@ nonisolated final class CostScanSession: @unchecked Sendable {
         return snapshotLocked(windowDays: windowDays)
     }
 
+    /// Records `.zst` Codex rollouts found inside the window with no readable
+    /// copy anywhere in the corpus (issue #570), so the Costs page can say so
+    /// instead of a total that is quietly short. Merged rather than replaced —
+    /// see `codexCompressedRolloutGapValue` — and republished through the same
+    /// progress handler a listing/processed-file milestone would use.
+    func noteCompressedRolloutGap(_ gap: CodexCompressedRolloutGap) {
+        guard !gap.isEmpty else { return }
+        lock.lock()
+        codexCompressedRolloutGapValue = codexCompressedRolloutGapValue.merged(with: gap)
+        let snapshot = snapshotLocked()
+        let handler = onProgress
+        lock.unlock()
+        handler?(snapshot)
+    }
+
+    var codexCompressedRolloutGap: CodexCompressedRolloutGap {
+        lock.lock()
+        defer { lock.unlock() }
+        return codexCompressedRolloutGapValue
+    }
+
     private func snapshotLocked(windowDays: Int? = nil) -> CostScanProgress {
         CostScanProgress(
             windowDays: windowDays ?? progressWindowDays,
@@ -173,7 +200,8 @@ nonisolated final class CostScanSession: @unchecked Sendable {
             listedBytes: listedBytes,
             processedFiles: processedFiles,
             bytesRead: budget.bytesRead,
-            isComplete: deferred.isEmpty && processedFiles == listedFiles
+            isComplete: deferred.isEmpty && processedFiles == listedFiles,
+            codexCompressedRolloutCount: codexCompressedRolloutGapValue.count
         )
     }
 
