@@ -121,6 +121,54 @@ final class CLIBinaryLocatorTests: XCTestCase {
         )
     }
 
+    /// Issue #586: the Grok Build installer's default BIN_DIR is `~/.grok/bin`,
+    /// and it only symlinks into `~/.local/bin` when that directory is already
+    /// on the interactive PATH. A launchd-started GUI app sees neither, so a
+    /// working `grok` looked uninstalled to MeterBar.
+    func testGrokResolvesFromTheInstallerBinDirectoryWhenPATHIsBare() {
+        let fileManager = StubExecutableFileManager(
+            executablePaths: ["/Users/tester/.grok/bin/grok"]
+        )
+
+        let resolved = CLIBinaryLocator.resolve(
+            command: "grok",
+            overrideEnvVar: "GROK_CLI_PATH",
+            environment: ["PATH": "/usr/bin:/bin"],
+            home: "/Users/tester",
+            fileManager: fileManager
+        )
+
+        XCTAssertEqual(resolved, "/Users/tester/.grok/bin/grok")
+        XCTAssertEqual(
+            CLIBinaryLocator.trust(
+                forResolvedPath: "/Users/tester/.grok/bin/grok",
+                home: "/Users/tester"
+            ),
+            .wellKnown,
+            "The installer's own directory must not be logged as an unexpected path"
+        )
+    }
+
+    /// A shared directory that really is on PATH still wins, so the new
+    /// fallback cannot reorder an existing installation.
+    func testPATHEntriesKeepPriorityOverTheGrokInstallerBinDirectory() {
+        let fileManager = StubExecutableFileManager(
+            executablePaths: [
+                "/opt/homebrew/bin/grok",
+                "/Users/tester/.grok/bin/grok",
+            ]
+        )
+
+        let resolved = CLIBinaryLocator.resolve(
+            command: "grok",
+            environment: ["PATH": "/opt/homebrew/bin"],
+            home: "/Users/tester",
+            fileManager: fileManager
+        )
+
+        XCTAssertEqual(resolved, "/opt/homebrew/bin/grok")
+    }
+
     func testUnexpectedResolutionNoticeIsDeduplicatedByCommandAndPath() {
         let fileManager = StubExecutableFileManager(executablePaths: ["/tmp/evil/claude"])
         let arguments = (

@@ -848,8 +848,15 @@ public enum ProviderReadinessEvaluator {
                 id: ReadinessCheckID.installed,
                 title: title,
                 level: .fail,
-                detail: "Grok Build CLI not found on PATH.",
-                recovery: "Install Grok Build, then run `grok login`."
+                detail: "Grok Build CLI not found on PATH or in the usual install directories.",
+                // Everyone who reaches this row while signed in has already
+                // installed Grok Build — the binary just landed somewhere
+                // launchd's PATH cannot see. Lead with "install it" for the
+                // genuinely-missing case, but name the link that fixes the
+                // custom-directory one rather than making them guess. (#586)
+                recovery: "Install Grok Build, then run `grok login`. "
+                    + "Already installed elsewhere? Link it: "
+                    + "`ln -s <path>/grok ~/.local/bin/grok`."
             )
         }
 

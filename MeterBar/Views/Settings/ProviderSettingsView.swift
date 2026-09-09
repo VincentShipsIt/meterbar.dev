@@ -958,6 +958,7 @@ struct ProviderSettingsView: View {
                             statusPresentation: ProviderAccountConnectionState
                                 .from(
                                     isEnabled: account.isEnabled,
+                                    isCLIInstalled: grokService.isCLIInstalled,
                                     isConnected: grokService.canAccess(account: account)
                                 )
                                 .statusPresentation,

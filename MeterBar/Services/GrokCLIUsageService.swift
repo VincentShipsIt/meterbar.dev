@@ -77,7 +77,14 @@ final class GrokCLIUsageService: ObservableObject {
     }
 
     nonisolated func canAccess(account: GrokAccount) -> Bool {
-        binaryPathProvider() != nil && authAvailableProvider(account)
+        isCLIInstalled && authAvailableProvider(account)
+    }
+
+    /// Whether the `grok` binary itself resolves, independent of any profile's
+    /// cached login. Settings needs the two apart so a missing CLI is not
+    /// reported as a login problem.
+    nonisolated var isCLIInstalled: Bool {
+        binaryPathProvider() != nil
     }
 
     func fetchUsageMetrics() async throws -> UsageMetrics {
