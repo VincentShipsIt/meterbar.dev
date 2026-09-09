@@ -258,7 +258,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     ///
     /// Cursor Ultra's weekly Grok Bot pool is an additional percent-of-100
     /// bar. The weekly *slot* with the same shape stays **Other Models**.
+    ///
+    /// A provider-supplied label wins over every cadence rule below: Codex's
+    /// Luna reserve is a weekly window beside the plan's own weekly window, and
+    /// naming it from its cadence would draw two bars both called "Weekly".
+    /// Only providers that name a pool set the field, so the Cursor and
+    /// cadence branches still decide every window that arrives without one.
     public func additionalQuotaTitleKey(for limit: UsageLimit) -> QuotaTitleKey {
+        if let label = limit.label, !label.isEmpty {
+            return .model(label: label)
+        }
         if self == .cursor,
            limit.periodKind == .weekly,
            Self.isCursorIncludedPool(total: limit.total) {

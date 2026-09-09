@@ -550,6 +550,13 @@ nonisolated struct CodexCliUsageResponse: Codable {
     let credits: Credits?  // Can be null for free accounts
     let spendControl: SpendControl?
     let rateLimitResetCredits: RateLimitResetCredits?
+    /// Separately metered pools that sit beside the plan's own rate limit —
+    /// the Luna reserve MeterBar surfaces, and the Codex Spark windows it does
+    /// not map yet (issue #578).
+    let additionalRateLimits: [CodexAdditionalRateLimit]?
+    /// The banner OpenAI shows when a plan's quota is spent and requests are
+    /// being served from a fallback pool instead.
+    let rateLimitUpsell: CodexRateLimitUpsell?
 
     enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
@@ -558,6 +565,8 @@ nonisolated struct CodexCliUsageResponse: Codable {
         case credits
         case spendControl = "spend_control"
         case rateLimitResetCredits = "rate_limit_reset_credits"
+        case additionalRateLimits = "additional_rate_limits"
+        case rateLimitUpsell = "rate_limit_upsell"
     }
 
     /// Number of banked "rate-limit resets" the account can actually redeem
@@ -569,6 +578,44 @@ nonisolated struct CodexCliUsageResponse: Codable {
     /// banked, or the payload didn't decode.
     var resetCreditsAvailable: Int? {
         rateLimitResetCredits?.resolvedAvailableCount
+    }
+
+    /// Whether requests are currently being served from the reserve pool rather
+    /// than the plan's own quota.
+    ///
+    /// The upsell banner is OpenAI's own answer to that question, so it leads.
+    /// `limit_reached` is the fallback: the banner is a marketing surface and
+    /// can be withdrawn, while the exhausted window is the condition the
+    /// reserve exists for. Either signal alone is enough — requiring both would
+    /// hide the reserve exactly when the user needs it.
+    var isServingFromReserve: Bool {
+        if rateLimitUpsell?.bannerType == CodexRateLimitUpsell.lunaReserveBannerType {
+            return true
+        }
+        return rateLimit?.limitReached == true
+    }
+
+    /// The reserve pool's window, or `nil` when no reserve is being served, the
+    /// payload reports none, or it cannot be named.
+    ///
+    /// Deliberately gated on `isServingFromReserve`: the reserve is reported
+    /// whether or not it is in use, and a full bar beside a healthy weekly one
+    /// is noise. It earns its row only once the plan's own quota is gone.
+    var reserveLimit: UsageLimit? {
+        guard isServingFromReserve,
+              let reserve = additionalRateLimits?.first(where: { $0.isReserve }),
+              let window = reserve.rateLimit?.primaryWindow,
+              let label = CodexReserveLabel.make(
+                  modelSlug: reserve.normalModelSlug,
+                  limitName: reserve.limitName
+              )
+        else {
+            return nil
+        }
+        return window.usageLimit(
+            periodKind: window.isSessionWindow ? .session : .weekly,
+            label: label
+        )
     }
 
     /// Maps the Codex credits/spend payload onto the shared extra-usage status.
@@ -650,7 +697,8 @@ extension CodexCliUsageResponse {
                 weeklyLimit: nil,
                 codeReviewLimit: nil,
                 extraUsage: extraUsageStatus,
-                resetCreditsAvailable: resetCreditsAvailable
+                resetCreditsAvailable: resetCreditsAvailable,
+                additionalLimits: additionalLimits
             )
         }
 
@@ -667,8 +715,16 @@ extension CodexCliUsageResponse {
             weeklyLimit: weeklyLimit,
             codeReviewLimit: codeReviewLimit,
             extraUsage: extraUsageStatus,
-            resetCreditsAvailable: resetCreditsAvailable
+            resetCreditsAvailable: resetCreditsAvailable,
+            additionalLimits: additionalLimits
         )
+    }
+
+    /// Extra windows beyond the named slots. Only the reserve maps today; the
+    /// Codex Spark pool in the same array reports two windows under one name
+    /// and needs a cadence-composed title first (issue #578).
+    private var additionalLimits: [UsageLimit] {
+        [reserveLimit].compactMap { $0 }
     }
 }
 
@@ -700,6 +756,55 @@ nonisolated struct SpendControl: Codable {
         try container.encode(reached, forKey: .reached)
         try container.encodeIfPresent(individualLimit, forKey: .individualLimit)
     }
+}
+
+/// One separately metered pool from the Codex usage API's `additional_rate_limits`.
+///
+/// Every field is optional: the array is undocumented, its entries change as
+/// OpenAI ships models, and a renamed key must cost MeterBar a row rather than
+/// the whole usage decode.
+nonisolated struct CodexAdditionalRateLimit: Codable {
+    /// OpenAI's internal name for the pool, e.g. `gpt-reserve`.
+    let limitName: String?
+    /// What the pool meters. `base_model_inference` is the reserve that serves
+    /// requests once a plan's own quota is spent — the stable identity, unlike
+    /// `limitName` or array position.
+    let meteredFeature: String?
+    let rateLimit: RateLimit?
+    /// The model served from this pool, e.g. `gpt-5.6-luna`. Names the reserve
+    /// so a model rename follows the provider instead of shipping stale copy.
+    let normalModelSlug: String?
+
+    enum CodingKeys: String, CodingKey {
+        case limitName = "limit_name"
+        case meteredFeature = "metered_feature"
+        case rateLimit = "rate_limit"
+        case normalModelSlug = "normal_model_slug"
+    }
+
+    /// Metered feature of the pool that serves requests after a plan's quota is
+    /// exhausted.
+    static let reserveMeteredFeature = "base_model_inference"
+
+    var isReserve: Bool {
+        meteredFeature == Self.reserveMeteredFeature
+    }
+}
+
+/// The upsell banner OpenAI attaches once a plan's quota is spent.
+///
+/// MeterBar reads only the discriminator. The banner's own copy is marketing
+/// ("Add credits to continue…") and its `reset_at` repeats the plan window's,
+/// which the weekly row already shows.
+nonisolated struct CodexRateLimitUpsell: Codable {
+    let bannerType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case bannerType = "banner_type"
+    }
+
+    /// Banner shown while requests are being served from the Luna reserve.
+    static let lunaReserveBannerType = "luna_reserve"
 }
 
 /// Banked rate-limit resets the account can trigger on demand, from the Codex usage API.
@@ -802,6 +907,24 @@ nonisolated struct LimitWindow: Codable {
             total: 100.0,
             resetTime: Date(timeIntervalSince1970: Double(resetAt)),
             windowSeconds: TimeInterval(limitWindowSeconds)
+        )
+    }
+
+    /// The same window, carrying the cadence and name an extra pool needs.
+    ///
+    /// Separate from `usageLimit` so the plan's own session and weekly slots
+    /// keep the shape they have always cached: those two are identified by the
+    /// slot they occupy, and back-filling `periodKind` on them would change
+    /// what `cliWindowKind` and the quota-guard filters report for windows this
+    /// change is not about.
+    func usageLimit(periodKind: UsageLimit.PeriodKind, label: String?) -> UsageLimit {
+        UsageLimit(
+            used: usedPercent,
+            total: 100.0,
+            resetTime: Date(timeIntervalSince1970: Double(resetAt)),
+            windowSeconds: TimeInterval(limitWindowSeconds),
+            periodKind: periodKind,
+            label: label
         )
     }
 

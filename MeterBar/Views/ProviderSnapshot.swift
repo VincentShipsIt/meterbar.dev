@@ -864,13 +864,41 @@ enum ProviderSnapshotBuilder {
                 // Cursor's Grok Bot pool keeps a stable id so the menu-bar
                 // candidate builder, its pin key, and the split-out card in
                 // `cursorSnapshots` all agree on which window it is.
-                id: quotaTitleKey == .grokBot ? grokBotLimitID : "additional-\(index)",
+                id: quotaTitleKey == .grokBot
+                    ? grokBotLimitID
+                    : additionalLimitID(for: additional, index: index),
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
                 usageLimit: additional
             ))
         }
         return result
+    }
+
+    /// Identity for an extra window, preferring its provider-supplied name over
+    /// its position in `additionalLimits`.
+    ///
+    /// Position is only stable while the list is. Codex's reserve row appears
+    /// and disappears with the plan's weekly quota, and `StatusItemPinKey`
+    /// persists whatever id was current when the user pinned it — so a
+    /// positional id would hand a returning row a key that no longer matches
+    /// its pin. Unnamed windows keep the positional id they already ship with.
+    private static func additionalLimitID(for limit: UsageLimit, index: Int) -> String {
+        guard let slug = limit.label.map(slugified), !slug.isEmpty else {
+            return "additional-\(index)"
+        }
+        return slug
+    }
+
+    /// Lowercased, hyphen-joined runs of alphanumerics — "Luna Reserve" becomes
+    /// `luna-reserve`. Pin keys are compared by exact string equality and are
+    /// written to user defaults, so the id must not carry spaces or casing that
+    /// a later rename would perturb.
+    private static func slugified(_ label: String) -> String {
+        label
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .joined(separator: "-")
     }
 
     /// Window id of Cursor Ultra's weekly Grok Bot pool, shared by the raw

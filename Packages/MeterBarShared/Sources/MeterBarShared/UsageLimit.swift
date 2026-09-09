@@ -35,6 +35,16 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     /// receiving it from the provider.
     public let isEstimated: Bool
     public let periodKind: PeriodKind?
+    /// Provider-supplied name for a window that its cadence cannot identify.
+    ///
+    /// Codex's Luna reserve pool is a weekly window sitting beside the plan's
+    /// own weekly window, so titling it from `periodKind` alone would draw two
+    /// bars both called "Weekly". The label is provider data and stays verbatim
+    /// in every locale, the same way Claude Code's model-scoped window keeps
+    /// its parsed "Fable" / "Sonnet" name. `nil` for every window a cadence
+    /// already names honestly, and missing on payloads written before this
+    /// field existed.
+    public let label: String?
 
     public init(
         used: Double,
@@ -42,7 +52,8 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         resetTime: Date?,
         windowSeconds: TimeInterval? = nil,
         isEstimated: Bool = false,
-        periodKind: PeriodKind? = nil
+        periodKind: PeriodKind? = nil,
+        label: String? = nil
     ) {
         self.used = used
         self.total = total
@@ -50,6 +61,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         self.windowSeconds = windowSeconds
         self.isEstimated = isEstimated
         self.periodKind = periodKind
+        self.label = label
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -59,6 +71,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         case windowSeconds
         case isEstimated
         case periodKind
+        case label
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,6 +82,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         windowSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .windowSeconds)
         isEstimated = try container.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
         periodKind = try container.decodeIfPresent(PeriodKind.self, forKey: .periodKind)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -79,6 +93,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         try container.encodeIfPresent(windowSeconds, forKey: .windowSeconds)
         try container.encode(isEstimated, forKey: .isEstimated)
         try container.encodeIfPresent(periodKind, forKey: .periodKind)
+        try container.encodeIfPresent(label, forKey: .label)
     }
 
     public var rawPercentage: Double {
