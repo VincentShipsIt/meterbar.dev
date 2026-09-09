@@ -682,4 +682,25 @@ final class ProviderReadinessTests: XCTestCase {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+    /// Issue #586: the reporter had installed Grok Build and signed in, and was
+    /// still told to install it and sign in. The recovery has to carry the fix
+    /// for the case that actually produces this row.
+    func testGrokMissingCLIRecoveryNamesTheLinkForAnExistingInstall() {
+        let readiness = ProviderReadinessEvaluator.grok(
+            GrokReadinessInput(
+                isCLIInstalled: false,
+                authFileExists: true,
+                authFileReadable: true
+            )
+        )
+        let installed = readiness.checks.first { $0.id == ReadinessCheckID.installed }
+
+        XCTAssertEqual(installed?.level, .fail)
+        XCTAssertTrue(
+            installed?.recovery?.contains("~/.local/bin/grok") == true,
+            "A user whose binary is installed elsewhere needs the link, not \"install it\""
+        )
+        XCTAssertTrue(installed?.detail.contains("usual install directories") == true)
+    }
+
 }
