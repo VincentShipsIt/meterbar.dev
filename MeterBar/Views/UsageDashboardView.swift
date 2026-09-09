@@ -8,6 +8,27 @@ import SwiftUI
 struct UsageDashboardView: View {
     private static let detailHorizontalPadding = MeterBarTheme.Spacing.xxl
 
+    /// Widest the page content is allowed to get, however wide the window is.
+    ///
+    /// On an ultrawide display an uncapped page is not "more room", it is a
+    /// worse page: a quota bar stretched to 1800pt makes a 7%-left fill
+    /// indistinguishable from a 4% one because the eye cannot judge a ratio
+    /// across that distance, a row's label and its value end up a foot apart,
+    /// and prose runs far past a readable measure. Capping and centring is what
+    /// the system apps do with document and settings content, for the same
+    /// reason.
+    static let maximumContentWidth: CGFloat = 1_280
+
+    /// The width a page is actually handed, once the cap is applied.
+    ///
+    /// Pages that do their own column math (the Share gallery) must measure
+    /// against this rather than the raw viewport, or they lay out for a width
+    /// they will never be given — the gallery would compute columns for 1800pt
+    /// and then be squeezed into 1328.
+    static func contentViewportWidth(_ viewportWidth: CGFloat) -> CGFloat {
+        min(viewportWidth, maximumContentWidth + detailHorizontalPadding * 2)
+    }
+
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var costTracker = CostTracker.shared
     @StateObject private var claudeAccountStore = ClaudeCodeAccountStore.shared
@@ -124,17 +145,9 @@ struct UsageDashboardView: View {
 
     private var monitoringSidebarList: some View {
         List(selection: selectedSection) {
-            ForEach(DashboardSection.sidebarGroups) { group in
-                Section {
-                    ForEach(group.sections) { section in
-                        Label(section.rawValue, systemImage: section.iconName)
-                            .tag(section)
-                    }
-                } header: {
-                    if let title = group.title {
-                        Text(title)
-                    }
-                }
+            ForEach(DashboardSection.sidebarOrder) { section in
+                Label(section.rawValue, systemImage: section.iconName)
+                    .tag(section)
             }
         }
         .listStyle(.sidebar)
@@ -245,7 +258,7 @@ struct UsageDashboardView: View {
                             settingsSectionContent
                         } else {
                             monitoringSectionContent(
-                                viewportWidth: viewport.size.width,
+                                viewportWidth: Self.contentViewportWidth(viewport.size.width),
                                 scrollProxy: proxy
                             )
                         }
@@ -253,7 +266,11 @@ struct UsageDashboardView: View {
                     .padding(.horizontal, Self.detailHorizontalPadding)
                     .padding(.top, MeterBarTheme.Spacing.md)
                     .padding(.bottom, MeterBarTheme.Spacing.xxl)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(
+                        maxWidth: Self.maximumContentWidth + Self.detailHorizontalPadding * 2,
+                        alignment: .leading
+                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .scrollContentBackground(.hidden)
                 .scrollEdgeEffectHidden(for: .top)

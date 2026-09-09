@@ -1,11 +1,33 @@
 ---
-last_verified: 2026-09-07
+last_verified: 2026-09-09
 status: active
 ---
 
 # Decisions
 
 Live ADRs only.
+
+## The Share page is a gallery, and both cards are one design
+
+**Accepted 2026-09-09.** Share shows every card at once — the 30-day token receipt plus one live limits card per provider — packed by `ProviderMasonryLayout`. The provider picker is gone: a menu that showed one account at a time made "which of my accounts is worth posting" a navigation problem, and the two caption sections were orphaned from the cards they described.
+
+A tile is the card and nothing else. No `DashboardTile` around it (a card around a card), no title row (the artwork prints the provider in its own masthead), no inline caption. Exports appear on hover as one glass capsule of icon buttons in the card's bottom-right corner, built the way `MenuBarView` builds its overlay pair — plain buttons inside a single `.glassEffect(in: .capsule)` group, not `.buttonStyle(.glass)` per button, which produces separate pills that read as six controls instead of one toolbar. Dimmed rather than removed, so they stay in the accessibility tree, and repeated as a right-click context menu where the same actions are named. No scrim: dimming a card to reach its export controls hides the very thing you are deciding whether to post. The caption opens as an editable sheet. Printed inline, six captions were eighteen monospaced lines nobody read; editable, the sheet stops pretending the generated wording is the wording you will post.
+
+Columns come from `ShareGalleryLayout`: at least `minimumTileWidth` (420) per column, at most two. A third column only fits on a very wide window and buys the row nothing — the cards are 16:9, so a narrower column is just a smaller card, and reading the card is what the page is for. Masonry rather than `LazyVGrid` because a tile's height follows its card.
+
+The card masthead carries no "Updated 4 sec ago". On artwork posted the moment it is exported, a relative timestamp only ever reads "seconds ago", and it is wrong by the time anyone else sees it. `updatedText` survives on the content model for the caption sheet, which is answering a different question.
+
+The cards themselves are now one design (`SocialCardChrome.swift`): one flat near-black surface, one masthead, one footer, one severity ramp. The receipt's purple gradient, blurred orbs, diagonal hatch, sparkles and rotated sticker are gone — a gallery makes a second visual language impossible to miss.
+
+Both cards head themselves with `MeterBarBrandMark`, the app icon's own three meter bars redrawn in SwiftUI, replacing the stand-in SF Symbols (`chart.bar.xaxis` in a white circle; `gauge.with.needle.fill`) that appeared nowhere else in the product. Card severity now spends the icon's green / amber / red (`MeterBarBrand`) instead of a second unrelated ramp. The mark is drawn rather than loaded from `AppIcon` because `ImageRenderer` rasterizes the preview at 3x its laid-out size and a bitmap would resample twice; `SocialCardBrandTests` pins the fills and colors to the icon so it cannot drift.
+
+Typography stays SF (Rounded for display, Mono for the terminal-ish lines). MeterBar bundles no custom face and a licensed brand font is not worth an app-size and licensing cost for two exported bitmaps.
+
+Two rules follow from the card drawing a filled bar under every row. A quota row drops its used-percent when it has a pace label — the bar already says how much is used, and the words were crowding out the two facts the bar cannot show, pace and reset. An estimated row has no pace, so it keeps the number rather than being left with a bare countdown; a currency row keeps its "$… spent" because an absolute amount is not something a bar encodes.
+
+A sub-pool card names the account it is carved out of ("Grok Bot on Cursor"), in the masthead and in the caption. Cursor Ultra's Grok Bot entitlement is branded Grok and titled "Grok Bot", so the gallery shows it next to a real Grok account: same mark, near-identical name, routinely the opposite status. In the app that ambiguity survives because the cards sit in a page you already understand; posted as a standalone image nothing says which Grok is out.
+
+Page content caps at `UsageDashboardView.maximumContentWidth` (1280) and centres, on the shell rather than per page. An uncapped page on an ultrawide is not more room: a quota bar stretched to 1800pt makes 7% left indistinguishable from 4%, because the eye cannot judge a ratio across that distance. Pages doing their own column math take `contentViewportWidth`, not the raw viewport, or they deal columns for a width they are never given. The gallery does not answer ultrawide by adding columns: these cards are fixed-aspect artwork authored at 1200x675 whose row text is 18pt at export scale, so a third column pushes it below legibility — the cap keeps cards at a readable size and leaves the margin empty on purpose.
 
 ## Every quota row shows its own reset countdown
 

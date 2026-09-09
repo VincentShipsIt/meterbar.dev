@@ -110,6 +110,10 @@ struct ProviderLogoView: View {
     }
 }
 
+/// Anchors `Bundle(for:)` to the bundle this code was compiled into. An enum
+/// cannot be passed to `Bundle(for:)`, so the cache needs a class to point at.
+private final class ProviderLogoBundleToken {}
+
 enum ProviderLogoImageCache {
     private static var cache: [String: NSImage] = [:]
 
@@ -127,13 +131,37 @@ enum ProviderLogoImageCache {
         return nil
     }
 
-    private static func bundledSVGImage(named name: String) -> NSImage? {
-        let bundle = Bundle.main
-        let url = bundle.url(forResource: name, withExtension: "svg") ??
-            bundle.url(forResource: name, withExtension: "svg", subdirectory: "Resources")
+    /// Bundles that can hold the loose provider SVGs, in the order they are
+    /// tried.
+    ///
+    /// `Bundle.main` is the app when the app is running, but it is the test
+    /// runner under `swift test` and the preview host in an Xcode preview — and
+    /// in both of those `ProviderLogoView` used to fall through to an SF Symbol
+    /// with nothing reporting it. A share card rendered from a preview or a
+    /// test therefore carried `terminal.fill` where Codex's mark belongs, and
+    /// looked plausible enough to ship. Checking this type's own bundle as well
+    /// means the logo resolves wherever the code does.
+    private static var candidateBundles: [Bundle] {
+        var bundles = [Bundle.main]
+        let ownBundle = Bundle(for: ProviderLogoBundleToken.self)
+        if ownBundle != Bundle.main {
+            bundles.append(ownBundle)
+        }
+        #if SWIFT_PACKAGE
+        bundles.append(Bundle.module)
+        #endif
+        return bundles
+    }
 
-        guard let url else { return nil }
-        return NSImage(contentsOf: url)
+    private static func bundledSVGImage(named name: String) -> NSImage? {
+        for bundle in candidateBundles {
+            let url = bundle.url(forResource: name, withExtension: "svg") ??
+                bundle.url(forResource: name, withExtension: "svg", subdirectory: "Resources")
+            if let url, let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
+        return nil
     }
 }
 

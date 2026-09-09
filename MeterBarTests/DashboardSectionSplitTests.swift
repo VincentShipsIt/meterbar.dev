@@ -652,11 +652,110 @@ final class DashboardSectionSplitTests: XCTestCase {
         assertRenders(DashboardDiagnosticsSection(reports: .constant([]), isRunning: .constant(false)))
     }
 
-    /// The limits card follows the picker while the pick still exists and
-    /// falls back to the first reporting provider otherwise — an account that
-    /// was removed must not leave the card stuck on a blank snapshot.
-    func testLimitsSnapshotFollowsSelectionThenFallsBackToFirst() {
-        let snapshots = ["codex", "claude"].map { id in
+    /// The gallery replaced a provider picker, so "every provider is visible"
+    /// is now a property of the entry list rather than of a selection. The
+    /// receipt leads because it is the only card that speaks for the whole
+    /// machine; the rest follow the dashboard's own provider order.
+    func testGalleryListsTheReceiptThenEveryProviderInOrder() {
+        let entries = ShareGalleryEntry.entries(for: Self.galleryTestSnapshots)
+
+        XCTAssertEqual(
+            entries.map(\.id),
+            ["share.receipt", "share.limits.codex", "share.limits.claude"]
+        )
+        XCTAssertEqual(entries.map(\.title), ["Token Receipt", "codex", "claude"])
+    }
+
+    /// With nothing tracked the gallery still shows what a limits card is,
+    /// rather than collapsing to a single tile that reads as a bug.
+    func testGalleryKeepsAPlaceholderLimitsTileWhenNothingIsTracked() {
+        let entries = ShareGalleryEntry.entries(for: [])
+
+        XCTAssertEqual(entries.map(\.id), ["share.receipt", "share.limits.placeholder"])
+        XCTAssertEqual(entries.last?.subtitle, "No data")
+    }
+
+    /// Only the receipt has a `meterbar cost --json` counterpart; offering the
+    /// JSON exports on a quota card would produce the wrong document.
+    func testOnlyTheReceiptOffersTheCostJSONExports() {
+        let entries = ShareGalleryEntry.entries(for: Self.galleryTestSnapshots)
+
+        XCTAssertEqual(entries.map(\.exportsCostJSON), [true, false, false])
+    }
+
+    /// Column count is what makes the grid "dynamic": it has to fall to one
+    /// column before a 16:9 preview stops being readable, and stop growing
+    /// before the previews outnumber the pixels.
+    func testGalleryColumnCountTracksAvailableWidth() {
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 0), 1)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 500), 1)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 900), 2)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 1_300), 2)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 4_000), 2)
+
+        // Every column must still be at least one tile wide, whatever the
+        // thresholds are tuned to.
+        for width in stride(from: 0.0, through: 3_000.0, by: 37.0) {
+            let columns = ShareGalleryLayout.columnCount(contentWidth: CGFloat(width))
+            guard columns > 1 else { continue }
+            XCTAssertGreaterThanOrEqual(
+                ProviderMasonryLayout.columnWidth(
+                    containerWidth: CGFloat(width),
+                    columnCount: columns,
+                    spacing: ShareGalleryLayout.spacing
+                ),
+                ShareGalleryLayout.minimumTileWidth,
+                "\(width)pt was split into \(columns) columns narrower than a tile."
+            )
+        }
+    }
+
+    /// The card fills its column exactly, at the export aspect.
+    ///
+    /// Both halves have bitten. A preview narrower than its column leaves slack
+    /// the masonry still counts, so the gutter between two cards grows by the
+    /// slack while the gap between two rows stays at the grid spacing — a grid
+    /// that is visibly wider than it is tall for no stated reason. And a preview
+    /// at any ratio but the export's is lying about the PNG it produces.
+    func testGalleryCardFillsItsColumnAtTheExportAspect() {
+        for contentWidth in [420.0, 1_000.0, 1_600.0] as [CGFloat] {
+            let columnCount = ShareGalleryLayout.columnCount(contentWidth: contentWidth)
+            let size = ShareGalleryLayout.previewSize(
+                contentWidth: contentWidth,
+                columnCount: columnCount
+            )
+
+            XCTAssertEqual(
+                size.width,
+                ProviderMasonryLayout.columnWidth(
+                    containerWidth: contentWidth,
+                    columnCount: columnCount,
+                    spacing: ShareGalleryLayout.spacing
+                ),
+                accuracy: 0.001,
+                "a card narrower than its column turns the column gutter into spacing + slack"
+            )
+            XCTAssertEqual(
+                size.height,
+                size.width / SocialShareCardLayout.aspectRatio,
+                accuracy: 0.001
+            )
+        }
+
+        // The gutter between two columns is exactly the gap between two rows.
+        let columnCount = 2
+        let contentWidth: CGFloat = 1_200
+        let card = ShareGalleryLayout.previewSize(contentWidth: contentWidth, columnCount: columnCount)
+        XCTAssertEqual(
+            contentWidth - card.width * CGFloat(columnCount),
+            ShareGalleryLayout.spacing,
+            accuracy: 0.001,
+            "horizontal and vertical gaps must both be the grid spacing"
+        )
+    }
+
+    private static var galleryTestSnapshots: [ProviderSnapshot] {
+        ["codex", "claude"].map { id in
             ProviderSnapshot(
                 id: id,
                 title: id,
@@ -669,20 +768,6 @@ final class DashboardSectionSplitTests: XCTestCase {
                 accountID: nil
             )
         }
-
-        XCTAssertEqual(
-            DashboardShareSection.limitsSnapshot(selectedID: "claude", in: snapshots)?.id,
-            "claude"
-        )
-        XCTAssertEqual(
-            DashboardShareSection.limitsSnapshot(selectedID: "gone", in: snapshots)?.id,
-            "codex"
-        )
-        XCTAssertEqual(
-            DashboardShareSection.limitsSnapshot(selectedID: nil, in: snapshots)?.id,
-            "codex"
-        )
-        XCTAssertNil(DashboardShareSection.limitsSnapshot(selectedID: nil, in: []))
     }
 
     func testShareSectionRenders() {
