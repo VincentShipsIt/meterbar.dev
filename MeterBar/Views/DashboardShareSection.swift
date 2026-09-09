@@ -492,7 +492,7 @@ private struct ShareGalleryTile: View {
     /// Every export this tile offers, in the order they degrade.
     private var shareActions: [ShareAction] {
         var actions: [ShareAction] = [
-            ShareAction(id: "copyPNG", title: "Copy PNG", symbol: "doc.on.doc", isProminent: true, run: copyImage),
+            ShareAction(id: "copyPNG", title: "Copy PNG", symbol: "doc.on.doc", run: copyImage),
             ShareAction(id: "savePNG", title: "Save PNG", symbol: "square.and.arrow.down", run: saveImage),
             ShareAction(id: "caption", title: "Caption", symbol: "text.quote") {
                 caption = CaptionDraft(text: stampedCaption())
@@ -551,22 +551,18 @@ private struct ShareGalleryTile: View {
         }
     }
 
-    @ViewBuilder
+    /// `.bordered`, like every other button in the app. The overlay used to
+    /// tint its first action prominent, which made the one control that is not
+    /// a decision — copying a PNG — look like a form's default action, in a
+    /// style nothing else on the page wears.
     private func button(_ action: ShareAction, iconOnly: Bool) -> some View {
-        let label = Label(action.title, systemImage: action.symbol)
-            .labelStyle(ShareActionLabelStyle(iconOnly: iconOnly))
-
-        if action.isProminent {
-            Button(action: action.run) { label }
-                .buttonStyle(.glassProminent)
-                .disabled(action.isDisabled)
-                .help(action.title)
-        } else {
-            Button(action: action.run) { label }
-                .buttonStyle(.bordered)
-                .disabled(action.isDisabled)
-                .help(action.title)
+        Button(action: action.run) {
+            Label(action.title, systemImage: action.symbol)
+                .labelStyle(ShareActionLabelStyle(iconOnly: iconOnly))
         }
+        .buttonStyle(.bordered)
+        .disabled(action.isDisabled)
+        .help(action.title)
     }
 }
 
@@ -579,7 +575,6 @@ private struct ShareAction: Identifiable {
     let id: String
     let title: String
     let symbol: String
-    var isProminent = false
     var isDisabled = false
     let run: () -> Void
 }
@@ -653,7 +648,7 @@ private struct ShareCaptionSheet: View {
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }

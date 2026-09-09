@@ -81,9 +81,10 @@ enum ShareGalleryLayout {
     /// longer hold a labelled row of export buttons. The gallery is better off
     /// with one wide column than with two unreadable ones.
     static let minimumTileWidth: CGFloat = 420
-    /// Three across is the point where the preview stops carrying its own hero
-    /// number on a 1440pt-wide window.
-    static let maximumColumnCount = 3
+    /// Two across. A third column only fits on a very wide window, and it buys
+    /// the row nothing: the cards are 16:9, so a narrower column is a smaller
+    /// card, and what the page is for is reading the card.
+    static let maximumColumnCount = 2
     static let spacing = MeterBarTheme.Spacing.md
 
     /// Width available to the grid itself, once the page insets and the space

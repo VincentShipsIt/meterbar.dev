@@ -10,37 +10,25 @@ import XCTest
 final class DashboardLayoutTests: XCTestCase {
     // MARK: - Sidebar groups
 
-    func testSidebarGroupsCoverEveryDashboardSection() {
-        let flattened = DashboardSection.sidebarGroups.flatMap(\.sections)
+    func testSidebarOrderCoversEveryDashboardSection() {
+        let order = DashboardSection.sidebarOrder
 
-        XCTAssertEqual(Set(flattened).count, flattened.count, "sidebar must not repeat a section")
+        XCTAssertEqual(Set(order).count, order.count, "sidebar must not repeat a section")
         XCTAssertEqual(
-            Set(flattened),
+            Set(order),
             Set(DashboardSection.allCases),
             "every dashboard section must stay reachable from the sidebar"
         )
     }
 
-    func testSidebarGroupOrderLeadsWithMonitoringPages() {
-        let groups = DashboardSection.sidebarGroups
-
-        XCTAssertEqual(groups.first?.sections.first, .overview)
-        XCTAssertEqual(groups.first?.sections, [.overview, .limits, .costs, .optimize])
-        XCTAssertTrue(
-            groups.contains { $0.sections == [.status, .diagnostics] },
-            "health pages group together"
+    /// The sidebar is one flat run — no groups, so no headers and no uneven
+    /// gaps between clusters — but the reading order still goes monitoring,
+    /// then health, then utilities.
+    func testSidebarOrderLeadsWithMonitoringPagesThenHealthThenUtilities() {
+        XCTAssertEqual(
+            DashboardSection.sidebarOrder,
+            [.overview, .limits, .costs, .optimize, .status, .diagnostics, .share]
         )
-    }
-
-    /// The sidebar groups are spacing only. A header would reintroduce the
-    /// "Health" / "Utilities" taxonomy the sidebar deliberately dropped, so the
-    /// model must not carry a title for the list to render.
-    func testSidebarGroupsCarryNoHeaderText() {
-        let mirrored = DashboardSection.sidebarGroups.flatMap { group in
-            Mirror(reflecting: group).children.compactMap(\.label)
-        }
-
-        XCTAssertFalse(mirrored.contains("title"), "sidebar groups must not carry header text")
     }
 
     // MARK: - DashboardCard trailing view slot

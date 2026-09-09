@@ -124,13 +124,9 @@ struct UsageDashboardView: View {
 
     private var monitoringSidebarList: some View {
         List(selection: selectedSection) {
-            ForEach(DashboardSection.sidebarGroups) { group in
-                Section {
-                    ForEach(group.sections) { section in
-                        Label(section.rawValue, systemImage: section.iconName)
-                            .tag(section)
-                    }
-                }
+            ForEach(DashboardSection.sidebarOrder) { section in
+                Label(section.rawValue, systemImage: section.iconName)
+                    .tag(section)
             }
         }
         .listStyle(.sidebar)

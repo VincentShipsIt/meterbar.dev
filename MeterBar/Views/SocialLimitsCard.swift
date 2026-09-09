@@ -35,15 +35,14 @@ struct SocialLimitsCard: View {
                     providerLogo: content.providerLogo,
                     scale: scale
                 ) {
-                    HStack(spacing: 16 * scale) {
-                        Text(content.updatedText)
-                            .font(.system(size: 20 * scale, weight: .medium, design: .rounded))
-                            .foregroundStyle(SocialCardPalette.tertiaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-
-                        SocialCardChip(text: content.statusLabel, accent: accent, scale: scale)
-                    }
+                    // No "Updated 4 sec ago". On a card that is posted the
+                    // moment it is exported, a relative timestamp only ever
+                    // reads "seconds ago", and by the time anyone else sees it
+                    // the number is wrong. The freshness of the data is the
+                    // app's problem, not the artwork's. It survives on
+                    // `SocialLimitsCardContent.updatedText` for the gallery's
+                    // caption sheet, where it is answering a different question.
+                    SocialCardChip(text: content.statusLabel, accent: accent, scale: scale)
                 }
 
                 Spacer(minLength: 0)

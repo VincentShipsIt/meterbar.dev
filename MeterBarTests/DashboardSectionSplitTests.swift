@@ -690,8 +690,8 @@ final class DashboardSectionSplitTests: XCTestCase {
         XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 0), 1)
         XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 500), 1)
         XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 900), 2)
-        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 1_300), 3)
-        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 4_000), 3)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 1_300), 2)
+        XCTAssertEqual(ShareGalleryLayout.columnCount(contentWidth: 4_000), 2)
 
         // Every column must still be at least one tile wide, whatever the
         // thresholds are tuned to.

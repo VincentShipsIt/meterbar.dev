@@ -13,7 +13,9 @@ Live ADRs only.
 
 A tile is the card and nothing else. No `DashboardTile` around it (a card around a card), no title row (the artwork prints the provider and the timestamp in its own masthead), no inline caption. Exports float over the artwork on hover on a `Surface.chrome` toolbar — dimmed rather than removed, so they stay in the accessibility tree — and the caption opens as an editable sheet. Printed inline, six captions were eighteen monospaced lines nobody read; editable, the sheet stops pretending the generated wording is the wording you will post.
 
-Columns come from `ShareGalleryLayout`: at least `minimumTileWidth` (420) per column, at most three. Below 420 a 16:9 preview cannot carry its own hero number and a tile cannot hold a labelled row of export buttons, so the grid falls to one wide column rather than two unreadable ones. Masonry rather than `LazyVGrid` because captions wrap to different heights and a row-locked grid pads every tile to the tallest caption in its row.
+Columns come from `ShareGalleryLayout`: at least `minimumTileWidth` (420) per column, at most two. A third column only fits on a very wide window and buys the row nothing — the cards are 16:9, so a narrower column is just a smaller card, and reading the card is what the page is for. Masonry rather than `LazyVGrid` because a tile's height follows its card.
+
+The card masthead carries no "Updated 4 sec ago". On artwork posted the moment it is exported, a relative timestamp only ever reads "seconds ago", and it is wrong by the time anyone else sees it. `updatedText` survives on the content model for the caption sheet, which is answering a different question.
 
 The cards themselves are now one design (`SocialCardChrome.swift`): one flat near-black surface, one masthead, one footer, one severity ramp. The receipt's purple gradient, blurred orbs, diagonal hatch, sparkles and rotated sticker are gone — a gallery makes a second visual language impossible to miss.
 

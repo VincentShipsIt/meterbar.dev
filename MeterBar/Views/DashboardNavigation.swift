@@ -89,25 +89,24 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Sidebar layout: frequency-ordered monitoring pages first, then health
+    /// Sidebar order: frequency-ordered monitoring pages first, then health
     /// checks, then utilities. App settings live in the dedicated macOS
     /// Settings scene rather than masquerading as dashboard content.
     ///
-    /// The groups are spacing, not labels. "Health" and "Utilities" named
-    /// categories the user never has to choose between — nine rows do not need
-    /// a taxonomy — and the headers cost more vertical space than the rows they
-    /// introduced. The grouping stays because the gap between clusters still
-    /// carries the same structure, silently.
-    struct SidebarGroup: Identifiable {
-        let sections: [DashboardSection]
-
-        var id: String { sections.first?.id ?? "" }
-    }
-
-    static let sidebarGroups: [SidebarGroup] = [
-        SidebarGroup(sections: [.overview, .limits, .costs, .optimize]),
-        SidebarGroup(sections: [.status, .diagnostics]),
-        SidebarGroup(sections: [.share]),
+    /// One flat run, not groups. This was three `Section`s titled "Health" and
+    /// "Utilities" — a taxonomy over seven rows nobody has to choose between.
+    /// Dropping the headers left the section gaps behind, which is worse than
+    /// either: uneven space that no longer separates anything named. Seven rows
+    /// read fine as a list, and a flat array makes a header unrepresentable
+    /// rather than merely absent.
+    static let sidebarOrder: [DashboardSection] = [
+        .overview,
+        .limits,
+        .costs,
+        .optimize,
+        .status,
+        .diagnostics,
+        .share,
     ]
 
     var titlebarSubtitle: String {
