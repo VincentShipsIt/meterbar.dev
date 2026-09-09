@@ -38,7 +38,14 @@ final class DashboardLayoutTests: XCTestCase {
     func testContentWidthIsCappedOnWideWindowsAndUntouchedOnNarrowOnes() {
         let capped = UsageDashboardView.contentViewportWidth(3_000)
 
-        XCTAssertLessThanOrEqual(capped, UsageDashboardView.maximumContentWidth + 48)
+        // Equality, not an upper bound: a cap that had drifted *smaller* would
+        // narrow every page and still satisfy `<=`. Expressed as the content
+        // width plus the page's own gutters rather than as 48, so the two
+        // cannot drift apart either.
+        XCTAssertEqual(
+            capped,
+            UsageDashboardView.maximumContentWidth + MeterBarTheme.Spacing.xxl * 2
+        )
         XCTAssertEqual(capped, UsageDashboardView.contentViewportWidth(10_000), "the cap must not drift with the window")
         XCTAssertEqual(UsageDashboardView.contentViewportWidth(900), 900, "a normal window is not narrowed")
         XCTAssertEqual(UsageDashboardView.contentViewportWidth(500), 500)
