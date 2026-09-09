@@ -690,6 +690,33 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertNil(service.firstError(for: [.defaultAccount]))
     }
 
+    /// Issue #586: the reporter's cached login was fine and only the binary was
+    /// missing, so the two facts have to stay separable for Settings.
+    @MainActor
+    func testCLIInstallationIsReportedSeparatelyFromProfileAuthentication() {
+        let missingCLI = GrokCLIUsageService(
+            binaryPathProvider: { nil },
+            authAvailableProvider: { _ in true },
+            billingResultProvider: { _, _ in throw ServiceError.notAuthenticated },
+            authFileDataProvider: { _ in nil },
+            remainingResetsProvider: { _ in nil }
+        )
+
+        XCTAssertFalse(missingCLI.isCLIInstalled)
+        XCTAssertFalse(missingCLI.canAccess(account: .defaultAccount))
+
+        let signedOut = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in false },
+            billingResultProvider: { _, _ in throw ServiceError.notAuthenticated },
+            authFileDataProvider: { _ in nil },
+            remainingResetsProvider: { _ in nil }
+        )
+
+        XCTAssertTrue(signedOut.isCLIInstalled)
+        XCTAssertFalse(signedOut.canAccess(account: .defaultAccount))
+    }
+
     func testReplayedTranscriptDecodesBillingResult() throws {
         let result = try GrokBillingRPC.result(
             replaying: transcript(

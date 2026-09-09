@@ -95,6 +95,56 @@ final class CodexAccountProfileRowTests: XCTestCase {
         )
     }
 
+    /// Issue #586: a missing CLI was reported as "Login required", so a user
+    /// with a perfectly valid cached login was told to sign in again — the one
+    /// action that could not fix it.
+    func testMissingCLIIsReportedSeparatelyFromAMissingLogin() {
+        XCTAssertEqual(
+            ProviderAccountConnectionState.from(
+                isEnabled: true,
+                isCLIInstalled: false,
+                isConnected: false
+            ),
+            .cliMissing
+        )
+        XCTAssertEqual(ProviderAccountConnectionState.cliMissing.title, "CLI not found")
+        XCTAssertEqual(ProviderAccountConnectionState.cliMissing.statusPresentation.tone, .warning)
+        XCTAssertTrue(
+            ProviderAccountConnectionState.cliMissing.accessibilityValue.contains("not found on PATH")
+        )
+    }
+
+    func testInstalledCLIStillDistinguishesConnectedFromLoginRequired() {
+        XCTAssertEqual(
+            ProviderAccountConnectionState.from(
+                isEnabled: true,
+                isCLIInstalled: true,
+                isConnected: true
+            ),
+            .authenticated
+        )
+        XCTAssertEqual(
+            ProviderAccountConnectionState.from(
+                isEnabled: true,
+                isCLIInstalled: true,
+                isConnected: false
+            ),
+            .loginRequired
+        )
+    }
+
+    /// A disabled profile is not a diagnosis: it outranks both CLI and login.
+    func testDisabledProfileOutranksAMissingCLI() {
+        XCTAssertEqual(
+            ProviderAccountConnectionState.from(
+                isEnabled: false,
+                isCLIInstalled: false,
+                isConnected: false
+            ),
+            .disabled
+        )
+    }
+
     func testAccountRowRendersWithEveryControl() {
         let account = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/codex-work")
         let view = CodexAccountSettingsRow(

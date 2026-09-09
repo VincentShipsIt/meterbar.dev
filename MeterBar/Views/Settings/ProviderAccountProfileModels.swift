@@ -79,6 +79,11 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
     case checking
     case authenticated
     case loginRequired
+    /// The provider's CLI could not be found at all. Distinct from
+    /// `loginRequired` on purpose: a cached login can be perfectly valid while
+    /// the binary is missing, and telling that user to sign in again sends them
+    /// to fix the one thing that is not broken.
+    case cliMissing
     case disabled
 
     var title: String {
@@ -86,6 +91,7 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
         case .checking: "Checking…"
         case .authenticated: "Connected"
         case .loginRequired: "Login required"
+        case .cliMissing: "CLI not found"
         case .disabled: "Disabled"
         }
     }
@@ -95,6 +101,7 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
         case .checking: "Checking the configured profile"
         case .authenticated: "A usable login is available for this profile"
         case .loginRequired: "No usable login is available for this profile"
+        case .cliMissing: "The provider CLI was not found on PATH"
         case .disabled: "This account is not included in tracking"
         }
     }
@@ -119,6 +126,12 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
                 systemImage: "person.crop.circle.badge.exclamationmark",
                 tone: .warning
             )
+        case .cliMissing:
+            SettingsStatusPresentation(
+                text: title,
+                systemImage: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
         case .disabled:
             SettingsStatusPresentation(
                 text: title,
@@ -130,6 +143,18 @@ nonisolated enum ProviderAccountConnectionState: Equatable, Sendable {
 
     static func from(isEnabled: Bool, isConnected: Bool) -> ProviderAccountConnectionState {
         guard isEnabled else { return .disabled }
+        return isConnected ? .authenticated : .loginRequired
+    }
+
+    /// For CLI-backed providers, where "not connected" has two very different
+    /// causes and only one of them is fixed by signing in again.
+    static func from(
+        isEnabled: Bool,
+        isCLIInstalled: Bool,
+        isConnected: Bool
+    ) -> ProviderAccountConnectionState {
+        guard isEnabled else { return .disabled }
+        guard isCLIInstalled else { return .cliMissing }
         return isConnected ? .authenticated : .loginRequired
     }
 }

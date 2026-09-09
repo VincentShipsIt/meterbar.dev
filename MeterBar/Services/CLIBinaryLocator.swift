@@ -21,6 +21,13 @@ nonisolated enum CLIBinaryLocator {
 
     /// The install directories the fallbacks draw from, in priority order.
     /// Kept in sync with the reconnect script's `export PATH` list.
+    ///
+    /// `~/.grok/bin` is the odd one out: it is the Grok Build installer's own
+    /// default `BIN_DIR`, and the installer only symlinks `grok` into a shared
+    /// directory such as `~/.local/bin` when that directory already exists on
+    /// the *interactive* PATH and is writable. Otherwise it just appends
+    /// `~/.grok/bin` to the shell rc — which a launchd-started GUI app never
+    /// reads, leaving a perfectly working `grok` invisible to MeterBar.
     static func fallbackDirectories(home: String) -> [String] {
         [
             "/opt/homebrew/bin",
@@ -30,6 +37,7 @@ nonisolated enum CLIBinaryLocator {
             "\(home)/.yarn/bin",
             "\(home)/.bun/bin",
             "\(home)/.volta/bin",
+            "\(home)/.grok/bin",
         ]
     }
 
