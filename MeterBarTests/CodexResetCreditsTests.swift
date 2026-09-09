@@ -61,6 +61,47 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertNil(response.resetCreditsAvailable)
     }
 
+    /// #580: OpenAI now reports two counts — `available_count` (total banked)
+    /// and `applicable_available_count` (banked *and* applicable to the limit
+    /// type actually reached). Only the second predicts whether
+    /// `consumeResetCredit`'s `status == "available" && reset_type ==
+    /// "codex_rate_limits"` filter will find a match, so eligibility and the
+    /// displayed count must follow it, not the larger legacy total.
+    func testPrefersApplicableCountWhenBothPresentAndDisagreeing() throws {
+        let response = try decode(#"""
+        {
+          "plan_type": "pro",
+          "rate_limit": null,
+          "rate_limit_reset_credits": { "available_count": 3, "applicable_available_count": 1 }
+        }
+        """#)
+        XCTAssertEqual(response.resetCreditsAvailable, 1)
+    }
+
+    /// Older payloads and accounts OpenAI hasn't rolled the new field out to
+    /// send only `available_count`. Falling back to it (rather than treating
+    /// its absence as "no applicable credit") preserves exactly the behavior
+    /// that shipped and was safe before #580 — this endpoint reported both
+    /// counts as 0 on the account the issue was filed from, so the fallback
+    /// changes nothing for accounts that haven't seen a divergence yet.
+    func testFallsBackToLegacyCountWhenApplicableCountIsAbsent() throws {
+        let response = try decode(#"""
+        { "plan_type": "pro", "rate_limit": null, "rate_limit_reset_credits": { "available_count": 2 } }
+        """#)
+        XCTAssertEqual(response.resetCreditsAvailable, 2)
+    }
+
+    /// Neither count present (or the object missing/null) still resolves to
+    /// `nil`, never `0` — a decode failure or an absent field must never read
+    /// as a confident "no credit", matching the `Credits.decodeBool` precedent
+    /// from #536/#553.
+    func testResetCreditsIsNilWhenNeitherCountIsPresent() throws {
+        let response = try decode(#"""
+        { "plan_type": "pro", "rate_limit": null, "rate_limit_reset_credits": {} }
+        """#)
+        XCTAssertNil(response.resetCreditsAvailable)
+    }
+
     /// Mirrors the real wham/usage payload, including fields the app does not model
     /// (`additional_rate_limits`, `spend_control`, `promo`) to prove forward-compatible
     /// decoding doesn't break when ChatGPT adds keys.

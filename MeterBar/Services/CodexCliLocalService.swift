@@ -560,11 +560,15 @@ nonisolated struct CodexCliUsageResponse: Codable {
         case rateLimitResetCredits = "rate_limit_reset_credits"
     }
 
-    /// Number of banked "rate-limit resets" the account can trigger on demand
-    /// (OpenAI feature: save a quota reset and use it when you hit a limit).
-    /// `nil` when the field is absent/null — i.e. the account has none banked.
+    /// Number of banked "rate-limit resets" the account can actually redeem
+    /// right now (OpenAI feature: save a quota reset and use it when you hit
+    /// a limit). This is `RateLimitResetCredits.resolvedAvailableCount` — the
+    /// applicable count when the server reports it, since that is the number
+    /// that predicts whether redemption will succeed (#580). `nil` when
+    /// nothing usable could be established — i.e. the account has none
+    /// banked, or the payload didn't decode.
     var resetCreditsAvailable: Int? {
-        rateLimitResetCredits?.availableCount
+        rateLimitResetCredits?.resolvedAvailableCount
     }
 
     /// Maps the Codex credits/spend payload onto the shared extra-usage status.
@@ -700,11 +704,63 @@ nonisolated struct SpendControl: Codable {
 
 /// Banked rate-limit resets the account can trigger on demand, from the Codex usage API.
 nonisolated struct RateLimitResetCredits: Codable {
-    /// How many resets are currently available to use. `nil` if absent/null.
+    /// Total resets currently banked, regardless of which limit type they
+    /// apply to. `nil` if absent, null, or undecodable — never `0`, matching
+    /// the "give up, don't guess" shape `Credits.decodeBool` established for
+    /// this file after #536/#553.
     let availableCount: Int?
+
+    /// Of those banked resets, how many apply to the limit type the account
+    /// actually reached. Added by OpenAI alongside `availableCount` (#580):
+    /// `consumeResetCredit` filters to `status == "available" && reset_type
+    /// == "codex_rate_limits"` before POSTing, so this — not the raw total —
+    /// is what predicts whether a redemption will succeed. `nil` if absent,
+    /// null, or undecodable.
+    let applicableAvailableCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case availableCount = "available_count"
+        case applicableAvailableCount = "applicable_available_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        availableCount = Self.decodeCount(container, forKey: .availableCount)
+        applicableAvailableCount = Self.decodeCount(container, forKey: .applicableAvailableCount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(availableCount, forKey: .availableCount)
+        try container.encodeIfPresent(applicableAvailableCount, forKey: .applicableAvailableCount)
+    }
+
+    /// The count eligibility and the displayed badge should use. Prefers the
+    /// applicable count — the one that predicts whether redemption actually
+    /// succeeds — and falls back to the legacy total when the newer field is
+    /// absent (older payloads, and accounts OpenAI hasn't rolled it out to).
+    /// That fallback is a deliberate choice, not a guess: `available_count`
+    /// was the only signal this app had before #580, both counts were 0 on
+    /// the account the issue was filed from, and OpenAI has not shipped a
+    /// payload where the field is missing yet the two counts diverge — so
+    /// falling back reproduces exactly the pre-#580 behavior rather than
+    /// inventing a new one. If both are absent/undecodable, resolve to `nil`
+    /// so an unreadable payload never reads as "no credit".
+    var resolvedAvailableCount: Int? {
+        applicableAvailableCount ?? availableCount
+    }
+
+    private static func decodeCount(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Int? {
+        if let value = try? container.decode(Int.self, forKey: key) {
+            return value
+        }
+        if let value = try? container.decode(String.self, forKey: key) {
+            return Int(value)
+        }
+        return nil
     }
 }
 
