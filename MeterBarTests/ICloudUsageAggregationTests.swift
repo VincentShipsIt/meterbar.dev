@@ -855,6 +855,105 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(second.recordZoneName, "MeterBarUsage-\(first.deviceID.uuidString)")
     }
 
+    // MARK: - removeDevice / sync serialization (issue #547 part 1)
+
+    /// `removeDevice` must not run while `sync` is still awaiting CloudKit —
+    /// otherwise the sync's pre-deletion snapshot can repopulate the removed
+    /// device on commit. The gate suspends `synchronize` mid-flight so the
+    /// second call genuinely overlaps the first instead of running after it.
+    ///
+    /// `localSummary` must already carry authoritative daily coverage (see
+    /// `summary()` below): a `nil`/non-authoritative summary routes through
+    /// `prepareLocalSummary`, which this harness defaults to `.failed`, so
+    /// `sync` would return *before* ever reaching `repository.synchronize`.
+    /// `isSyncing` would then already be `false` by the time `removeDevice`
+    /// runs, so `removeDevice` would itself reach the (still-armed) gate and
+    /// hang forever on a continuation this test never releases — a harness
+    /// bug, not a production deadlock. Passing an already-authoritative
+    /// summary makes `sync` take the direct-to-repository path so the two
+    /// calls genuinely overlap the way the test's name promises.
+    @MainActor
+    func testRemoveDeviceIsRejectedWhileSyncIsInFlight() async {
+        let synchronizeStarted = expectation(description: "sync started")
+        let repository = GatedRepositorySpy(synchronizeStarted: synchronizeStarted)
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let service = ICloudUsageAggregationService(settings: settings, repository: repository)
+
+        let syncTask = Task { await service.sync(localSummary: summary(), quotaSnapshots: []) }
+        await fulfillment(of: [synchronizeStarted], timeout: 5)
+        XCTAssertTrue(service.isSyncing)
+
+        let target = device(secondDeviceID)
+        await awaitOrFail("removeDevice while sync is in flight") { [service] in
+            await service.removeDevice(target)
+        }
+
+        let removeDeviceCallCount = await repository.removeDeviceCallCount
+        XCTAssertEqual(removeDeviceCallCount, 0, "removeDevice must not race an in-flight sync")
+        XCTAssertNotNil(service.lastError)
+
+        await repository.releaseSynchronize()
+        await awaitOrFail("sync task completion") { await syncTask.value }
+    }
+
+    /// Converse interleave: a sync that starts while `removeDevice` is still
+    /// awaiting CloudKit must not run either — otherwise its zone fetch can
+    /// hit the zone being deleted underneath it.
+    @MainActor
+    func testSyncIsRejectedWhileRemoveDeviceIsInFlight() async {
+        let removeDeviceStarted = expectation(description: "remove started")
+        let repository = GatedRepositorySpy(removeDeviceStarted: removeDeviceStarted)
+        let settings = ICloudUsageSettingsStore(userDefaults: isolatedDefaults())
+        settings.setEnabled(true)
+        let service = ICloudUsageAggregationService(settings: settings, repository: repository)
+
+        let removeTask = Task { await service.removeDevice(device(secondDeviceID)) }
+        await fulfillment(of: [removeDeviceStarted], timeout: 5)
+        XCTAssertTrue(service.isSyncing)
+
+        await awaitOrFail("sync while removeDevice is in flight") { [service] in
+            await service.sync(localSummary: nil, quotaSnapshots: [])
+        }
+
+        let synchronizeCallCount = await repository.synchronizeCallCount
+        XCTAssertEqual(synchronizeCallCount, 0, "sync must not race an in-flight removeDevice")
+
+        await repository.releaseRemoveDevice()
+        await awaitOrFail("removeDevice task completion") { await removeTask.value }
+    }
+
+    /// Bounded wait for a direct `await` that production code guarantees
+    /// completes quickly (a guard-and-return, never a real wait). If a
+    /// future regression turns that guard into an actual wait — or
+    /// reintroduces a harness mistake like the one described above — this
+    /// fails the test in `seconds` instead of hanging a CI run indefinitely.
+    /// Deliberately not built on a structured `TaskGroup`: leaving that
+    /// scope waits for every child before returning, so a task stuck on an
+    /// unreleased continuation would re-introduce the very hang this exists
+    /// to prevent. The losing, unstructured `Task` is left to leak instead.
+    @MainActor
+    private func awaitOrFail(
+        _ description: String,
+        seconds: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ operation: @escaping @Sendable () async -> Void
+    ) async {
+        let gate = TimeoutRaceGate()
+        Task {
+            await operation()
+            await gate.fire(.completed)
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            await gate.fire(.timedOut)
+        }
+        if await gate.arm() == .timedOut {
+            XCTFail("\(description) timed out after \(seconds)s — likely a real deadlock", file: file, line: line)
+        }
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         let name = "ICloudUsageAggregationTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name) ?? UserDefaults()
@@ -1016,6 +1115,76 @@ private actor RepositorySpy: ICloudUsageRepository {
     func removeDevice(id: UUID) async throws {
         callCount += 1
         if let error { throw error }
+    }
+}
+
+/// First-wins race between an operation and a timeout, used by
+/// `awaitOrFail` above. An actor rather than a plain flag because two
+/// unstructured `Task`s race to report their outcome concurrently.
+private actor TimeoutRaceGate {
+    enum Outcome {
+        case completed
+        case timedOut
+    }
+
+    private var continuation: CheckedContinuation<Outcome, Never>?
+    private var outcome: Outcome?
+
+    func arm() async -> Outcome {
+        if let outcome { return outcome }
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func fire(_ result: Outcome) {
+        guard outcome == nil else { return }
+        outcome = result
+        continuation?.resume(returning: result)
+        continuation = nil
+    }
+}
+
+/// Repository double whose `synchronize`/`removeDevice` suspend until
+/// released, so a test can drive two genuinely overlapping calls instead of
+/// two sequential ones.
+private actor GatedRepositorySpy: ICloudUsageRepository {
+    private(set) var synchronizeCallCount = 0
+    private(set) var removeDeviceCallCount = 0
+    // Optional: XCTest (Xcode 15+) fails a test that creates an expectation
+    // and never waits on it ("unwaited expectation"), so a test exercising
+    // only one side of this spy must be able to omit the other's
+    // expectation entirely rather than pass one it will never wait for.
+    private let synchronizeStarted: XCTestExpectation?
+    private let removeDeviceStarted: XCTestExpectation?
+    private var synchronizeContinuation: CheckedContinuation<Void, Never>?
+    private var removeDeviceContinuation: CheckedContinuation<Void, Never>?
+
+    init(synchronizeStarted: XCTestExpectation? = nil, removeDeviceStarted: XCTestExpectation? = nil) {
+        self.synchronizeStarted = synchronizeStarted
+        self.removeDeviceStarted = removeDeviceStarted
+    }
+
+    func synchronize(device: ICloudUsageDevice, rollups: [ICloudDailyUsageRollup]) async throws
+        -> ICloudUsageRepositorySnapshot {
+        synchronizeCallCount += 1
+        synchronizeStarted?.fulfill()
+        await withCheckedContinuation { synchronizeContinuation = $0 }
+        return ICloudUsageRepositorySnapshot(devices: [device], rollups: rollups)
+    }
+
+    func removeDevice(id: UUID) async throws {
+        removeDeviceCallCount += 1
+        removeDeviceStarted?.fulfill()
+        await withCheckedContinuation { removeDeviceContinuation = $0 }
+    }
+
+    func releaseSynchronize() {
+        synchronizeContinuation?.resume()
+        synchronizeContinuation = nil
+    }
+
+    func releaseRemoveDevice() {
+        removeDeviceContinuation?.resume()
+        removeDeviceContinuation = nil
     }
 }
 

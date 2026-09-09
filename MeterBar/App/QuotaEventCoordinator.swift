@@ -19,10 +19,22 @@ final class QuotaEventCoordinator {
     private let providerVisibility: ProviderVisibilityStore
     private let settings: QuotaEventSettingsStore
     private let diagnostics: QuotaEventDiagnosticStore
-    private let service: QuotaEventService
+    private let observe: (
+        [QuotaEventSnapshot],
+        QuotaEventIntegrationConfiguration
+    ) async -> QuotaEventObservation
 
     private var cancellables = Set<AnyCancellable>()
     private var started = false
+
+    /// Guards `evaluateCurrentSnapshot()` the same way
+    /// `ICloudUsageAggregationCoordinator.syncTask` guards `requestSync()`
+    /// (ICloudUsageAggregationCoordinator.swift:34,81,90-96): 15 merged
+    /// publishers (`start()` below) can each fire while a prior evaluation's
+    /// webhook POST — up to 10s (`QuotaWebhookClient`) — is still in flight,
+    /// and every fire used to spawn its own bare `Task`. Internal (not
+    /// private) so tests can observe it directly.
+    var evaluationTask: Task<Void, Never>?
 
     init(
         dataManager: UsageDataManager? = nil,
@@ -33,7 +45,13 @@ final class QuotaEventCoordinator {
         providerVisibility: ProviderVisibilityStore? = nil,
         settings: QuotaEventSettingsStore? = nil,
         diagnostics: QuotaEventDiagnosticStore? = nil,
-        service: QuotaEventService = QuotaEventService()
+        service: QuotaEventService = QuotaEventService(),
+        observe: (
+            (
+                [QuotaEventSnapshot],
+                QuotaEventIntegrationConfiguration
+            ) async -> QuotaEventObservation
+        )? = nil
     ) {
         self.dataManager = dataManager ?? .shared
         self.claudeAccounts = claudeAccounts ?? .shared
@@ -43,7 +61,13 @@ final class QuotaEventCoordinator {
         self.providerVisibility = providerVisibility ?? .shared
         self.settings = settings ?? .shared
         self.diagnostics = diagnostics ?? .shared
-        self.service = service
+        // Defaults to the (persistent, planner-stateful) `service` passed or
+        // constructed above; `observe` exists as a seam so tests can gate one
+        // evaluation mid-flight without a real 10s webhook POST, mirroring
+        // `ICloudUsageAggregationCoordinator`'s injectable `sync:` closure.
+        self.observe = observe ?? { snapshots, configuration in
+            await service.observe(snapshots: snapshots, configuration: configuration)
+        }
     }
 
     func start() {
@@ -78,6 +102,15 @@ final class QuotaEventCoordinator {
     }
 
     private func evaluateCurrentSnapshot() {
+        // See `evaluationTask`'s doc comment: without this, every one of the
+        // 15 merged publishers firing while a delivery pass is still running
+        // spawns its own bare Task, risking duplicate/overlapping delivery for
+        // one crossing. This is the lowest-confidence part of issue #547 —
+        // it depends on actual actor job ordering rather than a deterministic
+        // sequence — so treat it as aligning with the sibling coordinator's
+        // own precedent rather than as a proven bug.
+        guard evaluationTask == nil else { return }
+
         let snapshots = QuotaEventSnapshotCatalog.snapshots(
             metrics: dataManager.metrics,
             accounts: QuotaEventAccountInputs(
@@ -93,14 +126,12 @@ final class QuotaEventCoordinator {
             enabledServices: providerVisibility.enabledServices
         )
         let configuration = settings.configuration
-        let service = service
+        let observe = observe
         let diagnostics = diagnostics
 
-        Task {
-            let observation = await service.observe(
-                snapshots: snapshots,
-                configuration: configuration
-            )
+        evaluationTask = Task { [weak self] in
+            defer { self?.evaluationTask = nil }
+            let observation = await observe(snapshots, configuration)
             guard !observation.diagnostics.isEmpty else { return }
             diagnostics.record(observation.diagnostics)
             for record in observation.diagnostics where !record.succeeded {
