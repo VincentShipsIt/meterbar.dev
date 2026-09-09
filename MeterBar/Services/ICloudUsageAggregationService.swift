@@ -120,8 +120,25 @@ final class ICloudUsageAggregationService: ObservableObject {
         }
     }
 
+    /// Serialized against `sync(localSummary:quotaSnapshots:)` through the same
+    /// `isSyncing` flag, atomic on MainActor with no `await` between the check
+    /// and the set — exactly like `sync`'s own de-dupe above.
+    ///
+    /// Without this, a destructive removal could interleave with an in-flight
+    /// sync two ways: the sync's snapshot (taken before this zone deletion)
+    /// would repopulate the removed device on commit, or this deletion could
+    /// run mid-sync and turn the sync's own zone fetch into a CloudKit error.
+    /// Reusing `isSyncing` rules out both: whichever of `sync`/`removeDevice`
+    /// starts first runs to completion before the other is allowed to start.
     func removeDevice(_ device: ICloudUsageDevice) async {
         guard settings.isEnabled, device.id != settings.deviceID else { return }
+        guard !isSyncing else {
+            lastError = "A sync is in progress. Try removing this Mac again once it finishes."
+            return
+        }
+
+        isSyncing = true
+        defer { isSyncing = false }
         do {
             try await repository.removeDevice(id: device.id)
             if let aggregate {
