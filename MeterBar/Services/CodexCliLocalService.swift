@@ -553,7 +553,7 @@ nonisolated struct CodexCliUsageResponse: Codable {
     /// Separately metered pools that sit beside the plan's own rate limit —
     /// the Luna reserve MeterBar surfaces, and the Codex Spark windows it does
     /// not map yet (issue #578).
-    let additionalRateLimits: [CodexAdditionalRateLimit]?
+    let additionalRateLimits: CodexAdditionalRateLimits?
     /// The banner OpenAI shows when a plan's quota is spent and requests are
     /// being served from a fallback pool instead.
     let rateLimitUpsell: CodexRateLimitUpsell?
@@ -603,7 +603,7 @@ nonisolated struct CodexCliUsageResponse: Codable {
     /// is noise. It earns its row only once the plan's own quota is gone.
     var reserveLimit: UsageLimit? {
         guard isServingFromReserve,
-              let reserve = additionalRateLimits?.first(where: { $0.isReserve }),
+              let reserve = additionalRateLimits?.pools.first(where: { $0.isReserve }),
               let window = reserve.rateLimit?.primaryWindow,
               let label = CodexReserveLabel.make(
                   modelSlug: reserve.normalModelSlug,
@@ -758,11 +758,51 @@ nonisolated struct SpendControl: Codable {
     }
 }
 
+/// The Codex usage API's `additional_rate_limits`, decoded pool by pool.
+///
+/// The array is undocumented and MeterBar reads exactly one entry out of it. A
+/// renamed key on the Codex Spark pool — which this build does not even map —
+/// would otherwise fail the whole usage decode and blank the Codex card, which
+/// is strictly worse than the behaviour before the field was read at all. An
+/// unreadable pool costs its own entry and nothing else.
+nonisolated struct CodexAdditionalRateLimits: Codable {
+    let pools: [CodexAdditionalRateLimit]
+
+    init(pools: [CodexAdditionalRateLimit]) {
+        self.pools = pools
+    }
+
+    /// Never throws. A value that is not an array at all — the shape change
+    /// this guard exists for — decodes as no pools.
+    init(from decoder: Decoder) throws {
+        let elements = try? [LossyDecoded<CodexAdditionalRateLimit>](from: decoder)
+        pools = elements?.compactMap(\.value) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try pools.encode(to: encoder)
+    }
+}
+
+/// One array element that decodes to `nil` instead of failing its whole array.
+///
+/// The initializer itself never throws, so the unkeyed container always
+/// advances — the reason this wraps each element rather than catching a throw
+/// mid-array, where a failed `decode` leaves the index where it was.
+nonisolated private struct LossyDecoded<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
+    }
+}
+
 /// One separately metered pool from the Codex usage API's `additional_rate_limits`.
 ///
-/// Every field is optional: the array is undocumented, its entries change as
-/// OpenAI ships models, and a renamed key must cost MeterBar a row rather than
-/// the whole usage decode.
+/// Every field is optional and decoded with `try?`: the entries change as
+/// OpenAI ships models, and a retyped key MeterBar does not read must not cost
+/// the pool it appears on. Same "give up, don't guess" shape as
+/// `Credits.decodeBool`.
 nonisolated struct CodexAdditionalRateLimit: Codable {
     /// OpenAI's internal name for the pool, e.g. `gpt-reserve`.
     let limitName: String?
@@ -780,6 +820,26 @@ nonisolated struct CodexAdditionalRateLimit: Codable {
         case meteredFeature = "metered_feature"
         case rateLimit = "rate_limit"
         case normalModelSlug = "normal_model_slug"
+    }
+
+    init(
+        limitName: String?,
+        meteredFeature: String?,
+        rateLimit: RateLimit?,
+        normalModelSlug: String?
+    ) {
+        self.limitName = limitName
+        self.meteredFeature = meteredFeature
+        self.rateLimit = rateLimit
+        self.normalModelSlug = normalModelSlug
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        limitName = try? container.decodeIfPresent(String.self, forKey: .limitName)
+        meteredFeature = try? container.decodeIfPresent(String.self, forKey: .meteredFeature)
+        rateLimit = try? container.decodeIfPresent(RateLimit.self, forKey: .rateLimit)
+        normalModelSlug = try? container.decodeIfPresent(String.self, forKey: .normalModelSlug)
     }
 
     /// Metered feature of the pool that serves requests after a plan's quota is
@@ -801,6 +861,17 @@ nonisolated struct CodexRateLimitUpsell: Codable {
 
     enum CodingKeys: String, CodingKey {
         case bannerType = "banner_type"
+    }
+
+    init(bannerType: String?) {
+        self.bannerType = bannerType
+    }
+
+    /// A retyped discriminator costs the gate its leading signal, not the whole
+    /// usage decode — `limit_reached` still answers the same question.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bannerType = try? container.decodeIfPresent(String.self, forKey: .bannerType)
     }
 
     /// Banner shown while requests are being served from the Luna reserve.

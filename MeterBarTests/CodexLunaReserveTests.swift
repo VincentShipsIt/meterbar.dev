@@ -207,6 +207,85 @@ final class CodexLunaReserveTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
+    /// A pool MeterBar does not even map must not be able to blank the Codex
+    /// card. Before `additional_rate_limits` was read at all, a Spark shape
+    /// change was harmless; reading it must not make things worse.
+    func testAMalformedNeighbouringPoolDoesNotCostTheReserveOrTheDecode() throws {
+        let brokenSpark = """
+        {
+            "limit_name": "GPT-5.3-Codex-Spark",
+            "metered_feature": "codex_bengalfox",
+            "rate_limit": { "allowed": "yes", "primary_window": "gone" }
+        }
+        """
+        // A pool that is not even an object is the shape a per-element decode
+        // has to survive: a throw mid-array leaves the container index put.
+        let metrics = try decode(payload(
+            limitReached: true,
+            upsell: "luna_reserve",
+            additional: [brokenSpark, "\"not-a-pool\"", reserveEntry()]
+        )).toUsageMetrics()
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 100)
+        XCTAssertEqual(metrics.additionalLimits.first?.label, "Luna Reserve")
+    }
+
+    /// A retyped field on the reserve itself costs only that field. The pool is
+    /// still identified by `metered_feature` and still named by its slug.
+    func testARetypedFieldOnTheReserveDoesNotDropIt() throws {
+        let entry = """
+        {
+            "limit_name": 42,
+            "metered_feature": "base_model_inference",
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 0,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 603930,
+                    "reset_at": 1789544684
+                }
+            },
+            "normal_model_slug": "gpt-5.6-luna"
+        }
+        """
+        let metrics = try decode(payload(
+            limitReached: true,
+            upsell: "luna_reserve",
+            additional: [entry]
+        )).toUsageMetrics()
+
+        XCTAssertEqual(metrics.additionalLimits.first?.label, "Luna Reserve")
+    }
+
+    /// The whole field changing shape — an object where an array was — costs
+    /// the row and nothing else.
+    func testAnAdditionalRateLimitsFieldThatIsNotAnArrayIsIgnored() throws {
+        let json = """
+        {
+            "plan_type": "pro",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 506362,
+                    "reset_at": 1789447116
+                }
+            },
+            "additional_rate_limits": { "unexpected": true },
+            "rate_limit_upsell": { "banner_type": 7 }
+        }
+        """
+
+        let metrics = try decode(json).toUsageMetrics()
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 100)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
     /// Free accounts carry a null `rate_limit`, and the upsell banner is then
     /// the only signal that a reserve is serving.
     func testSurfacesReserveOnAnAccountWithNoPlanWindows() throws {
