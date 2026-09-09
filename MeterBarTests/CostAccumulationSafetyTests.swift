@@ -608,23 +608,36 @@ final class CostAccumulationSafetyTests: XCTestCase {
     }
 
     /// The stacked-bar chart above the breakdown list folds the same rows.
-    func testDailyUsageChartBuildDaysSurvivesTwoSaturatedRowsForOneProvider() {
+    /// Two rows for `claudeCode` exercise the inner per-provider fold
+    /// (`buildDays`' `tokens = SafeAccumulate.sum(providerRows...)`); two more
+    /// for `codexCli` give the day a second segment, so `DailyUsageDay
+    /// .totalTokens`'s outer fold across segments also combines two already-
+    /// saturated values instead of summing a single segment against nothing.
+    func testDailyUsageChartBuildDaysSurvivesTwoSaturatedProviderSegmentsOnTheSameDay() {
         let calendar = utcCalendar()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let today = calendar.startOfDay(for: now)
         let rows = [
             saturatedDailyUsage(on: today, provider: .claudeCode),
-            saturatedDailyUsage(on: today, provider: .claudeCode)
+            saturatedDailyUsage(on: today, provider: .claudeCode),
+            saturatedDailyUsage(on: today, provider: .codexCli),
+            saturatedDailyUsage(on: today, provider: .codexCli)
         ]
 
         let days = DailyUsageChart.buildDays(from: rows, daysToShow: 7, now: now, calendar: calendar)
 
         let todayColumn = days.first { calendar.startOfDay(for: $0.date) == today }
+        XCTAssertEqual(todayColumn?.segments.count, 2)
         XCTAssertEqual(todayColumn?.totalTokens, Int.max)
     }
 
     // MARK: - TokenActivityCalendar.swift: the heatmap (issue #575)
 
+    /// Two rows for `claudeCode` on `today` exercise `providerTotals`' own
+    /// inner fold (one row per provider per bucket was not enough to combine
+    /// two already-saturated rows there); `codexCli` on the same day exercises
+    /// the middle fold across providers within a day; `claudeCode` again on
+    /// `yesterday` exercises the outer fold across days in `totalTokens`.
     func testActivityCalendarSurvivesMultipleSaturatedRowsOnTheSameDay() {
         let calendar = utcCalendar()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -635,6 +648,7 @@ final class CostAccumulationSafetyTests: XCTestCase {
             totalTokens: Int.max,
             periodDays: 30,
             dailyUsage: [
+                saturatedDailyUsage(on: today, provider: .claudeCode),
                 saturatedDailyUsage(on: today, provider: .claudeCode),
                 saturatedDailyUsage(on: today, provider: .codexCli),
                 saturatedDailyUsage(
@@ -648,13 +662,35 @@ final class CostAccumulationSafetyTests: XCTestCase {
 
         XCTAssertEqual(grid.totalTokens, Int.max)
         XCTAssertEqual(grid.day(on: today)?.totalTokens, Int.max)
+        XCTAssertEqual(
+            grid.day(on: today)?.providers.first { $0.provider == .claudeCode }?.tokens,
+            Int.max
+        )
     }
 
-    func testActivityHourlyCalendarSurvivesMultipleSaturatedRowsInTheSameHour() {
+    /// Two `claudeCode` rows in the same hour exercise the hourly
+    /// `providerTotals`' own inner fold (one active hour, one row per
+    /// provider, was not enough to combine two already-saturated rows
+    /// there); `codexCli` in the same hour exercises the middle fold across
+    /// providers within an hour; a second active hour exercises the outer
+    /// fold across hours in `totalTokens` (a single active hour cannot —
+    /// reverting that fold to trapping addition would still sum one
+    /// saturated value against a run of zeros and never trap).
+    func testActivityHourlyCalendarSurvivesMultipleSaturatedRowsInTheSameHourAndAcrossHours() {
         let calendar = utcCalendar()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let hour = calendar.startOfDay(for: now).addingTimeInterval(3_600)
+        let today = calendar.startOfDay(for: now)
+        let hour = today.addingTimeInterval(3_600)
+        let secondHour = today.addingTimeInterval(2 * 3_600)
         let hourly = [
+            HourlyTokenUsage(
+                date: hour,
+                provider: .claudeCode,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
+            ),
             HourlyTokenUsage(
                 date: hour,
                 provider: .claudeCode,
@@ -670,12 +706,26 @@ final class CostAccumulationSafetyTests: XCTestCase {
                 outputTokens: Int.max,
                 cacheReadTokens: Int.max,
                 estimatedCostUSD: 1
+            ),
+            HourlyTokenUsage(
+                date: secondHour,
+                provider: .claudeCode,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
             )
         ]
 
         let grid = TokenActivityHourlyCalendar(hourlyUsage: hourly, now: now, calendar: calendar)
 
         XCTAssertEqual(grid.totalTokens, Int.max)
+        XCTAssertEqual(grid.hour(at: hour)?.totalTokens, Int.max)
+        XCTAssertEqual(grid.hour(at: secondHour)?.totalTokens, Int.max)
+        XCTAssertEqual(
+            grid.hour(at: hour)?.providers.first { $0.provider == .claudeCode }?.tokens,
+            Int.max
+        )
     }
 
     // MARK: - OptimizationInsights.swift: the insights rollups (issue #575)

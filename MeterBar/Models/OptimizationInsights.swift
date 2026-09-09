@@ -262,11 +262,18 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         let modelBreakdowns = costs.flatMap(\.modelBreakdowns)
         let originBreakdowns = costs.flatMap(\.originBreakdowns)
 
-        // Saturating (issue #575): every breakdown's own `totalTokens` is
-        // already a saturating sum, and these fold hundreds of them flattened
-        // across providers.
-        let modelTokenTotal = SafeAccumulate.sum(modelBreakdowns.map(\.totalTokens))
-        let originTokenTotal = SafeAccumulate.sum(originBreakdowns.map(\.totalTokens))
+        // Ratio denominators (issue #575): folded as `Double`, not `Int`.
+        // `SafeAccumulate.sum` is the right call for a total that is itself
+        // displayed, but a *share* built from two independently saturating
+        // `Int` sums — this total and a numerator drawn from a subset of the
+        // same rows — loses the real split the moment either one hits the
+        // bound: two merely-large-but-different provider totals both read
+        // back as `Int.max` and the share renders as 100% instead of the
+        // true proportion. `Double` never traps and stays faithful to that
+        // proportion far past what `Int` can hold, so `sumAsDouble` is used
+        // everywhere a ratio (not a displayed count) is being built.
+        let modelTokenTotal = SafeAccumulate.sumAsDouble(modelBreakdowns.map(\.totalTokens))
+        let originTokenTotal = SafeAccumulate.sumAsDouble(originBreakdowns.map(\.totalTokens))
 
         self.topModels = Self.rank(modelBreakdowns, groupTotal: modelTokenTotal)
         self.topOrigins = Self.rank(originBreakdowns, groupTotal: originTokenTotal)
@@ -274,21 +281,27 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         // Aggregate token buckets across providers.
         // Saturating (issue #575): per-provider `TokenCost` fields come
         // straight off the persisted cache and may already sit at the bound.
-        let input = SafeAccumulate.sum(costs.map(\.inputTokens))
-        let output = SafeAccumulate.sum(costs.map(\.outputTokens))
+        // `cacheCreation` stays an `Int` below only for its own existence
+        // check (`> 0`), which saturation cannot make wrong.
         let cacheCreation = SafeAccumulate.sum(costs.map(\.cacheCreationTokens))
-        let cacheRead = SafeAccumulate.sum(costs.map(\.cacheReadTokens))
 
         self.totalTokens = summary.totalTokens
         self.periodDays = summary.periodDays
 
         self.premiumTokenShare = Self.premiumShare(of: modelBreakdowns, groupTotal: modelTokenTotal)
-        self.inputOutputRatio = output > 0 ? Double(input) / Double(output) : nil
 
-        // Saturating (issue #575): both operands are themselves saturating
-        // sums, so a plain `+` here can trap even though each is well-formed.
-        let cacheDenominator = SafeAccumulate.add(cacheRead, cacheCreation)
-        self.cacheReuseRatio = cacheDenominator > 0 ? Double(cacheRead) / Double(cacheDenominator) : nil
+        // Ratio denominators (issue #575): see `modelTokenTotal` above — the
+        // input:output and cache-reuse ratios have the identical shape (two
+        // separately-folded `Int` sums feeding a division), so both operands
+        // are folded as `Double` here too.
+        let input = SafeAccumulate.sumAsDouble(costs.map(\.inputTokens))
+        let output = SafeAccumulate.sumAsDouble(costs.map(\.outputTokens))
+        self.inputOutputRatio = output > 0 ? input / output : nil
+
+        let cacheRead = SafeAccumulate.sumAsDouble(costs.map(\.cacheReadTokens))
+        let cacheCreationForRatio = SafeAccumulate.sumAsDouble(costs.map(\.cacheCreationTokens))
+        let cacheDenominator = cacheRead + cacheCreationForRatio
+        self.cacheReuseRatio = cacheDenominator > 0 ? cacheRead / cacheDenominator : nil
 
         self.tokens7Day = Self.windowTokens(summary.dailyUsage, days: 7, now: now, calendar: calendar)
         self.tokens30Day = Self.windowTokens(summary.dailyUsage, days: 30, now: now, calendar: calendar)
@@ -319,17 +332,19 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
 
     // MARK: - Pure computations
 
-    static func premiumShare(of models: [TokenUsageBreakdown], groupTotal: Int? = nil) -> Double {
-        // Saturating (issue #575): both folds run over already-saturating
-        // per-model totals.
-        let total = groupTotal ?? SafeAccumulate.sum(models.map(\.totalTokens))
+    static func premiumShare(of models: [TokenUsageBreakdown], groupTotal: Double? = nil) -> Double {
+        // Ratio denominators (issue #575): folded as `Double` — see the call
+        // site's comment on `modelTokenTotal` for why an `Int` fold here
+        // would let two large-but-unequal totals both saturate to the same
+        // bound and render as 100% share.
+        let total = groupTotal ?? SafeAccumulate.sumAsDouble(models.map(\.totalTokens))
         guard total > 0 else { return 0 }
-        let premiumTokens = SafeAccumulate.sum(
+        let premiumTokens = SafeAccumulate.sumAsDouble(
             models
                 .filter { ModelTier.classify($0.name).isPremium }
                 .map(\.totalTokens)
         )
-        return Double(premiumTokens) / Double(total)
+        return premiumTokens / total
     }
 
     /// Blends four leanness signals into a 0...100 score (higher = leaner).
@@ -491,7 +506,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
 
     // MARK: - Helpers
 
-    private static func rank(_ breakdowns: [TokenUsageBreakdown], groupTotal: Int) -> [RankedTokenEntry] {
+    private static func rank(_ breakdowns: [TokenUsageBreakdown], groupTotal: Double) -> [RankedTokenEntry] {
         breakdowns
             .filter { $0.totalTokens > 0 }
             .sorted { $0.totalTokens > $1.totalTokens }
@@ -503,7 +518,11 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
                     totalTokens: breakdown.totalTokens,
                     estimatedCostUSD: breakdown.estimatedCostUSD,
                     sessionCount: breakdown.sessionCount,
-                    tokenShare: groupTotal > 0 ? Double(breakdown.totalTokens) / Double(groupTotal) : 0
+                    // Ratio denominators (issue #575): `groupTotal` is a
+                    // `Double` fold (see the initializer), so two ranked
+                    // entries that each individually saturated to `Int.max`
+                    // no longer both read back as 100% share.
+                    tokenShare: groupTotal > 0 ? Double(breakdown.totalTokens) / groupTotal : 0
                 )
             }
     }
