@@ -550,9 +550,9 @@ nonisolated struct CodexCliUsageResponse: Codable {
     let credits: Credits?  // Can be null for free accounts
     let spendControl: SpendControl?
     let rateLimitResetCredits: RateLimitResetCredits?
-    /// Separately metered pools that sit beside the plan's own rate limit —
-    /// the Luna reserve MeterBar surfaces, and the Codex Spark windows it does
-    /// not map yet (issue #578).
+    /// Separately metered pools that sit beside the plan's own rate limit.
+    /// MeterBar surfaces the Luna reserve out of this array; the deprecated
+    /// Codex Spark windows that share it are read past, not mapped.
     let additionalRateLimits: CodexAdditionalRateLimits?
     /// The banner OpenAI shows when a plan's quota is spent and requests are
     /// being served from a fallback pool instead.
@@ -720,9 +720,9 @@ extension CodexCliUsageResponse {
         )
     }
 
-    /// Extra windows beyond the named slots. Only the reserve maps today; the
-    /// Codex Spark pool in the same array reports two windows under one name
-    /// and needs a cadence-composed title first (issue #578).
+    /// Extra windows beyond the named slots. Only the reserve maps: the other
+    /// pool this array carries today is the deprecated Codex Spark, and giving
+    /// a retired model two bars on the card would be worse than silence.
     private var additionalLimits: [UsageLimit] {
         [reserveLimit].compactMap { $0 }
     }
@@ -761,9 +761,9 @@ nonisolated struct SpendControl: Codable {
 /// The Codex usage API's `additional_rate_limits`, decoded pool by pool.
 ///
 /// The array is undocumented and MeterBar reads exactly one entry out of it. A
-/// renamed key on the Codex Spark pool — which this build does not even map —
-/// would otherwise fail the whole usage decode and blank the Codex card, which
-/// is strictly worse than the behaviour before the field was read at all. An
+/// renamed key on a pool it ignores — the deprecated Codex Spark today — would
+/// otherwise fail the whole usage decode and blank the Codex card, which is
+/// strictly worse than the behaviour before the field was read at all. An
 /// unreadable pool costs its own entry and nothing else.
 nonisolated struct CodexAdditionalRateLimits: Codable {
     let pools: [CodexAdditionalRateLimit]

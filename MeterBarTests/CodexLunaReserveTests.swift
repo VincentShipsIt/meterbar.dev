@@ -36,8 +36,8 @@ final class CodexLunaReserveTests: XCTestCase {
         """
     }
 
-    /// The Codex Spark pool, which shares the array with the reserve and must
-    /// not be mistaken for it.
+    /// The deprecated Codex Spark pool, which shares the array with the reserve
+    /// and must not be mistaken for it.
     private var sparkEntry: String {
         """
         {
@@ -101,7 +101,7 @@ final class CodexLunaReserveTests: XCTestCase {
         )).toUsageMetrics()
 
         let reserve = try XCTUnwrap(metrics.additionalLimits.first)
-        XCTAssertEqual(metrics.additionalLimits.count, 1, "Only the reserve maps; Spark is not mapped yet.")
+        XCTAssertEqual(metrics.additionalLimits.count, 1, "Only the reserve maps; Spark is deprecated.")
         XCTAssertEqual(reserve.label, "Luna Reserve")
         XCTAssertEqual(reserve.used, 0)
         XCTAssertEqual(reserve.total, 100)
@@ -207,9 +207,9 @@ final class CodexLunaReserveTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
 
-    /// A pool MeterBar does not even map must not be able to blank the Codex
-    /// card. Before `additional_rate_limits` was read at all, a Spark shape
-    /// change was harmless; reading it must not make things worse.
+    /// A pool MeterBar ignores must not be able to blank the Codex card. Before
+    /// `additional_rate_limits` was read at all, a Spark shape change was
+    /// harmless; reading the array must not make things worse.
     func testAMalformedNeighbouringPoolDoesNotCostTheReserveOrTheDecode() throws {
         let brokenSpark = """
         {
