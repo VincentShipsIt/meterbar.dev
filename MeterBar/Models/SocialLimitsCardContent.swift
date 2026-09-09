@@ -22,12 +22,14 @@ struct SocialLimitsCardContent: Equatable {
         updatedText: String,
         headline: Row?,
         rows: [Row],
+        providerLogo: ProviderLogoKind? = nil,
         generatedAt: Date = Date()
     ) {
         self.providerName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.updatedText = updatedText
         self.headline = headline
         self.rows = rows
+        self.providerLogo = providerLogo
         self.generatedAt = generatedAt
     }
 
@@ -44,6 +46,7 @@ struct SocialLimitsCardContent: Equatable {
             updatedText: snapshot.updatedText,
             headline: headlineLimit ?? rows.min { $0.percentLeft < $1.percentLeft },
             rows: rows,
+            providerLogo: snapshot.logoKind,
             generatedAt: generatedAt
         )
     }
@@ -58,6 +61,9 @@ struct SocialLimitsCardContent: Equatable {
     let updatedText: String
     let headline: Row?
     let rows: [Row]
+    /// The provider's own mark for the card masthead, beside MeterBar's. `nil`
+    /// on the placeholder card, which speaks for no provider.
+    let providerLogo: ProviderLogoKind?
     let generatedAt: Date
 
     var hasQuotaData: Bool { headline != nil }

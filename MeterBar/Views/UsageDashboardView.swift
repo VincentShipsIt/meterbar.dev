@@ -130,10 +130,6 @@ struct UsageDashboardView: View {
                         Label(section.rawValue, systemImage: section.iconName)
                             .tag(section)
                     }
-                } header: {
-                    if let title = group.title {
-                        Text(title)
-                    }
                 }
             }
         }

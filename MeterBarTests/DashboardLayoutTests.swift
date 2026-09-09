@@ -32,6 +32,17 @@ final class DashboardLayoutTests: XCTestCase {
         )
     }
 
+    /// The sidebar groups are spacing only. A header would reintroduce the
+    /// "Health" / "Utilities" taxonomy the sidebar deliberately dropped, so the
+    /// model must not carry a title for the list to render.
+    func testSidebarGroupsCarryNoHeaderText() {
+        let mirrored = DashboardSection.sidebarGroups.flatMap { group in
+            Mirror(reflecting: group).children.compactMap(\.label)
+        }
+
+        XCTAssertFalse(mirrored.contains("title"), "sidebar groups must not carry header text")
+    }
+
     // MARK: - DashboardCard trailing view slot
 
     func testDashboardCardAcceptsTrailingControl() {

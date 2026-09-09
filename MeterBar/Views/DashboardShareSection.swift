@@ -11,6 +11,12 @@ import UniformTypeIdentifiers
 // away, where before the split it lived on the shell and survived. The
 // enabled-source labels are lifted to a static so the card's provenance line can
 // be asserted without hosting the page.
+//
+// The page is a gallery: every shareable card at once, packed by
+// `ProviderMasonryLayout`. It used to be four stacked sections — the receipt,
+// its caption, one limits card behind a provider picker, and that card's
+// caption — which meant the answer to "what can I post?" was three cards deep
+// in a menu, and comparing two accounts was impossible without navigating.
 
 struct DashboardShareSection: View {
     private let costSummary: CostSummary?
@@ -20,11 +26,6 @@ struct DashboardShareSection: View {
 
     @Binding private var generatedAt: Date
     @Binding private var shareStatus: String?
-
-    /// Which provider the limits card shows. Page-local on purpose: unlike the
-    /// toast, a picker that snaps back to the first provider on revisit is the
-    /// expected default, not lost state.
-    @State private var limitsProviderID: String?
 
     @StateObject private var providerVisibility = ProviderVisibilityStore.shared
     @StateObject private var costTracker = CostTracker.shared
@@ -100,260 +101,151 @@ struct DashboardShareSection: View {
         "meterbar-cost-\(SocialShareCardDateFormat.filename(generatedAt)).json"
     }
 
-    /// The snapshot the limits card renders: the picked one when it still
-    /// exists, else the first provider that has reported anything. `nil` only
-    /// when nothing has metrics, which the card draws as an honest empty state.
-    static func limitsSnapshot(
-        selectedID: String?,
-        in snapshots: [ProviderSnapshot]
-    ) -> ProviderSnapshot? {
-        if let selectedID, let match = snapshots.first(where: { $0.id == selectedID }) {
-            return match
-        }
-        return snapshots.first
-    }
-
     var body: some View {
-        let previewSize = SocialShareCardLayout.previewSize(
+        let contentWidth = ShareGalleryLayout.contentWidth(
             viewportWidth: viewportWidth,
-            // The preview now sits inside a card, whose own inset eats into the
-            // width the fixed-size artwork can claim.
-            horizontalInsets: horizontalInsets + MeterBarTheme.CardPadding.standard.value * 2
+            horizontalInsets: horizontalInsets
+        )
+        let columnCount = ShareGalleryLayout.columnCount(contentWidth: contentWidth)
+        let previewSize = ShareGalleryLayout.previewSize(
+            contentWidth: contentWidth,
+            columnCount: columnCount
         )
 
-        return VStack(alignment: .leading, spacing: 14) {
-            DashboardCard(
-                title: "Share Card",
-                trailing: Self.scanStatusText(
-                    isScanning: costTracker.isScanning,
-                    isRefreshingMissingDays: costTracker.isRefreshingMissingDays
-                )
+        return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+            galleryHeader
+
+            ProviderMasonryLayout(
+                columnCount: columnCount,
+                spacing: ShareGalleryLayout.spacing
             ) {
-                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
-                    SocialShareCardPreview(content: cardContent, size: previewSize)
-                        .accessibilityLabel("MeterBar 30-day token receipt preview")
-
-                    // The export actions live with the artifact they export —
-                    // as a bare row between two cards they were anchored to
-                    // neither.
-                    HStack(spacing: 10) {
-                        Button {
-                            copyCardImage()
-                        } label: {
-                            Label("Copy PNG", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.glassProminent)
-
-                        Button {
-                            saveCardImage()
-                        } label: {
-                            Label("Save PNG", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            copyCaption()
-                        } label: {
-                            Label("Copy Caption", systemImage: "text.quote")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            copyCostJSON()
-                        } label: {
-                            Label("Copy JSON", systemImage: "curlybraces")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(costSummary == nil)
-
-                        Button {
-                            saveCostJSON()
-                        } label: {
-                            Label("Save JSON", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(costSummary == nil)
-
-                        if costSummary?.dailyUsage.isEmpty ?? true {
-                            Button {
-                                Task {
-                                    if await costTracker.scanCosts(days: CostWindow.scanWindowDays).isAuthoritative {
-                                        generatedAt = Date()
-                                    }
-                                }
-                            } label: {
-                                Label("Scan 30 Days", systemImage: "magnifyingglass")
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(costTracker.isRefreshInProgress)
-                        }
-
-                        Spacer()
-
-                        if let shareStatus {
-                            Text(shareStatus)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .transition(.opacity)
-                        }
-                    }
+                ForEach(entries) { entry in
+                    ShareGalleryTile(
+                        entry: entry,
+                        previewSize: previewSize,
+                        card: card(for: entry, generatedAt: generatedAt),
+                        canExportCostJSON: entry.exportsCostJSON && costSummary != nil,
+                        scanAction: scanAction(for: entry),
+                        copyImage: { copyImage(for: entry) },
+                        saveImage: { saveImage(for: entry) },
+                        copyCaption: { copyCaption(for: entry) },
+                        copyJSON: copyCostJSON,
+                        saveJSON: saveCostJSON
+                    )
+                    .id(entry.id)
                 }
-            }
-
-            DashboardCard(title: "Share Caption") {
-                Text(cardContent.shareCaption)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            DashboardCard(title: "Limits Card", trailing: limitsSnapshot?.updatedText) {
-                VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
-                    if providerSnapshots.count > 1 {
-                        Picker("Provider", selection: limitsProviderBinding) {
-                            ForEach(providerSnapshots) { snapshot in
-                                Text(snapshot.title).tag(Optional(snapshot.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .fixedSize()
-                    }
-
-                    SocialLimitsCardPreview(content: limitsCardContent, size: previewSize)
-                        .accessibilityLabel("MeterBar quota limits card preview")
-
-                    HStack(spacing: 10) {
-                        Button {
-                            copyLimitsCardImage()
-                        } label: {
-                            Label("Copy PNG", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.glassProminent)
-
-                        Button {
-                            saveLimitsCardImage()
-                        } label: {
-                            Label("Save PNG", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            copyLimitsCaption()
-                        } label: {
-                            Label("Copy Caption", systemImage: "text.quote")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Spacer()
-
-                        if let shareStatus {
-                            Text(shareStatus)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .transition(.opacity)
-                        }
-                    }
-                }
-            }
-
-            DashboardCard(title: "Limits Caption") {
-                Text(limitsCardContent.shareCaption)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Limits card
+    // MARK: - Gallery
 
-    private var limitsSnapshot: ProviderSnapshot? {
-        Self.limitsSnapshot(selectedID: limitsProviderID, in: providerSnapshots)
+    private var entries: [ShareGalleryEntry] {
+        ShareGalleryEntry.entries(for: providerSnapshots)
     }
 
-    private var limitsProviderBinding: Binding<String?> {
-        Binding(
-            get: { limitsSnapshot?.id },
-            set: { limitsProviderID = $0 }
-        )
-    }
+    private var galleryHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: MeterBarTheme.Spacing.sm) {
+            Text("Share Gallery")
+                .font(.title3)
+                .bold()
 
-    private var limitsCardContent: SocialLimitsCardContent {
-        makeLimitsCardContent(generatedAt: generatedAt)
-    }
+            if let scanStatus = Self.scanStatusText(
+                isScanning: costTracker.isScanning,
+                isRefreshingMissingDays: costTracker.isRefreshingMissingDays
+            ) {
+                Text(scanStatus)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
-    private func makeLimitsCardContent(generatedAt: Date) -> SocialLimitsCardContent {
-        guard let limitsSnapshot else {
-            return SocialLimitsCardContent(
-                providerName: providerSnapshots.first?.title ?? SocialShareCardContent.appName,
-                updatedText: "No data",
-                headline: nil,
-                rows: [],
-                generatedAt: generatedAt
-            )
-        }
-        return SocialLimitsCardContent(snapshot: limitsSnapshot, now: generatedAt, generatedAt: generatedAt)
-    }
+            Spacer()
 
-    private func stampedLimitsContent() -> SocialLimitsCardContent {
-        let now = Date()
-        let content = makeLimitsCardContent(generatedAt: now)
-        generatedAt = now
-        return content
-    }
-
-    private func copyLimitsCardImage() {
-        guard let image = SocialCardRenderer.image(for: stampedLimitsContent()) else {
-            setShareStatus("PNG render failed")
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        if pasteboard.writeObjects([image]) {
-            setShareStatus("PNG copied")
-        } else {
-            setShareStatus("Copy failed")
-        }
-    }
-
-    private func saveLimitsCardImage() {
-        let content = stampedLimitsContent()
-        guard let pngData = SocialCardRenderer.pngData(for: content) else {
-            setShareStatus("PNG render failed")
-            return
-        }
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = content.defaultFilename
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                // Same reasoning as the token card: a user-picked share
-                // destination wants normal umask semantics, not the owner-only
-                // default `SecureFileWriter` applies to app state.
-                try pngData.write(to: url, options: .atomic)
-                setShareStatus("PNG saved")
-            } catch {
-                setShareStatus("Save failed")
+            if let shareStatus {
+                Text(shareStatus)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .transition(.opacity)
             }
         }
     }
 
-    private func copyLimitsCaption() {
-        let content = stampedLimitsContent()
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(content.shareCaption, forType: .string)
-        setShareStatus("Caption copied")
+    /// The receipt is the only card a scan can fill in, and offering the scan on
+    /// a card that already has thirty days of data is noise.
+    private func scanAction(for entry: ShareGalleryEntry) -> (() -> Void)? {
+        guard entry.exportsCostJSON, costSummary?.dailyUsage.isEmpty ?? true else { return nil }
+        guard !costTracker.isRefreshInProgress else { return nil }
+        return {
+            Task {
+                if await costTracker.scanCosts(days: CostWindow.scanWindowDays).isAuthoritative {
+                    generatedAt = Date()
+                }
+            }
+        }
     }
 
-    private var cardContent: SocialShareCardContent {
-        makeCardContent(generatedAt: generatedAt)
+    // MARK: - Card content
+
+    /// The two card contents behind one export path. Both render through the
+    /// same `SocialCardRenderer` overloads at the same size, so the gallery's
+    /// buttons do not need to know which kind of card they are pointed at.
+    enum GalleryCard {
+        case receipt(SocialShareCardContent)
+        case limits(SocialLimitsCardContent)
+
+        var shareCaption: String {
+            switch self {
+            case let .receipt(content): return content.shareCaption
+            case let .limits(content): return content.shareCaption
+            }
+        }
+
+        var defaultFilename: String {
+            switch self {
+            case let .receipt(content): return content.defaultFilename
+            case let .limits(content): return content.defaultFilename
+            }
+        }
+
+        @MainActor var image: NSImage? {
+            switch self {
+            case let .receipt(content): return SocialCardRenderer.image(for: content)
+            case let .limits(content): return SocialCardRenderer.image(for: content)
+            }
+        }
+
+        @MainActor var pngData: Data? {
+            switch self {
+            case let .receipt(content): return SocialCardRenderer.pngData(for: content)
+            case let .limits(content): return SocialCardRenderer.pngData(for: content)
+            }
+        }
+    }
+
+    private func card(for entry: ShareGalleryEntry, generatedAt: Date) -> GalleryCard {
+        switch entry {
+        case .receipt:
+            return .receipt(makeCardContent(generatedAt: generatedAt))
+        case let .limits(snapshot):
+            return .limits(
+                SocialLimitsCardContent(
+                    snapshot: snapshot,
+                    now: generatedAt,
+                    generatedAt: generatedAt
+                )
+            )
+        case .limitsPlaceholder:
+            return .limits(
+                SocialLimitsCardContent(
+                    providerName: SocialShareCardContent.appName,
+                    updatedText: "No data",
+                    headline: nil,
+                    rows: [],
+                    generatedAt: generatedAt
+                )
+            )
+        }
     }
 
     private func makeCardContent(generatedAt: Date) -> SocialShareCardContent {
@@ -367,15 +259,17 @@ struct DashboardShareSection: View {
 
     /// Each export re-stamps the card so the exported artwork and the on-screen
     /// preview agree on when it was generated.
-    private func stampedContent() -> SocialShareCardContent {
+    private func stampedCard(for entry: ShareGalleryEntry) -> GalleryCard {
         let now = Date()
-        let content = makeCardContent(generatedAt: now)
+        let card = card(for: entry, generatedAt: now)
         generatedAt = now
-        return content
+        return card
     }
 
-    private func copyCardImage() {
-        guard let image = SocialCardRenderer.image(for: stampedContent()) else {
+    // MARK: - Exports
+
+    private func copyImage(for entry: ShareGalleryEntry) {
+        guard let image = stampedCard(for: entry).image else {
             setShareStatus("PNG render failed")
             return
         }
@@ -389,15 +283,15 @@ struct DashboardShareSection: View {
         }
     }
 
-    private func saveCardImage() {
+    private func saveImage(for entry: ShareGalleryEntry) {
         // The bytes are rendered now; the save panel can sit open long enough
         // for the scan to finish. The caveat has to describe the totals baked
         // into the PNG, not whatever the tracker happens to say once the user
         // has picked a destination.
         let wasRefreshInProgress = costTracker.isRefreshInProgress
-        let content = stampedContent()
+        let card = stampedCard(for: entry)
 
-        guard let pngData = SocialCardRenderer.pngData(for: content) else {
+        guard let pngData = card.pngData else {
             setShareStatus("PNG render failed")
             return
         }
@@ -405,7 +299,7 @@ struct DashboardShareSection: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = content.defaultFilename
+        panel.nameFieldStringValue = card.defaultFilename
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             do {
@@ -421,6 +315,15 @@ struct DashboardShareSection: View {
                 setShareStatus("Save failed")
             }
         }
+    }
+
+    private func copyCaption(for entry: ShareGalleryEntry) {
+        let card = stampedCard(for: entry)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(card.shareCaption, forType: .string)
+        setExportStatus("Caption copied")
     }
 
     private func copyCostJSON() {
@@ -477,15 +380,6 @@ struct DashboardShareSection: View {
         return json
     }
 
-    private func copyCaption() {
-        let content = stampedContent()
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(content.shareCaption, forType: .string)
-        setExportStatus("Caption copied")
-    }
-
     private func setExportStatus(_ status: String) {
         setShareStatus(Self.exportStatus(status, isRefreshInProgress: costTracker.isRefreshInProgress))
     }
@@ -493,6 +387,188 @@ struct DashboardShareSection: View {
     private func setShareStatus(_ status: String) {
         withAnimation(MeterBarTheme.Motion.standard) {
             shareStatus = status
+        }
+    }
+}
+
+// MARK: - ShareGalleryTile
+
+/// One gallery tile: the card, what it is, the caption that ships with it, and
+/// the exports that produce it.
+///
+/// The caption lives in the tile rather than in a section of its own — with one
+/// card on the page a separate "Share Caption" card was merely redundant; with
+/// six it would be six orphaned blocks of text with nothing tying each to its
+/// card.
+private struct ShareGalleryTile: View {
+    let entry: ShareGalleryEntry
+    let previewSize: CGSize
+    let card: DashboardShareSection.GalleryCard
+    let canExportCostJSON: Bool
+    let scanAction: (() -> Void)?
+    let copyImage: () -> Void
+    let saveImage: () -> Void
+    let copyCaption: () -> Void
+    let copyJSON: () -> Void
+    let saveJSON: () -> Void
+
+    var body: some View {
+        DashboardTile {
+            VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+                HStack(alignment: .firstTextBaseline, spacing: MeterBarTheme.Spacing.sm) {
+                    Text(entry.title)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer(minLength: MeterBarTheme.Spacing.xs)
+
+                    Text(entry.subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                preview
+                    .accessibilityLabel("\(entry.title) share card preview")
+
+                Text(card.shareCaption)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // A narrow column cannot hold six labelled buttons on one line.
+                // Rather than pick one form for every width, degrade in the
+                // order that costs the least: one labelled row, then labelled
+                // rows that wrap, and only then icons with tooltips.
+                ViewThatFits(in: .horizontal) {
+                    actions(iconOnly: false, wrapped: false)
+                    actions(iconOnly: false, wrapped: true)
+                    actions(iconOnly: true, wrapped: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder private var preview: some View {
+        switch card {
+        case let .receipt(content):
+            SocialShareCardPreview(content: content, size: previewSize)
+        case let .limits(content):
+            SocialLimitsCardPreview(content: content, size: previewSize)
+        }
+    }
+
+    /// Every export this tile offers, in the order they degrade.
+    private var shareActions: [ShareAction] {
+        var actions: [ShareAction] = [
+            ShareAction(id: "copyPNG", title: "Copy PNG", symbol: "doc.on.doc", isProminent: true, run: copyImage),
+            ShareAction(id: "savePNG", title: "Save PNG", symbol: "square.and.arrow.down", run: saveImage),
+            ShareAction(id: "caption", title: "Copy Caption", symbol: "text.quote", run: copyCaption),
+        ]
+
+        if entry.exportsCostJSON {
+            actions.append(
+                ShareAction(
+                    id: "copyJSON",
+                    title: "Copy JSON",
+                    symbol: "curlybraces",
+                    isDisabled: !canExportCostJSON,
+                    run: copyJSON
+                )
+            )
+            actions.append(
+                ShareAction(
+                    id: "saveJSON",
+                    title: "Save JSON",
+                    symbol: "arrow.down.doc",
+                    isDisabled: !canExportCostJSON,
+                    run: saveJSON
+                )
+            )
+        }
+
+        if let scanAction {
+            actions.append(
+                ShareAction(id: "scan", title: "Scan 30 Days", symbol: "magnifyingglass", run: scanAction)
+            )
+        }
+
+        return actions
+    }
+
+    private func actions(iconOnly: Bool, wrapped: Bool) -> some View {
+        let rows = wrapped ? Self.rows(of: shareActions) : [shareActions]
+
+        return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: MeterBarTheme.Spacing.sm) {
+                    ForEach(row) { action in
+                        button(action, iconOnly: iconOnly)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wraps at three, which is exactly the receipt's PNG exports on the first
+    /// line and its data exports on the second.
+    private static func rows(of actions: [ShareAction]) -> [[ShareAction]] {
+        stride(from: 0, to: actions.count, by: 3).map { start in
+            Array(actions[start..<min(start + 3, actions.count)])
+        }
+    }
+
+    @ViewBuilder
+    private func button(_ action: ShareAction, iconOnly: Bool) -> some View {
+        let label = Label(action.title, systemImage: action.symbol)
+            .labelStyle(ShareActionLabelStyle(iconOnly: iconOnly))
+
+        if action.isProminent {
+            Button(action: action.run) { label }
+                .buttonStyle(.glassProminent)
+                .disabled(action.isDisabled)
+                .help(action.title)
+        } else {
+            Button(action: action.run) { label }
+                .buttonStyle(.bordered)
+                .disabled(action.isDisabled)
+                .help(action.title)
+        }
+    }
+}
+
+// MARK: - ShareAction
+
+/// One export button. Modeled rather than written out inline so the tile can
+/// re-lay the same set of buttons three different ways without three copies of
+/// the list drifting apart.
+private struct ShareAction: Identifiable {
+    let id: String
+    let title: String
+    let symbol: String
+    var isProminent = false
+    var isDisabled = false
+    let run: () -> Void
+}
+
+// MARK: - ShareActionLabelStyle
+
+/// Title-and-icon or icon-only, chosen at runtime.
+///
+/// `ViewThatFits` needs both action rows to be the same type, and the built-in
+/// styles are not — so the branch lives in a style of our own rather than in a
+/// conditional around each button.
+private struct ShareActionLabelStyle: LabelStyle {
+    let iconOnly: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: MeterBarTheme.Spacing.xs) {
+            configuration.icon
+            if !iconOnly {
+                configuration.title
+            }
         }
     }
 }

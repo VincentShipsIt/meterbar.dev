@@ -92,17 +92,22 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     /// Sidebar layout: frequency-ordered monitoring pages first, then health
     /// checks, then utilities. App settings live in the dedicated macOS
     /// Settings scene rather than masquerading as dashboard content.
+    ///
+    /// The groups are spacing, not labels. "Health" and "Utilities" named
+    /// categories the user never has to choose between — nine rows do not need
+    /// a taxonomy — and the headers cost more vertical space than the rows they
+    /// introduced. The grouping stays because the gap between clusters still
+    /// carries the same structure, silently.
     struct SidebarGroup: Identifiable {
-        let title: String?
         let sections: [DashboardSection]
 
-        var id: String { sections.first?.id ?? title ?? "" }
+        var id: String { sections.first?.id ?? "" }
     }
 
     static let sidebarGroups: [SidebarGroup] = [
-        SidebarGroup(title: nil, sections: [.overview, .limits, .costs, .optimize]),
-        SidebarGroup(title: "Health", sections: [.status, .diagnostics]),
-        SidebarGroup(title: "Utilities", sections: [.share]),
+        SidebarGroup(sections: [.overview, .limits, .costs, .optimize]),
+        SidebarGroup(sections: [.status, .diagnostics]),
+        SidebarGroup(sections: [.share]),
     ]
 
     var titlebarSubtitle: String {

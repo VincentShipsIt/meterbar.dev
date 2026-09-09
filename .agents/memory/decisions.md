@@ -1,11 +1,23 @@
 ---
-last_verified: 2026-09-07
+last_verified: 2026-09-09
 status: active
 ---
 
 # Decisions
 
 Live ADRs only.
+
+## The Share page is a gallery, and both cards are one design
+
+**Accepted 2026-09-09.** Share shows every card at once — the 30-day token receipt plus one live limits card per provider — packed by `ProviderMasonryLayout`, with each tile carrying its own caption and its own exports. The provider picker is gone: a menu that showed one account at a time made "which of my accounts is worth posting" a navigation problem, and the two caption sections were orphaned from the cards they described.
+
+Columns come from `ShareGalleryLayout`: at least `minimumTileWidth` (420) per column, at most three. Below 420 a 16:9 preview cannot carry its own hero number and a tile cannot hold a labelled row of export buttons, so the grid falls to one wide column rather than two unreadable ones. Masonry rather than `LazyVGrid` because captions wrap to different heights and a row-locked grid pads every tile to the tallest caption in its row.
+
+The cards themselves are now one design (`SocialCardChrome.swift`): one flat near-black surface, one masthead, one footer, one severity ramp. The receipt's purple gradient, blurred orbs, diagonal hatch, sparkles and rotated sticker are gone — a gallery makes a second visual language impossible to miss.
+
+Both cards head themselves with `MeterBarBrandMark`, the app icon's own three meter bars redrawn in SwiftUI, replacing the stand-in SF Symbols (`chart.bar.xaxis` in a white circle; `gauge.with.needle.fill`) that appeared nowhere else in the product. Card severity now spends the icon's green / amber / red (`MeterBarBrand`) instead of a second unrelated ramp. The mark is drawn rather than loaded from `AppIcon` because `ImageRenderer` rasterizes the preview at 3x its laid-out size and a bitmap would resample twice; `SocialCardBrandTests` pins the fills and colors to the icon so it cannot drift.
+
+Typography stays SF (Rounded for display, Mono for the terminal-ish lines). MeterBar bundles no custom face and a licensed brand font is not worth an app-size and licensing cost for two exported bitmaps.
 
 ## Every quota row shows its own reset countdown
 
