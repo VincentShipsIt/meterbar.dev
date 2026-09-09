@@ -346,6 +346,14 @@ class CostTracker: ObservableObject {
 
         for _ in 0..<Self.maxScanSlices {
             let slice = try? await CostScanExecutor.run { token in
+                // Attached first, from this slice's own token, before the
+                // session can publish a single milestone through it: a
+                // milestone this closure hands off to the main queue can still
+                // be in flight when `token` flips cancelled and this call
+                // returns early. Re-checking that same token right before the
+                // hop lands lets a late milestone be dropped instead of
+                // rendered — see `CostScanProgressBridge.publish`.
+                progressBridge.attach(token: token)
                 let session = CostScanSession(
                     cutoff: cutoff,
                     hourlyCutoff: hourlyCutoff,
@@ -371,9 +379,23 @@ class CostTracker: ObservableObject {
                     progress: session.progress(windowDays: days)
                 )
             }
-            // Cancelled. Whatever earlier slices published stands, and the
-            // offsets they committed are already on disk.
-            guard let slice else { break }
+            guard let slice else {
+                // Cancelled. Whatever earlier slices published stands, and the
+                // offsets they committed are already on disk.
+                //
+                // The `queue.async` body behind this call does not stop the
+                // instant the continuation above resumes — it runs until its own
+                // next file boundary (`CostScanExecutor`'s documented shape) —
+                // so returning here immediately would let the caller clear
+                // `isScanning` / `isRefreshingMissingDays` while that orphaned
+                // slice is still walking the corpus (issue #547 part 3). Waiting
+                // for the scan queue to actually go idle first keeps the flag
+                // accurate: it stays set for exactly as long as work it guards
+                // is still running, not for as long as this call's own
+                // continuation took to resume.
+                await CostScanExecutor.waitForIdle()
+                break
+            }
 
             latest = slice.scan
             await MainActor.run {
@@ -473,13 +495,39 @@ class CostTracker: ObservableObject {
 /// Costs banner updates during a single-slice refresh.
 nonisolated final class CostScanProgressBridge: @unchecked Sendable {
     private weak var tracker: CostTracker?
+    private let lock = NSLock()
+    private var token: CostScanCancellationToken = .never
 
     init(tracker: CostTracker) {
         self.tracker = tracker
     }
 
+    /// Attaches the token of the slice about to run through this bridge.
+    ///
+    /// Called once per slice, from inside `CostScanExecutor.run`'s closure,
+    /// before that slice's session is given the chance to publish a single
+    /// milestone — `CostTracker.makeCostSummary` builds one bridge for the
+    /// whole refresh, reused slice to slice, so each slice's own token has to
+    /// be handed in rather than fixed at construction.
+    func attach(token: CostScanCancellationToken) {
+        lock.lock()
+        self.token = token
+        lock.unlock()
+    }
+
+    /// Re-checks the attached token *inside* the dispatched block, not at this
+    /// call's own site: `publish` runs on the scan queue, but the slice's
+    /// token can flip cancelled at any point between this call and the
+    /// `DispatchQueue.main.async` hop actually landing. A milestone that is
+    /// already stale by the time it would render is dropped rather than
+    /// shown — issue #547 part 3's second bug, a stale progress flash at the
+    /// start of the next scan.
     func publish(_ progress: CostScanProgress) {
+        lock.lock()
+        let sliceToken = token
+        lock.unlock()
         DispatchQueue.main.async { [weak tracker] in
+            guard !sliceToken.isCancelled else { return }
             tracker?.scanProgress = progress
         }
     }
