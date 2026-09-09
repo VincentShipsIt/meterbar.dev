@@ -9,7 +9,9 @@ Live ADRs only.
 
 ## The Share page is a gallery, and both cards are one design
 
-**Accepted 2026-09-09.** Share shows every card at once — the 30-day token receipt plus one live limits card per provider — packed by `ProviderMasonryLayout`, with each tile carrying its own caption and its own exports. The provider picker is gone: a menu that showed one account at a time made "which of my accounts is worth posting" a navigation problem, and the two caption sections were orphaned from the cards they described.
+**Accepted 2026-09-09.** Share shows every card at once — the 30-day token receipt plus one live limits card per provider — packed by `ProviderMasonryLayout`. The provider picker is gone: a menu that showed one account at a time made "which of my accounts is worth posting" a navigation problem, and the two caption sections were orphaned from the cards they described.
+
+A tile is the card and nothing else. No `DashboardTile` around it (a card around a card), no title row (the artwork prints the provider and the timestamp in its own masthead), no inline caption. Exports float over the artwork on hover on a `Surface.chrome` toolbar — dimmed rather than removed, so they stay in the accessibility tree — and the caption opens as an editable sheet. Printed inline, six captions were eighteen monospaced lines nobody read; editable, the sheet stops pretending the generated wording is the wording you will post.
 
 Columns come from `ShareGalleryLayout`: at least `minimumTileWidth` (420) per column, at most three. Below 420 a 16:9 preview cannot carry its own hero number and a tile cannot hold a labelled row of export buttons, so the grid falls to one wide column rather than two unreadable ones. Masonry rather than `LazyVGrid` because captions wrap to different heights and a row-locked grid pads every tile to the tallest caption in its row.
 

@@ -128,7 +128,8 @@ struct DashboardShareSection: View {
                         scanAction: scanAction(for: entry),
                         copyImage: { copyImage(for: entry) },
                         saveImage: { saveImage(for: entry) },
-                        copyCaption: { copyCaption(for: entry) },
+                        stampedCaption: { stampedCard(for: entry).shareCaption },
+                        copyCaptionText: copyCaptionText,
                         copyJSON: copyCostJSON,
                         saveJSON: saveCostJSON
                     )
@@ -317,12 +318,13 @@ struct DashboardShareSection: View {
         }
     }
 
-    private func copyCaption(for entry: ShareGalleryEntry) {
-        let card = stampedCard(for: entry)
-
+    /// Copies whatever text the caption sheet ended up holding — the card's own
+    /// wording is a starting point, not a contract. The card was already
+    /// stamped when the sheet was seeded, so nothing is re-stamped here.
+    private func copyCaptionText(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(card.shareCaption, forType: .string)
+        pasteboard.setString(text, forType: .string)
         setExportStatus("Caption copied")
     }
 
@@ -393,13 +395,16 @@ struct DashboardShareSection: View {
 
 // MARK: - ShareGalleryTile
 
-/// One gallery tile: the card, what it is, the caption that ships with it, and
-/// the exports that produce it.
+/// One gallery tile: the card, and — on hover — the exports that produce it.
 ///
-/// The caption lives in the tile rather than in a section of its own — with one
-/// card on the page a separate "Share Caption" card was merely redundant; with
-/// six it would be six orphaned blocks of text with nothing tying each to its
-/// card.
+/// The tile is the card. It used to be a `DashboardTile` wrapping a titled
+/// header, the preview, the raw caption and a button row, which stacked a
+/// second card around something that is already a card, repeated a provider
+/// name and timestamp the artwork prints in its own masthead, and hung three
+/// lines of monospaced caption under every tile. Six of those is a wall of text
+/// nobody reads. What is left is the artwork; the controls float over it when
+/// the pointer is on it, and the caption is a sheet you can edit before you
+/// copy it.
 private struct ShareGalleryTile: View {
     let entry: ShareGalleryEntry
     let previewSize: CGSize
@@ -408,48 +413,43 @@ private struct ShareGalleryTile: View {
     let scanAction: (() -> Void)?
     let copyImage: () -> Void
     let saveImage: () -> Void
-    let copyCaption: () -> Void
+    /// Stamps the card and hands back the caption to seed the sheet with, the
+    /// same way an export stamps it.
+    let stampedCaption: () -> String
+    let copyCaptionText: (String) -> Void
     let copyJSON: () -> Void
     let saveJSON: () -> Void
 
     var body: some View {
-        DashboardTile {
-            VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
-                HStack(alignment: .firstTextBaseline, spacing: MeterBarTheme.Spacing.sm) {
-                    Text(entry.title)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    Spacer(minLength: MeterBarTheme.Spacing.xs)
-
-                    Text(entry.subtitle)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+        preview
+            .overlay { actionOverlay }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(entry.title) share card")
+            .onHover { hovering in
+                withAnimation(MeterBarTheme.Motion.standard) {
+                    isShowingActions = hovering
                 }
-
-                preview
-                    .accessibilityLabel("\(entry.title) share card preview")
-
-                Text(card.shareCaption)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // A narrow column cannot hold six labelled buttons on one line.
-                // Rather than pick one form for every width, degrade in the
-                // order that costs the least: one labelled row, then labelled
-                // rows that wrap, and only then icons with tooltips.
-                ViewThatFits(in: .horizontal) {
-                    actions(iconOnly: false, wrapped: false)
-                    actions(iconOnly: false, wrapped: true)
-                    actions(iconOnly: true, wrapped: false)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
+            .sheet(item: $caption) { caption in
+                ShareCaptionSheet(
+                    title: entry.title,
+                    subtitle: entry.subtitle,
+                    text: caption.text,
+                    onCopy: copyCaptionText
+                )
+            }
     }
+
+    // MARK: Private
+
+    /// One editable caption, kept as a value so `.sheet(item:)` can key off it.
+    private struct CaptionDraft: Identifiable {
+        let id = UUID()
+        let text: String
+    }
+
+    @State private var isShowingActions = false
+    @State private var caption: CaptionDraft?
 
     @ViewBuilder private var preview: some View {
         switch card {
@@ -460,12 +460,43 @@ private struct ShareGalleryTile: View {
         }
     }
 
+    /// The controls live on the artwork rather than beside it. They are dimmed
+    /// rather than removed when the pointer leaves, so they stay in the
+    /// accessibility tree instead of being unreachable without a mouse.
+    private var actionOverlay: some View {
+        ZStack {
+            // The scrim mutes the artwork so the controls are the only thing
+            // with contrast; without it the buttons sit in the middle of a
+            // 168pt hero number and neither reads.
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.black.opacity(0.72))
+
+            // A narrow column cannot hold six labelled buttons on one line.
+            // Rather than pick one form for every width, degrade in the order
+            // that costs the least: one labelled row, then labelled rows that
+            // wrap, and only then icons with tooltips.
+            ViewThatFits(in: .horizontal) {
+                actions(iconOnly: false, wrapped: false)
+                actions(iconOnly: false, wrapped: true)
+                actions(iconOnly: true, wrapped: false)
+            }
+            .padding(MeterBarTheme.Spacing.md)
+            // A floating toolbar over content is chrome, which is the one thing
+            // `Surface.chrome` is for — see `MeterBarTheme.Surface`.
+            .background { MeterBarTheme.Surface.chrome(radius: MeterBarTheme.Radius.card) }
+            .padding(MeterBarTheme.Spacing.md)
+        }
+        .opacity(isShowingActions ? 1 : 0)
+    }
+
     /// Every export this tile offers, in the order they degrade.
     private var shareActions: [ShareAction] {
         var actions: [ShareAction] = [
             ShareAction(id: "copyPNG", title: "Copy PNG", symbol: "doc.on.doc", isProminent: true, run: copyImage),
             ShareAction(id: "savePNG", title: "Save PNG", symbol: "square.and.arrow.down", run: saveImage),
-            ShareAction(id: "caption", title: "Copy Caption", symbol: "text.quote", run: copyCaption),
+            ShareAction(id: "caption", title: "Caption", symbol: "text.quote") {
+                caption = CaptionDraft(text: stampedCaption())
+            },
         ]
 
         if entry.exportsCostJSON {
@@ -501,7 +532,7 @@ private struct ShareGalleryTile: View {
     private func actions(iconOnly: Bool, wrapped: Bool) -> some View {
         let rows = wrapped ? Self.rows(of: shareActions) : [shareActions]
 
-        return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
+        return VStack(spacing: MeterBarTheme.Spacing.sm) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: MeterBarTheme.Spacing.sm) {
                     ForEach(row) { action in
@@ -571,4 +602,71 @@ private struct ShareActionLabelStyle: LabelStyle {
             }
         }
     }
+}
+
+// MARK: - ShareCaptionSheet
+
+/// The caption, on demand and editable.
+///
+/// Six cards on a page means six captions, and printed inline they were three
+/// monospaced lines of text under every tile that nobody read and everybody
+/// scrolled past. Behind a button they are out of the way; editable, they stop
+/// pretending the generated wording is the wording you will post.
+private struct ShareCaptionSheet: View {
+    // MARK: Lifecycle
+
+    init(title: String, subtitle: String, text: String, onCopy: @escaping (String) -> Void) {
+        self.title = title
+        self.subtitle = subtitle
+        self.onCopy = onCopy
+        self._text = State(initialValue: text)
+    }
+
+    // MARK: Internal
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xxs) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            TextEditor(text: $text)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(MeterBarTheme.Spacing.sm)
+                .frame(minWidth: 420, minHeight: 150)
+                .meterBarCardSurface(cornerRadius: MeterBarTheme.Radius.medium)
+
+            HStack {
+                Spacer()
+
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+
+                Button {
+                    onCopy(text)
+                    dismiss()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.glassProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(MeterBarTheme.CardPadding.standard.value)
+    }
+
+    // MARK: Private
+
+    private let title: String
+    private let subtitle: String
+    private let onCopy: (String) -> Void
+
+    @State private var text: String
+    @Environment(\.dismiss)
+    private var dismiss
 }
