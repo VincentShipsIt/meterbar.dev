@@ -136,7 +136,9 @@ struct SocialShareCardContent: Equatable {
 
         return (0 ..< dayCount).map { offset in
             let day = CalendarDayStep.day(startDate, offsetBy: offset, calendar: calendar)
-            return grouped[day]?.reduce(0) { $0 + $1.totalTokens } ?? 0
+            // Saturating (issue #575): a saturated cache row must not trap the
+            // share-card sparkline.
+            return SafeAccumulate.sum((grouped[day] ?? []).map(\.totalTokens))
         }
     }
 

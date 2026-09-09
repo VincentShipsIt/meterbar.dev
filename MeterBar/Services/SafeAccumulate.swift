@@ -50,6 +50,24 @@ nonisolated enum SafeAccumulate {
         values.reduce(0, add)
     }
 
+    /// Sums a sequence of `Int` values as `Double`, for a caller building a
+    /// ratio or share rather than a displayed count.
+    ///
+    /// `sum(_:)` saturates a displayed total at the `Int` bound, which is the
+    /// right call for a number shown on its own — but a ratio built from two
+    /// *independently* saturating `Int` sums (numerator and denominator each
+    /// folded with `sum(_:)`) loses the split between them the moment either
+    /// one hits the bound: two provider totals that were merely large, not
+    /// equal, both read back as the same `Int.max` and render as 100%/0%
+    /// instead of their real proportion. `Double` addition never traps, and
+    /// real token/cost totals never approach its 2^53 exact-integer ceiling,
+    /// so folding the ratio's operands here keeps the *proportion* correct
+    /// past the point `Int` can represent it at all — this is strictly a
+    /// bugfix for real data, not just a crash guard.
+    static func sumAsDouble(_ values: some Sequence<Int>) -> Double {
+        values.reduce(0) { $0 + Double($1) }
+    }
+
     /// `max(0, minuend - subtrahend)`, but clamps both operands to
     /// non-negative *before* subtracting rather than after.
     ///

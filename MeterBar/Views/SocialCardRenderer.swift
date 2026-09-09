@@ -11,7 +11,10 @@ enum SocialCardRenderer {
         generatedAt: Date
     ) -> SocialShareCardContent {
         let tokenTotal = costSummary?.totalTokens
-        let sessionCount = costSummary?.costs.reduce(0) { $0 + $1.sessionCount }
+        // Saturating (issue #575): a cached provider's own `sessionCount` can
+        // already sit at the `Int` bound, and a plain `+` here just hands the
+        // trap to share-card assembly instead of removing it.
+        let sessionCount = (costSummary?.costs.map(\.sessionCount)).map(SafeAccumulate.sum)
         let topProviderName = costSummary?.costs.max {
             $0.totalTokens < $1.totalTokens
         }?.provider.displayName

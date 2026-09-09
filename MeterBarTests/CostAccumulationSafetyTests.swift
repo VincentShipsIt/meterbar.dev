@@ -542,7 +542,303 @@ final class CostAccumulationSafetyTests: XCTestCase {
         XCTAssertEqual(daily.totalTokens, Int.max)
     }
 
+    // MARK: - DailyUsageChart.swift: the Costs-page daily breakdown (issue #575)
+
+    /// The highest-visibility site of the class #573 left open: this reads
+    /// `dailyUsage` cache rows directly and re-folds them on every render of
+    /// the Costs page, so a single poisoned row crashes the page rather than
+    /// only the scan that produced it.
+    func testDailyBreakdownProviderSummariesSurviveTwoSaturatedRowsForOneProvider() {
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let rows = [
+            saturatedDailyUsage(on: day, provider: .claudeCode),
+            saturatedDailyUsage(on: day, provider: .claudeCode)
+        ]
+
+        let summaries = DailyUsageBreakdownList.providerSummaries(from: rows)
+
+        let claude = try? XCTUnwrap(summaries.first { $0.provider == .claudeCode })
+        XCTAssertEqual(claude?.inputTokens, Int.max)
+        XCTAssertEqual(claude?.outputTokens, Int.max)
+        XCTAssertEqual(claude?.cacheReadTokens, Int.max)
+    }
+
+    /// `DailyProviderUsageSummary.totalTokens` combines three fields that are
+    /// each already a saturating sum over that provider's rows.
+    func testDailyProviderUsageSummaryTotalTokensSurvivesTwoSaturatedFields() {
+        let summary = DailyProviderUsageSummary(
+            provider: .codexCli,
+            inputTokens: Int.max,
+            outputTokens: Int.max,
+            cacheReadTokens: 10,
+            estimatedCostUSD: 1
+        )
+
+        XCTAssertEqual(summary.totalTokens, Int.max)
+    }
+
+    /// One row per provider, both saturated: the per-day rollup folds two
+    /// already-saturated summaries.
+    func testDailyProviderUsageDayTotalsSurviveTwoSaturatedProviderSummaries() {
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let usageDay = DailyProviderUsageDay(
+            date: day,
+            providers: [
+                DailyProviderUsageSummary(
+                    provider: .claudeCode,
+                    inputTokens: Int.max,
+                    outputTokens: Int.max,
+                    cacheReadTokens: Int.max,
+                    estimatedCostUSD: 1
+                ),
+                DailyProviderUsageSummary(
+                    provider: .codexCli,
+                    inputTokens: Int.max,
+                    outputTokens: Int.max,
+                    cacheReadTokens: Int.max,
+                    estimatedCostUSD: 1
+                )
+            ]
+        )
+
+        XCTAssertEqual(usageDay.inputTokens, Int.max)
+        XCTAssertEqual(usageDay.outputTokens, Int.max)
+        XCTAssertEqual(usageDay.cacheReadTokens, Int.max)
+        XCTAssertEqual(usageDay.totalTokens, Int.max)
+    }
+
+    /// The stacked-bar chart above the breakdown list folds the same rows.
+    /// Two rows for `claudeCode` exercise the inner per-provider fold
+    /// (`buildDays`' `tokens = SafeAccumulate.sum(providerRows...)`); two more
+    /// for `codexCli` give the day a second segment, so `DailyUsageDay
+    /// .totalTokens`'s outer fold across segments also combines two already-
+    /// saturated values instead of summing a single segment against nothing.
+    func testDailyUsageChartBuildDaysSurvivesTwoSaturatedProviderSegmentsOnTheSameDay() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let rows = [
+            saturatedDailyUsage(on: today, provider: .claudeCode),
+            saturatedDailyUsage(on: today, provider: .claudeCode),
+            saturatedDailyUsage(on: today, provider: .codexCli),
+            saturatedDailyUsage(on: today, provider: .codexCli)
+        ]
+
+        let days = DailyUsageChart.buildDays(from: rows, daysToShow: 7, now: now, calendar: calendar)
+
+        let todayColumn = days.first { calendar.startOfDay(for: $0.date) == today }
+        XCTAssertEqual(todayColumn?.segments.count, 2)
+        XCTAssertEqual(todayColumn?.totalTokens, Int.max)
+    }
+
+    // MARK: - TokenActivityCalendar.swift: the heatmap (issue #575)
+
+    /// Two rows for `claudeCode` on `today` exercise `providerTotals`' own
+    /// inner fold (one row per provider per bucket was not enough to combine
+    /// two already-saturated rows there); `codexCli` on the same day exercises
+    /// the middle fold across providers within a day; `claudeCode` again on
+    /// `yesterday` exercises the outer fold across days in `totalTokens`.
+    func testActivityCalendarSurvivesMultipleSaturatedRowsOnTheSameDay() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let summary = CostSummary(
+            costs: [],
+            totalCostUSD: 1,
+            totalTokens: Int.max,
+            periodDays: 30,
+            dailyUsage: [
+                saturatedDailyUsage(on: today, provider: .claudeCode),
+                saturatedDailyUsage(on: today, provider: .claudeCode),
+                saturatedDailyUsage(on: today, provider: .codexCli),
+                saturatedDailyUsage(
+                    on: CalendarDayStep.day(today, offsetBy: -1, calendar: calendar),
+                    provider: .claudeCode
+                )
+            ]
+        )
+
+        let grid = TokenActivityCalendar(summary: summary, weeks: 4, now: now, calendar: calendar)
+
+        XCTAssertEqual(grid.totalTokens, Int.max)
+        XCTAssertEqual(grid.day(on: today)?.totalTokens, Int.max)
+        XCTAssertEqual(
+            grid.day(on: today)?.providers.first { $0.provider == .claudeCode }?.tokens,
+            Int.max
+        )
+    }
+
+    /// Two `claudeCode` rows in the same hour exercise the hourly
+    /// `providerTotals`' own inner fold (one active hour, one row per
+    /// provider, was not enough to combine two already-saturated rows
+    /// there); `codexCli` in the same hour exercises the middle fold across
+    /// providers within an hour; a second active hour exercises the outer
+    /// fold across hours in `totalTokens` (a single active hour cannot —
+    /// reverting that fold to trapping addition would still sum one
+    /// saturated value against a run of zeros and never trap).
+    func testActivityHourlyCalendarSurvivesMultipleSaturatedRowsInTheSameHourAndAcrossHours() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let hour = today.addingTimeInterval(3_600)
+        let secondHour = today.addingTimeInterval(2 * 3_600)
+        let hourly = [
+            HourlyTokenUsage(
+                date: hour,
+                provider: .claudeCode,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
+            ),
+            HourlyTokenUsage(
+                date: hour,
+                provider: .claudeCode,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
+            ),
+            HourlyTokenUsage(
+                date: hour,
+                provider: .codexCli,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
+            ),
+            HourlyTokenUsage(
+                date: secondHour,
+                provider: .claudeCode,
+                inputTokens: Int.max,
+                outputTokens: Int.max,
+                cacheReadTokens: Int.max,
+                estimatedCostUSD: 1
+            )
+        ]
+
+        let grid = TokenActivityHourlyCalendar(hourlyUsage: hourly, now: now, calendar: calendar)
+
+        XCTAssertEqual(grid.totalTokens, Int.max)
+        XCTAssertEqual(grid.hour(at: hour)?.totalTokens, Int.max)
+        XCTAssertEqual(grid.hour(at: secondHour)?.totalTokens, Int.max)
+        XCTAssertEqual(
+            grid.hour(at: hour)?.providers.first { $0.provider == .claudeCode }?.tokens,
+            Int.max
+        )
+    }
+
+    // MARK: - OptimizationInsights.swift: the insights rollups (issue #575)
+
+    /// Every fold in the initializer runs over already-saturating per-row
+    /// totals: the flattened model/origin breakdowns, the four token buckets,
+    /// the cache denominator, the premium share, and the 7/30-day windows.
+    func testOptimizationInsightsSurviveTwoSaturatedProvidersAndBreakdowns() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let summary = CostSummary(
+            costs: [
+                saturatedTokenCost(provider: .claudeCode, model: "claude-opus-5"),
+                saturatedTokenCost(provider: .codexCli, model: "gpt-5.5")
+            ],
+            totalCostUSD: 2,
+            totalTokens: Int.max,
+            periodDays: 30,
+            dailyUsage: [
+                saturatedDailyUsage(on: today, provider: .claudeCode),
+                saturatedDailyUsage(on: today, provider: .codexCli)
+            ]
+        )
+
+        let insights = OptimizationInsights(summary: summary, now: now, calendar: calendar)
+
+        XCTAssertEqual(insights.tokens7Day, Int.max)
+        XCTAssertEqual(insights.tokens30Day, Int.max)
+        XCTAssertEqual(insights.totalTokens, Int.max)
+        // Two saturated model rows, one premium: the share stays a real
+        // fraction rather than trapping on the way to the denominator.
+        XCTAssertGreaterThanOrEqual(insights.premiumTokenShare, 0)
+        XCTAssertLessThanOrEqual(insights.premiumTokenShare, 1)
+    }
+
+    func testPremiumShareSurvivesTwoSaturatedModelRowsWithoutAGroupTotal() {
+        let models = [
+            saturatedBreakdown(provider: .claudeCode, name: "claude-opus-5"),
+            saturatedBreakdown(provider: .claudeCode, name: "claude-haiku-4-5")
+        ]
+
+        let share = OptimizationInsights.premiumShare(of: models)
+
+        XCTAssertGreaterThanOrEqual(share, 0)
+        XCTAssertLessThanOrEqual(share, 1)
+    }
+
+    // MARK: - SocialShareCardContent.swift: the share-card sparkline (issue #575)
+
+    func testSocialShareDailyTotalsSurviveTwoSaturatedRowsOnTheSameDay() {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+
+        let totals = SocialShareCardContent.dailyTokenTotals(
+            from: [
+                saturatedDailyUsage(on: today, provider: .claudeCode),
+                saturatedDailyUsage(on: today, provider: .codexCli)
+            ],
+            days: 7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(totals.last, Int.max)
+        XCTAssertEqual(totals.count, 7)
+    }
+
     // MARK: - Fixtures
+    // MARK: Saturated-row fixtures (issue #575)
+
+    private func saturatedDailyUsage(on date: Date, provider: ServiceType) -> DailyTokenUsage {
+        DailyTokenUsage(
+            date: date,
+            provider: provider,
+            inputTokens: Int.max,
+            outputTokens: Int.max,
+            cacheCreationTokens: Int.max,
+            cacheReadTokens: Int.max,
+            estimatedCostUSD: 1
+        )
+    }
+
+    private func saturatedBreakdown(provider: ServiceType, name: String) -> TokenUsageBreakdown {
+        TokenUsageBreakdown(
+            provider: provider,
+            name: name,
+            inputTokens: Int.max,
+            outputTokens: Int.max,
+            cacheCreationTokens: Int.max,
+            cacheReadTokens: Int.max,
+            estimatedCostUSD: 1,
+            sessionCount: 1
+        )
+    }
+
+    private func saturatedTokenCost(provider: ServiceType, model: String) -> TokenCost {
+        TokenCost(
+            provider: provider,
+            inputTokens: Int.max,
+            outputTokens: Int.max,
+            cacheCreationTokens: Int.max,
+            cacheReadTokens: Int.max,
+            estimatedCostUSD: 1,
+            sessionCount: 1,
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 1),
+            modelBreakdowns: [saturatedBreakdown(provider: provider, name: model)],
+            originBreakdowns: [saturatedBreakdown(provider: provider, name: "interactive")]
+        )
+    }
+
 
     private func makeTemporaryDirectory(prefix: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory

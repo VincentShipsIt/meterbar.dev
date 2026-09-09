@@ -50,7 +50,9 @@ struct DailyUsageChart: View {
       let rows = grouped[date] ?? []
       let segments = providerOrder.compactMap { provider -> DailyUsageProviderSegment? in
         let providerRows = rows.filter { $0.provider == provider }
-        let tokens = providerRows.reduce(0) { $0 + $1.totalTokens }
+        // Saturating (issue #575): the stacked-bar chart folds the same cache
+        // rows the breakdown list below it does.
+        let tokens = SafeAccumulate.sum(providerRows.map(\.totalTokens))
         guard tokens > 0 else { return nil }
 
         return DailyUsageProviderSegment(
@@ -268,8 +270,10 @@ struct DailyUsageDay: Identifiable {
   let segments: [DailyUsageProviderSegment]
   let cost: Double
 
+  /// Saturating (issue #575): each segment's token count is already a
+  /// saturating sum over that provider's rows for the day.
   var totalTokens: Int {
-    segments.reduce(0) { $0 + $1.tokens }
+    SafeAccumulate.sum(segments.map(\.tokens))
   }
 
   var chartAccessibilityLabel: String {
@@ -306,7 +310,7 @@ struct DailyUsageBreakdownList: View {
   private var days: [DailyProviderUsageDay] {
     let grouped = Dictionary(grouping: dailyUsage) { Calendar.current.startOfDay(for: $0.date) }
     return grouped.map { day, rows in
-      DailyProviderUsageDay(date: day, providers: providerSummaries(from: rows))
+      DailyProviderUsageDay(date: day, providers: Self.providerSummaries(from: rows))
     }
     .filter { $0.totalTokens > 0 }
     .sorted { $0.date > $1.date }
@@ -354,14 +358,20 @@ struct DailyUsageBreakdownList: View {
     }
   }
 
-  private func providerSummaries(from rows: [DailyTokenUsage]) -> [DailyProviderUsageSummary] {
+  /// Static so the fold itself is reachable from tests without going through
+  /// SwiftUI body evaluation — the saturation regression this guards lives in
+  /// the arithmetic, not the view.
+  static func providerSummaries(from rows: [DailyTokenUsage]) -> [DailyProviderUsageSummary] {
     let grouped = Dictionary(grouping: rows, by: \.provider)
     return grouped.map { provider, providerRows in
       DailyProviderUsageSummary(
         provider: provider,
-        inputTokens: providerRows.reduce(0) { $0 + $1.inputTokens },
-        outputTokens: providerRows.reduce(0) { $0 + $1.outputTokens },
-        cacheReadTokens: providerRows.reduce(0) { $0 + $1.cacheReadTokens },
+        // Saturating (issue #575): these are cache rows whose own token fields
+        // can already be saturated from an earlier fold, so a plain
+        // `reduce(0, +)` across a provider's days would trap on re-render.
+        inputTokens: SafeAccumulate.sum(providerRows.map(\.inputTokens)),
+        outputTokens: SafeAccumulate.sum(providerRows.map(\.outputTokens)),
+        cacheReadTokens: SafeAccumulate.sum(providerRows.map(\.cacheReadTokens)),
         estimatedCostUSD: providerRows.reduce(0) { $0 + $1.estimatedCostUSD }
       )
     }
@@ -427,20 +437,23 @@ struct DailyProviderUsageDay: Identifiable {
   let date: Date
   let providers: [DailyProviderUsageSummary]
 
+  // Saturating (issue #575): each provider summary's own totals are already
+  // saturating sums, and combining two saturated summaries with a plain `+`
+  // traps just the same. This recomputes on every Costs-page render.
   var inputTokens: Int {
-    providers.reduce(0) { $0 + $1.inputTokens }
+    SafeAccumulate.sum(providers.map(\.inputTokens))
   }
 
   var outputTokens: Int {
-    providers.reduce(0) { $0 + $1.outputTokens }
+    SafeAccumulate.sum(providers.map(\.outputTokens))
   }
 
   var cacheReadTokens: Int {
-    providers.reduce(0) { $0 + $1.cacheReadTokens }
+    SafeAccumulate.sum(providers.map(\.cacheReadTokens))
   }
 
   var totalTokens: Int {
-    providers.reduce(0) { $0 + $1.totalTokens }
+    SafeAccumulate.sum(providers.map(\.totalTokens))
   }
 
   var estimatedCostUSD: Double {
@@ -456,8 +469,10 @@ struct DailyProviderUsageSummary: Identifiable {
   let cacheReadTokens: Int
   let estimatedCostUSD: Double
 
+  /// Saturating (issue #575): all three fields are themselves saturating sums
+  /// over cache rows, so any two of them at the bound trap a plain `+`.
   var totalTokens: Int {
-    inputTokens + outputTokens + cacheReadTokens
+    SafeAccumulate.sum([inputTokens, outputTokens, cacheReadTokens])
   }
 }
 
