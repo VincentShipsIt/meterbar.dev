@@ -12,18 +12,30 @@ import XCTest
 @MainActor
 final class UsageDataManagerTests: XCTestCase {
     /// Distinguishes a serial orchestration from a concurrent one without ever
-    /// risking a hang: each fetch registers itself, spins on `Task.yield()` for
-    /// a bounded number of turns waiting for its peers to arrive, then proceeds
-    /// regardless. A serial implementation simply never sees more than one leg
-    /// in flight, so `maxInFlight` stays 1.
+    /// risking a hang: each fetch registers itself and parks at a barrier, so
+    /// the last leg to arrive releases them all. A serial implementation never
+    /// gets a peer, so its parked leg is freed by the deadline instead and
+    /// `maxInFlight` stays 1.
+    ///
+    /// The wait is a real barrier rather than a bounded number of
+    /// `Task.yield()` turns: a yield budget is not a synchronization primitive,
+    /// and on a loaded machine the peer legs need not be scheduled within it —
+    /// which would under-report concurrency and fail a healthy build.
     ///
     /// Everything here runs on the main actor alongside the manager, so plain
     /// mutable state is safe.
     @MainActor
     private final class ConcurrencyProbe {
+        /// Only ever reached when the orchestration under test is serial — the
+        /// assertion is failing by then either way — so this trades a slow
+        /// failure for a deterministic one.
+        private static let peerDeadline = Duration.seconds(5)
+
         private(set) var maxInFlight = 0
         private var inFlight = 0
         private let expected: Int
+        private var parked: [CheckedContinuation<Void, Never>] = []
+        private var deadline: Task<Void, Never>?
 
         init(expected: Int) {
             self.expected = expected
@@ -32,10 +44,32 @@ final class UsageDataManagerTests: XCTestCase {
         func recordFetch() async {
             inFlight += 1
             maxInFlight = max(maxInFlight, inFlight)
-            for _ in 0..<200 where inFlight < expected {
-                await Task.yield()
+            if inFlight >= expected {
+                releaseParkedLegs()
+            } else {
+                await withCheckedContinuation { continuation in
+                    parked.append(continuation)
+                    startDeadlineIfNeeded()
+                }
             }
             inFlight -= 1
+        }
+
+        private func startDeadlineIfNeeded() {
+            guard deadline == nil else { return }
+            deadline = Task { [weak self] in
+                try? await Task.sleep(for: ConcurrencyProbe.peerDeadline)
+                guard !Task.isCancelled else { return }
+                self?.releaseParkedLegs()
+            }
+        }
+
+        private func releaseParkedLegs() {
+            deadline?.cancel()
+            deadline = nil
+            let waiting = parked
+            parked = []
+            for continuation in waiting { continuation.resume() }
         }
     }
 
@@ -82,6 +116,9 @@ final class UsageDataManagerTests: XCTestCase {
         var result: Result<UsageMetrics, Error>
         var suspendsFetch = false
         var probe: ConcurrencyProbe?
+        /// Fulfilled the moment the fetch is entered, so a test that needs the
+        /// fetch suspended can wait for it to actually start.
+        var fetchStarted: XCTestExpectation?
         private(set) var fetchCount = 0
         private var fetchContinuation: CheckedContinuation<Void, Never>?
 
@@ -92,6 +129,7 @@ final class UsageDataManagerTests: XCTestCase {
 
         func fetchUsageMetrics() async throws -> UsageMetrics {
             fetchCount += 1
+            fetchStarted?.fulfill()
             if suspendsFetch {
                 await withCheckedContinuation { continuation in
                     fetchContinuation = continuation
@@ -148,6 +186,9 @@ final class UsageDataManagerTests: XCTestCase {
         /// mid-flight to simulate a refresh that is still in progress while a
         /// targeted write (e.g. reset-credit redemption) lands.
         var suspendsFetch = false
+        /// Fulfilled the moment the fetch is entered, so a test that needs the
+        /// fetch suspended can wait for it to actually start.
+        var fetchStarted: XCTestExpectation?
         private(set) var fetchCount = 0
         private var fetchContinuation: CheckedContinuation<Void, Never>?
 
@@ -161,6 +202,7 @@ final class UsageDataManagerTests: XCTestCase {
 
         func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
             fetchCount += 1
+            fetchStarted?.fulfill()
             if suspendsFetch {
                 await withCheckedContinuation { continuation in
                     fetchContinuation = continuation
@@ -289,6 +331,29 @@ final class UsageDataManagerTests: XCTestCase {
             demoMode: demoMode
         )
         return (manager, sharedStore)
+    }
+
+    /// The signal a suspending stub provider fulfils as it enters its fetch.
+    ///
+    /// Over-fulfilment is allowed because a provider may legitimately be
+    /// fetched again later in the same test; only the first arrival is what a
+    /// caller waits on.
+    private func fetchStartSignal(_ description: String) -> XCTestExpectation {
+        let signal = expectation(description: description)
+        signal.assertForOverFulfill = false
+        return signal
+    }
+
+    /// Waits for a concurrently started refresh to actually reach the provider
+    /// fetch a test needs suspended.
+    ///
+    /// Spinning a fixed number of `Task.yield()` turns is not a
+    /// synchronization primitive: under CPU contention the refresh task need
+    /// not be scheduled within the budget, which failed these tests
+    /// deterministically on a loaded machine. Wait on the provider's own
+    /// signal instead.
+    private func waitForFetchStart(_ signal: XCTestExpectation) async {
+        await fulfillment(of: [signal], timeout: 10)
     }
 
     // MARK: - Demo mode
@@ -1106,12 +1171,12 @@ final class UsageDataManagerTests: XCTestCase {
         let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
         cursor.suspendsFetch = true
+        let cursorFetchStarted = fetchStartSignal("cursor fetch reached")
+        cursor.fetchStarted = cursorFetchStarted
         let (manager, _) = makeManager(codex: codex, cursor: cursor)
 
         let firstRefresh = Task { await manager.refreshAll() }
-        for _ in 0..<100 where cursor.fetchCount == 0 {
-            await Task.yield()
-        }
+        await waitForFetchStart(cursorFetchStarted)
         guard cursor.fetchCount == 1, manager.isLoading else {
             cursor.resumeFetch()
             _ = await firstRefresh.value
@@ -1133,6 +1198,8 @@ final class UsageDataManagerTests: XCTestCase {
         let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
         cursor.suspendsFetch = true
+        let cursorFetchStarted = fetchStartSignal("cursor fetch reached")
+        cursor.fetchStarted = cursorFetchStarted
         let (manager, _) = makeManager(
             codex: codex,
             cursor: cursor,
@@ -1142,9 +1209,7 @@ final class UsageDataManagerTests: XCTestCase {
         )
 
         let refresh = Task { await manager.refreshAll() }
-        for _ in 0..<100 where cursor.fetchCount == 0 {
-            await Task.yield()
-        }
+        await waitForFetchStart(cursorFetchStarted)
         guard cursor.fetchCount == 1 else {
             cursor.resumeFetch()
             _ = await refresh.value
@@ -1255,12 +1320,12 @@ final class UsageDataManagerTests: XCTestCase {
         let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
         cursor.suspendsFetch = true
+        let cursorFetchStarted = fetchStartSignal("cursor fetch reached")
+        cursor.fetchStarted = cursorFetchStarted
         let (manager, _) = makeManager(codex: codex, cursor: cursor)
 
         let firstRefresh = Task { await manager.refreshAll() }
-        for _ in 0..<100 where cursor.fetchCount == 0 {
-            await Task.yield()
-        }
+        await waitForFetchStart(cursorFetchStarted)
         guard cursor.fetchCount == 1, manager.isLoading else {
             cursor.resumeFetch()
             _ = await firstRefresh.value
@@ -1931,15 +1996,15 @@ final class UsageDataManagerTests: XCTestCase {
         let staleMetrics = MetricsFixtures.codexCli(sessionUsedPercent: 80, resetCreditsAvailable: 1)
         let codex = StubProvider(hasAccess: true, result: .success(staleMetrics))
         codex.suspendsFetch = true
+        let codexFetchStarted = fetchStartSignal("codex fetch reached")
+        codex.fetchStarted = codexFetchStarted
         let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
         let (manager, sharedStore) = makeManager(codex: codex, cursor: cursor)
 
         // Start a refresh and let it suspend inside the Codex fetch, exactly
         // as if the timer's poll began before the user redeemed a credit.
         let refreshTask = Task { await manager.refreshAll() }
-        for _ in 0..<100 where codex.fetchCount == 0 {
-            await Task.yield()
-        }
+        await waitForFetchStart(codexFetchStarted)
         guard codex.fetchCount == 1, manager.isLoading else {
             codex.resumeFetch()
             _ = await refreshTask.value
@@ -1978,6 +2043,8 @@ final class UsageDataManagerTests: XCTestCase {
         let staleMetrics = MetricsFixtures.grok(weeklyUsedPercent: 80)
         let grok = MultiAccountGrokProvider(metricsByAccount: [GrokAccount.defaultID: staleMetrics])
         grok.suspendsFetch = true
+        let grokFetchStarted = fetchStartSignal("grok fetch reached")
+        grok.fetchStarted = grokFetchStarted
         let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
         let (manager, sharedStore) = makeManager(
@@ -1988,9 +2055,7 @@ final class UsageDataManagerTests: XCTestCase {
         )
 
         let refreshTask = Task { await manager.refreshAll() }
-        for _ in 0..<100 where grok.fetchCount == 0 {
-            await Task.yield()
-        }
+        await waitForFetchStart(grokFetchStarted)
         guard grok.fetchCount == 1, manager.isLoading else {
             grok.resumeFetch()
             _ = await refreshTask.value
