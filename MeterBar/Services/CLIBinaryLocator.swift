@@ -20,7 +20,13 @@ nonisolated enum CLIBinaryLocator {
     private static let trustLogState = CLIBinaryTrustLogState()
 
     /// The install directories the fallbacks draw from, in priority order.
-    /// Kept in sync with the reconnect script's `export PATH` list.
+    ///
+    /// This is the *lookup* set for every provider CLI, so it is a superset of
+    /// what any one reconnect script exports. `ClaudeCodeReconnectService`
+    /// deliberately stops at `.volta/bin`: it only ever runs `claude`, and
+    /// `~/.grok/bin` holds nothing it could invoke. Add a directory here when a
+    /// CLI can be *found* there; add it to a reconnect script only when that
+    /// script's own CLI can *live* there.
     ///
     /// `~/.grok/bin` is the odd one out: it is the Grok Build installer's own
     /// default `BIN_DIR`, and the installer only symlinks `grok` into a shared
