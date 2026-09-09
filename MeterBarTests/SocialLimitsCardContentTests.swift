@@ -60,7 +60,11 @@ final class SocialLimitsCardContentTests: XCTestCase {
     /// the value-style-specific `usedText` (a "$… spent" label for currency
     /// rows, not a bare percentage) and fold in the pace overlay before the
     /// reset text, the same two facts `LimitRow`'s footer prints.
-    func testDetailTextUsesValueStyleUsedTextAndPace() {
+    /// A quota row drops its used-percent when it has a pace label. The card
+    /// draws a filled bar under every row, so "81% used" is the bar restated in
+    /// words, and it was crowding out the two facts the bar cannot show: pace,
+    /// and when the window resets.
+    func testQuotaRowDropsTheUsedPercentTheBarAlreadyShows() {
         let now = Date(timeIntervalSince1970: 100_000)
         let limit = snapshotLimit(
             kind: .session,
@@ -77,7 +81,30 @@ final class SocialLimitsCardContentTests: XCTestCase {
 
         XCTAssertNotNil(row.pace)
         guard let pace = row.pace else { return }
-        XCTAssertEqual(row.detailText, "\(row.usedText) · \(pace.leftLabel) · resets in \(row.resetText ?? "")")
+        XCTAssertEqual(row.detailText, "\(pace.leftLabel) · resets in \(row.resetText ?? "")")
+        XCTAssertFalse(row.detailText.contains(row.usedText), "the bar already says how much is used")
+    }
+
+    /// An estimated row has no pace, so dropping the used-percent would leave
+    /// it with nothing but a countdown. It keeps the number.
+    func testEstimatedQuotaRowKeepsItsUsedPercentBecauseItHasNoPace() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let limit = snapshotLimit(
+            kind: .weekly,
+            title: "Weekly",
+            usageLimit: UsageLimit(
+                used: 62,
+                total: 100,
+                resetTime: now.addingTimeInterval(3_600),
+                windowSeconds: 18_000,
+                isEstimated: true
+            )
+        )
+
+        let row = SocialLimitsCardContent.row(for: limit, now: now)
+
+        XCTAssertNil(row.pace)
+        XCTAssertTrue(row.detailText.hasPrefix(row.usedText))
     }
 
     func testDetailTextForCurrencyRowShowsSpentLabelNotPercent() {
@@ -91,6 +118,8 @@ final class SocialLimitsCardContentTests: XCTestCase {
 
         let row = SocialLimitsCardContent.row(for: limit, now: now)
 
+        // A currency row keeps its amount even though it has a bar: the bar
+        // shows the proportion, but "$4.50" is a fact no bar encodes.
         XCTAssertEqual(row.usedText, "$4.50 spent")
         XCTAssertTrue(row.detailText.hasPrefix("$4.50 spent"))
         XCTAssertFalse(row.detailText.contains("%"))

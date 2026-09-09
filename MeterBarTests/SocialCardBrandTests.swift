@@ -89,6 +89,59 @@ final class SocialCardBrandTests: XCTestCase {
         }
     }
 
+    /// Cursor Ultra's Grok Bot pool is branded Grok and titled "Grok Bot", so a
+    /// gallery shows it beside a real Grok account — two cards, same mark,
+    /// near-identical names, routinely opposite statuses. Posted standalone,
+    /// nothing on the card says which Grok is out, so a sub-pool card names the
+    /// account it is carved out of, in the masthead and in the caption.
+    func testSubPoolCardNamesTheAccountItIsCarvedOutOf() {
+        var pool = Self.snapshot(id: "cursor.grokbot", title: "Grok Bot", service: .cursor)
+        pool.cardRole = .subPool
+        pool.logoKindOverride = .grok
+
+        let content = SocialLimitsCardContent(snapshot: pool)
+
+        XCTAssertEqual(content.providerQualifier, "Cursor")
+        XCTAssertTrue(
+            content.shareCaption.contains("Grok Bot on Cursor"),
+            "a posted caption must say which account the pool belongs to"
+        )
+    }
+
+    /// An ordinary provider card names its own service already; qualifying it
+    /// would say the same thing twice.
+    func testOrdinaryProviderCardCarriesNoQualifier() {
+        let account = Self.snapshot(id: "grok", title: "Grok", service: .grok)
+
+        XCTAssertNil(SocialLimitsCardContent(snapshot: account).providerQualifier)
+    }
+
+    private static func snapshot(id: String, title: String, service: ServiceType) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: id,
+            title: title,
+            service: service,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            limits: [
+                SnapshotLimit(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usageLimit: UsageLimit(
+                        used: 23,
+                        total: 100,
+                        resetTime: Date(timeIntervalSince1970: 500_000),
+                        windowSeconds: 604_800
+                    )
+                ),
+            ],
+            emptyDetail: "",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+    }
+
     /// The gallery's placeholder tile speaks for no provider, so it must not
     /// borrow one's mark.
     func testPlaceholderLimitsCardHasNoProviderLogo() {

@@ -32,6 +32,7 @@ struct SocialLimitsCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 SocialCardHeader(
                     context: content.providerName,
+                    contextQualifier: content.providerQualifier.map { "on \($0)" },
                     providerLogo: content.providerLogo,
                     scale: scale
                 ) {

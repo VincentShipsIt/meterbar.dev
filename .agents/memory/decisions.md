@@ -23,6 +23,12 @@ Both cards head themselves with `MeterBarBrandMark`, the app icon's own three me
 
 Typography stays SF (Rounded for display, Mono for the terminal-ish lines). MeterBar bundles no custom face and a licensed brand font is not worth an app-size and licensing cost for two exported bitmaps.
 
+Two rules follow from the card drawing a filled bar under every row. A quota row drops its used-percent when it has a pace label — the bar already says how much is used, and the words were crowding out the two facts the bar cannot show, pace and reset. An estimated row has no pace, so it keeps the number rather than being left with a bare countdown; a currency row keeps its "$… spent" because an absolute amount is not something a bar encodes.
+
+A sub-pool card names the account it is carved out of ("Grok Bot on Cursor"), in the masthead and in the caption. Cursor Ultra's Grok Bot entitlement is branded Grok and titled "Grok Bot", so the gallery shows it next to a real Grok account: same mark, near-identical name, routinely the opposite status. In the app that ambiguity survives because the cards sit in a page you already understand; posted as a standalone image nothing says which Grok is out.
+
+Page content caps at `UsageDashboardView.maximumContentWidth` (1280) and centres, on the shell rather than per page. An uncapped page on an ultrawide is not more room: a quota bar stretched to 1800pt makes 7% left indistinguishable from 4%, because the eye cannot judge a ratio across that distance. Pages doing their own column math take `contentViewportWidth`, not the raw viewport, or they deal columns for a width they are never given. The gallery does not answer ultrawide by adding columns: these cards are fixed-aspect artwork authored at 1200x675 whose row text is 18pt at export scale, so a third column pushes it below legibility — the cap keeps cards at a readable size and leaves the margin empty on purpose.
+
 ## Every quota row shows its own reset countdown
 
 **Accepted 2026-09-07.** Reverses the part of PR #502 that collapsed the popover card's `.compact` rows to one shared "next reset" line. Each quota window resets on its own clock, so the popover row shows title, percent left, bar, and that row's own countdown (`LimitRow` footer at `.compact`), and `NextResetCountdownLabel` is gone. What separates the hover detail panel from the popover is what it adds, not the reset: used percent and pace beside each row's countdown (`.detail`), and the seven-day sparkline. Every row honours the countdown/clock preference through `LimitRow.resetTimeFormat`.

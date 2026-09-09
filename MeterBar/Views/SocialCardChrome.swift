@@ -46,17 +46,22 @@ enum SocialCardPalette {
 /// unrelated cards in one gallery.
 struct SocialCardHeader<Trailing: View>: View {
     let context: String
+    /// A quieter second line of identity, for a card that speaks for a pool
+    /// carved out of someone else's account ("Grok Bot **on Cursor**").
+    let contextQualifier: String?
     let providerLogo: ProviderLogoKind?
     let scale: CGFloat
     @ViewBuilder let trailing: Trailing
 
     init(
         context: String,
+        contextQualifier: String? = nil,
         providerLogo: ProviderLogoKind? = nil,
         scale: CGFloat,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.context = context
+        self.contextQualifier = contextQualifier
         self.providerLogo = providerLogo
         self.scale = scale
         self.trailing = trailing()
@@ -94,6 +99,14 @@ struct SocialCardHeader<Trailing: View>: View {
                     .foregroundStyle(SocialCardPalette.secondaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+
+                if let contextQualifier {
+                    Text(contextQualifier)
+                        .font(.system(size: 20 * scale, weight: .medium, design: .rounded))
+                        .foregroundStyle(SocialCardPalette.tertiaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
             .layoutPriority(1)
 
