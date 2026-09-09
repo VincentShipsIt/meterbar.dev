@@ -104,15 +104,21 @@ enum ShareGalleryLayout {
         return max(1, min(maximumColumnCount, fitting))
     }
 
-    /// The 16:9 preview inside a tile: the column width less the tile's own
-    /// padding on both sides.
+    /// The 16:9 card, filling its column exactly.
+    ///
+    /// This used to subtract a card's padding on both sides, which was right
+    /// while the card sat inside a padded `DashboardTile`. Once the tile became
+    /// the card, that 32pt stopped being padding and became slack: the layout
+    /// still placed columns a full column-width apart, so the gap between two
+    /// cards was the grid spacing *plus* 32, while the gap between two rows was
+    /// the grid spacing alone. The grid looked wider than it was tall for no
+    /// reason anyone could see.
     static func previewSize(contentWidth: CGFloat, columnCount: Int) -> CGSize {
-        let columnWidth = ProviderMasonryLayout.columnWidth(
+        let width = ProviderMasonryLayout.columnWidth(
             containerWidth: contentWidth,
             columnCount: columnCount,
             spacing: spacing
         )
-        let width = max(0, columnWidth - MeterBarTheme.CardPadding.standard.value * 2)
         return CGSize(width: width, height: width / SocialShareCardLayout.aspectRatio)
     }
 }

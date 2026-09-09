@@ -710,31 +710,47 @@ final class DashboardSectionSplitTests: XCTestCase {
         }
     }
 
-    /// The preview is the column width less the tile's own padding, and always
-    /// the export aspect — a tile that previewed at a different ratio would be
-    /// lying about the PNG it produces.
-    func testGalleryPreviewFillsItsColumnAtTheExportAspect() {
-        let contentWidth: CGFloat = 1_000
-        let columnCount = ShareGalleryLayout.columnCount(contentWidth: contentWidth)
-        let size = ShareGalleryLayout.previewSize(
-            contentWidth: contentWidth,
-            columnCount: columnCount
-        )
+    /// The card fills its column exactly, at the export aspect.
+    ///
+    /// Both halves have bitten. A preview narrower than its column leaves slack
+    /// the masonry still counts, so the gutter between two cards grows by the
+    /// slack while the gap between two rows stays at the grid spacing — a grid
+    /// that is visibly wider than it is tall for no stated reason. And a preview
+    /// at any ratio but the export's is lying about the PNG it produces.
+    func testGalleryCardFillsItsColumnAtTheExportAspect() {
+        for contentWidth in [420.0, 1_000.0, 1_600.0] as [CGFloat] {
+            let columnCount = ShareGalleryLayout.columnCount(contentWidth: contentWidth)
+            let size = ShareGalleryLayout.previewSize(
+                contentWidth: contentWidth,
+                columnCount: columnCount
+            )
 
-        let columnWidth = ProviderMasonryLayout.columnWidth(
-            containerWidth: contentWidth,
-            columnCount: columnCount,
-            spacing: ShareGalleryLayout.spacing
-        )
+            XCTAssertEqual(
+                size.width,
+                ProviderMasonryLayout.columnWidth(
+                    containerWidth: contentWidth,
+                    columnCount: columnCount,
+                    spacing: ShareGalleryLayout.spacing
+                ),
+                accuracy: 0.001,
+                "a card narrower than its column turns the column gutter into spacing + slack"
+            )
+            XCTAssertEqual(
+                size.height,
+                size.width / SocialShareCardLayout.aspectRatio,
+                accuracy: 0.001
+            )
+        }
+
+        // The gutter between two columns is exactly the gap between two rows.
+        let columnCount = 2
+        let contentWidth: CGFloat = 1_200
+        let card = ShareGalleryLayout.previewSize(contentWidth: contentWidth, columnCount: columnCount)
         XCTAssertEqual(
-            size.width,
-            columnWidth - MeterBarTheme.CardPadding.standard.value * 2,
-            accuracy: 0.001
-        )
-        XCTAssertEqual(
-            size.height,
-            size.width / SocialShareCardLayout.aspectRatio,
-            accuracy: 0.001
+            contentWidth - card.width * CGFloat(columnCount),
+            ShareGalleryLayout.spacing,
+            accuracy: 0.001,
+            "horizontal and vertical gaps must both be the grid spacing"
         )
     }
 
