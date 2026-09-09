@@ -68,6 +68,27 @@ final class SocialCardBrandTests: XCTestCase {
         XCTAssertEqual(SocialLimitsCardContent(snapshot: snapshot).providerLogo, .grok)
     }
 
+    /// Every provider whose mark ships as an SVG must actually resolve to that
+    /// SVG.
+    ///
+    /// `ProviderLogoView` falls back to an SF Symbol when the asset cannot be
+    /// found, and the fallback for Codex is `terminal.fill` — a perfectly
+    /// plausible-looking glyph that is not the Codex mark. That failure is
+    /// silent by construction: the view renders, nothing throws, and a share
+    /// card exported from a preview or a test carries the wrong logo. The only
+    /// way to catch it is to assert the lookup itself.
+    func testEveryProviderLogoResolvesToItsRealAsset() {
+        for service in ServiceType.allCases {
+            let kind = ProviderLogoKind.forService(service)
+            guard let resourceName = kind.resourceName else { continue }
+
+            XCTAssertNotNil(
+                ProviderLogoImageCache.image(named: resourceName),
+                "\(service) falls back to the SF Symbol \(kind.fallbackSystemName) instead of \(resourceName)"
+            )
+        }
+    }
+
     /// The gallery's placeholder tile speaks for no provider, so it must not
     /// borrow one's mark.
     func testPlaceholderLimitsCardHasNoProviderLogo() {

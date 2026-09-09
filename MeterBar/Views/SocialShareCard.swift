@@ -84,20 +84,16 @@ struct SocialShareCard: View {
     var body: some View {
         SocialCardSurface { scale in
             VStack(alignment: .leading, spacing: 0) {
-                SocialCardHeader(context: "Token Receipt", scale: scale) {
-                    HStack(spacing: 16 * scale) {
-                        Text("Last 30 days")
-                            .font(.system(size: 20 * scale, weight: .medium, design: .rounded))
-                            .foregroundStyle(SocialCardPalette.tertiaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-
-                        SocialCardChip(
-                            text: content.usageTier.title,
-                            accent: accent,
-                            scale: scale
-                        )
-                    }
+                // "30-Day Receipt" rather than "Token Receipt" plus a separate
+                // "Last 30 days" line: the window is the one fact the identity
+                // line was missing, and saying it once leaves the badge alone
+                // beside the title, exactly as on the limits card.
+                SocialCardHeader(context: "30-Day Receipt", scale: scale) {
+                    SocialCardChip(
+                        text: content.usageTier.title,
+                        accent: accent,
+                        scale: scale
+                    )
                 }
 
                 Spacer(minLength: 0)

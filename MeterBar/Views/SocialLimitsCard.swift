@@ -42,6 +42,12 @@ struct SocialLimitsCard: View {
                     // app's problem, not the artwork's. It survives on
                     // `SocialLimitsCardContent.updatedText` for the gallery's
                     // caption sheet, where it is answering a different question.
+                    // A badge on the identity line, not a control in the
+                    // corner. Parked at the far right it sat 700pt from the
+                    // nearest element, where a window control lives, and read
+                    // as a button; here "MeterBar · Codex OUT" is one sentence,
+                    // and the badge lands in the same place on every card
+                    // regardless of how long the hero or the provider name is.
                     SocialCardChip(text: content.statusLabel, accent: accent, scale: scale)
                 }
 

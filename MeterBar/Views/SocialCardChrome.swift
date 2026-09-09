@@ -76,10 +76,16 @@ struct SocialCardHeader<Trailing: View>: View {
                     .foregroundStyle(SocialCardPalette.tertiaryText)
 
                 if let providerLogo {
+                    // Sized to the provider name it sits beside, and drawn in
+                    // near-white rather than the secondary grey. At 24pt of
+                    // grey on near-black the mark read as "an icon", not as
+                    // Codex. Deliberately not the provider's brand accent:
+                    // those tokens are appearance-adaptive, and a card is a
+                    // fixed dark bitmap with no appearance to adapt to.
                     ProviderLogoView(
                         kind: providerLogo,
-                        size: 24 * scale,
-                        foregroundColor: SocialCardPalette.secondaryText
+                        size: 30 * scale,
+                        foregroundColor: .white.opacity(0.9)
                     )
                 }
 
@@ -91,9 +97,9 @@ struct SocialCardHeader<Trailing: View>: View {
             }
             .layoutPriority(1)
 
-            Spacer(minLength: 12 * scale)
-
             trailing
+
+            Spacer(minLength: 12 * scale)
         }
     }
 }
