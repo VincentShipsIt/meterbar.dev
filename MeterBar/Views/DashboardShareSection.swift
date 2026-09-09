@@ -460,32 +460,30 @@ private struct ShareGalleryTile: View {
         }
     }
 
-    /// The controls live on the artwork rather than beside it. They are dimmed
-    /// rather than removed when the pointer leaves, so they stay in the
+    /// The controls sit in the card's bottom-right corner, as the same
+    /// icon-only glass buttons the window toolbar uses for Refresh and Settings
+    /// (`GeneralSettingsView` draws its refresh button exactly this way).
+    ///
+    /// This replaced a labelled toolbar floating in the middle of the card over
+    /// a scrim that dimmed the whole artwork. Three labelled buttons across the
+    /// centre of a 16:9 card cover the hero, and dimming a card to reach its
+    /// export controls hides the very thing you are deciding whether to post.
+    /// A corner cluster covers only the corner, needs no scrim, and puts the
+    /// controls where this app already puts controls.
+    ///
+    /// Dimmed rather than removed when the pointer leaves, so they stay in the
     /// accessibility tree instead of being unreachable without a mouse.
     private var actionOverlay: some View {
-        ZStack {
-            // The scrim mutes the artwork so the controls are the only thing
-            // with contrast; without it the buttons sit in the middle of a
-            // 168pt hero number and neither reads.
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.black.opacity(0.72))
-
-            // A narrow column cannot hold six labelled buttons on one line.
-            // Rather than pick one form for every width, degrade in the order
-            // that costs the least: one labelled row, then labelled rows that
-            // wrap, and only then icons with tooltips.
-            ViewThatFits(in: .horizontal) {
-                actions(iconOnly: false, wrapped: false)
-                actions(iconOnly: false, wrapped: true)
-                actions(iconOnly: true, wrapped: false)
+        VStack {
+            Spacer(minLength: 0)
+            HStack(spacing: MeterBarTheme.Spacing.sm) {
+                Spacer(minLength: 0)
+                ForEach(shareActions) { action in
+                    button(action)
+                }
             }
-            .padding(MeterBarTheme.Spacing.md)
-            // A floating toolbar over content is chrome, which is the one thing
-            // `Surface.chrome` is for — see `MeterBarTheme.Surface`.
-            .background { MeterBarTheme.Surface.chrome(radius: MeterBarTheme.Radius.card) }
-            .padding(MeterBarTheme.Spacing.md)
         }
+        .padding(MeterBarTheme.Spacing.md)
         .opacity(isShowingActions ? 1 : 0)
     }
 
@@ -529,38 +527,15 @@ private struct ShareGalleryTile: View {
         return actions
     }
 
-    private func actions(iconOnly: Bool, wrapped: Bool) -> some View {
-        let rows = wrapped ? Self.rows(of: shareActions) : [shareActions]
-
-        return VStack(spacing: MeterBarTheme.Spacing.sm) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: MeterBarTheme.Spacing.sm) {
-                    ForEach(row) { action in
-                        button(action, iconOnly: iconOnly)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Wraps at three, which is exactly the receipt's PNG exports on the first
-    /// line and its data exports on the second.
-    private static func rows(of actions: [ShareAction]) -> [[ShareAction]] {
-        stride(from: 0, to: actions.count, by: 3).map { start in
-            Array(actions[start..<min(start + 3, actions.count)])
-        }
-    }
-
-    /// `.bordered`, like every other button in the app. The overlay used to
-    /// tint its first action prominent, which made the one control that is not
-    /// a decision — copying a PNG — look like a form's default action, in a
-    /// style nothing else on the page wears.
-    private func button(_ action: ShareAction, iconOnly: Bool) -> some View {
+    /// Icon-only and `.glass`, matching the window toolbar. A title would not
+    /// fit six of these across a card corner, and every button carries its
+    /// `help` text for the tooltip and for VoiceOver.
+    private func button(_ action: ShareAction) -> some View {
         Button(action: action.run) {
             Label(action.title, systemImage: action.symbol)
-                .labelStyle(ShareActionLabelStyle(iconOnly: iconOnly))
+                .labelStyle(.iconOnly)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.glass)
         .disabled(action.isDisabled)
         .help(action.title)
     }
@@ -577,26 +552,6 @@ private struct ShareAction: Identifiable {
     let symbol: String
     var isDisabled = false
     let run: () -> Void
-}
-
-// MARK: - ShareActionLabelStyle
-
-/// Title-and-icon or icon-only, chosen at runtime.
-///
-/// `ViewThatFits` needs both action rows to be the same type, and the built-in
-/// styles are not — so the branch lives in a style of our own rather than in a
-/// conditional around each button.
-private struct ShareActionLabelStyle: LabelStyle {
-    let iconOnly: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: MeterBarTheme.Spacing.xs) {
-            configuration.icon
-            if !iconOnly {
-                configuration.title
-            }
-        }
-    }
 }
 
 // MARK: - ShareCaptionSheet
