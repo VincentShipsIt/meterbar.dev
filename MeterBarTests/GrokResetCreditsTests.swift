@@ -210,7 +210,11 @@ final class GrokResetCreditsTests: XCTestCase {
             from: Data(#"{"config":{"creditUsagePercent":16,"billingPeriodStart":"2026-08-12T15:05:27Z","billingPeriodEnd":"2026-08-19T15:05:27Z"}}"#.utf8)
         )
         let auth = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token"}}"#.utf8)
-        let expires = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-12T00:00:00Z"))
+        // Relative to now, not a fixed date: `consumeResetCredit()` filters
+        // tokens against the real clock, so a literal expiry turns this test
+        // into a time bomb that passes until that day arrives (it did, on
+        // 2026-09-12).
+        let expires = Date().addingTimeInterval(86_400)
         let expired = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
         var consumed: (String, String)?
 
