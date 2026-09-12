@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-02
+last_verified: 2026-09-12
 status: active
 ---
 
@@ -9,7 +9,8 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 ## Still open on the board
 
-- **#389** / **#427** / **#428** / **#429** — next providers (Kimi, Z.ai/GLM, Copilot).
+- **#389** / **#427** / **#428** / **#429** — next providers (Kimi, Z.ai/GLM, Copilot). **Deferred by Vincent on 2026-09-12**: no new providers until the app itself is good. Labeled `deferred` on GitHub. Do not start these without an explicit go.
+- **#513** — local workload router epic. Open, no children claimed yet, not scheduled.
 
 ## Structural debt (no issue required to remember)
 
