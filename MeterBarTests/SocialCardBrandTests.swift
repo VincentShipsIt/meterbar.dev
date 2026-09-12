@@ -47,6 +47,79 @@ final class SocialCardBrandTests: XCTestCase {
         XCTAssertEqual(SocialCardPalette.receiptAccent, MeterBarBrand.amber)
     }
 
+    /// A card is a fixed near-black PNG posted onto someone else's timeline, so
+    /// it cannot resolve `Color.adaptive` against an appearance it does not
+    /// have. Pinning the dark half is only truthful while it *is* the dark half
+    /// the app itself would show — which nothing but this test enforces.
+    func testProviderCardColorsAreTheDarkHalfOfTheAppAccent() {
+        let expected: [ServiceType: NSColor] = [
+            .claudeCode: MeterBarTheme.BrandAccentDark.claude,
+            .codexCli: MeterBarTheme.BrandAccentDark.codex,
+            .cursor: MeterBarTheme.BrandAccentDark.cursor,
+            .openRouter: MeterBarTheme.BrandAccentDark.openRouter,
+            .grok: MeterBarTheme.BrandAccentDark.grok,
+        ]
+
+        for service in ServiceType.allCases {
+            guard let dark = expected[service] else {
+                XCTFail("\(service) has no card color")
+                continue
+            }
+
+            XCTAssertEqual(SocialCardPalette.provider(service), Color(nsColor: dark), "\(service)")
+            // And the constant really is what the app draws in dark mode — the
+            // drift this guards is someone editing the adaptive token's `dark:`
+            // literal and leaving `BrandAccentDark` behind, unreferenced.
+            XCTAssertEqual(
+                Self.darkComponents(of: MeterBarTheme.accent(for: service)),
+                Self.darkComponents(of: Color(nsColor: dark)),
+                "\(service)'s card color has drifted from its in-app dark accent"
+            )
+        }
+    }
+
+    /// sRGB components of a color as the app would draw it in dark mode.
+    private static func darkComponents(of color: Color) -> [CGFloat]? {
+        var components: [CGFloat]?
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            guard let resolved = NSColor(color).usingColorSpace(.sRGB) else { return }
+            components = [
+                resolved.redComponent,
+                resolved.greenComponent,
+                resolved.blueComponent,
+                resolved.alphaComponent,
+            ]
+        }
+        return components
+    }
+
+    /// A stacked bar is only readable while every provider in it is a different
+    /// color; two services sharing one would silently merge into one taller
+    /// segment of whichever the legend named first.
+    func testEveryProviderHasItsOwnCardColor() {
+        let colors = ServiceType.allCases.map { SocialCardPalette.provider($0) }
+
+        XCTAssertEqual(Set(colors).count, ServiceType.allCases.count)
+    }
+
+    /// Models take their provider's color by design, so two Claude models are
+    /// one indistinguishable block unless rank steps them apart — and the last
+    /// step still has to sit clearly above the card's own empty track.
+    func testModelRankStepsSameProviderRowsApart() {
+        let ramp = (0 ..< SocialShareCardContent.modelRowCount)
+            .map(SocialCardPalette.modelRankOpacity)
+
+        XCTAssertEqual(ramp.first, 1.0)
+        XCTAssertEqual(ramp, ramp.sorted(by: >))
+        XCTAssertEqual(Set(ramp).count, ramp.count)
+        for opacity in ramp {
+            XCTAssertGreaterThan(opacity, 0.3, "a model row this faint reads as the empty track")
+        }
+        // Past the ramp the card would index out of bounds rather than clamp.
+        XCTAssertEqual(SocialCardPalette.modelRankOpacity(99), ramp.last)
+        XCTAssertEqual(SocialCardPalette.modelRankOpacity(-1), ramp.first)
+    }
+
     /// The limits card puts the provider's mark beside MeterBar's, which only
     /// works if the content carries it — and Cursor's Grok Bot pool proves the
     /// card must follow `logoKind` (the pool is branded Grok) rather than the

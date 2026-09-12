@@ -110,6 +110,59 @@ final class SocialCardRendererTests: XCTestCase {
         )
     }
 
+    /// The card's model rows answer for the same 30-day window its hero number
+    /// does, so they come from the summary's provider rollups rather than from
+    /// the chart week beside them.
+    func testContentTakesModelRowsFromTheThirtyDayRollup() {
+        var claudeCost = makeCost(
+            provider: .claudeCode,
+            inputTokens: 900,
+            outputTokens: 100,
+            sessionCount: 4
+        )
+        claudeCost.modelBreakdowns = [
+            makeBreakdown(provider: .claudeCode, name: "claude-fable-5", tokens: 800),
+            makeBreakdown(provider: .claudeCode, name: "claude-haiku-4-5", tokens: 200),
+        ]
+        let summary = CostSummary(
+            costs: [claudeCost],
+            totalCostUSD: 1,
+            totalTokens: claudeCost.totalTokens,
+            periodDays: 30
+        )
+
+        let content = SocialCardRenderer.content(
+            costSummary: summary,
+            providerSnapshotTitles: [],
+            enabledSourceLabels: [],
+            generatedAt: Date(timeIntervalSince1970: 10_000)
+        )
+
+        XCTAssertEqual(content.modelSlices.map(\.name), ["claude-fable-5", "claude-haiku-4-5"])
+        XCTAssertEqual(content.modelSlices.map(\.providerRank), [0, 1])
+        XCTAssertEqual(content.largestModelTokens, 800)
+    }
+
+    /// A cache written before model attribution has no model rows, and the card
+    /// must come back without them rather than refusing to render.
+    func testContentWithoutModelAttributionStillRenders() {
+        let summary = CostSummary(
+            costs: [makeCost(provider: .grok, inputTokens: 10, outputTokens: 5, sessionCount: 1)],
+            totalCostUSD: 1,
+            totalTokens: 15,
+            periodDays: 30
+        )
+
+        let content = SocialCardRenderer.content(
+            costSummary: summary,
+            providerSnapshotTitles: [],
+            enabledSourceLabels: [],
+            generatedAt: Date(timeIntervalSince1970: 10_000)
+        )
+
+        XCTAssertFalse(content.hasModelBreakdown)
+    }
+
     @MainActor
     func testImageAndPNGRendering() {
         let content = SocialShareCardContent(
@@ -117,7 +170,32 @@ final class SocialCardRendererTests: XCTestCase {
             sessionCount: 10,
             providerNames: ["Codex", "Claude"],
             topProviderName: "Claude",
-            dailyTokenTotals: Array(repeating: 100, count: 30),
+            dailyBurn: (0 ..< 30).map { _ in
+                SocialShareDayBurn(slices: [
+                    SocialShareProviderSlice(provider: .claudeCode, tokens: 70),
+                    SocialShareProviderSlice(provider: .codexCli, tokens: 30),
+                ])
+            },
+            modelSlices: [
+                SocialShareModelSlice(
+                    provider: .claudeCode,
+                    name: "claude-fable-5",
+                    tokens: 600_000,
+                    providerRank: 0
+                ),
+                SocialShareModelSlice(
+                    provider: .claudeCode,
+                    name: "claude-haiku-4-5",
+                    tokens: 250_000,
+                    providerRank: 1
+                ),
+                SocialShareModelSlice(
+                    provider: .codexCli,
+                    name: "gpt-5.6-sol",
+                    tokens: 150_000,
+                    providerRank: 0
+                ),
+            ],
             generatedAt: Date(timeIntervalSince1970: 10_000)
         )
 
@@ -203,6 +281,23 @@ final class SocialCardRendererTests: XCTestCase {
         )
 
         XCTAssertNotNil(SocialCardRenderer.pngData(for: content))
+    }
+
+    private func makeBreakdown(
+        provider: ServiceType,
+        name: String,
+        tokens: Int
+    ) -> TokenUsageBreakdown {
+        TokenUsageBreakdown(
+            provider: provider,
+            name: name,
+            inputTokens: tokens,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 0.1,
+            sessionCount: 1
+        )
     }
 
     private func makeCost(
