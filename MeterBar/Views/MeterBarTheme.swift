@@ -163,29 +163,49 @@ enum MeterBarTheme {
 
   // MARK: - Brand accents (semantic indicators only; adapt to light/dark)
 
+  /// The dark half of every brand accent, named so something rendering
+  /// *outside* an appearance can still reach it.
+  ///
+  /// `Color.adaptive` resolves against whatever appearance is current, and the
+  /// share cards are rasterized by `ImageRenderer` into a fixed near-black PNG
+  /// that gets posted onto someone else's timeline. That bitmap has no
+  /// appearance to follow, and following the exporting Mac's would put
+  /// light-mode accents — chosen for contrast against white — on a black card.
+  /// `SocialCardPalette.provider(_:)` therefore pins these values directly,
+  /// which only stays truthful as long as the adaptive tokens below are built
+  /// from the same constants rather than from a second copy of them.
+  enum BrandAccentDark {
+    static let codex = NSColor(srgbRed: 100 / 255, green: 210 / 255, blue: 255 / 255, alpha: 1)
+    static let claude = NSColor(srgbRed: 209 / 255, green: 134 / 255, blue: 101 / 255, alpha: 1)
+    static let cursor = NSColor(srgbRed: 99 / 255, green: 210 / 255, blue: 151 / 255, alpha: 1)
+    static let openai = NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
+    static let openRouter = NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
+    static let grok = NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
+  }
+
   static let codexAccent = Color.adaptive(
     light: NSColor(srgbRed: 0 / 255, green: 122 / 255, blue: 168 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 100 / 255, green: 210 / 255, blue: 255 / 255, alpha: 1)
+    dark: BrandAccentDark.codex
   )
   static let claudeAccent = Color.adaptive(
     light: NSColor(srgbRed: 176 / 255, green: 86 / 255, blue: 52 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 209 / 255, green: 134 / 255, blue: 101 / 255, alpha: 1)
+    dark: BrandAccentDark.claude
   )
   static let cursorAccent = Color.adaptive(
     light: NSColor(srgbRed: 34 / 255, green: 150 / 255, blue: 92 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 99 / 255, green: 210 / 255, blue: 151 / 255, alpha: 1)
+    dark: BrandAccentDark.cursor
   )
   static let openaiAccent = Color.adaptive(
     light: NSColor(srgbRed: 16 / 255, green: 163 / 255, blue: 127 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
+    dark: BrandAccentDark.openai
   )
   static let openRouterAccent = Color.adaptive(
     light: NSColor(srgbRed: 105 / 255, green: 82 / 255, blue: 188 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
+    dark: BrandAccentDark.openRouter
   )
   static let grokAccent = Color.adaptive(
     light: NSColor(srgbRed: 33 / 255, green: 103 / 255, blue: 209 / 255, alpha: 1),
-    dark: NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
+    dark: BrandAccentDark.grok
   )
 
   /// The app's own accent. Follows the user's system accent color.

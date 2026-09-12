@@ -1,3 +1,4 @@
+import MeterBarShared
 import XCTest
 @testable import MeterBar
 
@@ -60,7 +61,7 @@ final class SocialShareCardContentTests: XCTestCase {
             sessionCount: 42,
             providerNames: ["OpenAI Codex", "Claude Code"],
             topProviderName: "Claude Code",
-            dailyTokenTotals: [1, 2, 3],
+            dailyBurn: Self.burn([1, 2, 3]),
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
@@ -77,7 +78,7 @@ final class SocialShareCardContentTests: XCTestCase {
             sessionCount: nil,
             providerNames: [],
             topProviderName: nil,
-            dailyTokenTotals: [],
+            dailyBurn: [],
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
@@ -96,7 +97,7 @@ final class SocialShareCardContentTests: XCTestCase {
             sessionCount: 24,
             providerNames: ["Codex", "Claude", "Codex", " "],
             topProviderName: " Claude ",
-            dailyTokenTotals: [0, 100, 200, 0, 300],
+            dailyBurn: Self.burn([0, 100, 200, 0, 300]),
             generatedAt: Date(timeIntervalSince1970: 0)
         )
 
@@ -241,7 +242,7 @@ final class SocialShareCardContentTests: XCTestCase {
             sessionCount: 1,
             providerNames: ["Codex"],
             topProviderName: "Codex",
-            dailyTokenTotals: Array(0 ..< 40),
+            dailyBurn: Self.burn(Array(0 ..< 40)),
             generatedAt: Date(timeIntervalSince1970: 3600)
         )
 
@@ -251,5 +252,221 @@ final class SocialShareCardContentTests: XCTestCase {
         // week-old chart under a fresh timestamp.
         XCTAssertEqual(content.dailyTokenTotals, Array(33 ..< 40))
         XCTAssertEqual(content.defaultFilename, "meterbar-token-card-19700101-010000.png")
+    }
+
+    // MARK: - Provider split
+
+    /// One day can carry several rows for one provider (one per account), and
+    /// the chart draws one segment per provider — so the day has to fold before
+    /// it slices, or a two-account Claude day draws two Claude bands.
+    func testDailyBurnFoldsARepeatedProviderIntoOneSlice() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let now = Date(timeIntervalSince1970: 86400 * 3)
+        let usage = [
+            Self.usage(dayOffset: 3, provider: .claudeCode, inputTokens: 100),
+            Self.usage(dayOffset: 3, provider: .claudeCode, inputTokens: 60),
+            Self.usage(dayOffset: 3, provider: .codexCli, inputTokens: 400),
+        ]
+
+        let week = SocialShareCardContent.dailyBurn(from: usage, days: 2, now: now, calendar: calendar)
+
+        XCTAssertEqual(week.count, 2)
+        XCTAssertEqual(week[0].slices, [])
+        XCTAssertEqual(
+            week[1].slices,
+            [
+                SocialShareProviderSlice(provider: .codexCli, tokens: 400),
+                SocialShareProviderSlice(provider: .claudeCode, tokens: 160),
+            ]
+        )
+        XCTAssertEqual(week[1].tokens, 560)
+        XCTAssertEqual(week[1].tokens(for: .grok), 0)
+    }
+
+    /// A provider with no tokens on a day must not reach the chart at all: a
+    /// zero-height segment still claims a color the day did not earn.
+    func testDayBurnDropsProvidersWithNoTokens() {
+        let day = SocialShareDayBurn(slices: [
+            SocialShareProviderSlice(provider: .claudeCode, tokens: 0),
+            SocialShareProviderSlice(provider: .grok, tokens: 5),
+        ])
+
+        XCTAssertEqual(day.slices, [SocialShareProviderSlice(provider: .grok, tokens: 5)])
+    }
+
+    /// The stack order is the *week's*, not each day's. A per-day sort flips
+    /// the stack whenever the lead changes hands, which is exactly what this
+    /// fixture does: Codex leads the first day, Claude the second.
+    func testChartProvidersOrderTheWeekRatherThanEachDay() {
+        let content = Self.content(dailyBurn: [
+            SocialShareDayBurn(slices: [
+                SocialShareProviderSlice(provider: .codexCli, tokens: 900),
+                SocialShareProviderSlice(provider: .claudeCode, tokens: 100),
+            ]),
+            SocialShareDayBurn(slices: [
+                SocialShareProviderSlice(provider: .claudeCode, tokens: 700),
+                SocialShareProviderSlice(provider: .grok, tokens: 50),
+            ]),
+        ])
+
+        XCTAssertEqual(content.chartProviders, [.codexCli, .claudeCode, .grok])
+        XCTAssertEqual(content.dailyTokenTotals, [1_000, 750])
+    }
+
+    // MARK: - Models
+
+    /// Two providers can serve identically named models, and the color beside a
+    /// row is a claim about which one burned the tokens — so the fold is by
+    /// provider *and* name, never by name alone.
+    func testModelSlicesFoldPerProviderAndRankWithinIt() {
+        let slices = SocialShareCardContent.modelSlices(
+            from: [
+                Self.cost(provider: .claudeCode, models: [("claude-fable-5", 400), ("claude-fable-5", 300)]),
+                Self.cost(provider: .claudeCode, models: [("claude-haiku-4-5", 120)]),
+                Self.cost(provider: .codexCli, models: [("claude-fable-5", 500)]),
+            ],
+            limit: 10
+        )
+
+        XCTAssertEqual(
+            slices,
+            [
+                SocialShareModelSlice(
+                    provider: .claudeCode,
+                    name: "claude-fable-5",
+                    tokens: 700,
+                    providerRank: 0
+                ),
+                SocialShareModelSlice(
+                    provider: .codexCli,
+                    name: "claude-fable-5",
+                    tokens: 500,
+                    providerRank: 0
+                ),
+                SocialShareModelSlice(
+                    provider: .claudeCode,
+                    name: "claude-haiku-4-5",
+                    tokens: 120,
+                    providerRank: 1
+                ),
+            ]
+        )
+    }
+
+    /// The card has room for a fixed number of rows, and the ones it drops must
+    /// be the smallest.
+    func testModelSlicesKeepTheBiggestRowsTheCardHasRoomFor() {
+        let slices = SocialShareCardContent.modelSlices(
+            from: [
+                Self.cost(
+                    provider: .codexCli,
+                    models: [("a", 10), ("b", 90), ("c", 50), ("d", 70), ("e", 0)]
+                ),
+            ]
+        )
+
+        XCTAssertEqual(slices.count, SocialShareCardContent.modelRowCount)
+        XCTAssertEqual(slices.map(\.name), ["b", "d", "c"])
+        // A zero row is not a model anyone used, and it would draw a full-width
+        // minimum bar in its provider's color.
+        XCTAssertFalse(slices.contains { $0.tokens == 0 })
+    }
+
+    /// A cache from before model attribution carries no model rows at all. The
+    /// card has to know that, because it drops the block rather than drawing an
+    /// empty plate.
+    func testMissingModelAttributionLeavesTheBlockOff() {
+        let content = Self.content(dailyBurn: Self.burn([10, 20]))
+
+        XCTAssertFalse(content.hasModelBreakdown)
+        XCTAssertEqual(content.largestModelTokens, 0)
+        XCTAssertNil(content.topModelLabel)
+        XCTAssertFalse(content.shareCaption.contains("Most of it went to"))
+    }
+
+    /// Model ids repeat across vendors, and a pasted caption has no color to
+    /// lean on, so the provider rides along with the name.
+    func testShareCaptionNamesTheTopModelWithItsProvider() {
+        let content = Self.content(
+            dailyBurn: Self.burn([10]),
+            modelSlices: [
+                SocialShareModelSlice(
+                    provider: .codexCli,
+                    name: "gpt-5.6-sol",
+                    tokens: 900,
+                    providerRank: 0
+                ),
+            ]
+        )
+
+        XCTAssertEqual(content.topModelLabel, "gpt-5.6-sol (Codex)")
+        XCTAssertTrue(content.shareCaption.contains("Most of it went to gpt-5.6-sol (Codex)."))
+    }
+
+    private static func content(
+        dailyBurn: [SocialShareDayBurn],
+        modelSlices: [SocialShareModelSlice] = []
+    ) -> SocialShareCardContent {
+        SocialShareCardContent(
+            tokenTotal: 2_000_000,
+            sessionCount: 12,
+            providerNames: [],
+            topProviderName: nil,
+            dailyBurn: dailyBurn,
+            modelSlices: modelSlices,
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private static func usage(
+        dayOffset: Int,
+        provider: ServiceType,
+        inputTokens: Int
+    ) -> DailyTokenUsage {
+        DailyTokenUsage(
+            date: Date(timeIntervalSince1970: TimeInterval(86400 * dayOffset)),
+            provider: provider,
+            inputTokens: inputTokens,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 0
+        )
+    }
+
+    private static func cost(provider: ServiceType, models: [(String, Int)]) -> TokenCost {
+        TokenCost(
+            provider: provider,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 0,
+            sessionCount: 1,
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 1),
+            modelBreakdowns: models.map { name, tokens in
+                TokenUsageBreakdown(
+                    provider: provider,
+                    name: name,
+                    inputTokens: tokens,
+                    outputTokens: 0,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: 0,
+                    estimatedCostUSD: 0,
+                    sessionCount: 1
+                )
+            }
+        )
+    }
+
+    /// A chart week of plain day totals, all attributed to one provider — the
+    /// shape every test here that is not about the provider split wants.
+    private static func burn(_ totals: [Int]) -> [SocialShareDayBurn] {
+        totals.map { total in
+            SocialShareDayBurn(
+                slices: [SocialShareProviderSlice(provider: .claudeCode, tokens: total)]
+            )
+        }
     }
 }
