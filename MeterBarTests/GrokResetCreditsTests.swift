@@ -210,6 +210,11 @@ final class GrokResetCreditsTests: XCTestCase {
             from: Data(#"{"config":{"creditUsagePercent":16,"billingPeriodStart":"2026-08-12T15:05:27Z","billingPeriodEnd":"2026-08-19T15:05:27Z"}}"#.utf8)
         )
         let auth = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token"}}"#.utf8)
+        // Pinned to the capture date of the fixtures above, the same way every
+        // other test in this file passes an explicit `now`. Reading the wall
+        // clock here made the whole suite — and with it the nightly and daily
+        // E2E runs — turn red the day `expires` fell into the past.
+        let now = try XCTUnwrap(FlexibleISO8601.date(from: "2026-08-13T12:00:00Z"))
         let expires = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-12T00:00:00Z"))
         let expired = try XCTUnwrap(FlexibleISO8601.date(from: "2026-01-01T00:00:00Z"))
         var consumed: (String, String)?
@@ -229,7 +234,8 @@ final class GrokResetCreditsTests: XCTestCase {
             },
             consumeResetProvider: { token, tokenID in
                 consumed = (token, tokenID)
-            }
+            },
+            now: { now }
         )
 
         let result = try await service.consumeResetCredit()
@@ -237,6 +243,35 @@ final class GrokResetCreditsTests: XCTestCase {
         XCTAssertEqual(consumed?.1, "restok_live")
         XCTAssertEqual(result.refreshedMetrics?.weeklyLimit?.used, 16)
         XCTAssertNil(result.usageRefreshErrorDescription)
+    }
+
+    /// The same banked token is spendable before its expiry and refused after
+    /// it, decided against the injected clock rather than the wall clock.
+    func testConsumeRefusesATokenThatHasExpiredByTheInjectedClock() async throws {
+        let auth = Data(#"{"https://auth.x.ai::client":{"key":"cached-access-token"}}"#.utf8)
+        let expires = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-12T00:00:00Z"))
+        let afterExpiry = try XCTUnwrap(FlexibleISO8601.date(from: "2026-09-13T00:00:00Z"))
+
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in true },
+            authFileDataProvider: { _ in auth },
+            remainingResetsProvider: { _ in 0 },
+            resetTokensProvider: { _ in
+                [GrokResetCredits.Token(tokenID: "restok_live", validFrom: nil, expiresAt: expires)]
+            },
+            consumeResetProvider: { _, _ in
+                XCTFail("must not redeem an expired token")
+            },
+            now: { afterExpiry }
+        )
+
+        do {
+            _ = try await service.consumeResetCredit()
+            XCTFail("expected noAvailableCredit")
+        } catch let error as GrokResetCreditError {
+            XCTAssertEqual(error, .noAvailableCredit)
+        }
     }
 
     func testConsumeThrowsWhenNoUnexpiredTokenRemains() async throws {
