@@ -310,12 +310,14 @@ private struct SocialShareTokenChart: View {
 
     private var chartDays: [SocialShareDayBurn] {
         let visibleDays = Array(days.suffix(SocialShareCardContent.chartDayCount))
-        return visibleDays.isEmpty
-            ? Array(
-                repeating: SocialShareDayBurn(slices: []),
-                count: SocialShareCardContent.chartDayCount
-            )
-            : visibleDays
+        let missingDays = SocialShareCardContent.chartDayCount - visibleDays.count
+        guard missingDays > 0 else { return visibleDays }
+
+        // The heading and the active-day denominator both describe a seven-day
+        // window, so a short history is padded on the left rather than drawn as
+        // a narrower week that silently means something else.
+        let padding = Array(repeating: SocialShareDayBurn(slices: []), count: missingDays)
+        return padding + visibleDays
     }
 
     private var maxValue: Int {
@@ -334,9 +336,15 @@ private struct SocialShareTokenChart: View {
     /// the moment the lead changes hands, and two bars assembled in different
     /// orders cannot be compared by eye at all.
     private func bar(_ day: SocialShareDayBurn, width: CGFloat, plotHeight: CGFloat) -> some View {
-        let height = max(5 * scale, plotHeight * CGFloat(day.tokens) / CGFloat(maxValue))
         let present = providers.filter { day.tokens(for: $0) > 0 }
         let gaps = segmentGap * CGFloat(max(0, present.count - 1))
+        // Every segment below claims at least `2 * scale`, so a quiet day split
+        // across several providers needs more room than the bar's own floor: at
+        // 5 * scale a three-provider day overflows and the clip eats the top of
+        // the stack.
+        let proportionalHeight = plotHeight * CGFloat(day.tokens) / CGFloat(maxValue)
+        let minimumStackHeight = gaps + (2 * scale * CGFloat(present.count))
+        let height = max(5 * scale, max(proportionalHeight, minimumStackHeight))
         let fillHeight = max(0, height - gaps)
 
         return VStack(spacing: segmentGap) {

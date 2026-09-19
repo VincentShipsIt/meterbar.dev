@@ -336,9 +336,20 @@ struct SocialShareCardContent: Equatable {
 
         let ranked = slices
             .filter { $0.tokens > 0 }
-            // Name breaks the tie so a card exported twice from one cache is
-            // byte-identical; dictionary order alone is not stable.
-            .sorted { ($0.tokens, $1.name) > ($1.tokens, $0.name) }
+            // Name then provider break the tie so a card exported twice from
+            // one cache is byte-identical. Two providers can serve a model of
+            // the same name, and `totals` is a Dictionary, so name alone still
+            // leaves those two rows in whatever order this process happened to
+            // iterate in.
+            .sorted {
+                if $0.tokens != $1.tokens {
+                    return $0.tokens > $1.tokens
+                }
+                if $0.name != $1.name {
+                    return $0.name < $1.name
+                }
+                return $0.provider.sortOrder < $1.provider.sortOrder
+            }
             .prefix(max(0, limit))
         return Array(ranked)
     }
