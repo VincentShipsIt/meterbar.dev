@@ -73,3 +73,18 @@ jobs:
       prerelease: true
       rolling: true
     secrets: inherit
+
+  # Nobody watches a cron. Without this, a red nightly is visible only to
+  # whoever thinks to open the Actions tab — which is how the same failing test
+  # survived eight consecutive nightlies. Schedule only: a manual dispatch is
+  # already being watched by the person who pressed the button.
+  report:
+    needs: [version, build]
+    if: ${{ !cancelled() && github.event_name == 'schedule' }}
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/_report-scheduled-failure.yml
+    with:
+      check_name: Nightly
+      outcome: ${{ (needs.version.result == 'success' && needs.build.result == 'success') && 'success' || 'failure' }}

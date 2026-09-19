@@ -47,3 +47,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+  # Same tracking issue mechanism the Nightly uses: a cron failure has no PR to
+  # block, so it has to announce itself somewhere a human actually looks.
+  report:
+    needs: [e2e]
+    if: ${{ !cancelled() && github.event_name == 'schedule' }}
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/_report-scheduled-failure.yml
+    with:
+      check_name: E2E (daily)
+      outcome: ${{ needs.e2e.result }}
