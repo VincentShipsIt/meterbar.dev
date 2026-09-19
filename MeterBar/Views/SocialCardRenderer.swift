@@ -28,22 +28,28 @@ enum SocialCardRenderer {
             providerNames = enabledSourceLabels
         }
 
-        let dailyTokenTotals: [Int]
+        let dailyBurn: [SocialShareDayBurn]
         if let costSummary {
-            dailyTokenTotals = SocialShareCardContent.dailyTokenTotals(
+            dailyBurn = SocialShareCardContent.dailyBurn(
                 from: costSummary.dailyUsage,
                 now: generatedAt
             )
         } else {
-            dailyTokenTotals = []
+            dailyBurn = []
         }
+
+        // Models come from the 30-day rollup, not from the chart week, because
+        // the rows sit beside the 30-day hero number and have to answer for the
+        // same window it does.
+        let modelSlices = SocialShareCardContent.modelSlices(from: costSummary?.costs ?? [])
 
         return SocialShareCardContent(
             tokenTotal: tokenTotal,
             sessionCount: sessionCount,
             providerNames: providerNames,
             topProviderName: topProviderName,
-            dailyTokenTotals: dailyTokenTotals,
+            dailyBurn: dailyBurn,
+            modelSlices: modelSlices,
             generatedAt: generatedAt
         )
     }

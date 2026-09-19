@@ -24,6 +24,40 @@ enum SocialCardPalette {
     /// takes the icon's middle bar rather than a band color.
     static let receiptAccent = MeterBarBrand.amber
 
+    /// A provider's own color on a card: the dark half of its in-app accent,
+    /// pinned rather than resolved (see `MeterBarTheme.BrandAccentDark`).
+    ///
+    /// The receipt's chart and model list used to be one amber→red ramp, which
+    /// said "hot" about a number that carries no severity and said nothing at
+    /// all about *where* the tokens went. Coloring by provider makes the same
+    /// pixels answer the question the card is actually about.
+    static func provider(_ service: ServiceType) -> Color {
+        switch service {
+        case .claudeCode: return Color(nsColor: MeterBarTheme.BrandAccentDark.claude)
+        case .codexCli: return Color(nsColor: MeterBarTheme.BrandAccentDark.codex)
+        case .cursor: return Color(nsColor: MeterBarTheme.BrandAccentDark.cursor)
+        case .openRouter: return Color(nsColor: MeterBarTheme.BrandAccentDark.openRouter)
+        case .grok: return Color(nsColor: MeterBarTheme.BrandAccentDark.grok)
+        }
+    }
+
+    /// A provider's color stepped back for a model that is not that provider's
+    /// biggest. Two Claude models share Claude's hue by design, so rank is the
+    /// only thing left to separate them — and a second hue would claim a
+    /// provider that does not exist.
+    static func model(_ service: ServiceType, providerRank: Int) -> Color {
+        provider(service).opacity(modelRankOpacity(providerRank))
+    }
+
+    /// One stop per model row the card can show, because the worst case is a
+    /// card whose every row belongs to one provider. Stops rather than a
+    /// formula: the last one still has to read as the provider's color against
+    /// near-black, and a linear falloff arrives at the card's own track.
+    static func modelRankOpacity(_ providerRank: Int) -> Double {
+        let ramp = [1.0, 0.72, 0.52]
+        return ramp[min(max(0, providerRank), ramp.count - 1)]
+    }
+
     static func accent(for band: QuotaBand?) -> Color {
         guard let band else { return Color(white: 0.55) }
         switch band {
