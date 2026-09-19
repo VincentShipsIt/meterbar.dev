@@ -1,0 +1,114 @@
+name: Report scheduled check
+
+# A scheduled check that goes red quietly is a check nobody is running. Nightly
+# and the daily E2E both failed on the same test for eight consecutive days
+# before anyone looked, because a cron failure notifies nobody: there is no PR
+# to block and no red X on a commit page anyone visits.
+#
+# Both scheduled workflows call this so the outcome lands somewhere a human
+# reads. One red run opens exactly one tracking issue; every further red run
+# stays silent against that same issue (no daily comment spam); the next green
+# run closes it. The notifier itself never fails the run it reports on — a
+# reporting hiccup must not be indistinguishable from a broken build.
+on:
+  workflow_call:
+    inputs:
+      check_name:
+        description: 'Human name of the scheduled check. Also the issue dedupe key.'
+        required: true
+        type: string
+      outcome:
+        description: "'success' when every upstream job passed; anything else is a failure."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    name: Report scheduled check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # One reporter at a time per check. The step reads the open issues, decides,
+    # and only then creates — two overlapping runs of the same check would both
+    # read "nothing tracked" and both file an issue, which is exactly the daily
+    # duplicate this is meant to prevent. Nightly is already serialized by its
+    # own `concurrency: nightly`; the daily E2E is not, and these crons have
+    # fired hours behind schedule before, so the overlap is not hypothetical.
+    # `cancel-in-progress: false` makes the second run wait for the first one's
+    # write instead of racing it.
+    concurrency:
+      group: report-scheduled-failure-${{ inputs.check_name }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      # Every value the shell reads is surfaced as env first; no step below
+      # interpolates a `${{ }}` context straight into script text.
+      CHECK_NAME: ${{ inputs.check_name }}
+      OUTCOME: ${{ inputs.outcome }}
+      COMMIT_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      LABEL: ci-failure
+
+    steps:
+      - name: Open or close the tracking issue
+        # Never fail the calling workflow. A green nightly that could not file
+        # its bookkeeping is still a green nightly, and a red one is already
+        # reported by the job that actually failed.
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Scheduled check failing: $CHECK_NAME"
+
+          # Dedupe on the exact title across open issues rather than on the
+          # label, so a human removing the label cannot make this file a
+          # duplicate every single night.
+          existing=$(gh api --paginate "repos/$REPOSITORY/issues?state=open&per_page=100" \
+            | jq -s 'add' \
+            | jq -r --arg title "$title" 'map(select(.title == $title and (has("pull_request") | not))) | .[0].number // ""')
+
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -n "$existing" ]; then
+              gh api --method POST "repos/$REPOSITORY/issues/$existing/comments" \
+                -f body="\`$CHECK_NAME\` is green again: $RUN_URL" >/dev/null
+              gh api --method PATCH "repos/$REPOSITORY/issues/$existing" \
+                -f state=closed -f state_reason=completed >/dev/null
+              echo "Closed #$existing — $CHECK_NAME recovered."
+            else
+              echo "$CHECK_NAME is green and nothing was being tracked."
+            fi
+            exit 0
+          fi
+
+          if [ -n "$existing" ]; then
+            echo "$CHECK_NAME is still red; already tracked in #$existing. Staying quiet."
+            exit 0
+          fi
+
+          # Idempotent: 422 (already exists) is the expected steady state.
+          gh api --method POST "repos/$REPOSITORY/labels" \
+            -f name="$LABEL" \
+            -f color=B60205 \
+            -f description="A scheduled check is failing on master" >/dev/null 2>&1 || true
+
+          body=$(cat <<EOF
+          \`$CHECK_NAME\` failed on its scheduled run against \`master\`.
+
+          - First failing run: $RUN_URL
+          - Commit: \`$COMMIT_SHA\`
+
+          Opened automatically by \`.github/workflows/_report-scheduled-failure.yml\`.
+          Further failures stay silent on this issue; the next green run closes it.
+          EOF
+          )
+          number=$(gh api --method POST "repos/$REPOSITORY/issues" \
+            -f title="$title" \
+            -f body="$body" \
+            -f "labels[]=$LABEL" \
+            --jq .number)
+          echo "Opened #$number for the $CHECK_NAME failure."

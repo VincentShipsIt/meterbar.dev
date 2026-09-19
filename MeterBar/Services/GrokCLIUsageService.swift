@@ -26,6 +26,10 @@ final class GrokCLIUsageService: ObservableObject {
     nonisolated private let remainingResetsProvider: @Sendable (String) async -> Int?
     nonisolated private let resetTokensProvider: @Sendable (String) async -> [GrokResetCredits.Token]
     nonisolated private let consumeResetProvider: @Sendable (String, String) async throws -> Void
+    /// The clock banked reset tokens are expired against. Injectable so a test
+    /// can pin "now" to the day its captured fixture was taken, rather than
+    /// racing the wall clock into a date where every fixture has expired.
+    nonisolated private let now: @Sendable () -> Date
 
     init(
         binaryPathProvider: @escaping @Sendable () -> String? = {
@@ -51,7 +55,8 @@ final class GrokCLIUsageService: ObservableObject {
         },
         consumeResetProvider: @escaping @Sendable (String, String) async throws -> Void = { token, tokenID in
             try await GrokResetCreditsRPC.consume(tokenID: tokenID, accessToken: token)
-        }
+        },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.binaryPathProvider = binaryPathProvider
         self.authAvailableProvider = authAvailableProvider
@@ -60,6 +65,7 @@ final class GrokCLIUsageService: ObservableObject {
         self.remainingResetsProvider = remainingResetsProvider
         self.resetTokensProvider = resetTokensProvider
         self.consumeResetProvider = consumeResetProvider
+        self.now = now
         Task.detached(priority: .utility) { [weak self] in
             self?.checkAccess()
         }
@@ -140,10 +146,10 @@ final class GrokCLIUsageService: ObservableObject {
         }
 
         let tokens = await resetTokensProvider(accessToken)
-        let now = Date()
+        let currentDate = now()
         guard let token = tokens.first(where: { candidate in
             guard let expiresAt = candidate.expiresAt else { return true }
-            return expiresAt > now
+            return expiresAt > currentDate
         }) else {
             throw GrokResetCreditError.noAvailableCredit
         }
