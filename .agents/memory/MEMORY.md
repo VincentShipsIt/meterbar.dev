@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-09
+last_verified: 2026-09-12
 status: active
 ---
 
@@ -25,7 +25,7 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 - Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server.
 - Latest release tag at last verify: **v1.8.46** (`d79fe53`); master at `d79fe53`. Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
 - The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` therefore lags the tags (1.8.41 while v1.8.46 shipped) and is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
-- Providers: Claude Code, Codex CLI, Cursor, OpenRouter, Grok, plus optional Anthropic/OpenAI admin keys.
+- Providers: Claude Code, Codex CLI, Cursor, OpenRouter, Grok, plus optional Anthropic/OpenAI admin keys. **New providers are deferred** (2026-09-12): app quality comes first. See `deferred.md`.
 - Shared models live in `Packages/MeterBarShared`. App group `group.dev.meterbar.app`.
 - Release bundle ids `dev.meterbar.app` / `dev.meterbar.app.Widget`. Debug uses `dev.meterbar.app.debug` so local builds cannot shadow the installed app.
 - The **app is not sandboxed** (must read other tools’ logs/credentials and spawn CLIs). The widget is sandboxed. Hardened runtime on both.
