@@ -31,6 +31,17 @@ jobs:
     name: Report scheduled check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # One reporter at a time per check. The step reads the open issues, decides,
+    # and only then creates — two overlapping runs of the same check would both
+    # read "nothing tracked" and both file an issue, which is exactly the daily
+    # duplicate this is meant to prevent. Nightly is already serialized by its
+    # own `concurrency: nightly`; the daily E2E is not, and these crons have
+    # fired hours behind schedule before, so the overlap is not hypothetical.
+    # `cancel-in-progress: false` makes the second run wait for the first one's
+    # write instead of racing it.
+    concurrency:
+      group: report-scheduled-failure-${{ inputs.check_name }}
+      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
