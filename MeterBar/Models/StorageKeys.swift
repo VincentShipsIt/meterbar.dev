@@ -174,9 +174,14 @@ nonisolated enum StorageKeys {
     /// reads `sessionWakeEventHooks` once, then this key becomes authoritative.
     static let quotaEventIntegrations = "QuotaEventIntegrationsV1"
 
-    /// `CostWindowSelection` raw value (7, 30, or -1 for month-to-date): the Costs page reporting
-    /// window. Missing or unknown means the 30-day view.
+    /// `CostWindowSelection` raw value (7, 30, or -1 for month-to-date): the Usage page reporting
+    /// window. Missing or unknown means the 30-day view. (The key predates the Costs and Optimize
+    /// pages merging into Usage, so it keeps its old name and every reader's saved choice.)
     static let costsWindowDays = "CostsWindowDays"
+    /// `UsageMetric` raw value for the Usage page chart. Missing or unknown means tokens.
+    static let usageChartMetric = "UsageChartMetric"
+    /// `UsageStacking` raw value for the Usage page chart. Missing or unknown means provider.
+    static let usageChartStacking = "UsageChartStacking"
 
     // MARK: - Multi-Mac iCloud aggregation (#499)
 

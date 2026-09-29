@@ -27,7 +27,7 @@ final class DashboardLayoutTests: XCTestCase {
     func testSidebarOrderLeadsWithMonitoringPagesThenHealthThenUtilities() {
         XCTAssertEqual(
             DashboardSection.sidebarOrder,
-            [.overview, .limits, .costs, .optimize, .status, .diagnostics, .share]
+            [.overview, .limits, .usage, .status, .diagnostics, .share]
         )
     }
 
@@ -105,39 +105,39 @@ final class DashboardLayoutTests: XCTestCase {
         XCTAssertGreaterThan(hostingView.fittingSize.height, 0)
     }
 
-    // MARK: - Cost headline cards
+    // MARK: - Usage headline strip
 
-    func testLoadedCostOverviewCardStaysCompact() {
-        let start = Date(timeIntervalSince1970: 1_765_324_800)
-        let end = Date(timeIntervalSince1970: 1_786_003_200)
-        let cost = TokenCost(
+    func testUsageHeadlineStripStaysOneCompactRow() {
+        let report = UsageReport(summary: Self.usageSummary(), selection: .month)
+
+        let host = NSHostingView(rootView: UsageHeadlineStrip(report: report).frame(width: 720))
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(host.fittingSize.height, 0)
+        XCTAssertLessThan(host.fittingSize.height, 160, "four tiles in a row, not a 2×2 block")
+    }
+
+    private static func usageSummary() -> CostSummary {
+        let today = Calendar.current.startOfDay(for: Date())
+        let row = DailyTokenUsage(
+            date: today,
             provider: .claudeCode,
             inputTokens: 1_000,
             outputTokens: 200,
-            cacheCreationTokens: 0,
+            cacheCreationTokens: 100,
             cacheReadTokens: 500,
             estimatedCostUSD: 5_015.59,
-            sessionCount: 1,
-            periodStart: start,
-            periodEnd: end
+            modelBreakdowns: [],
+            projectBreakdowns: [],
+            sessionBreakdowns: []
         )
-        let summary = CostSummary(
-            costs: [cost],
-            totalCostUSD: cost.estimatedCostUSD,
-            totalTokens: cost.totalTokens,
-            periodDays: 30
+        return CostSummary(
+            costs: [],
+            totalCostUSD: row.estimatedCostUSD,
+            totalTokens: row.totalTokens,
+            periodDays: 31,
+            dailyUsage: [row]
         )
-        let overview = CostOverviewStatusCard(
-            summary: summary,
-            isScanning: false,
-            isRefreshingMissingDays: false,
-            formattedTokens: UsageFormat.tokens(summary.totalTokens)
-        )
-
-        let overviewHost = NSHostingView(rootView: overview.frame(width: 380))
-        overviewHost.layoutSubtreeIfNeeded()
-
-        XCTAssertLessThan(overviewHost.fittingSize.height, 220)
     }
 
     func testScanScopeBannerBuildsWithALargeCorpusWarning() {

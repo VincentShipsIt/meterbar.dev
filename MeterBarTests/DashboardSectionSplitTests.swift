@@ -24,9 +24,8 @@ final class DashboardSectionSplitTests: XCTestCase {
                 .overview: .usage,
                 .limits: .usage,
                 .diagnostics: .usage,
-                .costs: .costs,
+                .usage: .costs,
                 .share: .costs,
-                .optimize: .costs,
                 .status: .providerStatus,
             ]
         )
@@ -37,13 +36,22 @@ final class DashboardSectionSplitTests: XCTestCase {
         // which pages are cost-backed; they used to encode this list three times.
         let costBacked = DashboardSection.allCases.filter { $0.refreshTarget == .costs }
 
-        XCTAssertEqual(Set(costBacked), [.costs, .share, .optimize])
+        XCTAssertEqual(Set(costBacked), [.usage, .share])
     }
 
-    func testOnlyTheCostsPageAlsoRefreshesApiUsage() {
+    func testOnlyTheUsagePageAlsoRefreshesApiUsage() {
         let apiBacked = DashboardSection.allCases.filter(\.refreshesApiUsage)
 
-        XCTAssertEqual(apiBacked, [.costs])
+        XCTAssertEqual(apiBacked, [.usage])
+    }
+
+    /// Costs and Optimize were one dataset drawn on two pages (issue #593). The
+    /// merged page is the only entry, and neither old name survives.
+    func testCostsAndOptimizeAreOneUsagePage() {
+        XCTAssertEqual(DashboardSection.allCases.map(\.rawValue).filter { $0 == "Usage" }, ["Usage"])
+        XCTAssertFalse(DashboardSection.allCases.map(\.rawValue).contains("Costs"))
+        XCTAssertFalse(DashboardSection.allCases.map(\.rawValue).contains("Optimize"))
+        XCTAssertEqual(DashboardSection.sidebarOrder.filter { $0 == .usage }.count, 1)
     }
 
     func testEveryDashboardSectionCarriesAnIconAndSubtitle() {
@@ -100,7 +108,7 @@ final class DashboardSectionSplitTests: XCTestCase {
         let navigation = DashboardNavigationStore.shared
         defer { restore(navigation) }
 
-        navigation.navigate(to: .costs)
+        navigation.navigate(to: .usage)
         navigation.openSettings(.widget)
 
         XCTAssertTrue(navigation.isShowingSettings)
@@ -109,7 +117,7 @@ final class DashboardSectionSplitTests: XCTestCase {
         navigation.closeSettings()
 
         XCTAssertFalse(navigation.isShowingSettings)
-        XCTAssertEqual(navigation.selectedSection, .costs, "settings mode must not lose the page underneath")
+        XCTAssertEqual(navigation.selectedSection, .usage, "settings mode must not lose the page underneath")
     }
 
     func testLimitsKeepsDisplayOrderWhenAProviderIsFocused() {
@@ -134,56 +142,39 @@ final class DashboardSectionSplitTests: XCTestCase {
 
     func testCostRefreshStatusPrefersScanningOverTheMissingDayTopUp() {
         XCTAssertEqual(
-            DashboardCostsSection.refreshStatusText(isScanning: true, isRefreshingMissingDays: true),
+            DashboardUsageSection.refreshStatusText(isScanning: true, isRefreshingMissingDays: true),
             "Scanning..."
         )
         XCTAssertEqual(
-            DashboardCostsSection.refreshStatusText(isScanning: false, isRefreshingMissingDays: true),
+            DashboardUsageSection.refreshStatusText(isScanning: false, isRefreshingMissingDays: true),
             "Updating..."
         )
         XCTAssertNil(
-            DashboardCostsSection.refreshStatusText(isScanning: false, isRefreshingMissingDays: false)
+            DashboardUsageSection.refreshStatusText(isScanning: false, isRefreshingMissingDays: false)
         )
     }
 
-    /// The estimate card's subtitle names the window and nothing else: refresh
-    /// state belongs on the trailing edge, matching the spend card rather than
-    /// replacing the card's own caption. The window follows the page's 7/30-day
-    /// toggle.
-    func testCostOverviewSubtitleIsWindowOnlyAndStatusMatchesTheOtherCards() {
+    /// The windows name themselves the same way everywhere they are quoted: the
+    /// picker, the chart card's caption, the headline tiles and the insights.
+    func testWindowSubtitlesNameTheirDays() {
         XCTAssertEqual(CostWindowSelection.month.subtitle, "Last 30 days")
         XCTAssertEqual(CostWindowSelection.week.subtitle, "Last 7 days")
-
-        for isScanning in [true, false] {
-            for isRefreshingMissingDays in [true, false] {
-                XCTAssertEqual(
-                    CostOverviewStatusCard.headerStatus(
-                        isScanning: isScanning,
-                        isRefreshingMissingDays: isRefreshingMissingDays
-                    ),
-                    DashboardCostsSection.refreshStatusText(
-                        isScanning: isScanning,
-                        isRefreshingMissingDays: isRefreshingMissingDays
-                    ),
-                    "estimate card must reuse the page's trailing status wording"
-                )
-            }
-        }
+        XCTAssertEqual(CostWindowSelection.monthToDate.subtitle, "Month to date")
     }
 
-    /// The model list leads with the three biggest spenders; the rest live
-    /// behind an explicit control. No control at all when nothing is hidden.
-    func testModelSpendListCompactsPastTheTopThree() {
-        XCTAssertEqual(CostSpendCharts.compactModelLimit, 3)
-        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 3))
-        XCTAssertNil(CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 0))
+    /// The breakdown table leads with the biggest rows; the rest live behind an
+    /// explicit control. No control at all when nothing is hidden.
+    func testBreakdownTableCompactsPastItsRowLimit() {
+        let limit = UsageBreakdownCard.compactRowLimit
+        XCTAssertNil(UsageBreakdownCard.toggleTitle(showingAll: false, totalCount: limit))
+        XCTAssertNil(UsageBreakdownCard.toggleTitle(showingAll: false, totalCount: 0))
         XCTAssertEqual(
-            CostSpendCharts.modelToggleTitle(showingAll: false, totalCount: 12),
-            "Show all 12 models"
+            UsageBreakdownCard.toggleTitle(showingAll: false, totalCount: limit + 4),
+            "Show all \(limit + 4)"
         )
         XCTAssertEqual(
-            CostSpendCharts.modelToggleTitle(showingAll: true, totalCount: 12),
-            "Show top 3"
+            UsageBreakdownCard.toggleTitle(showingAll: true, totalCount: limit + 4),
+            "Show top \(limit)"
         )
     }
 
@@ -461,68 +452,30 @@ final class DashboardSectionSplitTests: XCTestCase {
         assertRenders(card, width: 900, height: 260)
     }
 
-    // MARK: - Optimize KPI tiles
+    // MARK: - Usage headline tiles
 
-    /// The four KPI tiles are one glanceable band of headline numbers, not a
-    /// 2×2 block that pushes the token-burn chart below the fold.
-    func testOptimizeKpiTilesSitOnASingleRow() {
-        XCTAssertEqual(OptimizeInsightsView.kpiColumns.count, 4)
+    /// The four tiles are one glanceable band of headline numbers, not a 2×2
+    /// block that pushes the chart below the fold.
+    func testUsageHeadlineTilesSitOnASingleRow() {
+        XCTAssertEqual(UsageHeadlineStrip.columns.count, 4)
     }
 
-    /// A quiet week rendered as a bare `0` next to a caption boasting billions
-    /// over 30 days reads as a broken counter. An empty window has to say so.
-    func testRecentWindowTileNamesAnEmptyWeekInsteadOfShowingZero() {
-        let empty = OptimizeInsightsView.recentWindowTile(tokens7Day: 0, tokens30Day: 32_400_000_000)
+    // MARK: - Usage columns
 
-        XCTAssertEqual(empty.value, "None")
-        XCTAssertTrue(
-            empty.caption.contains("over 30 days"),
-            "the 30-day total is the context that makes an empty week legible"
+    /// The insights column sits beside the main one until the window is too
+    /// narrow to give the main column room, then drops under it.
+    func testInsightsColumnCollapsesUnderTheMainColumnOnNarrowWindows() {
+        let threshold = UsageColumnsMetrics.collapseWidth
+
+        XCTAssertEqual(
+            threshold,
+            UsageColumnsMetrics.minimumMainWidth + UsageColumnsMetrics.spacing + UsageColumnsMetrics.sideColumnWidth
         )
-        XCTAssertNotEqual(empty.value, UsageFormat.tokens(0))
-    }
-
-    func testRecentWindowTileReportsNoUsageAtAllWhenBothWindowsAreEmpty() {
-        let blank = OptimizeInsightsView.recentWindowTile(tokens7Day: 0, tokens30Day: 0)
-
-        XCTAssertEqual(blank.value, "None")
-        XCTAssertFalse(
-            blank.caption.contains("over 30 days"),
-            "quoting an empty 30-day total explains nothing"
-        )
-    }
-
-    func testRecentWindowTileKeepsTheNormalReadoutWhenThereIsUsage() {
-        let busy = OptimizeInsightsView.recentWindowTile(tokens7Day: 1_200_000, tokens30Day: 9_000_000)
-
-        XCTAssertEqual(busy.value, UsageFormat.tokens(1_200_000))
-        XCTAssertEqual(busy.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
-    }
-
-    /// The window KPI tile follows the page's 7/30-day toggle: the week keeps
-    /// the empty-week wording above; the month reports the 30-day total.
-    func testWindowTileFollowsTheSelectedWindow() {
-        let week = OptimizeInsightsView.windowTile(
-            selection: .week,
-            tokens7Day: 1_200_000,
-            tokens30Day: 9_000_000
-        )
-        XCTAssertEqual(week.title, "Last 7 days")
-        XCTAssertEqual(week.value, UsageFormat.tokens(1_200_000))
-        XCTAssertEqual(week.caption, "\(UsageFormat.tokens(9_000_000)) over 30 days")
-
-        let month = OptimizeInsightsView.windowTile(
-            selection: .month,
-            tokens7Day: 1_200_000,
-            tokens30Day: 9_000_000
-        )
-        XCTAssertEqual(month.title, "Last 30 days")
-        XCTAssertEqual(month.value, UsageFormat.tokens(9_000_000))
-        XCTAssertEqual(month.caption, "tokens in the last 30 days")
-
-        let emptyMonth = OptimizeInsightsView.windowTile(selection: .month, tokens7Day: 0, tokens30Day: 0)
-        XCTAssertEqual(emptyMonth.value, "None")
-        XCTAssertEqual(emptyMonth.caption, "no tokens recorded in the last 30 days")
+        XCTAssertEqual(UsageColumnsMetrics.sideColumnWidth, 300)
+        XCTAssertTrue(UsageColumnsMetrics.isCollapsed(width: threshold - 1))
+        XCTAssertFalse(UsageColumnsMetrics.isCollapsed(width: threshold))
+        XCTAssertFalse(UsageColumnsMetrics.isCollapsed(width: 1_280))
+        XCTAssertTrue(UsageColumnsMetrics.isCollapsed(width: 600))
     }
 
     // MARK: - Share card sources
@@ -556,7 +509,7 @@ final class DashboardSectionSplitTests: XCTestCase {
                         isScanning: isScanning,
                         isRefreshingMissingDays: isRefreshingMissingDays
                     ),
-                    DashboardCostsSection.refreshStatusText(
+                    DashboardUsageSection.refreshStatusText(
                         isScanning: isScanning,
                         isRefreshingMissingDays: isRefreshingMissingDays
                     ),
@@ -640,8 +593,8 @@ final class DashboardSectionSplitTests: XCTestCase {
         assertRenders(view)
     }
 
-    func testCostsSectionRenders() {
-        assertRenders(DashboardCostsSection(summary: nil, quotaSnapshot: { _ in nil }))
+    func testUsageSectionRenders() {
+        assertRenders(DashboardUsageSection(summary: nil))
     }
 
     func testStatusSectionRenders() {

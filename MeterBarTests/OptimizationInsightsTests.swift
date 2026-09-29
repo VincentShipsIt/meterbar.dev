@@ -2,13 +2,12 @@ import XCTest
 import MeterBarShared
 @testable import MeterBar
 
-/// TDD coverage for the token-optimization recommendation engine (#72).
+/// Coverage for the model-cost tiers and the recommendation rules (#72, #593).
 ///
-/// The engine is a pure, local-only analytics layer over the cached
-/// `CostSummary` — it consumes token totals, model names, and derived stats
-/// only. These tests assert the math and the plain-English recommendation
-/// thresholds without any network or on-disk state, mirroring the
-/// `SocialShareCardContent` pattern.
+/// The rules are pure and local-only: they consume token totals, model names
+/// and derived stats only. The figures they read are cut per reporting window
+/// by `UsageReport` and asserted in `UsageReportTests`; these tests pin the
+/// tiering, the thresholds and the copy without any network or on-disk state.
 final class OptimizationInsightsTests: XCTestCase {
     // MARK: - Model tier classification
 
@@ -16,6 +15,7 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertEqual(ModelTier.classify("claude-opus-4-8"), .premium)
         XCTAssertEqual(ModelTier.classify("claude-fable-5"), .premium)
         XCTAssertEqual(ModelTier.classify("gpt-5"), .premium)
+        XCTAssertEqual(ModelTier.classify("gpt-6-astra"), .premium)
         XCTAssertEqual(ModelTier.classify("o3"), .premium)
         // Bedrock/date-suffixed variants still classify by family substring.
         XCTAssertEqual(ModelTier.classify("us.anthropic.claude-opus-4-8-20260101"), .premium)
@@ -25,6 +25,7 @@ final class OptimizationInsightsTests: XCTestCase {
         XCTAssertEqual(ModelTier.classify("claude-sonnet-4-5"), .standard)
         XCTAssertEqual(ModelTier.classify("codex"), .standard)
         XCTAssertEqual(ModelTier.classify("gpt-4o"), .standard)
+        XCTAssertEqual(ModelTier.classify("grok-4.6-build"), .standard)
     }
 
     func testClassifyEconomyModels() {
@@ -87,7 +88,7 @@ final class OptimizationInsightsTests: XCTestCase {
                 severity: .suggestion,
                 systemImage: "bolt.badge.automatic"
             )
-            let row = RecommendationRow(recommendation: recommendation)
+            let row = UsageInsightRow(recommendation: recommendation)
 
             XCTAssertTrue(recommendation.detail.contains(expectation.marker))
             XCTAssertTrue(
@@ -98,393 +99,124 @@ final class OptimizationInsightsTests: XCTestCase {
         }
     }
 
-    // MARK: - Optimization score
+    // MARK: - Recommendation rules
 
-    func testScoreBestCaseIsHundred() {
-        let score = OptimizationInsights.computeScore(
-            premiumShare: 0.0,
-            inputOutputRatio: 4.0,
-            cacheReuseRatio: 1.0,
-            topOriginShare: 0.2
-        )
-        XCTAssertEqual(score, 100)
+    private typealias Inputs = OptimizationInsights.Inputs
+
+    private func recommendation(
+        _ id: String,
+        in inputs: Inputs
+    ) -> OptimizationRecommendation? {
+        OptimizationInsights(inputs: inputs).recommendations.first { $0.id == id }
     }
 
-    func testScoreWorstCaseIsZero() {
-        let score = OptimizationInsights.computeScore(
-            premiumShare: 1.0,
-            inputOutputRatio: 40.0,
-            cacheReuseRatio: 0.0,
-            topOriginShare: 1.0
-        )
-        XCTAssertEqual(score, 0)
-    }
-
-    func testScoreIsClampedToRange() {
-        let score = OptimizationInsights.computeScore(
-            premiumShare: 2.0,          // out-of-range inputs are clamped
-            inputOutputRatio: 500.0,
-            cacheReuseRatio: -1.0,
-            topOriginShare: 5.0
-        )
-        XCTAssertTrue((0...100).contains(score))
-    }
-
-    func testScoreFallsAsPremiumShareRises() {
-        let lean = OptimizationInsights.computeScore(
-            premiumShare: 0.1, inputOutputRatio: 8.0, cacheReuseRatio: 0.6, topOriginShare: 0.4
-        )
-        let heavy = OptimizationInsights.computeScore(
-            premiumShare: 0.9, inputOutputRatio: 8.0, cacheReuseRatio: 0.6, topOriginShare: 0.4
-        )
-        XCTAssertGreaterThan(lean, heavy)
-    }
-
-    func testScoreFallsAsCacheReuseDrops() {
-        let goodReuse = OptimizationInsights.computeScore(
-            premiumShare: 0.3, inputOutputRatio: 8.0, cacheReuseRatio: 0.9, topOriginShare: 0.4
-        )
-        let poorReuse = OptimizationInsights.computeScore(
-            premiumShare: 0.3, inputOutputRatio: 8.0, cacheReuseRatio: 0.1, topOriginShare: 0.4
-        )
-        XCTAssertGreaterThan(goodReuse, poorReuse)
-    }
-
-    func testScoreTreatsMissingSignalsAsNeutral() {
-        // nil cache + nil ratio must not crash and must stay mid-range, not 0/100.
-        let score = OptimizationInsights.computeScore(
-            premiumShare: 0.5, inputOutputRatio: nil, cacheReuseRatio: nil, topOriginShare: 0.5
-        )
-        XCTAssertTrue((30...70).contains(score), "neutral score was \(score)")
-    }
-
-    // MARK: - Full pipeline from CostSummary
-
-    func testInsightsFromPopulatedSummary() {
-        let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
-
-        XCTAssertTrue(insights.hasData)
-        XCTAssertEqual(insights.totalTokens, Self.populatedSummary().totalTokens)
-
-        // Ranked model breakdown: opus (biggest) ranks first, descending tokens.
-        XCTAssertFalse(insights.topModels.isEmpty)
-        XCTAssertEqual(insights.topModels.first?.name, "claude-opus-4-8")
-        let modelTokens = insights.topModels.map(\.totalTokens)
-        XCTAssertEqual(modelTokens, modelTokens.sorted(by: >))
-
-        // Ranked origin breakdown exists and is descending.
-        XCTAssertFalse(insights.topOrigins.isEmpty)
-        XCTAssertEqual(insights.topOrigins.first?.name, "Agents")
-
-        // Premium share = opus tokens / all model tokens.
-        // opus 3,000,000 of (3,000,000 + 1,000,000 + 400,000) = 0.6818...
-        XCTAssertEqual(insights.premiumTokenShare, 3_000_000.0 / 4_400_000.0, accuracy: 0.0001)
-    }
-
-    func testSevenAndThirtyDayWindows() {
-        let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
-        // Fixture places 100k tokens/day for 40 days. The 7-day window counts the
-        // most recent 7 calendar days (today + 6 back); 30-day counts 30.
-        XCTAssertEqual(insights.tokens7Day, 700_000)
-        XCTAssertEqual(insights.tokens30Day, 3_000_000)
-        XCTAssertGreaterThan(insights.tokens30Day, insights.tokens7Day)
-    }
-
-    /// `America/Santiago` springs forward *at* local midnight on 2026-09-06,
-    /// so `startOfDay(now)` on that day is 01:00, not 00:00. Computing the
-    /// 7/30-day windows by stepping back from that instant without
-    /// re-normalizing every hop preserves 01:00 on earlier days, so their
-    /// rows fall outside the `>=` bound and both windows undercount. The
-    /// fixed `Self.referenceNow` used elsewhere in this file is UTC-pinned
-    /// and cannot exercise this.
-    func testSevenAndThirtyDayWindowsSurviveTheSantiagoMidnightTransition() {
-        var santiago = Calendar(identifier: .gregorian)
-        santiago.timeZone = TimeZone(identifier: "America/Santiago") ?? .current
-        let dstNow = ISO8601DateFormatter().date(from: "2026-09-06T13:00:00Z") ?? Date()
-
-        func exactDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
-            var components = DateComponents()
-            components.year = year
-            components.month = month
-            components.day = day
-            let date = santiago.date(from: components) ?? dstNow
-            return santiago.startOfDay(for: date)
-        }
-
-        XCTAssertEqual(santiago.component(.hour, from: exactDay(2026, 9, 6)), 1)
-
-        func row(_ date: Date, tokens: Int) -> DailyTokenUsage {
-            DailyTokenUsage(
-                date: date,
-                provider: .claudeCode,
-                inputTokens: tokens,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                estimatedCostUSD: 0
-            )
-        }
-
-        let cost = TokenCost(
-            provider: .claudeCode,
-            inputTokens: 100,
-            outputTokens: 0,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
-            estimatedCostUSD: 1,
-            sessionCount: 1,
-            periodStart: exactDay(2026, 9, 6),
-            periodEnd: exactDay(2026, 9, 6)
-        )
-        let summary = CostSummary(
-            costs: [cost],
-            totalCostUSD: 1,
-            totalTokens: 100,
-            periodDays: 30,
-            dailyUsage: [
-                // Inside both windows.
-                row(exactDay(2026, 9, 6), tokens: 100),
-                // Inside the 7-day window (6 days back) and the 30-day one.
-                row(exactDay(2026, 8, 31), tokens: 100),
-                // Inside only the 30-day window (29 days back).
-                row(exactDay(2026, 8, 8), tokens: 100),
-            ]
-        )
-
-        let insights = OptimizationInsights(summary: summary, now: dstNow, calendar: santiago)
-
-        XCTAssertEqual(insights.tokens7Day, 200)
-        XCTAssertEqual(insights.tokens30Day, 300)
-    }
-
-    func testCacheReuseRatioFromSummary() {
-        let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
-        // Aggregate cacheRead 8,000,000 / (cacheRead 8,000,000 + cacheCreation 2,000,000) = 0.8
-        XCTAssertNotNil(insights.cacheReuseRatio)
-        XCTAssertEqual(insights.cacheReuseRatio ?? 0, 0.8, accuracy: 0.0001)
-    }
-
-    func testInputOutputRatioFromSummary() {
-        let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
-        // input 6,000,000 / output 1,500,000 = 4.0
-        XCTAssertNotNil(insights.inputOutputRatio)
-        XCTAssertEqual(insights.inputOutputRatio ?? 0, 4.0, accuracy: 0.0001)
-    }
-
-    // MARK: - Recommendations
-
-    func testHighPremiumShareProducesWarning() {
+    func testHighPremiumShareProducesWarningWithItsSource() {
         // 90% premium tokens -> a premium-routing warning must appear.
-        let summary = Self.summary(models: [
-            Self.model(name: "claude-opus-4-8", provider: .claudeCode, total: 9_000_000),
-            Self.model(name: "claude-haiku-4-5", provider: .claudeCode, total: 1_000_000)
-        ])
-        let insights = OptimizationInsights(summary: summary, now: Self.referenceNow)
+        let inputs = Inputs(premiumTokens: 9_000_000, attributedModelTokens: 10_000_000)
 
-        let premiumRec = insights.recommendations.first { $0.id == "premium-share" }
-        XCTAssertNotNil(premiumRec)
-        XCTAssertEqual(premiumRec?.severity, .warning)
-        XCTAssertEqual(premiumRec?.title, "High-cost models are doing most of the work")
-        XCTAssertEqual(premiumRec?.detail.contains("$$$ models"), true)
+        let premium = recommendation("premium-share", in: inputs)
+
+        XCTAssertEqual(premium?.severity, .warning)
+        XCTAssertEqual(premium?.title, "High-cost models are doing most of the work")
+        XCTAssertEqual(premium?.detail.contains("$$$ models"), true)
+        XCTAssertEqual(premium?.source, "90% · 9.0M of 10.0M tokens")
+    }
+
+    func testModeratePremiumShareProducesASuggestion() {
+        let premium = recommendation("premium-share", in: Inputs(premiumTokens: 35, attributedModelTokens: 100))
+
+        XCTAssertEqual(premium?.severity, .suggestion)
+    }
+
+    func testNoPremiumInsightBelowTheThresholdOrWithoutAttribution() {
+        XCTAssertNil(recommendation("premium-share", in: Inputs(premiumTokens: 20, attributedModelTokens: 100)))
+        XCTAssertNil(recommendation("premium-share", in: Inputs()))
+        XCTAssertNil(OptimizationInsights(inputs: Inputs()).premiumTokenShare)
+        XCTAssertEqual(OptimizationInsights(inputs: Inputs()).formattedPremiumShare, "—")
     }
 
     func testLowCacheReuseProducesWarning() {
-        let summary = Self.summary(models: [
-            Self.model(
-                name: "claude-sonnet-4-5",
-                provider: .claudeCode,
-                input: 1_000_000,
-                output: 1_000_000,
-                cacheCreation: 9_000_000,   // churning cache
-                cacheRead: 1_000_000        // reuse ratio 0.1
-            )
-        ])
-        let insights = OptimizationInsights(summary: summary, now: Self.referenceNow)
+        let inputs = Inputs(cacheUse: .init(readTokens: 1_000_000, writeTokens: 9_000_000))
 
-        let cacheRec = insights.recommendations.first { $0.title.localizedCaseInsensitiveContains("cache") }
-        XCTAssertNotNil(cacheRec)
-        XCTAssertEqual(cacheRec?.severity, .warning)
+        let cache = recommendation("cache-reuse", in: inputs)
+
+        XCTAssertEqual(cache?.severity, .warning)
+        XCTAssertEqual(cache?.source, "1.0M read · 9.0M written")
     }
 
-    func testLeanUsageProducesPositiveNotWarning() {
-        let summary = Self.summary(models: [
-            Self.model(
-                name: "claude-haiku-4-5",
-                provider: .claudeCode,
-                input: 1_000_000,
-                output: 500_000,
-                cacheCreation: 500_000,
-                cacheRead: 4_500_000        // reuse ratio 0.9
-            )
-        ])
-        let insights = OptimizationInsights(summary: summary, now: Self.referenceNow)
+    func testHealthyCacheReuseIsPositive() {
+        let inputs = Inputs(cacheUse: .init(readTokens: 9_000_000, writeTokens: 1_000_000))
 
-        XCTAssertFalse(insights.recommendations.isEmpty)
-        XCTAssertFalse(
-            insights.recommendations.contains { $0.severity == .warning },
-            "lean usage should not raise warnings"
-        )
+        XCTAssertEqual(recommendation("cache-reuse", in: inputs)?.severity, .positive)
     }
 
-    func testRecommendationsSortedBySeverityDescending() {
-        let insights = OptimizationInsights(summary: Self.populatedSummary(), now: Self.referenceNow)
+    func testMissingCacheUseProducesNoCacheInsight() {
+        XCTAssertNil(recommendation("cache-reuse", in: Inputs()))
+        XCTAssertNil(OptimizationInsights(inputs: Inputs()).cacheReuseRatio)
+    }
+
+    func testInputDwarfingOutputIsFlaggedOnlyPastTheThreshold() {
+        let heavy = recommendation("input-output-ratio", in: Inputs(inputTokens: 25_000, outputTokens: 1_000))
+        XCTAssertEqual(heavy?.severity, .suggestion)
+        XCTAssertEqual(heavy?.source, "25.0K input · 1.0K output")
+
+        XCTAssertNil(recommendation("input-output-ratio", in: Inputs(inputTokens: 8_000, outputTokens: 1_000)))
+        XCTAssertNil(recommendation("input-output-ratio", in: Inputs(inputTokens: 8_000, outputTokens: 0)))
+    }
+
+    func testOriginConcentrationNeedsHalfTheTokens() {
+        let concentrated = Inputs(topOrigin: .init(name: "Agents", tokens: 700, groupTokens: 1_000))
+        XCTAssertEqual(recommendation("origin-concentration", in: concentrated)?.title, "Agents is your biggest token driver")
+
+        let spread = Inputs(topOrigin: .init(name: "Agents", tokens: 400, groupTokens: 1_000))
+        XCTAssertNil(recommendation("origin-concentration", in: spread))
+    }
+
+    func testTrendNeedsTheRecentRateToRunTwentyPercentAboveTheWindow() {
+        let hot = Inputs(trend: .init(recentDailyTokens: 130, windowDailyTokens: 100, recentDays: 7))
+        XCTAssertNotNil(recommendation("trend-up", in: hot))
+
+        let steady = Inputs(trend: .init(recentDailyTokens: 110, windowDailyTokens: 100, recentDays: 7))
+        XCTAssertNil(recommendation("trend-up", in: steady))
+    }
+
+    func testLeanFallbackAppearsWhenNothingIsFlaggedAndHasNoSource() {
+        let insights = OptimizationInsights(inputs: Inputs(
+            premiumTokens: 0,
+            attributedModelTokens: 100,
+            cacheUse: .init(readTokens: 50, writeTokens: 50)
+        ))
+
+        XCTAssertEqual(insights.recommendations.map(\.id), ["lean"])
+        XCTAssertNil(insights.recommendations.first?.source)
+    }
+
+    func testNoRecommendationsWithoutData() {
+        XCTAssertTrue(OptimizationInsights(inputs: Inputs(), hasData: false).recommendations.isEmpty)
+    }
+
+    func testRecommendationsAreSortedBySeverityDescending() {
+        let insights = OptimizationInsights(inputs: Inputs(
+            premiumTokens: 90,
+            attributedModelTokens: 100,
+            inputTokens: 30_000,
+            outputTokens: 1_000,
+            cacheUse: .init(readTokens: 900, writeTokens: 100)
+        ))
+
         let severities = insights.recommendations.map(\.severity.rawValue)
         XCTAssertEqual(severities, severities.sorted(by: >))
+        XCTAssertGreaterThan(insights.recommendations.count, 1)
     }
 
-    // MARK: - Empty state
+    func testFormattedRatios() {
+        let insights = OptimizationInsights(inputs: Inputs(
+            inputTokens: 6_000,
+            outputTokens: 1_500,
+            cacheUse: .init(readTokens: 8, writeTokens: 2)
+        ))
 
-    func testEmptySummaryHasNoData() {
-        let empty = CostSummary(costs: [], totalCostUSD: 0, totalTokens: 0, periodDays: 30, dailyUsage: [])
-        let insights = OptimizationInsights(summary: empty, now: Self.referenceNow)
-
-        XCTAssertFalse(insights.hasData)
-        XCTAssertTrue(insights.topModels.isEmpty)
-        XCTAssertTrue(insights.topOrigins.isEmpty)
-        XCTAssertTrue(insights.recommendations.isEmpty)
-    }
-
-    // MARK: - Fixtures
-
-    /// Fixed "now" so daily-window math is deterministic.
-    private static let referenceNow: Date = {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 7
-        components.day = 3
-        components.hour = 12
-        return Calendar.current.date(from: components) ?? Date(timeIntervalSince1970: 1_783_080_000)
-    }()
-
-    private static func model(
-        name: String,
-        provider: ServiceType,
-        input: Int = 0,
-        output: Int = 0,
-        cacheCreation: Int = 0,
-        cacheRead: Int = 0,
-        total: Int? = nil,
-        sessionCount: Int = 1
-    ) -> TokenUsageBreakdown {
-        // When `total` is supplied, stuff it into input so totalTokens matches
-        // without callers specifying every bucket.
-        let resolvedInput = total ?? input
-        return TokenUsageBreakdown(
-            provider: provider,
-            name: name,
-            inputTokens: resolvedInput,
-            outputTokens: output,
-            cacheCreationTokens: cacheCreation,
-            cacheReadTokens: cacheRead,
-            estimatedCostUSD: Double(resolvedInput + output + cacheCreation + cacheRead) / 1_000_000.0,
-            sessionCount: sessionCount
-        )
-    }
-
-    private static func origin(
-        name: String,
-        provider: ServiceType,
-        total: Int,
-        sessionCount: Int = 1
-    ) -> TokenUsageBreakdown {
-        TokenUsageBreakdown(
-            provider: provider,
-            name: name,
-            inputTokens: total,
-            outputTokens: 0,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
-            estimatedCostUSD: Double(total) / 1_000_000.0,
-            sessionCount: sessionCount
-        )
-    }
-
-    /// Build a single-provider summary from model breakdowns, deriving the
-    /// top-level token buckets so aggregates line up with the breakdowns.
-    private static func summary(models: [TokenUsageBreakdown]) -> CostSummary {
-        let input = models.reduce(0) { $0 + $1.inputTokens }
-        let output = models.reduce(0) { $0 + $1.outputTokens }
-        let cacheCreation = models.reduce(0) { $0 + $1.cacheCreationTokens }
-        let cacheRead = models.reduce(0) { $0 + $1.cacheReadTokens }
-        let cost = models.reduce(0) { $0 + $1.estimatedCostUSD }
-
-        let tokenCost = TokenCost(
-            provider: models.first?.provider ?? .claudeCode,
-            inputTokens: input,
-            outputTokens: output,
-            cacheCreationTokens: cacheCreation,
-            cacheReadTokens: cacheRead,
-            estimatedCostUSD: cost,
-            sessionCount: 1,
-            periodStart: referenceNow.addingTimeInterval(-30 * 86_400),
-            periodEnd: referenceNow,
-            modelBreakdowns: models,
-            originBreakdowns: []
-        )
-        let total = input + output + cacheCreation + cacheRead
-        return CostSummary(
-            costs: [tokenCost],
-            totalCostUSD: cost,
-            totalTokens: total,
-            periodDays: 30,
-            dailyUsage: []
-        )
-    }
-
-    /// A realistic multi-model, multi-origin, 40-day summary.
-    ///
-    /// Model breakdowns use single-bucket totals so the premium-share assertion
-    /// (opus / all-models) reads cleanly; the provider's aggregate token buckets
-    /// are set independently below to drive the input/output and cache ratios.
-    private static func populatedSummary() -> CostSummary {
-        let shareModels = [
-            model(name: "claude-opus-4-8", provider: .claudeCode, total: 3_000_000),
-            model(name: "claude-sonnet-4-5", provider: .claudeCode, total: 1_000_000),
-            model(name: "claude-haiku-4-5", provider: .claudeCode, total: 400_000)
-        ]
-
-        let origins = [
-            origin(name: "Agents", provider: .claudeCode, total: 2_500_000),
-            origin(name: "Main chat", provider: .claudeCode, total: 1_200_000),
-            origin(name: "Tool use", provider: .claudeCode, total: 700_000)
-        ]
-
-        // Aggregate buckets: input 6.0M / output 1.5M (ratio 4.0);
-        // cacheRead 8.0M / cacheCreation 2.0M (reuse 0.8).
-        let tokenCost = TokenCost(
-            provider: .claudeCode,
-            inputTokens: 6_000_000,
-            outputTokens: 1_500_000,
-            cacheCreationTokens: 2_000_000,
-            cacheReadTokens: 8_000_000,
-            estimatedCostUSD: 42.0,
-            sessionCount: 12,
-            periodStart: referenceNow.addingTimeInterval(-40 * 86_400),
-            periodEnd: referenceNow,
-            modelBreakdowns: shareModels,
-            originBreakdowns: origins
-        )
-
-        // 40 days of daily rows at 100k tokens/day (70k input + 30k read).
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: referenceNow)
-        let daily: [DailyTokenUsage] = (0..<40).compactMap { offset in
-            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            return DailyTokenUsage(
-                date: date,
-                provider: .claudeCode,
-                inputTokens: 70_000,
-                outputTokens: 0,
-                cacheReadTokens: 30_000,
-                estimatedCostUSD: 0.5
-            )
-        }
-
-        return CostSummary(
-            costs: [tokenCost],
-            totalCostUSD: 42.0,
-            totalTokens: 17_500_000,
-            periodDays: 40,
-            dailyUsage: daily
-        )
+        XCTAssertEqual(insights.formattedInputOutputRatio, "4.0 : 1")
+        XCTAssertEqual(insights.formattedCacheReuse, "80%")
     }
 }

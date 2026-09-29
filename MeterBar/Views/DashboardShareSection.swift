@@ -72,7 +72,7 @@ struct DashboardShareSection: View {
     /// Shared with the Costs cards so the preview and the spend cards announce
     /// the same scan state in the same words — the same two flags drive both.
     static func scanStatusText(isScanning: Bool, isRefreshingMissingDays: Bool) -> String? {
-        DashboardCostsSection.refreshStatusText(
+        DashboardUsageSection.refreshStatusText(
             isScanning: isScanning,
             isRefreshingMissingDays: isRefreshingMissingDays
         )

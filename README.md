@@ -61,7 +61,8 @@ by itself once a limit resets.
 ### Cost and optimization
 
 - **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded
-- **Optimize Tab**: See where tokens actually go, and which provider has the most headroom right now
+- **Usage Tab**: One reporting window over tokens and spend: a headline strip, a time series stackable by provider, token type or model, a breakdown by model, origin, project or provider with each row's input/output/cache mix, and an insights column that says what to trim and how far to trust the numbers
+- **What To Use Next**: At the top of Limits, ranks which provider has the most headroom right now
 - **Display Currency**: Keep USD as the default or choose EUR with daily ECB reference rates and an offline cache (Settings → Costs)
 
 ### Scripting
@@ -191,9 +192,8 @@ exhausted — a countdown to when usage resumes.
 | Tab | What it shows |
 |-----|---------------|
 | **Overview** | Current health and local token history |
-| **Limits** | Every tracked quota window |
-| **Costs** | Local 30-day token spend |
-| **Optimize** | Where tokens go, and which provider has headroom right now |
+| **Limits** | Every tracked quota window, ranked by headroom |
+| **Usage** | Where tokens and spend go, and how to trim them |
 | **Status** | Provider service health |
 | **Diagnostics** | Provider setup health |
 | **Share** | Social card export |
@@ -271,7 +271,7 @@ prevents two from racing each other.
 
 ## Cost Tracking
 
-The **Costs** tab computes 30-day token spend by scanning your local Claude,
+The **Usage** tab computes 30-day token spend by scanning your local Claude,
 Codex, and Grok session logs. The scan is incremental and resumable — it caches
 per-file results and picks up where it left off rather than re-reading the whole
 corpus each time. Nothing is uploaded; the numbers are derived entirely from
@@ -304,7 +304,7 @@ meterbar cost --json
 ```
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
-the app's Costs tab), so the CLI and the app always show the same numbers.
+the app's Usage tab), so the CLI and the app always show the same numbers.
 The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
 ### HTTP Endpoint

@@ -23,10 +23,12 @@ nonisolated enum ModelTier: String, Sendable, Equatable {
         let economyMarkers = ["haiku", "mini", "nano", "flash", "lite", "small"]
         if economyMarkers.contains(where: name.contains) { return .economy }
 
-        let premiumMarkers = ["opus", "fable", "gpt-5", "gpt5", "o3", "o1"]
+        let premiumMarkers = ["opus", "fable", "gpt-6", "gpt6", "gpt-5", "gpt5", "o3", "o1"]
         if premiumMarkers.contains(where: name.contains) { return .premium }
 
-        let standardMarkers = ["sonnet", "codex", "gpt-4", "gpt4", "gpt-3"]
+        // Grok's coding models bill at $2/$6 per million, which is Sonnet's
+        // class rather than Opus's, so the whole family reads as mid-cost.
+        let standardMarkers = ["sonnet", "codex", "grok", "gpt-4", "gpt4", "gpt-3"]
         if standardMarkers.contains(where: name.contains) { return .standard }
 
         return .unknown
@@ -119,26 +121,6 @@ nonisolated enum ModelTier: String, Sendable, Equatable {
     }
 }
 
-// MARK: - Ranked entry
-
-/// One row of a ranked token breakdown (by model or by usage origin).
-nonisolated struct RankedTokenEntry: Identifiable, Equatable, Sendable {
-    let id: String
-    let name: String
-    let provider: ServiceType
-    let totalTokens: Int
-    let estimatedCostUSD: Double
-    let sessionCount: Int
-    /// Share of the ranked group's grand total, 0...1.
-    let tokenShare: Double
-
-    var tier: ModelTier { ModelTier.classify(name) }
-
-    var formattedTokens: String { UsageFormat.tokens(totalTokens) }
-    var formattedCost: String { UsageFormat.cost(estimatedCostUSD) }
-    var formattedShare: String { OptimizationInsights.percentString(tokenShare) }
-}
-
 // MARK: - Recommendation
 
 nonisolated enum RecommendationSeverity: Int, Comparable, Sendable {
@@ -160,6 +142,26 @@ nonisolated struct OptimizationRecommendation: Identifiable, Equatable, Sendable
     let detail: String
     let severity: RecommendationSeverity
     let systemImage: String
+    /// The numbers the recommendation was derived from ("62% · 3.0M of 4.4M
+    /// tokens"), so it can be checked rather than taken on faith. `nil` only
+    /// for the "usage looks lean" fallback, which is the absence of a signal.
+    var source: String?
+
+    init(
+        id: String,
+        title: String,
+        detail: String,
+        severity: RecommendationSeverity,
+        systemImage: String,
+        source: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.severity = severity
+        self.systemImage = systemImage
+        self.source = source
+    }
 
     var accessibilityDetail: String {
         ModelTier.accessibilityText(replacingCostMarkersIn: detail)
@@ -168,33 +170,20 @@ nonisolated struct OptimizationRecommendation: Identifiable, Equatable, Sendable
 
 // MARK: - Insights
 
-/// Pure, local-only analytics over the cached `CostSummary`.
+/// Pure, local-only recommendations over one reporting window.
 ///
 /// **Privacy boundary (hard):** this type reads token totals, model names,
 /// origin/workflow metadata, and derived statistics. It never touches prompt
 /// contents and nothing here is uploaded — every value is computed on-device
-/// from the same cache the Costs page already renders. Kept as a pure model
+/// from the same cache the Usage page already renders. Kept as a pure model
 /// (no SwiftUI, no I/O) so the recommendation logic is unit-testable, matching
 /// the `SocialShareCardContent` pattern.
+///
+/// It is built from a `UsageReport`, which has already cut every figure to the
+/// selected window; this type only decides what the figures mean. There is no
+/// blended score or letter grade — it was a weighted average of four heuristics
+/// and hid which one moved. Each signal stands as its own row instead.
 nonisolated struct OptimizationInsights: Equatable, Sendable {
-    // MARK: Tunable scoring constants
-
-    private enum Score {
-        static let premiumWeight = 0.40
-        static let cacheWeight = 0.25
-        static let bloatWeight = 0.20
-        static let concentrationWeight = 0.15
-
-        /// Input:output ratios at or below this are treated as unbloated.
-        static let idealInputOutputRatio = 8.0
-        /// Ratio at/above which the context-bloat component bottoms out.
-        static let bloatCeilingRatio = 32.0
-        /// Origin share at/below which no concentration penalty applies.
-        static let concentrationFloor = 0.5
-        /// Neutral fill for signals we cannot measure (no output / no cache).
-        static let neutralComponent = 0.5
-    }
-
     private enum Threshold {
         static let premiumWarning = 0.5
         static let premiumSuggestion = 0.3
@@ -205,47 +194,65 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         static let trendUpMultiplier = 1.2
     }
 
-    // MARK: KPIs
+    /// Cache reads and writes from the providers that report both. Codex and
+    /// Grok log reads but never writes, so folding them in would push the
+    /// ratio toward 100% whatever the real behavior was.
+    struct CacheUse: Equatable, Sendable {
+        let readTokens: Double
+        let writeTokens: Double
 
-    let totalTokens: Int
-    let periodDays: Int
-    let tokens7Day: Int
-    let tokens30Day: Int
-    let premiumTokenShare: Double
-    let inputOutputRatio: Double?
-    let cacheReuseRatio: Double?
-    let topModels: [RankedTokenEntry]
-    let topOrigins: [RankedTokenEntry]
-    let optimizationScore: Int
+        var reuseRatio: Double? {
+            let denominator = readTokens + writeTokens
+            return denominator > 0 ? readTokens / denominator : nil
+        }
+    }
+
+    struct OriginShare: Equatable, Sendable {
+        let name: String
+        let tokens: Double
+        let groupTokens: Double
+
+        var share: Double { groupTokens > 0 ? tokens / groupTokens : 0 }
+    }
+
+    struct Trend: Equatable, Sendable {
+        let recentDailyTokens: Double
+        let windowDailyTokens: Double
+        let recentDays: Int
+    }
+
+    /// Everything the recommendation rules read, already windowed.
+    struct Inputs: Equatable, Sendable {
+        var premiumTokens: Double = 0
+        var attributedModelTokens: Double = 0
+        var inputTokens: Double = 0
+        var outputTokens: Double = 0
+        var cacheUse: CacheUse?
+        var topOrigin: OriginShare?
+        var trend: Trend?
+    }
+
+    let inputs: Inputs
     let recommendations: [OptimizationRecommendation]
 
-    var hasData: Bool { totalTokens > 0 }
-
-    var scoreGrade: String {
-        switch optimizationScore {
-        case 85...: return "A"
-        case 70..<85: return "B"
-        case 55..<70: return "C"
-        case 40..<55: return "D"
-        default: return "F"
-        }
+    /// Premium-tier share of the tokens whose model is known. `nil` when no
+    /// token in the window carries model attribution.
+    var premiumTokenShare: Double? {
+        inputs.attributedModelTokens > 0 ? inputs.premiumTokens / inputs.attributedModelTokens : nil
     }
 
-    var scoreHeadline: String {
-        switch optimizationScore {
-        case 85...: return "Lean usage"
-        case 70..<85: return "Efficient"
-        case 55..<70: return "Room to optimize"
-        case 40..<55: return "Heavy usage"
-        default: return "Very heavy usage"
-        }
+    var inputOutputRatio: Double? {
+        inputs.outputTokens > 0 ? inputs.inputTokens / inputs.outputTokens : nil
     }
 
-    var formattedPremiumShare: String { Self.percentString(premiumTokenShare) }
+    var cacheReuseRatio: Double? { inputs.cacheUse?.reuseRatio }
+
+    var formattedPremiumShare: String {
+        premiumTokenShare.map(Self.percentString) ?? "—"
+    }
 
     var formattedCacheReuse: String {
-        guard let cacheReuseRatio else { return "—" }
-        return Self.percentString(cacheReuseRatio)
+        cacheReuseRatio.map(Self.percentString) ?? "—"
     }
 
     var formattedInputOutputRatio: String {
@@ -253,247 +260,114 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         return String(format: "%.1f : 1", inputOutputRatio)
     }
 
-    // MARK: Init
-
-    init(summary: CostSummary, now: Date = Date(), calendar: Calendar = .current) {
-        let costs = summary.costs
-
-        // Flatten model + origin breakdowns across every provider.
-        let modelBreakdowns = costs.flatMap(\.modelBreakdowns)
-        let originBreakdowns = costs.flatMap(\.originBreakdowns)
-
-        // Ratio denominators (issue #575): folded as `Double`, not `Int`.
-        // `SafeAccumulate.sum` is the right call for a total that is itself
-        // displayed, but a *share* built from two independently saturating
-        // `Int` sums — this total and a numerator drawn from a subset of the
-        // same rows — loses the real split the moment either one hits the
-        // bound: two merely-large-but-different provider totals both read
-        // back as `Int.max` and the share renders as 100% instead of the
-        // true proportion. `Double` never traps and stays faithful to that
-        // proportion far past what `Int` can hold, so `sumAsDouble` is used
-        // everywhere a ratio (not a displayed count) is being built.
-        //
-        // Issue #591: the operands are the raw *components*, not each row's
-        // already-saturated `totalTokens`. A row whose components overflow
-        // `Int` reads back as `Int.max` whatever its true size, so converting
-        // that to `Double` still ties rows of different real size.
-        let modelTokenTotal = modelBreakdowns.reduce(0) { $0 + $1.rawTotalTokens }
-        let originTokenTotal = originBreakdowns.reduce(0) { $0 + $1.rawTotalTokens }
-
-        self.topModels = Self.rank(modelBreakdowns, groupTotal: modelTokenTotal)
-        self.topOrigins = Self.rank(originBreakdowns, groupTotal: originTokenTotal)
-
-        // Aggregate token buckets across providers.
-        // Saturating (issue #575): per-provider `TokenCost` fields come
-        // straight off the persisted cache and may already sit at the bound.
-        // `cacheCreation` stays an `Int` below only for its own existence
-        // check (`> 0`), which saturation cannot make wrong.
-        let cacheCreation = SafeAccumulate.sum(costs.map(\.cacheCreationTokens))
-
-        self.totalTokens = summary.totalTokens
-        self.periodDays = summary.periodDays
-
-        self.premiumTokenShare = Self.premiumShare(of: modelBreakdowns, groupTotal: modelTokenTotal)
-
-        // Ratio denominators (issue #575): see `modelTokenTotal` above — the
-        // input:output and cache-reuse ratios have the identical shape (two
-        // separately-folded `Int` sums feeding a division), so both operands
-        // are folded as `Double` here too.
-        let input = SafeAccumulate.sumAsDouble(costs.map(\.inputTokens))
-        let output = SafeAccumulate.sumAsDouble(costs.map(\.outputTokens))
-        self.inputOutputRatio = output > 0 ? input / output : nil
-
-        let cacheRead = SafeAccumulate.sumAsDouble(costs.map(\.cacheReadTokens))
-        let cacheCreationForRatio = SafeAccumulate.sumAsDouble(costs.map(\.cacheCreationTokens))
-        let cacheDenominator = cacheRead + cacheCreationForRatio
-        self.cacheReuseRatio = cacheDenominator > 0 ? cacheRead / cacheDenominator : nil
-
-        self.tokens7Day = Self.windowTokens(summary.dailyUsage, days: 7, now: now, calendar: calendar)
-        self.tokens30Day = Self.windowTokens(summary.dailyUsage, days: 30, now: now, calendar: calendar)
-
-        let topOriginShare = topOrigins.first?.tokenShare ?? 0
-
-        self.optimizationScore = Self.computeScore(
-            premiumShare: premiumTokenShare,
-            inputOutputRatio: inputOutputRatio,
-            cacheReuseRatio: cacheReuseRatio,
-            topOriginShare: topOriginShare
-        )
-
-        if summary.totalTokens > 0 {
-            self.recommendations = Self.buildRecommendations(RecommendationInputs(
-                premiumShare: premiumTokenShare,
-                inputOutputRatio: inputOutputRatio,
-                cacheReuseRatio: cacheReuseRatio,
-                cacheCreationTokens: cacheCreation,
-                topOrigin: topOrigins.first,
-                tokens7Day: tokens7Day,
-                tokens30Day: tokens30Day
-            ))
-        } else {
-            self.recommendations = []
-        }
+    init(inputs: Inputs, hasData: Bool = true) {
+        self.inputs = inputs
+        recommendations = hasData ? Self.buildRecommendations(inputs) : []
     }
 
-    // MARK: - Pure computations
+    // MARK: - Recommendations
 
-    static func premiumShare(of models: [TokenUsageBreakdown], groupTotal: Double? = nil) -> Double {
-        // Ratio denominators (issue #575): folded as `Double` — see the call
-        // site's comment on `modelTokenTotal` for why an `Int` fold here
-        // would let two large-but-unequal totals both saturate to the same
-        // bound and render as 100% share.
-        // Issue #591: summed from raw components, not saturated row totals.
-        let total = groupTotal ?? models.reduce(0) { $0 + $1.rawTotalTokens }
-        guard total > 0 else { return 0 }
-        let premiumTokens = models
-            .filter { ModelTier.classify($0.name).isPremium }
-            .reduce(0) { $0 + $1.rawTotalTokens }
-        return premiumTokens / total
-    }
-
-    /// Blends four leanness signals into a 0...100 score (higher = leaner).
-    static func computeScore(
-        premiumShare: Double,
-        inputOutputRatio: Double?,
-        cacheReuseRatio: Double?,
-        topOriginShare: Double
-    ) -> Int {
-        let premiumComponent = 1 - clamp01(premiumShare)
-        let cacheComponent = cacheReuseRatio.map(clamp01) ?? Score.neutralComponent
-
-        let bloatComponent: Double
-        if let ratio = inputOutputRatio {
-            let span = Score.bloatCeilingRatio - Score.idealInputOutputRatio
-            let excess = (ratio - Score.idealInputOutputRatio) / span
-            bloatComponent = 1 - clamp01(excess)
-        } else {
-            bloatComponent = Score.neutralComponent
-        }
-
-        let concentrationSpan = 1 - Score.concentrationFloor
-        let concentrationExcess = (clamp01(topOriginShare) - Score.concentrationFloor) / concentrationSpan
-        let concentrationComponent = 1 - clamp01(concentrationExcess)
-
-        let weighted =
-            Score.premiumWeight * premiumComponent
-            + Score.cacheWeight * cacheComponent
-            + Score.bloatWeight * bloatComponent
-            + Score.concentrationWeight * concentrationComponent
-
-        return Int((clamp01(weighted) * 100).rounded())
-    }
-
-    /// Grouped inputs for `buildRecommendations` — keeps the derived signals
-    /// together and the function parameter count in check.
-    struct RecommendationInputs {
-        let premiumShare: Double
-        let inputOutputRatio: Double?
-        let cacheReuseRatio: Double?
-        let cacheCreationTokens: Int
-        let topOrigin: RankedTokenEntry?
-        let tokens7Day: Int
-        let tokens30Day: Int
-    }
-
-    static func buildRecommendations(_ inputs: RecommendationInputs) -> [OptimizationRecommendation] {
-        let premiumShare = inputs.premiumShare
-        let inputOutputRatio = inputs.inputOutputRatio
-        let cacheReuseRatio = inputs.cacheReuseRatio
-        let cacheCreationTokens = inputs.cacheCreationTokens
-        let topOrigin = inputs.topOrigin
-        let tokens7Day = inputs.tokens7Day
-        let tokens30Day = inputs.tokens30Day
-
+    private static func buildRecommendations(_ inputs: Inputs) -> [OptimizationRecommendation] {
         var recommendations: [OptimizationRecommendation] = []
+        let format = UsageFormat.compactTokens
 
-        // High-cost model routing.
-        if premiumShare >= Threshold.premiumWarning {
-            recommendations.append(OptimizationRecommendation(
-                id: "premium-share",
-                title: "High-cost models are doing most of the work",
-                detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
-                    + "Routing routine edits, summaries, and lookups to $$ or $ models "
-                    + "can cut token spend without much quality loss.",
-                severity: .warning,
-                systemImage: "bolt.badge.automatic"
-            ))
-        } else if premiumShare >= Threshold.premiumSuggestion {
-            recommendations.append(OptimizationRecommendation(
-                id: "premium-share",
-                title: "Use lower-cost models more often",
-                detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
-                    + "Reserve them for the hardest reasoning and route routine work to $$ or $ models.",
-                severity: .suggestion,
-                systemImage: "bolt.badge.automatic"
-            ))
+        if inputs.attributedModelTokens > 0 {
+            let premiumShare = inputs.premiumTokens / inputs.attributedModelTokens
+            let source = "\(percentString(premiumShare)) · \(format(inputs.premiumTokens)) of "
+                + "\(format(inputs.attributedModelTokens)) tokens"
+            if premiumShare >= Threshold.premiumWarning {
+                recommendations.append(OptimizationRecommendation(
+                    id: "premium-share",
+                    title: "High-cost models are doing most of the work",
+                    detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
+                        + "Routing routine edits, summaries, and lookups to $$ or $ models "
+                        + "can cut token spend without much quality loss.",
+                    severity: .warning,
+                    systemImage: "bolt.badge.automatic",
+                    source: source
+                ))
+            } else if premiumShare >= Threshold.premiumSuggestion {
+                recommendations.append(OptimizationRecommendation(
+                    id: "premium-share",
+                    title: "Use lower-cost models more often",
+                    detail: "$$$ models handled \(percentString(premiumShare)) of your tokens. "
+                        + "Reserve them for the hardest reasoning and route routine work to $$ or $ models.",
+                    severity: .suggestion,
+                    systemImage: "bolt.badge.automatic",
+                    source: source
+                ))
+            }
         }
 
-        // Cache reuse.
-        if let cacheReuseRatio {
-            if cacheReuseRatio < Threshold.cacheReuseWarning, cacheCreationTokens > 0 {
+        if let cacheUse = inputs.cacheUse, let ratio = cacheUse.reuseRatio {
+            let source = "\(format(cacheUse.readTokens)) read · \(format(cacheUse.writeTokens)) written"
+            if ratio < Threshold.cacheReuseWarning, cacheUse.writeTokens > 0 {
                 recommendations.append(OptimizationRecommendation(
                     id: "cache-reuse",
                     title: "Cache reuse is low",
-                    detail: "Only \(percentString(cacheReuseRatio)) of your cache tokens were reuse — "
+                    detail: "Only \(percentString(ratio)) of your cache tokens were reuse — "
                         + "sessions are rebuilding context instead of hitting the cache. Keeping related "
                         + "work in one session and avoiding long idle gaps improves cache hits.",
                     severity: .warning,
-                    systemImage: "arrow.triangle.2.circlepath"
+                    systemImage: "arrow.triangle.2.circlepath",
+                    source: source
                 ))
-            } else if cacheReuseRatio >= Threshold.cacheReusePositive {
+            } else if ratio >= Threshold.cacheReusePositive {
                 recommendations.append(OptimizationRecommendation(
                     id: "cache-reuse",
                     title: "Cache reuse looks healthy",
-                    detail: "\(percentString(cacheReuseRatio)) of your cache tokens were reuse, "
+                    detail: "\(percentString(ratio)) of your cache tokens were reuse, "
                         + "so you're paying the cheap cache-read rate instead of rebuilding context.",
                     severity: .positive,
-                    systemImage: "checkmark.seal"
+                    systemImage: "checkmark.seal",
+                    source: source
                 ))
             }
         }
 
-        // Context bloat (input vs output).
-        if let inputOutputRatio, inputOutputRatio > Threshold.inputOutputSuggestion {
-            recommendations.append(OptimizationRecommendation(
-                id: "input-output-ratio",
-                title: "Input tokens dwarf output",
-                detail: "You're sending roughly \(String(format: "%.0f", inputOutputRatio))× as many input "
-                    + "tokens as output. Trimming large pasted context, stale files, or oversized system "
-                    + "prompts is usually the fastest token win.",
-                severity: .suggestion,
-                systemImage: "text.append"
-            ))
+        if inputs.outputTokens > 0 {
+            let ratio = inputs.inputTokens / inputs.outputTokens
+            if ratio > Threshold.inputOutputSuggestion {
+                recommendations.append(OptimizationRecommendation(
+                    id: "input-output-ratio",
+                    title: "Input tokens dwarf output",
+                    detail: "You're sending roughly \(String(format: "%.0f", ratio))× as many input "
+                        + "tokens as output. Trimming large pasted context, stale files, or oversized system "
+                        + "prompts is usually the fastest token win.",
+                    severity: .suggestion,
+                    systemImage: "text.append",
+                    source: "\(format(inputs.inputTokens)) input · \(format(inputs.outputTokens)) output"
+                ))
+            }
         }
 
-        // Origin concentration.
-        if let topOrigin, topOrigin.tokenShare >= Threshold.originConcentration {
+        if let origin = inputs.topOrigin, origin.share >= Threshold.originConcentration {
             recommendations.append(OptimizationRecommendation(
                 id: "origin-concentration",
-                title: "\(topOrigin.name) is your biggest token driver",
-                detail: "\(topOrigin.name) accounts for \(percentString(topOrigin.tokenShare)) of tracked "
+                title: "\(origin.name) is your biggest token driver",
+                detail: "\(origin.name) accounts for \(percentString(origin.share)) of tracked "
                     + "tokens. It's the highest-leverage place to tune prompts or model choice.",
                 severity: .info,
-                systemImage: "chart.pie"
+                systemImage: "chart.pie",
+                source: "\(format(origin.tokens)) of \(format(origin.groupTokens)) tokens"
             ))
         }
 
-        // Short-term trend.
-        if tokens30Day > 0 {
-            let recentDailyRate = Double(tokens7Day) / 7.0
-            let monthlyDailyRate = Double(tokens30Day) / 30.0
-            if recentDailyRate > monthlyDailyRate * Threshold.trendUpMultiplier {
-                recommendations.append(OptimizationRecommendation(
-                    id: "trend-up",
-                    title: "Token burn is trending up",
-                    detail: "Your last 7 days are running hotter than your 30-day average. Worth checking "
-                        + "which model or workflow is driving the increase before it compounds.",
-                    severity: .info,
-                    systemImage: "chart.line.uptrend.xyaxis"
-                ))
-            }
+        if let trend = inputs.trend,
+           trend.recentDailyTokens > trend.windowDailyTokens * Threshold.trendUpMultiplier {
+            recommendations.append(OptimizationRecommendation(
+                id: "trend-up",
+                title: "Token burn is trending up",
+                detail: "Your last \(trend.recentDays) days are running hotter than the rest of this window. "
+                    + "Worth checking which model or workflow is driving the increase before it compounds.",
+                severity: .info,
+                systemImage: "chart.line.uptrend.xyaxis",
+                source: "\(format(trend.recentDailyTokens))/day recently · "
+                    + "\(format(trend.windowDailyTokens))/day over the window"
+            ))
         }
 
-        // Positive fallback so the panel is never empty on healthy usage.
+        // Positive fallback so the column is never empty on healthy usage.
         if !recommendations.contains(where: { $0.severity >= .suggestion }) {
             recommendations.append(OptimizationRecommendation(
                 id: "lean",
@@ -510,55 +384,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
 
     // MARK: - Helpers
 
-    private static func rank(_ breakdowns: [TokenUsageBreakdown], groupTotal: Double) -> [RankedTokenEntry] {
-        breakdowns
-            .filter { $0.totalTokens > 0 }
-            // Issue #591: order by the raw size so distinct overflowing rows
-            // do not tie at the saturated `Int.max`.
-            .sorted { $0.rawTotalTokens > $1.rawTotalTokens }
-            .map { breakdown in
-                RankedTokenEntry(
-                    id: breakdown.id,
-                    name: breakdown.name,
-                    provider: breakdown.provider,
-                    totalTokens: breakdown.totalTokens,
-                    estimatedCostUSD: breakdown.estimatedCostUSD,
-                    sessionCount: breakdown.sessionCount,
-                    // Ratio denominators (issue #575): `groupTotal` is a
-                    // `Double` fold (see the initializer), so two ranked
-                    // entries that each individually saturated to `Int.max`
-                    // no longer both read back as 100% share.
-                    tokenShare: groupTotal > 0 ? breakdown.rawTotalTokens / groupTotal : 0
-                )
-            }
-    }
-
-    private static func windowTokens(
-        _ dailyUsage: [DailyTokenUsage],
-        days: Int,
-        now: Date,
-        calendar: Calendar
-    ) -> Int {
-        guard days > 0 else { return 0 }
-        let today = calendar.startOfDay(for: now)
-        let start = CalendarDayStep.day(today, offsetBy: -(days - 1), calendar: calendar)
-        // Saturating (issue #575): the 7/30-day insight windows fold the same
-        // cache rows the Costs page renders.
-        return SafeAccumulate.sum(
-            dailyUsage
-                .filter { usage in
-                    let day = calendar.startOfDay(for: usage.date)
-                    return day >= start && day <= today
-                }
-                .map(\.totalTokens)
-        )
-    }
-
-    private static func clamp01(_ value: Double) -> Double {
-        min(1, max(0, value))
-    }
-
     static func percentString(_ fraction: Double) -> String {
-        "\(Int((clamp01(fraction) * 100).rounded()))%"
+        "\(Int((min(1, max(0, fraction)) * 100).rounded()))%"
     }
 }

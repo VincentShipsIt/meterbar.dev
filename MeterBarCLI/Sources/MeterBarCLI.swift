@@ -196,16 +196,16 @@ struct Cost: ParsableCommand {
         // Reports the app's cached scan instead of re-implementing it. The old
         // CLI scanner diverged from the app (no event dedup, one scan root,
         // file-mtime-only cutoff, hardcoded Sonnet pricing) so `meterbar cost`
-        // and the app's Costs tab showed different numbers for the same logs.
+        // and the app's Usage tab showed different numbers for the same logs.
         guard let cache = CostSummaryStore.load() else {
             if json {
                 try emitJSON(CLIJSONErrorResponse(
                     code: "cost_cache_missing",
-                    message: "No cost data cached. Open MeterBar and run a scan (Costs tab)."
+                    message: "No cost data cached. Open MeterBar and run a scan (Usage tab)."
                 ))
             } else {
                 print("No cost data cached.")
-                print("Open MeterBar and run a scan (Costs tab), then try again.")
+                print("Open MeterBar and run a scan (Usage tab), then try again.")
             }
             return
         }
@@ -298,7 +298,7 @@ struct Cost: ParsableCommand {
             } else {
                 // Legacy caches carry totals but no per-day rows.
                 print("No cached daily breakdown for this window.")
-                print("Open MeterBar and rescan (Costs tab) to record per-day usage.")
+                print("Open MeterBar and rescan (Usage tab) to record per-day usage.")
             }
             return
         }
