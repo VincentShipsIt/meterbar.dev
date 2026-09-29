@@ -48,7 +48,8 @@ public enum DemoData {
             .openRouter: openRouter(now: now),
             .grok: grok(now: now),
             .kimiCode: kimiCode(now: now),
-            .zaiCodingPlan: zaiCodingPlan(now: now)
+            .zaiCodingPlan: zaiCodingPlan(now: now),
+            .githubCopilot: githubCopilot(now: now)
         ]
     }
 
@@ -197,6 +198,21 @@ public enum DemoData {
                     label: "MCP tools"
                 )
             ],
+            lastUpdated: now
+        )
+    }
+
+    /// GitHub Copilot: the one shape with a documented cap — an organization
+    /// user-level budget — as a monthly window in the weekly slot.
+    private static func githubCopilot(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .githubCopilot,
+            weeklyLimit: UsageLimit(
+                used: 9,
+                total: 25,
+                resetTime: now.addingTimeInterval(12 * 24 * 3_600),
+                periodKind: .monthly
+            ),
             lastUpdated: now
         )
     }

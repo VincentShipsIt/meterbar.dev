@@ -31,7 +31,7 @@ Fields:
 | Field | Type | Values / meaning |
 |---|---|---|
 | `schema_version` | integer | Current major version: `1` |
-| `provider` | string | `Claude Code`, `Codex CLI`, `Cursor`, `OpenRouter`, `Grok`, `Kimi Code`, or `Z.ai Coding Plan` |
+| `provider` | string | `Claude Code`, `Codex CLI`, `Cursor`, `OpenRouter`, `Grok`, `Kimi Code`, `Z.ai Coding Plan`, or `GitHub Copilot` |
 | `account.id` | string | Account UUID for Claude Code, Codex CLI, and Grok profiles, or `default` for a single-account provider |
 | `account.name` | string | The user-visible account or provider name |
 | `event` | string | `warning`, `critical`, `exhausted`, or `recovered` |

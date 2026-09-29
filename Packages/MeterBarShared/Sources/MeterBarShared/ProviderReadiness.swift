@@ -533,6 +533,33 @@ public struct ZaiCodingPlanReadinessInput: Sendable {
     }
 }
 
+/// Fixture-able facts for the GitHub Copilot billing provider (fine-grained token).
+public struct GitHubCopilotReadinessInput: Sendable {
+    public var hasToken: Bool
+    public var hasUsername: Bool
+    public var scope: GitHubCopilotBillingScope
+    public var hasOrganization: Bool
+    /// The last classification the app persisted, or `nil` before the first refresh.
+    public var support: GitHubCopilotAccountSupport?
+    public var refreshError: String?
+
+    public init(
+        hasToken: Bool,
+        hasUsername: Bool,
+        scope: GitHubCopilotBillingScope = .personal,
+        hasOrganization: Bool = false,
+        support: GitHubCopilotAccountSupport? = nil,
+        refreshError: String? = nil
+    ) {
+        self.hasToken = hasToken
+        self.hasUsername = hasUsername
+        self.scope = scope
+        self.hasOrganization = hasOrganization
+        self.support = support
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the Grok Build CLI-backed provider. The inspector
 /// checks only file existence/readability; credential contents stay private to
 /// the official CLI process.
@@ -856,6 +883,81 @@ public enum ProviderReadinessEvaluator {
         )
         return ProviderReadiness(
             provider: .openRouter,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: GitHub Copilot
+
+    public static func githubCopilot(_ input: GitHubCopilotReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local Copilot app or CLI is read; only GitHub's documented billing API is used."
+        )
+
+        let configured = input.hasToken && input.hasUsername
+            && (input.scope == .personal || input.hasOrganization)
+        let auth: ReadinessCheck
+        if configured {
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Token and account",
+                level: .pass,
+                detail: "A fine-grained token and the billing account are configured (\(input.scope.displayName))."
+            )
+        } else {
+            let missing = [
+                input.hasToken ? nil : "token",
+                input.hasUsername ? nil : "GitHub username",
+                input.scope == .organization && !input.hasOrganization ? "organization" : nil
+            ].compactMap { $0 }.joined(separator: ", ")
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Token and account",
+                level: .fail,
+                detail: "Missing: \(missing).",
+                recovery: "Add a fine-grained token with the Plan (user) read permission and your GitHub "
+                    + "username in MeterBar Settings."
+            )
+        }
+
+        let data: ReadinessCheck
+        switch (configured, input.support) {
+        case (false, _):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: "Usage becomes readable once a token and account are configured."
+            )
+        case (true, nil):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: "The account has not been checked yet.",
+                recovery: "Run `meterbar refresh`, or refresh in the app."
+            )
+        case let (true, support?) where support.isQuota:
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .pass,
+                detail: support.message
+            )
+        case let (true, support?):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: support.message,
+                recovery: "MeterBar does not guess an allowance for this account shape."
+            )
+        }
+        return ProviderReadiness(
+            provider: .githubCopilot,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
     }

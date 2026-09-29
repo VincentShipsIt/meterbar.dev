@@ -126,6 +126,27 @@ final class ProviderCapabilitiesTests: XCTestCase {
         XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.zaiCodingPlan))
     }
 
+    func testGitHubCopilotIsASingleAccountOptInProviderWithAStatusPage() {
+        XCTAssertEqual(
+            ServiceType.githubCopilot.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.githubCopilot.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.githubCopilot.isOptInByDefault)
+        XCTAssertTrue(ServiceType.githubCopilot.hasStatusPage)
+        XCTAssertEqual(ServiceType.githubCopilot.statusPageURL?.absoluteString, "https://www.githubstatus.com/")
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.githubCopilot))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.githubCopilot))
+    }
+
     func testSessionWakeIsAnExplicitExceptionForGrok() {
         XCTAssertTrue(ServiceType.grok.isMultiAccount)
         XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
@@ -410,7 +431,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
             openRouterError: .apiError("openrouter"),
             grokError: .apiError("grok"),
             kimiCodeError: .apiError("kimi"),
-            zaiCodingPlanError: .apiError("zai")
+            zaiCodingPlanError: .apiError("zai"),
+            githubCopilotError: .apiError("copilot")
         )
         XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
     }

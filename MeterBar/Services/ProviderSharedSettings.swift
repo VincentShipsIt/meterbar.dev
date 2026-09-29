@@ -52,3 +52,59 @@ nonisolated enum ZaiRegionSetting {
         ProviderSharedSettings.set(region.rawValue, for: key, directory: directory)
     }
 }
+
+/// Where GitHub Copilot's billing is read from: the billing scope, the account
+/// login, and (for organization-managed licences) the organization. Logins are
+/// validated on the way in and on the way out, because they are interpolated
+/// into a request path.
+nonisolated struct GitHubCopilotAccountConfig: Equatable {
+    var scope: GitHubCopilotBillingScope = .personal
+    var username: String?
+    var organization: String?
+
+    /// Enough to build a request: a username, and an organization when the
+    /// licence is organization-managed.
+    var isComplete: Bool {
+        username != nil && (scope == .personal || organization != nil)
+    }
+
+    private static let scopeKey = "githubCopilotScope"
+    private static let usernameKey = "githubCopilotUsername"
+    private static let organizationKey = "githubCopilotOrganization"
+    private static let supportKey = "githubCopilotSupport"
+
+    static func load(directory: URL? = SharedMetricsStore.containerURL) -> GitHubCopilotAccountConfig {
+        func login(_ key: String) -> String? {
+            ProviderSharedSettings.value(for: key, directory: directory).flatMap {
+                GitHubLogin.isValid($0) ? $0 : nil
+            }
+        }
+        return GitHubCopilotAccountConfig(
+            scope: ProviderSharedSettings.value(for: scopeKey, directory: directory)
+                .flatMap(GitHubCopilotBillingScope.init(rawValue:)) ?? .personal,
+            username: login(usernameKey),
+            organization: login(organizationKey)
+        )
+    }
+
+    /// Invalid logins are dropped rather than stored, so a bad paste can never
+    /// be read back as a request path.
+    func save(directory: URL? = SharedMetricsStore.containerURL) {
+        ProviderSharedSettings.set(scope.rawValue, for: Self.scopeKey, directory: directory)
+        let validUsername = username.flatMap { GitHubLogin.isValid($0) ? $0 : nil }
+        let validOrganization = organization.flatMap { GitHubLogin.isValid($0) ? $0 : nil }
+        ProviderSharedSettings.set(validUsername, for: Self.usernameKey, directory: directory)
+        ProviderSharedSettings.set(validOrganization, for: Self.organizationKey, directory: directory)
+    }
+
+    /// The last account classification, persisted (as a secret-free token) so
+    /// the CLI's `doctor` can report it without making a request.
+    static func loadSupport(directory: URL? = SharedMetricsStore.containerURL) -> GitHubCopilotAccountSupport? {
+        ProviderSharedSettings.value(for: supportKey, directory: directory)
+            .flatMap(GitHubCopilotAccountSupport.init(token:))
+    }
+
+    static func saveSupport(_ support: GitHubCopilotAccountSupport?, directory: URL? = SharedMetricsStore.containerURL) {
+        ProviderSharedSettings.set(support?.token, for: supportKey, directory: directory)
+    }
+}

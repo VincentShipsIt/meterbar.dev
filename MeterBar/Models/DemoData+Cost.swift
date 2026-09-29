@@ -165,6 +165,16 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 0,
             sessionCount: 0
+        ),
+        // Copilot is read from budgets, not token logs, and has no demo spend.
+        DemoProviderCost(
+            provider: .githubCopilot,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 0,
+            sessionCount: 0
         )
     ]
 

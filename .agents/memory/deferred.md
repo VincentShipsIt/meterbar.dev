@@ -9,7 +9,7 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 ## Still open on the board
 
-- **#389** — provider epic. Vincent lifted the 2026-09-12 deferral on 2026-09-29 and asked for the whole backlog. Kimi Code (#427) and Z.ai/GLM (#428, with the peak/off-peak indicator) are done; GitHub Copilot (#429, bounded billing coverage) follows. Close #389 when all three land. Antigravity stays on hold (no machine-readable quota API); Gemini CLI is out (Google forbids third-party reuse of its OAuth/backend).
+- **#389** — provider epic. Vincent lifted the 2026-09-12 deferral on 2026-09-29 and asked for the whole backlog. Kimi Code (#427), Z.ai/GLM (#428, with the peak/off-peak indicator), and GitHub Copilot (#429, bounded billing coverage) are done; #389 closes when the three land. Close #389 when all three land. Antigravity stays on hold (no machine-readable quota API); Gemini CLI is out (Google forbids third-party reuse of its OAuth/backend).
 - **#513** — local workload router epic. Open, no children claimed yet, not scheduled.
 
 ## Structural debt (no issue required to remember)

@@ -68,6 +68,7 @@ struct DashboardShareSection: View {
         case .openRouter: return "OpenRouter logs"
         case .kimiCode: return "Kimi Code usage polls"
         case .zaiCodingPlan: return "Z.ai Coding Plan usage polls"
+        case .githubCopilot: return "GitHub billing polls"
         }
     }
 

@@ -46,6 +46,19 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    func testGitHubCopilotIsOffByDefaultAndItsOptInPersistsIndependently() {
+        withIsolatedDefaults { defaults in
+            let initial = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(initial.isEnabled(.githubCopilot))
+
+            initial.set(.githubCopilot, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.githubCopilot))
+            XCTAssertFalse(reloaded.isEnabled(.zaiCodingPlan))
+            XCTAssertFalse(reloaded.isEnabled(.kimiCode))
+        }
+    }
+
     /// Claude Code, Codex CLI, and Cursor have no dedicated opt-in/opt-out key
     /// (`set` deliberately does nothing extra for them — see the `switch` in
     /// `ProviderVisibilityStore.set`); they persist solely through the generic

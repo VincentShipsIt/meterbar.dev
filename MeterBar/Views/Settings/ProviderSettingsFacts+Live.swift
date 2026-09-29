@@ -51,6 +51,13 @@ extension ProviderSettingsFacts {
                     nil,
                     ZaiCodingPlanService.shared.lastError?.localizedDescription
                 )
+            case .githubCopilot:
+                (
+                    GitHubCopilotService.shared.hasAccess,
+                    nil,
+                    nil,
+                    GitHubCopilotService.shared.lastError?.localizedDescription
+                )
             }
 
         return ProviderSettingsFacts(

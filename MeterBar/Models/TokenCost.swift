@@ -411,7 +411,7 @@ nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
 extension ServiceType {
     fileprivate var dailyUsageDayBoundary: ProviderUsageDayBoundary {
         switch self {
-        case .openRouter: return .utc
+        case .openRouter, .githubCopilot: return .utc
         case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan: return .local
         }
     }
