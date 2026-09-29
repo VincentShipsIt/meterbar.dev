@@ -11,6 +11,7 @@ status: active
 - Root markdown is only `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `README.md`. Everything else goes under `.agents/` or `docs/`.
 - Durable decisions go in [decisions.md](decisions.md). Delivery state goes on the GitHub issue or PR.
 - Session logs: `.agents/sessions/YYYY-MM-DD.md`, lowercase, gitignored. Never commit. Never `git add -f`.
+- Skills live in repo-root `skills/<name>/SKILL.md`. `.claude/skills` and `.agents/skills` are symlinks to it; never put a real skill under either.
 - Do not recreate `.agents/SYSTEM/` or `.agents/docs/`.
 
 ## Swift
