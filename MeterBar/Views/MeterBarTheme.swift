@@ -13,7 +13,7 @@ enum MeterBarTheme {
 
   /// Corner-radius scale. Raw radii across the views snap to the nearest step
   /// so cards, chips, and bars read as one system instead of a dozen ad-hoc
-  /// values. `shell` matches MacSweep's companion popover / detail-panel shell.
+  /// values. `shell` is the companion popover / detail-panel shell.
   enum Radius {
     /// Chart bars, legend swatches, inline quota-bar caps/markers. Geometry
     /// often clamps this below 4 on thin (≤2–7pt) shapes, which is intended.
@@ -22,8 +22,11 @@ enum MeterBarTheme {
     static let medium: CGFloat = 8
     /// Standard dashboard card.
     static let card: CGFloat = 12
-    /// Companion popover + detail-panel shell.
-    static let shell: CGFloat = 16
+    /// Companion popover + detail-panel shell. Sized so a `card` sitting one
+    /// `Spacing.md` (the popover's inset) inside it is concentric: 12 + 12.
+    /// macOS 26's own panels carry corners this generous; a 16pt shell with
+    /// 12pt cards a full 12pt inside it left the two curves visibly unparallel.
+    static let shell: CGFloat = 24
 
     /// Concentric-radius rule: a rounded child inset by `inset` from a rounded
     /// parent keeps visually parallel corners when its radius is the parent's
@@ -33,15 +36,15 @@ enum MeterBarTheme {
     }
   }
 
-  /// A card nested inside the companion shell (16) reads as concentric one
-  /// spacing step in → 12 (== `Radius.card`).
-  static let detailCardRadius = Radius.concentric(outer: Radius.shell, inset: Spacing.xs)
+  /// A card nested inside the companion shell (24) reads as concentric one
+  /// popover inset (`Spacing.md`) in → 12 (== `Radius.card`).
+  static let detailCardRadius = Radius.concentric(outer: Radius.shell, inset: Spacing.md)
 
   /// A card nested inside a standard dashboard card (12) reads as concentric one
   /// spacing step in → 8 (== `Radius.medium`). Used by the API-usage card.
   static let apiCardRadius = Radius.concentric(outer: Radius.card, inset: Spacing.xs)
 
-  /// Matches MacSweep's companion popover and detail-panel shell radius.
+  /// The companion popover and detail-panel shell radius.
   static let companionShellRadius: CGFloat = Radius.shell
 
   // MARK: - Spacing scale

@@ -413,7 +413,6 @@ struct DailyUsageTableHeader: View {
     .font(.caption2)
     .fontWeight(.semibold)
     .foregroundColor(.secondary)
-    .textCase(.uppercase)
     .padding(.horizontal, MeterBarTheme.Spacing.md)
     .padding(.vertical, MeterBarTheme.Spacing.sm)
   }
