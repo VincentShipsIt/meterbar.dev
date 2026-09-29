@@ -83,6 +83,18 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 hasAccountScopedNotifications: false,
                 hasAccountScopedQuotaEvents: false
             )
+        case .kimiCode:
+            // One credential (the official OAuth artifact or one API key) and
+            // one account. Booster-wallet balance is the extra-usage analog.
+            return ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: true,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
         case .openRouter:
             // Multi-key: each managed API key is an account. Extra usage, reset
             // redemption, guard config directories, and Session Wake have no

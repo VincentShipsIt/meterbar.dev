@@ -82,7 +82,7 @@ struct Usage: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output the versioned JSON schema")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok)")
+    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok, kimi)")
     var provider: String?
 
     @Option(
@@ -386,7 +386,7 @@ struct Doctor: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output as JSON")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok)")
+    @Option(name: .shortAndLong, help: "Filter by provider (claude, codex, cursor, openrouter, grok, kimi)")
     var provider: String?
 
     func run() throws {

@@ -20,6 +20,7 @@ final class UsageCLISelectionTests: XCTestCase {
         .cursor: MetricsFixtures.cursor(),
         .openRouter: openRouterMetrics,
         .grok: MetricsFixtures.grok(),
+        .kimiCode: MetricsFixtures.kimiCode(),
     ]
 
     private lazy var accounts: [AccountUsageSnapshot] = [
@@ -63,8 +64,10 @@ final class UsageCLISelectionTests: XCTestCase {
 
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .cursor })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .openRouter })
+        XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .kimiCode })
         XCTAssertNotNil(selection.metrics[.cursor])
         XCTAssertNotNil(selection.metrics[.openRouter])
+        XCTAssertNotNil(selection.metrics[.kimiCode])
     }
 
     func testLegacyProviderOnlyCacheKeepsAccountsEmpty() {

@@ -820,6 +820,116 @@
         }
       },
       "comment": "Generic unavailable placeholder."
+    },
+    "provider.kimi.setup_prompt": {
+      "comment": "Empty-state prompt on the Kimi Code provider card when no credential is readable. Kimi Code is a product name; /login is not part of this string.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to Kimi Code or add an API key"
+          }
+        }
+      }
+    },
+    "settings.kimi.notice": {
+      "comment": "Explanatory note at the top of the Kimi Code settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar reads the Kimi Code sign-in file read-only and sends the token only to Kimi Code's usage endpoint. Kimi Code keeps ownership of refreshing it. Or add a Kimi Code API key, stored in macOS Keychain."
+          }
+        }
+      }
+    },
+    "settings.kimi.key_placeholder": {
+      "comment": "Placeholder in the secure field where the user pastes a Kimi Code API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code API key"
+          }
+        }
+      }
+    },
+    "settings.kimi.unauthenticated": {
+      "comment": "Error card shown when Kimi Code rejects the credential. /login is a command typed inside the Kimi Code app and must stay verbatim.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code rejected the credential. Run /login in Kimi Code, or add an API key."
+          }
+        }
+      }
+    },
+    "settings.kimi.signin": {
+      "comment": "Row label for the state of the official Kimi Code sign-in file.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code sign-in"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.ready": {
+      "comment": "Kimi Code sign-in file was found and is readable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.expired": {
+      "comment": "Kimi Code sign-in has expired. /login is a command typed inside the Kimi Code app and must stay verbatim.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expired — run /login"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.unreadable": {
+      "comment": "Kimi Code sign-in file exists but could not be read.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unreadable"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.not_found": {
+      "comment": "No Kimi Code sign-in file was found on this Mac.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not found"
+          }
+        }
+      }
+    },
+    "settings.kimi.wallet": {
+      "comment": "Row label for the Kimi Code pay-as-you-go booster wallet balance. Booster is a Kimi product term.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Booster wallet"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

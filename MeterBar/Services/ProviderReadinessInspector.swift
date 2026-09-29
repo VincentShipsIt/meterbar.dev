@@ -156,6 +156,9 @@ nonisolated public enum ProviderReadinessInspector {
         },
         grokReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
             [ProviderReadinessInspector.grokReport(refreshError: error)]
+        },
+        kimiCodeReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.kimiCodeReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
@@ -171,6 +174,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return openRouterReport(refreshErrors[provider], now)
             case .grok:
                 return grokReport(refreshErrors[provider], now)
+            case .kimiCode:
+                return kimiCodeReport(refreshErrors[provider], now)
             }
         }
     }
@@ -361,6 +366,20 @@ nonisolated public enum ProviderReadinessInspector {
             now: now
         )
         return ProviderReadinessEvaluator.cursor(input)
+    }
+
+    static func kimiCodeReport(
+        refreshError: ServiceError? = nil,
+        credential: () -> KimiCodeCredentialProbe = { KimiCodeService.shared.credentialProbe() },
+        hasAPIKey: () -> Bool = { KimiCodeService.shared.hasAPIKey }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(
+                credential: credential(),
+                hasAPIKey: hasAPIKey(),
+                refreshError: sanitize(refreshError)
+            )
+        )
     }
 
     static func openRouterReport(

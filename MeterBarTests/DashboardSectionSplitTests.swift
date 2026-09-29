@@ -199,7 +199,7 @@ final class DashboardSectionSplitTests: XCTestCase {
             DashboardStatusSection.summary(
                 isRefreshing: false,
                 issueCount: 0,
-                reportCount: ServiceType.allCases.count
+                reportCount: ServiceType.statusPageServices.count
             ),
             "All operational"
         )
@@ -207,7 +207,7 @@ final class DashboardSectionSplitTests: XCTestCase {
             DashboardStatusSection.summary(
                 isRefreshing: false,
                 issueCount: 0,
-                reportCount: ServiceType.allCases.count - 1
+                reportCount: ServiceType.statusPageServices.count - 1
             ),
             "a partial sweep must not claim every provider is healthy"
         )

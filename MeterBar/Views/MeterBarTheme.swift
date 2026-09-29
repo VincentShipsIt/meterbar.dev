@@ -181,6 +181,7 @@ enum MeterBarTheme {
     static let openai = NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
     static let openRouter = NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
     static let grok = NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
+    static let kimiCode = NSColor(srgbRed: 255 / 255, green: 120 / 255, blue: 150 / 255, alpha: 1)
   }
 
   static let codexAccent = Color.adaptive(
@@ -206,6 +207,10 @@ enum MeterBarTheme {
   static let grokAccent = Color.adaptive(
     light: NSColor(srgbRed: 33 / 255, green: 103 / 255, blue: 209 / 255, alpha: 1),
     dark: BrandAccentDark.grok
+  )
+  static let kimiCodeAccent = Color.adaptive(
+    light: NSColor(srgbRed: 196 / 255, green: 40 / 255, blue: 88 / 255, alpha: 1),
+    dark: BrandAccentDark.kimiCode
   )
 
   /// The app's own accent. Follows the user's system accent color.
@@ -283,6 +288,8 @@ enum MeterBarTheme {
       return openRouterAccent
     case .grok:
       return grokAccent
+    case .kimiCode:
+      return kimiCodeAccent
     }
   }
 

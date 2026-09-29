@@ -132,7 +132,8 @@ struct DashboardDiagnosticsSection: View {
             codexError: codexCliService.firstError(for: codexAccountStore.enabledAccounts),
             cursorError: cursorService.lastError,
             openRouterError: openRouterService.lastError,
-            grokError: grokService.firstError(for: grokAccountStore.enabledAccounts)
+            grokError: grokService.firstError(for: grokAccountStore.enabledAccounts),
+            kimiCodeError: KimiCodeService.shared.lastError
         )
         let accountErrors = DiagnosticsRunner.accountRefreshErrors(
             claudeAccountErrors: Dictionary(

@@ -61,7 +61,7 @@ struct ProviderStatusTable: View {
         // and its unclipped move-in transition drew the expanding content on
         // top of the row above it.
         VStack(spacing: MeterBarTheme.Spacing.sm) {
-            ForEach(ServiceType.allCases) { service in
+            ForEach(ServiceType.statusPageServices) { service in
                 ProviderStatusDisclosureRow(
                     service: service,
                     report: reports[service],
@@ -313,7 +313,7 @@ struct MenuBarStatusDetailContent: View {
     @StateObject private var statusMonitor = ProviderStatusMonitor.shared
 
     private var reports: [ProviderStatusReport] {
-        ServiceType.allCases.compactMap { statusMonitor.reports[$0] }
+        ServiceType.statusPageServices.compactMap { statusMonitor.reports[$0] }
     }
 
     private var worstIndicator: ProviderStatusIndicator {
@@ -328,7 +328,7 @@ struct MenuBarStatusDetailContent: View {
         }
 
         let issueCount = reports.filter(\.hasIssue).count
-        if issueCount == 0, reports.count == ServiceType.allCases.count {
+        if issueCount == 0, reports.count == ServiceType.statusPageServices.count {
             return "All provider pages operational"
         }
         if issueCount == 1 {
@@ -395,7 +395,7 @@ struct MenuBarStatusDetailContent: View {
 
     private var detailRows: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(ServiceType.allCases) { service in
+            ForEach(ServiceType.statusPageServices) { service in
                 MenuBarStatusDetailProviderSection(
                     service: service,
                     report: statusMonitor.reports[service],

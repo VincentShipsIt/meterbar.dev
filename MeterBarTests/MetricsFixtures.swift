@@ -20,6 +20,7 @@ enum MetricsFixtures {
         case .cursor: return cursor()
         case .openRouter: return openRouter()
         case .grok: return grok()
+        case .kimiCode: return kimiCode()
         }
     }
 
@@ -116,6 +117,28 @@ enum MetricsFixtures {
     }
 
     /// OpenRouter: key-limit + account-credits, matching production mapping.
+    static func kimiCode() -> UsageMetrics {
+        UsageMetrics(
+            service: .kimiCode,
+            sessionLimit: UsageLimit(
+                used: 23,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(2 * 3_600),
+                windowSeconds: 5 * 3_600,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 37,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600,
+                periodKind: .weekly
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$12.00 left of $20.00"),
+            lastUpdated: referenceDate
+        )
+    }
+
     static func openRouter(
         keyUsed: Double = 12.8,
         keyTotal: Double = 40,

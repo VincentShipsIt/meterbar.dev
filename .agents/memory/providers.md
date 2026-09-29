@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-09
+last_verified: 2026-09-29
 status: active
 ---
 
@@ -14,12 +14,15 @@ MeterBar reads usage from local CLI artifacts and provider APIs. CLI-backed prov
 | Cursor | `.cursor` | Session JWT from Cursor `state.vscdb` → `https://cursor.com/api/usage-summary`. Current payloads expose two included pools as `plan.autoPercentUsed` (Cursor Models) and `plan.apiPercentUsed` (Other Models) — those are the dashboard bars. If those fields are absent, the UI falls back to `plan.used` / server quota, and if the API omits totals it uses an assumed 500-request default marked estimated. On-demand spend is the third bar when enabled. Grok Bot is **not** MeterBar's Grok provider and is **not** on usage-summary: the weekly Ultra entitlement is `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus` with the same Cursor JWT, mapped to `additionalLimits`. That fetch is optional — Cursor still shows the three usage-summary bars if the sand RPC fails. |
 | OpenRouter | `.openRouter` | User API key in Keychain → documented `/api/v1/credits` and `/api/v1/key`. |
 | Grok | `.grok` | On by default (opt-out). Official Grok Build CLI ACP stdio maps `_x.ai/billing` for the weekly gauge. Usage-limit resets (display + Redeem) come from unofficial grok.com `ConsumerUiSvc/GetRemainingResets` and `RedeemReset` using the cached OIDC token in `$GROK_HOME/auth.json` — same class as Codex wham. The token is not logged. Exhausted accounts can spend a banked reset after explicit confirmation. |
+| Kimi Code | `.kimiCode` | Off by default (opt-in). Read-only `<KIMI_CODE_HOME or ~/.kimi-code>/credentials/kimi-code.json` (the official client's default managed OAuth slot; mode 0600, `access_token` + `expires_at` Unix seconds) → `GET https://api.kimi.com/coding/v1/usages`, or an optional API key in Keychain (`kimiCodeAPIKey`). Source is the official open-source client (`packages/oauth/src/managed-usage.ts`): first-party but **not an independently versioned API**. The payload changed on 2026-09-15 from "rows" (`usage` + `limits[].window/detail`) to "quota" (`usages.limit_5h` / `limit_7d` / `limit_month_total` / `limit_month_code`, `used_ratio` 0–1, `reset_time`); `KimiCodeUsageParser` reads both, quota first. Numbers may be strings. `boosterWallet` (fixed-point, 1e6 = one cent) maps to extra usage only when a 3-letter currency is stated. Kimi Code owns token refresh: an expired token is never sent and never refreshed — reconnect guidance says run `/login`. Env-scoped credential slots (`kimi-code-env-<hash>.json`) and `api.kimi.ai` are deliberately not read. |
 | Claude admin | `.claude` | User Anthropic Admin key → `/v1/organizations/usage_report/messages` (50-page cap). |
 | OpenAI admin | `.openai` | User OpenAI Admin key → `/v1/organization/usage/completions` (50-page cap). |
 
 ## Status pages
 
 `ProviderStatusMonitor` polls each provider's public status page. Claude, OpenAI and Cursor are Atlassian Statuspage (`api/v2/status.json` + `components.json`). OpenRouter is an HTML "All Systems Operational" check. **Grok is `https://status.x.ai/`, branded "SpaceXAI Status" — a custom Next.js page, not Statuspage.** Its `api/v2/status.json` is a 404 HTML page (verified 2026-09-04). `SpaceXAIStatusPageParser` reads the server-rendered service cards (`heading-2` name + `text-text-success|caution|danger|info|unavailable` chip) and the "No incidents declared" banner. The incident RSS at `feed.xml` (`ttl` 30) lists incidents only, not current service state; live API probe data lives at `data.x.ai/status/<region>.json`. Display name for the Grok status row is "SpaceXAI".
+
+`ServiceType.hasStatusPage` gates every status surface (`statusPageServices`). Kimi Code has none: `status.moonshot.cn` is Moonshot AI's platform page and there is no verified first-party page for the coding plan, so it is left out rather than pointed at a neighbour's page (checked 2026-09-29).
 
 ## Cost scan
 
@@ -33,6 +36,6 @@ Admin keys live in keychain service `dev.meterbar.app`, with reads migrating `de
 
 ## Residual risk (R1)
 
-Claude `/usage` parse, Codex wham, Cursor SQLite + cookie, and Grok ACP are unofficial or vendor-internal. A vendor change can break a provider with no compile error. Fixtures live in `ProviderResponseContractTests`. There is no telemetry; users are the canary.
+Claude `/usage` parse, Codex wham, Cursor SQLite + cookie, Grok ACP, and the Kimi Code `/usages` payload are unofficial or vendor-internal. A vendor change can break a provider with no compile error. Fixtures live in `ProviderResponseContractTests`. There is no telemetry; users are the canary.
 
 Never log tokens, cookies, webhook URLs with secrets, or raw provider bodies.

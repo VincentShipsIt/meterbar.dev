@@ -65,6 +65,8 @@ struct ProviderSettingsFacts {
             "OpenRouter credits + key APIs"
         case .grok:
             "Grok Build ACP billing + usage reset API"
+        case .kimiCode:
+            "Kimi Code sign-in or API key + managed usage API"
         }
     }
 
@@ -88,6 +90,8 @@ struct ProviderSettingsFacts {
             // Grok's plan token is already human-facing (e.g. "SuperGrok"),
             // so it is shown verbatim rather than title-cased.
             return subscriptionType?.nilIfEmpty
+        case .kimiCode:
+            return nil
         }
     }
 

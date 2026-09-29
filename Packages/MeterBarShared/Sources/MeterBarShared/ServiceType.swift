@@ -9,6 +9,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case cursor = "Cursor"
     case openRouter = "OpenRouter"
     case grok = "Grok"
+    case kimiCode = "Kimi Code"
 
     public var id: String { rawValue }
 
@@ -22,6 +23,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cursor: return "Cursor"
         case .openRouter: return "OpenRouter"
         case .grok: return "Grok"
+        case .kimiCode: return "Kimi Code"
         }
     }
 
@@ -42,6 +44,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cursor: return "Cursor"
         case .openRouter: return "OpenRouter"
         case .grok: return "Grok"
+        case .kimiCode: return "Kimi"
         }
     }
 
@@ -53,6 +56,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cursor: return "cursorarrow.click"
         case .openRouter: return "point.3.connected.trianglepath.dotted"
         case .grok: return "bolt.fill"
+        case .kimiCode: return "moon.stars.fill"
         }
     }
 
@@ -65,6 +69,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cursor: return "CursorIcon"
         case .openRouter: return "OpenRouterIcon"
         case .grok: return "GrokIcon"
+        case .kimiCode: return "KimiCodeIcon"
+        }
+    }
+
+    /// Whether an asset-catalog logo ships for the provider. The rest use their
+    /// SF Symbol (`iconName`) wherever a logo would go.
+    public var hasBundledLogo: Bool {
+        switch self {
+        case .claudeCode, .codexCli, .cursor, .grok: return true
+        case .openRouter, .kimiCode: return false
         }
     }
 
@@ -76,6 +90,36 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cursor: return 2
         case .openRouter: return 3
         case .grok: return 4
+        case .kimiCode: return 5
+        }
+    }
+
+    /// Whether MeterBar can poll a verified first-party status page for this
+    /// provider. Kimi Code's plan has no status page of its own that MeterBar
+    /// has verified, so it is left out of the status surfaces rather than
+    /// pointed at a neighbouring product's page.
+    public var hasStatusPage: Bool {
+        switch self {
+        case .claudeCode, .codexCli, .cursor, .openRouter, .grok: return true
+        case .kimiCode: return false
+        }
+    }
+
+    /// The providers that have a status page to poll and show.
+    public static var statusPageServices: [ServiceType] {
+        allCases.filter(\.hasStatusPage)
+    }
+
+    /// Whether the provider is off until the user turns it on.
+    ///
+    /// OpenRouter needs an API key, so it has always been opt-in. Newer
+    /// providers follow it: a card that can only say "not connected" is noise
+    /// for everyone who does not use the service, so the Providers settings
+    /// page is where they are switched on.
+    public var isOptInByDefault: Bool {
+        switch self {
+        case .openRouter, .kimiCode: return true
+        case .claudeCode, .codexCli, .cursor, .grok: return false
         }
     }
 
@@ -96,7 +140,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var writesLocalTokenLogs: Bool {
         switch self {
         case .claudeCode, .codexCli, .grok: return true
-        case .cursor, .openRouter: return false
+        case .cursor, .openRouter, .kimiCode: return false
         }
     }
 
@@ -172,7 +216,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return .model(label: modelLimitLabel)
         case .cursor: return .onDemand
-        case .codexCli, .openRouter, .grok: return .codeReview
+        case .codexCli, .openRouter, .grok, .kimiCode: return .codeReview
         }
     }
 

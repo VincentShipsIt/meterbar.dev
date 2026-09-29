@@ -16,6 +16,8 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
+    /// Kimi Code is off until the user turns it on in Providers settings.
+    static let kimiCodeProviderEnabled = "KimiCodeProviderEnabled"
     /// Grok Build is tracked by default; this key records an explicit opt-out.
     /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
     /// distinguish "never touched" from "turned off" now that the default flipped.

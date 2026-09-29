@@ -469,6 +469,7 @@ nonisolated extension ServiceType {
         case .cursor: return "cursor"
         case .openRouter: return "openrouter"
         case .grok: return "grok"
+        case .kimiCode: return "kimi"
         }
     }
 

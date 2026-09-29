@@ -139,6 +139,19 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 probe: { nil }
             ))
         }
+        // Single-account providers with no activity signal on disk: like
+        // OpenRouter they never auto-win the title but can be pinned.
+        for service in ServiceType.simpleProviderCases where visibility.isEnabled(service) {
+            guard let serviceMetrics = metrics[service] else { continue }
+            let source = StatusLimitSource(
+                service: service,
+                accountID: nil,
+                autoSelectionKey: nil,
+                displayName: service.displayName,
+                metrics: serviceMetrics
+            )
+            requests.append(request(source: source, probe: { nil }))
+        }
 
         return requests
     }

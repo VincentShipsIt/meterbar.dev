@@ -66,6 +66,7 @@ struct DashboardShareSection: View {
         case .grok: return "Grok JSONL"
         case .cursor: return "Cursor local state"
         case .openRouter: return "OpenRouter logs"
+        case .kimiCode: return "Kimi Code usage polls"
         }
     }
 

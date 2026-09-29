@@ -14,6 +14,7 @@ enum ProviderLogoKind: Equatable {
     case openai
     case openRouter
     case grok
+    case kimiCode
 
     static func forService(_ service: ServiceType) -> ProviderLogoKind {
         switch service {
@@ -27,6 +28,8 @@ enum ProviderLogoKind: Equatable {
             return .openRouter
         case .grok:
             return .grok
+        case .kimiCode:
+            return .kimiCode
         }
     }
 
@@ -65,6 +68,8 @@ enum ProviderLogoKind: Equatable {
             return nil
         case .grok:
             return "ProviderIcon-grok"
+        case .kimiCode:
+            return nil
         }
     }
 
@@ -84,6 +89,8 @@ enum ProviderLogoKind: Equatable {
             return ServiceType.openRouter.iconName
         case .grok:
             return ServiceType.grok.iconName
+        case .kimiCode:
+            return ServiceType.kimiCode.iconName
         }
     }
 }

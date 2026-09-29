@@ -16,7 +16,7 @@ same versioned usage/cost documents over a local HTTP endpoint instead of standa
 - Optional values are omitted when the provider or cached source did not supply them.
 - JSON is the only content written to standard output for these commands.
 
-Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, and `grok`.
+Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, `grok`, and `kimi`.
 
 ## Usage
 
@@ -87,7 +87,7 @@ also includes an additive `accounts` array — one entry per cached profile, nev
 `GROK_HOME`, or token.
 
 `accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor which stays
-provider-only and never gets fake accounts). OpenRouter entries are one per managed API key.
+provider-only and never gets fake accounts, as does Kimi Code). OpenRouter entries are one per managed API key.
 
 ```json
 {
@@ -536,7 +536,7 @@ cadence selectors `daily`, `monthly`, `billing`, and `unknown` resolve a reporte
 period in `additionalLimits`. `--min-remaining` is a percentage of quota that must remain;
 without it, only exhaustion blocks. `--config-dir` narrows the check to one configured Claude
 Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex config dir, or
-Grok `GROK_HOME`). Cursor and OpenRouter have no per-account directories and are rejected.
+Grok `GROK_HOME`). Cursor, OpenRouter, and Kimi Code have no per-account directories and are rejected.
 The JSON `window` field stays `session`, `weekly`, or `codeReview`. Additive `periodKind` names
 the reported cadence. Human `message` text uses that cadence ("monthly", never "weekly" for a
 monthly Grok allowance).
@@ -657,7 +657,7 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 `overall` is `pass`. Multi-account providers (Claude, Codex, Grok) emit one object per enabled
 profile, plus a provider-wide aggregate when more than one profile is enabled. `accountId` is
 MeterBar's local profile id and `accountName` is the user-facing display name; both are omitted
-for provider-wide reports (Cursor, OpenRouter, and the aggregate). Filesystem paths, credentials,
+for provider-wide reports (Cursor, OpenRouter, Kimi Code, and the aggregate). Filesystem paths, credentials,
 tokens, passwords, authorization headers, and raw response bodies are never emitted. Diagnostic
 messages may use standard error, but standard output remains one JSON document.
 
