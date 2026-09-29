@@ -67,6 +67,7 @@ struct DashboardShareSection: View {
         case .cursor: return "Cursor local state"
         case .openRouter: return "OpenRouter logs"
         case .kimiCode: return "Kimi Code usage polls"
+        case .zaiCodingPlan: return "Z.ai Coding Plan usage polls"
         }
     }
 

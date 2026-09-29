@@ -92,15 +92,19 @@ final class ProviderSnapshotTests: XCTestCase {
                 .cursor: makeMetrics(service: .cursor, weekly: 30),
                 .openRouter: makeMetrics(service: .openRouter, weekly: 40),
                 .grok: makeMetrics(service: .grok, weekly: 50),
-                .kimiCode: makeMetrics(service: .kimiCode, weekly: 60)
+                .kimiCode: makeMetrics(service: .kimiCode, weekly: 60),
+                .zaiCodingPlan: makeMetrics(service: .zaiCodingPlan, weekly: 70)
             ]
         ))
 
         XCTAssertEqual(
             snapshots.map(\.service),
-            [.claudeCode, .codexCli, .cursor, .grok, .kimiCode, .openRouter]
+            [.claudeCode, .codexCli, .cursor, .grok, .kimiCode, .openRouter, .zaiCodingPlan]
         )
-        XCTAssertEqual(snapshots.map(\.title), ["Claude", "Codex", "Cursor", "Grok", "Kimi", "OpenRouter"])
+        XCTAssertEqual(
+            snapshots.map(\.title),
+            ["Claude", "Codex", "Cursor", "Grok", "Kimi", "OpenRouter", "Z.ai"]
+        )
     }
 
     /// Two accounts on one subscription stay adjacent even when their labels
@@ -158,7 +162,7 @@ final class ProviderSnapshotTests: XCTestCase {
         ))
 
         // Popover shows all enabled providers (Codex/Claude/OpenRouter/Grok as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 6)
+        XCTAssertEqual(snapshots.count, 7)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -412,19 +416,19 @@ final class ProviderSnapshotTests: XCTestCase {
             switch service {
             case .openRouter: return .keyLimit
             case .cursor: return isIncludedPool ? .cursorModels : .session
-            case .claudeCode, .codexCli, .grok, .kimiCode: return .session
+            case .claudeCode, .codexCli, .grok, .kimiCode, .zaiCodingPlan: return .session
             }
         case .weekly:
             switch service {
             case .openRouter: return .accountCredits
             case .cursor: return isIncludedPool ? .otherModels : .monthly
-            case .claudeCode, .codexCli, .grok, .kimiCode: return .weekly
+            case .claudeCode, .codexCli, .grok, .kimiCode, .zaiCodingPlan: return .weekly
             }
         case .codeReview:
             switch service {
             case .claudeCode: return .model(label: modelLimitLabel)
             case .cursor: return .onDemand
-            case .codexCli, .openRouter, .grok, .kimiCode: return .codeReview
+            case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan: return .codeReview
             }
         case .additional:
             return .quota

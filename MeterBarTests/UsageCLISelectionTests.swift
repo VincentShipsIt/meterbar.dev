@@ -21,6 +21,7 @@ final class UsageCLISelectionTests: XCTestCase {
         .openRouter: openRouterMetrics,
         .grok: MetricsFixtures.grok(),
         .kimiCode: MetricsFixtures.kimiCode(),
+        .zaiCodingPlan: MetricsFixtures.zaiCodingPlan(),
     ]
 
     private lazy var accounts: [AccountUsageSnapshot] = [
@@ -65,6 +66,7 @@ final class UsageCLISelectionTests: XCTestCase {
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .cursor })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .openRouter })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .kimiCode })
+        XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .zaiCodingPlan })
         XCTAssertNotNil(selection.metrics[.cursor])
         XCTAssertNotNil(selection.metrics[.openRouter])
         XCTAssertNotNil(selection.metrics[.kimiCode])

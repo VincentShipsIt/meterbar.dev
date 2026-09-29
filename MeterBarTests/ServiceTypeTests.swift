@@ -48,6 +48,8 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.grok.shortName, "Grok")
         XCTAssertEqual(ServiceType.kimiCode.displayName, "Kimi Code")
         XCTAssertEqual(ServiceType.kimiCode.shortName, "Kimi")
+        XCTAssertEqual(ServiceType.zaiCodingPlan.displayName, "Z.ai GLM Coding Plan")
+        XCTAssertEqual(ServiceType.zaiCodingPlan.shortName, "Z.ai")
     }
 
     /// Both names must exist and be usable for every case, including any added
@@ -64,7 +66,7 @@ final class ServiceTypeTests: XCTestCase {
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 6)
+        XCTAssertEqual(ServiceType.allCases.count, 7)
     }
 
     func testCodable() throws {

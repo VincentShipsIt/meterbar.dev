@@ -7,7 +7,7 @@ import MeterBarShared
 extension ServiceType {
     /// In display order. Adding a provider here is what makes the popover and
     /// dashboard build a card for it (`ProviderSnapshotBuilder`).
-    static let simpleProviderCases: [ServiceType] = [.kimiCode]
+    static let simpleProviderCases: [ServiceType] = [.kimiCode, .zaiCodingPlan]
 
     /// What the empty card asks for when no credential is readable.
     var simpleProviderSetupPrompt: String {
@@ -16,6 +16,11 @@ extension ServiceType {
             return String(
                 localized: "provider.kimi.setup_prompt",
                 defaultValue: "Sign in to Kimi Code or add an API key"
+            )
+        case .zaiCodingPlan:
+            return String(
+                localized: "provider.zai.setup_prompt",
+                defaultValue: "Add your GLM Coding Plan API key"
             )
         case .claudeCode, .codexCli, .cursor, .openRouter, .grok:
             return ""

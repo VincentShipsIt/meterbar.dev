@@ -251,6 +251,7 @@ final class UsageDataManagerTests: XCTestCase {
         codex: CodexUsageProviding,
         cursor: StubProvider,
         kimi: StubProvider? = nil,
+        zai: StubProvider? = nil,
         grok: GrokUsageProviding? = nil,
         claude: ClaudeCodeUsageProviding? = nil,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
@@ -317,7 +318,8 @@ final class UsageDataManagerTests: XCTestCase {
             codexCliService: codex,
             cursorService: cursor,
             additionalSimpleProviders: [
-                .kimiCode: kimi ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed))
+                .kimiCode: kimi ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed)),
+                .zaiCodingPlan: zai ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed))
             ],
             grokService: grok ?? MultiAccountGrokProvider(metricsByAccount: [:]),
             claudeCodeService: claude ?? ClaudeCodeLocalService.shared,

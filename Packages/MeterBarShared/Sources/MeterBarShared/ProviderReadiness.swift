@@ -520,6 +520,19 @@ public struct KimiCodeReadinessInput: Sendable {
     }
 }
 
+/// Fixture-able facts for the Z.ai GLM Coding Plan provider (API key only).
+public struct ZaiCodingPlanReadinessInput: Sendable {
+    public var hasAPIKey: Bool
+    public var region: ZaiCodingPlanRegion
+    public var refreshError: String?
+
+    public init(hasAPIKey: Bool, region: ZaiCodingPlanRegion = .default, refreshError: String? = nil) {
+        self.hasAPIKey = hasAPIKey
+        self.region = region
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the Grok Build CLI-backed provider. The inspector
 /// checks only file existence/readability; credential contents stay private to
 /// the official CLI process.
@@ -843,6 +856,36 @@ public enum ProviderReadinessEvaluator {
         )
         return ProviderReadiness(
             provider: .openRouter,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: Z.ai Coding Plan
+
+    public static func zaiCodingPlan(_ input: ZaiCodingPlanReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local Z.ai app or CLI is required."
+        )
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "API key",
+            level: input.hasAPIKey ? .pass : .fail,
+            detail: input.hasAPIKey ? "Coding Plan API key is configured." : "Coding Plan API key is missing.",
+            recovery: input.hasAPIKey ? nil : "Add your GLM Coding Plan API key in MeterBar Settings."
+        )
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: input.hasAPIKey ? .pass : .warn,
+            detail: input.hasAPIKey
+                ? "Quota windows can be fetched from \(input.region.host)."
+                : "Usage becomes readable after a Coding Plan API key is configured."
+        )
+        return ProviderReadiness(
+            provider: .zaiCodingPlan,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
     }

@@ -151,6 +151,8 @@ extension ServiceType {
             return "SpaceXAI"
         case .kimiCode:
             return "Kimi Code"
+        case .zaiCodingPlan:
+            return "Z.ai"
         }
     }
 
@@ -166,7 +168,7 @@ extension ServiceType {
             return "https://status.openrouter.ai/"
         case .grok:
             return "https://status.x.ai/"
-        case .kimiCode:
+        case .kimiCode, .zaiCodingPlan:
             // No verified first-party status page; `hasStatusPage` keeps this
             // out of every status surface and the monitor never polls it.
             return ""

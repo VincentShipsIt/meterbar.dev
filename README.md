@@ -20,7 +20,7 @@
 > MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
 A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
-OpenRouter, Grok, and Kimi Code usage at a glance — then tells you which provider still has
+OpenRouter, Grok, Kimi Code, and Z.ai usage at a glance — then tells you which provider still has
 headroom, warns you before you hit a wall, and can resume your blocked sessions
 by itself once a limit resets.
 
@@ -40,7 +40,7 @@ by itself once a limit resets.
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
-- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, and Kimi Code
+- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, and Z.ai GLM Coding Plan
 - **Provider Status**: Service-health monitoring for every provider that publishes a status page, so you can tell a provider outage apart from your own exhausted quota
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
@@ -79,6 +79,7 @@ by itself once a limit resets.
 | **OpenRouter** | User-provided API key stored in Keychain | Account credits, spend, per-key limits |
 | **Grok** | Cached `grok login` session, accessed by the official CLI | Weekly quota, reset time, extra credits |
 | **Kimi Code** | Kimi Code's own sign-in file (read-only), or an API key stored in Keychain. Off until you enable it in Settings → Providers | 5-hour and weekly windows, monthly windows when the plan reports them, booster-wallet balance |
+| **Z.ai GLM Coding Plan** | Coding Plan API key stored in Keychain; you choose the international (`api.z.ai`) or mainland (`open.bigmodel.cn`) region. Off until you enable it in Settings → Providers | 5-hour and weekly credit windows, monthly MCP tool allowance, and a peak / off-peak indicator |
 
 ## Installation
 
@@ -294,7 +295,7 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider (claude, codex, cursor, openrouter, grok, kimi)
+# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai)
 meterbar usage --provider claude
 
 # Show token costs from the app's last local scan

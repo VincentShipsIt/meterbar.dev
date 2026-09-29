@@ -249,7 +249,7 @@ final class LocalizationResourceContractTests: XCTestCase {
     func testCLIMachineTokensRemainStableAndOutsideTheCatalogs() throws {
         XCTAssertEqual(
             ServiceType.allCases.sorted { $0.sortOrder < $1.sortOrder }.map(\.cliIdentifier),
-            ["claude", "codex", "cursor", "openrouter", "grok", "kimi"]
+            ["claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai"]
         )
 
         let reservedTokens: Set<String> = [

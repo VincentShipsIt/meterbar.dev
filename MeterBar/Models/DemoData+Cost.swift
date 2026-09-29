@@ -155,6 +155,16 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 0,
             sessionCount: 0
+        ),
+        // The Z.ai Coding Plan is a flat subscription with no per-token spend.
+        DemoProviderCost(
+            provider: .zaiCodingPlan,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 0,
+            sessionCount: 0
         )
     ]
 

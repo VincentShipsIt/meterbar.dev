@@ -337,6 +337,10 @@ struct ProviderSettingsView: View {
             KimiCodeSettingsSection {
                 Task { await dataManager.refresh(service: .kimiCode) }
             }
+        case .zaiCodingPlan:
+            ZaiCodingPlanSettingsSection {
+                Task { await dataManager.refresh(service: .zaiCodingPlan) }
+            }
         }
     }
 
@@ -373,8 +377,8 @@ struct ProviderSettingsView: View {
                     manageURL: "https://grok.com/?_s=usage"
                 )
             }
-        case .kimiCode:
-            // The booster wallet is shown inside Kimi Code's own panel.
+        case .kimiCode, .zaiCodingPlan:
+            // Kimi's booster wallet is shown inside its own panel; the Z.ai plan has none.
             EmptyView()
         }
     }
@@ -1046,7 +1050,7 @@ struct ProviderSettingsView: View {
                     codexCli.checkAccess(account: codexDefaultAccount)
                 case .cursor:
                     cursor.checkAccess(forceRescan: true)
-                case .openRouter, .kimiCode:
+                case .openRouter, .kimiCode, .zaiCodingPlan:
                     break
                 case .grok:
                     grok.checkAccess()

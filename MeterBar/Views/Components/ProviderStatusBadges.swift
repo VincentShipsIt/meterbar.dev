@@ -4,6 +4,7 @@ import MeterBarShared
 /// Trailing status badges shown beneath a provider's limits:
 /// - "N reset(s) available" — banked rate-limit resets (`resetCreditsAvailable`)
 /// - "Extra usage" + read-only toggle — paid overage state (`extraUsage`)
+/// - "Peak · off-peak in 2h" — Z.ai's published credit-rate window (local clock only)
 ///
 /// Shared by the single provider card (`ProviderStatusCard`) that renders on the
 /// popover, the dashboard Overview, and the Limits page — one component, so the
@@ -18,6 +19,8 @@ struct ProviderStatusBadges: View {
     let extraUsage: ExtraUsageStatus?
     let accentColor: Color
     var style: Style = .compact
+    /// Only the Z.ai Coding Plan publishes a peak/off-peak credit schedule.
+    var peakStatus: ZaiPeakSchedule.Status?
 
     /// Convenience initializer from a `ProviderSnapshot`, which already carries
     /// every field these badges need.
@@ -26,6 +29,9 @@ struct ProviderStatusBadges: View {
         self.extraUsage = snapshot.displayedExtraUsage
         self.accentColor = snapshot.accentColor
         self.style = style
+        self.peakStatus = snapshot.service == .zaiCodingPlan && snapshot.hasMetrics
+            ? ZaiPeakSchedule.status(at: Date())
+            : nil
     }
 
     private var showsResetCredits: Bool {
@@ -40,7 +46,7 @@ struct ProviderStatusBadges: View {
     /// stack spacing when there's nothing to show (matches the old inline
     /// behavior where absent badges contributed no layout).
     var hasContent: Bool {
-        showsResetCredits || showsExtraUsage
+        showsResetCredits || showsExtraUsage || peakStatus != nil
     }
 
     private var iconSize: CGFloat {
@@ -68,6 +74,20 @@ struct ProviderStatusBadges: View {
                     "\(Self.resetCreditsLabel(resetCount)) - banked quota resets you can trigger " +
                     "when you hit a rate limit."
                 )
+            }
+
+            if let peakStatus {
+                HStack(spacing: 4) {
+                    Image(systemName: peakStatus.isPeak ? "clock.badge.exclamationmark" : "clock")
+                        .font(.system(size: iconSize, weight: .semibold))
+                        .foregroundColor(peakStatus.isPeak ? MeterBarTheme.warning : .secondary)
+                    Text(ZaiPeakPresentation.label(peakStatus))
+                        .font(textFont)
+                        .foregroundColor(peakStatus.isPeak ? .primary : .secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                }
+                .help(ZaiPeakPresentation.explanation)
             }
 
             if showsExtraUsage, let extraUsage {

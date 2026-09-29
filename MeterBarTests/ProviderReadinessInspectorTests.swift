@@ -655,6 +655,19 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertFalse(text.contains(".kimi-code"))
     }
 
+    func testZaiCodingPlanReportSanitizesProviderTextAndUsesTheInjectedRegion() throws {
+        let report = ProviderReadinessInspector.zaiCodingPlanReport(
+            refreshError: .apiError("HTTP 401 key=SECRET-DO-NOT-LEAK"),
+            hasAPIKey: { true },
+            region: { .mainland }
+        )
+
+        XCTAssertEqual(report.provider, .zaiCodingPlan)
+        XCTAssertTrue((report.check("data")?.detail ?? "").contains("open.bigmodel.cn"))
+        let text = String(data: try JSONEncoder().encode(ProviderReadinessExport(report)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"))
+    }
+
     func testKimiCodeIsProbedThroughItsOwnReportOnly() {
         var probed: [ServiceType] = []
         _ = ProviderReadinessInspector.reports(

@@ -159,6 +159,9 @@ nonisolated public enum ProviderReadinessInspector {
         },
         kimiCodeReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
             [ProviderReadinessInspector.kimiCodeReport(refreshError: error)]
+        },
+        zaiCodingPlanReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.zaiCodingPlanReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
@@ -176,6 +179,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return grokReport(refreshErrors[provider], now)
             case .kimiCode:
                 return kimiCodeReport(refreshErrors[provider], now)
+            case .zaiCodingPlan:
+                return zaiCodingPlanReport(refreshErrors[provider], now)
             }
         }
     }
@@ -366,6 +371,20 @@ nonisolated public enum ProviderReadinessInspector {
             now: now
         )
         return ProviderReadinessEvaluator.cursor(input)
+    }
+
+    static func zaiCodingPlanReport(
+        refreshError: ServiceError? = nil,
+        hasAPIKey: () -> Bool = { ZaiCodingPlanService.shared.hasAPIKey },
+        region: () -> ZaiCodingPlanRegion = { ZaiRegionSetting.current() }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.zaiCodingPlan(
+            ZaiCodingPlanReadinessInput(
+                hasAPIKey: hasAPIKey(),
+                region: region(),
+                refreshError: sanitize(refreshError)
+            )
+        )
     }
 
     static func kimiCodeReport(

@@ -67,6 +67,8 @@ struct ProviderSettingsFacts {
             "Grok Build ACP billing + usage reset API"
         case .kimiCode:
             "Kimi Code sign-in or API key + managed usage API"
+        case .zaiCodingPlan:
+            "Z.ai monitor quota API (API key)"
         }
     }
 
@@ -92,6 +94,8 @@ struct ProviderSettingsFacts {
             return subscriptionType?.nilIfEmpty
         case .kimiCode:
             return nil
+        case .zaiCodingPlan:
+            return subscriptionType?.capitalized.nilIfEmpty
         }
     }
 

@@ -86,6 +86,28 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(text.contains(".kimi-code"), "no filesystem path in a paste-safe report")
     }
 
+    func testZaiCodingPlanRequiresAKeyAndNamesTheRegionHost() throws {
+        let missing = ProviderReadinessEvaluator.zaiCodingPlan(ZaiCodingPlanReadinessInput(hasAPIKey: false))
+        XCTAssertEqual(missing.provider, .zaiCodingPlan)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertEqual(missing.check("data")?.level, .warn)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("Settings"))
+
+        let mainland = ProviderReadinessEvaluator.zaiCodingPlan(
+            ZaiCodingPlanReadinessInput(hasAPIKey: true, region: .mainland)
+        )
+        XCTAssertEqual(mainland.check("auth")?.level, .pass)
+        XCTAssertTrue((mainland.check("data")?.detail ?? "").contains("open.bigmodel.cn"))
+        XCTAssertTrue(mainland.isHealthy)
+
+        let failing = ProviderReadinessEvaluator.zaiCodingPlan(
+            ZaiCodingPlanReadinessInput(hasAPIKey: true, refreshError: "API error (HTTP 404)")
+        )
+        XCTAssertEqual(failing.check("refresh")?.level, .fail)
+        let text = String(data: try JSONEncoder().encode(ProviderReadinessExport(failing)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+    }
+
     func testGrokRequiresCLIAndCachedLogin() {
         let missing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)

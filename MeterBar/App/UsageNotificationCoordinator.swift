@@ -215,7 +215,7 @@ final class UsageNotificationCoordinator {
                     bundle: openRouter,
                     fallbackMetrics: metrics[.openRouter]
                 )
-            case .cursor, .kimiCode:
+            case .cursor, .kimiCode, .zaiCodingPlan:
                 assertionFailure(
                     "account-scoped notifications for \(service.rawValue) have no routing"
                 )

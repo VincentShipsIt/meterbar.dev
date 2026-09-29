@@ -412,7 +412,7 @@ extension ServiceType {
     fileprivate var dailyUsageDayBoundary: ProviderUsageDayBoundary {
         switch self {
         case .openRouter: return .utc
-        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode: return .local
+        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan: return .local
         }
     }
 }
