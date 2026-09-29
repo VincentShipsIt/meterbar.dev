@@ -490,7 +490,7 @@ class ClaudeCodeLocalService: ObservableObject {
             // the keychain read was already detached, the usage GET was not).
             let capturedSession = session
             return try await ServiceSupport.detached {
-                let data = try await ServiceSupport.fetchValidatedData(request, session: capturedSession)
+                let data = try await fetchUsageData(request, token: token, session: capturedSession)
                 let usageResponse = try decodeUsageResponse(from: data)
                 return metrics(from: usageResponse)
             }
@@ -499,12 +499,41 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
+    /// One GET to the usage endpoint that honours `ClaudeUsageRateLimitGate`.
+    /// A 429 opens a cooldown (from `Retry-After`) and every refresh inside it
+    /// fails with the same `HTTP 429` without sending a request, so the caller
+    /// keeps the last good reading instead of hammering a limited endpoint.
+    nonisolated private static func fetchUsageData(
+        _ request: URLRequest,
+        token: String,
+        session: URLSession,
+        gate: ClaudeUsageRateLimitGate = .shared
+    ) async throws -> Data {
+        if gate.cooldownEnd(token: token) != nil {
+            throw ServiceError.apiError("HTTP 429")
+        }
+        let (data, response) = try await ServiceSupport.data(for: request, session: session)
+        if let http = response as? HTTPURLResponse, http.statusCode == 429 {
+            gate.recordRateLimit(token: token, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+        }
+        try ServiceSupport.validate(response, data: data)
+        return data
+    }
+
     /// The OAuth metrics fetch and best-effort extra-usage probe decode the
     /// same response contract with the same date strategy.
+    ///
+    /// Dates are read by `UsageWindow` itself, so the decoder's date strategy is
+    /// irrelevant. A payload with no readable window at all is a parse failure;
+    /// one unreadable window is not (see `ClaudeCodeUsageResponse`).
     nonisolated static func decodeUsageResponse(from data: Data) throws -> ClaudeCodeUsageResponse {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+        let response = try JSONDecoder().decode(ClaudeCodeUsageResponse.self, from: data)
+        guard response.hasUsageWindow else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(codingPath: [], debugDescription: "No usage window in response")
+            )
+        }
+        return response
     }
 
     /// Reads a non-expired Claude Code OAuth access token for `account`
@@ -614,19 +643,23 @@ class ClaudeCodeLocalService: ObservableObject {
     /// Session = 5-hour window, weekly = 7-day (all models), code-review =
     /// the provider-named model weekly window when the server emits one.
     nonisolated static func metrics(from response: ClaudeCodeUsageResponse) -> UsageMetrics {
-        let sessionLimit = UsageLimit(
-            used: response.fiveHour.utilization,
-            total: 100.0,
-            resetTime: response.fiveHour.resetsAt,
-            windowSeconds: 5 * 60 * 60
-        )
+        let sessionLimit = response.fiveHour.map {
+            UsageLimit(
+                used: $0.utilization,
+                total: 100.0,
+                resetTime: $0.resetsAt,
+                windowSeconds: 5 * 60 * 60
+            )
+        }
 
-        let weeklyLimit = UsageLimit(
-            used: response.sevenDay.utilization,
-            total: 100.0,
-            resetTime: response.sevenDay.resetsAt,
-            windowSeconds: 7 * 24 * 60 * 60
-        )
+        let weeklyLimit = response.sevenDay.map {
+            UsageLimit(
+                used: $0.utilization,
+                total: 100.0,
+                resetTime: $0.resetsAt,
+                windowSeconds: 7 * 24 * 60 * 60
+            )
+        }
 
         let modelWindow: (window: UsageWindow, label: String)?
         if let fable = response.sevenDayFable {
@@ -673,8 +706,9 @@ class ClaudeCodeLocalService: ObservableObject {
             return .unknown
         }
 
+        let token = credentials.claudeAiOauth.accessToken
         guard let request = Self.usageRequest(
-            token: credentials.claudeAiOauth.accessToken,
+            token: token,
             endpoint: usageEndpoint,
             timeout: Self.extraUsageRequestTimeout
         ) else {
@@ -684,7 +718,7 @@ class ClaudeCodeLocalService: ObservableObject {
         do {
             let session = urlSession
             return try await ServiceSupport.detached(priority: .utility) {
-                let data = try await ServiceSupport.fetchValidatedData(request, session: session)
+                let data = try await Self.fetchUsageData(request, token: token, session: session)
                 let usageResponse = try Self.decodeUsageResponse(from: data)
                 return usageResponse.extraUsageStatus
             }
@@ -775,9 +809,13 @@ nonisolated struct ClaudeAiOAuth: Codable {
     let rateLimitTier: String?
 }
 
+/// `/api/oauth/usage` is an unofficial endpoint, so every window is optional and
+/// an unreadable one is dropped on its own: a single `null` or renamed window
+/// must not blank the windows that did decode (which also blanked their reset
+/// times). `decodeUsageResponse` still rejects a payload with none at all.
 nonisolated struct ClaudeCodeUsageResponse: Codable {
-    let fiveHour: UsageWindow
-    let sevenDay: UsageWindow
+    let fiveHour: UsageWindow?
+    let sevenDay: UsageWindow?
     let sevenDaySonnet: UsageWindow?
     let sevenDayFable: UsageWindow?
     let extraUsage: ClaudeExtraUsage?
@@ -790,6 +828,20 @@ nonisolated struct ClaudeCodeUsageResponse: Codable {
         case sevenDayFable = "seven_day_fable"
         case extraUsage = "extra_usage"
         case spend
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fiveHour = try? container.decodeIfPresent(UsageWindow.self, forKey: .fiveHour)
+        sevenDay = try? container.decodeIfPresent(UsageWindow.self, forKey: .sevenDay)
+        sevenDaySonnet = try? container.decodeIfPresent(UsageWindow.self, forKey: .sevenDaySonnet)
+        sevenDayFable = try? container.decodeIfPresent(UsageWindow.self, forKey: .sevenDayFable)
+        extraUsage = try? container.decodeIfPresent(ClaudeExtraUsage.self, forKey: .extraUsage)
+        spend = try? container.decodeIfPresent(ClaudeSpend.self, forKey: .spend)
+    }
+
+    var hasUsageWindow: Bool {
+        fiveHour != nil || sevenDay != nil || sevenDaySonnet != nil || sevenDayFable != nil
     }
 
     /// Maps the Claude `extra_usage`/`spend` payload onto the shared extra-usage status.
@@ -885,10 +937,51 @@ nonisolated struct ClaudeMoney: Codable {
 
 nonisolated struct UsageWindow: Codable {
     let utilization: Double
-    let resetsAt: Date
+    /// `nil` when the API sends `null`, omits the key, or sends a format that is
+    /// not recognised. The utilization still renders; only the reset is unknown.
+    let resetsAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case utilization
         case resetsAt = "resets_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let utilization = Self.number(container, .utilization) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.utilization,
+                DecodingError.Context(codingPath: container.codingPath, debugDescription: "No utilization")
+            )
+        }
+        self.utilization = utilization
+        resetsAt = Self.date(container, .resetsAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(utilization, forKey: .utilization)
+        try container.encodeIfPresent(resetsAt.map(FlexibleISO8601.fractional.string(from:)), forKey: .resetsAt)
+    }
+
+    private static func number(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Double? {
+        if let value = try? container.decode(Double.self, forKey: key) { return value }
+        if let text = try? container.decode(String.self, forKey: key) { return Double(text) }
+        return nil
+    }
+
+    /// ISO 8601 with or without fractional seconds and any offset, or a Unix
+    /// timestamp in seconds or milliseconds (as a number or a numeric string).
+    private static func date(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Date? {
+        if let text = try? container.decode(String.self, forKey: key) {
+            if let date = FlexibleISO8601.date(from: text) { return date }
+            return Double(text).flatMap(epoch)
+        }
+        return (try? container.decode(Double.self, forKey: key)).flatMap(epoch)
+    }
+
+    private static func epoch(_ value: Double) -> Date? {
+        guard value.isFinite, value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value > 100_000_000_000 ? value / 1000 : value)
     }
 }
