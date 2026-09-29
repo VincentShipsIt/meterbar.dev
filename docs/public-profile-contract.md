@@ -84,15 +84,19 @@ names, credentials, and dollar amounts. Labels and model ids pass a character
 allowlist; anything else (an email, a path, a fine-tune id) is dropped rather
 than sent.
 
-## Site requirements
+## Site behaviour (implemented in `landings`, PR 17)
 
-- `/u/<slug>` renders from the stored document and shows "updated <time>" from
-  `updatedAt`. An unknown or expired slug renders a plain not-found page with
-  `noindex`. Set `robots: noindex` on profile pages unless indexing is chosen
-  deliberately.
-- `/u/<slug>/opengraph-image` (and a `twitter:image`) renders the card in the
-  share-card look: near-black surface, MeterBar mark, provider colors, and the
-  green/amber/red severity ramp from `SocialCardChrome.swift`, 1200x630.
-- Read paths are cached for about a minute so page views do not touch storage.
-- Update the privacy copy that says "no server" to say it is true unless the
-  user turns on Public profile.
+- `PUT` answers `204`; `400` invalid body or key, `401` no bearer, `403`/`409`
+  wrong key or slug lost, `413` over 16 KB, `429` (with `Retry-After`) when a
+  slug is written more than once per 30 s or one address claims more than 10
+  new slugs an hour, `503` when storage is not configured. `DELETE` answers
+  `204`, or `403` for a wrong key. Both are `no-store` with no body.
+- `/u/<slug>` renders from the stored document, is `noindex, nofollow`, and
+  shows "updated <time>" from `updatedAt`. An unknown, expired or deleted slug
+  is a plain 404.
+- `/u/<slug>/og` is the 1200x630 card (share-card look: near-black surface, the
+  icon mark, provider colors, the green/amber/red ramp). It is cached for five
+  minutes at the CDN. Social platforms keep their own copies longer.
+- A delete expires the cached page and card at once.
+- The site's privacy copy says "no server" is true unless the user turns on
+  Public profile.
