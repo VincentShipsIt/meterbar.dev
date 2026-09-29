@@ -163,7 +163,7 @@ final class ZaiCodingPlanServiceTests: XCTestCase {
     }
 
     func testErrorsNeverCarryTheKeyOrProviderBody() async {
-        let (service, _, _) = makeService(apiKey: "zai-key-secret-123") { request in
+        let (service, _, _) = makeService(apiKey: "zai-fixture-key-value") { request in
             throw ServiceError.apiError("boom \(request.value(forHTTPHeaderField: "Authorization") ?? "") {\"raw\":\"body\"}")
         }
 
@@ -172,9 +172,9 @@ final class ZaiCodingPlanServiceTests: XCTestCase {
             XCTFail("expected a failure")
         } catch {
             let text = ServiceSupport.safeErrorMessage(for: error)
-            XCTAssertFalse(text.contains("zai-key-secret-123"))
+            XCTAssertFalse(text.contains("zai-fixture-key-value"))
             XCTAssertFalse(text.contains("raw"))
-            XCTAssertFalse(service.lastError?.localizedDescription.contains("zai-key-secret-123") ?? false)
+            XCTAssertFalse(service.lastError?.localizedDescription.contains("zai-fixture-key-value") ?? false)
         }
     }
 
