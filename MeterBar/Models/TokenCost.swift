@@ -171,6 +171,14 @@ nonisolated public struct TokenUsageBreakdown: Codable, Identifiable, Sendable {
         SafeAccumulate.sum([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
     }
 
+    /// Sum of the raw components as `Double`, for layout and ratio math only
+    /// (issue #591). `totalTokens` saturates at `Int.max`, so rows whose
+    /// components overflow by different amounts read back identical; this
+    /// keeps their real relative size. Never display it.
+    var rawTotalTokens: Double {
+        SafeAccumulate.sumAsDouble([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
+    }
+
     public var formattedCost: String {
         UsageFormat.cost(estimatedCostUSD)
     }
@@ -236,6 +244,14 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     // Saturating (issue #541) — see `TokenCost.totalTokens`.
     public var totalTokens: Int {
         SafeAccumulate.sum([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
+    }
+
+    /// Sum of the raw components as `Double`, for layout and ratio math only
+    /// (issue #591). `totalTokens` saturates at `Int.max`, so rows whose
+    /// components overflow by different amounts read back identical; this
+    /// keeps their real relative size. Never display it.
+    var rawTotalTokens: Double {
+        SafeAccumulate.sumAsDouble([inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens])
     }
 
     private enum CodingKeys: String, CodingKey {
