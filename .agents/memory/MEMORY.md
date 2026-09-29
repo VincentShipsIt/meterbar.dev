@@ -22,7 +22,7 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 ## Hard facts
 
 - Repo: `VincentShipsIt/meterbar.dev`. Public. Default branch `master`.
-- Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server.
+- Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server. The one opt-in exception is **Public profile** (#594): the app publishes to the site, which lives in `VincentShipsIt/landings`. See `decisions.md`.
 - Latest release tag at last verify: **v1.8.46** (`d79fe53`); master at `d79fe53`. Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
 - The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` therefore lags the tags (1.8.41 while v1.8.46 shipped) and is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
 - Providers: Claude Code, Codex CLI, Cursor, OpenRouter, Grok, plus optional Anthropic/OpenAI admin keys. **New providers are deferred** (2026-09-12): app quality comes first. See `deferred.md`.

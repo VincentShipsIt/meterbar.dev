@@ -113,6 +113,8 @@ struct DashboardShareSection: View {
         )
 
         return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+            PublicProfilePanel()
+
             galleryHeader
 
             ProviderMasonryLayout(

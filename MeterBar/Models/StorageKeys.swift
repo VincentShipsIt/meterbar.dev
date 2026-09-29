@@ -207,4 +207,17 @@ nonisolated enum StorageKeys {
     static let displayCurrencyAutomatic = "DisplayCurrencyAutomatic"
     /// Last successful automatic refresh, used to cap fetches at once per day.
     static let displayCurrencyLastRefreshAt = "DisplayCurrencyLastRefreshAt"
+
+    // MARK: - Public profile (#594)
+
+    /// Explicit opt-in for publishing the anonymous profile to meterbar.dev.
+    /// Missing means off, and nothing leaves the Mac until it is set.
+    static let publicProfileEnabled = "PublicProfileEnabled"
+    /// The current profile's random public slug (the `/u/<slug>` URL).
+    static let publicProfileSlug = "PublicProfileSlug"
+    /// Last time the server confirmed a write, for the panel's "updated" line.
+    static let publicProfileLastPublishedAt = "PublicProfileLastPublishedAt"
+    /// Slugs whose server copy still has to be deleted (`[String]`). A slug
+    /// stays here until the server confirms the delete.
+    static let publicProfilePendingDeletions = "PublicProfilePendingDeletions"
 }
