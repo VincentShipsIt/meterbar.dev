@@ -50,6 +50,7 @@ CLI `--json` is a separate version-1 DTO with ISO-8601 dates (`docs/cli-json-sch
 - `UsageDataManager` (`@MainActor`, `ObservableObject`) — provider refresh, per-account isolation for Claude/Codex/Grok, UserDefaults cache, app-group mirror, `ProviderParseHealthStore`, non-overlapping timer (default 10 min; Adaptive 1–30 min; wake catch-up). Cross-process lock shared with `meterbar refresh`.
 - Services are `.shared` singletons. New services follow that until a DI refactor (not planned).
 - Cost: `CostTracker` + provider scanners. Cache `~/Library/Application Support/MeterBar/cost-summary-v2.json`. Pricing from `MeterBarShared.ModelPricing`.
+- Workload routing (#513 Phase 1): `WorkloadRouter` + policy/decision contracts in `Packages/MeterBarShared/.../Routing/`; `RoutingCandidateAssembler`, `RoutingPolicyStore` (`routing-policies.json` in the App Group container), and `WorkloadRouteCLI` in `MeterBar/Routing/`; `meterbar route` in `MeterBarCLI/Sources/Route.swift`. Recommendation only. See [decisions.md](decisions.md).
 - Session Wake: `SessionWakeController` + signed `meterbar wake-agent` via `SMAppService.agent`. Debug without the injected CLI uses the in-process fallback.
 - Quota events: `QuotaEventService` + coordinator. Off by default. Contract: `docs/quota-event-webhooks.md`.
 - Updates: `SoftwareUpdateController` (Sparkle 2). Automatic checks default off until consent.

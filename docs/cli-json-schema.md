@@ -1,7 +1,7 @@
 # MeterBar CLI JSON schema
 
-`meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`, and
-`meterbar guard --json` emit stable, versioned JSON for menu bars, shell prompts,
+`meterbar usage --json`, `meterbar cost --json`, `meterbar refresh --json`,
+`meterbar guard --json`, and `meterbar route --json` emit stable, versioned JSON for menu bars, shell prompts,
 dashboards, and other third-party integrations.
 Human-readable output remains the default when `--json` is absent. `meterbar serve` exposes the
 same versioned usage/cost documents over a local HTTP endpoint instead of standard output.
@@ -622,6 +622,201 @@ the human-readable reason uses standard error.
 evaluates the cached snapshot exactly as it would after a refresh that simply failed, and exits
 with one of the codes above — guard has no cancellation code, because an interrupted guard still
 has an answer. Without `--refresh` there is no window to interrupt.
+
+## Route
+
+```sh
+meterbar route --task implementation
+meterbar route --task implementation --json
+meterbar route --task review --refresh
+meterbar route --task release-notes --refresh --refresh-timeout 30 --json
+```
+
+Route answers one question — where should this kind of work go? — with a provider, an account,
+and a model tier, an ordered fallback chain, and the reason for every choice. It is **recommendation
+only**: it reads the usage snapshots, provider health, account configuration, and routing policy
+MeterBar already keeps, and prints a decision. It never starts a process, switches a credential,
+changes an account, or reads a prompt. The task is named explicitly by the caller; MeterBar does not
+inspect or classify free-form text. `--refresh` opts into one bounded refresh through the same
+coordinator `meterbar refresh` and `meterbar guard --refresh` use, then decides from the resulting
+cache.
+
+The same pure engine (`WorkloadRouter`) produces the decision for the app and the CLI, so identical
+snapshots and policy give byte-identical JSON.
+
+### Tasks and policies
+
+`--task` accepts the seven built-in tasks — `planning`, `implementation`, `debugging`, `review`,
+`research`, `quick-edit`, and `custom` — or the id of a task the user defined. Matching is
+case-insensitive and treats `_` and spaces as `-`. Each task has a policy; the shipped defaults are:
+
+| Task | Model tier | Minimum quota left | Maximum pace deficit | Estimated quota | Cost preference |
+| --- | --- | --- | --- | --- | --- |
+| `planning` | `premium` | 30% | 15 points | no | `balanced` |
+| `implementation` | `standard` | 20% | 25 points | no | `balanced` |
+| `debugging` | `standard` | 15% | 25 points | no | `balanced` |
+| `review` | `premium` | 20% | 20 points | no | `balanced` |
+| `research` | `standard` | 15% | 30 points | yes | `balanced` |
+| `quick-edit` | `economy` | 5% | none | yes | `cost` |
+| `custom` | `standard` | 10% | none | no | `balanced` |
+
+No built-in policy prefers a provider: out of the box a route is decided by quota headroom, pace,
+and health, so a single-provider setup needs no configuration. A policy may also set an ordered
+provider preference (optionally restricted to those providers), preferred or pinned accounts, a
+per-provider model alias, the fallback order (`score` or `policyPreference`), and the fallback
+count (0–4). Model tiers are `economy`, `standard`, and `premium`; MeterBar ships no concrete model
+ids.
+
+Policies persist in `routing-policies.json` beside the shared usage cache, written by the app and
+read by the CLI. The file is `{ "schemaVersion": 1, "policies": [...] }` and holds only what the
+user changed or added, so improved defaults reach everyone who never customised a task. A file
+from a newer MeterBar is never interpreted or overwritten; an unreadable file is ignored. In both
+cases route falls back to the defaults and adds a `policy_unsupported_version` or
+`policy_unreadable` entry to `reasons`.
+
+### How a candidate is judged
+
+A candidate is one provider, or one account of a multi-account provider. When per-account
+snapshots exist a provider is routed per account and its provider-wide roll-up is not counted a
+second time; Cursor is always provider-wide. Providers hidden in MeterBar are not candidates.
+
+Hard filters run first, in this order; the first one a candidate fails is its rejection code:
+
+| Code | Rejected because |
+| --- | --- |
+| `provider_disabled` | The account is turned off in MeterBar. |
+| `provider_not_permitted` | The policy limits routing to preferred providers and this is not one. |
+| `account_not_permitted` | The policy pins accounts for this provider and this is not one. |
+| `snapshot_missing` | No usage has been cached. |
+| `snapshot_stale` | The snapshot is older than two hours (the bound `guard` and provider health share). |
+| `no_quota_window` | No session or weekly window with a usable total. A model-scoped or code-review window never decides a route. |
+| `estimate_not_allowed` | The quota total is MeterBar's estimate and the policy requires a reported one. |
+| `quota_exhausted` | The tighter window is spent. Paid overage ("extra usage") is not treated as headroom. |
+| `below_minimum_headroom` | Less quota remains than the policy's minimum. |
+| `deficit_exceeds_limit` | Burning further ahead of sustainable pace than the policy allows. Unknown pace never rejects. |
+| `provider_unhealthy` | Refreshes have been failing for the provider, so its numbers cannot be trusted. |
+
+Eligible candidates are scored in points: the percent of quota left in the tighter window, plus a
+bounded pace adjustment (±12, reserve raises and deficit lowers), plus 4 for a window resetting
+within 30 minutes, plus the policy's provider preference (+25, +15, +8, +3 by position) and
+preferred-account bonus (+10), minus a penalty for metered spend (OpenRouter credits; 0, 15, or 40
+by cost preference, scaled 0.5×, 1×, 1.5× by tier) and 8 for a provider with recent refresh
+failures. Cost therefore trades against headroom: an included subscription quota beats a metered
+one that has more room only as far as the policy's cost preference says.
+
+**Tie-breaker.** Equal scores fall through, in order, to more quota remaining; earlier position in
+the policy's provider preference; provider order (`claude`, `codex`, `cursor`, `openrouter`,
+`grok`); the account's display order; the account id. The last step is total, so the result never
+depends on the order candidates were read. When a tie decided the recommendation, `reasons` says
+which step did.
+
+The fallback chain is the remaining eligible candidates, ordered by score or by policy preference
+and capped by the policy.
+
+### Output
+
+Version 1 shape for a recommendation:
+
+```json
+{
+  "schemaVersion": 1,
+  "outcome": "recommended",
+  "exitCode": 0,
+  "checkedAt": "2026-09-29T17:00:00Z",
+  "task": { "id": "implementation", "name": "Implementation", "builtIn": true },
+  "policy": { "customized": false },
+  "recommendation": {
+    "rank": 1,
+    "provider": "codex",
+    "providerName": "OpenAI Codex",
+    "account": { "id": "00000000-0000-0000-0000-000000000012", "label": "Work" },
+    "model": { "tier": "standard" },
+    "score": 78,
+    "quota": {
+      "window": "weekly",
+      "periodKind": "weekly",
+      "percentLeft": 74,
+      "quotaBand": "healthy",
+      "estimated": false,
+      "resetAt": "2026-10-03T00:00:00Z",
+      "pace": { "stage": "reserve", "deltaPercent": -9.5 }
+    },
+    "freshness": {
+      "lastUpdated": "2026-09-29T16:58:00Z",
+      "ageSeconds": 120,
+      "isStale": false
+    },
+    "reasons": [
+      { "code": "quota_headroom", "message": "74% weekly quota remains" },
+      { "code": "ahead_of_pace", "message": "OpenAI Codex (Work) has 10% in reserve" },
+      { "code": "included_quota", "message": "Uses included subscription quota" }
+    ]
+  },
+  "fallbacks": [
+    { "rank": 2, "provider": "claude", "providerName": "Claude Code", "…": "same shape as recommendation" }
+  ],
+  "rejected": [
+    {
+      "provider": "cursor",
+      "providerName": "Cursor",
+      "code": "quota_exhausted",
+      "message": "Cursor: Cursor Models quota is spent, resets in 3d 4h",
+      "freshness": { "lastUpdated": "2026-09-29T16:58:00Z", "ageSeconds": 120, "isStale": false }
+    }
+  ],
+  "reasons": [],
+  "message": "Use Codex · Work · standard model"
+}
+```
+
+`recommendation` is present only when `outcome` is `recommended`. `fallbacks`, `rejected`, and
+`reasons` are always arrays on a decision; a usage error omits every decision field. `account` is
+omitted for a provider-wide snapshot. `model.alias` is present only when the policy maps the
+provider to an alias. `quota.pace`, `quota.resetAt`, and `quota.periodKind` are omitted when not
+known. `quota.window` is `session` or `weekly`, the provider-blocking slots, exactly as in `guard`.
+`account.label` is the user's account name; a name that looks like an email address or a path is
+replaced with `Account <first 8 characters of the id>`.
+
+Route reason codes (`recommendation.reasons[].code`): `quota_headroom`, `preferred_provider`,
+`preferred_account`, `ahead_of_pace`, `behind_pace`, `reset_soon`, `included_quota`,
+`metered_usage`, `estimated_quota`, `health_degraded`. Decision-level `reasons[].code`:
+`only_eligible_candidate`, `tie_break_applied`, `no_candidates`, `policy_unreadable`,
+`policy_unsupported_version`. New codes may be added within version 1; consumers should tolerate
+codes they do not know and branch on `outcome` and `exitCode`.
+
+`outcome` is `recommended`, `noEligibleCandidate`, `dataUnavailable`, or `usageError`. Exit codes are
+stable for scripting and mirror `guard`:
+
+| Code | Outcome | Meaning |
+| --- | --- | --- |
+| `0` | `recommended` | A route was chosen. |
+| `11` | `noEligibleCandidate` | At least one candidate had readable data and every candidate was rejected. `rejected` lists why. |
+| `12` | `dataUnavailable` | No candidate had fresh, readable quota data (or none is set up). Re-run with `--refresh` or open MeterBar. |
+| `13` | `usageError` | An invalid `--task` or `--refresh-timeout`. |
+
+A usage error carries the same `error` object as `guard`, with a stable `code` — `missing_task`,
+`invalid_task`, `unknown_task`, or `invalid_refresh_timeout` — plus `flag` and `value`:
+
+```json
+{
+  "schemaVersion": 1,
+  "outcome": "usageError",
+  "exitCode": 13,
+  "checkedAt": "2026-09-29T17:00:00Z",
+  "message": "Unknown task 'triage' for --task. Expected one of: planning, implementation, debugging, review, research, quick-edit, custom.",
+  "error": {
+    "code": "unknown_task",
+    "message": "Unknown task 'triage' for --task. Expected one of: planning, implementation, debugging, review, research, quick-edit, custom.",
+    "flag": "--task",
+    "value": "triage"
+  }
+}
+```
+
+The document contains no token, cookie, API key, email address, webhook URL, raw provider response,
+absolute path, or prompt content. It carries task metadata and quota state only. As with `guard`,
+non-success JSON stays on standard output and the human-readable explanation uses standard error.
+`SIGINT` and `SIGTERM` end a `--refresh` window early, and route then decides from the cache.
 
 ## Doctor
 

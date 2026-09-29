@@ -301,6 +301,10 @@ meterbar cost
 
 # JSON output
 meterbar cost --json
+
+# Ask where a task should go: provider, account, model tier, fallbacks, and why.
+# Recommendation only — nothing is launched, switched, or read.
+meterbar route --task implementation
 ```
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from

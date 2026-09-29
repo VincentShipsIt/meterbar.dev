@@ -7,6 +7,21 @@ status: active
 
 Live ADRs only.
 
+## The workload router recommends; it never executes
+
+**Accepted 2026-09-29** (epic #513, Phase 1). `WorkloadRouter` in `MeterBarShared` is a pure function from a task policy, cached quota snapshots, provider health, and an injected `now` to a `RoutingDecision`. The app and `meterbar route` both call it, so identical inputs give identical decisions. It has no clock, disk, network, credential, or subprocess access by construction (`RouteCLITests` scans its sources for the forbidden APIs), and it never sees a prompt: the task is named explicitly by the caller.
+
+Choices that are easy to reverse but should not drift by accident:
+
+- **No provider preference in the shipped policies.** Which vendor suits which work is an opinion that ages with every model release, and a default would quietly steer people. Defaults differ by model tier, minimum headroom, pace tolerance, and whether estimated totals are eligible. Preference order is the user's.
+- **Exhausted means rejected, even with paid overage on.** The router routes within included quota; `extraUsage: on` is not headroom. Billable spillover is never a silent recommendation.
+- **Data problems and policy refusals are different exit codes** (12 vs 11), as in `guard`, so a script can tell "MeterBar cannot see" from "MeterBar sees and says no".
+- **The policy file stores only overrides.** Built-ins with no entry use the shipped default, so better defaults reach everyone who never customised. A file from a newer schema is never interpreted or overwritten; a read-only caller (the CLI) never rewrites a migrated file.
+- **Free text is gated.** Account and task names pass `RoutingLabel`; anything shaped like an email or a path is replaced, so `route --json` cannot leak either whatever a user typed.
+- **`ServiceType.cliIdentifier` moved into `MeterBarShared`** so the decision contract and every CLI document share one token mapping.
+
+Execution (`meterbar run`), HTTP, and MCP exposure are out of scope until the recommendation contract is proven and separately approved.
+
 ## The Share page is a gallery, and both cards are one design
 
 **Accepted 2026-09-09.** Share shows every card at once — the 30-day token receipt plus one live limits card per provider — packed by `ProviderMasonryLayout`. The provider picker is gone: a menu that showed one account at a time made "which of my accounts is worth posting" a navigation problem, and the two caption sections were orphaned from the cards they described.

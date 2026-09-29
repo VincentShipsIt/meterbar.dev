@@ -10,7 +10,7 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 ## Still open on the board
 
 - **#389** / **#427** / **#428** / **#429** — next providers (Kimi, Z.ai/GLM, Copilot). **Deferred by Vincent on 2026-09-12**: no new providers until the app itself is good. Labeled `deferred` on GitHub. Do not start these without an explicit go.
-- **#513** — local workload router epic. Open, no children claimed yet, not scheduled.
+- **#513** — local workload router epic. Phase 1 (contracts, pure router, `meterbar route`) implemented 2026-09-29. Open: policy editor + routing preview (Phase 2, waits for the merged Usage page, #593), popover recommendation, `meterbar run` decision, HTTP/MCP exposure.
 
 ## Structural debt (no issue required to remember)
 
