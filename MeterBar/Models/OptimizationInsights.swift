@@ -272,8 +272,13 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         // true proportion. `Double` never traps and stays faithful to that
         // proportion far past what `Int` can hold, so `sumAsDouble` is used
         // everywhere a ratio (not a displayed count) is being built.
-        let modelTokenTotal = SafeAccumulate.sumAsDouble(modelBreakdowns.map(\.totalTokens))
-        let originTokenTotal = SafeAccumulate.sumAsDouble(originBreakdowns.map(\.totalTokens))
+        //
+        // Issue #591: the operands are the raw *components*, not each row's
+        // already-saturated `totalTokens`. A row whose components overflow
+        // `Int` reads back as `Int.max` whatever its true size, so converting
+        // that to `Double` still ties rows of different real size.
+        let modelTokenTotal = modelBreakdowns.reduce(0) { $0 + $1.rawTotalTokens }
+        let originTokenTotal = originBreakdowns.reduce(0) { $0 + $1.rawTotalTokens }
 
         self.topModels = Self.rank(modelBreakdowns, groupTotal: modelTokenTotal)
         self.topOrigins = Self.rank(originBreakdowns, groupTotal: originTokenTotal)
@@ -337,13 +342,12 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
         // site's comment on `modelTokenTotal` for why an `Int` fold here
         // would let two large-but-unequal totals both saturate to the same
         // bound and render as 100% share.
-        let total = groupTotal ?? SafeAccumulate.sumAsDouble(models.map(\.totalTokens))
+        // Issue #591: summed from raw components, not saturated row totals.
+        let total = groupTotal ?? models.reduce(0) { $0 + $1.rawTotalTokens }
         guard total > 0 else { return 0 }
-        let premiumTokens = SafeAccumulate.sumAsDouble(
-            models
-                .filter { ModelTier.classify($0.name).isPremium }
-                .map(\.totalTokens)
-        )
+        let premiumTokens = models
+            .filter { ModelTier.classify($0.name).isPremium }
+            .reduce(0) { $0 + $1.rawTotalTokens }
         return premiumTokens / total
     }
 
@@ -509,7 +513,9 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
     private static func rank(_ breakdowns: [TokenUsageBreakdown], groupTotal: Double) -> [RankedTokenEntry] {
         breakdowns
             .filter { $0.totalTokens > 0 }
-            .sorted { $0.totalTokens > $1.totalTokens }
+            // Issue #591: order by the raw size so distinct overflowing rows
+            // do not tie at the saturated `Int.max`.
+            .sorted { $0.rawTotalTokens > $1.rawTotalTokens }
             .map { breakdown in
                 RankedTokenEntry(
                     id: breakdown.id,
@@ -522,7 +528,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
                     // `Double` fold (see the initializer), so two ranked
                     // entries that each individually saturated to `Int.max`
                     // no longer both read back as 100% share.
-                    tokenShare: groupTotal > 0 ? Double(breakdown.totalTokens) / groupTotal : 0
+                    tokenShare: groupTotal > 0 ? breakdown.rawTotalTokens / groupTotal : 0
                 )
             }
     }
