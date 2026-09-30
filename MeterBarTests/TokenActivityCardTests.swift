@@ -88,8 +88,8 @@ final class TokenActivityCardTests: XCTestCase {
 
     // MARK: - Placement regression
 
-    func testCostsSectionStillHostsWithTheNewCard() {
-        let section = DashboardCostsSection(summary: makeSummary(dayCount: 30)) { _ in nil }
+    func testUsageSectionStillHostsWithTheNewCard() {
+        let section = DashboardUsageSection(summary: makeSummary(dayCount: 30))
 
         let hostingView = NSHostingView(rootView: section)
         hostingView.frame = NSRect(x: 0, y: 0, width: 720, height: 900)
@@ -104,10 +104,10 @@ final class TokenActivityCardTests: XCTestCase {
         // The heatmap reads the same `dailyUsage` contract but must not narrow
         // or reshape what the existing surfaces receive.
         XCTAssertEqual(
-            DashboardCostsSection.refreshStatusText(isScanning: true, isRefreshingMissingDays: true),
+            DashboardUsageSection.refreshStatusText(isScanning: true, isRefreshingMissingDays: true),
             "Scanning..."
         )
-        XCTAssertTrue(CostChartPresentation(summary: summary).hasSpend)
+        XCTAssertTrue(UsageReport(summary: summary, selection: .month).hasData)
 
         let details = DashboardCard(title: "Daily Details", trailing: "Last 30 days") {
             DailyUsageBreakdownList(dailyUsage: summary.dailyUsage)

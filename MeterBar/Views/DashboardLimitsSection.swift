@@ -17,11 +17,19 @@ enum DashboardLimitsLayout {
 /// a glanceable summary; Limits gives every window room to breathe.
 struct DashboardLimitsSection: View {
     let snapshots: [ProviderSnapshot]
+    /// Every enabled provider/account, including the ones with no cached usage.
+    /// The "What To Use Next" card names a silent provider instead of dropping
+    /// it, so it reads this rather than `snapshots`.
+    var allSnapshots: [ProviderSnapshot] = []
     let focusedProviderID: ProviderSnapshot.ID?
     let scrollProxy: ScrollViewProxy
 
     var body: some View {
         VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+            // Above the quota cards it is ranked from, so the page answers "which
+            // one do I reach for?" before it shows every window.
+            HeadroomRecommendationCard(providerSnapshots: allSnapshots)
+
             if snapshots.isEmpty {
                 DashboardCard(title: "No Quota Windows") {
                     Text("Enable providers in Settings to show quota windows.")

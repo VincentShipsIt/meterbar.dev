@@ -4,12 +4,12 @@ import SwiftUI
 import XCTest
 @testable import MeterBar
 
-/// Offscreen PNG renders of the redesigned Costs-page cards, for visual
+/// Offscreen PNG renders of the Usage page and its cards, for visual
 /// verification without driving the running app. Skipped unless SNAPSHOT_DIR
 /// is set, so the normal suite never writes artifacts.
 @MainActor
 final class CostsPageSnapshotRenderTests: XCTestCase {
-    func testRenderCostsPageCards() throws {
+    func testRenderUsagePage() throws {
         guard let dir = ProcessInfo.processInfo.environment["SNAPSHOT_DIR"] else {
             throw XCTSkip("render only when SNAPSHOT_DIR is set")
         }
@@ -26,28 +26,30 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
             )
         }
 
-        try render(width: 1000, name: "1-headline-row", into: outputDir) {
-            CostOverviewStatusCard(
-                summary: summary,
-                isScanning: false,
-                isRefreshingMissingDays: false,
-                formattedTokens: UsageFormat.tokens(summary.totalTokens)
-            )
-        }
-
-        try render(width: 1000, name: "2-spend-charts", into: outputDir) {
-            DashboardCard(title: "30 Day Spend") {
-                CostSpendCharts(presentation: CostChartPresentation(summary: summary))
+        // A week keeps the day-by-day list short enough for the offscreen host to
+        // size the whole page (a 30-row list makes it clip both ends).
+        let defaults = UserDefaults.standard
+        let savedWindow = defaults.object(forKey: StorageKeys.costsWindowDays)
+        defaults.set(CostWindowSelection.week.rawValue, forKey: StorageKeys.costsWindowDays)
+        defer {
+            if let savedWindow {
+                defaults.set(savedWindow, forKey: StorageKeys.costsWindowDays)
+            } else {
+                defaults.removeObject(forKey: StorageKeys.costsWindowDays)
             }
         }
 
-        try render(width: 1000, name: "3-token-activity", into: outputDir) {
-            TokenActivityCard(
-                summary: summary,
-                isScanning: false,
-                isScanDisabled: false,
-                scan: {}
-            )
+        // The whole page at a wide window (insights column beside the main one) and
+        // at a narrow one (insights column collapsed underneath).
+        try render(width: 1240, name: "1-usage-wide", into: outputDir) {
+            DashboardUsageSection(summary: summary)
+        }
+        try render(width: 720, name: "2-usage-narrow", into: outputDir) {
+            DashboardUsageSection(summary: summary)
+        }
+
+        try render(width: 1000, name: "3-limits-what-to-use-next", into: outputDir) {
+            HeadroomRecommendationCard(providerSnapshots: overviewSnapshots())
         }
     }
 
@@ -95,6 +97,7 @@ final class CostsPageSnapshotRenderTests: XCTestCase {
         let host = NSHostingView(
             rootView: content()
                 .frame(width: width)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(20)
                 .background(Color(nsColor: NSColor(calibratedWhite: 0.11, alpha: 1)))
                 .environment(\.colorScheme, .dark)

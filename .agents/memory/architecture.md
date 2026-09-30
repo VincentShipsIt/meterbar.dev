@@ -10,7 +10,7 @@ What is implemented. Not a roadmap.
 ## Surfaces
 
 - **Menu bar app** — `@main` SwiftUI `App` + `NSApplicationDelegateAdaptor`. Manual `NSStatusItem` + `NSPopover` (`MenuBarView`), not `MenuBarExtra`. Right-click native menu. `LSUIElement = true`; Dock icon via `DockVisibilityStore`.
-- **Dashboard window** — `UsageDashboardView` and split section files under `MeterBar/Views/`.
+- **Dashboard window** — `UsageDashboardView` and split section files under `MeterBar/Views/`. The Usage page is `DashboardUsageSection`; its numbers come from `UsageReport` (`Models/UsageReport.swift`) and its columns from `UsageColumnsLayout`.
 - **Settings** — `SettingsView` + `MeterBar/Views/Settings/*`.
 - **Widgets** — `UsageWidget` (small/medium/large) and `BurnDownWidget` (small/medium). Both read `WidgetPreferences`. Burn-down uses `WidgetBurnDownPlanner` on `UsageLimit.pace()`.
 - **CLI** — `meterbar` in `MeterBar.app/Contents/Helpers/`. Public JSON is versioned in `docs/cli-json-schema.md`.

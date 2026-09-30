@@ -38,6 +38,23 @@ nonisolated public enum UsageFormat {
         return "\(value)"
     }
 
+    /// Compact token count from a `Double` total, for figures built in the
+    /// non-saturating domain (`TokenComposition`, the Usage page). Clamps to the
+    /// `Int` range rather than trapping on the conversion, so a total past what
+    /// `Int` can hold reads as the largest count `tokens(_:)` can format.
+    static func compactTokens(_ value: Double) -> String {
+        tokens(clampedTokenCount(value))
+    }
+
+    /// `value` as an `Int` token count: negative and non-finite values read as
+    /// zero, and anything at or past `Int.max` saturates to it.
+    static func clampedTokenCount(_ value: Double) -> Int {
+        guard value.isFinite, value > 0 else { return 0 }
+        // `Double(Int.max)` rounds *up* to 2^63, which `Int(_:)` traps on.
+        guard value < Double(Int.max) else { return Int.max }
+        return Int(value)
+    }
+
     /// Full token count with thousands separators, e.g. `1,234,567`.
     public static func groupedTokens(_ value: Int) -> String {
         groupedInteger.string(from: NSNumber(value: value)) ?? "\(value)"
