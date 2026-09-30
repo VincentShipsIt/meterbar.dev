@@ -395,6 +395,95 @@ final class UsageReportTests: XCTestCase {
         XCTAssertEqual(series.points.first?.value, 2)
     }
 
+    func testDailyDetailsMatchesChartForMixedProviderDaysAtWindowBounds() throws {
+        var pacific = Calendar(identifier: .gregorian)
+        pacific.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let now = Self.date("2026-09-29T20:00:00Z")
+        func row(_ iso: String, _ provider: ServiceType) -> DailyTokenUsage {
+            DailyTokenUsage(
+                date: Self.date(iso),
+                provider: provider,
+                inputTokens: 100,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 1
+            )
+        }
+        let firstDay = pacific.startOfDay(for: Self.date("2026-09-23T20:00:00Z"))
+        let today = pacific.startOfDay(for: now)
+        let included = [
+            row("2026-09-23T00:00:00Z", .openRouter),
+            row("2026-09-23T00:00:00Z", .githubCopilot),
+            row("2026-09-23T07:00:00Z", .claudeCode),
+            row("2026-09-29T00:00:00Z", .openRouter),
+            row("2026-09-29T07:00:00Z", .claudeCode),
+        ]
+        let excluded = [
+            row("2026-09-22T00:00:00Z", .openRouter),
+            row("2026-09-22T07:00:00Z", .claudeCode),
+            row("2026-09-30T00:00:00Z", .githubCopilot),
+            row("2026-09-30T07:00:00Z", .claudeCode),
+        ]
+        let report = UsageReport(
+            summary: Self.summary(daily: included + excluded),
+            selection: .week,
+            now: now,
+            calendar: pacific
+        )
+
+        XCTAssertEqual(report.windowRows.map(\.id), included.map(\.id))
+        let days = DailyUsageBreakdownList.usageDays(from: report.windowRows, calendar: pacific)
+        XCTAssertEqual(days.map(\.date), [today, firstDay])
+        XCTAssertEqual(days.map(\.totalTokens), [200, 300])
+        XCTAssertEqual(Set(days.last?.providers.map(\.provider) ?? []), [.openRouter, .githubCopilot, .claudeCode])
+        let series = report.series(UsageChartSelection(metric: .tokens, stacking: .provider))
+        XCTAssertEqual(Set(series.points.map(\.date)), Set(days.map(\.date)))
+        for day in days {
+            XCTAssertEqual(Double(day.totalTokens), report.dayTotal(on: day.date, metric: .tokens))
+        }
+    }
+
+    func testDailyDetailsDayGroupingPreservesSaturatedProviderTotals() throws {
+        let rows = [
+            Self.dailyRow(
+                daysAgo: 0,
+                provider: .claudeCode,
+                input: Int.max,
+                output: 0,
+                cacheWrite: 0,
+                cacheRead: 0,
+                cost: 1
+            ),
+            Self.dailyRow(
+                daysAgo: 0,
+                provider: .claudeCode,
+                input: Int.max,
+                output: 0,
+                cacheWrite: 0,
+                cacheRead: 0,
+                cost: 1
+            ),
+            Self.dailyRow(
+                daysAgo: 0,
+                provider: .codexCli,
+                input: Int.max,
+                output: 0,
+                cacheWrite: 0,
+                cacheRead: 0,
+                cost: 1
+            ),
+        ]
+        let report = Self.report(Self.summary(daily: rows), .week)
+        let days = DailyUsageBreakdownList.usageDays(from: report.windowRows, calendar: Self.calendar)
+        let day = try XCTUnwrap(days.first)
+
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(day.totalTokens, Int.max)
+        XCTAssertEqual(day.providers.count, 2)
+        XCTAssertTrue(day.providers.allSatisfy { $0.inputTokens == Int.max && $0.totalTokens == Int.max })
+        XCTAssertEqual(day.estimatedCostUSD, 3)
+    }
+
     // MARK: - Saturated totals
 
     /// Two providers each carrying `Int.max` in one day must stay inside one
@@ -589,6 +678,52 @@ final class UsageReportTests: XCTestCase {
         XCTAssertNotNil(week.notes.first { $0.id == "origin-scan-period" })
         XCTAssertTrue(month.originsCoverWindow, "the actual origin dates fit, regardless of requested scan width")
         XCTAssertNil(month.notes.first { $0.id == "origin-scan-period" })
+    }
+
+    func testNoOriginDataHasNoOriginScanPeriodNote() {
+        let daily = Self.dailyRow(
+            daysAgo: 0,
+            provider: .codexCli,
+            input: 100,
+            output: 0,
+            cacheWrite: 0,
+            cacheRead: 0,
+            cost: 1
+        )
+        let legacy = Self.withCost(Self.summary(daily: [daily]), provider: .codexCli, models: [], projects: [])
+        let emptyOrigin = TokenCost(
+            provider: .claudeCode,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUSD: 0,
+            sessionCount: 0,
+            periodStart: Self.date("2026-09-01T00:00:00Z"),
+            periodEnd: Self.now,
+            originBreakdowns: [TokenUsageBreakdown(
+                provider: .claudeCode,
+                name: "Main chat",
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                estimatedCostUSD: 0,
+                sessionCount: 0
+            )]
+        )
+        let summaries = [
+            Self.summary(daily: []),
+            Self.summary(daily: [daily]),
+            legacy,
+            Self.summary(daily: [daily], costs: [emptyOrigin]),
+        ]
+        for summary in summaries {
+            let report = Self.report(summary, .week)
+            XCTAssertTrue(report.breakdown(.origin).isEmpty)
+            XCTAssertFalse(report.originsCoverWindow)
+            XCTAssertNil(report.notes.first { $0.id == "origin-scan-period" })
+        }
     }
 
     func testBreakdownRowsAreSortedByTokensAndSharesAreFractions() {

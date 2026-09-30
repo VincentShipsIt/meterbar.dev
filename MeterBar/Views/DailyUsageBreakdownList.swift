@@ -13,14 +13,21 @@ struct DailyUsageBreakdownList: View {
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
-  private var days: [DailyProviderUsageDay] {
-    let grouped = Dictionary(grouping: dailyUsage) { Calendar.current.startOfDay(for: $0.date) }
-    return grouped.map { day, rows in
-      DailyProviderUsageDay(date: day, providers: Self.providerSummaries(from: rows))
+    private var days: [DailyProviderUsageDay] {
+        Self.usageDays(from: dailyUsage)
     }
-    .filter { $0.totalTokens > 0 }
-    .sorted { $0.date > $1.date }
-  }
+
+    static func usageDays(
+        from dailyUsage: [DailyTokenUsage],
+        calendar: Calendar = .current
+    ) -> [DailyProviderUsageDay] {
+        let grouped = Dictionary(grouping: dailyUsage) { $0.day(on: calendar) }
+        return grouped.map { day, rows in
+            DailyProviderUsageDay(date: day, providers: Self.providerSummaries(from: rows))
+        }
+        .filter { $0.totalTokens > 0 }
+        .sorted { $0.date > $1.date }
+    }
 
   var body: some View {
     ScrollView(.horizontal) {

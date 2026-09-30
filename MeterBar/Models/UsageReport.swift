@@ -342,6 +342,9 @@ nonisolated struct UsageReport: Sendable {
     private let breakdowns: [UsageBreakdownTab: [UsageBreakdownRow]]
 
     var hasData: Bool { composition.total > 0 || headline.costUSD > 0 }
+    var windowRows: [DailyTokenUsage] {
+        rows
+    }
 
     init(
         summary: CostSummary,
@@ -454,6 +457,7 @@ nonisolated struct UsageReport: Sendable {
             context: NoteContext(
                 windowDays: windowDays,
                 coveredDays: coveredDays,
+                hasOriginData: !origins.isEmpty,
                 originsCoverWindow: originsCoverWindow,
                 unreportedCacheProviders: cacheReport.unreported,
                 compressedCodexRollouts: compressedCodexRollouts,
@@ -885,6 +889,7 @@ nonisolated struct UsageReport: Sendable {
     nonisolated private struct NoteContext {
         let windowDays: Int
         let coveredDays: Int
+        let hasOriginData: Bool
         let originsCoverWindow: Bool
         let unreportedCacheProviders: [ServiceType]
         let compressedCodexRollouts: Int
@@ -930,7 +935,7 @@ nonisolated struct UsageReport: Sendable {
 
         notes.append(contentsOf: context.tableNotes)
 
-        if !context.originsCoverWindow {
+        if context.hasOriginData, !context.originsCoverWindow {
             notes.append(UsageDataNote(
                 id: "origin-scan-period",
                 severity: .info,
