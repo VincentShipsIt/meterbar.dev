@@ -106,7 +106,9 @@ final class CodexAccountStore: ObservableObject, CredentialLocationStoring {
         let defaultAccount = accounts.first(where: \.isDefault) ?? .defaultAccount
         defaultAccountName = defaultAccount.name
         defaultAccountHomeDirectory = defaultAccount.homeDirectory
-        defaultAccountIsEnabled = defaultAccount.isEnabled
+        // A missing default is a disabled presentation placeholder, not an
+        // account the authoritative CLI projection authorizes us to refresh.
+        defaultAccountIsEnabled = accounts.first(where: \.isDefault)?.isEnabled ?? false
         customAccounts = accounts.filter { !$0.isDefault }
         accountOrder = accounts.map(\.id)
     }

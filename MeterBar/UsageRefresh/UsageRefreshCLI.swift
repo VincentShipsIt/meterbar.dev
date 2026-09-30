@@ -147,18 +147,43 @@ public enum UsageRefreshCLI {
         UsageRefreshLock.lockURL()
     }
 
+    /// Test fixtures supply every live dependency; account stores still come
+    /// from the CLI's authoritative configuration in the factory below.
+    struct ManagerDependencies {
+        let codex: CodexUsageProviding
+        let cursor: SimpleUsageProviding
+        let openRouter: OpenRouterUsageProviding
+        let grok: GrokUsageProviding
+        let claude: ClaudeCodeUsageProviding
+        let preferences: UserDefaults
+        let cacheDefaults: UserDefaults
+        let parseHealth: ProviderParseHealthStore
+        let failover: AccountFailoverCoordinator
+    }
+
     @MainActor
-    private static func makeManager(
+    static func makeManager(
         sharedStore: SharedDataStore,
-        configuration: UsageRefreshConfigurationStore.Snapshot
+        configuration: UsageRefreshConfigurationStore.Snapshot,
+        dependencies: ManagerDependencies? = nil
     ) -> UsageDataManager {
         UsageDataManager(
+            codexCliService: dependencies?.codex,
+            cursorService: dependencies?.cursor ?? CursorLocalService.shared,
+            openRouterService: dependencies?.openRouter ?? OpenRouterService.shared,
+            grokService: dependencies?.grok ?? GrokCLIUsageService.shared,
+            claudeCodeService: dependencies?.claude ?? ClaudeCodeLocalService.shared,
             claudeCodeAccountStore: ClaudeCodeAccountStore(accounts: configuration.claudeAccounts),
             codexAccountStore: CodexAccountStore(accounts: configuration.codexAccounts),
             grokAccountStore: GrokAccountStore(accounts: configuration.grokAccounts),
+            openRouterAccountStore: OpenRouterAccountStore(accounts: configuration.openRouterAccounts),
             providerVisibilityStore: ProviderVisibilityStore(hiddenServices: configuration.hiddenServices),
             sharedStore: sharedStore,
-            cacheDefaults: UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier) ?? .standard,
+            preferences: dependencies?.preferences ?? .standard,
+            cacheDefaults: dependencies?.cacheDefaults
+                ?? UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier) ?? .standard,
+            parseHealthStore: dependencies?.parseHealth,
+            accountFailoverCoordinator: dependencies?.failover,
             schedulesAutoRefresh: false,
             refreshLockMode: .externallyOwned
         )
