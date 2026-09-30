@@ -20,7 +20,7 @@ struct ProviderStatusBadges: View {
     let accentColor: Color
     var style: Style = .compact
     /// Only the Z.ai Coding Plan publishes a peak/off-peak credit schedule.
-    var peakStatus: ZaiPeakSchedule.Status?
+    private let showsPeakStatus: Bool
 
     /// Convenience initializer from a `ProviderSnapshot`, which already carries
     /// every field these badges need.
@@ -29,9 +29,7 @@ struct ProviderStatusBadges: View {
         self.extraUsage = snapshot.displayedExtraUsage
         self.accentColor = snapshot.accentColor
         self.style = style
-        self.peakStatus = snapshot.service == .zaiCodingPlan && snapshot.hasMetrics
-            ? ZaiPeakSchedule.status(at: Date())
-            : nil
+        self.showsPeakStatus = snapshot.service == .zaiCodingPlan && snapshot.hasMetrics
     }
 
     private var showsResetCredits: Bool {
@@ -46,7 +44,7 @@ struct ProviderStatusBadges: View {
     /// stack spacing when there's nothing to show (matches the old inline
     /// behavior where absent badges contributed no layout).
     var hasContent: Bool {
-        showsResetCredits || showsExtraUsage || peakStatus != nil
+        showsResetCredits || showsExtraUsage || showsPeakStatus
     }
 
     private var iconSize: CGFloat {
@@ -76,18 +74,25 @@ struct ProviderStatusBadges: View {
                 )
             }
 
-            if let peakStatus {
-                HStack(spacing: 4) {
-                    Image(systemName: peakStatus.isPeak ? "clock.badge.exclamationmark" : "clock")
-                        .font(.system(size: iconSize, weight: .semibold))
-                        .foregroundColor(peakStatus.isPeak ? MeterBarTheme.warning : .secondary)
-                    Text(ZaiPeakPresentation.label(peakStatus))
-                        .font(textFont)
-                        .foregroundColor(peakStatus.isPeak ? .primary : .secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
+            if showsPeakStatus {
+                TimelineView(.periodic(
+                    from: ResetCountdownSchedule.anchor,
+                    by: ResetCountdownSchedule.interval
+                )) { timeline in
+                    if let peakStatus = peakStatus(at: timeline.date) {
+                        HStack(spacing: 4) {
+                            Image(systemName: peakStatus.isPeak ? "clock.badge.exclamationmark" : "clock")
+                                .font(.system(size: iconSize, weight: .semibold))
+                                .foregroundColor(peakStatus.isPeak ? MeterBarTheme.warning : .secondary)
+                            Text(ZaiPeakPresentation.label(peakStatus, now: timeline.date))
+                                .font(textFont)
+                                .foregroundColor(peakStatus.isPeak ? .primary : .secondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                        }
+                        .help(ZaiPeakPresentation.explanation)
+                    }
                 }
-                .help(ZaiPeakPresentation.explanation)
             }
 
             if showsExtraUsage, let extraUsage {
@@ -103,6 +108,10 @@ struct ProviderStatusBadges: View {
                 }
             }
         }
+    }
+
+    func peakStatus(at now: Date) -> ZaiPeakSchedule.Status? {
+        showsPeakStatus ? ZaiPeakSchedule.status(at: now) : nil
     }
 
     /// "1 reset available" / "N resets available" — the count of banked

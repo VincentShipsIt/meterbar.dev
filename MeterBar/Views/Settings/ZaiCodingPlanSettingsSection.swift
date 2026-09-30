@@ -55,9 +55,14 @@ struct ZaiCodingPlanSettingsSection: View {
                     title: String(localized: "settings.zai.pricing", defaultValue: "Credit rate"),
                     detail: ZaiPeakPresentation.explanation
                 ) {
-                    Text(ZaiPeakPresentation.label(ZaiPeakSchedule.status(at: Date())))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(
+                        from: ResetCountdownSchedule.anchor,
+                        by: ResetCountdownSchedule.interval
+                    )) { timeline in
+                        Text(ZaiPeakPresentation.label(ZaiPeakSchedule.status(at: timeline.date), now: timeline.date))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         )
@@ -71,7 +76,7 @@ struct ZaiCodingPlanSettingsSection: View {
             get: { region },
             set: { newValue in
                 region = newValue
-                ZaiRegionSetting.save(newValue)
+                service.saveRegion(newValue)
                 onChange()
             }
         )
