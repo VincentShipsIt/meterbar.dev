@@ -491,6 +491,35 @@ public struct OpenRouterReadinessInput: Sendable {
     }
 }
 
+/// What MeterBar found at the official Kimi Code OAuth artifact
+/// (`~/.kimi-code/credentials/kimi-code.json`). The probe reports the outcome
+/// only — never a token, a path, or any part of the file.
+public enum KimiCodeCredentialProbe: String, Codable, Sendable, Equatable {
+    /// No credential file, or none in the default managed slot.
+    case notFound
+    /// A credential with an unexpired access token.
+    case ready
+    /// The access token has expired. Kimi Code owns refresh, so this needs a
+    /// `/login` from the user rather than anything MeterBar can do.
+    case expired
+    /// The file exists but is not a credential MeterBar can read.
+    case unreadable
+}
+
+/// Fixture-able facts for the Kimi Code provider, which reads either the
+/// official OAuth artifact or a user-supplied API key from the Keychain.
+public struct KimiCodeReadinessInput: Sendable {
+    public var credential: KimiCodeCredentialProbe
+    public var hasAPIKey: Bool
+    public var refreshError: String?
+
+    public init(credential: KimiCodeCredentialProbe, hasAPIKey: Bool, refreshError: String? = nil) {
+        self.credential = credential
+        self.hasAPIKey = hasAPIKey
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the Grok Build CLI-backed provider. The inspector
 /// checks only file existence/readability; credential contents stay private to
 /// the official CLI process.
@@ -816,6 +845,90 @@ public enum ProviderReadinessEvaluator {
             provider: .openRouter,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
+    }
+
+    // MARK: Kimi Code
+
+    public static func kimiCode(_ input: KimiCodeReadinessInput) -> ProviderReadiness {
+        let oauthUsable = input.credential == .ready
+        let usable = oauthUsable || input.hasAPIKey
+
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "Sign-in source",
+            level: input.credential == .notFound && !input.hasAPIKey ? .fail : .pass,
+            detail: kimiSourceDetail(input),
+            recovery: input.credential == .notFound && !input.hasAPIKey
+                ? "Sign in with Kimi Code (`/login`), or add an API key in MeterBar Settings."
+                : nil
+        )
+
+        let auth: ReadinessCheck
+        if usable {
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Credentials",
+                level: .pass,
+                detail: oauthUsable
+                    ? "Kimi Code sign-in is readable."
+                    : "Kimi Code API key is configured."
+            )
+        } else {
+            switch input.credential {
+            case .expired:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "The Kimi Code sign-in has expired.",
+                    recovery: "Open Kimi Code and run `/login`, or add an API key in MeterBar Settings."
+                )
+            case .unreadable:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "The Kimi Code credential file could not be read.",
+                    recovery: "Run `/login` in Kimi Code to write a fresh credential."
+                )
+            case .notFound, .ready:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "No Kimi Code sign-in or API key was found.",
+                    recovery: "Sign in with Kimi Code (`/login`), or add an API key in MeterBar Settings."
+                )
+            }
+        }
+
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: usable ? .pass : .warn,
+            detail: usable
+                ? "The 5-hour and weekly windows can be fetched from Kimi Code."
+                : "Usage becomes readable once Kimi Code is signed in or an API key is set."
+        )
+        return ProviderReadiness(
+            provider: .kimiCode,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    private static func kimiSourceDetail(_ input: KimiCodeReadinessInput) -> String {
+        switch (input.credential, input.hasAPIKey) {
+        case (.notFound, false):
+            return "No Kimi Code credential was found on this Mac."
+        case (.notFound, true):
+            return "Using an API key; no local Kimi Code sign-in is required."
+        case (.ready, _):
+            return "Kimi Code's official OAuth credential was found."
+        case (.expired, _):
+            return "Kimi Code's OAuth credential was found but has expired."
+        case (.unreadable, _):
+            return "A Kimi Code credential file exists but is not readable."
+        }
     }
 
     // MARK: Grok

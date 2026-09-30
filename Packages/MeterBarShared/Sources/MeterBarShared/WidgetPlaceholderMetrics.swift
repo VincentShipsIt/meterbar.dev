@@ -31,6 +31,9 @@ public enum WidgetPlaceholderMetrics {
         case .openRouter:
             used = 32
             resetDelay = 18 * 24 * 60 * 60
+        case .kimiCode:
+            used = 41
+            resetDelay = 4 * 24 * 60 * 60
         }
         return UsageMetrics(
             service: service,

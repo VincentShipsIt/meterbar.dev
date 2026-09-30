@@ -152,6 +152,7 @@ public enum UsageRefreshCLI {
     struct ManagerDependencies {
         let codex: CodexUsageProviding
         let cursor: SimpleUsageProviding
+        let additionalSimpleProviders: [ServiceType: SimpleUsageProviding]
         let openRouter: OpenRouterUsageProviding
         let grok: GrokUsageProviding
         let claude: ClaudeCodeUsageProviding
@@ -170,6 +171,7 @@ public enum UsageRefreshCLI {
         UsageDataManager(
             codexCliService: dependencies?.codex,
             cursorService: dependencies?.cursor ?? CursorLocalService.shared,
+            additionalSimpleProviders: dependencies?.additionalSimpleProviders,
             openRouterService: dependencies?.openRouter ?? OpenRouterService.shared,
             grokService: dependencies?.grok ?? GrokCLIUsageService.shared,
             claudeCodeService: dependencies?.claude ?? ClaudeCodeLocalService.shared,

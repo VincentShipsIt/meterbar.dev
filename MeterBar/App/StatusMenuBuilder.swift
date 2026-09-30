@@ -194,7 +194,7 @@ struct StatusMenuBuilder {
     func makeProviderStatusMenu() -> NSMenu {
         let menu = NSMenu()
 
-        for service in ServiceType.allCases {
+        for service in ServiceType.statusPageServices {
             let item = NSMenuItem(
                 title: Self.providerStatusMenuTitle(for: service, status: status),
                 action: nil,

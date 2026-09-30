@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// One provider/account card's connection health, separate from `QuotaBand`.
 ///
@@ -28,6 +29,9 @@ enum ProviderPresentationHealth {
         var codexAccounts: [UUID: ServiceError] = [:]
         var grokAccounts: [UUID: ServiceError] = [:]
         var openRouterAccounts: [UUID: ServiceError] = [:]
+        /// Last refresh error for the single-account, API-or-CLI-credential
+        /// providers (Kimi Code, and the later Z.ai / Copilot providers).
+        var simpleProviders: [ServiceType: ServiceError] = [:]
     }
 
     static var staleAfter: TimeInterval { ProviderParseHealthRecord.staleAfter }

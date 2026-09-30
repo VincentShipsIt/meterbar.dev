@@ -84,6 +84,27 @@ final class ProviderCapabilitiesTests: XCTestCase {
         )
     }
 
+    func testKimiCodeIsASingleAccountProviderWithABoosterWallet() {
+        XCTAssertEqual(
+            ServiceType.kimiCode.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: true,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.kimiCode.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.kimiCode.isOptInByDefault)
+        XCTAssertFalse(ServiceType.kimiCode.hasStatusPage)
+        XCTAssertNil(ServiceType.kimiCode.statusPageURL)
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.kimiCode))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.kimiCode))
+    }
+
     func testSessionWakeIsAnExplicitExceptionForGrok() {
         XCTAssertTrue(ServiceType.grok.isMultiAccount)
         XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
@@ -363,7 +384,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
             codexError: .apiError("codex"),
             cursorError: .apiError("cursor"),
             openRouterError: .apiError("openrouter"),
-            grokError: .apiError("grok")
+            grokError: .apiError("grok"),
+            kimiCodeError: .apiError("kimi")
         )
         XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
     }

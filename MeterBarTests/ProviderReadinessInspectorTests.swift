@@ -640,6 +640,48 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertNil(ProviderReadinessInspector.httpStatus(in: "no status here"))
     }
 
+    func testKimiCodeReportReadsOnlyTheOutcomeAndNeverEmitsCredentialsOrPaths() throws {
+        let report = ProviderReadinessInspector.kimiCodeReport(
+            refreshError: .apiError("HTTP 401 token=SECRET-DO-NOT-LEAK"),
+            credential: { .expired },
+            hasAPIKey: { false }
+        )
+
+        XCTAssertEqual(report.provider, .kimiCode)
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        let export = try JSONEncoder().encode(ProviderReadinessExport(report))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"), "provider text must be sanitized before it is reported")
+        XCTAssertFalse(text.contains(".kimi-code"))
+    }
+
+    func testKimiCodeIsProbedThroughItsOwnReportOnly() {
+        var probed: [ServiceType] = []
+        _ = ProviderReadinessInspector.reports(
+            providers: [.kimiCode],
+            refreshErrors: [:],
+            now: Date(timeIntervalSince1970: 2_000),
+            claudeReport: { _, _ in
+                probed.append(.claudeCode)
+                return []
+            },
+            codexReport: { _, _ in
+                probed.append(.codexCli)
+                return []
+            },
+            cursorReport: { _, _ in
+                probed.append(.cursor)
+                return []
+            },
+            kimiCodeReport: { _, _ in
+                probed.append(.kimiCode)
+                return [self.report(for: .kimiCode)]
+            }
+        )
+
+        XCTAssertEqual(probed, [.kimiCode])
+    }
+
     private func report(for provider: ServiceType) -> ProviderReadiness {
         ProviderReadiness(
             provider: provider,

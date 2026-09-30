@@ -16,6 +16,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case grok
         case cursor
         case openRouter
+        case kimiCode
 
         var service: ServiceType {
             switch self {
@@ -24,11 +25,12 @@ final class ProviderPresentationHealthTests: XCTestCase {
             case .grok: return .grok
             case .cursor: return .cursor
             case .openRouter: return .openRouter
+            case .kimiCode: return .kimiCode
             }
         }
 
         var isFlat: Bool {
-            self == .cursor || self == .openRouter
+            self == .cursor || self == .openRouter || self == .kimiCode
         }
     }
 
@@ -619,7 +621,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
                     : [:],
                 openRouterAccountAccess: kind == .openRouter
                     ? [OpenRouterAccount.defaultID: true]
-                    : [:]
+                    : [:],
+                simpleProviderAccess: kind == .kimiCode ? [.kimiCode: true] : [:]
             )
         )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
@@ -656,6 +659,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
             lastErrors.codexAccounts = [CodexAccount.defaultID: .apiError("Codex refresh failed")]
         case (.grok, .transientFailure), (.grok, .sustainedOrParseFailure):
             lastErrors.grokAccounts = [GrokAccount.defaultID: .apiError("Grok refresh failed")]
+        case (.kimiCode, .transientFailure), (.kimiCode, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.kimiCode: .apiError("Kimi Code refresh failed")]
         default:
             break
         }
@@ -699,6 +704,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 ? [OpenRouterAccount.defaultID: true]
                 : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
+            simpleProviderAccess: kind == .kimiCode && refresh != .unprobed ? [.kimiCode: true] : [:],
             lastErrors: lastErrors
         )
     }

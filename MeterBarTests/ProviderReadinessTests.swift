@@ -28,6 +28,64 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(configured.isHealthy)
     }
 
+    func testKimiCodeReadinessCoversEveryCredentialOutcome() {
+        let missing = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .notFound, hasAPIKey: false)
+        )
+        XCTAssertEqual(missing.provider, .kimiCode)
+        XCTAssertEqual(missing.check("installed")?.level, .fail)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertEqual(missing.check("data")?.level, .warn)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("/login"))
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("Settings"))
+        XCTAssertFalse(missing.isHealthy)
+
+        let ready = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .ready, hasAPIKey: false)
+        )
+        XCTAssertEqual(ready.check("installed")?.level, .pass)
+        XCTAssertEqual(ready.check("auth")?.level, .pass)
+        XCTAssertEqual(ready.check("data")?.level, .pass)
+        XCTAssertTrue(ready.isHealthy)
+
+        let expired = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .expired, hasAPIKey: false)
+        )
+        XCTAssertEqual(expired.check("auth")?.level, .fail)
+        XCTAssertTrue((expired.check("auth")?.detail ?? "").contains("expired"))
+        XCTAssertTrue((expired.check("auth")?.recovery ?? "").contains("/login"))
+
+        let unreadable = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .unreadable, hasAPIKey: false)
+        )
+        XCTAssertEqual(unreadable.check("auth")?.level, .fail)
+        XCTAssertEqual(unreadable.check("installed")?.level, .pass, "a file exists, so a sign-in source is present")
+    }
+
+    func testKimiCodeAPIKeyCoversAnExpiredOrMissingSignIn() {
+        for credential in [KimiCodeCredentialProbe.notFound, .expired, .unreadable] {
+            let report = ProviderReadinessEvaluator.kimiCode(
+                KimiCodeReadinessInput(credential: credential, hasAPIKey: true)
+            )
+            XCTAssertEqual(report.check("auth")?.level, .pass, "\(credential)")
+            XCTAssertEqual(report.check("data")?.level, .pass, "\(credential)")
+            XCTAssertEqual(report.check("installed")?.level, .pass, "\(credential)")
+        }
+    }
+
+    func testKimiCodeRefreshFailureIsSurfacedAndNoSecretIsEverEmitted() throws {
+        let report = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .ready, hasAPIKey: true, refreshError: "HTTP 404")
+        )
+        XCTAssertEqual(report.check("refresh")?.level, .fail)
+        XCTAssertFalse(report.isHealthy)
+
+        let export = try JSONEncoder().encode(ProviderReadinessExport(report))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+        XCTAssertFalse(text.contains(".kimi-code"), "no filesystem path in a paste-safe report")
+    }
+
     func testGrokRequiresCLIAndCachedLogin() {
         let missing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)

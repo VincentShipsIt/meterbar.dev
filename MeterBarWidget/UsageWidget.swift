@@ -429,7 +429,7 @@ struct WidgetProviderIcon: View {
         // asset is a template imageset rather than the full-color logos the
         // others ship, since its mark is monochrome and has to hold up against
         // the widget's appearance-following background.
-        if service == .openRouter {
+        if !service.hasBundledLogo {
             Image(systemName: service.iconName)
                 .font(.system(size: size, weight: .semibold))
                 .frame(width: size, height: size)

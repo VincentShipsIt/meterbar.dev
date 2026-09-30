@@ -416,6 +416,9 @@ enum ProviderSnapshotBuilder {
         var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
         var openRouterAccountAccess: [UUID: Bool] = [:]
         var grokHasAccess: Bool = false
+        /// Access probe per single-account provider (Kimi Code, …). A missing
+        /// entry is "unprobed", the same as Cursor's `nil`.
+        var simpleProviderAccess: [ServiceType: Bool] = [:]
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
 
         /// Live stores the popover, dashboard, and settings cards share.
@@ -432,6 +435,8 @@ enum ProviderSnapshotBuilder {
             var cursorService: CursorLocalService
             var openRouterService: OpenRouterService
             var grokService: GrokCLIUsageService
+            /// Defaulted so the views that build stores need no edit per provider.
+            var kimiCodeService: KimiCodeService = .shared
         }
 
         /// Builds Input here so lastError / parse health / Grok access cannot
@@ -467,11 +472,13 @@ enum ProviderSnapshotBuilder {
                     ($0.id, stores.openRouterService.canAccess(account: $0))
                 }),
                 grokHasAccess: stores.grokService.hasAccess,
+                simpleProviderAccess: [.kimiCode: stores.kimiCodeService.hasAccess],
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
                     codexAccounts: stores.codexCliService.accountErrors,
                     grokAccounts: stores.grokService.accountErrors,
-                    openRouterAccounts: stores.openRouterService.accountLastErrors
+                    openRouterAccounts: stores.openRouterService.accountLastErrors,
+                    simpleProviders: [.kimiCode: stores.kimiCodeService.lastError].compactMapValues { $0 }
                 )
             )
         }
@@ -626,6 +633,20 @@ enum ProviderSnapshotBuilder {
             }
         }
 
+        for service in ServiceType.simpleProviderCases where input.enabledServices.contains(service) {
+            let metrics = input.metrics[service]
+            result.append(snapshot(
+                title: service.shortName,
+                service: service,
+                metrics: metrics,
+                emptyDetail: input.simpleProviderAccess[service] == true
+                    ? "Waiting for refresh"
+                    : service.simpleProviderSetupPrompt,
+                accountID: nil,
+                authNotice: notice(for: service, accountID: nil, metrics: metrics, input: input)
+            ))
+        }
+
         return orderedForDisplay(result)
     }
 
@@ -671,6 +692,10 @@ enum ProviderSnapshotBuilder {
         case .claudeCode:
             lastError = nil
             probed = input.claudeCodeHasAccess ? true : nil
+            usesAPIKey = false
+        case .kimiCode:
+            lastError = input.lastErrors.simpleProviders[service]
+            probed = input.simpleProviderAccess[service]
             usesAPIKey = false
         }
 

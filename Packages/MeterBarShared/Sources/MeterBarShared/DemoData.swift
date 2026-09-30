@@ -46,7 +46,8 @@ public enum DemoData {
             .codexCli: codexCli(now: now),
             .cursor: cursor(now: now),
             .openRouter: openRouter(now: now),
-            .grok: grok(now: now)
+            .grok: grok(now: now),
+            .kimiCode: kimiCode(now: now)
         ]
     }
 
@@ -140,6 +141,29 @@ public enum DemoData {
             weeklyLimit: weeklyLimit(usedPercent: 47, now: now),
             extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
             resetCreditsAvailable: 1,
+            lastUpdated: now
+        )
+    }
+
+    /// Kimi Code: the 5-hour and 7-day windows plus a booster wallet, green.
+    private static func kimiCode(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .kimiCode,
+            sessionLimit: UsageLimit(
+                used: 23,
+                total: 100,
+                resetTime: now.addingTimeInterval(2 * 3_600),
+                windowSeconds: sessionWindowSeconds,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 37,
+                total: 100,
+                resetTime: now.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$12.00 left of $20.00"),
             lastUpdated: now
         )
     }

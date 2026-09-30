@@ -145,6 +145,16 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 12.80,
             sessionCount: 18
+        ),
+        // Kimi Code is a flat subscription with no per-token spend to report.
+        DemoProviderCost(
+            provider: .kimiCode,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 0,
+            sessionCount: 0
         )
     ]
 

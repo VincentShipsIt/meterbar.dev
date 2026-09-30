@@ -53,7 +53,7 @@ final class DailyUsageChartBucketingTests: XCTestCase {
 
         let today = try XCTUnwrap(days.last)
         XCTAssertEqual(Set(today.segments.map(\.provider)), Set(ServiceType.allCases))
-        XCTAssertEqual(today.totalTokens, 5000)
+        XCTAssertEqual(today.totalTokens, ServiceType.allCases.count * 1000)
     }
 
     func testWindowEndsOnTodayAndSpansTheRequestedDayCount() {

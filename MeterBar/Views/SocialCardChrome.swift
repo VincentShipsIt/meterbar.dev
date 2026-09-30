@@ -38,6 +38,7 @@ enum SocialCardPalette {
         case .cursor: return Color(nsColor: MeterBarTheme.BrandAccentDark.cursor)
         case .openRouter: return Color(nsColor: MeterBarTheme.BrandAccentDark.openRouter)
         case .grok: return Color(nsColor: MeterBarTheme.BrandAccentDark.grok)
+        case .kimiCode: return Color(nsColor: MeterBarTheme.BrandAccentDark.kimiCode)
         }
     }
 

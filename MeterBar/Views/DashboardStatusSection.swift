@@ -15,7 +15,7 @@ struct DashboardStatusSection: View {
         if isRefreshing {
             return "Refreshing..."
         }
-        if issueCount == 0, reportCount == ServiceType.allCases.count {
+        if issueCount == 0, reportCount == ServiceType.statusPageServices.count {
             return "All operational"
         }
         if issueCount == 1 {
