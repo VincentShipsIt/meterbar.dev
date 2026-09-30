@@ -180,7 +180,7 @@ final class PublicProfileDocumentTests: XCTestCase {
         let privateNote = "fixture-credential-marker private-subject private-provenance private-support-note"
         let budget = UsageMetrics(
             service: .githubCopilot,
-            sessionLimit: UsageLimit(used: 12345.67, total: 98765.43, resetTime: nil, periodKind: .monthly),
+            weeklyLimit: UsageLimit(used: 12345.67, total: 98765.43, resetTime: nil, periodKind: .monthly),
             lastUpdated: now
         )
         let copilot = ProviderSnapshotBuilder.snapshot(
