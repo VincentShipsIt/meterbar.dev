@@ -78,29 +78,13 @@ nonisolated public enum QuotaGuardCLI {
         if request.refresh {
             // A failed refresh is not itself a guard failure: the cached
             // snapshot is still evaluated below, and reports its own staleness.
-            await performRefresh(
+            await CLIBoundedRefresh.run(
                 timeout: target.refreshTimeout,
                 shouldCancel: request.shouldCancel
             )
         }
 
         return result(from: evaluate(target: target))
-    }
-
-    /// One bounded refresh through the coordinator the app and `meterbar
-    /// refresh` share, so `--refresh` cannot start a second concurrent poll.
-    @MainActor
-    private static func performRefresh(
-        timeout: TimeInterval,
-        shouldCancel: @escaping @Sendable () -> Bool
-    ) async {
-        let result = await UsageRefreshCLI.run(
-            UsageRefreshCLI.Request(timeout: timeout, shouldCancel: shouldCancel)
-        )
-        // Guard keeps running after the refresh, so it must not leave the
-        // cross-process lock held by an abandoned task while it evaluates the
-        // snapshot and exits.
-        await result.awaitPendingCleanup()
     }
 
     private static func evaluate(target: QuotaGuardTarget) -> QuotaGuardEvaluation {

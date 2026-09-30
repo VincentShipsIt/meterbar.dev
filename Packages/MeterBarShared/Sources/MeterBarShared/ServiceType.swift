@@ -117,6 +117,20 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether cached quota supports workload recommendations.
+    public var supportsWorkloadRouting: Bool {
+        switch self {
+        case .claudeCode,
+             .codexCli,
+             .cursor,
+             .openRouter,
+             .grok: true
+        case .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot: false
+        }
+    }
+
     /// The providers that have a status page to poll and show.
     public static var statusPageServices: [ServiceType] {
         allCases.filter(\.hasStatusPage)
