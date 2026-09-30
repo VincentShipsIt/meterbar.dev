@@ -91,6 +91,24 @@ final class ZaiCodingPlanUsageParserTests: XCTestCase {
         }
     }
 
+    func testOverflowingWindowDurationPreservesUsageAndMetricsEncoding() throws {
+        for unit in [1, 3, 6] {
+            for count in ["1e308", "\"1e308\""] {
+                let item = #"{"type":"TOKENS_LIMIT","unit":\#(unit),"number":\#(count),"percentage":30}"#
+                let metrics = try parse(envelope(item)).metrics
+                let limit = try XCTUnwrap(metrics.additionalLimits.first)
+                XCTAssertEqual(limit.used, 30)
+                XCTAssertEqual(limit.total, 100)
+                XCTAssertNil(limit.windowSeconds)
+                XCTAssertEqual(limit.periodKind, .unknown)
+                let data = try JSONEncoder().encode(metrics)
+                let decoded = try JSONDecoder().decode(UsageMetrics.self, from: data)
+                XCTAssertEqual(decoded.additionalLimits.first?.used, 30)
+                XCTAssertNil(decoded.additionalLimits.first?.windowSeconds)
+            }
+        }
+    }
+
     func testDayWindowIsDaily() throws {
         let metrics = try parse(envelope(#"{"type":"TOKENS_LIMIT","unit":1,"number":1,"percentage":30}"#)).metrics
 

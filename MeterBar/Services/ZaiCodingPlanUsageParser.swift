@@ -160,12 +160,14 @@ nonisolated enum ZaiCodingPlanUsageParser {
         guard let unit, let code = Int(exactly: unit), let count, count > 0 else {
             return nil
         }
+        let seconds: TimeInterval
         switch code {
-        case 1: return count * dayWindowSeconds
-        case 3: return count * 3_600
-        case 6: return count * weeklyWindowSeconds
+        case 1: seconds = count * dayWindowSeconds
+        case 3: seconds = count * 3600
+        case 6: seconds = count * weeklyWindowSeconds
         default: return nil
         }
+        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 
     private static func periodKind(forSeconds seconds: TimeInterval?, unit: Double?) -> UsageLimit.PeriodKind {
