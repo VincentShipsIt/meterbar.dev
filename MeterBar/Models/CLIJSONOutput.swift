@@ -458,53 +458,10 @@ nonisolated public struct CLIJSONErrorResponse: CLIJSONDocument {
     }
 }
 
-/// The stable provider tokens every CLI JSON document uses (`docs/cli-json-schema.md`).
-/// Module-internal so `refresh --json` emits the same tokens as `usage --json`
-/// rather than a second, drift-prone mapping.
-nonisolated extension ServiceType {
-    var cliIdentifier: String {
-        switch self {
-        case .claudeCode: return "claude"
-        case .codexCli: return "codex"
-        case .cursor: return "cursor"
-        case .openRouter: return "openrouter"
-        case .grok: return "grok"
-        case .kimiCode: return "kimi"
-        case .zaiCodingPlan: return "zai"
-        case .githubCopilot: return "copilot"
-        }
-    }
-
-    /// The same tokens in documented order, for `--provider` help and error text.
-    static var cliIdentifiers: String {
-        allCases.sorted { $0.sortOrder < $1.sortOrder }
-            .map(\.cliIdentifier)
-            .joined(separator: ", ")
-    }
-
-    /// Parses a caller-supplied `--provider` value. Tolerant of surrounding
-    /// whitespace and casing so shell interpolation doesn't become a usage error.
-    static func fromCLIIdentifier(_ raw: String) -> ServiceType? {
-        let needle = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return allCases.first { $0.cliIdentifier == needle }
-    }
-}
-
 nonisolated private extension UsageLimit {
     /// Extra windows keep a v1 `kind` token (`session` / `weekly`). Cadence
     /// lives in `periodKind` so exhaustive v1 consumers are not broken.
     var cliWindowKind: String {
         periodKind?.legacyWindowKind ?? "weekly"
-    }
-}
-
-nonisolated extension QuotaBand {
-    var cliIdentifier: String {
-        switch self {
-        case .healthy: return "healthy"
-        case .tight: return "tight"
-        case .critical: return "critical"
-        case .exhausted: return "exhausted"
-        }
     }
 }

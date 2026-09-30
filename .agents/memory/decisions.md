@@ -1,11 +1,44 @@
 ---
-last_verified: 2026-09-09
+last_verified: 2026-09-29
 status: active
 ---
 
 # Decisions
 
 Live ADRs only.
+
+## The workload router recommends; it never executes
+
+**Accepted 2026-09-29** (epic #513, Phase 1). `WorkloadRouter` in `MeterBarShared` is a pure function from a task policy, cached quota snapshots, provider health, and an injected `now` to a `RoutingDecision`. The app and `meterbar route` both call it, so identical inputs give identical decisions. It has no clock, disk, network, credential, or subprocess access by construction (`RouteCLITests` scans its sources for the forbidden APIs), and it never sees a prompt: the task is named explicitly by the caller.
+
+Choices that are easy to reverse but should not drift by accident:
+
+- **No provider preference in the shipped policies.** Which vendor suits which work is an opinion that ages with every model release, and a default would quietly steer people. Defaults differ by model tier, minimum headroom, pace tolerance, and whether estimated totals are eligible. Preference order is the user's.
+- **Exhausted means rejected, even with paid overage on.** The router routes within included quota; `extraUsage: on` is not headroom. Billable spillover is never a silent recommendation.
+- **Data problems and known restrictions are different exit codes** (12 vs 11), as in `guard`. A capability, enablement, policy or quota restriction yields 11 even when other candidates have missing data; only all-data rejections or no candidates yield 12.
+- **The policy file stores only overrides.** Built-ins with no entry use the shipped default, so better defaults reach everyone who never customised. A file from a newer schema is never interpreted or overwritten; a read-only caller (the CLI) never rewrites a migrated file.
+- **Free text is gated.** Account and task names pass `RoutingLabel`; anything shaped like an email or a path is replaced, so `route --json` cannot leak either whatever a user typed.
+- **The original five providers support routing.** Shared `ServiceType.supportsWorkloadRouting` rejects Kimi, Z.ai and Copilot as `provider_unsupported` immediately after enablement, before policy, quota or cost checks. They remain tracked, are provider-wide with no account identity, and cannot enter recommendations or fallbacks. Missing or unreadable configuration keeps these opt-in candidates disabled; cached snapshots cannot enable them. Known hidden providers are omitted.
+- **`ServiceType.cliIdentifier` moved into `MeterBarShared`** so the decision contract and every CLI document share one eight-provider token mapping.
+- **Policy saves preserve unreadable entries and dangling links.** Only confirmed absence permits creation. Explicit saves may replace readable malformed JSON, while future schemas remain protected. A malformed non-null deficit field falls back to the task default; only explicit null clears the cap.
+
+Execution (`meterbar run`), HTTP, and MCP exposure are out of scope until the recommendation contract is proven and separately approved.
+
+## Public profile is the one opt-in exception to "no backend"
+
+**Accepted 2026-09-29** (issue #594; Vincent chose Vercel, live sync, and windows + plan + 30-day receipt). MeterBar has no server and this stays true by default. A public page needs hosted storage, so turning on **Public profile** is the single, off-by-default, user-initiated path where the app talks to a MeterBar host. Nothing is sent until the toggle is on, and turning it off deletes the server copy.
+
+**The site is not in this repo.** meterbar.dev is `VincentShipsIt/landings` (`apps/meterbardev`, Next.js 16 on Vercel; CI owns deploys). This repo owns the app client and the wire contract (`docs/public-profile-contract.md`). The page, the API and the OG images are built there against that contract.
+
+**There is no "MeterBar ID" to key on.** The only identity today is the per-install iCloud `deviceID`, which is also the name of the private CloudKit zone and is re-minted on hardware clones. Publishing it would tie a public URL to private data and could not be reset on its own. So a profile has its own identity, minted on first opt-in: a random 10-character `slug` (Crockford base32, the URL: `meterbar.dev/u/<slug>`) and a random 256-bit `publishKey` kept in the Keychain. The server stores only SHA-256(publishKey). First write claims the slug; every later write and the delete must present the key. **Reset** = delete on the server, then mint a fresh slug and key, so the old URL dies and the new one is unlinkable to it.
+
+**Published (allowlist, never a blocklist):** per provider the display name, the plan label, and each quota window's label, used percent, reset time and pace; plus the 30-day receipt (token total, session count, top three models, the 7-day daily token series). Never: account names or ids, emails, handles, paths, project or session names, credentials, or device names. Multiple accounts of one provider are told apart by an ordinal ("Claude Code 2"), not by name. The plan label passes a character allowlist so an account string cannot ride in through it. History beyond the 7-day series is not published in v1.
+
+**Live while published, throttled.** Publish on opt-in, then after a refresh at most every 15 minutes and only when the document changed (unchanged content still refreshes once an hour). The server expires a profile 7 days after its last write, so a lost Keychain key or a Mac that never comes back cannot leave data up indefinitely. Toggle-off sends DELETE at once; if that fails the app keeps a pending-delete flag and retries until the server confirms. The toggle turns off locally either way.
+
+**Storage and cost.** Upstash Redis on the Vercel Marketplace: one JSON value per slug with a 7-day TTL. The 2026-09-30 ownership/cache repair removes cross-request page/card caching so deletion and storage expiry take effect on the next request; only reads within one server render are deduplicated. Budget for page/card reads as well as writes. The original free-tier estimates assumed ISR and are superseded. Verify the Vercel project/team and Upstash account, region, plan and billing limits before provisioning; those remain Vincent's separate infrastructure decision.
+
+**Copy that must change with it.** "No account, no server, no telemetry" appears in the README privacy section and in landings' `products/meterbar.ts`. Both gain "unless you turn on Public profile", in the same PR that ships the feature.
 
 ## The Share page is a gallery, and both cards are one design
 

@@ -60,7 +60,7 @@ by itself once a limit resets.
 
 ### Cost and optimization
 
-- **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded
+- **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded unless you turn on the opt-in public profile
 - **Usage Tab**: One reporting window over tokens and spend: a headline strip, a time series stackable by provider, token type or model, a breakdown by model, origin, project or provider with each row's input/output/cache mix, and an insights column that says what to trim and how far to trust the numbers
 - **What To Use Next**: At the top of Limits, ranks which provider has the most headroom right now
 - **Display Currency**: Keep USD as the default or choose EUR with daily ECB reference rates and an offline cache (Settings → Costs)
@@ -304,7 +304,13 @@ meterbar cost
 
 # JSON output
 meterbar cost --json
+
+# Ask where a task should go: provider, account, model tier, fallbacks, and why.
+# Recommendation only — reads cached usage and leaves work execution to you.
+meterbar route --task implementation
 ```
+
+`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai and GitHub Copilot are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the three newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Usage tab), so the CLI and the app always show the same numbers.
@@ -378,6 +384,12 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 - Multi-Mac sync is off by default. When enabled, it sends compact daily rollups, coarse quota
   windows/reset times, and deterministic hashes of provider account IDs to your private iCloud database.
   It never sends raw account IDs, credentials, or log content.
+- Public profile is off by default. When you turn it on (Share → Public profile), MeterBar
+  publishes each provider's quota windows and optional plan when its account ownership
+  is unambiguous, plus your 30-day token and session totals, top models, and daily tokens
+  for the last 7 days to a random `meterbar.dev/u/<id>` link, and refreshes it while it is on.
+  Turning it off, or resetting the link, deletes the published copy. It never includes your name, email,
+  account names, folders, project names, or credentials ([contract](docs/public-profile-contract.md)).
 - No data is sent beyond providers' own usage endpoints by default. An explicitly
   enabled webhook sends only the documented quota event fields to the URL the
   user configured; credentials and config paths are never included.
@@ -386,7 +398,7 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 - The main app is **not** sandboxed — it must read other tools' credential/log files
   (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.
-- No analytics, telemetry, or crash reporting
+- No analytics, telemetry, or crash reporting (the opt-in public profile above is the only feature that talks to a MeterBar host)
 - Open source for full transparency
 
 ## Architecture

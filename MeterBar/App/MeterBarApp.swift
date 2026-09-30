@@ -89,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let dockVisibilityStore = DockVisibilityStore.shared
     private let notifications = UsageNotificationCoordinator()
     private let quotaEvents = QuotaEventCoordinator.shared
+    private let publicProfile = PublicProfileCoordinator.shared
     private let iCloudUsage = ICloudUsageAggregationCoordinator.shared
     private var cancellables = Set<AnyCancellable>()
 
@@ -189,6 +190,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Prime and observe app-wide quota transitions before the notification
         // coordinator performs its launch refresh.
         quotaEvents.start()
+        // Idle unless the user opted in to the public profile; then it keeps
+        // the page live and finishes any delete a previous session owed.
+        publicProfile.start()
 
         // Setup notifications (also handles initial data refresh)
         notifications.start()
