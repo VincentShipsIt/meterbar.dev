@@ -27,12 +27,7 @@ struct UsageBreakdownCard: View {
     /// Header caption for a tab whose rows describe something other than the
     /// selected window, `nil` when they describe the window.
     static func scopeCaption(for tab: UsageBreakdownTab, in report: UsageReport) -> String? {
-        switch tab {
-        case .origin where !report.originsCoverWindow:
-            return "\(report.scanPeriodDays)-day scan"
-        case .model, .project, .origin, .provider:
-            return report.selection.subtitle
-        }
+        report.breakdownIsWindowed(tab) ? report.selection.subtitle : "\(report.scanPeriodDays)-day scan"
     }
 
     private var rows: [UsageBreakdownRow] { report.breakdown(tab) }

@@ -59,6 +59,17 @@ nonisolated struct TokenComposition: Equatable, Sendable {
             cacheWrite: row.cacheCreationTokens,
             cacheRead: row.cacheReadTokens
         )
+        // A day's parent components saturate independently of its models and
+        // projects. Recover any detail still available before computing shares
+        // or stacks; never add two attribution dimensions to one another.
+        for detail in [row.modelBreakdowns, row.projectBreakdowns] {
+            var detailed = Self.zero
+            for part in detail ?? [] { detailed.add(TokenComposition(part)) }
+            if row.inputTokens == Int.max { input = max(input, detailed.input) }
+            if row.outputTokens == Int.max { output = max(output, detailed.output) }
+            if row.cacheCreationTokens == Int.max { cacheWrite = max(cacheWrite, detailed.cacheWrite) }
+            if row.cacheReadTokens == Int.max { cacheRead = max(cacheRead, detailed.cacheRead) }
+        }
     }
 
     init(_ breakdown: TokenUsageBreakdown) {
@@ -106,6 +117,24 @@ nonisolated struct TokenComposition: Equatable, Sendable {
         output += other.output
         cacheWrite += other.cacheWrite
         cacheRead += other.cacheRead
+    }
+
+    /// Bound over-attributed components to the authoritative row, preserving
+    /// each component's relative model/project split.
+    func limited(to total: TokenComposition, attributed: TokenComposition) -> TokenComposition {
+        var result = self
+        for kind in TokenKind.allCases {
+            let sum = attributed.value(kind)
+            guard sum > total.value(kind), sum > 0 else { continue }
+            let value = value(kind) * total.value(kind) / sum
+            switch kind {
+            case .input: result.input = value
+            case .output: result.output = value
+            case .cacheWrite: result.cacheWrite = value
+            case .cacheRead: result.cacheRead = value
+            }
+        }
+        return result
     }
 
     /// This composition with `other` taken away, each component floored at zero.
@@ -287,10 +316,6 @@ nonisolated struct UsageDataNote: Identifiable, Equatable, Sendable {
 // MARK: - Report
 
 nonisolated struct UsageReport: Sendable {
-    /// Rows the scan dates one day before the window may still carry (the scan
-    /// reads a day past the 30-day window, issue #544), so a 30-day origin
-    /// rollup counts as covering a 30-day window.
-    private static let originCoverageSlackDays = 1
     private static let trendRecentDays = 7
     private static let unattributedName = "Unattributed"
     private static let costTolerance = 0.005
@@ -348,7 +373,13 @@ nonisolated struct UsageReport: Sendable {
         self.composition = composition
 
         // Origins are a scan-period rollup; the daily rows carry no origin split.
-        let originsCoverWindow = windowDays >= summary.periodDays - Self.originCoverageSlackDays
+        let originCosts = summary.costs.filter { !$0.originBreakdowns.isEmpty }
+        let windowEnd = CalendarDayStep.day(today, offsetBy: 1, calendar: calendar)
+        let originsCoverWindow = !originCosts.isEmpty && originCosts.allSatisfy {
+            $0.periodStart <= $0.periodEnd
+                && calendar.startOfDay(for: $0.periodStart) >= windowStart
+                && $0.periodEnd < windowEnd
+        }
         self.originsCoverWindow = originsCoverWindow
         scanPeriodDays = summary.periodDays
 
@@ -371,7 +402,12 @@ nonisolated struct UsageReport: Sendable {
         let providers = Self.providerRows(from: rows)
         breakdowns = [.model: models, .origin: origins, .project: projects, .provider: providers]
 
-        let attributedModels = models.filter { $0.name != Self.unattributedName }
+        // A scan-period table fallback is useful detail, but never evidence
+        // about this window's model mix. Missing daily attribution means the
+        // premium signal is unavailable, including mixed legacy/current rows.
+        let attributedModels = rows.allSatisfy { $0.modelBreakdowns != nil }
+            ? models.filter { $0.name != Self.unattributedName }
+            : []
         let attributedTokens = attributedModels.reduce(0) { $0 + $1.tokens }
         let premiumTokens = attributedModels.filter { $0.tier?.isPremium == true }.reduce(0) { $0 + $1.tokens }
         let premiumShare = attributedTokens > 0 ? premiumTokens / attributedTokens : nil
@@ -430,6 +466,15 @@ nonisolated struct UsageReport: Sendable {
 
     func breakdown(_ tab: UsageBreakdownTab) -> [UsageBreakdownRow] {
         breakdowns[tab] ?? []
+    }
+
+    func breakdownIsWindowed(_ tab: UsageBreakdownTab) -> Bool {
+        switch tab {
+        case .origin: return originsCoverWindow
+        case .model: return !notes.contains { $0.id == AttributionKind.model.noteID }
+        case .project: return !notes.contains { $0.id == AttributionKind.project.noteID }
+        case .provider: return true
+        }
     }
 
     /// That day's total in `metric`, straight from the rows. The chart's stacked
@@ -599,8 +644,19 @@ nonisolated struct UsageReport: Sendable {
             attributed.add(composition)
             attributedCost += max(0, part.estimatedCostUSD)
         }
-        let remainder = TokenComposition(row).subtractingClamped(attributed)
-        let remainderCost = max(0, row.estimatedCostUSD - attributedCost)
+        let total = TokenComposition(row)
+        let totalCost = max(0, row.estimatedCostUSD)
+        let costScale = attributedCost > totalCost && attributedCost > 0 ? totalCost / attributedCost : 1
+        result = result.map { slice in
+            Slice(
+                provider: slice.provider,
+                name: slice.name,
+                composition: slice.composition.limited(to: total, attributed: attributed),
+                costUSD: slice.costUSD * costScale
+            )
+        }
+        let remainder = total.subtractingClamped(attributed)
+        let remainderCost = max(0, totalCost - attributedCost)
         if remainder.total > 0 || remainderCost > costTolerance {
             result.append(Slice(
                 provider: row.provider,

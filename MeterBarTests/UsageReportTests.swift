@@ -559,7 +559,7 @@ final class UsageReportTests: XCTestCase {
         XCTAssertEqual(week.breakdown(.origin).map(\.name), ["Agents", "Main chat"])
         XCTAssertFalse(week.originsCoverWindow)
         XCTAssertNotNil(week.notes.first { $0.id == "origin-scan-period" })
-        XCTAssertTrue(month.originsCoverWindow, "the 31-day scan reads one day past the 30-day window")
+        XCTAssertTrue(month.originsCoverWindow, "the actual origin dates fit, regardless of requested scan width")
         XCTAssertNil(month.notes.first { $0.id == "origin-scan-period" })
     }
 
@@ -728,6 +728,98 @@ final class UsageReportTests: XCTestCase {
         XCTAssertEqual(note?.severity, .warning)
         XCTAssertTrue(note?.text.contains("3") == true)
         XCTAssertNil(Self.report(Self.mixedSummary(), .week).notes.first { $0.id == "compressed-rollouts" })
+    }
+
+    func testLegacyModelAttributionDoesNotFeedTheWindowPremiumSignal() {
+        let daily = [
+            Self.dailyRow(daysAgo: 0, provider: .claudeCode, input: 100, output: 0,
+                          cacheWrite: 0, cacheRead: 0, cost: 1,
+                          models: [Self.breakdown(.claudeCode, "claude-haiku-4-5", input: 100)]),
+            Self.dailyRow(daysAgo: 1, provider: .claudeCode, input: 100, output: 0,
+                          cacheWrite: 0, cacheRead: 0, cost: 1, models: nil, projects: nil),
+        ]
+        let summary = Self.withCost(Self.summary(daily: daily), provider: .claudeCode,
+                                    models: [Self.breakdown(.claudeCode, "claude-opus-5", input: 9_000)],
+                                    projects: [Self.breakdown(.claudeCode, "project", input: 9_000)])
+        let report = Self.report(summary, .week)
+
+        XCTAssertEqual(report.headline.totalTokens, 200)
+        XCTAssertNil(report.headline.premiumShare)
+        XCTAssertNil(report.insights.premiumTokenShare)
+        XCTAssertNil(report.insights.recommendations.first { $0.id == "premium-share" })
+        XCTAssertEqual(report.breakdown(.model).first?.tokens, 9_000)
+        XCTAssertEqual(UsageBreakdownCard.scopeCaption(for: .model, in: report), "31-day scan")
+        XCTAssertEqual(UsageBreakdownCard.scopeCaption(for: .project, in: report), "31-day scan")
+        XCTAssertEqual(UsageBreakdownCard.scopeCaption(for: .provider, in: report), "Last 7 days")
+    }
+
+    func testSaturatedModelDetailRecoversOneCommonTotalForAllStacks() throws {
+        let opus = Self.breakdown(.claudeCode, "claude-opus-5", input: Int.max, cacheRead: Int.max)
+        let haiku = Self.breakdown(.claudeCode, "claude-haiku-4-5", input: Int.max)
+        let daily = Self.dailyRow(daysAgo: 0, provider: .claudeCode, input: Int.max, output: 100,
+                                 cacheWrite: 0, cacheRead: Int.max, cost: 2, models: [opus, haiku])
+        let report = Self.report(Self.summary(daily: [daily]), .week)
+
+        XCTAssertEqual(report.composition.input, 2 * Double(Int.max))
+        XCTAssertEqual(report.composition.cacheRead, Double(Int.max))
+        XCTAssertEqual(report.breakdown(.model).first?.share ?? 0, 2.0 / 3.0, accuracy: 1e-12)
+        for stacking in UsageStacking.allCases {
+            try Self.assertStacksMatchDayTotals(report.series(.init(metric: .tokens, stacking: stacking)), in: report)
+        }
+    }
+
+    func testUnsaturatedAttributionCannotExceedAuthoritativeComponentsOrCost() throws {
+        let daily = Self.dailyRow(daysAgo: 0, provider: .claudeCode, input: 100, output: 0,
+                                 cacheWrite: 0, cacheRead: 0, cost: 1, models: [
+                                    Self.breakdown(.claudeCode, "claude-opus-5", input: 100),
+                                    Self.breakdown(.claudeCode, "claude-haiku-4-5", input: 100),
+                                 ])
+        let report = Self.report(Self.summary(daily: [daily]), .week)
+        XCTAssertEqual(report.composition.total, 100)
+        XCTAssertEqual(report.breakdown(.model).map(\.tokens), [50, 50])
+        for metric in UsageMetric.allCases {
+            for stacking in UsageStacking.available(for: metric) {
+                try Self.assertStacksMatchDayTotals(report.series(.init(metric: metric, stacking: stacking)), in: report)
+            }
+        }
+    }
+
+    func testOriginInsightRequiresActualScanDatesInsideTheWindow() {
+        let today = Self.calendar.startOfDay(for: Self.now)
+        func report(scanDaysAgo: Int, periodDays: Int) -> UsageReport {
+            let cost = TokenCost(provider: .claudeCode, inputTokens: 10_000, outputTokens: 0,
+                                 cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCostUSD: 1,
+                                 sessionCount: 1,
+                                 periodStart: CalendarDayStep.day(today, offsetBy: -scanDaysAgo, calendar: Self.calendar),
+                                 periodEnd: Self.now,
+                                 originBreakdowns: [Self.breakdown(.claudeCode, "Agents", input: 9_900),
+                                                    Self.breakdown(.claudeCode, "Main chat", input: 100)])
+            let daily = Self.dailyRow(daysAgo: 0, provider: .claudeCode, input: 100, output: 0,
+                                     cacheWrite: 0, cacheRead: 0, cost: 1)
+            return Self.report(Self.summary(daily: [daily], costs: [cost], periodDays: periodDays), .month)
+        }
+        let outside = report(scanDaysAgo: 30, periodDays: 31)
+        XCTAssertFalse(outside.originsCoverWindow)
+        XCTAssertNil(outside.insights.recommendations.first { $0.id == "origin-concentration" })
+        XCTAssertEqual(UsageBreakdownCard.scopeCaption(for: .origin, in: outside), "31-day scan")
+        XCTAssertNotNil(outside.notes.first { $0.id == "origin-scan-period" })
+        XCTAssertTrue(report(scanDaysAgo: 29, periodDays: 31).originsCoverWindow)
+        XCTAssertFalse(report(scanDaysAgo: 30, periodDays: 7).originsCoverWindow,
+                       "a short rounded scan width does not prove its date bounds")
+    }
+
+    func testSaturatedTrendUsesRawComponentsWithFullHistoryCoverage() throws {
+        let rows = (0..<30).map { offset in
+            Self.dailyRow(daysAgo: offset, provider: .claudeCode,
+                          input: offset < 7 ? Int.max : Int.max / 4, output: 0,
+                          cacheWrite: 0, cacheRead: 0, cost: 1)
+        }
+        let report = Self.report(Self.summary(daily: rows), .month)
+        let trend = try XCTUnwrap(report.insights.inputs.trend)
+        XCTAssertEqual(trend.recentDailyTokens, Double(Int.max), accuracy: 1_000)
+        XCTAssertEqual(trend.windowDailyTokens / Double(Int.max), 0.425, accuracy: 1e-12)
+        let recommendation = try XCTUnwrap(report.insights.recommendations.first { $0.id == "trend-up" })
+        XCTAssertTrue(recommendation.detail.contains("whole-window average"))
     }
 
     // MARK: - Fixtures
@@ -919,7 +1011,7 @@ final class UsageReportTests: XCTestCase {
             cacheReadTokens: 21 * 800,
             estimatedCostUSD: 21,
             sessionCount: 4,
-            periodStart: calendar.startOfDay(for: now),
+            periodStart: daily.map(\.date).min() ?? now,
             periodEnd: now,
             modelBreakdowns: [opus, sonnet],
             originBreakdowns: [

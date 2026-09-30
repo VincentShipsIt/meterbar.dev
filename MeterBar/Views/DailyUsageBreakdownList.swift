@@ -23,6 +23,15 @@ struct DailyUsageBreakdownList: View {
   }
 
   var body: some View {
+    ScrollView(.horizontal) {
+      table
+        .frame(minWidth: DailyUsageTableLayout.minimumWidth)
+    }
+    .fixedSize(horizontal: false, vertical: true)
+    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+  }
+
+  private var table: some View {
     VStack(spacing: 0) {
       DailyUsageTableHeader()
 
@@ -96,6 +105,10 @@ private enum DailyUsageTableLayout {
   static let sourceColumnWidth: CGFloat = 70
   static let metricColumnWidth: CGFloat = 76
   static let costColumnWidth: CGFloat = 72
+  static var minimumWidth: CGFloat {
+    dayColumnMinWidth + sourceColumnWidth + 4 * metricColumnWidth + costColumnWidth
+      + 6 * rowSpacing + 2 * MeterBarTheme.Spacing.md
+  }
 }
 
 struct DailyUsageTableHeader: View {

@@ -358,7 +358,7 @@ nonisolated struct OptimizationInsights: Equatable, Sendable {
             recommendations.append(OptimizationRecommendation(
                 id: "trend-up",
                 title: "Token burn is trending up",
-                detail: "Your last \(trend.recentDays) days are running hotter than the rest of this window. "
+                detail: "Your last \(trend.recentDays) days are running hotter than the whole-window average. "
                     + "Worth checking which model or workflow is driving the increase before it compounds.",
                 severity: .info,
                 systemImage: "chart.line.uptrend.xyaxis",
