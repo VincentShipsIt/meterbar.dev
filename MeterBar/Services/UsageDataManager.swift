@@ -223,6 +223,7 @@ class UsageDataManager: ObservableObject {
         let additionalSimpleProviders = additionalSimpleProviders ?? [
             .kimiCode: KimiCodeService.shared,
             .zaiCodingPlan: ZaiCodingPlanService.shared,
+            .githubCopilot: GitHubCopilotService.shared,
         ]
         self.simpleProviders = additionalSimpleProviders.merging([.cursor: cursorService]) { _, explicit in explicit }
         self.openRouterService = openRouterService
@@ -760,7 +761,8 @@ class UsageDataManager: ObservableObject {
             openRouterAccountMetrics = [:]
         case .cursor,
              .kimiCode,
-             .zaiCodingPlan:
+             .zaiCodingPlan,
+             .githubCopilot:
             break
         }
     }
@@ -779,7 +781,8 @@ class UsageDataManager: ObservableObject {
             return openRouterAccountStore.enabledAccounts.count
         case .cursor,
              .kimiCode,
-             .zaiCodingPlan:
+             .zaiCodingPlan,
+             .githubCopilot:
             return nil
         }
     }
@@ -932,7 +935,8 @@ class UsageDataManager: ObservableObject {
         switch service {
         case .cursor,
              .kimiCode,
-             .zaiCodingPlan:
+             .zaiCodingPlan,
+             .githubCopilot:
             return try await refreshedSimpleMetrics(for: service)
         case .claudeCode, .codexCli, .grok, .openRouter:
             return try await refreshedAccountAwareMetrics(for: service)
@@ -994,7 +998,8 @@ class UsageDataManager: ObservableObject {
             throw ServiceError.notAuthenticated
         case .cursor,
              .kimiCode,
-             .zaiCodingPlan:
+             .zaiCodingPlan,
+             .githubCopilot:
             preconditionFailure("Single-account providers use refreshedSimpleMetrics")
         }
 
@@ -1644,7 +1649,8 @@ class UsageDataManager: ObservableObject {
             return false
         case .cursor,
              .kimiCode,
-             .zaiCodingPlan:
+             .zaiCodingPlan,
+             .githubCopilot:
             return simpleProviders[service]?.hasAccess ?? false
         case .openRouter:
             // Access means at least one enabled key has its Keychain item.
@@ -1664,7 +1670,8 @@ class UsageDataManager: ObservableObject {
             switch service {
             case .cursor,
                  .kimiCode,
-                 .zaiCodingPlan:
+                 .zaiCodingPlan,
+                 .githubCopilot:
                 guard let provider = simpleProviders[service] else { throw ServiceError.notAuthenticated }
                 result = try await provider.fetchUsageMetrics()
             case .claudeCode, .codexCli, .grok, .openRouter:

@@ -22,6 +22,7 @@ enum MetricsFixtures {
         case .grok: return grok()
         case .kimiCode: return kimiCode()
         case .zaiCodingPlan: return zaiCodingPlan()
+        case .githubCopilot: return githubCopilot()
         }
     }
 
@@ -118,6 +119,21 @@ enum MetricsFixtures {
     }
 
     /// OpenRouter: key-limit + account-credits, matching production mapping.
+    /// The one Copilot shape with a documented cap: an organization user-level
+    /// budget, in dollars, resetting monthly.
+    static func githubCopilot() -> UsageMetrics {
+        UsageMetrics(
+            service: .githubCopilot,
+            weeklyLimit: UsageLimit(
+                used: 9,
+                total: 25,
+                resetTime: referenceDate.addingTimeInterval(12 * 24 * 3600),
+                periodKind: .monthly
+            ),
+            lastUpdated: referenceDate
+        )
+    }
+
     static func zaiCodingPlan() -> UsageMetrics {
         UsageMetrics(
             service: .zaiCodingPlan,

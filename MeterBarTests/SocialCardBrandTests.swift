@@ -60,6 +60,7 @@ final class SocialCardBrandTests: XCTestCase {
             .grok: MeterBarTheme.BrandAccentDark.grok,
             .kimiCode: MeterBarTheme.BrandAccentDark.kimiCode,
             .zaiCodingPlan: MeterBarTheme.BrandAccentDark.zaiCodingPlan,
+            .githubCopilot: MeterBarTheme.BrandAccentDark.githubCopilot,
         ]
 
         for service in ServiceType.allCases {

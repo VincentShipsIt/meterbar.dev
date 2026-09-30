@@ -162,6 +162,9 @@ nonisolated public enum ProviderReadinessInspector {
         },
         zaiCodingPlanReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
             [ProviderReadinessInspector.zaiCodingPlanReport(refreshError: error)]
+        },
+        githubCopilotReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.githubCopilotReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
@@ -181,6 +184,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return kimiCodeReport(refreshErrors[provider], now)
             case .zaiCodingPlan:
                 return zaiCodingPlanReport(refreshErrors[provider], now)
+            case .githubCopilot:
+                return githubCopilotReport(refreshErrors[provider], now)
             }
         }
     }
@@ -371,6 +376,25 @@ nonisolated public enum ProviderReadinessInspector {
             now: now
         )
         return ProviderReadinessEvaluator.cursor(input)
+    }
+
+    static func githubCopilotReport(
+        refreshError: ServiceError? = nil,
+        hasToken: () -> Bool = { GitHubCopilotService.shared.hasToken },
+        configuration: () -> GitHubCopilotAccountConfig = { GitHubCopilotService.shared.configuration },
+        support: () -> GitHubCopilotAccountSupport? = { GitHubCopilotAccountConfig.loadSupport() }
+    ) -> ProviderReadiness {
+        let config = configuration()
+        return ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(
+                hasToken: hasToken(),
+                hasUsername: config.username != nil,
+                scope: config.scope,
+                hasOrganization: config.organization != nil,
+                support: support(),
+                refreshError: sanitize(refreshError)
+            )
+        )
     }
 
     static func zaiCodingPlanReport(

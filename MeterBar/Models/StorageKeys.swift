@@ -20,6 +20,8 @@ nonisolated enum StorageKeys {
     static let kimiCodeProviderEnabled = "KimiCodeProviderEnabled"
     /// Z.ai Coding Plan is off until the user turns it on in Providers settings.
     static let zaiCodingPlanProviderEnabled = "ZaiCodingPlanProviderEnabled"
+    /// GitHub Copilot is off until the user turns it on in Providers settings.
+    static let githubCopilotProviderEnabled = "GitHubCopilotProviderEnabled"
     /// Grok Build is tracked by default; this key records an explicit opt-out.
     /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
     /// distinguish "never touched" from "turned off" now that the default flipped.

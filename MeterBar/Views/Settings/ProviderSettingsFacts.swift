@@ -69,6 +69,8 @@ struct ProviderSettingsFacts {
             "Kimi Code sign-in or API key + managed usage API"
         case .zaiCodingPlan:
             "Z.ai monitor quota API (API key)"
+        case .githubCopilot:
+            "GitHub billing REST API (fine-grained token)"
         }
     }
 
@@ -96,6 +98,8 @@ struct ProviderSettingsFacts {
             return nil
         case .zaiCodingPlan:
             return subscriptionType?.capitalized.nilIfEmpty
+        case .githubCopilot:
+            return nil
         }
     }
 

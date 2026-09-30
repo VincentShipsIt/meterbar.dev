@@ -116,6 +116,29 @@ final class ZaiPeakScheduleTests: XCTestCase {
         XCTAssertTrue(ZaiPeakPresentation.label(promo, now: promoNow).hasPrefix("Off-peak all day · peak resumes in"))
     }
 
+    @MainActor
+    func testOneBadgeInstanceFollowsTheClockAcrossPeakBoundaries() throws {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Z.ai", service: .zaiCodingPlan,
+            metrics: UsageMetrics(
+                service: .zaiCodingPlan,
+                sessionLimit: UsageLimit(used: 12, total: 100, resetTime: nil)
+            ),
+            emptyDetail: ""
+        )
+        let badges = ProviderStatusBadges(snapshot: snapshot)
+        for (hour, minute, expected) in [
+            (13, 59, "Off-peak · peak in 1m"),
+            (14, 0, "Peak · off-peak in 4h"),
+            (17, 59, "Peak · off-peak in 1m"),
+            (18, 0, "Off-peak · peak in 20h"),
+        ] {
+            let tick = date(2026, 8, 3, hour, minute)
+            let status = try XCTUnwrap(badges.peakStatus(at: tick))
+            XCTAssertEqual(ZaiPeakPresentation.label(status, now: tick), expected)
+        }
+    }
+
     func testStatusWithNoKnownChangeStillNamesTheRate() {
         XCTAssertEqual(
             ZaiPeakPresentation.label(.init(isPeak: true, isPromotion: false, nextChange: nil)),

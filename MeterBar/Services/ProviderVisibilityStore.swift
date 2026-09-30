@@ -55,6 +55,8 @@ final class ProviderVisibilityStore: ObservableObject {
             userDefaults.set(enabled, forKey: StorageKeys.kimiCodeProviderEnabled)
         case .zaiCodingPlan:
             userDefaults.set(enabled, forKey: StorageKeys.zaiCodingPlanProviderEnabled)
+        case .githubCopilot:
+            userDefaults.set(enabled, forKey: StorageKeys.githubCopilotProviderEnabled)
         case .grok:
             userDefaults.set(enabled, forKey: StorageKeys.grokProviderEnabled)
         case .claudeCode, .codexCli, .cursor:
@@ -76,6 +78,9 @@ final class ProviderVisibilityStore: ObservableObject {
         }
         if !userDefaults.bool(forKey: StorageKeys.zaiCodingPlanProviderEnabled) {
             hiddenServices.insert(.zaiCodingPlan)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.githubCopilotProviderEnabled) {
+            hiddenServices.insert(.githubCopilot)
         }
         // Grok is a first-class provider, so only an explicit opt-out hides it.
         // While it was opt-in, `load()` inserted it into `hiddenServices` and any

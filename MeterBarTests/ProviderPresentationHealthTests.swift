@@ -18,6 +18,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case openRouter
         case kimiCode
         case zaiCodingPlan
+        case githubCopilot
 
         var service: ServiceType {
             switch self {
@@ -28,11 +29,13 @@ final class ProviderPresentationHealthTests: XCTestCase {
             case .openRouter: return .openRouter
             case .kimiCode: return .kimiCode
             case .zaiCodingPlan: return .zaiCodingPlan
+            case .githubCopilot: return .githubCopilot
             }
         }
 
         var isFlat: Bool {
-            self == .cursor || self == .openRouter || self == .kimiCode || self == .zaiCodingPlan
+            self == .cursor || self == .openRouter || self == .kimiCode || self == .zaiCodingPlan || self ==
+                .githubCopilot
         }
     }
 
@@ -624,7 +627,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 openRouterAccountAccess: kind == .openRouter
                     ? [OpenRouterAccount.defaultID: true]
                     : [:],
-                simpleProviderAccess: kind == .kimiCode || kind == .zaiCodingPlan ? [kind.service: true] : [:]
+                simpleProviderAccess: kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot
+                    ? [kind.service: true]
+                    : [:]
             )
         )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
@@ -665,6 +670,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
             lastErrors.simpleProviders = [.kimiCode: .apiError("Kimi Code refresh failed")]
         case (.zaiCodingPlan, .transientFailure), (.zaiCodingPlan, .sustainedOrParseFailure):
             lastErrors.simpleProviders = [.zaiCodingPlan: .apiError("Z.ai refresh failed")]
+        case (.githubCopilot, .transientFailure),
+             (.githubCopilot, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.githubCopilot: .apiError("Copilot refresh failed")]
         default:
             break
         }
@@ -708,7 +716,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 ? [OpenRouterAccount.defaultID: true]
                 : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
-            simpleProviderAccess: (kind == .kimiCode || kind == .zaiCodingPlan) && refresh != .unprobed
+            simpleProviderAccess: (kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot)
+                && refresh != .unprobed
                 ? [kind.service: true]
                 : [:],
             lastErrors: lastErrors

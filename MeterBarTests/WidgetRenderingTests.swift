@@ -130,7 +130,10 @@ final class WidgetRenderingTests: XCTestCase {
     func testProvidersRenderInStableSortOrder() {
         let metrics = MetricsFixtures.allProviders()
         let expected = ServiceType.allCases.sorted { $0.sortOrder < $1.sortOrder }
-        XCTAssertEqual(renderedServices(metrics, family: .large), expected)
+        XCTAssertEqual(
+            renderedServices(metrics, family: .large),
+            Array(expected.prefix(WidgetFamily.large.visibleRowCount(totalRowCount: expected.count)))
+        )
         XCTAssertEqual(
             renderedServices(metrics, family: .medium),
             Array(expected.prefix(WidgetFamily.medium.visibleRowCount(totalRowCount: expected.count)))

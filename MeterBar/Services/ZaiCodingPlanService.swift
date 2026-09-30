@@ -48,12 +48,25 @@ final class ZaiCodingPlanService: ObservableObject, SimpleUsageProviding {
     var hasAPIKey: Bool { apiKeyStore.hasKey }
 
     /// A key is present and Z.ai has not rejected it. A rejected key clears
-    /// access until it is replaced, so the card asks for a new key instead of
+    /// access until it or its region is changed, so the card asks for a valid key instead of
     /// polling with one that cannot work. Sync and prompt-free: an
     /// attribute-only Keychain probe.
     var hasAccess: Bool {
         if case .notAuthenticated? = lastError { return false }
         return hasAPIKey
+    }
+
+    func saveRegion(_ value: ZaiCodingPlanRegion, directory: URL? = SharedMetricsStore.containerURL) {
+        guard value != region() else {
+            return
+        }
+        ZaiRegionSetting.save(value, directory: directory)
+        guard region() == value else {
+            return
+        }
+        if case .notAuthenticated? = lastError {
+            lastError = nil
+        }
     }
 
     @discardableResult

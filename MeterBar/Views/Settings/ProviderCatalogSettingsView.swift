@@ -80,6 +80,7 @@ struct ProviderCatalogSettingsView: View {
         case .grok: return "Track Grok Build session and weekly quota from its cached CLI login."
         case .kimiCode: return "Track Kimi Code 5-hour and weekly quota from its sign-in or an API key."
         case .zaiCodingPlan: return "Track GLM Coding Plan 5-hour and weekly credits and peak hours from an API key."
+        case .githubCopilot: return "Track Copilot AI-credit budgets where GitHub documents one."
         }
     }
 

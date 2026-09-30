@@ -19,6 +19,48 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         directories = []
     }
 
+    func testZaiRegionChangeRetriesRejectedKeyThroughActualManager() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        directories.append(directory)
+        let keychain = KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.zai.region",
+            legacyServices: []
+        )
+        XCTAssertTrue(keychain.save(key: ZaiCodingPlanService.keychainKey, value: "fixture-key"))
+        let service = ZaiCodingPlanService(
+            keychain: keychain,
+            fetchData: { request in
+                guard request.url?.host == ZaiCodingPlanRegion.mainland.host else {
+                    throw ServiceError.notAuthenticated
+                }
+                return Data(
+                    #"{"code":200,"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":12}]}}"#
+                        .utf8
+                )
+            },
+            region: { ZaiRegionSetting.current(directory: directory) }
+        )
+        let fixture = try makeFixture(
+            accounts: [],
+            additionalSimpleProviders: [.zaiCodingPlan: service],
+            enabledSimpleProvider: .zaiCodingPlan
+        )
+        await fixture.manager.refresh(service: .zaiCodingPlan)
+        XCTAssertFalse(service.hasAccess)
+        XCTAssertNil(fixture.manager.metrics[.zaiCodingPlan])
+        service.saveRegion(.international, directory: directory)
+        XCTAssertFalse(service.hasAccess, "Reselecting the rejected region must not clear its failure")
+        service.saveRegion(.mainland, directory: directory)
+        XCTAssertTrue(service.hasAccess, "The same saved key may work at the correct regional endpoint")
+        XCTAssertNil(service.lastError)
+        await fixture.manager.refresh(service: .zaiCodingPlan)
+        XCTAssertEqual(fixture.manager.metrics[.zaiCodingPlan]?.sessionLimit?.used, 12)
+        fixture.store.flushPendingWrites()
+        XCTAssertEqual(fixture.store.loadMetrics()[.zaiCodingPlan]?.sessionLimit?.used, 12)
+    }
+
     func testFactoryRefreshesOnlyConfiguredEnabledKeysInProjectedOrder() async throws {
         let first = OpenRouterAccount(id: UUID(), name: "First key")
         let second = OpenRouterAccount(id: UUID(), name: "Second key")
@@ -85,7 +127,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     }
 
     func testFactoryHonorsInjectedSimpleProviderMembershipIncludingEmptyDictionary() async throws {
-        for service in [ServiceType.kimiCode, .zaiCodingPlan] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot] {
             let provider = SimpleProvider(service: service)
             let injected = try makeFixture(
                 accounts: [],
@@ -272,7 +314,11 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         let dependencies = UsageRefreshCLI.ManagerDependencies(
             codex: unused,
             cursor: unused,
-            additionalSimpleProviders: additionalSimpleProviders ?? [.kimiCode: unused, .zaiCodingPlan: unused],
+            additionalSimpleProviders: additionalSimpleProviders ?? [
+                .kimiCode: unused,
+                .zaiCodingPlan: unused,
+                .githubCopilot: unused,
+            ],
             openRouter: provider,
             grok: unused,
             claude: unused,
