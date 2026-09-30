@@ -263,9 +263,6 @@ nonisolated enum KimiCodeUsageParser {
 
     private static func date(_ value: Any?) -> Date? {
         guard let string = value as? String, !string.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let parsed = fractional.date(from: string) { return parsed }
-        return ISO8601DateFormatter().date(from: string)
+        return FlexibleISO8601.date(from: string)
     }
 }
