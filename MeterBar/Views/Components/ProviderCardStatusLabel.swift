@@ -21,6 +21,6 @@ struct ProviderCardStatusLabel: View {
     }
 
     var body: some View {
-        MeterBarChip(text.uppercased(), tint: color, style: .flat)
+        MeterBarChip(text, tint: color, style: .flat)
     }
 }

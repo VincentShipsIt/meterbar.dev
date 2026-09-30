@@ -130,8 +130,8 @@ private struct OverviewProviderGroup: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
-            Text(title.uppercased())
-                .font(.caption)
+            Text(title)
+                .font(.subheadline)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
 

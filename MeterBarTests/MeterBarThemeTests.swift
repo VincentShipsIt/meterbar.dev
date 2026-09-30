@@ -29,7 +29,7 @@ final class MeterBarThemeTests: XCTestCase {
         XCTAssertEqual(MeterBarTheme.Radius.small, 4)
         XCTAssertEqual(MeterBarTheme.Radius.medium, 8)
         XCTAssertEqual(MeterBarTheme.Radius.card, 12)
-        XCTAssertEqual(MeterBarTheme.Radius.shell, 16)
+        XCTAssertEqual(MeterBarTheme.Radius.shell, 24)
         XCTAssertLessThan(MeterBarTheme.Radius.small, MeterBarTheme.Radius.medium)
         XCTAssertLessThan(MeterBarTheme.Radius.medium, MeterBarTheme.Radius.card)
         XCTAssertLessThan(MeterBarTheme.Radius.card, MeterBarTheme.Radius.shell)
@@ -51,6 +51,15 @@ final class MeterBarThemeTests: XCTestCase {
 
         // Derived tokens used by the detail panel and API-usage card.
         XCTAssertEqual(MeterBarTheme.detailCardRadius, MeterBarTheme.Radius.card)
+        // A popover card sits one `Spacing.md` inside the shell, so its radius is
+        // exactly the shell's minus that inset.
+        XCTAssertEqual(
+            MeterBarTheme.Radius.concentric(
+                outer: MeterBarTheme.Radius.shell,
+                inset: MeterBarTheme.CardPadding.popover.value
+            ),
+            MeterBarTheme.Radius.card
+        )
         XCTAssertEqual(MeterBarTheme.apiCardRadius, MeterBarTheme.Radius.medium)
     }
 

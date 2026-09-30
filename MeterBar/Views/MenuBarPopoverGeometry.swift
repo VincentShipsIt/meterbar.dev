@@ -12,8 +12,9 @@ import Foundation
 enum MenuBarPopoverGeometry {
     static let width: CGFloat = 390
     static let minimumHeight: CGFloat = 180
-    /// Header + divider above the scroll area.
-    static let chromeHeight: CGFloat = 41
+    /// The header bar that floats over the top of the scroll area: a 30pt glass
+    /// capsule plus `Spacing.sm` above and below.
+    static let chromeHeight: CGFloat = 46
     /// Breathing room kept between the popover and each screen edge.
     static let screenPadding: CGFloat = 8
     /// Absolute ceiling, independent of how tall the display is.
