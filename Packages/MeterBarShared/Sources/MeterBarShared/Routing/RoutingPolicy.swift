@@ -207,9 +207,13 @@ extension RoutingPolicy: Codable {
             } ?? base.modelAliases
         minimumRemainingPercent = Self.tolerant(Int.self, values, .minimumRemainingPercent)
             ?? base.minimumRemainingPercent
-        maximumDeficitPercent = values.contains(.maximumDeficitPercent)
-            ? Self.tolerant(Int.self, values, .maximumDeficitPercent)
-            : base.maximumDeficitPercent
+        if values.contains(.maximumDeficitPercent),
+           (try? values.decodeNil(forKey: .maximumDeficitPercent)) == true {
+            maximumDeficitPercent = nil
+        } else {
+            maximumDeficitPercent = Self.tolerant(Int.self, values, .maximumDeficitPercent)
+                ?? base.maximumDeficitPercent
+        }
         allowsEstimatedQuota = Self.tolerant(Bool.self, values, .allowsEstimatedQuota)
             ?? base.allowsEstimatedQuota
         costPreference = Self.tolerant(RoutingCostPreference.self, values, .costPreference)

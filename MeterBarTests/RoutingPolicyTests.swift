@@ -148,6 +148,27 @@ final class RoutingPolicyTests: XCTestCase {
         XCTAssertNil(decoded.maximumDeficitPercent)
     }
 
+    func testMalformedNonNullDeficitRetainsTaskDefaultWhileNullClearsIt() throws {
+        let expected = RoutingPolicyDefaults.policy(for: .implementation).maximumDeficitPercent
+        XCTAssertNotNil(expected)
+        for value in ["\"unreadable\"", "25.5", "true", "{}", "[]"] {
+            let body = #"{"task":"implementation","maximumDeficitPercent":\#(value)}"#
+            let decoded = try JSONDecoder().decode(RoutingPolicy.self, from: Data(body.utf8))
+            XCTAssertEqual(decoded.maximumDeficitPercent, expected, value)
+        }
+        let cleared = try JSONDecoder().decode(
+            RoutingPolicy.self,
+            from: Data(#"{"task":"implementation","maximumDeficitPercent":null}"#
+                .utf8)
+        )
+        XCTAssertNil(cleared.maximumDeficitPercent)
+        let valid = try JSONDecoder().decode(
+            RoutingPolicy.self,
+            from: Data(#"{"task":"implementation","maximumDeficitPercent":17}"#.utf8)
+        )
+        XCTAssertEqual(valid.maximumDeficitPercent, 17)
+    }
+
     func testMissingFieldsTakeThatTasksDefaults() throws {
         let decoded = try JSONDecoder().decode(RoutingPolicy.self, from: Data(#"{"task":"planning"}"#.utf8))
         XCTAssertEqual(decoded, RoutingPolicyDefaults.policy(for: .planning))

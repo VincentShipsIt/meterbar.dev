@@ -54,6 +54,46 @@ final class RoutingPolicyStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fileURL), original)
     }
 
+    func testSaveRefusesUnreadableExistingFileBeforeCallingWriter() throws {
+        let original = Data("preserved policy bytes".utf8)
+        try original.write(to: fileURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path) }
+        var wrote = false
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: directory, writer: { _, _ in
+            wrote = true
+        })) {
+            XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .existingFileUnreadable)
+            XCTAssertFalse($0.localizedDescription.contains(self.directory.path))
+        }
+        XCTAssertFalse(wrote)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+    }
+
+    func testSaveRefusesDanglingLinkBeforeCallingWriter() throws {
+        let missing = directory.appendingPathComponent("missing-target")
+        try FileManager.default.createSymbolicLink(at: fileURL, withDestinationURL: missing)
+        var wrote = false
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: directory, writer: { _, _ in
+            wrote = true
+        })) {
+            XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .existingFileUnreadable)
+            XCTAssertFalse($0.localizedDescription.contains(self.directory.path))
+        }
+        XCTAssertFalse(wrote)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: fileURL.path), missing.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+    }
+
+    func testSaveCreatesConfirmedMissingFileAndCanReplaceReadableMalformedJSON() throws {
+        try RoutingPolicyStore.save(.empty, directory: directory)
+        XCTAssertEqual(RoutingPolicyStore.load(directory: directory).catalog.document, .empty)
+        try Data("{ malformed".utf8).write(to: fileURL)
+        try RoutingPolicyStore.save(.empty, directory: directory)
+        XCTAssertEqual(RoutingPolicyStore.load(directory: directory).catalog.document, .empty)
+    }
+
     func testSaveWithoutAContainerFailsInsteadOfClaimingSuccess() {
         XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: nil)) {
             XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .containerUnavailable)

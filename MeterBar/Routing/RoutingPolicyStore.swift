@@ -18,6 +18,7 @@ nonisolated enum RoutingPolicyStore {
     enum PersistenceError: LocalizedError, Equatable {
         case containerUnavailable
         case encodingFailed
+        case existingFileUnreadable
         case unsupportedVersion(Int)
         case writeFailed(reason: String)
 
@@ -27,6 +28,8 @@ nonisolated enum RoutingPolicyStore {
                 "Routing policy storage is unavailable. Open MeterBar and try again."
             case .encodingFailed:
                 "Routing policies could not be encoded."
+            case .existingFileUnreadable:
+                "Routing policies could not be read; the existing file was not changed."
             case let .unsupportedVersion(version):
                 "Routing policies use a newer schema (\(version)); update MeterBar before saving."
             case let .writeFailed(reason):
@@ -64,11 +67,7 @@ nonisolated enum RoutingPolicyStore {
         } catch {
             // Only a missing file is normal. A dangling symlink or an existing
             // unreadable entry must not silently remove the user's constraints.
-            let fileError = error as NSError
-            let isMissing = fileError.domain == NSCocoaErrorDomain
-                && fileError.code == NSFileReadNoSuchFileError
-                && (try? FileManager.default.attributesOfItem(atPath: url.path)) == nil
-            return isMissing
+            return isConfirmedMissing(url, after: error)
                 ? Loaded(catalog: RoutingPolicyCatalog(), notice: nil)
                 : unreadable()
         }
@@ -119,13 +118,40 @@ nonisolated enum RoutingPolicyStore {
         guard let data = (encoder ?? codec.encode)(document) else {
             throw PersistenceError.encodingFailed
         }
-        if let existing = try? Data(contentsOf: url), case let .unsupportedVersion(version) = codec.decode(existing) {
+        let existing: Data?
+        do {
+            existing = try Data(contentsOf: url)
+        } catch {
+            guard isConfirmedMissing(url, after: error) else {
+                throw PersistenceError.existingFileUnreadable
+            }
+            existing = nil
+        }
+        if let existing, case let .unsupportedVersion(version) = codec.decode(existing) {
             throw PersistenceError.unsupportedVersion(version)
         }
         do {
             try writer(data, url)
         } catch {
             throw PersistenceError.writeFailed(reason: SecureFileWriterError.logDescription(for: error))
+        }
+    }
+
+    private static func isConfirmedMissing(_ url: URL, after error: Error) -> Bool {
+        let readError = error as NSError
+        guard readError.domain == NSCocoaErrorDomain,
+              readError.code == NSFileReadNoSuchFileError else {
+            return false
+        }
+        do {
+            // Attributes inspect the directory entry itself, including a
+            // dangling symlink, rather than only following its target.
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return false
+        } catch {
+            let entryError = error as NSError
+            return entryError.domain == NSCocoaErrorDomain
+                && (entryError.code == NSFileNoSuchFileError || entryError.code == NSFileReadNoSuchFileError)
         }
     }
 
