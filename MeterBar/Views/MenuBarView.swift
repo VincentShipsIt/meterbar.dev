@@ -100,59 +100,62 @@ struct MenuBarView: View {
   }
 
   private var mainColumn: some View {
-    VStack(spacing: 0) {
-      popoverHeader
-
-      Divider()
-
-      ScrollView {
-        VStack(spacing: 10) {
-          PopoverOverviewPanel(
-            snapshots: snapshots,
-            openDashboard: openDashboard,
-            openStatusDetail: openStatusDetail,
-            openProviderOverview: openProviderDetail,
-            hoverProviderOverview: hoverProviderDetailChanged,
-            claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
-            claudeEnabledCustomAccountIDs: claudeAccountStore.enabledAccounts
-              .filter { !$0.isDefault }
-              .map(\.id),
-            claudeEnabledAccountMetrics: claudeAccountStore.enabledAccounts.compactMap {
-              dataManager.claudeCodeAccountMetrics[$0.id]
-            },
-            claudeAccounts: claudeAccountStore.accounts,
-            claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
-            codexAccounts: codexAccountStore.accounts,
-            grokAccounts: grokAccountStore.accounts,
-            showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
-          )
-
-          Divider()
-          StayAwakeMenuControl()
-
-          if SessionWakeMenuControl.shouldShow(
-            featureEnabled: sessionWakeStore.featureEnabled,
-            isOn: sessionWakeStore.isOn,
-            canTurnOn: sessionWakeStore.canTurnOn
-          ) {
-            Divider()
-            SessionWakeMenuControl()
-          }
-        }
-        .padding(MeterBarTheme.Spacing.md)
-        .background(
-          GeometryReader { proxy in
-            Color.clear.preference(
-              key: MenuContentHeightPreferenceKey.self,
-              value: proxy.size.height
-            )
-          }
+    // The header is a floating glass bar over the scroll view, not a strip above
+    // it: `safeAreaBar` insets the content by the bar's height and lets the
+    // system draw its soft scroll-edge fade where cards slide underneath, in
+    // place of the hard rule the old header-plus-Divider stack drew.
+    ScrollView {
+      VStack(spacing: 10) {
+        PopoverOverviewPanel(
+          snapshots: snapshots,
+          openDashboard: openDashboard,
+          openStatusDetail: openStatusDetail,
+          openProviderOverview: openProviderDetail,
+          hoverProviderOverview: hoverProviderDetailChanged,
+          claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
+          claudeEnabledCustomAccountIDs: claudeAccountStore.enabledAccounts
+            .filter { !$0.isDefault }
+            .map(\.id),
+          claudeEnabledAccountMetrics: claudeAccountStore.enabledAccounts.compactMap {
+            dataManager.claudeCodeAccountMetrics[$0.id]
+          },
+          claudeAccounts: claudeAccountStore.accounts,
+          claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
+          codexAccounts: codexAccountStore.accounts,
+          grokAccounts: grokAccountStore.accounts,
+          showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
         )
+
+        Divider()
+        StayAwakeMenuControl()
+
+        if SessionWakeMenuControl.shouldShow(
+          featureEnabled: sessionWakeStore.featureEnabled,
+          isOn: sessionWakeStore.isOn,
+          canTurnOn: sessionWakeStore.canTurnOn
+        ) {
+          Divider()
+          SessionWakeMenuControl()
+        }
       }
-      .scrollIndicators(.hidden)
-      .scrollContentBackground(.hidden)
-      .frame(height: scrollHeight)
+      .padding(MeterBarTheme.Spacing.md)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: MenuContentHeightPreferenceKey.self,
+            value: proxy.size.height
+          )
+        }
+      )
     }
+    .scrollIndicators(.hidden)
+    .scrollContentBackground(.hidden)
+    .safeAreaBar(edge: .top, spacing: 0) {
+      popoverHeader
+        .frame(height: MenuBarPopoverGeometry.chromeHeight)
+    }
+    .scrollEdgeEffectStyle(.soft, for: .top)
+    .frame(height: scrollHeight + MenuBarPopoverGeometry.chromeHeight)
   }
 
   private var scrollHeight: CGFloat {

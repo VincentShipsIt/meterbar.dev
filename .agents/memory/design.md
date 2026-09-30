@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-09-29
 status: active
 ---
 
@@ -22,6 +22,12 @@ Glass is the **chrome** layer (menu bar, popover, toolbar, sidebar, occasional f
 - Do not paint content cards with product-colored washes. Use `MeterBarTheme.Surface.content`.
 - Content is not glass. Never stack material on material.
 - For a genuinely free-floating custom control only: one `.glassEffect(.regular, in:)` inside a `GlassEffectContainer`.
+
+## Shape and hierarchy
+
+- Concentric corners: `Radius.shell` (24) minus the popover inset (`Spacing.md`, 12) equals `Radius.card` (12). Change one, change the others.
+- Popover header is a `safeAreaBar` glass bar over the scroll view with a soft top scroll edge, not a strip with a `Divider` under it. `MenuBarPopoverGeometry.chromeHeight` must equal the bar height.
+- Labels, section headers, table column headers and status chips are sentence case, never `.uppercased()` / `.textCase(.uppercase)`. Share-card artwork is the exception.
 
 ## Color
 

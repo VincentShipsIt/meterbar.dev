@@ -105,7 +105,7 @@ struct LimitRow: View {
 
             if content.emphasizesCompactOutHeader {
                 MeterBarChip(
-                    content.trailingText.uppercased(),
+                    content.trailingText,
                     tint: MeterBarTheme.danger,
                     style: .flat
                 )

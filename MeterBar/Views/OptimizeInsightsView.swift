@@ -629,7 +629,6 @@ private struct RankedBreakdownTable: View {
       .font(.caption2)
       .fontWeight(.semibold)
       .foregroundStyle(.secondary)
-      .textCase(.uppercase)
 
       ForEach(entries) { entry in
         RankedBreakdownRow(entry: entry, kind: kind)
