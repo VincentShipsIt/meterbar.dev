@@ -78,6 +78,19 @@ final class ZaiCodingPlanUsageParserTests: XCTestCase {
         XCTAssertEqual(ServiceType.zaiCodingPlan.additionalQuotaTitleKey(for: limit).englishTitle, "Quota")
     }
 
+    func testInvalidUnitsRemainNeutralWithoutDiscardingUsage() throws {
+        for unit in ["1.5", "3.5", "5.5", "6.5", "1e100", "-1e100", "9223372036854775808", "\"1e100\""] {
+            let item = #"{"type":"TOKENS_LIMIT","unit":\#(unit),"number":5,"percentage":30}"#
+            let metrics = try parse(envelope(item)).metrics
+            XCTAssertNil(metrics.sessionLimit)
+            XCTAssertNil(metrics.weeklyLimit)
+            let limit = try XCTUnwrap(metrics.additionalLimits.first)
+            XCTAssertEqual(limit.used, 30)
+            XCTAssertEqual(limit.periodKind, .unknown)
+            XCTAssertNil(limit.windowSeconds)
+        }
+    }
+
     func testDayWindowIsDaily() throws {
         let metrics = try parse(envelope(#"{"type":"TOKENS_LIMIT","unit":1,"number":1,"percentage":30}"#)).metrics
 
@@ -171,6 +184,29 @@ final class ZaiCodingPlanUsageParserTests: XCTestCase {
                 return XCTFail("expected apiError, got \(error)")
             }
             XCTAssertEqual(message, "Request failed", "provider text must never be surfaced")
+        }
+    }
+
+    func testInvalidFailureCodesRemainAPIErrors() {
+        for code in ["1e100", "-1e100", "9223372036854775808", "401.5", "1001.5", "200.5", "\"1e100\""] {
+            // A readable payload and success=true must not hide a raw non-200 code.
+            let body = #"{"code":\#(code),"success":true,"data":{"limits":[\#(fiveHour)]}}"#
+            XCTAssertThrowsError(try parse(body), code) { error in
+                guard case let ServiceError.apiError(message) = error else {
+                    return XCTFail("expected apiError for \(code), got \(error)")
+                }
+                XCTAssertEqual(message, "Request failed")
+            }
+        }
+    }
+
+    func testExactAuthCodesRemainAuthenticationFailures() {
+        for code in [401, 1000, 1001, 1002, 1003, 1004] {
+            XCTAssertThrowsError(try parse(#"{"code":\#(code),"success":true}"#)) { error in
+                guard case ServiceError.notAuthenticated = error else {
+                    return XCTFail("expected authentication failure for \(code), got \(error)")
+                }
+            }
         }
     }
 

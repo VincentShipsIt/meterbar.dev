@@ -89,7 +89,7 @@ nonisolated enum ZaiCodingPlanUsageParser {
     /// envelope is checked before anything is read from `data`.
     private static func checkEnvelope(_ root: [String: Any]) throws {
         if root["success"] as? Bool == false || (number(root["code"]).map { $0 != 200 } ?? false) {
-            let code = number(root["code"]).map(Int.init) ?? 0
+            let code = number(root["code"]).flatMap { Int(exactly: $0) } ?? 0
             if code == 401 || (1000...1004).contains(code) {
                 throw ServiceError.notAuthenticated
             }
@@ -157,8 +157,10 @@ nonisolated enum ZaiCodingPlanUsageParser {
     }
 
     private static func windowSeconds(unit: Double?, count: Double?) -> TimeInterval? {
-        guard let unit, let count, count > 0 else { return nil }
-        switch Int(unit) {
+        guard let unit, let code = Int(exactly: unit), let count, count > 0 else {
+            return nil
+        }
+        switch code {
         case 1: return count * dayWindowSeconds
         case 3: return count * 3_600
         case 6: return count * weeklyWindowSeconds
@@ -167,7 +169,9 @@ nonisolated enum ZaiCodingPlanUsageParser {
     }
 
     private static func periodKind(forSeconds seconds: TimeInterval?, unit: Double?) -> UsageLimit.PeriodKind {
-        if let unit, Int(unit) == 5 { return .monthly }
+        if let unit, Int(exactly: unit) == 5 {
+            return .monthly
+        }
         switch seconds {
         case sessionWindowSeconds: return .session
         case weeklyWindowSeconds: return .weekly
