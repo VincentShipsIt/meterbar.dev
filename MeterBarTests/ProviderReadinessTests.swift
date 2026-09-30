@@ -108,6 +108,55 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(text.contains(secret))
     }
 
+    func testGitHubCopilotReadinessCoversTheSupportMatrix() throws {
+        let unconfigured = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: false, hasUsername: false)
+        )
+        XCTAssertEqual(unconfigured.provider, .githubCopilot)
+        XCTAssertEqual(unconfigured.check("auth")?.level, .fail)
+        XCTAssertTrue((unconfigured.check("auth")?.detail ?? "").contains("token"))
+        XCTAssertTrue((unconfigured.check("auth")?.detail ?? "").contains("GitHub username"))
+        XCTAssertEqual(unconfigured.check("data")?.level, .warn)
+
+        let orgMissing = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: true, hasUsername: true, scope: .organization, hasOrganization: false)
+        )
+        XCTAssertEqual(orgMissing.check("auth")?.level, .fail)
+        XCTAssertTrue((orgMissing.check("auth")?.detail ?? "").contains("organization"))
+
+        let unchecked = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: true, hasUsername: true)
+        )
+        XCTAssertEqual(unchecked.check("auth")?.level, .pass)
+        XCTAssertEqual(unchecked.check("data")?.level, .warn)
+        XCTAssertTrue((unchecked.check("data")?.recovery ?? "").contains("meterbar refresh"))
+
+        let quota = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(
+                hasToken: true, hasUsername: true, scope: .organization, hasOrganization: true, support: .quota
+            )
+        )
+        XCTAssertEqual(quota.check("data")?.level, .pass)
+        XCTAssertTrue(quota.isHealthy)
+
+        for support in [
+            GitHubCopilotAccountSupport.usageOnly(.noDocumentedAllowance),
+            .usageOnly(.legacyEntitlementUndocumented),
+            .unsupported(.missingPermission),
+        ] {
+            let report = ProviderReadinessEvaluator.githubCopilot(
+                GitHubCopilotReadinessInput(hasToken: true, hasUsername: true, support: support)
+            )
+            XCTAssertEqual(report.check("data")?.level, .warn, support.token)
+            XCTAssertEqual(report.check("data")?.detail, support.message)
+            XCTAssertTrue((report.check("data")?.recovery ?? "").contains("does not guess"))
+        }
+
+        let export = try JSONEncoder().encode(ProviderReadinessExport(quota))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+    }
+
     func testGrokRequiresCLIAndCachedLogin() {
         let missing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)

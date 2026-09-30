@@ -611,7 +611,7 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertFalse(services.contains(.codexCli))
         XCTAssertFalse(services.contains(.grok))
         XCTAssertFalse(services.contains(.openRouter))
-        XCTAssertEqual(services, [.cursor, .kimiCode, .zaiCodingPlan])
+        XCTAssertEqual(services, [.cursor, .kimiCode, .zaiCodingPlan, .githubCopilot])
         XCTAssertEqual(
             services.count,
             ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }.count

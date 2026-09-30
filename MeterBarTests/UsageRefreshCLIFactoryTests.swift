@@ -127,7 +127,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     }
 
     func testFactoryHonorsInjectedSimpleProviderMembershipIncludingEmptyDictionary() async throws {
-        for service in [ServiceType.kimiCode, .zaiCodingPlan] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot] {
             let provider = SimpleProvider(service: service)
             let injected = try makeFixture(
                 accounts: [],
@@ -314,7 +314,11 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         let dependencies = UsageRefreshCLI.ManagerDependencies(
             codex: unused,
             cursor: unused,
-            additionalSimpleProviders: additionalSimpleProviders ?? [.kimiCode: unused, .zaiCodingPlan: unused],
+            additionalSimpleProviders: additionalSimpleProviders ?? [
+                .kimiCode: unused,
+                .zaiCodingPlan: unused,
+                .githubCopilot: unused,
+            ],
             openRouter: provider,
             grok: unused,
             claude: unused,

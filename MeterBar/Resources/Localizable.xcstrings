@@ -1073,6 +1073,105 @@
           }
         }
       }
+    },
+    "provider.copilot.setup_prompt": {
+      "comment": "Empty-state prompt on the GitHub Copilot provider card when no token or account is configured.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a GitHub token and your username"
+          }
+        }
+      }
+    },
+    "settings.copilot.notice": {
+      "comment": "Explanatory note at the top of the GitHub Copilot settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar reads Copilot billing through GitHub's documented billing API with a fine-grained token you create (Plan: read for a personal plan). The token is stored in macOS Keychain and sent only to api.github.com. GitHub documents an allowance only for organization budgets, so other accounts show their usage state instead of a quota bar."
+          }
+        }
+      }
+    },
+    "settings.copilot.token_placeholder": {
+      "comment": "Placeholder in the secure field for a GitHub fine-grained personal access token; the prefix is literal.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "github_pat_…"
+          }
+        }
+      }
+    },
+    "settings.copilot.get_token": {
+      "comment": "Button that opens GitHub's page for creating a fine-grained personal access token.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get Token"
+          }
+        }
+      }
+    },
+    "settings.copilot.unauthenticated": {
+      "comment": "Error card shown when GitHub rejects the token.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub rejected the token. Create a new fine-grained token and paste it here."
+          }
+        }
+      }
+    },
+    "settings.copilot.billing": {
+      "comment": "Row label for choosing whose Copilot billing is read: a personal plan or an organization-managed licence.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing"
+          }
+        }
+      }
+    },
+    "settings.copilot.username": {
+      "comment": "Row label for the GitHub account login whose billing is read.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub username"
+          }
+        }
+      }
+    },
+    "settings.copilot.organization": {
+      "comment": "Row label for the GitHub organization that manages and bills the Copilot licence.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organization"
+          }
+        }
+      }
+    },
+    "settings.copilot.save_account": {
+      "comment": "Button that saves the GitHub username and organization.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Account"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

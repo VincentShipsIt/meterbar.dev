@@ -668,6 +668,24 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"))
     }
 
+    func testGitHubCopilotReportUsesInjectedFactsAndSanitizesProviderText() throws {
+        let report = ProviderReadinessInspector.githubCopilotReport(
+            refreshError: .apiError("HTTP 403 token=SECRET-DO-NOT-LEAK"),
+            hasToken: { true },
+            configuration: {
+                GitHubCopilotAccountConfig(scope: .organization, username: "octocat", organization: "acme")
+            },
+            support: { .quota }
+        )
+
+        XCTAssertEqual(report.provider, .githubCopilot)
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .pass)
+        let text = try String(data: JSONEncoder().encode(ProviderReadinessExport(report)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"))
+        XCTAssertFalse(text.contains("octocat"), "the login is never part of a paste-safe report")
+    }
+
     func testKimiCodeIsProbedThroughItsOwnReportOnly() {
         var probed: [ServiceType] = []
         _ = ProviderReadinessInspector.reports(

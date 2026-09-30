@@ -24,6 +24,9 @@ final class CLIProviderFilterTests: XCTestCase {
         XCTAssertEqual(CLIProviderFilter.select("z.ai"), [.zaiCodingPlan])
         XCTAssertEqual(CLIProviderFilter.select("glm"), [.zaiCodingPlan])
         XCTAssertEqual(ServiceType.zaiCodingPlan.cliIdentifier, "zai")
+        XCTAssertEqual(CLIProviderFilter.select("copilot"), [.githubCopilot])
+        XCTAssertEqual(CLIProviderFilter.select("github"), [.githubCopilot])
+        XCTAssertEqual(ServiceType.githubCopilot.cliIdentifier, "copilot")
     }
 
     func testAnUnmatchedFilterSelectsNothingRatherThanEverything() {
