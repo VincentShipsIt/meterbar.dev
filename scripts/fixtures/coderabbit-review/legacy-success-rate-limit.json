@@ -1,0 +1,18 @@
+{
+  "expected": 1,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [
+      {
+        "context": "CodeRabbit",
+        "state": "success",
+        "description": "Review rate limited",
+        "created_at": "2026-09-30T10:00:00Z"
+      }
+    ],
+    "comments": [],
+    "reviews": []
+  }
+}

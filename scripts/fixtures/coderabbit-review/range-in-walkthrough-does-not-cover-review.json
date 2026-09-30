@@ -1,0 +1,19 @@
+{
+  "expected": 2,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [],
+    "comments": [
+      {
+        "user": {
+          "login": "coderabbitai[bot]"
+        },
+        "body": "<!-- recent_review_start -->No actionable comments were generated in the recent review. Reviewing files between aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.<!-- recent_review_end -->\nReviewing files between bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb and aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
+        "updated_at": "2026-09-30T10:01:00Z"
+      }
+    ],
+    "reviews": []
+  }
+}

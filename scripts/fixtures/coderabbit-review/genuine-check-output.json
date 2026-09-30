@@ -1,0 +1,25 @@
+{
+  "expected": 0,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [
+      {
+        "name": "CodeRabbit",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app": {
+          "slug": "coderabbitai"
+        },
+        "status": "completed",
+        "conclusion": "success",
+        "output": {
+          "summary": "Code review completed. Actionable comments posted: 0"
+        },
+        "updated_at": "2026-09-30T10:00:00Z"
+      }
+    ],
+    "statuses": [],
+    "comments": [],
+    "reviews": []
+  }
+}

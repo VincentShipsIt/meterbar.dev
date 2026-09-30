@@ -1,0 +1,19 @@
+{
+  "expected": 2,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [],
+    "comments": [
+      {
+        "user": {
+          "login": "coderabbitai[bot]"
+        },
+        "body": "## Walkthrough\nReviewing files between bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb and aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
+        "updated_at": "2026-09-30T10:01:00Z"
+      }
+    ],
+    "reviews": []
+  }
+}

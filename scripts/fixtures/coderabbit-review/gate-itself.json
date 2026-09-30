@@ -1,0 +1,25 @@
+{
+  "expected": 2,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [
+      {
+        "name": "coderabbit-gate",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app": {
+          "slug": "coderabbitai"
+        },
+        "status": "completed",
+        "conclusion": "success",
+        "output": {
+          "summary": "Review completed"
+        },
+        "updated_at": "2026-09-30T10:00:00Z"
+      }
+    ],
+    "statuses": [],
+    "comments": [],
+    "reviews": []
+  }
+}
