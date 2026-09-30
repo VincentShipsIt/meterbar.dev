@@ -204,7 +204,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // open the popover once the status item has been placed.
         if CommandLine.arguments.contains("--open-popover") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.togglePopover()
+                guard let self, self.menuPanel?.isShown != true else {
+                    return
+                }
+                self.togglePopover()
             }
         }
     }
