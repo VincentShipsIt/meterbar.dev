@@ -10,7 +10,7 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 ## Still open on the board
 
 - **#389** — provider epic. Vincent lifted the 2026-09-12 deferral on 2026-09-29 and asked for the whole backlog. Kimi Code (#427), Z.ai/GLM (#428, with the peak/off-peak indicator), and GitHub Copilot (#429, bounded billing coverage) have implementations tracked on their respective issues. Close #389 only after all three land on `master` and acceptance evidence is recorded; implementation alone does not complete the epic. Antigravity stays on hold (no machine-readable quota API); Gemini CLI is out (Google forbids third-party reuse of its OAuth/backend).
-- **#513** — local workload router epic. Open, no children claimed yet, not scheduled.
+- **#513** — local workload router epic. Phase 1 (contracts, pure router, `meterbar route`) implemented 2026-09-29, with original-five routing on the eight-provider tracking contract. Open: policy editor + routing preview (Phase 2 requires separate prepared approval), popover recommendation, `meterbar run` decision, HTTP/MCP exposure.
 
 ## Structural debt (no issue required to remember)
 

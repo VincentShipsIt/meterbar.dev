@@ -304,7 +304,13 @@ meterbar cost
 
 # JSON output
 meterbar cost --json
+
+# Ask where a task should go: provider, account, model tier, fallbacks, and why.
+# Recommendation only — nothing is launched, switched, or read.
+meterbar route --task implementation
 ```
+
+`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai and GitHub Copilot are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the three newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Usage tab), so the CLI and the app always show the same numbers.
