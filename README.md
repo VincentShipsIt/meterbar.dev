@@ -379,9 +379,10 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
   windows/reset times, and deterministic hashes of provider account IDs to your private iCloud database.
   It never sends raw account IDs, credentials, or log content.
 - Public profile is off by default. When you turn it on (Share → Public profile), MeterBar
-  publishes each provider's plan and quota windows plus your 30-day token totals to a
-  random `meterbar.dev/u/<id>` link, and refreshes it while it is on. Turning it off, or
-  resetting the link, deletes the published copy. It never includes your name, email,
+  publishes each provider's quota windows and optional plan when its account ownership
+  is unambiguous, plus your 30-day token and session totals, top models, and daily tokens
+  for the last 7 days to a random `meterbar.dev/u/<id>` link, and refreshes it while it is on.
+  Turning it off, or resetting the link, deletes the published copy. It never includes your name, email,
   account names, folders, project names, or credentials ([contract](docs/public-profile-contract.md)).
 - No data is sent beyond providers' own usage endpoints by default. An explicitly
   enabled webhook sends only the documented quota event fields to the URL the

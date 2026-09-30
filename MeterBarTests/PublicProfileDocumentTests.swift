@@ -43,6 +43,91 @@ final class PublicProfileDocumentTests: XCTestCase {
         XCTAssertNil(doc.providers.first?.plan)
     }
 
+    func testMultiAccountProvidersDoNotShareAProviderWidePlan() {
+        for service in [ServiceType.claudeCode, .codexCli, .grok, .cursor, .zaiCodingPlan] {
+            let doc = make(
+                snapshots: [
+                    Self.snapshot(id: "a", title: "work", service: service),
+                    Self.snapshot(id: "b", title: "personal", service: service),
+                ],
+                plans: [service: "Pro"]
+            )
+            XCTAssertEqual(doc.providers.count, 2)
+            XCTAssertTrue(doc.providers.allSatisfy { $0.plan == nil }, service.rawValue)
+        }
+    }
+
+    func testFilteredOrCappedAccountCannotMakeAProviderPlanUnambiguous() {
+        let visible = Self.snapshot(
+            id: "default",
+            title: "private",
+            service: .codexCli,
+            accountID: CodexAccount.defaultID
+        )
+        let filtered = Self.snapshot(
+            id: "filtered",
+            title: "private",
+            service: .codexCli,
+            windows: [("me@example.com", 20)],
+            accountID: UUID()
+        )
+        let capped = Self.snapshot(id: "capped", title: "private", service: .codexCli, accountID: UUID())
+        let filler = (0 ..< (PublicProfileDocument.maxProviders - 1)).map { index in
+            Self.snapshot(id: "cursor-\(index)", title: "private", service: .cursor)
+        }
+        for snapshots in [[visible, filtered], [visible] + filler + [capped]] {
+            let doc = make(snapshots: snapshots, plans: [.codexCli: "Pro"])
+            let codex = doc.providers.filter { $0.provider == ServiceType.codexCli.rawValue }
+            XCTAssertEqual(codex.count, 1)
+            XCTAssertNil(codex.first?.plan)
+        }
+    }
+
+    func testCustomOnlyAccountsDoNotInheritTheDefaultAccountPlan() {
+        for service in [ServiceType.claudeCode, .codexCli, .grok] {
+            let doc = make(
+                snapshots: [Self.snapshot(id: "custom", title: "private", service: service, accountID: UUID())],
+                plans: [service: "Pro"]
+            )
+            XCTAssertEqual(doc.providers.count, 1)
+            XCTAssertNil(doc.providers.first?.plan, service.rawValue)
+        }
+    }
+
+    func testUnambiguousDefaultAndLegacyPlansAreRetained() {
+        let defaults: [(ServiceType, UUID)] = [
+            (.claudeCode, ClaudeCodeAccount.defaultID),
+            (.codexCli, CodexAccount.defaultID),
+            (.grok, GrokAccount.defaultID),
+        ]
+        for (service, accountID) in defaults {
+            for identity in [accountID, nil] as [UUID?] {
+                let doc = make(
+                    snapshots: [Self.snapshot(id: "sole", title: "private", service: service, accountID: identity)],
+                    plans: [service: "Pro"]
+                )
+                XCTAssertEqual(doc.providers.first?.plan, "Pro", service.rawValue)
+            }
+        }
+        for service in [ServiceType.cursor, .zaiCodingPlan] {
+            let doc = make(
+                snapshots: [Self.snapshot(id: "sole", title: "private", service: service, accountID: UUID())],
+                plans: [service: "Pro"]
+            )
+            XCTAssertEqual(doc.providers.first?.plan, "Pro", service.rawValue)
+        }
+    }
+
+    func testSubPoolDoesNotInflateAccountCountOrReceiveAPlan() {
+        let parent = Self.snapshot(id: "parent", title: "private", service: .cursor)
+        var pool = Self.snapshot(id: "pool", title: "Grok Bot", service: .cursor)
+        pool.cardRole = .subPool
+
+        let doc = make(snapshots: [parent, pool], plans: [.cursor: "Ultra"])
+
+        XCTAssertEqual(doc.providers.map(\.plan), ["Ultra", nil])
+    }
+
     /// The only free-text fields are allowlisted by character set, so an email,
     /// a path or a URL that reached a label is dropped rather than published.
     func testPlanLabelsThatCouldCarryAnAccountAreDropped() {
@@ -331,7 +416,8 @@ final class PublicProfileDocumentTests: XCTestCase {
         title: String,
         service: ServiceType,
         windows: [(String, Double)] = [("Weekly", 23)],
-        reset: Date? = Date(timeIntervalSince1970: 1_800_100_000)
+        reset: Date? = Date(timeIntervalSince1970: 1_800_100_000),
+        accountID: UUID? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             id: id,
@@ -349,7 +435,7 @@ final class PublicProfileDocumentTests: XCTestCase {
             emptyDetail: "",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil
+            accountID: accountID
         )
     }
 

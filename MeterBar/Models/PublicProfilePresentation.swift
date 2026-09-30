@@ -5,8 +5,12 @@ import Foundation
 enum PublicProfilePresentation {
     static let title = "Public profile"
 
-    static let offSummary = "Off by default. Turn it on to publish your limits to a link you can share. "
-        + "MeterBar sends nothing until you do."
+    private static let publishedFields = "each provider's quota windows (used, reset, pace), "
+        + "its plan when its account is unambiguous, your 30-day token and session totals, "
+        + "top models, and daily tokens for the last 7 days"
+
+    static let offSummary = "Off by default. Turn it on to publish " + publishedFields
+        + " to a link you can share. MeterBar sends nothing until you do."
 
     static let onSummary = "Anyone with this link can see it. Turn it off to delete the published copy."
 
@@ -17,8 +21,7 @@ enum PublicProfilePresentation {
     static let neverPublished = "Never published: your name, email, account names, folders, "
         + "project names, or credentials."
 
-    static let publishedSummary = "Published: each provider's plan and quota windows (used, reset, pace) "
-        + "plus your 30-day token totals and top models."
+    static let publishedSummary = "Published: " + publishedFields + "."
 
     static func statusText(
         status: PublicProfileStore.Status,

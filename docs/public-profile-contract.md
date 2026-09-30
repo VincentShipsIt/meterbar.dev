@@ -63,17 +63,27 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
 }
 ```
 
-- `provider` is the app's provider id: `Claude Code`, `Codex CLI`, `Cursor`,
-  `OpenRouter`, `Grok`. The site maps it to a logo and color. Unknown ids
-  should render with a neutral mark.
+- `provider` is the app's exact `ServiceType.rawValue`: `Claude Code`,
+  `Codex CLI`, `Cursor`, `OpenRouter`, `Grok`, `Kimi Code`, `Z.ai Coding Plan`,
+  or `GitHub Copilot`. The site maps it to a logo and color. Unknown ids
+  should render with a neutral mark. Only quota windows are published;
+  currency budgets are omitted, including Copilot's monthly dollar budget.
+  A currency-only provider does not acquire an invented quota window.
 - `name` is the provider's display name, with an ordinal for a second account
   of the same provider (`OpenAI Codex 2`), or `<pool> on <parent>` for a
   sub-pool (`Grok Bot on Cursor`). It is never an account name.
 - `plan`, `pace` and `resetsAt` may be `null` or absent. `resetsAt` is rounded
-  to the minute.
+  to the minute. `plan` is included only when its account ownership is
+  unambiguous across the full snapshot input, before window sanitization or
+  provider caps. Multiple account cards suppress the provider-wide plan;
+  sub-pools never count as accounts or carry a plan. Claude, Codex and Grok
+  custom accounts cannot inherit the default account's plan. A sole default
+  account or legacy provider-wide snapshot without an account id may retain it.
 - `usedPercent` is 0-100. The card shows "left", which is `100 - usedPercent`.
 - `receipt` is this Mac's local scan and is absent when there is nothing to
-  show. `dailyTokens` is oldest first, 7 entries, most recent day last.
+  show. It contains 30-day token and session totals, top models, and daily
+  tokens for the last 7 days. `dailyTokens` is oldest first, 7 entries, most
+  recent day last.
 - Only the keys above exist. The site must ignore unknown keys, and the app's
   tests fail if a key is added without updating the allowlist.
 
