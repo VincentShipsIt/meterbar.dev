@@ -34,7 +34,8 @@ final class QuotaEventCoordinatorTests: XCTestCase {
 
         coordinator.start()
         await fulfillment(of: [entered], timeout: 1)
-        XCTAssertNotNil(coordinator.evaluationTask, "start() must leave an evaluation in flight")
+        let evaluation = coordinator.evaluationTask
+        XCTAssertNotNil(evaluation, "start() must leave an evaluation in flight")
 
         // Two more merged-publisher fires land on the same synchronous call
         // stack, while the first evaluation is still suspended inside
@@ -50,8 +51,7 @@ final class QuotaEventCoordinatorTests: XCTestCase {
         )
 
         await gate.resume()
-        await Task.yield()
-        await Task.yield()
+        await evaluation?.value
 
         XCTAssertNil(coordinator.evaluationTask, "the guard must clear once the in-flight evaluation finishes")
     }
@@ -80,8 +80,7 @@ final class QuotaEventCoordinatorTests: XCTestCase {
 
         coordinator.start()
         await fulfillment(of: [firstEntered], timeout: 1)
-        await Task.yield()
-        await Task.yield()
+        await coordinator.evaluationTask?.value
         XCTAssertNil(coordinator.evaluationTask)
 
         providerVisibility.set(.codexCli, isEnabled: false)
