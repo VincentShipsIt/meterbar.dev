@@ -11,15 +11,14 @@ import Foundation
 /// Keyed by a one-way hash of the bearer token so each Claude profile has its
 /// own cooldown and no credential is held as a dictionary key.
 nonisolated final class ClaudeUsageRateLimitGate: @unchecked Sendable {
+    // MARK: Internal
+
     static let shared = ClaudeUsageRateLimitGate()
 
     /// Used when a 429 carries no usable `Retry-After`.
     static let defaultCooldown: TimeInterval = 5 * 60
     /// A hostile or broken header must not park the provider for hours.
     static let maximumCooldown: TimeInterval = 30 * 60
-
-    private let lock = NSLock()
-    private var blockedUntil: [Int: Date] = [:]
 
     /// Seconds from a `Retry-After` header (delta-seconds or HTTP-date), clamped
     /// to `1...maximumCooldown`; `defaultCooldown` when absent or unreadable.
@@ -35,7 +34,9 @@ nonisolated final class ClaudeUsageRateLimitGate: @unchecked Sendable {
         } else {
             return defaultCooldown
         }
-        guard seconds.isFinite else { return defaultCooldown }
+        guard seconds.isFinite else {
+            return defaultCooldown
+        }
         return min(max(seconds, 1), maximumCooldown)
     }
 
@@ -51,7 +52,9 @@ nonisolated final class ClaudeUsageRateLimitGate: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let key = Self.key(token)
-        guard let until = blockedUntil[key] else { return nil }
+        guard let until = blockedUntil[key] else {
+            return nil
+        }
         guard until > now else {
             blockedUntil[key] = nil
             return nil
@@ -64,6 +67,11 @@ nonisolated final class ClaudeUsageRateLimitGate: @unchecked Sendable {
         blockedUntil[Self.key(token)] = nil
         lock.unlock()
     }
+
+    // MARK: Private
+
+    private let lock = NSLock()
+    private var blockedUntil: [Int: Date] = [:]
 
     private static func key(_ token: String) -> Int {
         var hasher = Hasher()

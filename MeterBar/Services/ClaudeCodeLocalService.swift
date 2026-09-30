@@ -965,8 +965,12 @@ nonisolated struct UsageWindow: Codable {
     }
 
     private static func number(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Double? {
-        if let value = try? container.decode(Double.self, forKey: key) { return value }
-        if let text = try? container.decode(String.self, forKey: key) { return Double(text) }
+        if let value = try? container.decode(Double.self, forKey: key) {
+            return value
+        }
+        if let text = try? container.decode(String.self, forKey: key) {
+            return Double(text)
+        }
         return nil
     }
 
@@ -974,14 +978,18 @@ nonisolated struct UsageWindow: Codable {
     /// timestamp in seconds or milliseconds (as a number or a numeric string).
     private static func date(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Date? {
         if let text = try? container.decode(String.self, forKey: key) {
-            if let date = FlexibleISO8601.date(from: text) { return date }
+            if let date = FlexibleISO8601.date(from: text) {
+                return date
+            }
             return Double(text).flatMap(epoch)
         }
         return (try? container.decode(Double.self, forKey: key)).flatMap(epoch)
     }
 
     private static func epoch(_ value: Double) -> Date? {
-        guard value.isFinite, value > 0 else { return nil }
+        guard value.isFinite, value > 0 else {
+            return nil
+        }
         return Date(timeIntervalSince1970: value > 100_000_000_000 ? value / 1000 : value)
     }
 }
