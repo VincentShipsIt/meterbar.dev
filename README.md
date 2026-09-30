@@ -306,7 +306,7 @@ meterbar cost
 meterbar cost --json
 
 # Ask where a task should go: provider, account, model tier, fallbacks, and why.
-# Recommendation only — nothing is launched, switched, or read.
+# Recommendation only — reads cached usage and leaves work execution to you.
 meterbar route --task implementation
 ```
 
