@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-16
+last_verified: 2026-09-29
 status: active
 ---
 
@@ -53,6 +53,7 @@ CLI `--json` is a separate version-1 DTO with ISO-8601 dates (`docs/cli-json-sch
 - Cost: `CostTracker` + provider scanners. Cache `~/Library/Application Support/MeterBar/cost-summary-v2.json`. Pricing from `MeterBarShared.ModelPricing`.
 - Session Wake: `SessionWakeController` + signed `meterbar wake-agent` via `SMAppService.agent`. Debug without the injected CLI uses the in-process fallback.
 - Quota events: `QuotaEventService` + coordinator. Off by default. Contract: `docs/quota-event-webhooks.md`.
+- Public profile (#594): opt-in, off by default. `PublicProfileStore` (opt-in state, identity, publish/unpublish/reset through one serial chain), `PublicProfileClient` (PUT/DELETE to meterbar.dev, no redirects), `PublicProfileDocument` (allowlisted payload), `PublicProfileCoordinator` (throttled sync after refreshes). Panel at the top of the Share page. Contract: `docs/public-profile-contract.md`.
 - Updates: `SoftwareUpdateController` (Sparkle 2). Automatic checks default off until consent.
 
 ## Observability
