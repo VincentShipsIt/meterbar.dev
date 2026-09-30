@@ -11,18 +11,51 @@ permissions:
   pull-requests: read
 
 jobs:
+  candidate-fixtures:
+    name: CodeRabbit candidate fixtures
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Test candidate review evidence evaluator offline
+        run: scripts/test-coderabbit-review.sh
+
   coderabbit-gate:
     name: coderabbit-gate
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout evaluator
+      - name: Checkout trusted base evaluator
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
-      - name: Test review evidence evaluator offline
+      - name: Verify trusted base evaluator and fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          fixtures=(scripts/fixtures/coderabbit-review/*.json)
+          if (( ${#fixtures[@]} == 0 )); then
+            echo "::error::Trusted base CodeRabbit evaluator or fixtures are unavailable."
+            exit 1
+          fi
+          for required in scripts/verify-coderabbit-review.py scripts/test-coderabbit-review.py \
+            scripts/test-coderabbit-review.sh "${fixtures[@]}"; do
+            if [[ ! -f "$required" || ! -r "$required" ]]; then
+              echo "::error::Trusted base CodeRabbit evaluator or fixtures are unavailable."
+              exit 1
+            fi
+          done
+
+      - name: Test trusted base review evidence evaluator offline
         run: scripts/test-coderabbit-review.sh
 
       - name: Require completed CodeRabbit review on the exact head

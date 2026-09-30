@@ -71,6 +71,17 @@ def latest_check_runs(records):
     return list(selected.values())
 
 
+def latest_statuses(records):
+    selected = {}
+    for record in records:
+        identity = record["context"].lower()
+        # GitHub lists statuses newest first. Equal-second timestamps must
+        # retain that first record, rather than replace it with an older one.
+        if identity not in selected or timestamp(record) > timestamp(selected[identity]):
+            selected[identity] = record
+    return list(selected.values())
+
+
 def review_body(record):
     body = record.get("body") or ""
     # Walkthroughs/release notes can outlive a review. Only the recent section
@@ -91,10 +102,10 @@ def evaluate(data):
     ])
     if runs is None:
         return 1, "CodeRabbit check-run attempt identity is missing or invalid."
-    statuses = latest([
+    statuses = latest_statuses([
         status for status in data["statuses"]
         if status.get("context", "").lower() in {"coderabbit", "coderabbitai"}
-    ], lambda status: status["context"].lower())
+    ])
     signals = runs + statuses
     for signal in signals:
         if BLOCKED.search(text_of(signal)):
@@ -107,10 +118,10 @@ def evaluate(data):
     ):
         return 2, "CodeRabbit review is still in progress."
 
-    comments = latest([
+    comments = [
         comment for comment in data["comments"]
         if (comment.get("user") or {}).get("login", "").lower() in BOT_LOGINS
-    ], lambda comment: "rolling-comment")
+    ]
     reviews = latest([
         review for review in data["reviews"]
         if review.get("commit_id") == sha
@@ -125,7 +136,7 @@ def evaluate(data):
         # if its timestamp precedes a status by a few seconds. A refusal
         # explicitly scoped to an older range is irrelevant.
         unscoped = not ranges and not record.get("commit_id")
-        if (current or unscoped) and BLOCKED.search(record.get("body") or ""):
+        if (current or unscoped) and BLOCKED.search(body):
             return 1, "CodeRabbit's current review evidence explicitly reports no review."
         if not current:
             continue
