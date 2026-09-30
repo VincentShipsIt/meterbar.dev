@@ -46,7 +46,10 @@ public enum DemoData {
             .codexCli: codexCli(now: now),
             .cursor: cursor(now: now),
             .openRouter: openRouter(now: now),
-            .grok: grok(now: now)
+            .grok: grok(now: now),
+            .kimiCode: kimiCode(now: now),
+            .zaiCodingPlan: zaiCodingPlan(now: now),
+            .githubCopilot: githubCopilot(now: now)
         ]
     }
 
@@ -140,6 +143,76 @@ public enum DemoData {
             weeklyLimit: weeklyLimit(usedPercent: 47, now: now),
             extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
             resetCreditsAvailable: 1,
+            lastUpdated: now
+        )
+    }
+
+    /// Kimi Code: the 5-hour and 7-day windows plus a booster wallet, green.
+    private static func kimiCode(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .kimiCode,
+            sessionLimit: UsageLimit(
+                used: 23,
+                total: 100,
+                resetTime: now.addingTimeInterval(2 * 3_600),
+                windowSeconds: sessionWindowSeconds,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 37,
+                total: 100,
+                resetTime: now.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$12.00 left of $20.00"),
+            lastUpdated: now
+        )
+    }
+
+    /// Z.ai Coding Plan: the 5-hour and weekly credit windows plus the monthly
+    /// MCP tool allowance, all green.
+    private static func zaiCodingPlan(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .zaiCodingPlan,
+            sessionLimit: UsageLimit(
+                used: 18,
+                total: 100,
+                resetTime: now.addingTimeInterval(2 * 3_600),
+                windowSeconds: sessionWindowSeconds,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 31,
+                total: 100,
+                resetTime: now.addingTimeInterval(4 * 24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
+            additionalLimits: [
+                UsageLimit(
+                    used: 120,
+                    total: 1_000,
+                    resetTime: now.addingTimeInterval(20 * 24 * 3_600),
+                    periodKind: .monthly,
+                    label: "MCP tools"
+                )
+            ],
+            lastUpdated: now
+        )
+    }
+
+    /// GitHub Copilot: the one shape with a documented cap — an organization
+    /// user-level budget — as a monthly window in the weekly slot.
+    private static func githubCopilot(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .githubCopilot,
+            weeklyLimit: UsageLimit(
+                used: 9,
+                total: 25,
+                resetTime: now.addingTimeInterval(12 * 24 * 3_600),
+                periodKind: .monthly
+            ),
             lastUpdated: now
         )
     }

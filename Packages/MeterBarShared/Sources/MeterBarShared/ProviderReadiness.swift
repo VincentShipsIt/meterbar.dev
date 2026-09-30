@@ -491,6 +491,75 @@ public struct OpenRouterReadinessInput: Sendable {
     }
 }
 
+/// What MeterBar found at the official Kimi Code OAuth artifact
+/// (`~/.kimi-code/credentials/kimi-code.json`). The probe reports the outcome
+/// only — never a token, a path, or any part of the file.
+public enum KimiCodeCredentialProbe: String, Codable, Sendable, Equatable {
+    /// No credential file, or none in the default managed slot.
+    case notFound
+    /// A credential with an unexpired access token.
+    case ready
+    /// The access token has expired. Kimi Code owns refresh, so this needs a
+    /// `/login` from the user rather than anything MeterBar can do.
+    case expired
+    /// The file exists but is not a credential MeterBar can read.
+    case unreadable
+}
+
+/// Fixture-able facts for the Kimi Code provider, which reads either the
+/// official OAuth artifact or a user-supplied API key from the Keychain.
+public struct KimiCodeReadinessInput: Sendable {
+    public var credential: KimiCodeCredentialProbe
+    public var hasAPIKey: Bool
+    public var refreshError: String?
+
+    public init(credential: KimiCodeCredentialProbe, hasAPIKey: Bool, refreshError: String? = nil) {
+        self.credential = credential
+        self.hasAPIKey = hasAPIKey
+        self.refreshError = refreshError
+    }
+}
+
+/// Fixture-able facts for the Z.ai GLM Coding Plan provider (API key only).
+public struct ZaiCodingPlanReadinessInput: Sendable {
+    public var hasAPIKey: Bool
+    public var region: ZaiCodingPlanRegion
+    public var refreshError: String?
+
+    public init(hasAPIKey: Bool, region: ZaiCodingPlanRegion = .default, refreshError: String? = nil) {
+        self.hasAPIKey = hasAPIKey
+        self.region = region
+        self.refreshError = refreshError
+    }
+}
+
+/// Fixture-able facts for the GitHub Copilot billing provider (fine-grained token).
+public struct GitHubCopilotReadinessInput: Sendable {
+    public var hasToken: Bool
+    public var hasUsername: Bool
+    public var scope: GitHubCopilotBillingScope
+    public var hasOrganization: Bool
+    /// The last classification the app persisted, or `nil` before the first refresh.
+    public var support: GitHubCopilotAccountSupport?
+    public var refreshError: String?
+
+    public init(
+        hasToken: Bool,
+        hasUsername: Bool,
+        scope: GitHubCopilotBillingScope = .personal,
+        hasOrganization: Bool = false,
+        support: GitHubCopilotAccountSupport? = nil,
+        refreshError: String? = nil
+    ) {
+        self.hasToken = hasToken
+        self.hasUsername = hasUsername
+        self.scope = scope
+        self.hasOrganization = hasOrganization
+        self.support = support
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the Grok Build CLI-backed provider. The inspector
 /// checks only file existence/readability; credential contents stay private to
 /// the official CLI process.
@@ -816,6 +885,195 @@ public enum ProviderReadinessEvaluator {
             provider: .openRouter,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
+    }
+
+    // MARK: GitHub Copilot
+
+    public static func githubCopilot(_ input: GitHubCopilotReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local Copilot app or CLI is read; only GitHub's documented billing API is used."
+        )
+
+        let configured = input.hasToken && input.hasUsername
+            && (input.scope == .personal || input.hasOrganization)
+        let auth: ReadinessCheck
+        if configured {
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Token and account",
+                level: .pass,
+                detail: "A fine-grained token and the billing account are configured (\(input.scope.displayName))."
+            )
+        } else {
+            let missing = [
+                input.hasToken ? nil : "token",
+                input.hasUsername ? nil : "GitHub username",
+                input.scope == .organization && !input.hasOrganization ? "organization" : nil
+            ].compactMap { $0 }.joined(separator: ", ")
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Token and account",
+                level: .fail,
+                detail: "Missing: \(missing).",
+                recovery: "Add a fine-grained token with the Plan (user) read permission and your GitHub "
+                    + "username in MeterBar Settings."
+            )
+        }
+
+        let data: ReadinessCheck
+        switch (configured, input.support) {
+        case (false, _):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: "Usage becomes readable once a token and account are configured."
+            )
+        case (true, nil):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: "The account has not been checked yet.",
+                recovery: "Run `meterbar refresh`, or refresh in the app."
+            )
+        case let (true, support?) where support.isQuota:
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .pass,
+                detail: support.message
+            )
+        case let (true, support?):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Usage readable",
+                level: .warn,
+                detail: support.message,
+                recovery: "MeterBar does not guess an allowance for this account shape."
+            )
+        }
+        return ProviderReadiness(
+            provider: .githubCopilot,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: Z.ai Coding Plan
+
+    public static func zaiCodingPlan(_ input: ZaiCodingPlanReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local Z.ai app or CLI is required."
+        )
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "API key",
+            level: input.hasAPIKey ? .pass : .fail,
+            detail: input.hasAPIKey ? "Coding Plan API key is configured." : "Coding Plan API key is missing.",
+            recovery: input.hasAPIKey ? nil : "Add your GLM Coding Plan API key in MeterBar Settings."
+        )
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: input.hasAPIKey ? .pass : .warn,
+            detail: input.hasAPIKey
+                ? "Quota windows can be fetched from \(input.region.host)."
+                : "Usage becomes readable after a Coding Plan API key is configured."
+        )
+        return ProviderReadiness(
+            provider: .zaiCodingPlan,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: Kimi Code
+
+    public static func kimiCode(_ input: KimiCodeReadinessInput) -> ProviderReadiness {
+        let oauthUsable = input.credential == .ready
+        let usable = oauthUsable || input.hasAPIKey
+
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "Sign-in source",
+            level: input.credential == .notFound && !input.hasAPIKey ? .fail : .pass,
+            detail: kimiSourceDetail(input),
+            recovery: input.credential == .notFound && !input.hasAPIKey
+                ? "Sign in with Kimi Code (`/login`), or add an API key in MeterBar Settings."
+                : nil
+        )
+
+        let auth: ReadinessCheck
+        if usable {
+            auth = ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: "Credentials",
+                level: .pass,
+                detail: oauthUsable
+                    ? "Kimi Code sign-in is readable."
+                    : "Kimi Code API key is configured."
+            )
+        } else {
+            switch input.credential {
+            case .expired:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "The Kimi Code sign-in has expired.",
+                    recovery: "Open Kimi Code and run `/login`, or add an API key in MeterBar Settings."
+                )
+            case .unreadable:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "The Kimi Code credential file could not be read.",
+                    recovery: "Run `/login` in Kimi Code to write a fresh credential."
+                )
+            case .notFound, .ready:
+                auth = ReadinessCheck(
+                    id: ReadinessCheckID.auth,
+                    title: "Credentials",
+                    level: .fail,
+                    detail: "No Kimi Code sign-in or API key was found.",
+                    recovery: "Sign in with Kimi Code (`/login`), or add an API key in MeterBar Settings."
+                )
+            }
+        }
+
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: usable ? .pass : .warn,
+            detail: usable
+                ? "The 5-hour and weekly windows can be fetched from Kimi Code."
+                : "Usage becomes readable once Kimi Code is signed in or an API key is set."
+        )
+        return ProviderReadiness(
+            provider: .kimiCode,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    private static func kimiSourceDetail(_ input: KimiCodeReadinessInput) -> String {
+        switch (input.credential, input.hasAPIKey) {
+        case (.notFound, false):
+            return "No Kimi Code credential was found on this Mac."
+        case (.notFound, true):
+            return "Using an API key; no local Kimi Code sign-in is required."
+        case (.ready, _):
+            return "Kimi Code's official OAuth credential was found."
+        case (.expired, _):
+            return "Kimi Code's OAuth credential was found but has expired."
+        case (.unreadable, _):
+            return "A Kimi Code credential file exists but is not readable."
+        }
     }
 
     // MARK: Grok

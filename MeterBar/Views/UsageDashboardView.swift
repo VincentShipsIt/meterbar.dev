@@ -305,21 +305,17 @@ struct UsageDashboardView: View {
         case .limits:
             DashboardLimitsSection(
                 snapshots: providerSnapshots,
+                // Unfiltered on purpose: the "What To Use Next" card lists the
+                // enabled providers with no cached usage under its own "no data"
+                // state, so filtering them out here would hide them instead.
+                allSnapshots: allProviderSnapshots,
                 focusedProviderID: navigation.focusedProviderID,
                 scrollProxy: scrollProxy
             )
         case .status:
             DashboardStatusSection()
-        case .costs:
-            DashboardCostsSection(
-                summary: visibleCostSummary,
-                quotaSnapshot: providerSnapshot(for:)
-            )
-        case .optimize:
-            // Unfiltered on purpose: the recommendation card lists the enabled
-            // providers with no cached usage under its own "no data" state, so
-            // filtering them out here would hide them instead.
-            OptimizeInsightsView(providerSnapshots: allProviderSnapshots)
+        case .usage:
+            DashboardUsageSection(summary: visibleCostSummary)
         case .diagnostics:
             DashboardDiagnosticsSection(
                 reports: $readinessReports,
@@ -376,8 +372,8 @@ struct UsageDashboardView: View {
     }
 
     /// Every enabled provider/account, including the ones with no cached usage.
-    /// Sections that must *name* a silent provider — the Optimize page's
-    /// recommendation card — read this instead of the filtered list.
+    /// Sections that must *name* a silent provider — the Limits page's
+    /// "What To Use Next" card — read this instead of the filtered list.
     private var allProviderSnapshots: [ProviderSnapshot] {
         ProviderSnapshotBuilder.snapshots(.live(
             stores: .init(
@@ -395,15 +391,6 @@ struct UsageDashboardView: View {
             ),
             parseHealth: parseHealthStore.records
         ))
-    }
-
-    /// The snapshot for a provider in the Costs panel — prefers an exhausted
-    /// one so the cost card can surface when that provider's quota resets.
-    /// Delegates to `accountSnapshot(for:)` so a shared-branding sub-pool
-    /// card (Cursor's Grok Bot) can never win this selection just for being
-    /// exhausted; only an actual account card can.
-    private func providerSnapshot(for service: ServiceType) -> ProviderSnapshot? {
-        providerSnapshots.accountSnapshot(for: service)
     }
 
     private var visibleCostSummary: CostSummary? {

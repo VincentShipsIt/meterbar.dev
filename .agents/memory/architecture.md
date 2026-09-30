@@ -10,7 +10,7 @@ What is implemented. Not a roadmap.
 ## Surfaces
 
 - **Menu bar app** — `@main` SwiftUI `App` + `NSApplicationDelegateAdaptor`. Manual `NSStatusItem` + `NSPopover` (`MenuBarView`), not `MenuBarExtra`. Right-click native menu. `LSUIElement = true`; Dock icon via `DockVisibilityStore`.
-- **Dashboard window** — `UsageDashboardView` and split section files under `MeterBar/Views/`.
+- **Dashboard window** — `UsageDashboardView` and split section files under `MeterBar/Views/`. The Usage page is `DashboardUsageSection`; its numbers come from `UsageReport` (`Models/UsageReport.swift`) and its columns from `UsageColumnsLayout`.
 - **Settings** — `SettingsView` + `MeterBar/Views/Settings/*`.
 - **Widgets** — `UsageWidget` (small/medium/large) and `BurnDownWidget` (small/medium). Both read `WidgetPreferences`. Burn-down uses `WidgetBurnDownPlanner` on `UsageLimit.pace()`.
 - **CLI** — `meterbar` in `MeterBar.app/Contents/Helpers/`. Public JSON is versioned in `docs/cli-json-schema.md`.
@@ -49,6 +49,7 @@ CLI `--json` is a separate version-1 DTO with ISO-8601 dates (`docs/cli-json-sch
 
 - `UsageDataManager` (`@MainActor`, `ObservableObject`) — provider refresh, per-account isolation for Claude/Codex/Grok, UserDefaults cache, app-group mirror, `ProviderParseHealthStore`, non-overlapping timer (default 10 min; Adaptive 1–30 min; wake catch-up). Cross-process lock shared with `meterbar refresh`.
 - Services are `.shared` singletons. New services follow that until a DI refactor (not planned).
+- Single-account providers (Cursor, Kimi Code, Z.ai, GitHub Copilot) are one table, `UsageDataManager.simpleProviders`, behind `SimpleUsageProviding`; a new one is a table entry, a `ServiceType` case, and its exhaustive-switch arms. Their cards come from `ServiceType.simpleProviderCases` in `ProviderSnapshotBuilder` (access in `Input.simpleProviderAccess`, errors in `LastErrors.simpleProviders`); their Keychain key goes through `ProviderAPIKeyStore`; their Settings panel wraps `SingleKeyProviderSettingsSection`. Opt-in providers (`ServiceType.isOptInByDefault`) stay hidden until `ProviderVisibilityStore` sees their own preference key. Providers with no verified status page set `hasStatusPage = false`. CLI-visible provider settings (Z.ai region, Copilot account and classification token) live in `ProviderSharedSettings`, an app-group JSON file; credentials never do.
 - Cost: `CostTracker` + provider scanners. Cache `~/Library/Application Support/MeterBar/cost-summary-v2.json`. Pricing from `MeterBarShared.ModelPricing`.
 - Session Wake: `SessionWakeController` + signed `meterbar wake-agent` via `SMAppService.agent`. Debug without the injected CLI uses the in-process fallback.
 - Quota events: `QuotaEventService` + coordinator. Off by default. Contract: `docs/quota-event-webhooks.md`.

@@ -16,6 +16,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case grok
         case cursor
         case openRouter
+        case kimiCode
+        case zaiCodingPlan
+        case githubCopilot
 
         var service: ServiceType {
             switch self {
@@ -24,11 +27,15 @@ final class ProviderPresentationHealthTests: XCTestCase {
             case .grok: return .grok
             case .cursor: return .cursor
             case .openRouter: return .openRouter
+            case .kimiCode: return .kimiCode
+            case .zaiCodingPlan: return .zaiCodingPlan
+            case .githubCopilot: return .githubCopilot
             }
         }
 
         var isFlat: Bool {
-            self == .cursor || self == .openRouter
+            self == .cursor || self == .openRouter || self == .kimiCode || self == .zaiCodingPlan || self ==
+                .githubCopilot
         }
     }
 
@@ -619,6 +626,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
                     : [:],
                 openRouterAccountAccess: kind == .openRouter
                     ? [OpenRouterAccount.defaultID: true]
+                    : [:],
+                simpleProviderAccess: kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot
+                    ? [kind.service: true]
                     : [:]
             )
         )
@@ -656,6 +666,13 @@ final class ProviderPresentationHealthTests: XCTestCase {
             lastErrors.codexAccounts = [CodexAccount.defaultID: .apiError("Codex refresh failed")]
         case (.grok, .transientFailure), (.grok, .sustainedOrParseFailure):
             lastErrors.grokAccounts = [GrokAccount.defaultID: .apiError("Grok refresh failed")]
+        case (.kimiCode, .transientFailure), (.kimiCode, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.kimiCode: .apiError("Kimi Code refresh failed")]
+        case (.zaiCodingPlan, .transientFailure), (.zaiCodingPlan, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.zaiCodingPlan: .apiError("Z.ai refresh failed")]
+        case (.githubCopilot, .transientFailure),
+             (.githubCopilot, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.githubCopilot: .apiError("Copilot refresh failed")]
         default:
             break
         }
@@ -699,6 +716,10 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 ? [OpenRouterAccount.defaultID: true]
                 : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
+            simpleProviderAccess: (kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot)
+                && refresh != .unprobed
+                ? [kind.service: true]
+                : [:],
             lastErrors: lastErrors
         )
     }

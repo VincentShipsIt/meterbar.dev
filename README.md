@@ -20,7 +20,7 @@
 > MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
 A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
-OpenRouter, and Grok usage at a glance — then tells you which provider still has
+OpenRouter, Grok, Kimi Code, Z.ai, and GitHub Copilot usage at a glance — then tells you which provider still has
 headroom, warns you before you hit a wall, and can resume your blocked sessions
 by itself once a limit resets.
 
@@ -40,8 +40,8 @@ by itself once a limit resets.
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
-- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, and Grok
-- **Provider Status**: Service-health monitoring for all five providers, so you can tell a provider outage apart from your own exhausted quota
+- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, and GitHub Copilot
+- **Provider Status**: Service-health monitoring for every provider that publishes a status page, so you can tell a provider outage apart from your own exhausted quota
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
 - **Real-time Updates**: Background refresh defaults to 10 minutes, with an opt-in 1–30 minute
@@ -61,7 +61,8 @@ by itself once a limit resets.
 ### Cost and optimization
 
 - **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded
-- **Optimize Tab**: See where tokens actually go, and which provider has the most headroom right now
+- **Usage Tab**: One reporting window over tokens and spend: a headline strip, a time series stackable by provider, token type or model, a breakdown by model, origin, project or provider with each row's input/output/cache mix, and an insights column that says what to trim and how far to trust the numbers
+- **What To Use Next**: At the top of Limits, ranks which provider has the most headroom right now
 - **Display Currency**: Keep USD as the default or choose EUR with daily ECB reference rates and an offline cache (Settings → Costs)
 
 ### Scripting
@@ -78,6 +79,9 @@ by itself once a limit resets.
 | **Cursor** | Local SQLite database | Monthly usage |
 | **OpenRouter** | User-provided API key stored in Keychain | Account credits, spend, per-key limits |
 | **Grok** | Cached `grok login` session, accessed by the official CLI | Weekly quota, reset time, extra credits |
+| **Kimi Code** | Kimi Code's own sign-in file (read-only), or an API key stored in Keychain. Off until you enable it in Settings → Providers | 5-hour and weekly windows, monthly windows when the plan reports them, booster-wallet balance |
+| **Z.ai GLM Coding Plan** | Coding Plan API key stored in Keychain; you choose the international (`api.z.ai`) or mainland (`open.bigmodel.cn`) region. Off until you enable it in Settings → Providers | 5-hour and weekly credit windows, monthly MCP tool allowance, and a peak / off-peak indicator |
+| **GitHub Copilot** | Fine-grained token stored in Keychain, read through GitHub's documented billing API. Off until you enable it in Settings → Providers | A monthly budget bar **only** for organization-managed licences with a user-level budget (needs the billing role). Personal and legacy plans show their usage state — GitHub documents no allowance for them, so MeterBar does not guess one |
 
 ## Installation
 
@@ -191,9 +195,8 @@ exhausted — a countdown to when usage resumes.
 | Tab | What it shows |
 |-----|---------------|
 | **Overview** | Current health and local token history |
-| **Limits** | Every tracked quota window |
-| **Costs** | Local 30-day token spend |
-| **Optimize** | Where tokens go, and which provider has headroom right now |
+| **Limits** | Every tracked quota window, ranked by headroom |
+| **Usage** | Where tokens and spend go, and how to trim them |
 | **Status** | Provider service health |
 | **Diagnostics** | Provider setup health |
 | **Share** | Social card export |
@@ -271,7 +274,7 @@ prevents two from racing each other.
 
 ## Cost Tracking
 
-The **Costs** tab computes 30-day token spend by scanning your local Claude,
+The **Usage** tab computes 30-day token spend by scanning your local Claude,
 Codex, and Grok session logs. The scan is incremental and resumable — it caches
 per-file results and picks up where it left off rather than re-reading the whole
 corpus each time. Nothing is uploaded; the numbers are derived entirely from
@@ -293,7 +296,7 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider (claude, codex, cursor, openrouter, grok)
+# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot)
 meterbar usage --provider claude
 
 # Show token costs from the app's last local scan
@@ -304,7 +307,7 @@ meterbar cost --json
 ```
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
-the app's Costs tab), so the CLI and the app always show the same numbers.
+the app's Usage tab), so the CLI and the app always show the same numbers.
 The [`--json` schema](docs/cli-json-schema.md) is versioned for third-party integrations.
 
 ### HTTP Endpoint

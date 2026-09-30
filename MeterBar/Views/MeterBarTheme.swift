@@ -13,7 +13,7 @@ enum MeterBarTheme {
 
   /// Corner-radius scale. Raw radii across the views snap to the nearest step
   /// so cards, chips, and bars read as one system instead of a dozen ad-hoc
-  /// values. `shell` matches MacSweep's companion popover / detail-panel shell.
+  /// values. `shell` is the companion popover / detail-panel shell.
   enum Radius {
     /// Chart bars, legend swatches, inline quota-bar caps/markers. Geometry
     /// often clamps this below 4 on thin (≤2–7pt) shapes, which is intended.
@@ -22,8 +22,11 @@ enum MeterBarTheme {
     static let medium: CGFloat = 8
     /// Standard dashboard card.
     static let card: CGFloat = 12
-    /// Companion popover + detail-panel shell.
-    static let shell: CGFloat = 16
+    /// Companion popover + detail-panel shell. Sized so a `card` sitting one
+    /// `Spacing.md` (the popover's inset) inside it is concentric: 12 + 12.
+    /// macOS 26's own panels carry corners this generous; a 16pt shell with
+    /// 12pt cards a full 12pt inside it left the two curves visibly unparallel.
+    static let shell: CGFloat = 24
 
     /// Concentric-radius rule: a rounded child inset by `inset` from a rounded
     /// parent keeps visually parallel corners when its radius is the parent's
@@ -33,15 +36,15 @@ enum MeterBarTheme {
     }
   }
 
-  /// A card nested inside the companion shell (16) reads as concentric one
-  /// spacing step in → 12 (== `Radius.card`).
-  static let detailCardRadius = Radius.concentric(outer: Radius.shell, inset: Spacing.xs)
+  /// A card nested inside the companion shell (24) reads as concentric one
+  /// popover inset (`Spacing.md`) in → 12 (== `Radius.card`).
+  static let detailCardRadius = Radius.concentric(outer: Radius.shell, inset: Spacing.md)
 
   /// A card nested inside a standard dashboard card (12) reads as concentric one
   /// spacing step in → 8 (== `Radius.medium`). Used by the API-usage card.
   static let apiCardRadius = Radius.concentric(outer: Radius.card, inset: Spacing.xs)
 
-  /// Matches MacSweep's companion popover and detail-panel shell radius.
+  /// The companion popover and detail-panel shell radius.
   static let companionShellRadius: CGFloat = Radius.shell
 
   // MARK: - Spacing scale
@@ -181,6 +184,9 @@ enum MeterBarTheme {
     static let openai = NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
     static let openRouter = NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
     static let grok = NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
+    static let kimiCode = NSColor(srgbRed: 255 / 255, green: 120 / 255, blue: 150 / 255, alpha: 1)
+    static let zaiCodingPlan = NSColor(srgbRed: 240 / 255, green: 196 / 255, blue: 64 / 255, alpha: 1)
+    static let githubCopilot = NSColor(srgbRed: 196 / 255, green: 203 / 255, blue: 226 / 255, alpha: 1)
   }
 
   static let codexAccent = Color.adaptive(
@@ -206,6 +212,18 @@ enum MeterBarTheme {
   static let grokAccent = Color.adaptive(
     light: NSColor(srgbRed: 33 / 255, green: 103 / 255, blue: 209 / 255, alpha: 1),
     dark: BrandAccentDark.grok
+  )
+  static let kimiCodeAccent = Color.adaptive(
+    light: NSColor(srgbRed: 196 / 255, green: 40 / 255, blue: 88 / 255, alpha: 1),
+    dark: BrandAccentDark.kimiCode
+  )
+  static let zaiCodingPlanAccent = Color.adaptive(
+    light: NSColor(srgbRed: 158 / 255, green: 118 / 255, blue: 0 / 255, alpha: 1),
+    dark: BrandAccentDark.zaiCodingPlan
+  )
+  static let githubCopilotAccent = Color.adaptive(
+    light: NSColor(srgbRed: 87 / 255, green: 96 / 255, blue: 122 / 255, alpha: 1),
+    dark: BrandAccentDark.githubCopilot
   )
 
   /// The app's own accent. Follows the user's system accent color.
@@ -283,6 +301,12 @@ enum MeterBarTheme {
       return openRouterAccent
     case .grok:
       return grokAccent
+    case .kimiCode:
+      return kimiCodeAccent
+    case .zaiCodingPlan:
+      return zaiCodingPlanAccent
+    case .githubCopilot:
+      return githubCopilotAccent
     }
   }
 

@@ -16,6 +16,12 @@ nonisolated enum StorageKeys {
     static let hiddenProviderServices = "HiddenProviderServices"
     /// OpenRouter is API-key backed and must be explicitly enabled.
     static let openRouterProviderEnabled = "OpenRouterProviderEnabled"
+    /// Kimi Code is off until the user turns it on in Providers settings.
+    static let kimiCodeProviderEnabled = "KimiCodeProviderEnabled"
+    /// Z.ai Coding Plan is off until the user turns it on in Providers settings.
+    static let zaiCodingPlanProviderEnabled = "ZaiCodingPlanProviderEnabled"
+    /// GitHub Copilot is off until the user turns it on in Providers settings.
+    static let githubCopilotProviderEnabled = "GitHubCopilotProviderEnabled"
     /// Grok Build is tracked by default; this key records an explicit opt-out.
     /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
     /// distinguish "never touched" from "turned off" now that the default flipped.
@@ -174,9 +180,14 @@ nonisolated enum StorageKeys {
     /// reads `sessionWakeEventHooks` once, then this key becomes authoritative.
     static let quotaEventIntegrations = "QuotaEventIntegrationsV1"
 
-    /// `CostWindowSelection` raw value (7, 30, or -1 for month-to-date): the Costs page reporting
-    /// window. Missing or unknown means the 30-day view.
+    /// `CostWindowSelection` raw value (7, 30, or -1 for month-to-date): the Usage page reporting
+    /// window. Missing or unknown means the 30-day view. (The key predates the Costs and Optimize
+    /// pages merging into Usage, so it keeps its old name and every reader's saved choice.)
     static let costsWindowDays = "CostsWindowDays"
+    /// `UsageMetric` raw value for the Usage page chart. Missing or unknown means tokens.
+    static let usageChartMetric = "UsageChartMetric"
+    /// `UsageStacking` raw value for the Usage page chart. Missing or unknown means provider.
+    static let usageChartStacking = "UsageChartStacking"
 
     // MARK: - Multi-Mac iCloud aggregation (#499)
 

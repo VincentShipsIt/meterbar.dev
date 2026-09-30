@@ -640,6 +640,79 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         XCTAssertNil(ProviderReadinessInspector.httpStatus(in: "no status here"))
     }
 
+    func testKimiCodeReportReadsOnlyTheOutcomeAndNeverEmitsCredentialsOrPaths() throws {
+        let report = ProviderReadinessInspector.kimiCodeReport(
+            refreshError: .apiError("HTTP 401 token=SECRET-DO-NOT-LEAK"),
+            credential: { .expired },
+            hasAPIKey: { false }
+        )
+
+        XCTAssertEqual(report.provider, .kimiCode)
+        XCTAssertEqual(report.check("auth")?.level, .fail)
+        let export = try JSONEncoder().encode(ProviderReadinessExport(report))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"), "provider text must be sanitized before it is reported")
+        XCTAssertFalse(text.contains(".kimi-code"))
+    }
+
+    func testZaiCodingPlanReportSanitizesProviderTextAndUsesTheInjectedRegion() throws {
+        let report = ProviderReadinessInspector.zaiCodingPlanReport(
+            refreshError: .apiError("HTTP 401 key=SECRET-DO-NOT-LEAK"),
+            hasAPIKey: { true },
+            region: { .mainland }
+        )
+
+        XCTAssertEqual(report.provider, .zaiCodingPlan)
+        XCTAssertTrue((report.check("data")?.detail ?? "").contains("open.bigmodel.cn"))
+        let text = String(data: try JSONEncoder().encode(ProviderReadinessExport(report)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"))
+    }
+
+    func testGitHubCopilotReportUsesInjectedFactsAndSanitizesProviderText() throws {
+        let report = ProviderReadinessInspector.githubCopilotReport(
+            refreshError: .apiError("HTTP 403 token=SECRET-DO-NOT-LEAK"),
+            hasToken: { true },
+            configuration: {
+                GitHubCopilotAccountConfig(scope: .organization, username: "octocat", organization: "acme")
+            },
+            support: { .quota }
+        )
+
+        XCTAssertEqual(report.provider, .githubCopilot)
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .pass)
+        let text = try String(data: JSONEncoder().encode(ProviderReadinessExport(report)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("SECRET-DO-NOT-LEAK"))
+        XCTAssertFalse(text.contains("octocat"), "the login is never part of a paste-safe report")
+    }
+
+    func testKimiCodeIsProbedThroughItsOwnReportOnly() {
+        var probed: [ServiceType] = []
+        _ = ProviderReadinessInspector.reports(
+            providers: [.kimiCode],
+            refreshErrors: [:],
+            now: Date(timeIntervalSince1970: 2_000),
+            claudeReport: { _, _ in
+                probed.append(.claudeCode)
+                return []
+            },
+            codexReport: { _, _ in
+                probed.append(.codexCli)
+                return []
+            },
+            cursorReport: { _, _ in
+                probed.append(.cursor)
+                return []
+            },
+            kimiCodeReport: { _, _ in
+                probed.append(.kimiCode)
+                return [self.report(for: .kimiCode)]
+            }
+        )
+
+        XCTAssertEqual(probed, [.kimiCode])
+    }
+
     private func report(for provider: ServiceType) -> ProviderReadiness {
         ProviderReadiness(
             provider: provider,

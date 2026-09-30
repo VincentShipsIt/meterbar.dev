@@ -66,13 +66,16 @@ struct DashboardShareSection: View {
         case .grok: return "Grok JSONL"
         case .cursor: return "Cursor local state"
         case .openRouter: return "OpenRouter logs"
+        case .kimiCode: return "Kimi Code usage polls"
+        case .zaiCodingPlan: return "Z.ai Coding Plan usage polls"
+        case .githubCopilot: return "GitHub billing polls"
         }
     }
 
     /// Shared with the Costs cards so the preview and the spend cards announce
     /// the same scan state in the same words — the same two flags drive both.
     static func scanStatusText(isScanning: Bool, isRefreshingMissingDays: Bool) -> String? {
-        DashboardCostsSection.refreshStatusText(
+        DashboardUsageSection.refreshStatusText(
             isScanning: isScanning,
             isRefreshingMissingDays: isRefreshingMissingDays
         )

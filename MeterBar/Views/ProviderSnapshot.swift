@@ -416,6 +416,13 @@ enum ProviderSnapshotBuilder {
         var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
         var openRouterAccountAccess: [UUID: Bool] = [:]
         var grokHasAccess: Bool = false
+        /// Access probe per single-account provider (Kimi Code, …). A missing
+        /// entry is "unprobed", the same as Cursor's `nil`.
+        var simpleProviderAccess: [ServiceType: Bool] = [:]
+        /// A precise, authored explanation to show on an empty single-account
+        /// card instead of the generic setup prompt (Copilot's usage-only and
+        /// unsupported account shapes).
+        var simpleProviderNotes: [ServiceType: String] = [:]
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
 
         /// Live stores the popover, dashboard, and settings cards share.
@@ -432,6 +439,10 @@ enum ProviderSnapshotBuilder {
             var cursorService: CursorLocalService
             var openRouterService: OpenRouterService
             var grokService: GrokCLIUsageService
+            /// Defaulted so the views that build stores need no edit per provider.
+            var kimiCodeService: KimiCodeService = .shared
+            var zaiCodingPlanService: ZaiCodingPlanService = .shared
+            var githubCopilotService: GitHubCopilotService = .shared
         }
 
         /// Builds Input here so lastError / parse health / Grok access cannot
@@ -467,11 +478,24 @@ enum ProviderSnapshotBuilder {
                     ($0.id, stores.openRouterService.canAccess(account: $0))
                 }),
                 grokHasAccess: stores.grokService.hasAccess,
+                simpleProviderAccess: [
+                    .kimiCode: stores.kimiCodeService.hasAccess,
+                    .zaiCodingPlan: stores.zaiCodingPlanService.hasAccess,
+                    .githubCopilot: stores.githubCopilotService.hasAccess
+                ],
+                simpleProviderNotes: [
+                    .githubCopilot: stores.githubCopilotService.supportNote,
+                ].compactMapValues { $0 },
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
                     codexAccounts: stores.codexCliService.accountErrors,
                     grokAccounts: stores.grokService.accountErrors,
-                    openRouterAccounts: stores.openRouterService.accountLastErrors
+                    openRouterAccounts: stores.openRouterService.accountLastErrors,
+                    simpleProviders: [
+                        .kimiCode: stores.kimiCodeService.lastError,
+                        .zaiCodingPlan: stores.zaiCodingPlanService.lastError,
+                        .githubCopilot: stores.githubCopilotService.lastError
+                    ].compactMapValues { $0 }
                 )
             )
         }
@@ -626,6 +650,24 @@ enum ProviderSnapshotBuilder {
             }
         }
 
+        for service in ServiceType.simpleProviderCases where input.enabledServices.contains(service) {
+            // Metrics with no window at all (a Copilot account with no
+            // documented allowance) have nothing to draw: the card stays a
+            // status row and says why, rather than expanding to nothing.
+            let metrics = input.metrics[service].flatMap { $0.hasData ? $0 : nil }
+            result.append(snapshot(
+                title: service.shortName,
+                service: service,
+                metrics: metrics,
+                emptyDetail: input.simpleProviderNotes[service]
+                    ?? (input.simpleProviderAccess[service] == true
+                        ? "Waiting for refresh"
+                        : service.simpleProviderSetupPrompt),
+                accountID: nil,
+                authNotice: notice(for: service, accountID: nil, metrics: metrics, input: input)
+            ))
+        }
+
         return orderedForDisplay(result)
     }
 
@@ -672,6 +714,12 @@ enum ProviderSnapshotBuilder {
             lastError = nil
             probed = input.claudeCodeHasAccess ? true : nil
             usesAPIKey = false
+        case .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
+            lastError = input.lastErrors.simpleProviders[service]
+            probed = input.simpleProviderAccess[service]
+            usesAPIKey = service != .kimiCode
         }
 
         let parseHealth = input.parseHealth[service]
@@ -832,7 +880,7 @@ enum ProviderSnapshotBuilder {
                     periodKind: session.periodKind
                 ),
                 usageLimit: session,
-                valueStyle: service == .openRouter ? .currency : .quota
+                valueStyle: service == .openRouter || service == .githubCopilot ? .currency : .quota
             ))
         }
         if let weekly = metrics.weeklyLimit {
@@ -844,7 +892,7 @@ enum ProviderSnapshotBuilder {
                     periodKind: weekly.periodKind
                 ),
                 usageLimit: weekly,
-                valueStyle: service == .openRouter ? .currency : .quota
+                valueStyle: service == .openRouter || service == .githubCopilot ? .currency : .quota
             ))
         }
         if let codeReview = metrics.codeReviewLimit {

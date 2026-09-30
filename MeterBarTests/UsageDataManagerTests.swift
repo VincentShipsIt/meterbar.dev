@@ -250,6 +250,9 @@ final class UsageDataManagerTests: XCTestCase {
     private func makeManager(
         codex: CodexUsageProviding,
         cursor: StubProvider,
+        kimi: StubProvider? = nil,
+        zai: StubProvider? = nil,
+        copilot: StubProvider? = nil,
         grok: GrokUsageProviding? = nil,
         claude: ClaudeCodeUsageProviding? = nil,
         claudeCodeAccountStore: ClaudeCodeAccountStore? = nil,
@@ -257,6 +260,7 @@ final class UsageDataManagerTests: XCTestCase {
         grokAccountStore: GrokAccountStore? = nil,
         providerVisibilityStore: ProviderVisibilityStore? = nil,
         hidden: Set<ServiceType> = [],
+        enabling: Set<ServiceType> = [],
         preload: [ServiceType: UsageMetrics] = [:],
         preloadClaudeAccountMetrics: [UUID: UsageMetrics] = [:],
         preloadGrokAccountMetrics: [UUID: UsageMetrics] = [:],
@@ -299,6 +303,9 @@ final class UsageDataManagerTests: XCTestCase {
         for service in hiddenProviders {
             visibility.set(service, isEnabled: false)
         }
+        for service in enabling {
+            visibility.set(service, isEnabled: true)
+        }
 
         let sharedStore = SharedDataStore(directoryOverride: tempDirectory) {}
         if !preloadSharedAccountMetrics.isEmpty {
@@ -311,6 +318,11 @@ final class UsageDataManagerTests: XCTestCase {
         let manager = UsageDataManager(
             codexCliService: codex,
             cursorService: cursor,
+            additionalSimpleProviders: [
+                .kimiCode: kimi ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed)),
+                .zaiCodingPlan: zai ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed)),
+                .githubCopilot: copilot ?? StubProvider(hasAccess: false, result: .failure(StubError.fetchFailed))
+            ],
             grokService: grok ?? MultiAccountGrokProvider(metricsByAccount: [:]),
             claudeCodeService: claude ?? ClaudeCodeLocalService.shared,
             claudeCodeAccountStore: claudeCodeAccountStore,
@@ -417,6 +429,64 @@ final class UsageDataManagerTests: XCTestCase {
         // The merged snapshot is mirrored to the App Group file for the widget.
         sharedStore.flushPendingWrites()
         XCTAssertEqual(Set(sharedStore.loadMetrics().keys), [.codexCli, .cursor])
+    }
+
+    func testKimiCodeIsOffUntilEnabledAndThenRefreshesLikeAnyProvider() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let kimi = StubProvider(hasAccess: true, result: .success(MetricsFixtures.kimiCode()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor, kimi: kimi)
+
+        let offReport = await manager.refreshAll()
+        XCTAssertNil(manager.metrics[.kimiCode], "opt-in providers stay off until the user enables them")
+        XCTAssertEqual(kimi.fetchCount, 0)
+        XCTAssertEqual(offReport.outcome(for: .kimiCode)?.state, .skipped)
+    }
+
+    func testEnabledKimiCodeIsFetchedMirroredAndSurvivesAFailedRefresh() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let kimi = StubProvider(hasAccess: true, result: .success(MetricsFixtures.kimiCode()))
+        let healthSuite = "UsageDataManagerTests-kimi-health-\(UUID().uuidString)"
+        createdSuiteNames.append(healthSuite)
+        let healthDefaults = UserDefaults(suiteName: healthSuite)!
+        let health = ProviderParseHealthStore(userDefaults: healthDefaults)
+        let (manager, sharedStore) = makeManager(
+            codex: codex,
+            cursor: cursor,
+            kimi: kimi,
+            enabling: [.kimiCode],
+            parseHealthStore: health
+        )
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(kimi.fetchCount, 1)
+        XCTAssertEqual(report.outcome(for: .kimiCode)?.state, .refreshed)
+        XCTAssertEqual(manager.metrics[.kimiCode]?.extraUsage?.state, .on)
+        sharedStore.flushPendingWrites()
+        XCTAssertNotNil(sharedStore.loadMetrics()[.kimiCode])
+        XCTAssertEqual(health.records[.kimiCode]?.consecutiveFailures, 0)
+
+        // A later failed poll keeps the last good numbers and records the failure.
+        kimi.result = .failure(ServiceError.parsingError(nil))
+        let failed = await manager.refreshAll()
+        XCTAssertEqual(failed.outcome(for: .kimiCode)?.state, .failed)
+        XCTAssertNotNil(manager.metrics[.kimiCode])
+        XCTAssertEqual(health.records[.kimiCode]?.consecutiveFailures, 1)
+        XCTAssertTrue(health.records[.kimiCode]?.lastFailureWasShapeMismatch ?? false)
+    }
+
+    func testKimiCodeWithoutCredentialsIsSkippedNotFetched() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
+        let kimi = StubProvider(hasAccess: false, result: .success(MetricsFixtures.kimiCode()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor, kimi: kimi, enabling: [.kimiCode])
+
+        let report = await manager.refreshAll()
+
+        XCTAssertEqual(kimi.fetchCount, 0)
+        XCTAssertEqual(report.outcome(for: .kimiCode)?.state, .skipped)
     }
 
     func testRefreshAllRetriesEnabledClaudeWhenPublishedAccessIsFalse() async throws {

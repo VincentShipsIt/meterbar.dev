@@ -37,6 +37,27 @@ extension ProviderSettingsFacts {
                 openRouterLiveState()
             case .grok:
                 grokLiveState()
+            case .kimiCode:
+                (
+                    KimiCodeService.shared.hasAccess,
+                    nil,
+                    nil,
+                    KimiCodeService.shared.lastError?.localizedDescription
+                )
+            case .zaiCodingPlan:
+                (
+                    ZaiCodingPlanService.shared.hasAccess,
+                    ZaiCodingPlanService.shared.planName,
+                    nil,
+                    ZaiCodingPlanService.shared.lastError?.localizedDescription
+                )
+            case .githubCopilot:
+                (
+                    GitHubCopilotService.shared.hasAccess,
+                    nil,
+                    nil,
+                    GitHubCopilotService.shared.lastError?.localizedDescription
+                )
             }
 
         return ProviderSettingsFacts(

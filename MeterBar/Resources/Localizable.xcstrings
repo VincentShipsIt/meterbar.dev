@@ -820,6 +820,358 @@
         }
       },
       "comment": "Generic unavailable placeholder."
+    },
+    "provider.kimi.setup_prompt": {
+      "comment": "Empty-state prompt on the Kimi Code provider card when no credential is readable. Kimi Code is a product name; /login is not part of this string.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to Kimi Code or add an API key"
+          }
+        }
+      }
+    },
+    "settings.kimi.notice": {
+      "comment": "Explanatory note at the top of the Kimi Code settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar reads the Kimi Code sign-in file read-only and sends the token only to Kimi Code's usage endpoint. Kimi Code keeps ownership of refreshing it. Or add a Kimi Code API key, stored in macOS Keychain."
+          }
+        }
+      }
+    },
+    "settings.kimi.key_placeholder": {
+      "comment": "Placeholder in the secure field where the user pastes a Kimi Code API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code API key"
+          }
+        }
+      }
+    },
+    "settings.kimi.unauthenticated": {
+      "comment": "Error card shown when Kimi Code rejects the credential. /login is a command typed inside the Kimi Code app and must stay verbatim.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code rejected the credential. Run /login in Kimi Code, or add an API key."
+          }
+        }
+      }
+    },
+    "settings.kimi.signin": {
+      "comment": "Row label for the state of the official Kimi Code sign-in file.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kimi Code sign-in"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.ready": {
+      "comment": "Kimi Code sign-in file was found and is readable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.expired": {
+      "comment": "Kimi Code sign-in has expired. /login is a command typed inside the Kimi Code app and must stay verbatim.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expired — run /login"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.unreadable": {
+      "comment": "Kimi Code sign-in file exists but could not be read.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unreadable"
+          }
+        }
+      }
+    },
+    "settings.kimi.signin.not_found": {
+      "comment": "No Kimi Code sign-in file was found on this Mac.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not found"
+          }
+        }
+      }
+    },
+    "settings.kimi.wallet": {
+      "comment": "Row label for the Kimi Code pay-as-you-go booster wallet balance. Booster is a Kimi product term.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Booster wallet"
+          }
+        }
+      }
+    },
+    "provider.zai.setup_prompt": {
+      "comment": "Empty-state prompt on the Z.ai provider card when no key is saved. GLM Coding Plan is a Z.ai product name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add your GLM Coding Plan API key"
+          }
+        }
+      }
+    },
+    "settings.zai.notice": {
+      "comment": "Explanatory note at the top of the Z.ai settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste your GLM Coding Plan API key. It is stored in macOS Keychain and sent only to Z.ai's quota endpoint for the region you choose. MeterBar shows only the limits Z.ai reports for your key."
+          }
+        }
+      }
+    },
+    "settings.zai.key_placeholder": {
+      "comment": "Placeholder in the secure field where the user pastes a Z.ai GLM Coding Plan API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GLM Coding Plan API key"
+          }
+        }
+      }
+    },
+    "settings.zai.unauthenticated": {
+      "comment": "Error card shown when Z.ai rejects the API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Z.ai rejected the key. Check that it is a Coding Plan key for the selected region."
+          }
+        }
+      }
+    },
+    "settings.zai.region": {
+      "comment": "Row label for choosing which Z.ai platform (international or mainland China) the key belongs to.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Region"
+          }
+        }
+      }
+    },
+    "settings.zai.pricing": {
+      "comment": "Row label for whether Z.ai is currently charging its peak or off-peak credit rate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credit rate"
+          }
+        }
+      }
+    },
+    "zai.peak.peak": {
+      "comment": "Badge shown while Z.ai charges its peak credit rate. %@ is a short duration such as 2h 10m until the off-peak rate begins.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peak · off-peak in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.peak_only": {
+      "comment": "Badge shown while Z.ai charges its peak credit rate and the next change is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peak"
+          }
+        }
+      }
+    },
+    "zai.peak.promotion": {
+      "comment": "Badge shown during Z.ai's all-day off-peak promotion. %@ is a short duration until peak hours resume.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak all day · peak resumes in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.promotion_only": {
+      "comment": "Badge shown during Z.ai's all-day off-peak promotion when the end is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak all day"
+          }
+        }
+      }
+    },
+    "zai.peak.offpeak": {
+      "comment": "Badge shown while Z.ai charges its discounted off-peak credit rate. %@ is a short duration until peak hours begin.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak · peak in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.offpeak_only": {
+      "comment": "Badge shown while Z.ai charges its off-peak credit rate and the next change is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak"
+          }
+        }
+      }
+    },
+    "zai.peak.explanation": {
+      "comment": "Tooltip explaining Z.ai peak and off-peak credit rates; the hours are Singapore time (UTC+8).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Z.ai charges off-peak usage at 50% of the standard credit rate. Peak hours are Monday to Friday, 14:00–18:00 Singapore time (UTC+8)."
+          }
+        }
+      }
+    },
+    "provider.copilot.setup_prompt": {
+      "comment": "Empty-state prompt on the GitHub Copilot provider card when no token or account is configured.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a GitHub token and your username"
+          }
+        }
+      }
+    },
+    "settings.copilot.notice": {
+      "comment": "Explanatory note at the top of the GitHub Copilot settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar reads Copilot billing through GitHub's documented billing API with a fine-grained token you create (Plan: read for a personal plan). The token is stored in macOS Keychain and sent only to api.github.com. GitHub documents an allowance only for organization budgets, so other accounts show their usage state instead of a quota bar."
+          }
+        }
+      }
+    },
+    "settings.copilot.token_placeholder": {
+      "comment": "Placeholder in the secure field for a GitHub fine-grained personal access token; the prefix is literal.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "github_pat_…"
+          }
+        }
+      }
+    },
+    "settings.copilot.get_token": {
+      "comment": "Button that opens GitHub's page for creating a fine-grained personal access token.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get Token"
+          }
+        }
+      }
+    },
+    "settings.copilot.unauthenticated": {
+      "comment": "Error card shown when GitHub rejects the token.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub rejected the token. Create a new fine-grained token and paste it here."
+          }
+        }
+      }
+    },
+    "settings.copilot.billing": {
+      "comment": "Row label for choosing whose Copilot billing is read: a personal plan or an organization-managed licence.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing"
+          }
+        }
+      }
+    },
+    "settings.copilot.username": {
+      "comment": "Row label for the GitHub account login whose billing is read.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub username"
+          }
+        }
+      }
+    },
+    "settings.copilot.organization": {
+      "comment": "Row label for the GitHub organization that manages and bills the Copilot licence.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organization"
+          }
+        }
+      }
+    },
+    "settings.copilot.save_account": {
+      "comment": "Button that saves the GitHub username and organization.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Account"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

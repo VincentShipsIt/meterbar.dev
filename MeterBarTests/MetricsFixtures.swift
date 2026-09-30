@@ -20,6 +20,9 @@ enum MetricsFixtures {
         case .cursor: return cursor()
         case .openRouter: return openRouter()
         case .grok: return grok()
+        case .kimiCode: return kimiCode()
+        case .zaiCodingPlan: return zaiCodingPlan()
+        case .githubCopilot: return githubCopilot()
         }
     }
 
@@ -116,6 +119,73 @@ enum MetricsFixtures {
     }
 
     /// OpenRouter: key-limit + account-credits, matching production mapping.
+    /// The one Copilot shape with a documented cap: an organization user-level
+    /// budget, in dollars, resetting monthly.
+    static func githubCopilot() -> UsageMetrics {
+        UsageMetrics(
+            service: .githubCopilot,
+            weeklyLimit: UsageLimit(
+                used: 9,
+                total: 25,
+                resetTime: referenceDate.addingTimeInterval(12 * 24 * 3600),
+                periodKind: .monthly
+            ),
+            lastUpdated: referenceDate
+        )
+    }
+
+    static func zaiCodingPlan() -> UsageMetrics {
+        UsageMetrics(
+            service: .zaiCodingPlan,
+            sessionLimit: UsageLimit(
+                used: 18,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(2 * 3_600),
+                windowSeconds: 5 * 3_600,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 31,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(4 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600,
+                periodKind: .weekly
+            ),
+            additionalLimits: [
+                UsageLimit(
+                    used: 120,
+                    total: 1_000,
+                    resetTime: referenceDate.addingTimeInterval(20 * 24 * 3_600),
+                    periodKind: .monthly,
+                    label: "MCP tools"
+                )
+            ],
+            lastUpdated: referenceDate
+        )
+    }
+
+    static func kimiCode() -> UsageMetrics {
+        UsageMetrics(
+            service: .kimiCode,
+            sessionLimit: UsageLimit(
+                used: 23,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(2 * 3_600),
+                windowSeconds: 5 * 3_600,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 37,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600,
+                periodKind: .weekly
+            ),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$12.00 left of $20.00"),
+            lastUpdated: referenceDate
+        )
+    }
+
     static func openRouter(
         keyUsed: Double = 12.8,
         keyTotal: Double = 40,

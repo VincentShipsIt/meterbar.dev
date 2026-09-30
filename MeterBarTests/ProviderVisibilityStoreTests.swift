@@ -16,6 +16,49 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    func testKimiCodeIsOffByDefaultAndItsOptInPersists() {
+        withIsolatedDefaults { defaults in
+            let initial = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(initial.isEnabled(.kimiCode))
+            XCTAssertTrue(ServiceType.kimiCode.isOptInByDefault)
+
+            initial.set(.kimiCode, isEnabled: true)
+            XCTAssertTrue(ProviderVisibilityStore(userDefaults: defaults).isEnabled(.kimiCode))
+
+            // Turning it off again sticks, and never touches OpenRouter's opt-in.
+            initial.set(.kimiCode, isEnabled: false)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(reloaded.isEnabled(.kimiCode))
+            XCTAssertFalse(reloaded.isEnabled(.openRouter))
+        }
+    }
+
+    func testZaiCodingPlanIsOffByDefaultAndItsOptInPersistsIndependently() {
+        withIsolatedDefaults { defaults in
+            let initial = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(initial.isEnabled(.zaiCodingPlan))
+
+            initial.set(.zaiCodingPlan, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.zaiCodingPlan))
+            XCTAssertFalse(reloaded.isEnabled(.kimiCode), "another opt-in provider must stay off")
+            XCTAssertFalse(reloaded.isEnabled(.openRouter))
+        }
+    }
+
+    func testGitHubCopilotIsOffByDefaultAndItsOptInPersistsIndependently() {
+        withIsolatedDefaults { defaults in
+            let initial = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(initial.isEnabled(.githubCopilot))
+
+            initial.set(.githubCopilot, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.githubCopilot))
+            XCTAssertFalse(reloaded.isEnabled(.zaiCodingPlan))
+            XCTAssertFalse(reloaded.isEnabled(.kimiCode))
+        }
+    }
+
     /// Claude Code, Codex CLI, and Cursor have no dedicated opt-in/opt-out key
     /// (`set` deliberately does nothing extra for them — see the `switch` in
     /// `ProviderVisibilityStore.set`); they persist solely through the generic

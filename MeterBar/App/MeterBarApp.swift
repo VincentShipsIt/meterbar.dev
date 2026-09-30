@@ -199,6 +199,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--open-dashboard") {
             UsageDashboardWindowController.shared.show()
         }
+
+        // Screenshot / UI-verification aid, the popover twin of the flag above:
+        // open the popover once the status item has been placed.
+        if CommandLine.arguments.contains("--open-popover") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.menuPanel?.isShown != true else {
+                    return
+                }
+                self.togglePopover()
+            }
+        }
     }
 
     /// Creates one menu bar slot and wires its button. Returns nil when AppKit

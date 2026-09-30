@@ -40,7 +40,7 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
 
     func testPopoverHeightAddsChromeAndClampsToTheMinimum() {
         let height = MenuBarPopoverGeometry.popoverHeight(scrollHeight: 80, maximumHeight: 760)
-        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "41 + 80 is below the 180 floor")
+        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "46 + 80 is below the 180 floor")
     }
 
     func testPopoverHeightClampsToTheMaximum() {

@@ -18,6 +18,15 @@ final class CLIProviderFilterTests: XCTestCase {
         XCTAssertEqual(CLIProviderFilter.select("CLAUDE"), [.claudeCode])
         XCTAssertEqual(CLIProviderFilter.select(" Cursor "), [.cursor])
         XCTAssertEqual(CLIProviderFilter.select("router"), [.openRouter])
+        XCTAssertEqual(CLIProviderFilter.select("kimi"), [.kimiCode])
+        XCTAssertEqual(CLIProviderFilter.select("Kimi Code"), [.kimiCode])
+        XCTAssertEqual(ServiceType.kimiCode.cliIdentifier, "kimi")
+        XCTAssertEqual(CLIProviderFilter.select("z.ai"), [.zaiCodingPlan])
+        XCTAssertEqual(CLIProviderFilter.select("glm"), [.zaiCodingPlan])
+        XCTAssertEqual(ServiceType.zaiCodingPlan.cliIdentifier, "zai")
+        XCTAssertEqual(CLIProviderFilter.select("copilot"), [.githubCopilot])
+        XCTAssertEqual(CLIProviderFilter.select("github"), [.githubCopilot])
+        XCTAssertEqual(ServiceType.githubCopilot.cliIdentifier, "copilot")
     }
 
     func testAnUnmatchedFilterSelectsNothingRatherThanEverything() {

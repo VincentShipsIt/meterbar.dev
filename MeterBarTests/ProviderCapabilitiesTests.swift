@@ -84,6 +84,69 @@ final class ProviderCapabilitiesTests: XCTestCase {
         )
     }
 
+    func testKimiCodeIsASingleAccountProviderWithABoosterWallet() {
+        XCTAssertEqual(
+            ServiceType.kimiCode.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: true,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.kimiCode.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.kimiCode.isOptInByDefault)
+        XCTAssertFalse(ServiceType.kimiCode.hasStatusPage)
+        XCTAssertNil(ServiceType.kimiCode.statusPageURL)
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.kimiCode))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.kimiCode))
+    }
+
+    func testZaiCodingPlanIsASingleAccountOptInProviderWithoutOverage() {
+        XCTAssertEqual(
+            ServiceType.zaiCodingPlan.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.zaiCodingPlan.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.zaiCodingPlan.isOptInByDefault)
+        XCTAssertFalse(ServiceType.zaiCodingPlan.hasStatusPage)
+        XCTAssertNil(ServiceType.zaiCodingPlan.statusPageURL)
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.zaiCodingPlan))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.zaiCodingPlan))
+    }
+
+    func testGitHubCopilotIsASingleAccountOptInProviderWithAStatusPage() {
+        XCTAssertEqual(
+            ServiceType.githubCopilot.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.githubCopilot.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.githubCopilot.isOptInByDefault)
+        XCTAssertTrue(ServiceType.githubCopilot.hasStatusPage)
+        XCTAssertEqual(ServiceType.githubCopilot.statusPageURL?.absoluteString, "https://www.githubstatus.com/")
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.githubCopilot))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.githubCopilot))
+    }
+
     func testSessionWakeIsAnExplicitExceptionForGrok() {
         XCTAssertTrue(ServiceType.grok.isMultiAccount)
         XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
@@ -218,8 +281,11 @@ final class ProviderCapabilitiesTests: XCTestCase {
                     family: family,
                     now: MetricsFixtures.referenceDate
                 )
+                // A provider may report extra windows (Z.ai's monthly MCP tool
+                // allowance), each of which is its own row; what must hold is
+                // that every row belongs to this provider and none is dropped.
                 XCTAssertEqual(
-                    presentation.rows.map(\.service),
+                    Set(presentation.rows.map(\.service)),
                     [service],
                     "\(family) dropped \(service)"
                 )
@@ -363,7 +429,10 @@ final class ProviderCapabilitiesTests: XCTestCase {
             codexError: .apiError("codex"),
             cursorError: .apiError("cursor"),
             openRouterError: .apiError("openrouter"),
-            grokError: .apiError("grok")
+            grokError: .apiError("grok"),
+            kimiCodeError: .apiError("kimi"),
+            zaiCodingPlanError: .apiError("zai"),
+            githubCopilotError: .apiError("copilot")
         )
         XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
     }

@@ -3,7 +3,8 @@ import Foundation
 import MeterBarShared
 import os
 
-/// The single-account provider surface `UsageDataManager` orchestrates (Cursor).
+/// The single-account provider surface `UsageDataManager` orchestrates (Cursor,
+/// Kimi Code).
 /// Behind a protocol so the manager's merge / graceful-degradation
 /// logic can be tested with stub providers instead of the real network + local
 /// credential files. Claude Code has its own account-aware path and is not part
@@ -138,7 +139,10 @@ class UsageDataManager: ObservableObject {
     }
 
     private let claudeCodeService: ClaudeCodeUsageProviding
-    private let cursorService: SimpleUsageProviding
+    /// The single-account providers, keyed by service. One table rather than a
+    /// stored property per provider, so a new single-account provider is one
+    /// entry here instead of another init parameter and `switch` arm.
+    private let simpleProviders: [ServiceType: SimpleUsageProviding]
     private let codexCliService: CodexUsageProviding
     private let openRouterService: OpenRouterUsageProviding
     private let grokService: GrokUsageProviding
@@ -189,6 +193,7 @@ class UsageDataManager: ObservableObject {
     init(
         codexCliService: CodexUsageProviding? = nil,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
+        additionalSimpleProviders: [ServiceType: SimpleUsageProviding]? = nil,
         openRouterService: OpenRouterUsageProviding = OpenRouterService.shared,
         grokService: GrokUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeUsageProviding = ClaudeCodeLocalService.shared,
@@ -215,7 +220,12 @@ class UsageDataManager: ObservableObject {
     ) {
         self.demoMode = demoMode
         self.codexCliService = codexCliService ?? CodexCliLocalService.shared
-        self.cursorService = cursorService
+        let additionalSimpleProviders = additionalSimpleProviders ?? [
+            .kimiCode: KimiCodeService.shared,
+            .zaiCodingPlan: ZaiCodingPlanService.shared,
+            .githubCopilot: GitHubCopilotService.shared,
+        ]
+        self.simpleProviders = additionalSimpleProviders.merging([.cursor: cursorService]) { _, explicit in explicit }
         self.openRouterService = openRouterService
         self.grokService = grokService
         self.claudeCodeService = claudeCodeService
@@ -656,7 +666,7 @@ class UsageDataManager: ObservableObject {
         // Visibility and access are synchronous, so resolve them up front and
         // fan out only the legs that will actually reach a provider.
         // OpenRouter left this path for the account-aware fetcher.
-        for service in [ServiceType.cursor] {
+        for service in simpleServices {
             guard providerVisibilityStore.isEnabled(service) else {
                 states[service] = (.skipped, Self.disabledReason)
                 continue
@@ -725,12 +735,15 @@ class UsageDataManager: ObservableObject {
     }
 
     private func simpleProvider(for service: ServiceType) -> SimpleUsageProviding? {
-        switch service {
-        case .cursor:
-            return cursorService
-        case .claudeCode, .codexCli, .grok, .openRouter:
-            return nil
-        }
+        simpleProviders[service]
+    }
+
+    /// The single-account providers in display order, so the refresh fold (and
+    /// the failure it reports first) stays deterministic.
+    private var simpleServices: [ServiceType] {
+        ServiceType.allCases
+            .filter { simpleProviders[$0] != nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     /// Clears one provider's per-account caches (used on disable and when its
@@ -746,7 +759,10 @@ class UsageDataManager: ObservableObject {
             grokAccountMetrics = [:]
         case .openRouter:
             openRouterAccountMetrics = [:]
-        case .cursor:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
             break
         }
     }
@@ -763,7 +779,10 @@ class UsageDataManager: ObservableObject {
             return grokAccountStore.enabledAccounts.count
         case .openRouter:
             return openRouterAccountStore.enabledAccounts.count
-        case .cursor:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
             return nil
         }
     }
@@ -914,20 +933,23 @@ class UsageDataManager: ObservableObject {
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
-        case .cursor:
-            return try await refreshedCursorMetrics()
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
+            return try await refreshedSimpleMetrics(for: service)
         case .claudeCode, .codexCli, .grok, .openRouter:
             return try await refreshedAccountAwareMetrics(for: service)
         }
     }
 
-    /// Cursor's single-account refresh with cache-preserving degradation.
-    private func refreshedCursorMetrics() async throws -> UsageMetrics {
-        guard hasProviderAccess(.cursor) else { throw ServiceError.notAuthenticated }
+    /// A single-account provider's refresh with cache-preserving degradation.
+    private func refreshedSimpleMetrics(for service: ServiceType) async throws -> UsageMetrics {
+        guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
         do {
-            return try await fetchSimpleProviderMetrics(.cursor)
+            return try await fetchSimpleProviderMetrics(service)
         } catch {
-            if let cachedMetric = metrics[.cursor] {
+            if let cachedMetric = metrics[service] {
                 lastError = error
                 return cachedMetric
             }
@@ -974,8 +996,11 @@ class UsageDataManager: ObservableObject {
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeOpenRouterMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
-        case .cursor:
-            preconditionFailure("Cursor uses refreshedCursorMetrics")
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
+            preconditionFailure("Single-account providers use refreshedSimpleMetrics")
         }
 
         if let cachedMetric = metrics[service] { return cachedMetric }
@@ -1276,7 +1301,7 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        for service in [ServiceType.cursor]
+        for service in simpleServices
         where providerVisibilityStore.isEnabled(service) && hasProviderAccess(service) {
             collect(metrics[service])
         }
@@ -1622,8 +1647,11 @@ class UsageDataManager: ObservableObject {
             return claudeCodeService.hasAccess
         case .codexCli:
             return false
-        case .cursor:
-            return cursorService.hasAccess
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
+            return simpleProviders[service]?.hasAccess ?? false
         case .openRouter:
             // Access means at least one enabled key has its Keychain item.
             return openRouterAccountStore.enabledAccounts.contains {
@@ -1640,8 +1668,12 @@ class UsageDataManager: ObservableObject {
         do {
             let result: UsageMetrics
             switch service {
-            case .cursor:
-                result = try await cursorService.fetchUsageMetrics()
+            case .cursor,
+                 .kimiCode,
+                 .zaiCodingPlan,
+                 .githubCopilot:
+                guard let provider = simpleProviders[service] else { throw ServiceError.notAuthenticated }
+                result = try await provider.fetchUsageMetrics()
             case .claudeCode, .codexCli, .grok, .openRouter:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }

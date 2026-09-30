@@ -245,7 +245,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
         let menu = builder.makeProviderStatusMenu()
 
-        XCTAssertEqual(menu.items.count, ServiceType.allCases.count + 2)
+        XCTAssertEqual(menu.items.count, ServiceType.statusPageServices.count + 2)
         let refreshItem = try XCTUnwrap(menu.items.last)
         XCTAssertEqual(refreshItem.title, "Refresh Status Pages")
         // A refresh already in flight disables the item instead of stacking work.
@@ -611,7 +611,7 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertFalse(services.contains(.codexCli))
         XCTAssertFalse(services.contains(.grok))
         XCTAssertFalse(services.contains(.openRouter))
-        XCTAssertEqual(services, [.cursor])
+        XCTAssertEqual(services, [.cursor, .kimiCode, .zaiCodingPlan, .githubCopilot])
         XCTAssertEqual(
             services.count,
             ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }.count

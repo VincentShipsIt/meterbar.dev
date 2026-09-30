@@ -149,6 +149,12 @@ extension ServiceType {
         case .grok:
             // Grok's status page is operated under the SpaceXAI brand.
             return "SpaceXAI"
+        case .kimiCode:
+            return "Kimi Code"
+        case .zaiCodingPlan:
+            return "Z.ai"
+        case .githubCopilot:
+            return "GitHub"
         }
     }
 
@@ -164,11 +170,18 @@ extension ServiceType {
             return "https://status.openrouter.ai/"
         case .grok:
             return "https://status.x.ai/"
+        case .githubCopilot:
+            // Copilot is a component of GitHub's own Statuspage.
+            return "https://www.githubstatus.com/"
+        case .kimiCode, .zaiCodingPlan:
+            // No verified first-party status page; `hasStatusPage` keeps this
+            // out of every status surface and the monitor never polls it.
+            return ""
         }
     }
 
     var statusPageURL: URL? {
-        URL(string: statusPageURLString)
+        hasStatusPage ? URL(string: statusPageURLString) : nil
     }
 }
 
@@ -413,7 +426,7 @@ final class ProviderStatusMonitor: ObservableObject {
         await refreshAll()
     }
 
-    func refreshAll(services: [ServiceType] = ServiceType.allCases) async {
+    func refreshAll(services: [ServiceType] = ServiceType.statusPageServices) async {
         guard !isRefreshing else { return }
         isRefreshing = true
 

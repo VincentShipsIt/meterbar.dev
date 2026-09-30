@@ -306,6 +306,21 @@ nonisolated public struct DailyTokenUsage: Codable, Identifiable, Sendable {
     }()
 }
 
+nonisolated extension DailyTokenUsage {
+    /// The row's calendar day expressed on `calendar`: the same year, month and
+    /// day *as its provider dated it*, placed at local midnight. A UTC-keyed
+    /// OpenRouter row for the 29th stays on the 29th for a viewer in Los
+    /// Angeles instead of sliding onto the evening of the 28th, which is what
+    /// `calendar.startOfDay(for: date)` would do to it.
+    func day(on calendar: Calendar) -> Date {
+        let boundary = provider.dailyUsageDayBoundary.calendar(local: calendar)
+        guard boundary.timeZone != calendar.timeZone else { return calendar.startOfDay(for: date) }
+        let parts = boundary.dateComponents([.year, .month, .day], from: date)
+        guard let placed = calendar.date(from: parts) else { return calendar.startOfDay(for: date) }
+        return calendar.startOfDay(for: placed)
+    }
+}
+
 /// One provider's token usage inside a local calendar-hour bucket.
 ///
 /// Hourly rows intentionally stop at the same aggregate shape as daily rows:
@@ -424,11 +439,12 @@ nonisolated public struct LifetimeCostSummary: Codable, Equatable, Sendable {
 /// dates its rows in the calendar the scan ran in. Cursor never reaches
 /// `dailyUsage` at all — it is denominated in requests, not dollars, and
 /// `ProviderUsageLedger.dailyUSDSeries` is the guard between the two.
-extension ServiceType {
+nonisolated extension ServiceType {
     fileprivate var dailyUsageDayBoundary: ProviderUsageDayBoundary {
         switch self {
-        case .openRouter: return .utc
-        case .claudeCode, .codexCli, .cursor, .grok: return .local
+        case .openRouter,
+             .githubCopilot: return .utc
+        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan: return .local
         }
     }
 }
@@ -656,6 +672,40 @@ nonisolated public struct CostSummary: Codable, Sendable {
         return enabledScanServices.contains { !present.contains($0) }
     }
 
+    /// The cached daily rows inside the last `days` calendar days (inclusive of
+    /// today), each judged in *its own* provider's day boundary rather than
+    /// necessarily `calendar` (issue #543). Re-normalizing a UTC-keyed row
+    /// through the local `calendar.startOfDay` compares two different absolute
+    /// instants for "the same" calendar day: west of UTC that pushes the row's
+    /// day number backward by one, and on the 1st of the month that is enough
+    /// to drop it out of a month-to-date window entirely, reading $0.00 for the
+    /// whole day. `ProviderDailyUsageSeries` avoids this by windowing each
+    /// provider against a `today`/`start` recomputed in its own boundary
+    /// calendar from the same `now` instant rather than the local one; this
+    /// mirrors that per-row instead of per-series.
+    ///
+    /// Shared by `dailyCostWindow` and the Usage page's `UsageReport`, so the
+    /// page's headline, chart and tables can never disagree about which rows
+    /// belong to the selected window.
+    func dailyRows(
+        lastDays days: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [DailyTokenUsage] {
+        let requestedDays = max(1, days)
+        return dailyUsage.filter { row in
+            let boundaryCalendar = row.provider.dailyUsageDayBoundary.calendar(local: calendar)
+            let boundaryToday = boundaryCalendar.startOfDay(for: now)
+            let boundaryStart = CalendarDayStep.day(
+                boundaryToday,
+                offsetBy: -(requestedDays - 1),
+                calendar: boundaryCalendar
+            )
+            let day = boundaryCalendar.startOfDay(for: row.date)
+            return day >= boundaryStart && day <= boundaryToday
+        }
+    }
+
     /// Aggregates the cached daily rows into per-provider totals over the last
     /// `days` calendar days (inclusive of today). Pure and rescan-free: it reads
     /// only `dailyUsage`. Those rows now retain cache-creation tokens, but the
@@ -676,31 +726,8 @@ nonisolated public struct CostSummary: Codable, Sendable {
     ) -> DailyCostWindow {
         let requestedDays = max(1, days)
         let today = calendar.startOfDay(for: now)
-        let startDate = CalendarDayStep.day(today, offsetBy: -(requestedDays - 1), calendar: calendar)
 
-        // A row is dated in its *own* provider's boundary, not necessarily
-        // `calendar` (issue #543). Re-normalizing a UTC-keyed row through the
-        // local `calendar.startOfDay` compares two different absolute instants
-        // for "the same" calendar day: west of UTC that pushes the row's day
-        // number backward by one, and on the 1st of the month that is enough to
-        // drop it out of a month-to-date window entirely, reading $0.00 for the
-        // whole day. `ProviderDailyUsageSeries` avoids this by windowing each
-        // provider against a `today`/`start` recomputed in its own boundary
-        // calendar from the same `now` instant rather than the local one; this
-        // mirrors that per-row instead of per-series.
-        func isWithinWindow(_ row: DailyTokenUsage) -> Bool {
-            let boundaryCalendar = row.provider.dailyUsageDayBoundary.calendar(local: calendar)
-            let boundaryToday = boundaryCalendar.startOfDay(for: now)
-            let boundaryStart = CalendarDayStep.day(
-                boundaryToday,
-                offsetBy: -(requestedDays - 1),
-                calendar: boundaryCalendar
-            )
-            let day = boundaryCalendar.startOfDay(for: row.date)
-            return day >= boundaryStart && day <= boundaryToday
-        }
-
-        let windowRows = dailyUsage.filter(isWithinWindow)
+        let windowRows = dailyRows(lastDays: requestedDays, now: now, calendar: calendar)
 
         let providers = Dictionary(grouping: windowRows, by: \.provider)
             .map { provider, rows in

@@ -51,6 +51,12 @@ final class ProviderVisibilityStore: ObservableObject {
         switch service {
         case .openRouter:
             userDefaults.set(enabled, forKey: StorageKeys.openRouterProviderEnabled)
+        case .kimiCode:
+            userDefaults.set(enabled, forKey: StorageKeys.kimiCodeProviderEnabled)
+        case .zaiCodingPlan:
+            userDefaults.set(enabled, forKey: StorageKeys.zaiCodingPlanProviderEnabled)
+        case .githubCopilot:
+            userDefaults.set(enabled, forKey: StorageKeys.githubCopilotProviderEnabled)
         case .grok:
             userDefaults.set(enabled, forKey: StorageKeys.grokProviderEnabled)
         case .claudeCode, .codexCli, .cursor:
@@ -62,8 +68,19 @@ final class ProviderVisibilityStore: ObservableObject {
     private func load() {
         let rawValues = userDefaults.stringArray(forKey: storageKey) ?? []
         hiddenServices = Set(rawValues.compactMap(ServiceType.init(rawValue:)))
+        // Opt-in providers stay hidden until their own preference key says
+        // otherwise, so a stale entry in the hidden list is never a decision.
         if !userDefaults.bool(forKey: StorageKeys.openRouterProviderEnabled) {
             hiddenServices.insert(.openRouter)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.kimiCodeProviderEnabled) {
+            hiddenServices.insert(.kimiCode)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.zaiCodingPlanProviderEnabled) {
+            hiddenServices.insert(.zaiCodingPlan)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.githubCopilotProviderEnabled) {
+            hiddenServices.insert(.githubCopilot)
         }
         // Grok is a first-class provider, so only an explicit opt-out hides it.
         // While it was opt-in, `load()` inserted it into `hiddenServices` and any

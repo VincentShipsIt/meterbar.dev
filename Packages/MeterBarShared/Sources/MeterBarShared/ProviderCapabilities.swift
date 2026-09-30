@@ -83,6 +83,42 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 hasAccountScopedNotifications: false,
                 hasAccountScopedQuotaEvents: false
             )
+        case .kimiCode:
+            // One credential (the official OAuth artifact or one API key) and
+            // one account. Booster-wallet balance is the extra-usage analog.
+            return ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: true,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        case .zaiCodingPlan:
+            // One Coding Plan key and one account. The plan has no overage
+            // wallet, banked resets, or per-account config directory.
+            return ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        case .githubCopilot:
+            // One token and one billing account. Overage, banked resets, and
+            // config directories have no Copilot analog in the billing API.
+            return ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
         case .openRouter:
             // Multi-key: each managed API key is an account. Extra usage, reset
             // redemption, guard config directories, and Session Wake have no

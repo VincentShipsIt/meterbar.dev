@@ -146,7 +146,10 @@ nonisolated enum QuotaEventSnapshotCatalog {
                 },
                 accounts.openRouterAccountMetrics
             )
-        case .cursor:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan,
+             .githubCopilot:
             return nil
         }
     }

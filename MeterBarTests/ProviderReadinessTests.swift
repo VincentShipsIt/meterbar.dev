@@ -28,6 +28,135 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(configured.isHealthy)
     }
 
+    func testKimiCodeReadinessCoversEveryCredentialOutcome() {
+        let missing = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .notFound, hasAPIKey: false)
+        )
+        XCTAssertEqual(missing.provider, .kimiCode)
+        XCTAssertEqual(missing.check("installed")?.level, .fail)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertEqual(missing.check("data")?.level, .warn)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("/login"))
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("Settings"))
+        XCTAssertFalse(missing.isHealthy)
+
+        let ready = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .ready, hasAPIKey: false)
+        )
+        XCTAssertEqual(ready.check("installed")?.level, .pass)
+        XCTAssertEqual(ready.check("auth")?.level, .pass)
+        XCTAssertEqual(ready.check("data")?.level, .pass)
+        XCTAssertTrue(ready.isHealthy)
+
+        let expired = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .expired, hasAPIKey: false)
+        )
+        XCTAssertEqual(expired.check("auth")?.level, .fail)
+        XCTAssertTrue((expired.check("auth")?.detail ?? "").contains("expired"))
+        XCTAssertTrue((expired.check("auth")?.recovery ?? "").contains("/login"))
+
+        let unreadable = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .unreadable, hasAPIKey: false)
+        )
+        XCTAssertEqual(unreadable.check("auth")?.level, .fail)
+        XCTAssertEqual(unreadable.check("installed")?.level, .pass, "a file exists, so a sign-in source is present")
+    }
+
+    func testKimiCodeAPIKeyCoversAnExpiredOrMissingSignIn() {
+        for credential in [KimiCodeCredentialProbe.notFound, .expired, .unreadable] {
+            let report = ProviderReadinessEvaluator.kimiCode(
+                KimiCodeReadinessInput(credential: credential, hasAPIKey: true)
+            )
+            XCTAssertEqual(report.check("auth")?.level, .pass, "\(credential)")
+            XCTAssertEqual(report.check("data")?.level, .pass, "\(credential)")
+            XCTAssertEqual(report.check("installed")?.level, .pass, "\(credential)")
+        }
+    }
+
+    func testKimiCodeRefreshFailureIsSurfacedAndNoSecretIsEverEmitted() throws {
+        let report = ProviderReadinessEvaluator.kimiCode(
+            KimiCodeReadinessInput(credential: .ready, hasAPIKey: true, refreshError: "HTTP 404")
+        )
+        XCTAssertEqual(report.check("refresh")?.level, .fail)
+        XCTAssertFalse(report.isHealthy)
+
+        let export = try JSONEncoder().encode(ProviderReadinessExport(report))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+        XCTAssertFalse(text.contains(".kimi-code"), "no filesystem path in a paste-safe report")
+    }
+
+    func testZaiCodingPlanRequiresAKeyAndNamesTheRegionHost() throws {
+        let missing = ProviderReadinessEvaluator.zaiCodingPlan(ZaiCodingPlanReadinessInput(hasAPIKey: false))
+        XCTAssertEqual(missing.provider, .zaiCodingPlan)
+        XCTAssertEqual(missing.check("auth")?.level, .fail)
+        XCTAssertEqual(missing.check("data")?.level, .warn)
+        XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("Settings"))
+
+        let mainland = ProviderReadinessEvaluator.zaiCodingPlan(
+            ZaiCodingPlanReadinessInput(hasAPIKey: true, region: .mainland)
+        )
+        XCTAssertEqual(mainland.check("auth")?.level, .pass)
+        XCTAssertTrue((mainland.check("data")?.detail ?? "").contains("open.bigmodel.cn"))
+        XCTAssertTrue(mainland.isHealthy)
+
+        let failing = ProviderReadinessEvaluator.zaiCodingPlan(
+            ZaiCodingPlanReadinessInput(hasAPIKey: true, refreshError: "API error (HTTP 404)")
+        )
+        XCTAssertEqual(failing.check("refresh")?.level, .fail)
+        let text = String(data: try JSONEncoder().encode(ProviderReadinessExport(failing)), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+    }
+
+    func testGitHubCopilotReadinessCoversTheSupportMatrix() throws {
+        let unconfigured = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: false, hasUsername: false)
+        )
+        XCTAssertEqual(unconfigured.provider, .githubCopilot)
+        XCTAssertEqual(unconfigured.check("auth")?.level, .fail)
+        XCTAssertTrue((unconfigured.check("auth")?.detail ?? "").contains("token"))
+        XCTAssertTrue((unconfigured.check("auth")?.detail ?? "").contains("GitHub username"))
+        XCTAssertEqual(unconfigured.check("data")?.level, .warn)
+
+        let orgMissing = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: true, hasUsername: true, scope: .organization, hasOrganization: false)
+        )
+        XCTAssertEqual(orgMissing.check("auth")?.level, .fail)
+        XCTAssertTrue((orgMissing.check("auth")?.detail ?? "").contains("organization"))
+
+        let unchecked = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(hasToken: true, hasUsername: true)
+        )
+        XCTAssertEqual(unchecked.check("auth")?.level, .pass)
+        XCTAssertEqual(unchecked.check("data")?.level, .warn)
+        XCTAssertTrue((unchecked.check("data")?.recovery ?? "").contains("meterbar refresh"))
+
+        let quota = ProviderReadinessEvaluator.githubCopilot(
+            GitHubCopilotReadinessInput(
+                hasToken: true, hasUsername: true, scope: .organization, hasOrganization: true, support: .quota
+            )
+        )
+        XCTAssertEqual(quota.check("data")?.level, .pass)
+        XCTAssertTrue(quota.isHealthy)
+
+        for support in [
+            GitHubCopilotAccountSupport.usageOnly(.noDocumentedAllowance),
+            .usageOnly(.legacyEntitlementUndocumented),
+            .unsupported(.missingPermission),
+        ] {
+            let report = ProviderReadinessEvaluator.githubCopilot(
+                GitHubCopilotReadinessInput(hasToken: true, hasUsername: true, support: support)
+            )
+            XCTAssertEqual(report.check("data")?.level, .warn, support.token)
+            XCTAssertEqual(report.check("data")?.detail, support.message)
+            XCTAssertTrue((report.check("data")?.recovery ?? "").contains("does not guess"))
+        }
+
+        let export = try JSONEncoder().encode(ProviderReadinessExport(quota))
+        let text = String(data: export, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains(secret))
+    }
+
     func testGrokRequiresCLIAndCachedLogin() {
         let missing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)

@@ -28,7 +28,7 @@ struct PopoverHeaderStatusDots: View {
     var hoverOpenDetail: (() -> Void)?
 
     private var summaryText: String {
-        let issues = ServiceType.allCases
+        let issues = ServiceType.statusPageServices
             .compactMap { statusMonitor.reports[$0] }
             .filter(\.hasIssue)
             .count
@@ -38,7 +38,7 @@ struct PopoverHeaderStatusDots: View {
     var body: some View {
         Button(action: openDetail) {
             HStack(spacing: 5) {
-                ForEach(ServiceType.allCases) { service in
+                ForEach(ServiceType.statusPageServices) { service in
                     let indicator = statusMonitor.reports[service]?.summary.indicator ?? .unknown
                     Circle()
                         .fill(indicator.tint)
