@@ -373,7 +373,7 @@ final class ServeRouterTests: XCTestCase {
         XCTAssertEqual(response.status, 200)
         let expected = try CLIJSONErrorResponse(
             code: "cost_cache_missing",
-            message: "No cost data cached. Open MeterBar and run a scan (Costs tab)."
+            message: "No cost data cached. Open MeterBar and run a scan (Usage tab)."
         ).jsonData()
         XCTAssertEqual(response.body, expected)
     }

@@ -63,8 +63,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview = "Overview"
     case limits = "Limits"
     case status = "Status"
-    case costs = "Costs"
-    case optimize = "Optimize"
+    case usage = "Usage"
     case diagnostics = "Diagnostics"
     case share = "Share"
 
@@ -78,10 +77,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "chart.bar.fill"
         case .status:
             return "waveform.path.ecg"
-        case .costs:
-            return "dollarsign.circle.fill"
-        case .optimize:
-            return "leaf.fill"
+        case .usage:
+            return "chart.xyaxis.line"
         case .diagnostics:
             return "stethoscope"
         case .share:
@@ -94,16 +91,15 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     /// Settings scene rather than masquerading as dashboard content.
     ///
     /// One flat run, not groups. This was three `Section`s titled "Health" and
-    /// "Utilities" — a taxonomy over seven rows nobody has to choose between.
+    /// "Utilities" — a taxonomy over six rows nobody has to choose between.
     /// Dropping the headers left the section gaps behind, which is worse than
-    /// either: uneven space that no longer separates anything named. Seven rows
+    /// either: uneven space that no longer separates anything named. Six rows
     /// read fine as a list, and a flat array makes a header unrepresentable
     /// rather than merely absent.
     static let sidebarOrder: [DashboardSection] = [
         .overview,
         .limits,
-        .costs,
-        .optimize,
+        .usage,
         .status,
         .diagnostics,
         .share,
@@ -117,10 +113,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "Every tracked quota window"
         case .status:
             return "Provider service health"
-        case .costs:
-            return "Local 30-day token spend"
-        case .optimize:
-            return "Where tokens go and how to trim them"
+        case .usage:
+            return "Where tokens and spend go, and how to trim them"
         case .diagnostics:
             return "Provider setup health"
         case .share:
@@ -142,16 +136,16 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .status:
             return .providerStatus
-        case .costs, .share, .optimize:
+        case .usage, .share:
             return .costs
         case .overview, .limits, .diagnostics:
             return .usage
         }
     }
 
-    /// Only the Costs page renders the org API-usage card, so it is the only page
+    /// Only the Usage page renders the org API-usage card, so it is the only page
     /// whose refresh also pulls the billing API.
-    var refreshesApiUsage: Bool { self == .costs }
+    var refreshesApiUsage: Bool { self == .usage }
 }
 
 /// The app-settings pages, surfaced as an in-window mode of the dashboard rather

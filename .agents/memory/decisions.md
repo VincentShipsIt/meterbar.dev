@@ -82,3 +82,14 @@ Against that it buys a new invalidation surface — archive schema drift, a corr
 ## Cost scan is the visible window only
 
 **Accepted 2026-08-13.** Quota APIs do not replace 30-day per-model spend. The local scan lists files by mtime (`cutoff - 36h`) and publishes period totals only. Lifetime is kept on `CostSummary` for cache decode and is no longer filled or shown. Codex `logs_2.sqlite` is not opened for the default scan. The Costs page shows listed file count and bytes while a refresh runs.
+
+## One Usage page, one `UsageReport`
+
+**Accepted 2026-09-29 (#593).** Costs and Optimize were one cached dataset drawn four ways. The dashboard has a single **Usage** page (`DashboardSection.usage`); every figure on it (headline strip, chart, breakdown table, insights, data-quality notes) is cut from one `UsageReport` for the selected window, so no KPI can read the full scan while the picker says 7 days. Accumulation is `Double` (`TokenComposition`), not saturating `Int`.
+
+- No 0-100 optimization score or letter grade. It blended four heuristics and hid which one moved; each signal is its own insight row with the number it came from.
+- Cache reuse is `read / (read + write)` over only the providers that report cache writes with authoritative rows. Codex and Grok write `cacheCreation: 0`, so folding them in pinned the tile at 100%. Cache-read share of all tokens is the provider-neutral headline.
+- The chart cannot stack **cost** by token type: cost is one number per row and Grok's is CLI-reported, so a split would invent prices.
+- Origins exist only as a scan-period rollup (no per-day split). The table flags them when the window is narrower; the origin-concentration insight is suppressed then.
+- "What To Use Next" is quota data and lives at the top of Limits. Overview keeps its one-line tile.
+- The routing UI planned in epic #513 (phase 2) extends the Usage page's side column (`UsageColumnsLayout`).

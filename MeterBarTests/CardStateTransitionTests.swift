@@ -53,36 +53,13 @@ final class CardStateTransitionTests: XCTestCase {
         assertRenders(ApiUsageCard(provider: .anthropic, usage: nil, isLoading: false))
     }
 
-    // MARK: - CostOverviewStatusCard phases
+    // MARK: - Usage page phases
 
-    func testCostOverviewCardRendersEveryPhase() {
-        // .loaded — a scan produced a total.
-        assertRenders(
-            CostOverviewStatusCard(
-                summary: loadedSummary(),
-                isScanning: false,
-                isRefreshingMissingDays: false,
-                formattedTokens: "1.0M"
-            )
-        )
-        // .scanning — no summary yet, scan running.
-        assertRenders(
-            CostOverviewStatusCard(
-                summary: nil,
-                isScanning: true,
-                isRefreshingMissingDays: false,
-                formattedTokens: "0"
-            )
-        )
-        // .needsScan — no summary, idle.
-        assertRenders(
-            CostOverviewStatusCard(
-                summary: nil,
-                isScanning: false,
-                isRefreshingMissingDays: false,
-                formattedTokens: "0"
-            )
-        )
+    func testUsageSectionRendersEveryPhase() {
+        // Scan needed — no summary yet.
+        assertRenders(DashboardUsageSection(summary: nil), minHeight: 0)
+        // Loaded — a scan produced rows.
+        assertRenders(DashboardUsageSection(summary: DemoData.costSummary()), minHeight: 0)
     }
 
     // MARK: - PopoverOverviewPanel structural states
@@ -171,16 +148,14 @@ final class CardStateTransitionTests: XCTestCase {
         )
     }
 
-    // MARK: - OptimizeInsightsView build smoke
+    // MARK: - Limits page: What To Use Next
 
-    func testOptimizeInsightsViewBuilds() {
-        // Reads CostTracker.shared, so the visible phase depends on shared state;
-        // this asserts the phase-switched body lays out rather than a specific
-        // branch.
-        assertRenders(OptimizeInsightsView(), minHeight: 0)
+    func testHeadroomRecommendationCardBuilds() {
+        // With nothing to rank the card renders nothing rather than an empty shell.
+        assertRenders(HeadroomRecommendationCard(providerSnapshots: []), minHeight: 0)
 
-        // With snapshots the recommendation card renders above the phase content,
-        // including its "no data" section for the provider without metrics.
+        // With snapshots the card renders, including its "no data" section for
+        // the provider without metrics.
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
                 metrics: [
@@ -192,7 +167,7 @@ final class CardStateTransitionTests: XCTestCase {
                 enabledServices: [.codexCli, .cursor, .claudeCode]
             )
         )
-        assertRenders(OptimizeInsightsView(providerSnapshots: snapshots), minHeight: 0)
+        assertRenders(HeadroomRecommendationCard(providerSnapshots: snapshots), minHeight: 0)
     }
 
     // MARK: - Helpers

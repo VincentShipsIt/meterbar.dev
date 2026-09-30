@@ -19,7 +19,7 @@ import Foundation
 /// `calendar.startOfDay(for: now)`, or a previous `CalendarDayStep.day`
 /// result); the result is re-normalized after the step so every hop lands on
 /// an exact day boundary regardless of the zone.
-enum CalendarDayStep {
+nonisolated enum CalendarDayStep {
     static func day(_ date: Date, offsetBy days: Int, calendar: Calendar) -> Date {
         guard let shifted = calendar.date(byAdding: .day, value: days, to: date) else { return date }
         return calendar.startOfDay(for: shifted)

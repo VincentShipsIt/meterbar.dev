@@ -607,13 +607,11 @@ final class CostAccumulationSafetyTests: XCTestCase {
         XCTAssertEqual(usageDay.totalTokens, Int.max)
     }
 
-    /// The stacked-bar chart above the breakdown list folds the same rows.
-    /// Two rows for `claudeCode` exercise the inner per-provider fold
-    /// (`buildDays`' `tokens = SafeAccumulate.sum(providerRows...)`); two more
-    /// for `codexCli` give the day a second segment, so `DailyUsageDay
-    /// .totalTokens`'s outer fold across segments also combines two already-
-    /// saturated values instead of summing a single segment against nothing.
-    func testDailyUsageChartBuildDaysSurvivesTwoSaturatedProviderSegmentsOnTheSameDay() {
+    /// The chart above the breakdown list draws the same rows. Two providers with
+    /// two saturated rows each on one day must still fit one column, and keep
+    /// their real proportion: a stack summed in saturating `Int` would clip at
+    /// `Int.max` and draw both segments the same height (issues #575, #591).
+    func testUsageSeriesSurvivesTwoSaturatedProviderSegmentsOnTheSameDay() throws {
         let calendar = utcCalendar()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let today = calendar.startOfDay(for: now)
@@ -623,12 +621,18 @@ final class CostAccumulationSafetyTests: XCTestCase {
             saturatedDailyUsage(on: today, provider: .codexCli),
             saturatedDailyUsage(on: today, provider: .codexCli)
         ]
+        let summary = CostSummary(costs: [], totalCostUSD: 4, totalTokens: Int.max, periodDays: 30, dailyUsage: rows)
 
-        let days = DailyUsageChart.buildDays(from: rows, daysToShow: 7, now: now, calendar: calendar)
+        let report = UsageReport(summary: summary, selection: .week, now: now, calendar: calendar)
+        let series = report.series(UsageChartSelection(metric: .tokens, stacking: .provider))
 
-        let todayColumn = days.first { calendar.startOfDay(for: $0.date) == today }
-        XCTAssertEqual(todayColumn?.segments.count, 2)
-        XCTAssertEqual(todayColumn?.totalTokens, Int.max)
+        XCTAssertEqual(series.categories.count, 2)
+        XCTAssertEqual(report.headline.totalTokens, Int.max, "the displayed total still saturates")
+        let total = try XCTUnwrap(series.maxDayTotal)
+        XCTAssertEqual(series.points.map(\.value).reduce(0, +), total)
+        for point in series.points {
+            XCTAssertEqual(point.value / total, 0.5, accuracy: 1e-12)
+        }
     }
 
     // MARK: - TokenActivityCalendar.swift: the heatmap (issue #575)
@@ -728,12 +732,11 @@ final class CostAccumulationSafetyTests: XCTestCase {
         )
     }
 
-    // MARK: - OptimizationInsights.swift: the insights rollups (issue #575)
+    // MARK: - UsageReport.swift: the insights rollups (issue #575)
 
-    /// Every fold in the initializer runs over already-saturating per-row
-    /// totals: the flattened model/origin breakdowns, the four token buckets,
-    /// the cache denominator, the premium share, and the 7/30-day windows.
-    func testOptimizationInsightsSurviveTwoSaturatedProvidersAndBreakdowns() {
+    /// Every fold in the report runs over already-saturating per-row totals: the
+    /// four token buckets, the model rows, the premium share and the trend window.
+    func testUsageReportSurvivesTwoSaturatedProvidersAndBreakdowns() throws {
         let calendar = utcCalendar()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let today = calendar.startOfDay(for: now)
@@ -751,167 +754,40 @@ final class CostAccumulationSafetyTests: XCTestCase {
             ]
         )
 
-        let insights = OptimizationInsights(summary: summary, now: now, calendar: calendar)
+        let report = UsageReport(summary: summary, selection: .month, now: now, calendar: calendar)
 
-        XCTAssertEqual(insights.tokens7Day, Int.max)
-        XCTAssertEqual(insights.tokens30Day, Int.max)
-        XCTAssertEqual(insights.totalTokens, Int.max)
-        // Two saturated model rows, one premium: the share stays a real
-        // fraction rather than trapping on the way to the denominator.
-        XCTAssertGreaterThanOrEqual(insights.premiumTokenShare, 0)
-        XCTAssertLessThanOrEqual(insights.premiumTokenShare, 1)
+        XCTAssertEqual(report.headline.totalTokens, Int.max)
+        let cacheShare = try XCTUnwrap(report.headline.cacheReadShare)
+        XCTAssertGreaterThan(cacheShare, 0)
+        XCTAssertLessThanOrEqual(cacheShare, 1)
+        XCTAssertFalse(report.breakdown(.provider).isEmpty)
     }
 
-    func testPremiumShareSurvivesTwoSaturatedModelRowsWithoutAGroupTotal() {
-        let models = [
-            saturatedBreakdown(provider: .claudeCode, name: "claude-opus-5"),
-            saturatedBreakdown(provider: .claudeCode, name: "claude-haiku-4-5")
-        ]
-
-        let share = OptimizationInsights.premiumShare(of: models)
-
-        XCTAssertGreaterThanOrEqual(share, 0)
-        XCTAssertLessThanOrEqual(share, 1)
-    }
-
-    // MARK: - Ratios from raw components, not saturated totals (issue #591)
-
-    private func overflowingBreakdown(
-        provider: ServiceType,
-        name: String,
-        saturatedComponents: Int
-    ) -> TokenUsageBreakdown {
-        let components = (0..<4).map { $0 < saturatedComponents ? Int.max : 0 }
-        return TokenUsageBreakdown(
-            provider: provider,
-            name: name,
-            inputTokens: components[0],
-            outputTokens: components[1],
-            cacheCreationTokens: components[2],
-            cacheReadTokens: components[3],
-            estimatedCostUSD: 1,
-            sessionCount: 1
-        )
-    }
-
-    /// Both rows report `totalTokens == Int.max`, but one holds four times the
-    /// tokens of the other. Ranking and share must keep that difference.
-    func testRankedEntriesKeepOrderAndRatioForUnequalOverflowingRows() {
-        let small = overflowingBreakdown(provider: .claudeCode, name: "claude-haiku-4-5", saturatedComponents: 1)
-        let large = overflowingBreakdown(provider: .claudeCode, name: "claude-opus-5", saturatedComponents: 4)
-        XCTAssertEqual(small.totalTokens, large.totalTokens)
-        let cost = TokenCost(
+    /// Two saturated model rows, one premium: the share is a real fraction, not
+    /// a saturated numerator over a saturated denominator.
+    func testPremiumShareSurvivesTwoSaturatedModelRows() throws {
+        let calendar = utcCalendar()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = calendar.startOfDay(for: now)
+        let row = DailyTokenUsage(
+            date: today,
             provider: .claudeCode,
-            inputTokens: 0,
+            inputTokens: Int.max,
             outputTokens: 0,
-            cacheCreationTokens: 0,
             cacheReadTokens: 0,
-            estimatedCostUSD: 2,
-            sessionCount: 2,
-            periodStart: Date(timeIntervalSince1970: 0),
-            periodEnd: Date(timeIntervalSince1970: 1),
-            modelBreakdowns: [small, large]
+            estimatedCostUSD: 1,
+            modelBreakdowns: [
+                saturatedBreakdown(provider: .claudeCode, name: "claude-opus-5"),
+                saturatedBreakdown(provider: .claudeCode, name: "claude-haiku-4-5")
+            ],
+            projectBreakdowns: [],
+            sessionBreakdowns: []
         )
-        let summary = CostSummary(costs: [cost], totalCostUSD: 2, totalTokens: Int.max, periodDays: 30)
+        let summary = CostSummary(costs: [], totalCostUSD: 1, totalTokens: Int.max, periodDays: 30, dailyUsage: [row])
 
-        let insights = OptimizationInsights(summary: summary)
+        let report = UsageReport(summary: summary, selection: .week, now: now, calendar: calendar)
 
-        XCTAssertEqual(insights.topModels.map(\.name), ["claude-opus-5", "claude-haiku-4-5"])
-        XCTAssertEqual(insights.topModels[0].tokenShare, 0.8, accuracy: 1e-9)
-        XCTAssertEqual(insights.topModels[1].tokenShare, 0.2, accuracy: 1e-9)
-        XCTAssertEqual(insights.premiumTokenShare, 0.8, accuracy: 1e-9)
-    }
-
-    func testPremiumShareReflectsStoredProportionWhenPremiumAndEconomyOverflowDifferently() {
-        let models = [
-            overflowingBreakdown(provider: .claudeCode, name: "claude-opus-5", saturatedComponents: 1),
-            overflowingBreakdown(provider: .claudeCode, name: "claude-haiku-4-5", saturatedComponents: 3)
-        ]
-
-        XCTAssertEqual(OptimizationInsights.premiumShare(of: models), 0.25, accuracy: 1e-9)
-    }
-
-    func testPremiumShareIsEvenWhenBothOverflowEqually() {
-        let models = [
-            overflowingBreakdown(provider: .claudeCode, name: "claude-opus-5", saturatedComponents: 2),
-            overflowingBreakdown(provider: .claudeCode, name: "claude-haiku-4-5", saturatedComponents: 2)
-        ]
-
-        XCTAssertEqual(OptimizationInsights.premiumShare(of: models), 0.5, accuracy: 1e-9)
-    }
-
-    func testStackedColumnSegmentsSplitByRawSizeAndSumToColumnHeight() throws {
-        let calendar = utcCalendar()
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let today = calendar.startOfDay(for: now)
-        let rows = [
-            saturatedDailyUsage(on: today, provider: .claudeCode),
-            DailyTokenUsage(
-                date: today,
-                provider: .codexCli,
-                inputTokens: Int.max,
-                outputTokens: 0,
-                cacheCreationTokens: 0,
-                cacheReadTokens: 0,
-                estimatedCostUSD: 1
-            )
-        ]
-
-        let days = DailyUsageChart.buildDays(from: rows, daysToShow: 1, now: now, calendar: calendar)
-        let day = try XCTUnwrap(days.first)
-        let heights = day.segmentHeights(columnHeight: 100)
-        let heightByProvider = Dictionary(uniqueKeysWithValues: zip(day.segments.map(\.provider), heights))
-
-        XCTAssertEqual(day.segments.count, 2)
-        XCTAssertEqual(heights.reduce(0, +), 100, accuracy: 1e-9)
-        XCTAssertEqual(try XCTUnwrap(heightByProvider[.claudeCode]), 80, accuracy: 1e-9)
-        XCTAssertEqual(try XCTUnwrap(heightByProvider[.codexCli]), 20, accuracy: 1e-9)
-    }
-
-    func testTwoEquallySaturatedProvidersRenderEqualBoundedSegments() {
-        let calendar = utcCalendar()
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let today = calendar.startOfDay(for: now)
-        let rows = [
-            saturatedDailyUsage(on: today, provider: .claudeCode),
-            saturatedDailyUsage(on: today, provider: .codexCli)
-        ]
-
-        let days = DailyUsageChart.buildDays(from: rows, daysToShow: 1, now: now, calendar: calendar)
-        let heights = days.first?.segmentHeights(columnHeight: 100) ?? []
-
-        XCTAssertEqual(heights.reduce(0, +), 100, accuracy: 1e-9)
-        XCTAssertEqual(heights.count, 2)
-        XCTAssertEqual(heights.first ?? 0, heights.last ?? -1, accuracy: 1e-9)
-    }
-
-    func testColumnHeightsKeepRelativeRatioForDaysThatBothSaturateTotals() {
-        let calendar = utcCalendar()
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let today = calendar.startOfDay(for: now)
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        let rows = [
-            saturatedDailyUsage(on: today, provider: .claudeCode),
-            DailyTokenUsage(
-                date: yesterday,
-                provider: .claudeCode,
-                inputTokens: Int.max,
-                outputTokens: Int.max,
-                cacheCreationTokens: 0,
-                cacheReadTokens: 0,
-                estimatedCostUSD: 1
-            )
-        ]
-
-        let days = DailyUsageChart.buildDays(from: rows, daysToShow: 2, now: now, calendar: calendar)
-        let maxLayout = days.map(\.layoutTotal).max() ?? 1
-        let heights = days.map {
-            DailyUsageChart.columnHeight(totalHeight: 100, day: $0, maxLayoutTotal: maxLayout)
-        }
-
-        XCTAssertEqual(days.map(\.totalTokens), [Int.max, Int.max])
-        XCTAssertEqual(heights[0], 50, accuracy: 1e-9)
-        XCTAssertEqual(heights[1], 100, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(report.headline.premiumShare), 0.5, accuracy: 1e-9)
     }
 
     // MARK: - SocialShareCardContent.swift: the share-card sparkline (issue #575)
