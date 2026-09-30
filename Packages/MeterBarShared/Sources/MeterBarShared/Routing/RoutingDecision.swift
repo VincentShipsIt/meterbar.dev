@@ -75,6 +75,7 @@ public enum RoutingReasonCode: String, Codable, CaseIterable, Equatable, Sendabl
     case noCandidates = "no_candidates"
     case policyUnreadable = "policy_unreadable"
     case policyUnsupportedVersion = "policy_unsupported_version"
+    case policyMigrationFailed = "policy_migration_failed"
 }
 
 /// A stable machine code and the sentence a person reads for it.

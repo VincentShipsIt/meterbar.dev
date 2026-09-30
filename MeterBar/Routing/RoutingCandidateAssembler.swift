@@ -27,16 +27,18 @@ nonisolated enum RoutingCandidateAssembler {
         for service in services where !hidden.contains(service) {
             let serviceHealth = routingHealth(health[service])
             let configured = configuredAccounts(for: service, in: configuration)
-            let snapshots = accounts.filter { $0.metrics.service == service }
+            let snapshots = service == .cursor ? [] : accounts.filter { $0.metrics.service == service }
 
             // No per-account snapshots (Cursor, or a cache written before the
             // account cache existed): the provider-wide snapshot speaks for
-            // the provider. It is off only when every configured account is.
+            // the provider. A present configuration with no enabled account is
+            // authoritative; only a missing legacy configuration permits an
+            // unknown account-managed provider. Cursor has no account list.
             guard !snapshots.isEmpty else {
-                let allDisabled = !configured.isEmpty && configured.allSatisfy { !$0.isEnabled }
+                let isEnabled = service == .cursor || configuration == nil || configured.contains { $0.isEnabled }
                 candidates.append(RoutingCandidate(
                     service: service,
-                    isEnabled: !allDisabled,
+                    isEnabled: isEnabled,
                     metrics: metrics[service],
                     health: serviceHealth
                 ))
@@ -50,25 +52,28 @@ nonisolated enum RoutingCandidateAssembler {
             for (order, account) in configured.enumerated() {
                 seen.insert(account.id)
                 let snapshot = snapshots.first { $0.id == account.id }
-                // A disabled account with no snapshot has nothing to say.
-                if !account.isEnabled, snapshot == nil { continue }
                 candidates.append(RoutingCandidate(
                     service: service,
                     accountID: account.id,
-                    accountName: snapshot?.name ?? account.name,
+                    accountName: account.name,
                     isEnabled: account.isEnabled,
                     displayOrder: order,
                     metrics: snapshot?.metrics,
                     health: serviceHealth
                 ))
             }
-            // A cached account the configuration no longer lists still has a
-            // real snapshot; keep it, after the configured ones.
-            for (offset, snapshot) in snapshots.enumerated() where !seen.contains(snapshot.id) {
+            // Keep removed accounts explainable, but a cache cannot revive
+            // membership absent from an authoritative configuration. Sort the
+            // legacy/orphan tail by UUID so cache serialization order cannot
+            // change account priority or rejection order.
+            let unlisted = snapshots.filter { !seen.contains($0.id) }
+                .sorted { $0.id.uuidString < $1.id.uuidString }
+            for (offset, snapshot) in unlisted.enumerated() {
                 candidates.append(RoutingCandidate(
                     service: service,
                     accountID: snapshot.id,
                     accountName: snapshot.name,
+                    isEnabled: configuration == nil,
                     displayOrder: configured.count + offset,
                     metrics: snapshot.metrics,
                     health: serviceHealth

@@ -239,6 +239,14 @@ public enum WorkloadRouter {
             )
         }
 
+        let blockingLimits = [metrics.sessionLimit, metrics.weeklyLimit].compactMap { $0 }
+        guard blockingLimits.allSatisfy(isUsableBlockingLimit) else {
+            return reject(
+                .noQuotaWindow,
+                "\(subject(candidate)) reported a malformed session or weekly quota window",
+                freshness: freshness
+            )
+        }
         let readings = windowReadings(of: metrics)
         guard !readings.isEmpty else {
             return reject(
@@ -316,16 +324,20 @@ public enum WorkloadRouter {
 
     /// Provider-blocking windows only: a model-scoped or code-review allowance
     /// can be spent while the provider itself stays usable, so it must never
-    /// decide a route. A window with no positive, finite total carries no
-    /// headroom information and is skipped rather than read as "100% left".
+    /// decide a route. Present windows are validated before this projection;
+    /// only genuinely absent optional windows are omitted.
     private static func windowReadings(of metrics: UsageMetrics) -> [WindowReading] {
         [(ProviderRecommendationWindow.session, metrics.sessionLimit), (.weekly, metrics.weeklyLimit)]
             .compactMap { window, limit in
-                guard let limit,
-                      limit.total > 0, limit.total.isFinite,
-                      limit.used.isFinite, limit.used >= 0 else { return nil }
+                guard let limit else {
+                    return nil
+                }
                 return WindowReading(window: window, limit: limit, percentLeft: QuotaMath.percentLeft(for: limit))
             }
+    }
+
+    private static func isUsableBlockingLimit(_ limit: UsageLimit) -> Bool {
+        limit.total > 0 && limit.total.isFinite && limit.used.isFinite && limit.used >= 0
     }
 
     /// The window the route is judged on: the tightest, session winning ties —

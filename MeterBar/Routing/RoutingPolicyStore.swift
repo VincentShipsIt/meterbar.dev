@@ -13,11 +13,32 @@ import MeterBarShared
 /// is absent, from a newer MeterBar, or unreadable — plus a notice saying so.
 nonisolated enum RoutingPolicyStore {
     static let fileName = "routing-policies.json"
+    typealias Writer = (Data, URL) throws -> Void
+
+    enum PersistenceError: LocalizedError, Equatable {
+        case containerUnavailable
+        case encodingFailed
+        case unsupportedVersion(Int)
+        case writeFailed(reason: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .containerUnavailable:
+                "Routing policy storage is unavailable. Open MeterBar and try again."
+            case .encodingFailed:
+                "Routing policies could not be encoded."
+            case let .unsupportedVersion(version):
+                "Routing policies use a newer schema (\(version)); update MeterBar before saving."
+            case let .writeFailed(reason):
+                "Routing policies could not be saved (\(reason))."
+            }
+        }
+    }
 
     struct Loaded: Equatable, Sendable {
         let catalog: RoutingPolicyCatalog
-        /// Set when the file existed but could not be used, so a surface can
-        /// say why the user's policies are not in effect.
+        /// Explains unusable policies or a failed migration write. A failed
+        /// write keeps the decoded catalog usable without claiming persistence.
         let notice: RoutingReason?
     }
 
@@ -31,17 +52,42 @@ nonisolated enum RoutingPolicyStore {
     static func load(
         directory: URL? = SharedMetricsStore.containerURL,
         codec: RoutingPolicyDocumentCodec = .standard,
-        persistMigration: Bool = false
+        persistMigration: Bool = false,
+        writer: Writer = { try SecureFileWriter.write($0, to: $1) }
     ) -> Loaded {
-        guard let url = fileURL(directory: directory),
-              let data = try? Data(contentsOf: url) else {
+        guard let url = fileURL(directory: directory) else {
             return Loaded(catalog: RoutingPolicyCatalog(), notice: nil)
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            // Only a missing file is normal. A dangling symlink or an existing
+            // unreadable entry must not silently remove the user's constraints.
+            let fileError = error as NSError
+            let isMissing = fileError.domain == NSCocoaErrorDomain
+                && fileError.code == NSFileReadNoSuchFileError
+                && (try? FileManager.default.attributesOfItem(atPath: url.path)) == nil
+            return isMissing
+                ? Loaded(catalog: RoutingPolicyCatalog(), notice: nil)
+                : unreadable()
         }
 
         switch codec.decode(data) {
         case let .document(document, migratedFrom):
             if migratedFrom != nil, persistMigration {
-                try? save(document, directory: directory, codec: codec)
+                do {
+                    try save(document, directory: directory, codec: codec, writer: writer)
+                } catch {
+                    return Loaded(
+                        catalog: RoutingPolicyCatalog(document: document),
+                        notice: RoutingReason(
+                            code: .policyMigrationFailed,
+                            message: "Routing policy upgrade could not be saved; "
+                                + "using upgraded policies for this session. The original file is unchanged."
+                        )
+                    )
+                }
             }
             return Loaded(catalog: RoutingPolicyCatalog(document: document), notice: nil)
         case let .unsupportedVersion(version):
@@ -56,22 +102,40 @@ nonisolated enum RoutingPolicyStore {
                 )
             )
         case .unreadable:
-            return Loaded(
-                catalog: RoutingPolicyCatalog(),
-                notice: RoutingReason(
-                    code: .policyUnreadable,
-                    message: "Routing policies could not be read; using defaults."
-                )
-            )
+            return unreadable()
         }
     }
 
     static func save(
         _ document: RoutingPolicyDocument,
         directory: URL? = SharedMetricsStore.containerURL,
-        codec: RoutingPolicyDocumentCodec = .standard
+        codec: RoutingPolicyDocumentCodec = .standard,
+        encoder: ((RoutingPolicyDocument) -> Data?)? = nil,
+        writer: Writer = { try SecureFileWriter.write($0, to: $1) }
     ) throws {
-        guard let url = fileURL(directory: directory), let data = codec.encode(document) else { return }
-        try SecureFileWriter.write(data, to: url)
+        guard let url = fileURL(directory: directory) else {
+            throw PersistenceError.containerUnavailable
+        }
+        guard let data = (encoder ?? codec.encode)(document) else {
+            throw PersistenceError.encodingFailed
+        }
+        if let existing = try? Data(contentsOf: url), case let .unsupportedVersion(version) = codec.decode(existing) {
+            throw PersistenceError.unsupportedVersion(version)
+        }
+        do {
+            try writer(data, url)
+        } catch {
+            throw PersistenceError.writeFailed(reason: SecureFileWriterError.logDescription(for: error))
+        }
+    }
+
+    private static func unreadable() -> Loaded {
+        Loaded(
+            catalog: RoutingPolicyCatalog(),
+            notice: RoutingReason(
+                code: .policyUnreadable,
+                message: "Routing policies could not be read; using defaults."
+            )
+        )
     }
 }

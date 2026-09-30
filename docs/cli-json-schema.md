@@ -672,13 +672,22 @@ read by the CLI. The file is `{ "schemaVersion": 1, "policies": [...] }` and hol
 user changed or added, so improved defaults reach everyone who never customised a task. A file
 from a newer MeterBar is never interpreted or overwritten; an unreadable file is ignored. In both
 cases route falls back to the defaults and adds a `policy_unsupported_version` or
-`policy_unreadable` entry to `reasons`.
+`policy_unreadable` entry to `reasons`. A missing file is normal; an existing file that cannot be
+read also produces `policy_unreadable` and is preserved. App saves report storage, encoding and
+write failures instead of claiming success, and refuse to overwrite a future schema. If an app
+migration cannot be persisted, the decoded upgraded catalog remains usable for that session with
+`policy_migration_failed`; the original policy file remains unchanged. The CLI never writes migrations.
 
 ### How a candidate is judged
 
 A candidate is one provider, or one account of a multi-account provider. When per-account
 snapshots exist a provider is routed per account and its provider-wide roll-up is not counted a
 second time; Cursor is always provider-wide. Providers hidden in MeterBar are not candidates.
+Current account configuration is authoritative: a cached account UUID absent from that configuration
+is retained as a disabled/rejected candidate, never a recommendation or fallback. An explicitly
+empty account list disables that provider's provider-wide fallback. With legacy caches and no
+configuration, cached accounts remain eligible; with no account snapshots, a configured provider
+with an enabled account may use its provider-wide cache.
 
 Hard filters run first, in this order; the first one a candidate fails is its rejection code:
 
@@ -689,7 +698,7 @@ Hard filters run first, in this order; the first one a candidate fails is its re
 | `account_not_permitted` | The policy pins accounts for this provider and this is not one. |
 | `snapshot_missing` | No usage has been cached. |
 | `snapshot_stale` | The snapshot is older than two hours (the bound `guard` and provider health share). |
-| `no_quota_window` | No session or weekly window with a usable total. A model-scoped or code-review window never decides a route. |
+| `no_quota_window` | No usable session or weekly window, or any present provider-blocking window is malformed (nonpositive/nonfinite total or negative/nonfinite usage). An absent optional window is allowed; a model-scoped or code-review window never decides a route. |
 | `estimate_not_allowed` | The quota total is MeterBar's estimate and the policy requires a reported one. |
 | `quota_exhausted` | The tighter window is spent. Paid overage ("extra usage") is not treated as headroom. |
 | `below_minimum_headroom` | Less quota remains than the policy's minimum. |
@@ -781,7 +790,7 @@ Route reason codes (`recommendation.reasons[].code`): `quota_headroom`, `preferr
 `preferred_account`, `ahead_of_pace`, `behind_pace`, `reset_soon`, `included_quota`,
 `metered_usage`, `estimated_quota`, `health_degraded`. Decision-level `reasons[].code`:
 `only_eligible_candidate`, `tie_break_applied`, `no_candidates`, `policy_unreadable`,
-`policy_unsupported_version`. New codes may be added within version 1; consumers should tolerate
+`policy_unsupported_version`, `policy_migration_failed`. New codes may be added within version 1; consumers should tolerate
 codes they do not know and branch on `outcome` and `exitCode`.
 
 `outcome` is `recommended`, `noEligibleCandidate`, `dataUnavailable`, or `usageError`. Exit codes are
@@ -795,7 +804,10 @@ stable for scripting and mirror `guard`:
 | `13` | `usageError` | An invalid `--task` or `--refresh-timeout`. |
 
 A usage error carries the same `error` object as `guard`, with a stable `code` — `missing_task`,
-`invalid_task`, `unknown_task`, or `invalid_refresh_timeout` — plus `flag` and `value`:
+`invalid_task`, `unknown_task`, or `invalid_refresh_timeout` — plus `flag` and `value`.
+Ordinary invalid values are echoed; values shaped like paths/emails or containing unsafe control
+characters use `[redacted]` in both `value` and every message instead:
+
 
 ```json
 {

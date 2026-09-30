@@ -30,6 +30,100 @@ final class RoutingPolicyStoreTests: XCTestCase {
         XCTAssertEqual(RoutingPolicyStore.load(directory: nil).catalog, RoutingPolicyCatalog())
     }
 
+    func testAnExistingPolicyLocationThatCannotBeReadReturnsANoticeWithoutChangingIt() throws {
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: true)
+        let marker = fileURL.appendingPathComponent("preserved")
+        let original = Data("user policy bytes".utf8)
+        try original.write(to: marker)
+        let loaded = RoutingPolicyStore.load(directory: directory, persistMigration: true)
+        XCTAssertEqual(loaded.catalog, RoutingPolicyCatalog())
+        XCTAssertEqual(loaded.notice?.code, .policyUnreadable)
+        XCTAssertFalse(loaded.notice?.message.contains(directory.path) == true)
+        XCTAssertEqual(try Data(contentsOf: marker), original)
+    }
+
+    func testPolicyReadPermissionFailurePreservesOriginalBytes() throws {
+        let original = Data(#"{"schemaVersion":1,"policies":[]}"#.utf8)
+        try original.write(to: fileURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path) }
+        let loaded = RoutingPolicyStore.load(directory: directory, persistMigration: true)
+        XCTAssertEqual(loaded.notice?.code, .policyUnreadable)
+        XCTAssertFalse(loaded.notice?.message.contains(directory.path) == true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+    }
+
+    func testSaveWithoutAContainerFailsInsteadOfClaimingSuccess() {
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: nil)) {
+            XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .containerUnavailable)
+        }
+    }
+
+    func testSaveToAnUnwritableLocationPreservesThePreviousFile() throws {
+        let old = Data("original bytes".utf8)
+        try old.write(to: fileURL)
+        let blocked = directory.appendingPathComponent("not-a-directory")
+        try Data("blocking file".utf8).write(to: blocked)
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: blocked))
+        XCTAssertEqual(try Data(contentsOf: fileURL), old)
+    }
+
+    func testSaveEncodingFailurePreservesExistingBytesAndReportsTheStage() throws {
+        let original = Data("original bytes".utf8)
+        try original.write(to: fileURL)
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: directory, encoder: { _ in nil })) {
+            XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .encodingFailed)
+        }
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+    }
+
+    func testSaveWriteFailureReportsPathFreeErrorAndPreservesExistingBytes() throws {
+        let original = Data("original bytes".utf8)
+        try original.write(to: fileURL)
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: directory, writer: { _, url in
+            throw SecureFileWriterError.write(code: 28, path: url.path)
+        })) {
+            XCTAssertEqual(
+                $0 as? RoutingPolicyStore.PersistenceError,
+                .writeFailed(reason: "write failed: No space left on device")
+            )
+            XCTAssertFalse($0.localizedDescription.contains(self.directory.path))
+        }
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+    }
+
+    func testFailedMigrationWriteKeepsUpgradedCatalogAndOriginalBytesWithANotice() throws {
+        let original = Data(#"{"schemaVersion":1,"policies":[{"task":"review","minimumRemainingPercent":41}]}"#.utf8)
+        try original.write(to: fileURL)
+        let codec = RoutingPolicyDocumentCodec(currentVersion: 2, migrations: [RoutingPolicyMigration(from: 1) { $0 }])
+        let loaded = RoutingPolicyStore.load(
+            directory: directory, codec: codec, persistMigration: true,
+            writer: { _, url in throw SecureFileWriterError.write(code: 28, path: url.path) }
+        )
+        XCTAssertEqual(loaded.catalog.policy(for: .review)?.minimumRemainingPercent, 41)
+        XCTAssertEqual(loaded.notice?.code, .policyMigrationFailed)
+        XCTAssertFalse(loaded.notice?.message.contains(directory.path) == true)
+        XCTAssertEqual(try Data(contentsOf: fileURL), original)
+        XCTAssertEqual(RoutingPolicyStore.load(directory: directory, codec: codec).catalog, loaded.catalog)
+    }
+
+    func testADanglingPolicySymlinkIsUnreadableRatherThanAbsent() throws {
+        let missing = directory.appendingPathComponent("missing-policy")
+        try FileManager.default.createSymbolicLink(at: fileURL, withDestinationURL: missing)
+        XCTAssertEqual(RoutingPolicyStore.load(directory: directory).notice?.code, .policyUnreadable)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: fileURL.path), missing.path)
+    }
+
+    func testSavingNeverOverwritesAFutureSchema() throws {
+        let future = Data(#"{"schemaVersion":99,"policies":[]}"#.utf8)
+        try future.write(to: fileURL)
+        XCTAssertThrowsError(try RoutingPolicyStore.save(.empty, directory: directory)) {
+            XCTAssertEqual($0 as? RoutingPolicyStore.PersistenceError, .unsupportedVersion(99))
+        }
+        XCTAssertEqual(try Data(contentsOf: fileURL), future)
+    }
+
     func testACustomPolicyIsRestoredAcrossRelaunch() throws {
         let custom = RoutingTaskID(token: "release-notes")!
         var edited = RoutingPolicyDefaults.policy(for: .implementation)

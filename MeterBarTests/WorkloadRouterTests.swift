@@ -171,6 +171,40 @@ final class WorkloadRouterTests: XCTestCase {
         }
     }
 
+    func testAnyPresentMalformedBlockingWindowRejectsEvenWithAnotherHealthyWindow() {
+        let healthy = Fixtures.limit(used: 10)
+        for bad in [
+            Fixtures.limit(used: 0, total: 0),
+            Fixtures.limit(used: 0, total: -1),
+            Fixtures.limit(used: 0, total: .nan),
+            Fixtures.limit(used: 0, total: .infinity),
+            Fixtures.limit(used: -1),
+            Fixtures.limit(used: .nan),
+            Fixtures.limit(used: .infinity),
+        ] {
+            for (session, weekly) in [(healthy, bad), (bad, healthy)] {
+                let decision = Fixtures.route([
+                    Fixtures.candidate(.claudeCode, session: session, weekly: weekly),
+                    Fixtures.candidate(.codexCli, used: 50),
+                ])
+                XCTAssertEqual(decision.chain, ["codex"])
+                XCTAssertEqual(decision.rejectionCodes, [.noQuotaWindow])
+                XCTAssertEqual(decision.rejected.first?.provider, "claude")
+            }
+        }
+    }
+
+    func testAbsentOptionalWindowAndMalformedIndependentAllowanceDoNotReject() {
+        let candidate = RoutingCandidate(
+            service: .claudeCode,
+            metrics: Fixtures.metrics(
+                .claudeCode, session: Fixtures.limit(used: 10), weekly: nil,
+                codeReview: Fixtures.limit(used: -1, total: 0)
+            )
+        )
+        XCTAssertEqual(Fixtures.route([candidate]).outcome, .recommended)
+    }
+
     func testAMetricsSnapshotWithNoSessionOrWeeklyWindowIsRejected() {
         let candidate = RoutingCandidate(
             service: .claudeCode,

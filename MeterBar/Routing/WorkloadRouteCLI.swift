@@ -93,11 +93,12 @@ nonisolated public enum WorkloadRouteCLI {
             ))
         }
         guard let id = RoutingTaskID(token: raw) else {
+            let safeValue = RoutingLabel.sanitized(raw, fallback: "[redacted]")
             return .failure(RouteUsageFailure(
                 code: "invalid_task",
-                message: "Invalid --task value '\(raw)'. Expected one of: \(known).",
+                message: "Invalid --task value '\(safeValue)'. Expected one of: \(known).",
                 flag: "--task",
-                value: raw
+                value: safeValue
             ))
         }
         guard let policy = catalog.policy(for: id) else {
@@ -114,13 +115,14 @@ nonisolated public enum WorkloadRouteCLI {
             let text = rawTimeout.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let parsed = Double(text), parsed.isFinite,
                   (QuotaGuardCLI.minimumRefreshTimeout...QuotaGuardCLI.maximumRefreshTimeout).contains(parsed) else {
+                let safeValue = text.isEmpty ? text : RoutingLabel.sanitized(text, fallback: "[redacted]")
                 return .failure(RouteUsageFailure(
                     code: "invalid_refresh_timeout",
-                    message: "Invalid --refresh-timeout value '\(text)'. Expected "
+                    message: "Invalid --refresh-timeout value '\(safeValue)'. Expected "
                         + "\(QuotaGuardNumber.text(QuotaGuardCLI.minimumRefreshTimeout))"
                         + "...\(QuotaGuardNumber.text(QuotaGuardCLI.maximumRefreshTimeout)) seconds.",
                     flag: "--refresh-timeout",
-                    value: text
+                    value: safeValue
                 ))
             }
             timeout = parsed

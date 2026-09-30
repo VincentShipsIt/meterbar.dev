@@ -14,6 +14,11 @@ public enum RoutingLabel {
     /// like an email address or a filesystem path.
     public static func sanitized(_ raw: String?, fallback: String) -> String {
         guard let raw else { return fallback }
+        guard !raw.unicodeScalars.contains(where: {
+            CharacterSet.controlCharacters.contains($0) && !CharacterSet.whitespacesAndNewlines.contains($0)
+        }) else {
+            return fallback
+        }
         let trimmed = raw
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")

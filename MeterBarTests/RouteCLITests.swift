@@ -64,6 +64,26 @@ final class RouteCLITests: XCTestCase {
         XCTAssertEqual(try target(task: "review").refreshTimeout, WorkloadRouteCLI.defaultRefreshTimeout)
     }
 
+    func testUnsafeUsageErrorValuesNeverReachAnyJSONOrHumanField() throws {
+        for raw in [
+            "/Users/test/private-task.md",
+            "review@example.invalid",
+            "~private",
+            "folder\\task",
+            "\u{001B}[31mprivate",
+        ] {
+            for failure in [expectFailure(task: raw), expectFailure(task: "review", refreshTimeout: raw)] {
+                let response = RouteCLIResponse(failure: failure, checkedAt: Fixtures.now)
+                let json = try response.jsonString()
+                XCTAssertFalse(json.contains(raw), json)
+                XCTAssertFalse(failure.message.contains(raw), failure.message)
+                XCTAssertEqual(response.exitCode, 13)
+                XCTAssertEqual(failure.value, "[redacted]")
+                XCTAssertTrue(failure.message.contains("[redacted]"))
+            }
+        }
+    }
+
     // MARK: - JSON contract
 
     func testRecommendationDocumentShapeIsTheVersionOneContract() throws {
@@ -391,7 +411,7 @@ final class RouteCLITests: XCTestCase {
         XCTAssertFalse(encoded.contains("/private"), "config directories must never reach routing output")
     }
 
-    func testDisabledAccountWithNoSnapshotIsSilentAndAnUnlistedCachedAccountIsKept() {
+    func testDisabledAndUnlistedCachedAccountsAreRejected() {
         let listed = Fixtures.uuid(1)
         let stray = Fixtures.uuid(5)
         let configuration = UsageRefreshConfigurationStore.Snapshot(
@@ -407,8 +427,12 @@ final class RouteCLITests: XCTestCase {
         )
 
         let claude = candidates.filter { $0.service == .claudeCode }
-        XCTAssertEqual(claude.map(\.accountID), [stray])
-        XCTAssertEqual(claude.first?.displayOrder, 1)
+        XCTAssertEqual(claude.map(\.accountID), [listed, stray])
+        XCTAssertEqual(claude.map(\.isEnabled), [false, false])
+        let decision = Fixtures.route(claude)
+        XCTAssertEqual(decision.outcome, .noEligibleCandidate)
+        XCTAssertNil(decision.recommendation)
+        XCTAssertEqual(decision.rejectionCodes, [.providerDisabled, .providerDisabled])
     }
 
     func testConfiguredAccountsWithOnlyAProviderWideCacheStillRouteOnThatCache() {
@@ -449,7 +473,78 @@ final class RouteCLITests: XCTestCase {
 
         XCTAssertEqual(candidate([on, off])?.isEnabled, true)
         XCTAssertEqual(candidate([off])?.isEnabled, false)
-        XCTAssertEqual(candidate([])?.isEnabled, true)
+        XCTAssertEqual(candidate([])?.isEnabled, false)
+    }
+
+    func testEmptyAuthoritativeAccountListsCannotReviveProviderWideSnapshots() {
+        let configuration = UsageRefreshConfigurationStore.Snapshot(
+            hiddenServices: [], claudeAccounts: [], codexAccounts: [], grokAccounts: [], openRouterAccounts: []
+        )
+        let metrics = Dictionary(uniqueKeysWithValues: ServiceType.allCases.map {
+            ($0, Fixtures.metrics($0, session: Fixtures.limit(used: 20)))
+        })
+        let candidates = RoutingCandidateAssembler.assemble(
+            metrics: metrics, accounts: [], configuration: configuration, health: [:]
+        )
+        XCTAssertEqual(Fixtures.route(candidates).chain, ["cursor"])
+        XCTAssertEqual(candidates.filter { $0.service != .cursor }.map(\.isEnabled), [false, false, false, false])
+    }
+
+    func testAnOrphanWithMoreHeadroomNeverBecomesARecommendationOrFallback() {
+        let listed = Fixtures.uuid(1)
+        let removed = Fixtures.uuid(42)
+        let configuration = UsageRefreshConfigurationStore.Snapshot(
+            hiddenServices: [],
+            claudeAccounts: [ClaudeCodeAccount(id: listed, name: "Active", configDirectory: nil)],
+            codexAccounts: []
+        )
+        let snapshots = [
+            AccountUsageSnapshot(
+                id: removed,
+                name: "Removed",
+                metrics: Fixtures.metrics(.claudeCode, session: Fixtures.limit(used: 0))
+            ),
+            AccountUsageSnapshot(
+                id: listed,
+                name: "Active",
+                metrics: Fixtures.metrics(.claudeCode, session: Fixtures.limit(used: 50))
+            ),
+        ]
+        let candidates = RoutingCandidateAssembler.assemble(
+            metrics: [:], accounts: snapshots, configuration: configuration, health: [:]
+        ).filter { $0.service == .claudeCode }
+        let decision = Fixtures.route(candidates)
+        XCTAssertEqual(decision.recommendation?.account?.id, listed.uuidString)
+        XCTAssertTrue(decision.fallbacks.isEmpty)
+        XCTAssertEqual(decision.rejected.first?.account?.id, removed.uuidString)
+        XCTAssertEqual(decision.rejected.first?.code, .providerDisabled)
+
+        let legacy = RoutingCandidateAssembler.assemble(
+            metrics: [:], accounts: snapshots, configuration: nil, health: [:]
+        ).filter { $0.service == .claudeCode }
+        XCTAssertEqual(Fixtures.route(legacy).recommendation?.account?.id, removed.uuidString)
+    }
+
+    func testLegacyAccountDecisionsDoNotDependOnCacheOrder() {
+        let snapshots = [
+            AccountUsageSnapshot(
+                id: Fixtures.uuid(42),
+                name: "Second",
+                metrics: Fixtures.metrics(.claudeCode, session: Fixtures.limit(used: 50))
+            ),
+            AccountUsageSnapshot(
+                id: Fixtures.uuid(1),
+                name: "First",
+                metrics: Fixtures.metrics(.claudeCode, session: Fixtures.limit(used: 50))
+            ),
+        ]
+        func decision(_ snapshots: [AccountUsageSnapshot]) -> RoutingDecision {
+            Fixtures.route(RoutingCandidateAssembler.assemble(
+                metrics: [:], accounts: snapshots, configuration: nil, health: [:]
+            ).filter { $0.service == .claudeCode })
+        }
+        XCTAssertEqual(decision(snapshots), decision(snapshots.reversed()))
+        XCTAssertEqual(decision(snapshots).recommendation?.account?.id, Fixtures.uuid(1).uuidString)
     }
 
     func testProviderHealthMapsFromTheParseHealthRecord() {
@@ -487,7 +582,7 @@ final class RouteCLITests: XCTestCase {
             accounts: [],
             configuration: UsageRefreshConfigurationStore.Snapshot(
                 hiddenServices: [.cursor, .openRouter, .grok],
-                claudeAccounts: [],
+                claudeAccounts: [.defaultAccount],
                 codexAccounts: []
             ),
             health: [:]

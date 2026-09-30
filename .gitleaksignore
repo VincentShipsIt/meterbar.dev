@@ -6,3 +6,7 @@
 # .cursor/commands/security-audit.md command doc (since removed from the tree).
 # Not a real credential — it is documentation showing what NOT to do.
 0f6594991c17d6a479ee7adbf383983a83bf84db:.cursor/commands/security-audit.md:generic-api-key:179
+
+# Synthetic API key used only by the historical Z.ai credential-isolation test.
+# Verified against the exact fixture; this exempts no other commit/path/line.
+ed155d8c663ad0fda9135822f31170f0524823ea:MeterBarTests/ZaiCodingPlanServiceTests.swift:generic-api-key:166
