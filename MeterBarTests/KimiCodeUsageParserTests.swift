@@ -93,7 +93,20 @@ final class KimiCodeUsageParserTests: XCTestCase {
     func testFractionalSecondResetTimesParse() throws {
         let metrics = try parse(#"{"usages":{"limit_5h":{"used_ratio":0.3,"reset_time":"2026-09-11T18:00:00.500Z"}}}"#)
 
-        XCTAssertNotNil(metrics.sessionLimit?.resetTime)
+        let reset = try XCTUnwrap(metrics.sessionLimit?.resetTime)
+        let plainReset = try XCTUnwrap(iso("2026-09-11T18:00:00Z"))
+        XCTAssertEqual(reset.timeIntervalSince1970, plainReset.timeIntervalSince1970 + 0.5)
+    }
+
+    func testUnsupportedResetFormatIsOmittedWhilePlainResetStillParses() throws {
+        let metrics = try parse("""
+        {"usages":{
+          "limit_5h":{"used_ratio":0.3,"reset_time":"not-a-timestamp"},
+          "limit_7d":{"used_ratio":0.4,"reset_time":"2026-09-17T00:00:00Z"}}}
+        """)
+
+        XCTAssertNil(metrics.sessionLimit?.resetTime)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, iso("2026-09-17T00:00:00Z"))
     }
 
     func testEntriesWithoutAReadableRatioAreDroppedNotZeroed() throws {

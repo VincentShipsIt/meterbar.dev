@@ -77,8 +77,8 @@ nonisolated enum KimiCodeCredentialReader {
         let path = credentialFilePath(environment: environment, realHomeDirectory: realHomeDirectory)
         guard fileManager.fileExists(atPath: path) else { return .notFound }
 
-        // A symlink or special file is not something Kimi Code writes, and
-        // following one could read an unrelated file's bytes into a request.
+        // Reject a symlink or special file at the final path component.
+        // This attribute check does not guard symlinked parent directories.
         guard let attributes = try? fileManager.attributesOfItem(atPath: path),
               attributes[.type] as? FileAttributeType == .typeRegular,
               (attributes[.size] as? NSNumber)?.intValue ?? 0 <= maximumFileSize,
