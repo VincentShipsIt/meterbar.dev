@@ -45,5 +45,13 @@ final class PublicProfilePresentationTests: XCTestCase {
         for word in ["email", "account names", "folders", "credentials"] {
             XCTAssertTrue(PublicProfilePresentation.neverPublished.contains(word), word)
         }
+        for field in ["30-day token and session totals", "top models", "daily tokens for the last 7 days"] {
+            XCTAssertTrue(PublicProfilePresentation.publishedSummary.contains(field), field)
+            XCTAssertTrue(PublicProfilePresentation.summary(isEnabled: false).contains(field), field)
+        }
+        XCTAssertTrue(PublicProfilePresentation.publishedSummary.contains("plan when its account is unambiguous"))
+        XCTAssertTrue(PublicProfilePresentation.summary(isEnabled: false).contains("quota windows"))
+        XCTAssertTrue(PublicProfilePresentation.summary(isEnabled: false)
+            .contains("plan when its account is unambiguous"))
     }
 }

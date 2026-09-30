@@ -121,7 +121,7 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
                 Provider(
                     provider: snapshot.service.rawValue,
                     name: name,
-                    plan: snapshot.isAccountCard ? plans[snapshot.service].flatMap(sanitizedPlan) : nil,
+                    plan: plan(for: snapshot, snapshots: snapshots, plans: plans),
                     windows: card.windows
                 )
             )
@@ -170,6 +170,29 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
     }
 
     // MARK: Private
+
+    /// Provider-wide plans describe one account. Count the complete input,
+    /// including accounts omitted later by window sanitization or the cap.
+    @MainActor
+    private static func plan(
+        for snapshot: ProviderSnapshot,
+        snapshots: [ProviderSnapshot],
+        plans: [ServiceType: String]
+    ) -> String? {
+        guard snapshot.isAccountCard, snapshots.accountCardCount(for: snapshot.service) == 1 else {
+            return nil
+        }
+        let defaultAccountID: UUID? = switch snapshot.service {
+        case .claudeCode: ClaudeCodeAccount.defaultID
+        case .codexCli: CodexAccount.defaultID
+        case .grok: GrokAccount.defaultID
+        default: nil
+        }
+        if let accountID = snapshot.accountID, let defaultAccountID, accountID != defaultAccountID {
+            return nil
+        }
+        return plans[snapshot.service].flatMap(sanitizedPlan)
+    }
 
     /// Quota windows only. A currency window is a dollar amount someone spent,
     /// which is not a limit and not what this profile is for.
