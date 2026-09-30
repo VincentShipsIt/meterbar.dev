@@ -49,9 +49,11 @@ final class QuotaEventCoordinatorTests: XCTestCase {
             "overlapping publisher fires must not start a second evaluation while one is in flight"
         )
 
+        // Capture the suspended evaluation before resuming it: yielding does
+        // not guarantee that its defer has cleared the overlap guard.
+        let evaluationTask = coordinator.evaluationTask
         await gate.resume()
-        await Task.yield()
-        await Task.yield()
+        await evaluationTask?.value
 
         XCTAssertNil(coordinator.evaluationTask, "the guard must clear once the in-flight evaluation finishes")
     }
@@ -80,8 +82,7 @@ final class QuotaEventCoordinatorTests: XCTestCase {
 
         coordinator.start()
         await fulfillment(of: [firstEntered], timeout: 1)
-        await Task.yield()
-        await Task.yield()
+        await coordinator.evaluationTask?.value
         XCTAssertNil(coordinator.evaluationTask)
 
         providerVisibility.set(.codexCli, isEnabled: false)

@@ -70,6 +70,119 @@ final class ClaudeCodeOAuthUsageTests: XCTestCase {
         }
     }
 
+    // MARK: - Lenient decoding (issue #595)
+
+    /// Fractional seconds and non-UTC offsets are what a real Anthropic
+    /// timestamp looks like; the fixtures above only cover `...Z`.
+    func testResetParsesWithFractionalSecondsAndOffset() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": {"utilization": 10, "resets_at": "2026-07-02T14:00:00.123456+00:00"},
+          "seven_day": {"utilization": 20, "resets_at": "2026-07-08T02:00:00+02:00"}
+        }
+        """#)
+
+        let session = try XCTUnwrap(response.fiveHour?.resetsAt)
+        XCTAssertEqual(session.timeIntervalSince1970, 1_783_000_800.123, accuracy: 0.01)
+        let weekly = try XCTUnwrap(response.sevenDay?.resetsAt)
+        XCTAssertEqual(weekly.timeIntervalSince1970, 1_783_468_800, accuracy: 0.01)
+    }
+
+    func testResetParsesFromEpochSecondsAndMilliseconds() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": {"utilization": 10, "resets_at": 1782986400},
+          "seven_day": {"utilization": 20, "resets_at": "1783468800000"}
+        }
+        """#)
+
+        XCTAssertEqual(response.fiveHour?.resetsAt?.timeIntervalSince1970, 1_782_986_400)
+        XCTAssertEqual(response.sevenDay?.resetsAt?.timeIntervalSince1970, 1_783_468_800)
+    }
+
+    /// A window with a `null` reset used to fail the whole decode, dropping the
+    /// reset of every other window with it.
+    func testNullResetKeepsTheWindowAndEveryOtherReset() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": {"utilization": 0, "resets_at": null},
+          "seven_day": {"utilization": 30, "resets_at": "2026-07-08T00:00:00Z"},
+          "seven_day_sonnet": {"utilization": 12, "resets_at": null}
+        }
+        """#)
+
+        let metrics = ClaudeCodeLocalService.metrics(from: response)
+
+        let session = try XCTUnwrap(metrics.sessionLimit)
+        XCTAssertNil(session.resetTime)
+        XCTAssertNotNil(metrics.weeklyLimit?.resetTime)
+        XCTAssertNotNil(metrics.codeReviewLimit)
+        XCTAssertNil(metrics.codeReviewLimit?.resetTime)
+    }
+
+    func testMissingOrNullCoreWindowIsDroppedNotFatal() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": null,
+          "seven_day": {"utilization": 30, "resets_at": "2026-07-08T00:00:00Z"}
+        }
+        """#)
+
+        let metrics = ClaudeCodeLocalService.metrics(from: response)
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertEqual(metrics.weeklyLimit?.percentage ?? 0, 30, accuracy: 0.01)
+        XCTAssertNotNil(metrics.weeklyLimit?.resetTime)
+    }
+
+    func testUnreadableWindowIsDroppedWithoutLosingTheOthers() throws {
+        let response = try decodeUsage(#"""
+        {
+          "five_hour": {"resets_at": "2026-07-02T14:00:00Z"},
+          "seven_day": {"utilization": "30.5", "resets_at": "2026-07-08T00:00:00Z"},
+          "extra_usage": {"unexpected": true}
+        }
+        """#)
+
+        XCTAssertNil(response.fiveHour)
+        XCTAssertEqual(response.sevenDay?.utilization, 30.5)
+        XCTAssertNotNil(response.sevenDay?.resetsAt)
+        XCTAssertEqual(response.extraUsageStatus.state, .unknown)
+    }
+
+    func testPayloadWithNoReadableWindowIsAParseFailure() {
+        XCTAssertThrowsError(try decodeUsage(#"{"five_hour": null, "seven_day": {}}"#))
+        XCTAssertThrowsError(try decodeUsage("{}"))
+    }
+
+    // MARK: - Rate-limit cooldown (issue #595)
+
+    func testRetryAfterSecondsAreHonoredAndClamped() {
+        let gate = ClaudeUsageRateLimitGate.self
+        XCTAssertEqual(gate.cooldown(retryAfter: "120"), 120)
+        XCTAssertEqual(gate.cooldown(retryAfter: "0"), 1)
+        XCTAssertEqual(gate.cooldown(retryAfter: "999999"), gate.maximumCooldown)
+        XCTAssertEqual(gate.cooldown(retryAfter: nil), gate.defaultCooldown)
+        XCTAssertEqual(gate.cooldown(retryAfter: "soon"), gate.defaultCooldown)
+    }
+
+    func testRetryAfterHTTPDateIsHonored() {
+        let now = Date(timeIntervalSince1970: 1_782_986_400)
+        let header = "Thu, 02 Jul 2026 10:12:00 GMT"
+        XCTAssertEqual(ClaudeUsageRateLimitGate.cooldown(retryAfter: header, now: now), 720, accuracy: 1)
+    }
+
+    func testCooldownBlocksOnlyTheLimitedTokenUntilItExpires() {
+        let gate = ClaudeUsageRateLimitGate()
+        let now = Date(timeIntervalSince1970: 1_782_986_400)
+
+        gate.recordRateLimit(token: "a", retryAfter: "60", now: now)
+
+        XCTAssertNotNil(gate.cooldownEnd(token: "a", now: now.addingTimeInterval(30)))
+        XCTAssertNil(gate.cooldownEnd(token: "b", now: now.addingTimeInterval(30)))
+        XCTAssertNil(gate.cooldownEnd(token: "a", now: now.addingTimeInterval(61)))
+    }
+
     // MARK: - Source-selection policy
 
     /// OAuth used to be restricted to the unscoped default account, because the
