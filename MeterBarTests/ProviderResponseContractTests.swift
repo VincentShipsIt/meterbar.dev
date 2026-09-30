@@ -239,8 +239,8 @@ final class ProviderResponseContractTests: XCTestCase {
         let data = try XCTUnwrap(json.data(using: .utf8))
         let response = try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
 
-        XCTAssertEqual(response.fiveHour.utilization, 61.5)
-        XCTAssertEqual(response.sevenDay.utilization, 30.0)
+        XCTAssertEqual(response.fiveHour?.utilization, 61.5)
+        XCTAssertEqual(response.sevenDay?.utilization, 30.0)
         XCTAssertEqual(response.sevenDaySonnet?.utilization, 12.0)
         XCTAssertNil(response.sevenDayFable)
         // Minor-unit money: 750 with exponent 2 is $7.50.
@@ -248,15 +248,15 @@ final class ProviderResponseContractTests: XCTestCase {
         XCTAssertEqual(response.extraUsageStatus.state, .on)
     }
 
-    func testClaudeCodeUsageResponseRequiresBothCoreWindows() throws {
-        // five_hour and seven_day are non-optional in the model. If the API
-        // drops one, decode must fail (caught and surfaced as parsingError)
-        // rather than fabricating zeros.
+    func testClaudeCodeUsageResponseKeepsTheWindowsThatDecode() throws {
+        // A dropped window is nil, never a fabricated zero; the other one keeps
+        // its utilization and its reset.
         let json = #"{"five_hour": {"utilization": 1.0, "resets_at": "2026-07-02T14:00:00Z"}}"#
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         let data = try XCTUnwrap(json.data(using: .utf8))
-        XCTAssertThrowsError(try decoder.decode(ClaudeCodeUsageResponse.self, from: data))
+        let response = try JSONDecoder().decode(ClaudeCodeUsageResponse.self, from: data)
+        XCTAssertEqual(response.fiveHour?.utilization, 1.0)
+        XCTAssertNotNil(response.fiveHour?.resetsAt)
+        XCTAssertNil(response.sevenDay)
     }
 
     // MARK: - Helpers
