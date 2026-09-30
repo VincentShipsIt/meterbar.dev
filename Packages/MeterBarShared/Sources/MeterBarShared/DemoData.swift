@@ -47,7 +47,8 @@ public enum DemoData {
             .cursor: cursor(now: now),
             .openRouter: openRouter(now: now),
             .grok: grok(now: now),
-            .kimiCode: kimiCode(now: now)
+            .kimiCode: kimiCode(now: now),
+            .zaiCodingPlan: zaiCodingPlan(now: now)
         ]
     }
 
@@ -164,6 +165,38 @@ public enum DemoData {
                 periodKind: .weekly
             ),
             extraUsage: ExtraUsageStatus(state: .on, detail: "$12.00 left of $20.00"),
+            lastUpdated: now
+        )
+    }
+
+    /// Z.ai Coding Plan: the 5-hour and weekly credit windows plus the monthly
+    /// MCP tool allowance, all green.
+    private static func zaiCodingPlan(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .zaiCodingPlan,
+            sessionLimit: UsageLimit(
+                used: 18,
+                total: 100,
+                resetTime: now.addingTimeInterval(2 * 3_600),
+                windowSeconds: sessionWindowSeconds,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 31,
+                total: 100,
+                resetTime: now.addingTimeInterval(4 * 24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
+            additionalLimits: [
+                UsageLimit(
+                    used: 120,
+                    total: 1_000,
+                    resetTime: now.addingTimeInterval(20 * 24 * 3_600),
+                    periodKind: .monthly,
+                    label: "MCP tools"
+                )
+            ],
             lastUpdated: now
         )
     }

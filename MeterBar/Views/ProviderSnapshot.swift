@@ -437,6 +437,7 @@ enum ProviderSnapshotBuilder {
             var grokService: GrokCLIUsageService
             /// Defaulted so the views that build stores need no edit per provider.
             var kimiCodeService: KimiCodeService = .shared
+            var zaiCodingPlanService: ZaiCodingPlanService = .shared
         }
 
         /// Builds Input here so lastError / parse health / Grok access cannot
@@ -472,13 +473,19 @@ enum ProviderSnapshotBuilder {
                     ($0.id, stores.openRouterService.canAccess(account: $0))
                 }),
                 grokHasAccess: stores.grokService.hasAccess,
-                simpleProviderAccess: [.kimiCode: stores.kimiCodeService.hasAccess],
+                simpleProviderAccess: [
+                    .kimiCode: stores.kimiCodeService.hasAccess,
+                    .zaiCodingPlan: stores.zaiCodingPlanService.hasAccess
+                ],
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
                     codexAccounts: stores.codexCliService.accountErrors,
                     grokAccounts: stores.grokService.accountErrors,
                     openRouterAccounts: stores.openRouterService.accountLastErrors,
-                    simpleProviders: [.kimiCode: stores.kimiCodeService.lastError].compactMapValues { $0 }
+                    simpleProviders: [
+                        .kimiCode: stores.kimiCodeService.lastError,
+                        .zaiCodingPlan: stores.zaiCodingPlanService.lastError
+                    ].compactMapValues { $0 }
                 )
             )
         }
@@ -693,7 +700,7 @@ enum ProviderSnapshotBuilder {
             lastError = nil
             probed = input.claudeCodeHasAccess ? true : nil
             usesAPIKey = false
-        case .kimiCode:
+        case .kimiCode, .zaiCodingPlan:
             lastError = input.lastErrors.simpleProviders[service]
             probed = input.simpleProviderAccess[service]
             usesAPIKey = false

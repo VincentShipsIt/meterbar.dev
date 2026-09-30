@@ -55,7 +55,7 @@ enum WidgetSettingsAccountProjection {
                         name: $0.name
                     )
                 }
-            case .cursor, .kimiCode:
+            case .cursor, .kimiCode, .zaiCodingPlan:
                 return [
                     WidgetSettingsAccountOption(
                         id: .provider(service),
@@ -133,7 +133,7 @@ struct WidgetSettingsPreviewData {
                 accountMetrics = codexAccountMetrics[accountID]
             case .grok:
                 accountMetrics = grokAccountMetrics[accountID]
-            case .cursor, .openRouter, .kimiCode:
+            case .cursor, .openRouter, .kimiCode, .zaiCodingPlan:
                 accountMetrics = nil
             }
             guard optionIDs.contains(option.id), let accountMetrics, accountMetrics.hasData else {

@@ -33,6 +33,19 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    func testZaiCodingPlanIsOffByDefaultAndItsOptInPersistsIndependently() {
+        withIsolatedDefaults { defaults in
+            let initial = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(initial.isEnabled(.zaiCodingPlan))
+
+            initial.set(.zaiCodingPlan, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.zaiCodingPlan))
+            XCTAssertFalse(reloaded.isEnabled(.kimiCode), "another opt-in provider must stay off")
+            XCTAssertFalse(reloaded.isEnabled(.openRouter))
+        }
+    }
+
     /// Claude Code, Codex CLI, and Cursor have no dedicated opt-in/opt-out key
     /// (`set` deliberately does nothing extra for them — see the `switch` in
     /// `ProviderVisibilityStore.set`); they persist solely through the generic

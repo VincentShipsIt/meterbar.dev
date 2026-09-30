@@ -19,6 +19,48 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         directories = []
     }
 
+    func testZaiRegionChangeRetriesRejectedKeyThroughActualManager() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        directories.append(directory)
+        let keychain = KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.zai.region",
+            legacyServices: []
+        )
+        XCTAssertTrue(keychain.save(key: ZaiCodingPlanService.keychainKey, value: "fixture-key"))
+        let service = ZaiCodingPlanService(
+            keychain: keychain,
+            fetchData: { request in
+                guard request.url?.host == ZaiCodingPlanRegion.mainland.host else {
+                    throw ServiceError.notAuthenticated
+                }
+                return Data(
+                    #"{"code":200,"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":12}]}}"#
+                        .utf8
+                )
+            },
+            region: { ZaiRegionSetting.current(directory: directory) }
+        )
+        let fixture = try makeFixture(
+            accounts: [],
+            additionalSimpleProviders: [.zaiCodingPlan: service],
+            enabledSimpleProvider: .zaiCodingPlan
+        )
+        await fixture.manager.refresh(service: .zaiCodingPlan)
+        XCTAssertFalse(service.hasAccess)
+        XCTAssertNil(fixture.manager.metrics[.zaiCodingPlan])
+        service.saveRegion(.international, directory: directory)
+        XCTAssertFalse(service.hasAccess, "Reselecting the rejected region must not clear its failure")
+        service.saveRegion(.mainland, directory: directory)
+        XCTAssertTrue(service.hasAccess, "The same saved key may work at the correct regional endpoint")
+        XCTAssertNil(service.lastError)
+        await fixture.manager.refresh(service: .zaiCodingPlan)
+        XCTAssertEqual(fixture.manager.metrics[.zaiCodingPlan]?.sessionLimit?.used, 12)
+        fixture.store.flushPendingWrites()
+        XCTAssertEqual(fixture.store.loadMetrics()[.zaiCodingPlan]?.sessionLimit?.used, 12)
+    }
+
     func testFactoryRefreshesOnlyConfiguredEnabledKeysInProjectedOrder() async throws {
         let first = OpenRouterAccount(id: UUID(), name: "First key")
         let second = OpenRouterAccount(id: UUID(), name: "Second key")
@@ -85,20 +127,26 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     }
 
     func testFactoryHonorsInjectedSimpleProviderMembershipIncludingEmptyDictionary() async throws {
-        let provider = SimpleProvider()
-        let injected = try makeFixture(accounts: [], additionalSimpleProviders: [.kimiCode: provider], enableKimi: true)
-        await injected.manager.refreshAll()
-        injected.store.flushPendingWrites()
-        XCTAssertEqual(provider.fetchCount, 1)
-        XCTAssertEqual(injected.manager.metrics[.kimiCode]?.sessionLimit?.used, 73)
-        XCTAssertEqual(injected.store.loadMetrics()[.kimiCode]?.sessionLimit?.used, 73)
+        for service in [ServiceType.kimiCode, .zaiCodingPlan] {
+            let provider = SimpleProvider(service: service)
+            let injected = try makeFixture(
+                accounts: [],
+                additionalSimpleProviders: [service: provider],
+                enabledSimpleProvider: service
+            )
+            await injected.manager.refreshAll()
+            injected.store.flushPendingWrites()
+            XCTAssertEqual(provider.fetchCount, 1)
+            XCTAssertEqual(injected.manager.metrics[service]?.sessionLimit?.used, 73)
+            XCTAssertEqual(injected.store.loadMetrics()[service]?.sessionLimit?.used, 73)
 
-        let omitted = try makeFixture(accounts: [], additionalSimpleProviders: [:], enableKimi: true)
-        await omitted.manager.refreshAll()
-        omitted.store.flushPendingWrites()
-        XCTAssertEqual(provider.fetchCount, 1, "An empty injected table must not refresh an omitted provider")
-        XCTAssertNil(omitted.manager.metrics[.kimiCode])
-        XCTAssertNil(omitted.store.loadMetrics()[.kimiCode])
+            let omitted = try makeFixture(accounts: [], additionalSimpleProviders: [:], enabledSimpleProvider: service)
+            await omitted.manager.refreshAll()
+            omitted.store.flushPendingWrites()
+            XCTAssertEqual(provider.fetchCount, 1, "An empty injected table must not refresh an omitted provider")
+            XCTAssertNil(omitted.manager.metrics[service])
+            XCTAssertNil(omitted.store.loadMetrics()[service])
+        }
     }
 
     // MARK: Private
@@ -149,6 +197,11 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     }
 
     private final class SimpleProvider: SimpleUsageProviding {
+        let service: ServiceType
+
+        init(service: ServiceType) {
+            self.service = service
+        }
         var hasAccess: Bool {
             true
         }
@@ -162,7 +215,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         func fetchUsageMetrics() async throws -> UsageMetrics {
             fetchCount += 1
             return UsageMetrics(
-                service: .kimiCode,
+                service: service,
                 sessionLimit: UsageLimit(used: 73, total: 100, resetTime: nil)
             )
         }
@@ -241,7 +294,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     private func makeFixture(
         accounts: [OpenRouterAccount],
         additionalSimpleProviders: [ServiceType: SimpleUsageProviding]? = nil,
-        enableKimi: Bool = false
+        enabledSimpleProvider: ServiceType? = nil
     ) throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("UsageRefreshCLIFactoryTests-\(UUID().uuidString)", isDirectory: true)
@@ -261,7 +314,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         let dependencies = UsageRefreshCLI.ManagerDependencies(
             codex: unused,
             cursor: unused,
-            additionalSimpleProviders: additionalSimpleProviders ?? [.kimiCode: unused],
+            additionalSimpleProviders: additionalSimpleProviders ?? [.kimiCode: unused, .zaiCodingPlan: unused],
             openRouter: provider,
             grok: unused,
             claude: unused,
@@ -272,7 +325,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         )
         let configuration = UsageRefreshConfigurationStore.Snapshot(
             hiddenServices: Set(ServiceType.allCases)
-                .subtracting(enableKimi ? [.openRouter, .kimiCode] : [.openRouter]),
+                .subtracting([.openRouter] + (enabledSimpleProvider.map { [$0] } ?? [])),
             claudeAccounts: [],
             codexAccounts: [],
             grokAccounts: [],

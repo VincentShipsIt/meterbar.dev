@@ -126,7 +126,7 @@ nonisolated enum StatusItemAutoSelectionPolicy {
             return ["session", "weekly"]
         case .cursor, .openRouter, .grok:
             return ["weekly", "session"]
-        case .kimiCode:
+        case .kimiCode, .zaiCodingPlan:
             return ["session", "weekly"]
         }
     }
@@ -153,7 +153,7 @@ nonisolated enum StatusItemAutoSelectionPolicy {
         switch service {
         case .cursor:
             return [ProviderSnapshotBuilder.grokBotLimitID]
-        case .claudeCode, .codexCli, .openRouter, .grok, .kimiCode:
+        case .claudeCode, .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan:
             return []
         }
     }

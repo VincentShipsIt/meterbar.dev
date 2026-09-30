@@ -21,7 +21,7 @@ struct Guard: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Emit only the versioned JSON response on stdout.")
     var json: Bool = false
 
-    @Option(name: .shortAndLong, help: "Provider to check (claude, codex, cursor, openrouter, grok, kimi).")
+    @Option(name: .shortAndLong, help: "Provider to check (claude, codex, cursor, openrouter, grok, kimi, zai).")
     var provider: String = QuotaGuardCLI.defaultProvider
 
     @Option(name: .shortAndLong, help: "Quota window to check (session, weekly, code-review).")

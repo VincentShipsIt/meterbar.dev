@@ -930,6 +930,149 @@
           }
         }
       }
+    },
+    "provider.zai.setup_prompt": {
+      "comment": "Empty-state prompt on the Z.ai provider card when no key is saved. GLM Coding Plan is a Z.ai product name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add your GLM Coding Plan API key"
+          }
+        }
+      }
+    },
+    "settings.zai.notice": {
+      "comment": "Explanatory note at the top of the Z.ai settings panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste your GLM Coding Plan API key. It is stored in macOS Keychain and sent only to Z.ai's quota endpoint for the region you choose. MeterBar shows only the limits Z.ai reports for your key."
+          }
+        }
+      }
+    },
+    "settings.zai.key_placeholder": {
+      "comment": "Placeholder in the secure field where the user pastes a Z.ai GLM Coding Plan API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GLM Coding Plan API key"
+          }
+        }
+      }
+    },
+    "settings.zai.unauthenticated": {
+      "comment": "Error card shown when Z.ai rejects the API key.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Z.ai rejected the key. Check that it is a Coding Plan key for the selected region."
+          }
+        }
+      }
+    },
+    "settings.zai.region": {
+      "comment": "Row label for choosing which Z.ai platform (international or mainland China) the key belongs to.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Region"
+          }
+        }
+      }
+    },
+    "settings.zai.pricing": {
+      "comment": "Row label for whether Z.ai is currently charging its peak or off-peak credit rate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credit rate"
+          }
+        }
+      }
+    },
+    "zai.peak.peak": {
+      "comment": "Badge shown while Z.ai charges its peak credit rate. %@ is a short duration such as 2h 10m until the off-peak rate begins.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peak · off-peak in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.peak_only": {
+      "comment": "Badge shown while Z.ai charges its peak credit rate and the next change is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peak"
+          }
+        }
+      }
+    },
+    "zai.peak.promotion": {
+      "comment": "Badge shown during Z.ai's all-day off-peak promotion. %@ is a short duration until peak hours resume.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak all day · peak resumes in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.promotion_only": {
+      "comment": "Badge shown during Z.ai's all-day off-peak promotion when the end is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak all day"
+          }
+        }
+      }
+    },
+    "zai.peak.offpeak": {
+      "comment": "Badge shown while Z.ai charges its discounted off-peak credit rate. %@ is a short duration until peak hours begin.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak · peak in %@"
+          }
+        }
+      }
+    },
+    "zai.peak.offpeak_only": {
+      "comment": "Badge shown while Z.ai charges its off-peak credit rate and the next change is unknown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off-peak"
+          }
+        }
+      }
+    },
+    "zai.peak.explanation": {
+      "comment": "Tooltip explaining Z.ai peak and off-peak credit rates; the hours are Singapore time (UTC+8).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Z.ai charges off-peak usage at 50% of the standard credit rate. Peak hours are Monday to Friday, 14:00–18:00 Singapore time (UTC+8)."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

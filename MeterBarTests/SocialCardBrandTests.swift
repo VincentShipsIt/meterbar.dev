@@ -59,6 +59,7 @@ final class SocialCardBrandTests: XCTestCase {
             .openRouter: MeterBarTheme.BrandAccentDark.openRouter,
             .grok: MeterBarTheme.BrandAccentDark.grok,
             .kimiCode: MeterBarTheme.BrandAccentDark.kimiCode,
+            .zaiCodingPlan: MeterBarTheme.BrandAccentDark.zaiCodingPlan,
         ]
 
         for service in ServiceType.allCases {

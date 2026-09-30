@@ -133,7 +133,8 @@ struct DashboardDiagnosticsSection: View {
             cursorError: cursorService.lastError,
             openRouterError: openRouterService.lastError,
             grokError: grokService.firstError(for: grokAccountStore.enabledAccounts),
-            kimiCodeError: KimiCodeService.shared.lastError
+            kimiCodeError: KimiCodeService.shared.lastError,
+            zaiCodingPlanError: ZaiCodingPlanService.shared.lastError
         )
         let accountErrors = DiagnosticsRunner.accountRefreshErrors(
             claudeAccountErrors: Dictionary(

@@ -470,6 +470,7 @@ nonisolated extension ServiceType {
         case .openRouter: return "openrouter"
         case .grok: return "grok"
         case .kimiCode: return "kimi"
+        case .zaiCodingPlan: return "zai"
         }
     }
 

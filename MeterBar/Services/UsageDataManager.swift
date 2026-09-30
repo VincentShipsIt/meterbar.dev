@@ -220,7 +220,10 @@ class UsageDataManager: ObservableObject {
     ) {
         self.demoMode = demoMode
         self.codexCliService = codexCliService ?? CodexCliLocalService.shared
-        let additionalSimpleProviders = additionalSimpleProviders ?? [.kimiCode: KimiCodeService.shared]
+        let additionalSimpleProviders = additionalSimpleProviders ?? [
+            .kimiCode: KimiCodeService.shared,
+            .zaiCodingPlan: ZaiCodingPlanService.shared,
+        ]
         self.simpleProviders = additionalSimpleProviders.merging([.cursor: cursorService]) { _, explicit in explicit }
         self.openRouterService = openRouterService
         self.grokService = grokService
@@ -755,7 +758,9 @@ class UsageDataManager: ObservableObject {
             grokAccountMetrics = [:]
         case .openRouter:
             openRouterAccountMetrics = [:]
-        case .cursor, .kimiCode:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan:
             break
         }
     }
@@ -772,7 +777,9 @@ class UsageDataManager: ObservableObject {
             return grokAccountStore.enabledAccounts.count
         case .openRouter:
             return openRouterAccountStore.enabledAccounts.count
-        case .cursor, .kimiCode:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan:
             return nil
         }
     }
@@ -923,7 +930,9 @@ class UsageDataManager: ObservableObject {
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
-        case .cursor, .kimiCode:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan:
             return try await refreshedSimpleMetrics(for: service)
         case .claudeCode, .codexCli, .grok, .openRouter:
             return try await refreshedAccountAwareMetrics(for: service)
@@ -983,7 +992,9 @@ class UsageDataManager: ObservableObject {
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeOpenRouterMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
-        case .cursor, .kimiCode:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan:
             preconditionFailure("Single-account providers use refreshedSimpleMetrics")
         }
 
@@ -1631,7 +1642,9 @@ class UsageDataManager: ObservableObject {
             return claudeCodeService.hasAccess
         case .codexCli:
             return false
-        case .cursor, .kimiCode:
+        case .cursor,
+             .kimiCode,
+             .zaiCodingPlan:
             return simpleProviders[service]?.hasAccess ?? false
         case .openRouter:
             // Access means at least one enabled key has its Keychain item.
@@ -1649,7 +1662,9 @@ class UsageDataManager: ObservableObject {
         do {
             let result: UsageMetrics
             switch service {
-            case .cursor, .kimiCode:
+            case .cursor,
+                 .kimiCode,
+                 .zaiCodingPlan:
                 guard let provider = simpleProviders[service] else { throw ServiceError.notAuthenticated }
                 result = try await provider.fetchUsageMetrics()
             case .claudeCode, .codexCli, .grok, .openRouter:

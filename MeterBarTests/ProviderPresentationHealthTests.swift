@@ -17,6 +17,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case cursor
         case openRouter
         case kimiCode
+        case zaiCodingPlan
 
         var service: ServiceType {
             switch self {
@@ -26,11 +27,12 @@ final class ProviderPresentationHealthTests: XCTestCase {
             case .cursor: return .cursor
             case .openRouter: return .openRouter
             case .kimiCode: return .kimiCode
+            case .zaiCodingPlan: return .zaiCodingPlan
             }
         }
 
         var isFlat: Bool {
-            self == .cursor || self == .openRouter || self == .kimiCode
+            self == .cursor || self == .openRouter || self == .kimiCode || self == .zaiCodingPlan
         }
     }
 
@@ -622,7 +624,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 openRouterAccountAccess: kind == .openRouter
                     ? [OpenRouterAccount.defaultID: true]
                     : [:],
-                simpleProviderAccess: kind == .kimiCode ? [.kimiCode: true] : [:]
+                simpleProviderAccess: kind == .kimiCode || kind == .zaiCodingPlan ? [kind.service: true] : [:]
             )
         )
         return try XCTUnwrap(snapshots.first { $0.service == kind.service }, kind.rawValue)
@@ -661,6 +663,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
             lastErrors.grokAccounts = [GrokAccount.defaultID: .apiError("Grok refresh failed")]
         case (.kimiCode, .transientFailure), (.kimiCode, .sustainedOrParseFailure):
             lastErrors.simpleProviders = [.kimiCode: .apiError("Kimi Code refresh failed")]
+        case (.zaiCodingPlan, .transientFailure), (.zaiCodingPlan, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.zaiCodingPlan: .apiError("Z.ai refresh failed")]
         default:
             break
         }
@@ -704,7 +708,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 ? [OpenRouterAccount.defaultID: true]
                 : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
-            simpleProviderAccess: kind == .kimiCode && refresh != .unprobed ? [.kimiCode: true] : [:],
+            simpleProviderAccess: (kind == .kimiCode || kind == .zaiCodingPlan) && refresh != .unprobed
+                ? [kind.service: true]
+                : [:],
             lastErrors: lastErrors
         )
     }

@@ -34,6 +34,9 @@ public enum WidgetPlaceholderMetrics {
         case .kimiCode:
             used = 41
             resetDelay = 4 * 24 * 60 * 60
+        case .zaiCodingPlan:
+            used = 29
+            resetDelay = 3 * 24 * 60 * 60
         }
         return UsageMetrics(
             service: service,

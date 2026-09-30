@@ -44,6 +44,13 @@ extension ProviderSettingsFacts {
                     nil,
                     KimiCodeService.shared.lastError?.localizedDescription
                 )
+            case .zaiCodingPlan:
+                (
+                    ZaiCodingPlanService.shared.hasAccess,
+                    ZaiCodingPlanService.shared.planName,
+                    nil,
+                    ZaiCodingPlanService.shared.lastError?.localizedDescription
+                )
             }
 
         return ProviderSettingsFacts(
