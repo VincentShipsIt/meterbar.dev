@@ -95,8 +95,13 @@ than sent.
   shows "updated <time>" from `updatedAt`. An unknown, expired or deleted slug
   is a plain 404.
 - `/u/<slug>/og` is the 1200x630 card (share-card look: near-black surface, the
-  icon mark, provider colors, the green/amber/red ramp). It is cached for five
-  minutes at the CDN. Social platforms keep their own copies longer.
-- A delete expires the cached page and card at once.
+  icon mark, provider colors, the green/amber/red ramp). Successful and missing
+  cards are `no-store`; page HTML/RSC is also served without shared caching.
+- Page/card reads are fresh on each request (metadata and page reads may be
+  deduplicated within one server render). Deletion and seven-day storage expiry
+  take effect on the next request. A write/delete also invalidates application
+  entries made by the older cached implementation.
+- Social platforms may retain independent previews. We cannot revoke those
+  copies by deleting a profile or invalidating our own caches.
 - The site's privacy copy says "no server" is true unless the user turns on
   Public profile.

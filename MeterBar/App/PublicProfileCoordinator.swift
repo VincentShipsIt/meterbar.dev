@@ -49,9 +49,8 @@ final class PublicProfileCoordinator {
     static let shared = PublicProfileCoordinator()
 
     private let store: PublicProfileStore
-    private let dataManager: UsageDataManager
-    private let costTracker: CostTracker
-    private let visibility: ProviderVisibilityStore
+    private let refreshEvents: AnyPublisher<Void, Never>
+    private let document: @MainActor () -> PublicProfileDocument
     private var cancellables = Set<AnyCancellable>()
     private var started = false
 
@@ -59,33 +58,37 @@ final class PublicProfileCoordinator {
         store: PublicProfileStore? = nil,
         dataManager: UsageDataManager? = nil,
         costTracker: CostTracker? = nil,
-        visibility: ProviderVisibilityStore? = nil
+        visibility: ProviderVisibilityStore? = nil,
+        refreshEvents: AnyPublisher<Void, Never>? = nil,
+        document: @escaping @MainActor () -> PublicProfileDocument = { PublicProfileSource.currentDocument() }
     ) {
         self.store = store ?? .shared
-        self.dataManager = dataManager ?? .shared
-        self.costTracker = costTracker ?? .shared
-        self.visibility = visibility ?? .shared
+        self.refreshEvents = refreshEvents ?? Publishers.MergeMany(
+            (dataManager ?? .shared).$refreshGeneration.map { _ in () }.eraseToAnyPublisher(),
+            (costTracker ?? .shared).$costSummary.map { _ in () }.eraseToAnyPublisher(),
+            (visibility ?? .shared).$hiddenServices.map { _ in () }.eraseToAnyPublisher()
+        )
+        .eraseToAnyPublisher()
+        self.document = document
     }
 
     func start() {
         guard !started else { return }
         started = true
 
-        Publishers.MergeMany(
-            dataManager.$refreshGeneration.map { _ in () }.eraseToAnyPublisher(),
-            costTracker.$costSummary.map { _ in () }.eraseToAnyPublisher(),
-            visibility.$hiddenServices.map { _ in () }.eraseToAnyPublisher()
-        )
-        .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
-        .sink { [weak self] in self?.sync() }
-        .store(in: &cancellables)
+        refreshEvents
+            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+            .sink { [weak self] in self?.sync() }
+            .store(in: &cancellables)
 
         Task { await store.resumePendingDeletions() }
     }
 
     private func sync() {
-        guard store.isEnabled, !DemoMode.isActive else { return }
-        let document = PublicProfileSource.currentDocument()
-        Task { await store.sync(document: document) }
+        Task {
+            await store.resumePendingDeletions()
+            guard store.isEnabled, store.canPublish else { return }
+            await store.sync(document: document())
+        }
     }
 }

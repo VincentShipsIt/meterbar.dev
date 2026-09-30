@@ -62,6 +62,7 @@ final class PublicProfileStore: ObservableObject {
     private let service: PublicProfileServing
     private let baseURL: URL
     private let now: () -> Date
+    private let isDemoMode: () -> Bool
 
     private var lastAttempt: Date?
     private var lastSuccess: Date?
@@ -78,13 +79,15 @@ final class PublicProfileStore: ObservableObject {
         keys: PublicProfileKeyStoring = KeychainPublicProfileKeyStore(),
         service: PublicProfileServing = PublicProfileClient(),
         baseURL: URL = PublicProfileEndpoint.baseURL,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        isDemoMode: @escaping () -> Bool = { DemoMode.isActive }
     ) {
         self.userDefaults = userDefaults
         self.keys = keys
         self.service = service
         self.baseURL = baseURL
         self.now = now
+        self.isDemoMode = isDemoMode
         let enabled = userDefaults.bool(forKey: StorageKeys.publicProfileEnabled)
         isEnabled = enabled
         slug = userDefaults.string(forKey: StorageKeys.publicProfileSlug)
@@ -101,11 +104,16 @@ final class PublicProfileStore: ObservableObject {
         return PublicProfileIdentity.profileURL(slug: slug, base: baseURL)
     }
 
+    /// Shared publication gate, also used before constructing a live document.
+    /// Deletion deliberately does not depend on this gate.
+    var canPublish: Bool { !isDemoMode() }
+
     // MARK: Intent
 
     func setEnabled(_ enabled: Bool, document: PublicProfileDocument) async {
         await serialized { [self] in
             if enabled {
+                guard canPublish else { return }
                 guard ensureIdentity() else { return }
                 pendingDeletions.removeAll { $0 == slug }
                 persist()
@@ -131,6 +139,7 @@ final class PublicProfileStore: ObservableObject {
     /// the server; the new slug and key share nothing with it.
     func reset(document: PublicProfileDocument) async {
         await serialized { [self] in
+            guard canPublish else { return }
             let previous = slug
             guard let fresh = mintIdentity() else { return }
             if let previous, !pendingDeletions.contains(previous) { pendingDeletions.append(previous) }
@@ -163,7 +172,7 @@ final class PublicProfileStore: ObservableObject {
     // MARK: Publishing
 
     private func publishNow(_ document: PublicProfileDocument, force: Bool) async {
-        guard isEnabled, let slug, let key = keys.key(for: slug) else { return }
+        guard canPublish, isEnabled, let slug, let key = keys.key(for: slug) else { return }
         guard !document.isEmpty else {
             status = .waiting
             return
@@ -198,9 +207,9 @@ final class PublicProfileStore: ObservableObject {
     // MARK: Deleting
 
     /// Deletes every slug whose server copy is still owed a delete. A slug only
-    /// leaves the list once the server confirms (or can never be reached: no
-    /// key left, or the key was refused), so a failed delete is retried rather
-    /// than forgotten. The server's seven-day expiry is the backstop.
+    /// leaves the list once the server confirms deletion (or no key remains).
+    /// A refused key is not deletion confirmation; keep it for later retries.
+    /// The server's seven-day expiry is the backstop.
     private func flushPendingDeletions(force: Bool) async {
         guard !pendingDeletions.isEmpty else { return }
         if !force, let lastFlushAttempt, now().timeIntervalSince(lastFlushAttempt) < Self.flushRetryInterval {
@@ -213,9 +222,11 @@ final class PublicProfileStore: ObservableObject {
                 continue
             }
             switch await service.delete(slug: pending, publishKey: key) {
-            case .ok, .rejected:
+            case .ok:
                 pendingDeletions.removeAll { $0 == pending }
                 if pending != slug { keys.remove(for: pending) }
+            case .rejected:
+                break
             case let .failed(message):
                 AppLog.app.error("Public profile delete failed: \(message, privacy: .public)")
             }

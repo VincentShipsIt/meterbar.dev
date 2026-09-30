@@ -89,16 +89,24 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         costSummary: CostSummary?,
         now: Date = Date()
     ) -> PublicProfileDocument {
-        let cards = snapshots.filter { $0.hasMetrics && !quotaLimits(of: $0).isEmpty }
+        let cards = snapshots.compactMap { snapshot -> (snapshot: ProviderSnapshot, windows: [Window])? in
+            guard snapshot.hasMetrics else { return nil }
+            let windows = quotaLimits(of: snapshot)
+                .prefix(maxWindowsPerProvider)
+                .compactMap { window(for: $0, now: now) }
+            guard !windows.isEmpty else { return nil }
+            return (snapshot, windows)
+        }
         var seen: [ServiceType: Int] = [:]
         var providers: [Provider] = []
-        for snapshot in cards.prefix(maxProviders) {
+        for card in cards.prefix(maxProviders) {
+            let snapshot = card.snapshot
             let name: String
             switch snapshot.cardRole {
             case .account:
                 let ordinal = (seen[snapshot.service] ?? 0) + 1
                 seen[snapshot.service] = ordinal
-                let total = cards.filter { $0.isAccountCard && $0.service == snapshot.service }.count
+                let total = cards.filter { $0.snapshot.isAccountCard && $0.snapshot.service == snapshot.service }.count
                 name = total > 1
                     ? "\(snapshot.service.displayName) \(ordinal)"
                     : snapshot.service.displayName
@@ -114,9 +122,7 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
                     provider: snapshot.service.rawValue,
                     name: name,
                     plan: snapshot.isAccountCard ? plans[snapshot.service].flatMap(sanitizedPlan) : nil,
-                    windows: quotaLimits(of: snapshot)
-                        .prefix(maxWindowsPerProvider)
-                        .compactMap { window(for: $0, now: now) }
+                    windows: card.windows
                 )
             )
         }

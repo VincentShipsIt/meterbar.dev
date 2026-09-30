@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import MeterBar
 
@@ -25,6 +26,7 @@ final class PublicProfileStoreTests: XCTestCase {
         var calls: [Call] = []
         var publishResult: PublicProfileResult = .ok
         var deleteResult: PublicProfileResult = .ok
+        var onDelete: (() -> Void)?
         /// When set, `publish` suspends here until the test releases it.
         var publishGate: CheckedContinuation<Void, Never>?
         var gatesNextPublish = false
@@ -41,6 +43,7 @@ final class PublicProfileStoreTests: XCTestCase {
 
         func delete(slug: String, publishKey: String) async -> PublicProfileResult {
             calls.append(.delete(slug: slug, key: publishKey))
+            onDelete?()
             return deleteResult
         }
 
@@ -69,13 +72,14 @@ final class PublicProfileStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    private func makeStore() -> PublicProfileStore {
+    private func makeStore(isDemoMode: @escaping () -> Bool = { false }) -> PublicProfileStore {
         PublicProfileStore(
             userDefaults: defaults,
             keys: keys,
             service: service,
             baseURL: base,
-            now: { [unowned self] in clock }
+            now: { [unowned self] in clock },
+            isDemoMode: isDemoMode
         )
     }
 
@@ -284,6 +288,24 @@ final class PublicProfileStoreTests: XCTestCase {
         XCTAssertEqual(store.status, .live)
     }
 
+    func testRefusedDeleteKeepsItsCredentialsUntilTheServerConfirmsDeletion() async throws {
+        let store = makeStore()
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        let oldKey = try XCTUnwrap(keys.key(for: oldSlug))
+        service.deleteResult = .rejected
+        await store.reset(document: document())
+        XCTAssertEqual(store.pendingDeletions, [oldSlug])
+        XCTAssertEqual(keys.key(for: oldSlug), oldKey)
+
+        let relaunched = makeStore()
+        XCTAssertEqual(relaunched.pendingDeletions, [oldSlug])
+        service.deleteResult = .ok
+        await relaunched.resumePendingDeletions()
+        XCTAssertTrue(relaunched.pendingDeletions.isEmpty)
+        XCTAssertNil(keys.key(for: oldSlug))
+    }
+
     func testAPendingDeleteWithNoKeyLeftIsDroppedNotRetriedForever() async throws {
         let store = makeStore()
         await store.setEnabled(true, document: document())
@@ -340,6 +362,171 @@ final class PublicProfileStoreTests: XCTestCase {
         XCTAssertEqual(store.pendingDeletions, [oldSlug])
         XCTAssertNotNil(keys.stored[oldSlug], "the key stays until the delete is confirmed")
         XCTAssertNotEqual(store.slug, oldSlug)
+    }
+
+    // MARK: - Coordinator privacy retries
+
+    func testCoordinatorRefreshRetriesFailedUnpublishWhileDisabledWithoutReadingUsage() async throws {
+        let store = makeStore()
+        let refreshes = PassthroughSubject<Void, Never>()
+        let coordinator = PublicProfileCoordinator(
+            store: store,
+            refreshEvents: refreshes.eraseToAnyPublisher(),
+            document: { XCTFail("disabled retries must not read live usage"); return self.emptyDocument }
+        )
+        coordinator.start()
+        await store.setEnabled(true, document: document())
+        let slug = try XCTUnwrap(store.slug)
+        service.deleteResult = .failed("offline")
+        await store.setEnabled(false, document: document())
+        XCTAssertNotNil(keys.key(for: slug), "keep deletion credentials while offline")
+
+        clock.addTimeInterval(PublicProfileStore.flushRetryInterval + 1)
+        let retried = expectation(description: "off-state coordinator delete retry")
+        service.deleteResult = .ok
+        service.onDelete = { retried.fulfill() }
+        refreshes.send(())
+        await fulfillment(of: [retried], timeout: 5)
+        await store.resumePendingDeletions()
+
+        XCTAssertEqual(service.deleteCount, 2)
+        XCTAssertEqual(service.publishCount, 1)
+        XCTAssertTrue(store.pendingDeletions.isEmpty)
+        XCTAssertFalse(store.isEnabled)
+    }
+
+    func testCoordinatorRetriesAfterAFailedLaunchDeletionWhileOff() async throws {
+        let first = makeStore()
+        await first.setEnabled(true, document: document())
+        let slug = try XCTUnwrap(first.slug)
+        service.deleteResult = .failed("offline")
+        await first.setEnabled(false, document: document())
+
+        let relaunched = makeStore()
+        let refreshes = PassthroughSubject<Void, Never>()
+        let coordinator = PublicProfileCoordinator(
+            store: relaunched,
+            refreshEvents: refreshes.eraseToAnyPublisher(),
+            document: { XCTFail("off-state relaunch must not read usage"); return self.emptyDocument }
+        )
+        let failedLaunch = expectation(description: "failed launch retry")
+        service.onDelete = { failedLaunch.fulfill() }
+        coordinator.start()
+        await fulfillment(of: [failedLaunch], timeout: 5)
+        await relaunched.resumePendingDeletions()
+        XCTAssertEqual(relaunched.pendingDeletions, [slug])
+        XCTAssertNotNil(keys.key(for: slug))
+
+        let recovered = expectation(description: "later refresh recovers deletion")
+        service.onDelete = { recovered.fulfill() }
+        service.deleteResult = .ok
+        clock.addTimeInterval(PublicProfileStore.flushRetryInterval + 1)
+        refreshes.send(())
+        await fulfillment(of: [recovered], timeout: 5)
+        await relaunched.resumePendingDeletions()
+
+        XCTAssertTrue(relaunched.pendingDeletions.isEmpty)
+        XCTAssertEqual(service.deleteCount, 3)
+        XCTAssertEqual(service.publishCount, 1)
+        XCTAssertFalse(relaunched.isEnabled)
+    }
+
+    // MARK: - Demo publication boundary
+
+    func testDemoEnableAndResetDoNotPublishEnableOrMintAnIdentity() async {
+        let store = makeStore(isDemoMode: { true })
+        await store.setEnabled(true, document: document())
+        await store.reset(document: document())
+        await store.sync(document: document())
+
+        XCTAssertFalse(store.isEnabled)
+        XCTAssertEqual(store.status, .off)
+        XCTAssertNil(store.slug)
+        XCTAssertNil(store.lastPublishedAt)
+        XCTAssertNil(store.profileURL)
+        XCTAssertTrue(keys.stored.isEmpty)
+        XCTAssertTrue(service.calls.isEmpty)
+        XCTAssertFalse(defaults.bool(forKey: StorageKeys.publicProfileEnabled))
+        XCTAssertNil(defaults.string(forKey: StorageKeys.publicProfileSlug))
+    }
+
+    func testDemoBlocksForcedAndBackgroundPublicationWithoutChangingExistingIdentity() async throws {
+        var demo = false
+        let store = makeStore(isDemoMode: { demo })
+        await store.setEnabled(true, document: document())
+        let slug = try XCTUnwrap(store.slug)
+        let originalKeys = keys.stored
+        let publishedAt = store.lastPublishedAt
+        demo = true
+        clock.addTimeInterval(3601)
+
+        await store.setEnabled(true, document: document(percent: 90))
+        await store.reset(document: document(percent: 90))
+        await store.sync(document: document(percent: 90))
+
+        XCTAssertEqual(service.publishCount, 1)
+        XCTAssertEqual(service.deleteCount, 0)
+        XCTAssertEqual(store.slug, slug)
+        XCTAssertEqual(keys.stored, originalKeys)
+        XCTAssertEqual(store.lastPublishedAt, publishedAt)
+        XCTAssertEqual(defaults.string(forKey: StorageKeys.publicProfileSlug), slug)
+    }
+
+    func testDemoUnpublishAndCoordinatorRetriesStillDelete() async throws {
+        var demo = false
+        let store = makeStore(isDemoMode: { demo })
+        let refreshes = PassthroughSubject<Void, Never>()
+        let coordinator = PublicProfileCoordinator(
+            store: store,
+            refreshEvents: refreshes.eraseToAnyPublisher(),
+            document: { XCTFail("demo must not construct a publication"); return self.emptyDocument }
+        )
+        coordinator.start()
+        await store.setEnabled(true, document: document())
+        let slug = try XCTUnwrap(store.slug)
+        demo = true
+        service.deleteResult = .failed("offline")
+        await store.setEnabled(false, document: document())
+        XCTAssertEqual(store.pendingDeletions, [slug])
+
+        let deleted = expectation(description: "demo permits privacy retry")
+        service.deleteResult = .ok
+        service.onDelete = { deleted.fulfill() }
+        clock.addTimeInterval(PublicProfileStore.flushRetryInterval + 1)
+        refreshes.send(())
+        await fulfillment(of: [deleted], timeout: 5)
+        await store.resumePendingDeletions()
+
+        XCTAssertEqual(service.publishCount, 1)
+        XCTAssertEqual(service.deleteCount, 2)
+        XCTAssertTrue(store.pendingDeletions.isEmpty)
+        XCTAssertFalse(store.isEnabled)
+        XCTAssertNil(store.lastPublishedAt)
+    }
+
+    func testQueuedDemoEnableAndResetAreBlockedWhenTheSerialOperationRuns() async throws {
+        var demo = false
+        service.gatesNextPublish = true
+        let entered = expectation(description: "initial publish in flight")
+        service.onPublishStarted = { entered.fulfill() }
+        let store = makeStore(isDemoMode: { demo })
+        let enabling = Task { await store.setEnabled(true, document: self.document()) }
+        await fulfillment(of: [entered], timeout: 5)
+        let slug = try XCTUnwrap(store.slug)
+        let originalKeys = keys.stored
+        let reset = Task { await store.reset(document: self.document()) }
+        let reenabling = Task { await store.setEnabled(true, document: self.document()) }
+        await Task.yield()
+        demo = true
+        service.publishGate?.resume()
+        await enabling.value
+        await reset.value
+        await reenabling.value
+
+        XCTAssertEqual(service.publishCount, 1)
+        XCTAssertEqual(service.deleteCount, 0)
+        XCTAssertEqual(store.slug, slug)
+        XCTAssertEqual(keys.stored, originalKeys)
     }
 
     // MARK: - Ordering

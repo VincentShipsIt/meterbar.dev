@@ -74,6 +74,55 @@ final class PublicProfileDocumentTests: XCTestCase {
         XCTAssertEqual(doc.providers.first?.windows.map(\.label), ["Weekly", "Sonnet only"])
     }
 
+    func testProviderWithOnlyRejectedWindowLabelsIsOmitted() {
+        let doc = make(snapshots: [
+            Self.snapshot(id: "a", title: "private", service: .claudeCode, windows: [
+                ("me@example.com", 20), ("/Users/me/session", 40),
+            ]),
+        ])
+        XCTAssertTrue(doc.providers.isEmpty)
+        XCTAssertTrue(doc.isEmpty)
+    }
+
+    func testRejectedProvidersDoNotConsumeTheCapOrChangeAccountOrdinals() {
+        let rejected = (0..<PublicProfileDocument.maxProviders).map { index in
+            Self.snapshot(id: "bad-\(index)", title: "private", service: .claudeCode,
+                          windows: [("me@example.com", 20)])
+        }
+        let valid = Self.snapshot(id: "valid", title: "private", service: .claudeCode)
+        let doc = make(snapshots: rejected + [valid])
+
+        XCTAssertEqual(doc.providers.map(\.name), ["Claude Code"])
+        XCTAssertTrue(doc.providers.allSatisfy { !$0.windows.isEmpty })
+    }
+
+    func testSanitizedWireDocumentMatchesTheSiteAcceptedFixture() throws {
+        var doc = make(snapshots: [
+            Self.snapshot(id: "bad", title: "private", service: .claudeCode, windows: [("me@example.com", 10)]),
+            Self.snapshot(id: "good", title: "private", service: .claudeCode, windows: [
+                ("/Users/me/session", 40), ("Weekly", 23),
+            ]),
+        ])
+        doc.updatedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-30T08:00:00Z"))
+        let expected = """
+        {
+          "schema": 1,
+          "updatedAt": "2026-09-30T08:00:00Z",
+          "providers": [{
+            "provider": "Claude Code", "name": "Claude Code",
+            "windows": [{
+              "label": "Weekly", "usedPercent": 23,
+              "pace": "60% in reserve", "resetsAt": "2027-01-16T11:47:00Z"
+            }]
+          }]
+        }
+        """
+        let actual = try JSONSerialization.jsonObject(with: doc.encoded()) as? NSDictionary
+        let fixture = try JSONSerialization.jsonObject(with: Data(expected.utf8)) as? NSDictionary
+        XCTAssertEqual(try XCTUnwrap(actual), try XCTUnwrap(fixture))
+        XCTAssertTrue(doc.providers.allSatisfy { !$0.windows.isEmpty })
+    }
+
     func testFineTuneModelIdsAreDroppedBecauseTheyCarryAnOrganization() {
         XCTAssertNil(PublicProfileDocument.sanitizedModelName("ft:gpt-4o:acme-corp::abc123"))
         XCTAssertNil(PublicProfileDocument.sanitizedModelName("/Users/me/models/local"))

@@ -3,7 +3,8 @@ import Foundation
 nonisolated enum PublicProfileResult: Equatable, Sendable {
     case ok
     /// The server refused the key for this slug (401/403/409): someone else
-    /// holds the slug, or the key was lost. Retrying cannot fix it.
+    /// holds the slug, or the key was lost. Publication needs a reset; deletion
+    /// keeps its credentials until the server confirms the record is gone.
     case rejected
     case failed(String)
 }
