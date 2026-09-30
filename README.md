@@ -60,7 +60,7 @@ by itself once a limit resets.
 
 ### Cost and optimization
 
-- **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded
+- **Local Cost Scan**: 30-day token spend computed from local session logs — nothing is uploaded unless you turn on the opt-in public profile
 - **Usage Tab**: One reporting window over tokens and spend: a headline strip, a time series stackable by provider, token type or model, a breakdown by model, origin, project or provider with each row's input/output/cache mix, and an insights column that says what to trim and how far to trust the numbers
 - **What To Use Next**: At the top of Limits, ranks which provider has the most headroom right now
 - **Display Currency**: Keep USD as the default or choose EUR with daily ECB reference rates and an offline cache (Settings → Costs)
@@ -378,6 +378,11 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 - Multi-Mac sync is off by default. When enabled, it sends compact daily rollups, coarse quota
   windows/reset times, and deterministic hashes of provider account IDs to your private iCloud database.
   It never sends raw account IDs, credentials, or log content.
+- Public profile is off by default. When you turn it on (Share → Public profile), MeterBar
+  publishes each provider's plan and quota windows plus your 30-day token totals to a
+  random `meterbar.dev/u/<id>` link, and refreshes it while it is on. Turning it off, or
+  resetting the link, deletes the published copy. It never includes your name, email,
+  account names, folders, project names, or credentials ([contract](docs/public-profile-contract.md)).
 - No data is sent beyond providers' own usage endpoints by default. An explicitly
   enabled webhook sends only the documented quota event fields to the URL the
   user configured; credentials and config paths are never included.
@@ -386,7 +391,7 @@ Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the sa
 - The main app is **not** sandboxed — it must read other tools' credential/log files
   (`~/.claude`, `~/.codex`, Cursor's local database) and run the `claude` and `grok` binaries. The
   widget extension is sandboxed. Hardened runtime is enabled for both.
-- No analytics, telemetry, or crash reporting
+- No analytics, telemetry, or crash reporting (the opt-in public profile above is the only feature that talks to a MeterBar host)
 - Open source for full transparency
 
 ## Architecture
