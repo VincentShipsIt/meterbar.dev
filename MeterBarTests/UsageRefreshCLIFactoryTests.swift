@@ -84,6 +84,23 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         XCTAssertTrue(fixture.store.loadAccountMetrics().isEmpty)
     }
 
+    func testFactoryHonorsInjectedSimpleProviderMembershipIncludingEmptyDictionary() async throws {
+        let provider = SimpleProvider()
+        let injected = try makeFixture(accounts: [], additionalSimpleProviders: [.kimiCode: provider], enableKimi: true)
+        await injected.manager.refreshAll()
+        injected.store.flushPendingWrites()
+        XCTAssertEqual(provider.fetchCount, 1)
+        XCTAssertEqual(injected.manager.metrics[.kimiCode]?.sessionLimit?.used, 73)
+        XCTAssertEqual(injected.store.loadMetrics()[.kimiCode]?.sessionLimit?.used, 73)
+
+        let omitted = try makeFixture(accounts: [], additionalSimpleProviders: [:], enableKimi: true)
+        await omitted.manager.refreshAll()
+        omitted.store.flushPendingWrites()
+        XCTAssertEqual(provider.fetchCount, 1, "An empty injected table must not refresh an omitted provider")
+        XCTAssertNil(omitted.manager.metrics[.kimiCode])
+        XCTAssertNil(omitted.store.loadMetrics()[.kimiCode])
+    }
+
     // MARK: Private
 
     private struct Fixture {
@@ -129,6 +146,26 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
 
         private let metrics: [UUID: UsageMetrics]
 
+    }
+
+    private final class SimpleProvider: SimpleUsageProviding {
+        var hasAccess: Bool {
+            true
+        }
+
+        var latestUsageObservation: ProviderUsageObservation? {
+            nil
+        }
+
+        private(set) var fetchCount = 0
+
+        func fetchUsageMetrics() async throws -> UsageMetrics {
+            fetchCount += 1
+            return UsageMetrics(
+                service: .kimiCode,
+                sessionLimit: UsageLimit(used: 73, total: 100, resetTime: nil)
+            )
+        }
     }
 
     private final class UnusedProvider: SimpleUsageProviding, CodexUsageProviding,
@@ -201,7 +238,11 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
     private var suiteNames: [String] = []
     private var directories: [URL] = []
 
-    private func makeFixture(accounts: [OpenRouterAccount]) throws -> Fixture {
+    private func makeFixture(
+        accounts: [OpenRouterAccount],
+        additionalSimpleProviders: [ServiceType: SimpleUsageProviding]? = nil,
+        enableKimi: Bool = false
+    ) throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("UsageRefreshCLIFactoryTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -220,6 +261,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         let dependencies = UsageRefreshCLI.ManagerDependencies(
             codex: unused,
             cursor: unused,
+            additionalSimpleProviders: additionalSimpleProviders ?? [.kimiCode: unused],
             openRouter: provider,
             grok: unused,
             claude: unused,
@@ -229,7 +271,8 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
             failover: failover
         )
         let configuration = UsageRefreshConfigurationStore.Snapshot(
-            hiddenServices: Set(ServiceType.allCases).subtracting([.openRouter]),
+            hiddenServices: Set(ServiceType.allCases)
+                .subtracting(enableKimi ? [.openRouter, .kimiCode] : [.openRouter]),
             claudeAccounts: [],
             codexAccounts: [],
             grokAccounts: [],

@@ -193,9 +193,7 @@ class UsageDataManager: ObservableObject {
     init(
         codexCliService: CodexUsageProviding? = nil,
         cursorService: SimpleUsageProviding = CursorLocalService.shared,
-        additionalSimpleProviders: [ServiceType: SimpleUsageProviding] = [
-            .kimiCode: KimiCodeService.shared
-        ],
+        additionalSimpleProviders: [ServiceType: SimpleUsageProviding]? = nil,
         openRouterService: OpenRouterUsageProviding = OpenRouterService.shared,
         grokService: GrokUsageProviding = GrokCLIUsageService.shared,
         claudeCodeService: ClaudeCodeUsageProviding = ClaudeCodeLocalService.shared,
@@ -222,6 +220,7 @@ class UsageDataManager: ObservableObject {
     ) {
         self.demoMode = demoMode
         self.codexCliService = codexCliService ?? CodexCliLocalService.shared
+        let additionalSimpleProviders = additionalSimpleProviders ?? [.kimiCode: KimiCodeService.shared]
         self.simpleProviders = additionalSimpleProviders.merging([.cursor: cursorService]) { _, explicit in explicit }
         self.openRouterService = openRouterService
         self.grokService = grokService
