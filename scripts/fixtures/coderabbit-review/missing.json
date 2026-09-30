@@ -1,0 +1,11 @@
+{
+  "expected": 2,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [],
+    "comments": [],
+    "reviews": []
+  }
+}

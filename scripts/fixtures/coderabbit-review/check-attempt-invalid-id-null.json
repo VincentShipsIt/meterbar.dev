@@ -1,0 +1,48 @@
+{
+  "expected": 1,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [
+      {
+        "name": "CodeRabbit",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app": {
+          "slug": "coderabbitai"
+        },
+        "status": "completed",
+        "conclusion": "success",
+        "output": {},
+        "id": 190000001,
+        "started_at": "2026-09-30T09:00:00Z",
+        "completed_at": "2026-09-30T09:00:00Z"
+      },
+      {
+        "name": "CodeRabbit",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app": {
+          "slug": "coderabbitai"
+        },
+        "status": "completed",
+        "conclusion": "success",
+        "output": {},
+        "id": null,
+        "started_at": "2026-09-30T10:00:00Z",
+        "completed_at": "2026-09-30T10:00:00Z"
+      }
+    ],
+    "statuses": [],
+    "comments": [],
+    "reviews": [
+      {
+        "user": {
+          "login": "coderabbitai[bot]"
+        },
+        "commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "state": "COMMENTED",
+        "body": "**Actionable comments posted: 2**",
+        "submitted_at": "2026-09-30T10:01:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "expected": 1,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [],
+    "comments": [],
+    "reviews": [
+      {
+        "user": {
+          "login": "coderabbitai[bot]"
+        },
+        "commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "state": "CHANGES_REQUESTED",
+        "body": "**Actionable comments posted: 2**",
+        "submitted_at": "2026-09-30T10:01:00Z"
+      }
+    ]
+  }
+}

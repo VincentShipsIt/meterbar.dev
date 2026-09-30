@@ -1,0 +1,26 @@
+{
+  "expected": 2,
+  "snapshot": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check_runs": [],
+    "statuses": [
+      {
+        "context": "CodeRabbit",
+        "state": "success",
+        "description": "Review completed",
+        "created_at": "2026-09-30T10:00:00Z"
+      }
+    ],
+    "comments": [
+      {
+        "user": {
+          "login": "coderabbitai[bot]"
+        },
+        "body": "<!-- recent_review_start -->No actionable comments were generated in the recent review. Reviewing files that changed from the base of the PR and between bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb and cccccccccccccccccccccccccccccccccccccccc.<!-- recent_review_end -->",
+        "updated_at": "2026-09-30T10:01:00Z"
+      }
+    ],
+    "reviews": []
+  }
+}
