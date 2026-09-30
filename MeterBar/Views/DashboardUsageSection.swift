@@ -108,13 +108,13 @@ struct DashboardUsageSection: View {
             }
         }
 
-        secondaryDetail(summary: summary)
+        secondaryDetail(summary: summary, report: report)
     }
 
     /// Everything that is not the headline story: the hourly heatmap, polled
     /// request counts, the day-by-day list and the admin-key API cost.
     @ViewBuilder
-    private func secondaryDetail(summary: CostSummary) -> some View {
+    private func secondaryDetail(summary: CostSummary, report: UsageReport) -> some View {
         TokenActivityCard(
             summary: summary,
             windowSelection: windowSelection,
@@ -134,11 +134,9 @@ struct DashboardUsageSection: View {
             PolledUsageCard(presentation: polledUsage)
         }
 
-        let windowStart = windowSelection.startDate()
-        let windowRows = summary.dailyUsage.filter { $0.date >= windowStart }
-        if !windowRows.isEmpty {
+        if !report.windowRows.isEmpty {
             DashboardCard(title: "Daily Details", trailing: windowSelection.subtitle) {
-                DailyUsageBreakdownList(dailyUsage: windowRows)
+                DailyUsageBreakdownList(dailyUsage: report.windowRows)
             }
         }
 
