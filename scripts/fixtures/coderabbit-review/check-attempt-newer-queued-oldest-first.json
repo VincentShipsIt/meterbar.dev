@@ -1,5 +1,5 @@
 {
-  "expected": 0,
+  "expected": 2,
   "snapshot": {
     "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -14,8 +14,20 @@
         "conclusion": "success",
         "output": {},
         "id": 190000001,
-        "started_at": "2026-09-30T10:00:00Z",
-        "completed_at": "2026-09-30T10:00:00Z"
+        "started_at": "2026-09-30T09:00:00Z",
+        "completed_at": "2026-09-30T09:00:00Z"
+      },
+      {
+        "name": "CodeRabbit",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app": {
+          "slug": "coderabbitai"
+        },
+        "status": "queued",
+        "conclusion": null,
+        "output": {},
+        "id": 190000002,
+        "completed_at": null
       }
     ],
     "statuses": [],

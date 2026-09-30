@@ -57,6 +57,20 @@ def latest(records, key):
     return list(selected.values())
 
 
+def latest_check_runs(records):
+    selected = {}
+    for record in records:
+        run_id = record.get("id")
+        if type(run_id) is not int or run_id <= 0:
+            return None
+        identity = (record.get("name"), (record.get("app") or {}).get("slug"))
+        # REST check runs have attempt IDs, not updated_at/created_at. An older
+        # attempt finishing later must not replace the newer queued attempt.
+        if identity not in selected or run_id > selected[identity]["id"]:
+            selected[identity] = record
+    return list(selected.values())
+
+
 def review_body(record):
     body = record.get("body") or ""
     # Walkthroughs/release notes can outlive a review. Only the recent section
@@ -69,12 +83,14 @@ def evaluate(data):
     sha = data["sha"]
     if data.get("head_sha") != sha:
         return 1, "PR head changed; evidence belongs to a superseded head."
-    runs = latest([
+    runs = latest_check_runs([
         run for run in data["check_runs"]
         if run.get("head_sha") == sha
         and run.get("name", "").lower() != "coderabbit-gate"
         and (run.get("app") or {}).get("slug", "").lower() in APP_SLUGS
-    ], lambda run: (run.get("name"), (run.get("app") or {}).get("slug")))
+    ])
+    if runs is None:
+        return 1, "CodeRabbit check-run attempt identity is missing or invalid."
     statuses = latest([
         status for status in data["statuses"]
         if status.get("context", "").lower() in {"coderabbit", "coderabbitai"}

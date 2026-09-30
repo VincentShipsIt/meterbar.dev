@@ -13,7 +13,9 @@
         "status": "in_progress",
         "conclusion": null,
         "output": {},
-        "updated_at": "2026-09-30T10:00:00Z"
+        "id": 190000001,
+        "started_at": "2026-09-30T10:00:00Z",
+        "completed_at": null
       }
     ],
     "statuses": [],
