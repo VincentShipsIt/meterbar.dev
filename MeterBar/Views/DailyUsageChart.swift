@@ -58,7 +58,11 @@ struct DailyUsageChart: View {
         return DailyUsageProviderSegment(
           provider: provider,
           tokens: tokens,
-          cost: providerRows.reduce(0) { $0 + $1.estimatedCostUSD }
+          cost: providerRows.reduce(0) { $0 + $1.estimatedCostUSD },
+          // Issue #591: layout weight from the raw components, not the
+          // saturated `tokens`, so two overflowing providers keep their
+          // real proportion.
+          layoutWeight: providerRows.reduce(0) { $0 + $1.rawTotalTokens }
         )
       }
 
@@ -97,7 +101,7 @@ struct DailyUsageChart: View {
                 StackedDailyUsageColumn(
                   day: day,
                   width: width,
-                  height: barHeight(totalHeight: chartHeight, tokens: day.totalTokens),
+                  height: barHeight(totalHeight: chartHeight, day: day),
                   maxHeight: chartHeight,
                   helpText: helpText(for: day),
                   colorForProvider: color(for:)
@@ -140,8 +144,8 @@ struct DailyUsageChart: View {
     .frame(height: legendHeight, alignment: .leading)
   }
 
-  private var maxTokens: Int {
-    max(days.map(\.totalTokens).max() ?? 1, 1)
+  private var maxLayoutTotal: Double {
+    max(days.map(\.layoutTotal).max() ?? 1, 1)
   }
 
   private func barWidth(totalWidth: CGFloat) -> CGFloat {
@@ -149,9 +153,15 @@ struct DailyUsageChart: View {
     return max(4, (totalWidth - gapsWidth) / CGFloat(max(1, days.count)))
   }
 
-  private func barHeight(totalHeight: CGFloat, tokens: Int) -> CGFloat {
-    guard tokens > 0 else { return 2 }
-    return max(4, totalHeight * CGFloat(tokens) / CGFloat(maxTokens))
+  private func barHeight(totalHeight: CGFloat, day: DailyUsageDay) -> CGFloat {
+    Self.columnHeight(totalHeight: totalHeight, day: day, maxLayoutTotal: maxLayoutTotal)
+  }
+
+  /// Column height for `day` against the tallest day, from layout weights
+  /// rather than saturated token totals (issue #591).
+  static func columnHeight(totalHeight: CGFloat, day: DailyUsageDay, maxLayoutTotal: Double) -> CGFloat {
+    guard day.layoutTotal > 0 else { return 2 }
+    return max(4, totalHeight * CGFloat(day.layoutTotal / maxLayoutTotal))
   }
 
   private func shouldShowMonth(at index: Int) -> Bool {
@@ -202,10 +212,10 @@ struct StackedDailyUsageColumn: View {
 
       if day.totalTokens > 0 {
         VStack(spacing: 0) {
-          ForEach(day.segments.reversed()) { segment in
+          ForEach(Array(zip(day.segments, day.segmentHeights(columnHeight: height))).reversed(), id: \.0.id) { pair in
             Rectangle()
-              .fill(colorForProvider(segment.provider))
-              .frame(height: segmentHeight(segment))
+              .fill(colorForProvider(pair.0.provider))
+              .frame(height: pair.1)
           }
         }
         .frame(width: width, height: height, alignment: .bottom)
@@ -221,11 +231,6 @@ struct StackedDailyUsageColumn: View {
     .accessibilityLabel(day.chartAccessibilityLabel)
     .accessibilityValue(day.chartAccessibilityValue)
     .help(helpText)
-  }
-
-  private func segmentHeight(_ segment: DailyUsageProviderSegment) -> CGFloat {
-    guard day.totalTokens > 0 else { return 0 }
-    return max(1, height * CGFloat(segment.tokens) / CGFloat(day.totalTokens))
   }
 }
 
@@ -276,6 +281,21 @@ struct DailyUsageDay: Identifiable {
     SafeAccumulate.sum(segments.map(\.tokens))
   }
 
+  /// Non-saturating total used only for layout (issue #591).
+  var layoutTotal: Double {
+    segments.reduce(0) { $0 + $1.layoutWeight }
+  }
+
+  /// Per-segment heights, in `segments` order, that sum to `columnHeight`.
+  /// Proportions come from `layoutWeight`, so segments whose token counts
+  /// saturated at `Int.max` still split the column by their real size and
+  /// never overfill it.
+  func segmentHeights(columnHeight: CGFloat) -> [CGFloat] {
+    let total = layoutTotal
+    guard total > 0 else { return segments.map { _ in 0 } }
+    return segments.map { columnHeight * CGFloat($0.layoutWeight / total) }
+  }
+
   var chartAccessibilityLabel: String {
     DashboardDateFormat.medium(date)
   }
@@ -298,6 +318,15 @@ struct DailyUsageProviderSegment: Identifiable {
   let provider: ServiceType
   let tokens: Int
   let cost: Double
+  /// Raw-component size for layout math only; `tokens` is the display value.
+  let layoutWeight: Double
+
+  init(provider: ServiceType, tokens: Int, cost: Double, layoutWeight: Double? = nil) {
+    self.provider = provider
+    self.tokens = tokens
+    self.cost = cost
+    self.layoutWeight = layoutWeight ?? Double(tokens)
+  }
 }
 
 struct DailyUsageBreakdownList: View {

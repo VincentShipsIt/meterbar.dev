@@ -81,7 +81,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         XCTAssertEqual(projectedGrok.enabledAccounts.map(\.name), ["Build"])
     }
 
-    func testLegacyRefreshConfigurationWithoutGrokProjectionUsesDefaultProfile() throws {
+    func testLegacyRefreshConfigurationWithoutOptionalProjectionsUsesDefaultProfiles() throws {
         UsageRefreshConfigurationStore.saveVisibility([], directory: tempDirectory)
         UsageRefreshConfigurationStore.saveClaudeAccounts([.defaultAccount], directory: tempDirectory)
         UsageRefreshConfigurationStore.saveCodexAccounts([.defaultAccount], directory: tempDirectory)
@@ -89,6 +89,24 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         let snapshot = try XCTUnwrap(UsageRefreshConfigurationStore.load(directory: tempDirectory))
 
         XCTAssertEqual(snapshot.grokAccounts, [.defaultAccount])
+        XCTAssertEqual(snapshot.openRouterAccounts, [.defaultAccount])
+        XCTAssertEqual(GrokAccountStore(accounts: snapshot.grokAccounts).enabledAccounts, [.defaultAccount])
+        XCTAssertEqual(OpenRouterAccountStore(accounts: snapshot.openRouterAccounts).enabledAccounts, [.defaultAccount])
+    }
+
+    func testPresentEmptyOptionalProjectionsDoNotUseLegacyDefaults() throws {
+        UsageRefreshConfigurationStore.saveVisibility([], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveClaudeAccounts([], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveCodexAccounts([], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveGrokAccounts([], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveOpenRouterAccounts([], directory: tempDirectory)
+
+        let snapshot = try XCTUnwrap(UsageRefreshConfigurationStore.load(directory: tempDirectory))
+
+        XCTAssertTrue(snapshot.grokAccounts.isEmpty)
+        XCTAssertTrue(snapshot.openRouterAccounts.isEmpty)
+        XCTAssertTrue(GrokAccountStore(accounts: snapshot.grokAccounts).enabledAccounts.isEmpty)
+        XCTAssertTrue(OpenRouterAccountStore(accounts: snapshot.openRouterAccounts).enabledAccounts.isEmpty)
     }
 
     func testLoadFailsClosedWhenAnyProjectionIsMissing() {
