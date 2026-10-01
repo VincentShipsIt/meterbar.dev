@@ -720,12 +720,78 @@ extension CodexCliUsageResponse {
         )
     }
 
-    /// Extra windows beyond the named slots. Only the reserve maps: the other
-    /// pool this array carries today is the deprecated Codex Spark, and giving
-    /// a retired model two bars on the card would be worse than silence.
-    private var additionalLimits: [UsageLimit] {
-        [reserveLimit].compactMap { $0 }
+    /// Extra windows beyond the named slots. The reserve maps only while it is
+    /// the pool being served. Prepaid credits map only once the included
+    /// subscription window is exhausted and they are the pool being spent.
+    /// The other pool this array carries today is the deprecated Codex Spark,
+    /// and giving a retired model two bars on the card would be worse than silence.
+    private nonisolated var additionalLimits: [UsageLimit] {
+        [reserveLimit, creditUsageLimit].compactMap { $0 }
     }
+
+    /// Leftover prepaid credits, once they replace an exhausted subscription
+    /// window. Absent while that window still has quota, and absent while the
+    /// Luna reserve is the pool actually serving requests.
+    ///
+    /// `credits.balance` is the same dollar amount the Extra usage tooltip
+    /// already formats. It is not the integer count on the ChatGPT Credits
+    /// page, so this row keeps that dollar amount. `spend_control.individual_limit`
+    /// is a spend cap. It is the bar's allowance only when the balance still
+    /// fits inside it. A cap smaller than the balance is not the pool size,
+    /// and a balance alone is not a percent.
+    private nonisolated var creditUsageLimit: UsageLimit? {
+        guard reserveLimit == nil,
+              includedSubscriptionIsExhausted,
+              let credits,
+              let limit = creditLimit(from: credits)
+        else {
+            return nil
+        }
+        return limit
+    }
+
+    private nonisolated var includedSubscriptionIsExhausted: Bool {
+        if rateLimit?.limitReached == true {
+            return true
+        }
+        guard let rateLimit else { return true }
+        let windows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap { $0 }
+        guard !windows.isEmpty else { return true }
+        return windows.allSatisfy { $0.usedPercent >= 100 }
+    }
+
+    private nonisolated func creditLimit(from credits: Credits) -> UsageLimit? {
+        if credits.unlimited == true {
+            return UsageLimit(
+                used: 0,
+                total: 0,
+                resetTime: nil,
+                label: Self.creditLimitLabel,
+                reading: .unlimited
+            )
+        }
+        guard let balance = credits.balance else { return nil }
+        let remaining = max(0, balance)
+        guard remaining > 0 || credits.hasCredits == true else { return nil }
+        if let cap = spendControl?.individualLimit, cap > 0, remaining <= cap {
+            return UsageLimit(
+                used: cap - remaining,
+                total: cap,
+                resetTime: nil,
+                label: Self.creditLimitLabel,
+                reading: .allowance
+            )
+        }
+        return UsageLimit(
+            used: 0,
+            total: remaining,
+            resetTime: nil,
+            label: Self.creditLimitLabel,
+            reading: .remainder
+        )
+    }
+
+    private nonisolated static let creditLimitLabel = "Credits"
 }
 
 /// Optional per-account spending cap returned by the Codex usage API.

@@ -467,6 +467,16 @@ nonisolated enum StatusItemLabelFormatter {
             return StatusItemFormattedValue(visible: "—", spoken: unavailableSpokenValue(for: metric))
         }
 
+        switch limit.reading {
+        case .unlimited:
+            return StatusItemFormattedValue(visible: "Unlimited", spoken: "unlimited credits")
+        case .remainder:
+            let amount = ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))
+            return StatusItemFormattedValue(visible: amount, spoken: "\(amount) in credits")
+        case .allowance, .measured:
+            break
+        }
+
         if showsExhaustedResetCountdown, limit.isAtLimit {
             return resetValue(for: limit, size: size, now: now)
         }

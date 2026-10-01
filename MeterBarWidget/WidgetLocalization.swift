@@ -26,6 +26,16 @@ enum WidgetLocalizedContent {
         guard !row.isBlocked else {
             return LocalizedUsageFormat.widgetBlockedBadge()
         }
+        switch limit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder, .allowance:
+            return LocalizedUsageFormat.amountLeft(
+                ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))
+            )
+        case .measured:
+            break
+        }
         if row.service == .openRouter {
             let amount: Double
             switch row.preservesLegacyOpenRouterBalance ? .remaining : row.displayMode {

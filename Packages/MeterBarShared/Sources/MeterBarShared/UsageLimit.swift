@@ -45,6 +45,21 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     /// already names honestly, and missing on payloads written before this
     /// field existed.
     public let label: String?
+    /// How `used` and `total` should be read. Missing on payloads written
+    /// before credit balances existed, which decode as `.measured`.
+    ///
+    /// `.measured` is a percent of a known quota. `.allowance` is the same
+    /// ratio for an absolute balance whose cap is in the payload. `.remainder`
+    /// is a balance with no finite allowance, so a percent would be invented.
+    /// `.unlimited` is a label with nothing to deplete.
+    public let reading: Reading
+
+    public enum Reading: String, Codable, Equatable, Sendable {
+        case measured
+        case allowance
+        case remainder
+        case unlimited
+    }
 
     public init(
         used: Double,
@@ -53,7 +68,8 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         windowSeconds: TimeInterval? = nil,
         isEstimated: Bool = false,
         periodKind: PeriodKind? = nil,
-        label: String? = nil
+        label: String? = nil,
+        reading: Reading = .measured
     ) {
         self.used = used
         self.total = total
@@ -62,6 +78,12 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         self.isEstimated = isEstimated
         self.periodKind = periodKind
         self.label = label
+        self.reading = reading
+    }
+
+    /// A percent exists only when the payload supplied the denominator.
+    public var hasDepletingMeter: Bool {
+        reading == .measured || reading == .allowance
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -72,6 +94,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         case isEstimated
         case periodKind
         case label
+        case reading
     }
 
     public init(from decoder: Decoder) throws {
@@ -83,6 +106,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         isEstimated = try container.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
         periodKind = try container.decodeIfPresent(PeriodKind.self, forKey: .periodKind)
         label = try container.decodeIfPresent(String.self, forKey: .label)
+        reading = try container.decodeIfPresent(Reading.self, forKey: .reading) ?? .measured
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -94,6 +118,9 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         try container.encode(isEstimated, forKey: .isEstimated)
         try container.encodeIfPresent(periodKind, forKey: .periodKind)
         try container.encodeIfPresent(label, forKey: .label)
+        if reading != .measured {
+            try container.encode(reading, forKey: .reading)
+        }
     }
 
     public var rawPercentage: Double {

@@ -977,6 +977,35 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(keys.filter { $0 == .otherModels }.count, 1)
     }
 
+    func testCreditRemainderLeadsTheWidgetWithoutAPercentOrBar() {
+        let preferences = WidgetPreferences.defaults
+        let result = presentation(
+            metrics: [
+                .codexCli: makeMetrics(
+                    .codexCli,
+                    weeklyUsed: 100,
+                    additionalLimits: [
+                        UsageLimit(
+                            used: 0,
+                            total: 61_586.14,
+                            resetTime: nil,
+                            label: "Credits",
+                            reading: .remainder
+                        )
+                    ]
+                )
+            ],
+            preferences: preferences,
+            family: .medium
+        )
+
+        let first = result.rows.first
+        XCTAssertEqual(first?.quotaTitle, "Credits")
+        XCTAssertEqual(first?.summaryText, "$61,586.14 left")
+        XCTAssertEqual(first?.drawsDepletingBar, false)
+        XCTAssertFalse(first?.summaryText.contains("%") ?? true)
+    }
+
     private func makeMetrics(
         _ service: ServiceType,
         sessionUsed: Double? = nil,

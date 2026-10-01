@@ -1220,6 +1220,78 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(snapshot.isAccountCard)
     }
 
+    func testCreditRemainderBecomesThePrimaryMeterAndHidesTheInventedPercent() throws {
+        let metrics = UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+            extraUsage: ExtraUsageStatus(state: .on, detail: "$61,586.14 in credits"),
+            additionalLimits: [
+                UsageLimit(
+                    used: 0,
+                    total: 61_586.14,
+                    resetTime: nil,
+                    label: "Credits",
+                    reading: .remainder
+                )
+            ]
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "shipshitdev",
+            service: .codexCli,
+            metrics: metrics,
+            emptyDetail: ""
+        )
+
+        XCTAssertEqual(snapshot.primaryLimit?.id, "credits")
+        XCTAssertEqual(snapshot.primaryLimit?.usageLimit.reading, .remainder)
+        XCTAssertEqual(snapshot.limits.map(\.title), ["Weekly", "Credits"])
+        XCTAssertEqual(
+            ProviderCardPresentation.statusText(for: snapshot),
+            "$61,586.14 left"
+        )
+        XCTAssertNotEqual(snapshot.band, .exhausted)
+
+        let creditLimit = try XCTUnwrap(snapshot.limits.first { $0.id == "credits" })
+        let row = LimitRow.RowContent(limit: creditLimit)
+        XCTAssertFalse(row.showsUsageBar)
+        XCTAssertEqual(row.trailingText, "$61,586.14 left")
+    }
+
+    func testCreditAllowanceUsesARemainingBarAndWeeklyQuotaStaysPrimary() throws {
+        let allowance = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                additionalLimits: [
+                    UsageLimit(used: 60, total: 100, resetTime: nil, label: "Credits", reading: .allowance)
+                ]
+            ),
+            emptyDetail: ""
+        )
+        XCTAssertEqual(allowance.primaryLimit?.usageLimit.reading, .allowance)
+        XCTAssertEqual(allowance.primaryLimit?.percentLeft, 40)
+        let allowanceLimit = try XCTUnwrap(
+            allowance.limits.first { $0.usageLimit.reading == .allowance }
+        )
+        let allowanceRow = LimitRow.RowContent(limit: allowanceLimit)
+        XCTAssertTrue(allowanceRow.showsUsageBar)
+        XCTAssertEqual(allowanceRow.trailingText, "$40.00 left")
+
+        let stillOnSubscription = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 36, total: 100, resetTime: nil)
+            ),
+            emptyDetail: ""
+        )
+        XCTAssertEqual(stillOnSubscription.primaryLimit?.title, "Weekly")
+        XCTAssertEqual(stillOnSubscription.primaryLimit?.percentLeft, 64)
+    }
+
     /// The dashboard Costs panel's per-provider selection: prefer an exhausted
     /// card so the panel can surface that provider's reset, but a sub-pool
     /// card can never win the selection even fully exhausted — it does not

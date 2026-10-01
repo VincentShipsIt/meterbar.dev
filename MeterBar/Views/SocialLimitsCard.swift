@@ -166,16 +166,18 @@ private struct SocialLimitsRowView: View {
                     .minimumScaleFactor(0.7)
             }
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(SocialCardPalette.track)
-                    Capsule()
-                        .fill(SocialCardPalette.accent(for: band))
-                        .frame(width: max(9 * scale, proxy.size.width * CGFloat(row.usedFraction)))
+            if row.showsBar {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(SocialCardPalette.track)
+                        Capsule()
+                            .fill(SocialCardPalette.accent(for: band))
+                            .frame(width: max(9 * scale, proxy.size.width * CGFloat(row.usedFraction)))
+                    }
                 }
+                .frame(height: 10 * scale)
             }
-            .frame(height: 10 * scale)
         }
     }
 }

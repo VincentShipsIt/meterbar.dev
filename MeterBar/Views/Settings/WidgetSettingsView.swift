@@ -919,7 +919,9 @@ struct WidgetSettingsPreviewRow: View {
                 summary
             }
 
-            usageBar
+            if row.drawsDepletingBar {
+                usageBar
+            }
             caption
         }
         .accessibilityElement(children: .combine)

@@ -92,6 +92,12 @@ struct ProviderSnapshot: Identifiable {
     /// the roomiest one read exhausted too, and the header agrees with
     /// `blockingLimits`.
     var primaryLimit: SnapshotLimit? {
+        // A credit balance replaces the exhausted subscription window as the
+        // glance. The weekly row stays in the list, but its 0% left must not
+        // win the header while requests are being served from that balance.
+        if let credit = limits.first(where: { $0.usageLimit.reading != .measured }) {
+            return credit
+        }
         let providerLimits = limits.filter(\.isProviderBlocking)
         if hasCursorSpilloverPools {
             return providerLimits.max { $0.percentLeft < $1.percentLeft }
@@ -358,6 +364,15 @@ struct SnapshotLimit: Identifiable {
     /// render. Currency-style limits (OpenRouter key/credit balances) speak
     /// dollars; quota-style limits speak percentages.
     var accessibilityValue: String {
+        switch usageLimit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder:
+            let left = UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
+            return "\(left) left"
+        case .allowance, .measured:
+            break
+        }
         if valueStyle == .currency {
             let left = UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
             return "\(left) left, \(UsageFormat.cost(usageLimit.used)) spent"
@@ -368,6 +383,16 @@ struct SnapshotLimit: Identifiable {
 
     /// Localized equivalent used by app views and VoiceOver.
     var localizedAccessibilityValue: String {
+        switch usageLimit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder:
+            return LocalizedUsageFormat.amountLeft(
+                UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
+            )
+        case .allowance, .measured:
+            break
+        }
         if valueStyle == .currency {
             let left = LocalizedUsageFormat.amountLeft(
                 UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
@@ -917,7 +942,10 @@ enum ProviderSnapshotBuilder {
                     : additionalLimitID(for: additional, index: index),
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
-                usageLimit: additional
+                usageLimit: additional,
+                valueStyle: additional.reading == .allowance || additional.reading == .remainder
+                    ? .currency
+                    : .quota
             ))
         }
         return result

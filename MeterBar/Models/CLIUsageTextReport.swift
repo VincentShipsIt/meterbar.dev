@@ -98,6 +98,25 @@ nonisolated public enum CLIUsageTextReport {
         _ limit: UsageLimit,
         currency: Bool = false
     ) -> [String] {
+        switch limit.reading {
+        case .unlimited:
+            return ["\(label): Unlimited credits"]
+        case .remainder:
+            let amount = ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))
+            return ["\(label): \(amount) left"]
+        case .allowance:
+            return measuredLimitLines(label, limit, currency: true)
+        case .measured:
+            break
+        }
+        return measuredLimitLines(label, limit, currency: currency)
+    }
+
+    private static func measuredLimitLines(
+        _ label: String,
+        _ limit: UsageLimit,
+        currency: Bool
+    ) -> [String] {
         let percent = limit.percentage
         let bar = progressBar(percent: percent, width: 20)
         let status = statusEmoji(for: limit)

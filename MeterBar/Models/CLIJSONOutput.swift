@@ -90,25 +90,35 @@ nonisolated public struct UsageCLIJSONResponse: CLIJSONDocument {
     private struct Window: Encodable {
         let kind: String
         let periodKind: String?
+        let label: String?
+        let reading: String?
         let used: Double
         let total: Double
-        let percentUsed: Double
-        let percentLeft: Int
+        let percentUsed: Double?
+        let percentLeft: Int?
         let resetAt: Date?
         let windowSeconds: TimeInterval?
-        let quotaBand: String
+        let quotaBand: String?
         let estimated: Bool
 
         init(kind: String, limit: UsageLimit) {
             self.kind = kind
             periodKind = limit.periodKind?.rawValue
+            label = limit.label
+            reading = limit.reading == .measured ? nil : limit.reading.rawValue
             used = limit.used
             total = limit.total
-            percentUsed = limit.percentage
-            percentLeft = QuotaMath.percentLeft(for: limit)
+            if limit.hasDepletingMeter {
+                percentUsed = limit.percentage
+                percentLeft = QuotaMath.percentLeft(for: limit)
+                quotaBand = QuotaBand.forLimit(limit).cliIdentifier
+            } else {
+                percentUsed = nil
+                percentLeft = nil
+                quotaBand = nil
+            }
             resetAt = limit.resetTime
             windowSeconds = limit.windowSeconds
-            quotaBand = QuotaBand.forLimit(limit).cliIdentifier
             estimated = limit.isEstimated
         }
 

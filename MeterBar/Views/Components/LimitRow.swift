@@ -199,12 +199,17 @@ extension LimitRow {
         /// row matches the compact blocked-card treatment.
         var compactsWhenOut: Bool { isOut && !isEstimated }
 
-        var showsUsageBar: Bool { !compactsWhenOut }
+        var showsUsageBar: Bool { !compactsWhenOut && limit.usageLimit.hasDepletingMeter }
 
         /// Density-independent: true whenever the row isn't compacted-out, so
         /// `.detail`/`.regular` keep their used/pace footer even without a
-        /// reset timestamp. See `showsFooter(density:)` for the compact rule.
-        var showsFooter: Bool { !compactsWhenOut }
+        /// reset timestamp. A remainder or unlimited balance has no used-percent
+        /// and no pace, so the footer appears only when a reset is actually known.
+        var showsFooter: Bool {
+            guard !compactsWhenOut else { return false }
+            if limit.usageLimit.hasDepletingMeter { return true }
+            return showsReset
+        }
 
         /// `.compact` carries nothing but the reset countdown in its footer, so
         /// it only earns the extra line when the limit reports a reset time.
@@ -228,6 +233,15 @@ extension LimitRow {
         /// limits show "Out" only for a real (non-estimated) exhaustion,
         /// otherwise the percent-left label.
         var trailingText: String {
+            switch limit.usageLimit.reading {
+            case .unlimited:
+                return "Unlimited credits"
+            case .remainder:
+                let remaining = max(0, limit.usageLimit.total - limit.usageLimit.used)
+                return LocalizedUsageFormat.amountLeft(UsageFormat.cost(remaining))
+            case .allowance, .measured:
+                break
+            }
             switch limit.valueStyle {
             case .currency:
                 let remaining = max(0, limit.usageLimit.total - limit.usageLimit.used)
@@ -241,7 +255,7 @@ extension LimitRow {
 
         /// The trailing value turns red once the window is exhausted, matching
         /// the pre-unification per-surface behavior.
-        var isTrailingDanger: Bool { isOut }
+        var isTrailingDanger: Bool { limit.usageLimit.hasDepletingMeter && isOut }
 
         /// Compact-out rows tint the whole header line danger so a one-line row
         /// still scans as exhausted without bringing the bar back.

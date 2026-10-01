@@ -370,6 +370,10 @@ enum MenuBarStatusItemPlanner {
         let scoped = candidates.filter {
             $0.service == anchor.service && $0.accountKey == anchor.accountKey
         }
+        if let credit = scoped.first(where: { $0.limit.reading != .measured }) {
+            let value = formattedValue(for: credit, context: context)
+            return DescriptorContent(visible: value.visible, spoken: value.spoken)
+        }
         let session = scoped.first { $0.windowID == "session" }
         let weekly = scoped.first { $0.windowID == "weekly" }
         let sessionValue = session.map { formattedValue(for: $0, context: context) }

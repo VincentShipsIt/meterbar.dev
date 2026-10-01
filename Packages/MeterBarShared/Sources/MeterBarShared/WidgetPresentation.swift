@@ -123,8 +123,15 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         return quotaTitleKey
     }
 
+    /// Remainder and unlimited balances have no denominator, so the glance
+    /// must not draw a bar that would read as 0% or 100%.
+    public var drawsDepletingBar: Bool {
+        guard let limit else { return true }
+        return isBlocked || limit.hasDepletingMeter
+    }
+
     public var progressValue: Double? {
-        guard let limit else { return nil }
+        guard let limit, limit.hasDepletingMeter else { return nil }
         switch displayMode {
         case .used:
             return limit.clampedUsed
@@ -140,6 +147,16 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     public var summaryText: String {
         guard let limit else { return "Unavailable" }
         guard !isBlocked else { return "OUT" }
+        switch limit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder:
+            return "\(ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))) left"
+        case .allowance:
+            return "\(ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))) left"
+        case .measured:
+            break
+        }
         if service == .openRouter {
             let amount: Double
             let suffix: String
@@ -380,6 +397,16 @@ public enum WidgetPresentationPlanner {
         if !evaluation.providerBlockers.isEmpty || !evaluation.independentSubPoolBlockers.isEmpty {
             return 100
         }
+        if let credit = metrics.additionalLimits.first(where: { $0.reading != .measured }) {
+            switch credit.reading {
+            case .allowance:
+                return credit.percentage
+            case .remainder, .unlimited:
+                return 0
+            case .measured:
+                break
+            }
+        }
         let primary = WidgetQuotaWindow.allCases
             .filter { visibleWindows.contains($0) }
             .compactMap { limit(for: $0, metrics: metrics)?.percentage }
@@ -450,7 +477,7 @@ public enum WidgetPresentationPlanner {
               let blocker = limitCandidates(in: metrics).first(where: {
                   $0.idSuffix == headline.blocker.id
               }) else {
-            return rows
+            return promotingCreditMeter(rows)
         }
 
         let blockedRow = row(
@@ -476,7 +503,23 @@ public enum WidgetPresentationPlanner {
             // every following account into the overflow summary.
             rows[0] = blockedRow
         }
-        return rows
+        return promotingCreditMeter(rows)
+    }
+
+    /// A prepaid credit balance is the pool being spent. It leads even when an
+    /// exhausted subscription window would otherwise take the headline slot.
+    private static func promotingCreditMeter(
+        _ rows: [WidgetPresentationRow]
+    ) -> [WidgetPresentationRow] {
+        guard let creditIndex = rows.firstIndex(where: { $0.limit?.reading != .measured }),
+              creditIndex != 0
+        else {
+            return rows
+        }
+        var promoted = rows
+        let credit = promoted.remove(at: creditIndex)
+        promoted.insert(credit, at: 0)
+        return promoted
     }
 
     private static func additionalRows(

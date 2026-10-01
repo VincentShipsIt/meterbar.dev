@@ -68,6 +68,12 @@ for display, while `used` and `total` preserve the source values. `percentLeft` 
 use MeterBar's shared quota rules; `quotaBand` is `healthy`, `tight`, `critical`, or `exhausted`.
 `estimated` identifies totals MeterBar inferred instead of receiving from the provider.
 
+A Codex credit balance is an additional window. Its `label` is `Credits`. `reading` is
+`allowance` when the payload includes a finite cap the balance still fits inside, `remainder`
+when only the balance is known, or `unlimited` when credits do not deplete. `percentUsed`,
+`percentLeft`, and `quotaBand` are omitted for `remainder` and `unlimited` because those
+payloads have no denominator. A measured quota window omits `reading` and `label`.
+
 `windows[].periodKind` is the additive identity field. It names the provider-reported cadence
 (`session`, `daily`, `weekly`, `monthly`, `billing`, `unknown`) even when `kind` stays a legacy
 slot token. A monthly Grok allowance therefore stays `kind: "weekly"` and adds

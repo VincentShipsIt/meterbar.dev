@@ -186,4 +186,132 @@ final class CodexUsageMappingTests: XCTestCase {
         // credits present + explicitly empty ⇒ overage authoritatively Off.
         XCTAssertEqual(metrics.extraUsage?.state, .off)
     }
+
+    // MARK: - Prepaid credits replace an exhausted subscription window
+
+    func testExhaustedWeeklyWithBalanceOnlyKeepsANumericRemainder() throws {
+        let metrics = try decode("""
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 200000,
+                    "reset_at": 1750600000
+                }
+            },
+            "credits": { "has_credits": true, "unlimited": false, "balance": 61586.14 }
+        }
+        """).toUsageMetrics()
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 100)
+        let credit = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(credit.label, "Credits")
+        XCTAssertEqual(credit.reading, .remainder)
+        XCTAssertEqual(credit.used, 0)
+        XCTAssertEqual(credit.total, 61586.14)
+        XCTAssertFalse(credit.hasDepletingMeter)
+        XCTAssertEqual(metrics.extraUsage?.detail, "$61,586.14 in credits")
+    }
+
+    func testBalanceInsideAFiniteCapDrawsAnAllowance() throws {
+        let metrics = try decode("""
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 200000,
+                    "reset_at": 1750600000
+                }
+            },
+            "credits": { "has_credits": true, "unlimited": false, "balance": 40 },
+            "spend_control": { "reached": false, "individual_limit": 100 }
+        }
+        """).toUsageMetrics()
+
+        let credit = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(credit.reading, .allowance)
+        XCTAssertEqual(credit.used, 60)
+        XCTAssertEqual(credit.total, 100)
+        XCTAssertTrue(credit.hasDepletingMeter)
+        XCTAssertEqual(credit.rawPercentage, 60, accuracy: 0.001)
+    }
+
+    func testSpendCapSmallerThanTheBalanceIsNotAnAllowance() throws {
+        let metrics = try decode("""
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 1,
+                    "reset_at": 1750600000
+                }
+            },
+            "credits": { "has_credits": true, "balance": 61586.14 },
+            "spend_control": { "reached": false, "individual_limit": 40 }
+        }
+        """).toUsageMetrics()
+
+        let credit = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(credit.reading, .remainder)
+        XCTAssertEqual(credit.total, 61586.14)
+        XCTAssertFalse(credit.hasDepletingMeter)
+    }
+
+    func testUnlimitedCreditsDoNotDeplete() throws {
+        let metrics = try decode("""
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {
+                    "used_percent": 100,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 1,
+                    "reset_at": 1750600000
+                }
+            },
+            "credits": { "unlimited": true, "balance": 10 }
+        }
+        """).toUsageMetrics()
+
+        let credit = try XCTUnwrap(metrics.additionalLimits.first)
+        XCTAssertEqual(credit.reading, .unlimited)
+        XCTAssertFalse(credit.hasDepletingMeter)
+    }
+
+    func testSubscriptionWindowWithQuotaStaysTheOnlyMeter() throws {
+        let metrics = try decode("""
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 36,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 540000,
+                    "reset_at": 1785880800
+                }
+            },
+            "credits": { "has_credits": true, "unlimited": false, "balance": 61586.14 }
+        }
+        """).toUsageMetrics()
+
+        XCTAssertEqual(metrics.weeklyLimit?.used, 36)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.extraUsage?.state, .on)
+    }
 }
