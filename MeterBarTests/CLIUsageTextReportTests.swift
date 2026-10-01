@@ -64,6 +64,23 @@ final class CLIUsageTextReportTests: XCTestCase {
         XCTAssertFalse(text.contains("$"), text)
     }
 
+    func testCreditAllowanceBarShowsTheRemainingFraction() {
+        let text = render(
+            .codexCli,
+            metric: UsageMetrics(
+                service: .codexCli,
+                additionalLimits: [
+                    UsageLimit(used: 60, total: 100, resetTime: nil, label: "Credits", reading: .allowance)
+                ],
+                lastUpdated: referenceDate
+            )
+        )
+
+        XCTAssertTrue(text.contains("40% left"), text)
+        XCTAssertTrue(text.contains("60 spent / 100 credits"), text)
+        XCTAssertFalse(text.contains("60%"), text)
+    }
+
     /// No label parsed from the CLI payload: a neutral "Model", never a
     /// hardcoded model name.
     func testClaudeCodeReviewWindowFallsBackToModelWithoutALabel() {

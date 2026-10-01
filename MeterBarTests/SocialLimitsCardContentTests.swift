@@ -54,6 +54,20 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertEqual(row.heroValueText, "~50%")
     }
 
+    func testAllowanceBarShrinksAsCreditsAreSpent() {
+        let rows = [60.0, 80.0].map { used in
+            SocialLimitsCardContent.row(for: snapshotLimit(
+                kind: .additional,
+                title: "Credits",
+                usageLimit: UsageLimit(used: used, total: 100, resetTime: nil, reading: .allowance)
+            ))
+        }
+
+        XCTAssertEqual(rows[0].trailingText, "40 left")
+        XCTAssertEqual(rows[0].usedFraction, 0.4, accuracy: 0.001)
+        XCTAssertEqual(rows[1].usedFraction, 0.2, accuracy: 0.001)
+    }
+
     // MARK: - Row detail text
 
     /// `detailText` drives the card's exported row copy — it must start from

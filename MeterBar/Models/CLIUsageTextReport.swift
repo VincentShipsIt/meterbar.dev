@@ -107,12 +107,14 @@ nonisolated public enum CLIUsageTextReport {
         case .remainder:
             return ["\(label): \(limit.formattedCreditRemainder) left"]
         case .allowance:
-            let percent = limit.percentage
+            let percent = 100 - limit.percentage
             let bar = progressBar(percent: percent, width: 20)
             let status = statusEmoji(for: limit)
+            let spent = CreditQuantityFormat.grouped(limit.used)
+            let total = CreditQuantityFormat.grouped(limit.total)
             return [
-                "\(label): \(bar) \(limit.percentageText) \(status)",
-                "    \(CreditQuantityFormat.grouped(limit.used)) spent / \(CreditQuantityFormat.grouped(limit.total)) credits"
+                "\(label): \(bar) \(limit.percentLeftText) \(status)",
+                "    \(spent) spent / \(total) credits"
             ]
         case .measured:
             break

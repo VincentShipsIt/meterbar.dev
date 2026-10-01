@@ -478,6 +478,27 @@ final class CodexUsageMappingTests: XCTestCase {
         XCTAssertEqual(credit.total, 12.5)
     }
 
+    func testZeroBalanceDoesNotActivateAnUnrelatedAllowance() throws {
+        let fixture = exhaustedWindow(credits: #"{ "has_credits": false, "balance": 0 }"#)
+            .replacingOccurrences(
+                of: #""plan_type": "plus","#,
+                with: #""plan_type": "plus", "spend_control": { "reached": false, "individual_limit": { "limit": 1000, "used": 40 } },"#
+            )
+        let metrics = try decode(fixture).toUsageMetrics()
+
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 100)
+    }
+
+    func testMissingSubscriptionDoesNotPromoteCredits() throws {
+        let metrics = try decode(#"{ "plan_type": "free", "rate_limit": null, "credits": { "balance": 40 } }"#)
+            .toUsageMetrics()
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertNil(metrics.weeklyLimit)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
     private func exhaustedWindow(credits: String) -> String {
         """
         {

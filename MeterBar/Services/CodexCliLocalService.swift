@@ -732,7 +732,7 @@ extension CodexCliUsageResponse {
     /// subscription window is exhausted and they are the pool being spent.
     /// The other pool this array carries today is the deprecated Codex Spark,
     /// and giving a retired model two bars on the card would be worse than silence.
-    private nonisolated var additionalLimits: [UsageLimit] {
+    nonisolated private var additionalLimits: [UsageLimit] {
         [reserveLimit, creditUsageLimit].compactMap { $0 }
     }
 
@@ -743,7 +743,7 @@ extension CodexCliUsageResponse {
     /// `credits.balance` is a credit count. A scalar `individual_limit` is a
     /// dollar spend cap and is not the bar. A nested allowance object is the
     /// bar only when it is the same pool as the balance, or the balance is absent.
-    private nonisolated var creditUsageLimit: UsageLimit? {
+    nonisolated private var creditUsageLimit: UsageLimit? {
         guard reserveLimit == nil,
               includedSubscriptionIsExhausted,
               let credits,
@@ -754,14 +754,14 @@ extension CodexCliUsageResponse {
         return limit
     }
 
-    private nonisolated var includedSubscriptionIsExhausted: Bool {
-        guard let rateLimit else { return true }
+    nonisolated private var includedSubscriptionIsExhausted: Bool {
+        guard let rateLimit else { return false }
         let windows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap { $0 }
         guard !windows.isEmpty else { return true }
         return windows.allSatisfy { $0.usedPercent >= 100 }
     }
 
-    private nonisolated func creditLimit(from credits: Credits) -> UsageLimit? {
+    nonisolated private func creditLimit(from credits: Credits) -> UsageLimit? {
         if credits.unlimited == true {
             return UsageLimit(
                 used: 0,
@@ -774,7 +774,7 @@ extension CodexCliUsageResponse {
         if let allowance = spendControl?.creditAllowance {
             let remaining = max(0, allowance.limit - allowance.used)
             let balance = credits.balance
-            let balanceAgrees = balance == nil || balance == 0
+            let balanceAgrees = balance == nil
                 || abs((balance ?? 0) - remaining) <= 0.05
             if balanceAgrees {
                 return UsageLimit(
@@ -798,7 +798,7 @@ extension CodexCliUsageResponse {
         )
     }
 
-    private nonisolated static let creditLimitLabel = "Credits"
+    nonisolated private static let creditLimitLabel = "Credits"
 }
 
 /// Optional per-account spending cap returned by the Codex usage API.
