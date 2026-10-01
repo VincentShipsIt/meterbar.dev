@@ -139,7 +139,7 @@ struct SocialLimitsCardContent: Equatable {
             id: limit.id,
             title: limit.title,
             percentLeft: limit.percentLeft,
-            usedFraction: usageLimit.reading == .allowance
+            usedFraction: usageLimit.reading == .allowance && usageLimit.total > 0
                 ? 1 - usageLimit.clampedUsed / usageLimit.clampedTotal
                 : usageLimit.clampedUsed / usageLimit.clampedTotal,
             isEstimated: usageLimit.isEstimated,

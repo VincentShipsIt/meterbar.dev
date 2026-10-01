@@ -68,6 +68,17 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertEqual(rows[1].usedFraction, 0.2, accuracy: 0.001)
     }
 
+    func testZeroTotalAllowanceDoesNotDrawAFullRemainingBar() {
+        let row = SocialLimitsCardContent.row(for: snapshotLimit(
+            kind: .additional,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .allowance)
+        ))
+
+        XCTAssertEqual(row.trailingText, "0 left")
+        XCTAssertEqual(row.usedFraction, 0)
+    }
+
     // MARK: - Row detail text
 
     /// `detailText` drives the card's exported row copy — it must start from
