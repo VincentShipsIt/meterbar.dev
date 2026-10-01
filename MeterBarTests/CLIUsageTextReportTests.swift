@@ -58,8 +58,10 @@ final class CLIUsageTextReportTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(text.contains("Credits: $61,586.14 left"), text)
+        XCTAssertTrue(text.contains("Credits: 61,586.14 left"), text)
         XCTAssertFalse(text.contains("Credits: ["), text)
+        XCTAssertFalse(text.contains("Weekly:"), text)
+        XCTAssertFalse(text.contains("$"), text)
     }
 
     /// No label parsed from the CLI payload: a neutral "Model", never a

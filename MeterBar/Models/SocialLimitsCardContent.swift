@@ -209,9 +209,9 @@ extension SocialLimitsCardContent {
             switch reading {
             case .unlimited:
                 return "Unlimited credits"
-            case .remainder:
-                return "\(UsageFormat.cost(remainingAmount)) left"
-            case .allowance, .measured:
+            case .remainder, .allowance:
+                return "\(CreditQuantityFormat.grouped(remainingAmount)) left"
+            case .measured:
                 break
             }
             switch valueStyle {
@@ -265,9 +265,9 @@ extension SocialLimitsCardContent {
             switch reading {
             case .unlimited:
                 return "Unlimited"
-            case .remainder:
-                return UsageFormat.cost(remainingAmount)
-            case .allowance, .measured:
+            case .remainder, .allowance:
+                return CreditQuantityFormat.grouped(remainingAmount)
+            case .measured:
                 break
             }
             switch valueStyle {

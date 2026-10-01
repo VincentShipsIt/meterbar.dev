@@ -66,14 +66,17 @@ nonisolated public enum CLIUsageTextReport {
 
     private static func metricLines(_ service: ServiceType, _ metric: UsageMetrics) -> [String] {
         var lines: [String] = []
-        if let session = metric.sessionLimit {
+        let creditMeterIsActive = metric.additionalLimits.contains { $0.reading != .measured }
+        if let session = metric.sessionLimit,
+           !(creditMeterIsActive && session.reading == .measured && session.isAtLimit) {
             lines += limitLines(
                 "  \(service.sessionQuotaTitle(limitTotal: session.total, periodKind: session.periodKind))",
                 session,
                 currency: service == .openRouter
             )
         }
-        if let weekly = metric.weeklyLimit {
+        if let weekly = metric.weeklyLimit,
+           !(creditMeterIsActive && weekly.reading == .measured && weekly.isAtLimit) {
             lines += limitLines(
                 "  \(service.weeklyQuotaTitle(limitTotal: weekly.total, periodKind: weekly.periodKind))",
                 weekly,
@@ -102,10 +105,15 @@ nonisolated public enum CLIUsageTextReport {
         case .unlimited:
             return ["\(label): Unlimited credits"]
         case .remainder:
-            let amount = ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))
-            return ["\(label): \(amount) left"]
+            return ["\(label): \(limit.formattedCreditRemainder) left"]
         case .allowance:
-            return measuredLimitLines(label, limit, currency: true)
+            let percent = limit.percentage
+            let bar = progressBar(percent: percent, width: 20)
+            let status = statusEmoji(for: limit)
+            return [
+                "\(label): \(bar) \(limit.percentageText) \(status)",
+                "    \(CreditQuantityFormat.grouped(limit.used)) spent / \(CreditQuantityFormat.grouped(limit.total)) credits"
+            ]
         case .measured:
             break
         }

@@ -1244,17 +1244,19 @@ final class ProviderSnapshotTests: XCTestCase {
 
         XCTAssertEqual(snapshot.primaryLimit?.id, "credits")
         XCTAssertEqual(snapshot.primaryLimit?.usageLimit.reading, .remainder)
-        XCTAssertEqual(snapshot.limits.map(\.title), ["Weekly", "Credits"])
+        XCTAssertEqual(snapshot.limits.map(\.title), ["Credits"])
         XCTAssertEqual(
             ProviderCardPresentation.statusText(for: snapshot),
-            "$61,586.14 left"
+            "61,586.14 left"
         )
         XCTAssertNotEqual(snapshot.band, .exhausted)
 
         let creditLimit = try XCTUnwrap(snapshot.limits.first { $0.id == "credits" })
+        XCTAssertEqual(creditLimit.valueStyle, .quota)
         let row = LimitRow.RowContent(limit: creditLimit)
         XCTAssertFalse(row.showsUsageBar)
-        XCTAssertEqual(row.trailingText, "$61,586.14 left")
+        XCTAssertEqual(row.trailingText, "61,586.14 left")
+        XCTAssertEqual(creditLimit.accessibilityValue, "61,586.14 left")
     }
 
     func testCreditAllowanceUsesARemainingBarAndWeeklyQuotaStaysPrimary() throws {
@@ -1270,14 +1272,25 @@ final class ProviderSnapshotTests: XCTestCase {
             ),
             emptyDetail: ""
         )
+        XCTAssertEqual(allowance.limits.map(\.title), ["Credits"])
         XCTAssertEqual(allowance.primaryLimit?.usageLimit.reading, .allowance)
         XCTAssertEqual(allowance.primaryLimit?.percentLeft, 40)
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: allowance), "40 left")
         let allowanceLimit = try XCTUnwrap(
             allowance.limits.first { $0.usageLimit.reading == .allowance }
         )
         let allowanceRow = LimitRow.RowContent(limit: allowanceLimit)
         XCTAssertTrue(allowanceRow.showsUsageBar)
-        XCTAssertEqual(allowanceRow.trailingText, "$40.00 left")
+        XCTAssertEqual(allowanceRow.trailingText, "40 left")
+
+        let spentAllowance = LimitRow.RowContent(limit: SnapshotLimit(
+            id: "credits",
+            kind: .additional,
+            quotaTitleKey: .model(label: "Credits"),
+            usageLimit: UsageLimit(used: 100, total: 100, resetTime: nil, label: "Credits", reading: .allowance)
+        ))
+        XCTAssertTrue(spentAllowance.showsUsageBar)
+        XCTAssertEqual(spentAllowance.trailingText, "0 left")
 
         let stillOnSubscription = ProviderSnapshotBuilder.snapshot(
             title: "Codex",

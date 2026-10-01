@@ -107,7 +107,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         )
 
         XCTAssertEqual(seeds.first { $0.isAutoSelectable }?.windowID, "credits")
-        XCTAssertEqual(seeds.first { $0.windowID == "weekly" }?.isAutoSelectable, false)
+        XCTAssertNil(seeds.first { $0.windowID == "weekly" })
     }
 
     private func cursorMetricsWithGrokBot(weeklyUsed: Double, grokBotUsed: Double) -> UsageMetrics {

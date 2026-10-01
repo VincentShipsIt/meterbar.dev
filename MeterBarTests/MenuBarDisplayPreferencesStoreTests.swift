@@ -387,7 +387,15 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
 
         XCTAssertEqual(
             StatusItemLabelFormatter.title(for: limit, metric: .percentLeft, size: .regular),
-            "$61,586.14"
+            "61,586.14"
+        )
+        XCTAssertEqual(
+            StatusItemLabelFormatter.title(
+                for: UsageLimit(used: 60, total: 100, resetTime: nil, reading: .allowance),
+                metric: .percentLeft,
+                size: .regular
+            ),
+            "40"
         )
         XCTAssertEqual(
             StatusItemLabelFormatter.title(

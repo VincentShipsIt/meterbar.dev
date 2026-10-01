@@ -69,10 +69,11 @@ use MeterBar's shared quota rules; `quotaBand` is `healthy`, `tight`, `critical`
 `estimated` identifies totals MeterBar inferred instead of receiving from the provider.
 
 A Codex credit balance is an additional window. Its `label` is `Credits`. `reading` is
-`allowance` when the payload includes a finite cap the balance still fits inside, `remainder`
-when only the balance is known, or `unlimited` when credits do not deplete. `percentUsed`,
-`percentLeft`, and `quotaBand` are omitted for `remainder` and `unlimited` because those
-payloads have no denominator. A measured quota window omits `reading` and `label`.
+`allowance` when a finite workspace allowance is the pool being spent, `remainder` when only
+a prepaid balance is known, or `unlimited` when credits do not deplete. `used` and `total`
+are credit counts, not currency. `percentUsed`, `percentLeft`, and `quotaBand` are omitted
+for `remainder` and `unlimited` because those payloads have no denominator. A measured quota
+window omits `reading` and `label`.
 
 `windows[].periodKind` is the additive identity field. It names the provider-reported cadence
 (`session`, `daily`, `weekly`, `monthly`, `billing`, `unknown`) even when `kind` stays a legacy

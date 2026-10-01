@@ -86,6 +86,11 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         reading == .measured || reading == .allowance
     }
 
+    /// Leftover credits for a remainder or allowance. Not a currency string.
+    public var formattedCreditRemainder: String {
+        CreditQuantityFormat.grouped(max(0, total - used))
+    }
+
     private enum CodingKeys: String, CodingKey {
         case used
         case total

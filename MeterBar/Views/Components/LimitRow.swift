@@ -197,7 +197,9 @@ extension LimitRow {
         /// while Cursor Models still has room). The header keeps the same "Out"
         /// status as other surfaces; the bar and reset footer are dropped so the
         /// row matches the compact blocked-card treatment.
-        var compactsWhenOut: Bool { isOut && !isEstimated }
+        var compactsWhenOut: Bool {
+            isOut && !isEstimated && limit.usageLimit.reading != .allowance
+        }
 
         var showsUsageBar: Bool { !compactsWhenOut && limit.usageLimit.hasDepletingMeter }
 
@@ -236,10 +238,9 @@ extension LimitRow {
             switch limit.usageLimit.reading {
             case .unlimited:
                 return "Unlimited credits"
-            case .remainder:
-                let remaining = max(0, limit.usageLimit.total - limit.usageLimit.used)
-                return LocalizedUsageFormat.amountLeft(UsageFormat.cost(remaining))
-            case .allowance, .measured:
+            case .remainder, .allowance:
+                return LocalizedUsageFormat.amountLeft(limit.usageLimit.formattedCreditRemainder)
+            case .measured:
                 break
             }
             switch limit.valueStyle {

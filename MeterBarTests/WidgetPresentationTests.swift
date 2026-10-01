@@ -999,9 +999,10 @@ final class WidgetPresentationTests: XCTestCase {
             family: .medium
         )
 
+        XCTAssertEqual(result.rows.map(\.quotaTitle), ["Credits"])
         let first = result.rows.first
         XCTAssertEqual(first?.quotaTitle, "Credits")
-        XCTAssertEqual(first?.summaryText, "$61,586.14 left")
+        XCTAssertEqual(first?.summaryText, "61,586.14 left")
         XCTAssertEqual(first?.drawsDepletingBar, false)
         XCTAssertFalse(first?.summaryText.contains("%") ?? true)
     }

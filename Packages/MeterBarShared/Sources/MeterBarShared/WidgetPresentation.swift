@@ -124,10 +124,16 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     }
 
     /// Remainder and unlimited balances have no denominator, so the glance
-    /// must not draw a bar that would read as 0% or 100%.
+    /// must not draw a bar that would read as 0% or 100%. A blocked card does
+    /// not invent one either.
     public var drawsDepletingBar: Bool {
         guard let limit else { return true }
-        return isBlocked || limit.hasDepletingMeter
+        switch limit.reading {
+        case .remainder, .unlimited:
+            return false
+        case .allowance, .measured:
+            return limit.hasDepletingMeter
+        }
     }
 
     public var progressValue: Double? {
@@ -146,17 +152,15 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
 
     public var summaryText: String {
         guard let limit else { return "Unavailable" }
-        guard !isBlocked else { return "OUT" }
         switch limit.reading {
         case .unlimited:
             return "Unlimited credits"
-        case .remainder:
-            return "\(ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))) left"
-        case .allowance:
-            return "\(ExtraUsageStatus.formatAmount(max(0, limit.total - limit.used))) left"
+        case .remainder, .allowance:
+            return "\(limit.formattedCreditRemainder) left"
         case .measured:
             break
         }
+        guard !isBlocked else { return "OUT" }
         if service == .openRouter {
             let amount: Double
             let suffix: String
@@ -450,8 +454,15 @@ public enum WidgetPresentationPlanner {
             ? blockers
             : evaluation.providerBlockers
         let blockedIDs = Set(blockers.map(\.id))
+        let creditMeterIsActive = metrics.additionalLimits.contains { $0.reading != .measured }
         let selectedRows: [WidgetPresentationRow] = windows.compactMap { window in
             guard let windowLimit = limit(for: window, metrics: metrics) else { return nil }
+            if creditMeterIsActive,
+               window != .codeReview,
+               windowLimit.reading == .measured,
+               windowLimit.isAtLimit {
+                return nil
+            }
             let isBlocked = blockedIDs.contains(window.rawValue)
             return row(
                 source: source,
@@ -473,7 +484,8 @@ public enum WidgetPresentationPlanner {
             now: now
         )
         var rows = selectedRows + additionalRows
-        guard let headline = ProviderBlockingPolicy.headline(from: headlineBlockers, now: now),
+        guard !creditMeterIsActive,
+              let headline = ProviderBlockingPolicy.headline(from: headlineBlockers, now: now),
               let blocker = limitCandidates(in: metrics).first(where: {
                   $0.idSuffix == headline.blocker.id
               }) else {

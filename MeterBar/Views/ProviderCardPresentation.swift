@@ -28,12 +28,11 @@ enum ProviderCardPresentation {
         if let notice = snapshot.authNotice { return notice.shortLabel }
         if let primary = snapshot.primaryLimit {
             switch primary.usageLimit.reading {
-            case .remainder:
-                let remaining = max(0, primary.usageLimit.total - primary.usageLimit.used)
-                return LocalizedUsageFormat.amountLeft(UsageFormat.cost(remaining))
+            case .remainder, .allowance:
+                return LocalizedUsageFormat.amountLeft(primary.usageLimit.formattedCreditRemainder)
             case .unlimited:
                 return "Unlimited credits"
-            case .allowance, .measured:
+            case .measured:
                 break
             }
         }
