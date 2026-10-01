@@ -198,7 +198,7 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
     /// which is not a limit and not what this profile is for.
     @MainActor
     private static func quotaLimits(of snapshot: ProviderSnapshot) -> [SnapshotLimit] {
-        snapshot.limits.filter { $0.valueStyle == .quota }
+        snapshot.limits.filter { $0.valueStyle == .quota && $0.usageLimit.hasDepletingMeter }
     }
 
     @MainActor
