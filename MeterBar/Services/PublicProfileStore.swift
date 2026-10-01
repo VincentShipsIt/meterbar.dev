@@ -56,6 +56,7 @@ final class PublicProfileStore: ObservableObject {
     @Published private(set) var lastPublishedAt: Date?
     @Published private(set) var status: Status
     @Published private(set) var pendingDeletions: [String]
+    @Published private(set) var isResetPending: Bool
 
     private let userDefaults: UserDefaults
     private let keys: PublicProfileKeyStoring
@@ -95,12 +96,13 @@ final class PublicProfileStore: ObservableObject {
         lastPublishedAt = userDefaults.object(forKey: StorageKeys.publicProfileLastPublishedAt) as? Date
         pendingDeletions = (userDefaults.stringArray(forKey: StorageKeys.publicProfilePendingDeletions) ?? [])
             .filter(PublicProfileIdentity.isValidSlug)
+        isResetPending = userDefaults.bool(forKey: StorageKeys.publicProfileResetPending)
         status = enabled ? .waiting : .off
     }
 
     /// The link to share, only while the profile is actually published.
     var profileURL: URL? {
-        guard isEnabled, let slug else { return nil }
+        guard isEnabled, !isResetPending, let slug else { return nil }
         return PublicProfileIdentity.profileURL(slug: slug, base: baseURL)
     }
 
@@ -114,6 +116,12 @@ final class PublicProfileStore: ObservableObject {
         await serialized { [self] in
             if enabled {
                 guard canPublish else { return }
+                if isResetPending {
+                    isEnabled = true
+                    userDefaults.set(true, forKey: StorageKeys.publicProfileEnabled)
+                    await completePendingReset(document: document, force: true)
+                    return
+                }
                 guard ensureIdentity() else { return }
                 pendingDeletions.removeAll { $0 == slug }
                 persist()
@@ -130,7 +138,11 @@ final class PublicProfileStore: ObservableObject {
                 userDefaults.removeObject(forKey: StorageKeys.publicProfileLastPublishedAt)
                 if let slug, !pendingDeletions.contains(slug) { pendingDeletions.append(slug) }
                 persist()
-                await flushPendingDeletions(force: true)
+                if isResetPending {
+                    await completePendingReset(document: nil, force: true)
+                } else {
+                    await flushPendingDeletions(force: true)
+                }
             }
         }
     }
@@ -140,24 +152,20 @@ final class PublicProfileStore: ObservableObject {
     func reset(document: PublicProfileDocument) async {
         await serialized { [self] in
             guard canPublish else { return }
-            let previous = slug
-            guard let fresh = mintIdentity() else { return }
-            if let previous, !pendingDeletions.contains(previous) { pendingDeletions.append(previous) }
-            slug = fresh
-            lastPublishedAt = nil
-            lastSuccess = nil
-            lastAttempt = nil
-            lastDocument = nil
-            userDefaults.removeObject(forKey: StorageKeys.publicProfileLastPublishedAt)
+            isResetPending = true
+            if let slug, !pendingDeletions.contains(slug) { pendingDeletions.append(slug) }
             persist()
-            await flushPendingDeletions(force: true)
-            if isEnabled { await publishNow(document, force: true) }
+            await completePendingReset(document: document, force: true)
         }
     }
 
     /// Called after each refresh by the coordinator.
     func sync(document: PublicProfileDocument) async {
         await serialized { [self] in
+            if isResetPending {
+                await completePendingReset(document: document, force: false)
+                return
+            }
             await flushPendingDeletions(force: false)
             guard isEnabled else { return }
             await publishNow(document, force: false)
@@ -166,13 +174,45 @@ final class PublicProfileStore: ObservableObject {
 
     /// Called at launch so a delete that failed last session is not forgotten.
     func resumePendingDeletions() async {
-        await serialized { [self] in await flushPendingDeletions(force: false) }
+        await serialized { [self] in
+            if isResetPending {
+                await completePendingReset(document: nil, force: false)
+            } else {
+                await flushPendingDeletions(force: false)
+            }
+        }
+    }
+
+    private func completePendingReset(document: PublicProfileDocument?, force: Bool) async {
+        status = .syncing
+        await flushPendingDeletions(force: force)
+        guard pendingDeletions.isEmpty else {
+            status = .error("The old profile could not be deleted. Reset is pending and will retry.")
+            return
+        }
+        if let slug { keys.remove(for: slug) }
+        slug = nil
+        userDefaults.removeObject(forKey: StorageKeys.publicProfileSlug)
+        lastPublishedAt = nil
+        lastSuccess = nil
+        lastAttempt = nil
+        lastDocument = nil
+        userDefaults.removeObject(forKey: StorageKeys.publicProfileLastPublishedAt)
+        guard canPublish else {
+            status = .error("Reset will finish when demo mode is off.")
+            return
+        }
+        guard mintIdentity() != nil else { return }
+        isResetPending = false
+        persist()
+        status = isEnabled ? .waiting : .off
+        if isEnabled, let document { await publishNow(document, force: true) }
     }
 
     // MARK: Publishing
 
     private func publishNow(_ document: PublicProfileDocument, force: Bool) async {
-        guard canPublish, isEnabled, let slug, let key = keys.key(for: slug) else { return }
+        guard canPublish, isEnabled, !isResetPending, let slug, let key = keys.key(for: slug) else { return }
         guard !document.isEmpty else {
             status = .waiting
             return
@@ -218,6 +258,7 @@ final class PublicProfileStore: ObservableObject {
         lastFlushAttempt = now()
         for pending in pendingDeletions {
             guard let key = keys.key(for: pending) else {
+                if isResetPending, pending == slug { continue }
                 pendingDeletions.removeAll { $0 == pending }
                 continue
             }
@@ -257,6 +298,7 @@ final class PublicProfileStore: ObservableObject {
 
     private func persist() {
         userDefaults.set(pendingDeletions, forKey: StorageKeys.publicProfilePendingDeletions)
+        userDefaults.set(isResetPending, forKey: StorageKeys.publicProfileResetPending)
         if let slug { userDefaults.set(slug, forKey: StorageKeys.publicProfileSlug) }
     }
 

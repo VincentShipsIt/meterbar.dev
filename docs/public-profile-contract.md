@@ -17,6 +17,10 @@ no backend".
   in a URL. The server stores only its SHA-256.
 - The first `PUT` for a slug claims it. Every later `PUT` and the `DELETE`
   must present the same key. A different key gets `401`, `403` or `409`.
+- Reset deletes the old profile before minting a replacement slug and key.
+  A failed deletion keeps reset pending across relaunches; the old identity
+  is retained for deletion retries and cannot be republished. Sharing actions
+  resume only after deletion succeeds and the replacement key is stored.
 
 ## Endpoints (served by the site)
 
