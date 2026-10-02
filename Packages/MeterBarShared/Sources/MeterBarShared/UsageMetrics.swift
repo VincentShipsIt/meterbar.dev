@@ -189,6 +189,16 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     /// the rest of a provider remains available, so it stays visible on its row
     /// without turning the widget's provider status critical.
     public var overallStatus: UsageStatus {
+        if let credit = additionalLimits.first(where: { $0.reading != .measured }) {
+            switch credit.reading {
+            case .remainder, .unlimited:
+                return .good
+            case .allowance:
+                return credit.statusColor
+            case .measured:
+                break
+            }
+        }
         let limits = [sessionLimit, weeklyLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
 

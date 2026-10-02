@@ -376,6 +376,37 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertNil(StatusItemLabelFormatter.title(for: limit, metric: .iconOnly, size: .regular))
     }
 
+    func testRemainderCreditLabelShowsTheAmountInsteadOfAPercent() {
+        let limit = UsageLimit(
+            used: 0,
+            total: 61_586.14,
+            resetTime: nil,
+            label: "Credits",
+            reading: .remainder
+        )
+
+        XCTAssertEqual(
+            StatusItemLabelFormatter.title(for: limit, metric: .percentLeft, size: .regular),
+            "61,586.14"
+        )
+        XCTAssertEqual(
+            StatusItemLabelFormatter.title(
+                for: UsageLimit(used: 60, total: 100, resetTime: nil, reading: .allowance),
+                metric: .percentLeft,
+                size: .regular
+            ),
+            "40"
+        )
+        XCTAssertEqual(
+            StatusItemLabelFormatter.title(
+                for: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .unlimited),
+                metric: .percentUsed,
+                size: .compact
+            ),
+            "Unlimited"
+        )
+    }
+
     func testPaceFormatterUsesBoundedVisibleAbbreviationsAndFullSpokenCopy() {
         let reserve = UsageLimit(
             used: 28,

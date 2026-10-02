@@ -123,8 +123,21 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         return quotaTitleKey
     }
 
+    /// Remainder and unlimited balances have no denominator, so the glance
+    /// must not draw a bar that would read as 0% or 100%. A blocked card does
+    /// not invent one either.
+    public var drawsDepletingBar: Bool {
+        guard let limit else { return true }
+        switch limit.reading {
+        case .remainder, .unlimited:
+            return false
+        case .allowance, .measured:
+            return limit.hasDepletingMeter
+        }
+    }
+
     public var progressValue: Double? {
-        guard let limit else { return nil }
+        guard let limit, limit.hasDepletingMeter else { return nil }
         switch displayMode {
         case .used:
             return limit.clampedUsed
@@ -139,6 +152,14 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
 
     public var summaryText: String {
         guard let limit else { return "Unavailable" }
+        switch limit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder, .allowance:
+            return "\(limit.formattedCreditRemainder) left"
+        case .measured:
+            break
+        }
         guard !isBlocked else { return "OUT" }
         if service == .openRouter {
             let amount: Double
@@ -380,6 +401,16 @@ public enum WidgetPresentationPlanner {
         if !evaluation.providerBlockers.isEmpty || !evaluation.independentSubPoolBlockers.isEmpty {
             return 100
         }
+        if let credit = metrics.additionalLimits.first(where: { $0.reading != .measured }) {
+            switch credit.reading {
+            case .allowance:
+                return credit.percentage
+            case .remainder, .unlimited:
+                return 0
+            case .measured:
+                break
+            }
+        }
         let primary = WidgetQuotaWindow.allCases
             .filter { visibleWindows.contains($0) }
             .compactMap { limit(for: $0, metrics: metrics)?.percentage }
@@ -423,8 +454,15 @@ public enum WidgetPresentationPlanner {
             ? blockers
             : evaluation.providerBlockers
         let blockedIDs = Set(blockers.map(\.id))
+        let creditMeterIsActive = metrics.additionalLimits.contains { $0.reading != .measured }
         let selectedRows: [WidgetPresentationRow] = windows.compactMap { window in
             guard let windowLimit = limit(for: window, metrics: metrics) else { return nil }
+            if creditMeterIsActive,
+               window != .codeReview,
+               windowLimit.reading == .measured,
+               windowLimit.isAtLimit {
+                return nil
+            }
             let isBlocked = blockedIDs.contains(window.rawValue)
             return row(
                 source: source,
@@ -446,11 +484,12 @@ public enum WidgetPresentationPlanner {
             now: now
         )
         var rows = selectedRows + additionalRows
-        guard let headline = ProviderBlockingPolicy.headline(from: headlineBlockers, now: now),
+        guard !creditMeterIsActive,
+              let headline = ProviderBlockingPolicy.headline(from: headlineBlockers, now: now),
               let blocker = limitCandidates(in: metrics).first(where: {
                   $0.idSuffix == headline.blocker.id
               }) else {
-            return rows
+            return promotingCreditMeter(rows)
         }
 
         let blockedRow = row(
@@ -476,7 +515,23 @@ public enum WidgetPresentationPlanner {
             // every following account into the overflow summary.
             rows[0] = blockedRow
         }
-        return rows
+        return promotingCreditMeter(rows)
+    }
+
+    /// A prepaid credit balance is the pool being spent. It leads even when an
+    /// exhausted subscription window would otherwise take the headline slot.
+    private static func promotingCreditMeter(
+        _ rows: [WidgetPresentationRow]
+    ) -> [WidgetPresentationRow] {
+        guard let creditIndex = rows.firstIndex(where: { $0.limit?.reading != .measured }),
+              creditIndex != 0
+        else {
+            return rows
+        }
+        var promoted = rows
+        let credit = promoted.remove(at: creditIndex)
+        promoted.insert(credit, at: 0)
+        return promoted
     }
 
     private static func additionalRows(

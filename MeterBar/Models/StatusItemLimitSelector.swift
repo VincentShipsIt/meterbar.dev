@@ -185,7 +185,8 @@ enum StatusItemLimitCandidateBuilder {
         lastUpdated: Date = Date()
     ) -> [StatusLimitCandidateSeed] {
         let availableWindowIDs = Set(limits.map(\.id))
-        let autoWindowID = StatusItemAutoSelectionPolicy.autoWindowID(
+        let creditWindowID = limits.first { $0.usageLimit.reading != .measured }?.id
+        let autoWindowID = creditWindowID ?? StatusItemAutoSelectionPolicy.autoWindowID(
             for: service,
             availableWindowIDs: availableWindowIDs
         )

@@ -23,6 +23,14 @@ enum WidgetLocalizedContent {
         guard let limit = row.limit else {
             return String(localized: "widget.unavailable", defaultValue: "Unavailable")
         }
+        switch limit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder, .allowance:
+            return LocalizedUsageFormat.amountLeft(limit.formattedCreditRemainder)
+        case .measured:
+            break
+        }
         guard !row.isBlocked else {
             return LocalizedUsageFormat.widgetBlockedBadge()
         }

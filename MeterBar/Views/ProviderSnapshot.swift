@@ -92,6 +92,12 @@ struct ProviderSnapshot: Identifiable {
     /// the roomiest one read exhausted too, and the header agrees with
     /// `blockingLimits`.
     var primaryLimit: SnapshotLimit? {
+        // A credit balance replaces the exhausted subscription window as the
+        // glance. Those spent windows are omitted from the list, and this
+        // still wins if a cached snapshot kept both.
+        if let credit = limits.first(where: { $0.usageLimit.reading != .measured }) {
+            return credit
+        }
         let providerLimits = limits.filter(\.isProviderBlocking)
         if hasCursorSpilloverPools {
             return providerLimits.max { $0.percentLeft < $1.percentLeft }
@@ -358,6 +364,14 @@ struct SnapshotLimit: Identifiable {
     /// render. Currency-style limits (OpenRouter key/credit balances) speak
     /// dollars; quota-style limits speak percentages.
     var accessibilityValue: String {
+        switch usageLimit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder, .allowance:
+            return "\(usageLimit.formattedCreditRemainder) left"
+        case .measured:
+            break
+        }
         if valueStyle == .currency {
             let left = UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
             return "\(left) left, \(UsageFormat.cost(usageLimit.used)) spent"
@@ -368,6 +382,14 @@ struct SnapshotLimit: Identifiable {
 
     /// Localized equivalent used by app views and VoiceOver.
     var localizedAccessibilityValue: String {
+        switch usageLimit.reading {
+        case .unlimited:
+            return "Unlimited credits"
+        case .remainder, .allowance:
+            return LocalizedUsageFormat.amountLeft(usageLimit.formattedCreditRemainder)
+        case .measured:
+            break
+        }
         if valueStyle == .currency {
             let left = LocalizedUsageFormat.amountLeft(
                 UsageFormat.cost(max(0, usageLimit.total - usageLimit.used))
@@ -871,7 +893,9 @@ enum ProviderSnapshotBuilder {
         guard let metrics else { return [] }
 
         var result: [SnapshotLimit] = []
-        if let session = metrics.sessionLimit {
+        let creditMeterIsActive = metrics.additionalLimits.contains { $0.reading != .measured }
+        if let session = metrics.sessionLimit,
+           !Self.hidesExhaustedSubscription(session, creditMeterIsActive: creditMeterIsActive) {
             result.append(SnapshotLimit(
                 id: "session",
                 kind: .session,
@@ -883,7 +907,8 @@ enum ProviderSnapshotBuilder {
                 valueStyle: service == .openRouter || service == .githubCopilot ? .currency : .quota
             ))
         }
-        if let weekly = metrics.weeklyLimit {
+        if let weekly = metrics.weeklyLimit,
+           !Self.hidesExhaustedSubscription(weekly, creditMeterIsActive: creditMeterIsActive) {
             result.append(SnapshotLimit(
                 id: "weekly",
                 kind: .weekly,
@@ -917,10 +942,20 @@ enum ProviderSnapshotBuilder {
                     : additionalLimitID(for: additional, index: index),
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
-                usageLimit: additional
+                usageLimit: additional,
+                valueStyle: .quota
             ))
         }
         return result
+    }
+
+    /// An exhausted included window is not the pool being spent once a credit
+    /// meter is present. Code review and other additional pools stay.
+    private static func hidesExhaustedSubscription(
+        _ limit: UsageLimit,
+        creditMeterIsActive: Bool
+    ) -> Bool {
+        creditMeterIsActive && limit.reading == .measured && limit.isAtLimit
     }
 
     /// Identity for an extra window, preferring its provider-supplied name over

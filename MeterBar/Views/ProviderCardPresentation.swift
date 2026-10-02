@@ -26,6 +26,16 @@ enum ProviderCardPresentation {
 
     static func statusText(for snapshot: ProviderSnapshot) -> String {
         if let notice = snapshot.authNotice { return notice.shortLabel }
+        if let primary = snapshot.primaryLimit {
+            switch primary.usageLimit.reading {
+            case .remainder, .allowance:
+                return LocalizedUsageFormat.amountLeft(primary.usageLimit.formattedCreditRemainder)
+            case .unlimited:
+                return "Unlimited credits"
+            case .measured:
+                break
+            }
+        }
         return snapshot.band?.shortLabel ?? "Offline"
     }
 

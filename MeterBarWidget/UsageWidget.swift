@@ -219,7 +219,9 @@ struct WidgetGlanceRow: View {
                     .minimumScaleFactor(0.7)
             }
 
-            WidgetGlanceBar(row: row, height: metrics.barHeight)
+            if row.drawsDepletingBar {
+                WidgetGlanceBar(row: row, height: metrics.barHeight)
+            }
             WidgetGlanceCaption(row: row, size: metrics.captionSize)
         }
         .accessibilityElement(children: .combine)
@@ -252,7 +254,9 @@ struct WidgetGlanceHero: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            WidgetGlanceBar(row: row, height: metrics.barHeight)
+            if row.drawsDepletingBar {
+                WidgetGlanceBar(row: row, height: metrics.barHeight)
+            }
             WidgetGlanceCaption(row: row, size: metrics.captionSize)
         }
         .accessibilityElement(children: .combine)
