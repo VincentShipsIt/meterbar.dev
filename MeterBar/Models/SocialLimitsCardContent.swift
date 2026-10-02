@@ -42,7 +42,7 @@ struct SocialLimitsCardContent: Equatable {
         // `primaryLimit` already encodes the provider-blocking rule and Cursor's
         // spillover exception. A provider whose windows are all secondary still
         // deserves a hero, so fall back to the tightest row it does have.
-        let headlineLimit = snapshot.primaryLimit.map { Self.row(for: $0, now: now) }
+        let headlineLimit = snapshot.presentationPrimaryLimit(now: now).map { Self.row(for: $0, now: now) }
         self.init(
             providerName: snapshot.title,
             updatedText: snapshot.updatedText,
@@ -79,7 +79,15 @@ struct SocialLimitsCardContent: Equatable {
         headline.map { QuotaBand.forPercentLeft($0.percentLeft) }
     }
 
-    var statusLabel: String { band?.shortLabel ?? "No data" }
+    var statusLabel: String {
+        if let headline, headline.reading == .remainder {
+            return headline.remainingAmount > 0 ? "Credits available" : "Out"
+        }
+        if headline?.reading == .unlimited {
+            return "Unlimited credits"
+        }
+        return band?.shortLabel ?? "No data"
+    }
 
     var quotaHeroValue: String {
         headline?.heroValueText ?? "NO QUOTA"
@@ -93,7 +101,23 @@ struct SocialLimitsCardContent: Equatable {
         return "left on \(headline.title)"
     }
 
-    var tier: SocialLimitsTier { SocialLimitsTier.classify(band: band) }
+    var tier: SocialLimitsTier {
+        if let headline, headline.reading == .unlimited ||
+            (headline.reading == .remainder && headline.remainingAmount > 0) {
+            return SocialLimitsTier(
+                title: "CREDITS AVAILABLE",
+                joke: "Credits ready. Your next idea is waiting.",
+                symbolName: "checkmark.shield.fill"
+            )
+        }
+        return SocialLimitsTier.classify(band: band)
+    }
+
+    /// A single amount-only balance is already stated by the hero. Avoid an
+    /// otherwise empty column containing only its repeated "Credits" title.
+    var detailRows: [Row] {
+        rows.filter { $0.id != headline?.id || $0.showsBar || !$0.detailText.isEmpty }
+    }
 
     var shareCaption: String {
         guard let headline else {
@@ -135,6 +159,9 @@ struct SocialLimitsCardContent: Equatable {
     /// that a derived total must not drive a pace overlay.
     static func row(for limit: SnapshotLimit, now: Date = Date()) -> Row {
         let usageLimit = limit.usageLimit
+        let hasVisibleReset = usageLimit.resetTime.map {
+            $0 >= now.addingTimeInterval(-ProviderBlockingPolicy.resetDueGracePeriod)
+        } ?? false
         return Row(
             id: limit.id,
             title: limit.title,
@@ -150,18 +177,18 @@ struct SocialLimitsCardContent: Equatable {
             percentLeftText: usageLimit.percentLeftText,
             usedPercentText: usageLimit.usedPercentageText,
             pace: usageLimit.hasDepletingMeter && !usageLimit.isEstimated ? usageLimit.pace(now: now) : nil,
-            resetText: usageLimit.resetCountdownText(now: now)
+            resetText: hasVisibleReset ? usageLimit.resetCountdownText(now: now) : nil
         )
     }
 
     static func rows(for snapshot: ProviderSnapshot, now: Date = Date()) -> [Row] {
-        let rows = snapshot.limits.map { row(for: $0, now: now) }
+        let rows = snapshot.presentationLimits.map { row(for: $0, now: now) }
         guard rows.count > maxRowCount else { return rows }
         // Trim by tightness but render in the provider's own order, so the card
         // reads like the popover it was taken from. The headline always reads
         // `snapshot.primaryLimit`, so that window must always survive the trim
         // — reserve its slot before ranking the rest by tightness.
-        let primaryID = snapshot.primaryLimit?.id
+        let primaryID = snapshot.presentationPrimaryLimit(now: now)?.id
         var kept = Set<String>()
         if let primaryID {
             kept.insert(primaryID)
@@ -202,7 +229,7 @@ extension SocialLimitsCardContent {
         private var isOut: Bool { percentLeft <= 0 }
 
         var showsBar: Bool {
-            reading == .measured || reading == .allowance
+            reading == .allowance || (reading == .measured && (!isOut || isEstimated))
         }
 
         /// Matches `LimitRow.RowContent.trailingText`: an estimated total never
@@ -246,6 +273,9 @@ extension SocialLimitsCardContent {
         /// A currency row keeps its "$… spent": the bar shows the proportion,
         /// but the absolute amount is a fact no bar encodes.
         var detailText: String {
+            if isOut && !isEstimated && reading == .measured {
+                return resetText.map { "Out of quota · resets in \($0)" } ?? "Out of quota · reset unavailable"
+            }
             var parts: [String] = []
             if reading != .remainder, reading != .unlimited, valueStyle == .currency || pace == nil {
                 parts.append(usedText)

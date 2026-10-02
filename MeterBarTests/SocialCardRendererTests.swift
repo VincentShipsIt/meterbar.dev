@@ -283,6 +283,54 @@ final class SocialCardRendererTests: XCTestCase {
         XCTAssertNotNil(SocialCardRenderer.pngData(for: content))
     }
 
+    @MainActor
+    func testAmountOnlyAndExhaustedLimitsCardsRender() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cases: [(String, ServiceType, UsageMetrics)] = [
+            ("codex-credits", .codexCli, UsageMetrics(
+                service: .codexCli,
+                additionalLimits: [UsageLimit(
+                    used: 0,
+                    total: 26269.74,
+                    resetTime: nil,
+                    label: "Credits",
+                    reading: .remainder
+                )],
+                lastUpdated: now
+            )),
+            ("cursor-out", .cursor, UsageMetrics(
+                service: .cursor,
+                sessionLimit: UsageLimit(
+                    used: 100,
+                    total: 100,
+                    resetTime: now.addingTimeInterval(9 * 86400)
+                ),
+                weeklyLimit: UsageLimit(
+                    used: 100,
+                    total: 100,
+                    resetTime: now.addingTimeInterval(9 * 86400)
+                ),
+                lastUpdated: now
+            )),
+        ]
+        for (name, service, metrics) in cases {
+            let snapshot = ProviderSnapshotBuilder.snapshot(
+                title: service.displayName,
+                service: service,
+                metrics: metrics,
+                emptyDetail: ""
+            )
+            let content = SocialLimitsCardContent(snapshot: snapshot, now: now, generatedAt: now)
+            let png = try XCTUnwrap(SocialCardRenderer.pngData(for: content))
+            XCTAssertEqual(Array(png.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+            if let directory = ProcessInfo.processInfo.environment["SNAPSHOT_DIR"] {
+                let output = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                try png.write(to: output.appendingPathComponent("\(name).png"))
+            }
+        }
+    }
+
     private func makeBreakdown(
         provider: ServiceType,
         name: String,

@@ -155,6 +155,25 @@ struct ProviderSnapshot: Identifiable {
 
     var hasExhaustedLimit: Bool { !blockingLimits.isEmpty }
 
+    /// Export and public-profile rows follow the same collapsed state as the
+    /// app: only blocking windows explain when provider usage can resume.
+    var presentationLimits: [SnapshotLimit] {
+        hasExhaustedLimit ? blockingLimits : limits
+    }
+
+    func presentationPrimaryLimit(now: Date) -> SnapshotLimit? {
+        guard hasExhaustedLimit else {
+            return primaryLimit
+        }
+        let candidates = blockingLimits.map {
+            ProviderBlockingCandidate(id: $0.id, role: $0.blockingRole, limit: $0.usageLimit)
+        }
+        guard let headline = ProviderBlockingPolicy.headline(from: candidates, now: now) else {
+            return primaryLimit
+        }
+        return blockingLimits.first { $0.id == headline.blocker.id }
+    }
+
     /// Weekly exhaustion blocks the whole subscription even when the shorter
     /// session window still has room. Compact overview cards should prioritize
     /// that reset instead of spending space on the session gauge.

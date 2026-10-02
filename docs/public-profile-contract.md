@@ -89,6 +89,17 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
   custom accounts cannot inherit the default account's plan. A sole default
   account or legacy provider-wide snapshot without an account id may retain it.
 - `usedPercent` is 0-100. The card shows "left", which is `100 - usedPercent`.
+- Optional availability metadata in schema 1: each window has `role`
+  (`provider` or `secondary`) and `isEstimated` (boolean). Each provider has
+  `primaryWindowIndex` (an index into its sanitized windows, omitted if the
+  primary window was filtered out) and `isBlocked` (boolean). These come from
+  the app's provider availability policy, including Cursor's included-pool
+  spillover and paid extra usage; model-specific limits do not block the parent.
+  Older documents remain valid. When a provider is blocked, the app publishes
+  only blocking windows; the site uses the same compact presentation. Exhausted
+  measured rows show their reset without a progress bar, and reset dates older
+  than the five-minute due grace period are omitted. Amount-only credit balances
+  remain private and never become an invented percentage.
 - `receipt` is this Mac's local scan and is absent when there is nothing to
   show. It contains 30-day token and session totals, top models, and daily
   tokens for the last 7 days. `dailyTokens` is oldest first, 7 entries, most

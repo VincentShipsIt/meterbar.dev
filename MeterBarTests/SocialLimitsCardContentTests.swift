@@ -3,6 +3,78 @@ import MeterBarShared
 @testable import MeterBar
 
 final class SocialLimitsCardContentTests: XCTestCase {
+    func testWeeklyBlockDropsSessionAndSecondaryRowsAndAllSpentBars() throws {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let snapshot = providerSnapshot(title: "Claude", updatedAt: now, limits: [
+            snapshotLimit(kind: .session, title: "Session", usageLimit: UsageLimit(
+                used: 10, total: 100, resetTime: now.addingTimeInterval(3600)
+            )),
+            snapshotLimit(kind: .weekly, title: "Weekly", usageLimit: UsageLimit(
+                used: 100, total: 100, resetTime: now.addingTimeInterval(86400)
+            )),
+            snapshotLimit(kind: .additional, title: "Fable", usageLimit: UsageLimit(
+                used: 100, total: 100, resetTime: now.addingTimeInterval(3600)
+            )),
+        ])
+        let content = SocialLimitsCardContent(snapshot: snapshot, now: now)
+        XCTAssertEqual(content.rows.map(\.title), ["Weekly"])
+        XCTAssertEqual(content.headline?.title, "Weekly")
+        let row = try XCTUnwrap(content.rows.first)
+        XCTAssertFalse(row.showsBar)
+        XCTAssertEqual(row.detailText, "Out of quota · resets in 1d")
+    }
+
+    func testSecondaryExhaustionDoesNotHideAvailableProviderWindows() {
+        let now = Date()
+        let snapshot = providerSnapshot(title: "Claude", updatedAt: now, limits: [
+            snapshotLimit(kind: .weekly, title: "Weekly", usageLimit: UsageLimit(
+                used: 20, total: 100, resetTime: nil
+            )),
+            snapshotLimit(kind: .additional, title: "Fable", usageLimit: UsageLimit(
+                used: 100, total: 100, resetTime: nil
+            )),
+        ])
+        let content = SocialLimitsCardContent(snapshot: snapshot, now: now)
+        XCTAssertEqual(content.rows.count, 2)
+        XCTAssertEqual(content.headline?.title, "Weekly")
+        XCTAssertTrue(content.rows[0].showsBar)
+        XCTAssertFalse(content.rows[1].showsBar)
+    }
+
+    func testAmountOnlyCreditsDoNotClaimPlentyOfQuotaOrLeaveAnEmptyDetailColumn() {
+        let snapshot = providerSnapshot(title: "Codex", updatedAt: Date(), limits: [
+            snapshotLimit(kind: .additional, title: "Credits", usageLimit: UsageLimit(
+                used: 0, total: 26269.74, resetTime: nil, reading: .remainder
+            )),
+        ])
+        let content = SocialLimitsCardContent(snapshot: snapshot)
+        XCTAssertEqual(content.quotaHeroValue, "26,269.74")
+        XCTAssertEqual(content.statusLabel, "Credits available")
+        XCTAssertTrue(content.detailRows.isEmpty)
+        XCTAssertFalse(content.tier.joke.contains("Plenty of quota"))
+        XCTAssertFalse(content.shareCaption.contains("CRUISING"))
+    }
+
+    func testBlockedHeadlineUsesLatestResetAndDoesNotPromiseStaleResetNow() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let content = SocialLimitsCardContent(snapshot: providerSnapshot(title: "Claude", updatedAt: now, limits: [
+            snapshotLimit(kind: .session, title: "Session", usageLimit: UsageLimit(
+                used: 100, total: 100, resetTime: now.addingTimeInterval(3600)
+            )),
+            snapshotLimit(kind: .weekly, title: "Weekly", usageLimit: UsageLimit(
+                used: 100, total: 100, resetTime: now.addingTimeInterval(86400)
+            )),
+        ]), now: now)
+        XCTAssertEqual(content.headline?.title, "Weekly")
+        let stale = SocialLimitsCardContent.row(for: snapshotLimit(
+            kind: .weekly,
+            title: "Weekly",
+            usageLimit: UsageLimit(used: 100, total: 100, resetTime: now.addingTimeInterval(-86400))
+        ), now: now)
+        XCTAssertNil(stale.resetText)
+        XCTAssertEqual(stale.detailText, "Out of quota · reset unavailable")
+    }
+
     // MARK: - Rows
 
     func testRowDerivesEveryLabelFromTheSharedQuotaMath() {
