@@ -59,4 +59,9 @@ enum PublicProfilePresentation {
 
     static let resetConfirmation = "Reset link? The current link stops working and its published data is deleted. "
         + "You get a new link that is not connected to the old one."
+
+    static let abandonResetConfirmation = "Create replacement link?"
+    static let abandonResetWarning = "The old profile cannot be deleted because its deletion key is unavailable. "
+        + "Its URL may remain public until it expires, up to 7 days after the last upload. "
+        + "Creating a replacement does not delete the old profile."
 }

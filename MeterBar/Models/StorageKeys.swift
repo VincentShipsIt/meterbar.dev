@@ -231,4 +231,6 @@ nonisolated enum StorageKeys {
     /// Slugs whose server copy still has to be deleted (`[String]`). A slug
     /// stays here until the server confirms the delete.
     static let publicProfilePendingDeletions = "PublicProfilePendingDeletions"
+    /// A requested reset awaiting confirmed deletion and a stored replacement key.
+    static let publicProfileResetPending = "PublicProfileResetPending"
 }
