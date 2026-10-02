@@ -667,7 +667,7 @@ nonisolated struct CodexCliUsageResponse: Codable {
     }
 
     private func onDetail(balance: Double) -> String {
-        var detail = "\(ExtraUsageStatus.formatAmount(balance)) in credits"
+        var detail = "\(CreditQuantityFormat.grouped(balance)) in credits"
         if let limit = spendControl?.individualLimit, limit > 0 {
             detail += " · cap \(ExtraUsageStatus.formatAmount(limit))"
         }
@@ -703,8 +703,15 @@ extension CodexCliUsageResponse {
         }
 
         let quotaWindows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap { $0 }
-        let sessionLimit = quotaWindows.first(where: { $0.isSessionWindow })?.usageLimit
-        let weeklyLimit = quotaWindows.first(where: { $0.isWeeklyWindow })?.usageLimit
+        // Credits replace the included windows only once every one of them is
+        // spent. Code review is a separate pool and stays either way.
+        let creditMeterReplacesSubscription = creditUsageLimit != nil
+        let sessionLimit = creditMeterReplacesSubscription
+            ? nil
+            : quotaWindows.first(where: { $0.isSessionWindow })?.usageLimit
+        let weeklyLimit = creditMeterReplacesSubscription
+            ? nil
+            : quotaWindows.first(where: { $0.isWeeklyWindow })?.usageLimit
 
         // Code review rate limit (7 days window) = code review limit
         let codeReviewLimit = codeReviewRateLimit?.primaryWindow.usageLimit
@@ -720,18 +727,90 @@ extension CodexCliUsageResponse {
         )
     }
 
-    /// Extra windows beyond the named slots. Only the reserve maps: the other
-    /// pool this array carries today is the deprecated Codex Spark, and giving
-    /// a retired model two bars on the card would be worse than silence.
-    private var additionalLimits: [UsageLimit] {
-        [reserveLimit].compactMap { $0 }
+    /// Extra windows beyond the named slots. The reserve maps only while it is
+    /// the pool being served. Prepaid credits map only once the included
+    /// subscription window is exhausted and they are the pool being spent.
+    /// The other pool this array carries today is the deprecated Codex Spark,
+    /// and giving a retired model two bars on the card would be worse than silence.
+    nonisolated private var additionalLimits: [UsageLimit] {
+        [reserveLimit, creditUsageLimit].compactMap { $0 }
     }
+
+    /// Leftover prepaid credits, once they replace an exhausted subscription
+    /// window. Absent while any included window still has quota, and absent
+    /// while the Luna reserve is the pool actually serving requests.
+    ///
+    /// `credits.balance` is a credit count. A scalar `individual_limit` is a
+    /// dollar spend cap and is not the bar. A nested allowance object is the
+    /// bar only when it is the same pool as the balance, or the balance is absent.
+    nonisolated private var creditUsageLimit: UsageLimit? {
+        guard reserveLimit == nil,
+              includedSubscriptionIsExhausted,
+              let credits,
+              let limit = creditLimit(from: credits)
+        else {
+            return nil
+        }
+        return limit
+    }
+
+    nonisolated private var includedSubscriptionIsExhausted: Bool {
+        guard let rateLimit else { return false }
+        let windows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap { $0 }
+        guard !windows.isEmpty else { return true }
+        return windows.allSatisfy { $0.usedPercent >= 100 }
+    }
+
+    nonisolated private func creditLimit(from credits: Credits) -> UsageLimit? {
+        if credits.unlimited == true {
+            return UsageLimit(
+                used: 0,
+                total: 0,
+                resetTime: nil,
+                label: Self.creditLimitLabel,
+                reading: .unlimited
+            )
+        }
+        if let allowance = spendControl?.creditAllowance {
+            let remaining = max(0, allowance.limit - allowance.used)
+            let balance = credits.balance
+            let balanceAgrees = balance == nil
+                || abs((balance ?? 0) - remaining) <= 0.05
+            if balanceAgrees {
+                return UsageLimit(
+                    used: allowance.used,
+                    total: allowance.limit,
+                    resetTime: allowance.resetAt,
+                    label: Self.creditLimitLabel,
+                    reading: .allowance
+                )
+            }
+        }
+        guard let balance = credits.balance else { return nil }
+        let remaining = max(0, balance)
+        guard remaining > 0 else { return nil }
+        return UsageLimit(
+            used: 0,
+            total: remaining,
+            resetTime: nil,
+            label: Self.creditLimitLabel,
+            reading: .remainder
+        )
+    }
+
+    nonisolated private static let creditLimitLabel = "Credits"
 }
 
 /// Optional per-account spending cap returned by the Codex usage API.
+///
+/// `individual_limit` is either a scalar dollar cap or a nested workspace
+/// allowance. The scalar stays on `individualLimit` for the extra-usage
+/// tooltip. The object stays on `creditAllowance` and is never copied into
+/// the dollar cap.
 nonisolated struct SpendControl: Codable {
     let reached: Bool
     let individualLimit: Double?
+    let creditAllowance: CreditAllowance?
 
     enum CodingKeys: String, CodingKey {
         case reached
@@ -744,10 +823,16 @@ nonisolated struct SpendControl: Codable {
 
         if let doubleLimit = try? container.decode(Double.self, forKey: .individualLimit) {
             individualLimit = doubleLimit
+            creditAllowance = nil
         } else if let stringLimit = try? container.decode(String.self, forKey: .individualLimit) {
             individualLimit = Double(stringLimit)
+            creditAllowance = nil
+        } else if let allowance = try? container.decode(CreditAllowance.self, forKey: .individualLimit) {
+            individualLimit = nil
+            creditAllowance = allowance
         } else {
             individualLimit = nil
+            creditAllowance = nil
         }
     }
 
@@ -755,6 +840,79 @@ nonisolated struct SpendControl: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(reached, forKey: .reached)
         try container.encodeIfPresent(individualLimit, forKey: .individualLimit)
+    }
+}
+
+/// Nested `spend_control.individual_limit` from a workspace spend pool.
+/// A malformed object fails this decode alone; `SpendControl` then drops it.
+nonisolated struct CreditAllowance: Codable, Equatable {
+    let limit: Double
+    let used: Double
+    let resetAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case limit
+        case used
+        case remaining
+        case usedPercent = "used_percent"
+        case resetAt = "reset_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let limit = Self.flexibleDouble(container, .limit), limit > 0, limit.isFinite else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .limit,
+                in: container,
+                debugDescription: "Credit allowance needs a finite limit."
+            )
+        }
+        let remaining = Self.flexibleDouble(container, .remaining)
+        let reportedUsed = Self.flexibleDouble(container, .used)
+        let usedPercent = Self.flexibleDouble(container, .usedPercent)
+        let used: Double
+        if let reportedUsed, reportedUsed.isFinite {
+            used = min(limit, max(0, reportedUsed))
+        } else if let remaining, remaining.isFinite {
+            used = min(limit, max(0, limit - remaining))
+        } else if let usedPercent, usedPercent.isFinite {
+            used = min(limit, max(0, usedPercent * limit / 100))
+        } else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .used,
+                in: container,
+                debugDescription: "Credit allowance needs used, remaining, or used_percent."
+            )
+        }
+        if let resetAt = Self.flexibleDouble(container, .resetAt), resetAt.isFinite {
+            self.resetAt = Date(timeIntervalSince1970: resetAt)
+        } else {
+            self.resetAt = nil
+        }
+        self.limit = limit
+        self.used = used
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(limit, forKey: .limit)
+        try container.encode(used, forKey: .used)
+        if let resetAt {
+            try container.encode(resetAt.timeIntervalSince1970, forKey: .resetAt)
+        }
+    }
+
+    private static func flexibleDouble<Key: CodingKey>(
+        _ container: KeyedDecodingContainer<Key>,
+        _ key: Key
+    ) -> Double? {
+        if let value = try? container.decode(Double.self, forKey: key), value.isFinite {
+            return value
+        }
+        if let text = try? container.decode(String.self, forKey: key) {
+            return Double(text)
+        }
+        return nil
     }
 }
 

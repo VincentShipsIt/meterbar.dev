@@ -148,7 +148,7 @@ final class ExtraUsageStatusTests: XCTestCase {
         """#)
         let status = response.extraUsageStatus
         XCTAssertEqual(status.state, .on)
-        XCTAssertEqual(status.detail?.contains("$5.00"), true)
+        XCTAssertEqual(status.detail, "5 in credits")
     }
 
     func testCodexBalanceAsNumberIsOn() throws {
@@ -157,7 +157,7 @@ final class ExtraUsageStatusTests: XCTestCase {
         """#)
         let status = response.extraUsageStatus
         XCTAssertEqual(status.state, .on)
-        XCTAssertEqual(status.detail?.contains("$7.50"), true)
+        XCTAssertEqual(status.detail, "7.5 in credits")
     }
 
     func testCodexSpendControlCapAppended() throws {
@@ -166,7 +166,7 @@ final class ExtraUsageStatusTests: XCTestCase {
         """#)
         let status = response.extraUsageStatus
         XCTAssertEqual(status.state, .on)
-        XCTAssertEqual(status.detail?.contains("cap $50.00"), true)
+        XCTAssertEqual(status.detail, "5 in credits · cap $50.00")
     }
 
     func testCodexSpendControlNullLimitDecodes() throws {

@@ -7,6 +7,25 @@ import XCTest
 final class PublicProfileDocumentTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testCreditBalancesWithoutAnAllowanceDoNotInventAPublicPercentage() {
+        for reading in [UsageLimit.Reading.remainder, .unlimited] {
+            let snapshot = ProviderSnapshot(
+                id: "credits", title: "private", service: .codexCli, updatedAt: now,
+                limits: [SnapshotLimit(
+                    id: "credits",
+                    kind: .additional,
+                    title: "Credits",
+                    usageLimit: UsageLimit(used: 0, total: 400, resetTime: nil, reading: reading)
+                )],
+                emptyDetail: "", extraUsage: nil, resetCreditsAvailable: nil, accountID: nil
+            )
+
+            let doc = make(snapshots: [snapshot])
+
+            XCTAssertTrue(doc.providers.isEmpty, "\(reading) has no public quota percentage")
+        }
+    }
+
     // MARK: - No personal data
 
     /// `ProviderSnapshot.title` is the user's own account label. It must never

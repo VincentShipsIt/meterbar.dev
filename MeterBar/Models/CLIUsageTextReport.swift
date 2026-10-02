@@ -66,14 +66,17 @@ nonisolated public enum CLIUsageTextReport {
 
     private static func metricLines(_ service: ServiceType, _ metric: UsageMetrics) -> [String] {
         var lines: [String] = []
-        if let session = metric.sessionLimit {
+        let creditMeterIsActive = metric.additionalLimits.contains { $0.reading != .measured }
+        if let session = metric.sessionLimit,
+           !(creditMeterIsActive && session.reading == .measured && session.isAtLimit) {
             lines += limitLines(
                 "  \(service.sessionQuotaTitle(limitTotal: session.total, periodKind: session.periodKind))",
                 session,
                 currency: service == .openRouter
             )
         }
-        if let weekly = metric.weeklyLimit {
+        if let weekly = metric.weeklyLimit,
+           !(creditMeterIsActive && weekly.reading == .measured && weekly.isAtLimit) {
             lines += limitLines(
                 "  \(service.weeklyQuotaTitle(limitTotal: weekly.total, periodKind: weekly.periodKind))",
                 weekly,
@@ -97,6 +100,32 @@ nonisolated public enum CLIUsageTextReport {
         _ label: String,
         _ limit: UsageLimit,
         currency: Bool = false
+    ) -> [String] {
+        switch limit.reading {
+        case .unlimited:
+            return ["\(label): Unlimited credits"]
+        case .remainder:
+            return ["\(label): \(limit.formattedCreditRemainder) left"]
+        case .allowance:
+            let percent = 100 - limit.percentage
+            let bar = progressBar(percent: percent, width: 20)
+            let status = statusEmoji(for: limit)
+            let spent = CreditQuantityFormat.grouped(limit.used)
+            let total = CreditQuantityFormat.grouped(limit.total)
+            return [
+                "\(label): \(bar) \(limit.percentLeftText) \(status)",
+                "    \(spent) spent / \(total) credits"
+            ]
+        case .measured:
+            break
+        }
+        return measuredLimitLines(label, limit, currency: currency)
+    }
+
+    private static func measuredLimitLines(
+        _ label: String,
+        _ limit: UsageLimit,
+        currency: Bool
     ) -> [String] {
         let percent = limit.percentage
         let bar = progressBar(percent: percent, width: 20)

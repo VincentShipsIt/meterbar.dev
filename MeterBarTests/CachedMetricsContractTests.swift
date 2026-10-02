@@ -123,7 +123,32 @@ final class CachedMetricsContractTests: XCTestCase {
         XCTAssertNil(metrics.resetCreditsAvailable)
         XCTAssertNil(metrics.modelLimitLabel)
         XCTAssertNil(metrics.weeklyLimit?.periodKind)
+        XCTAssertEqual(metrics.weeklyLimit?.reading, .measured)
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testCreditReadingRoundTripsAndStaysOffMeasuredWindows() throws {
+        let original = UsageLimit(
+            used: 0,
+            total: 40,
+            resetTime: nil,
+            label: "Credits",
+            reading: .remainder
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(UsageLimit.self, from: data)
+        XCTAssertEqual(decoded, original)
+
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["reading"] as? String, "remainder")
+
+        let measured = try JSONEncoder().encode(
+            UsageLimit(used: 1, total: 100, resetTime: nil)
+        )
+        let measuredObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: measured) as? [String: Any]
+        )
+        XCTAssertNil(measuredObject["reading"])
     }
 
     // MARK: - Shared App Group location (issue #13 — a rename must break CI)

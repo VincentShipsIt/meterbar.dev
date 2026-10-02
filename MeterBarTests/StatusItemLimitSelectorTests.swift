@@ -80,6 +80,36 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertEqual(seeds.first(where: \.isAutoSelectable)?.windowName, "Weekly")
     }
 
+    func testCodexCreditBalanceReplacesTheWeeklyAutoWindow() {
+        let limits = ProviderSnapshotBuilder.limits(
+            for: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                additionalLimits: [
+                    UsageLimit(
+                        used: 0,
+                        total: 61_586.14,
+                        resetTime: nil,
+                        label: "Credits",
+                        reading: .remainder
+                    )
+                ]
+            ),
+            service: .codexCli
+        )
+
+        let seeds = StatusItemLimitCandidateBuilder.seeds(
+            service: .codexCli,
+            accountID: nil,
+            autoSelectionKey: "codex:shipshitdev",
+            displayName: "shipshitdev",
+            limits: limits
+        )
+
+        XCTAssertEqual(seeds.first { $0.isAutoSelectable }?.windowID, "credits")
+        XCTAssertNil(seeds.first { $0.windowID == "weekly" })
+    }
+
     private func cursorMetricsWithGrokBot(weeklyUsed: Double, grokBotUsed: Double) -> UsageMetrics {
         UsageMetrics(
             service: .cursor,

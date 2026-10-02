@@ -87,6 +87,9 @@ struct SocialLimitsCardContent: Equatable {
 
     var quotaHeroCaption: String {
         guard let headline else { return "connect an account to see limits" }
+        if headline.reading == .unlimited {
+            return "on \(headline.title)"
+        }
         return "left on \(headline.title)"
     }
 
@@ -136,14 +139,17 @@ struct SocialLimitsCardContent: Equatable {
             id: limit.id,
             title: limit.title,
             percentLeft: limit.percentLeft,
-            usedFraction: usageLimit.clampedUsed / usageLimit.clampedTotal,
+            usedFraction: usageLimit.reading == .allowance && usageLimit.total > 0
+                ? 1 - usageLimit.clampedUsed / usageLimit.clampedTotal
+                : usageLimit.clampedUsed / usageLimit.clampedTotal,
             isEstimated: usageLimit.isEstimated,
             valueStyle: limit.valueStyle,
+            reading: usageLimit.reading,
             remainingAmount: max(0, usageLimit.total - usageLimit.used),
             usedAmount: usageLimit.used,
             percentLeftText: usageLimit.percentLeftText,
             usedPercentText: usageLimit.usedPercentageText,
-            pace: usageLimit.isEstimated ? nil : usageLimit.pace(now: now),
+            pace: usageLimit.hasDepletingMeter && !usageLimit.isEstimated ? usageLimit.pace(now: now) : nil,
             resetText: usageLimit.resetCountdownText(now: now)
         )
     }
@@ -185,6 +191,7 @@ extension SocialLimitsCardContent {
         let usedFraction: Double
         let isEstimated: Bool
         let valueStyle: SnapshotLimit.ValueStyle
+        let reading: UsageLimit.Reading
         let remainingAmount: Double
         let usedAmount: Double
         let percentLeftText: String
@@ -194,9 +201,21 @@ extension SocialLimitsCardContent {
 
         private var isOut: Bool { percentLeft <= 0 }
 
+        var showsBar: Bool {
+            reading == .measured || reading == .allowance
+        }
+
         /// Matches `LimitRow.RowContent.trailingText`: an estimated total never
         /// gets to declare a quota "Out".
         var trailingText: String {
+            switch reading {
+            case .unlimited:
+                return "Unlimited credits"
+            case .remainder, .allowance:
+                return "\(CreditQuantityFormat.grouped(remainingAmount)) left"
+            case .measured:
+                break
+            }
             switch valueStyle {
             case .currency:
                 return "\(UsageFormat.cost(remainingAmount)) left"
@@ -228,7 +247,7 @@ extension SocialLimitsCardContent {
         /// but the absolute amount is a fact no bar encodes.
         var detailText: String {
             var parts: [String] = []
-            if valueStyle == .currency || pace == nil {
+            if reading != .remainder, reading != .unlimited, valueStyle == .currency || pace == nil {
                 parts.append(usedText)
             }
             if isEstimated {
@@ -245,6 +264,14 @@ extension SocialLimitsCardContent {
 
         /// The hero number, without the "left" suffix the row label carries.
         var heroValueText: String {
+            switch reading {
+            case .unlimited:
+                return "Unlimited"
+            case .remainder, .allowance:
+                return CreditQuantityFormat.grouped(remainingAmount)
+            case .measured:
+                break
+            }
             switch valueStyle {
             case .currency:
                 return UsageFormat.cost(remainingAmount)
