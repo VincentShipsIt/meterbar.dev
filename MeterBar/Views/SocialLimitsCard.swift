@@ -56,10 +56,12 @@ struct SocialLimitsCard: View {
 
                 HStack(alignment: .center, spacing: 52 * scale) {
                     hero(scale: scale)
-                        .frame(width: 470 * scale, alignment: .leading)
+                        .frame(width: (content.detailRows.isEmpty ? 900 : 470) * scale, alignment: .leading)
 
-                    SocialLimitsRowsColumn(content: content, scale: scale)
-                        .frame(maxWidth: .infinity)
+                    if !content.hasQuotaData || !content.detailRows.isEmpty {
+                        SocialLimitsRowsColumn(content: content, scale: scale)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -112,10 +114,10 @@ private struct SocialLimitsRowsColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26 * scale) {
-            if content.rows.isEmpty {
+            if !content.hasQuotaData {
                 SocialLimitsEmptyRows(scale: scale)
             } else {
-                ForEach(content.rows) { row in
+                ForEach(content.detailRows) { row in
                     SocialLimitsRowView(row: row, scale: scale)
                 }
             }

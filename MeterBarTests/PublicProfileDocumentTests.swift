@@ -7,6 +7,66 @@ import XCTest
 final class PublicProfileDocumentTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testPublicRowsCollapseToWeeklyBlockAndDoNotPublishStaleReset() {
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "private", service: .claudeCode,
+            metrics: UsageMetrics(
+                service: .claudeCode,
+                sessionLimit: UsageLimit(
+                    used: 20,
+                    total: 100,
+                    resetTime: now.addingTimeInterval(3600)
+                ),
+                weeklyLimit: UsageLimit(
+                    used: 100,
+                    total: 100,
+                    resetTime: now.addingTimeInterval(-86400)
+                ),
+                codeReviewLimit: UsageLimit(used: 80, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            emptyDetail: ""
+        )
+        let provider = make(snapshots: [snapshot]).providers.first
+        XCTAssertEqual(provider?.windows.map(\.label), ["Weekly"])
+        XCTAssertEqual(provider?.primaryWindowIndex, 0)
+        XCTAssertEqual(provider?.isBlocked, true)
+        XCTAssertNil(provider?.windows.first?.resetsAt)
+        XCTAssertNil(provider?.windows.first?.pace)
+    }
+
+    func testCursorSpilloverPrimaryAndSecondaryRolesReachPublicConsumers() {
+        let cursor = ProviderSnapshotBuilder.snapshot(
+            title: "private", service: .cursor,
+            metrics: UsageMetrics(
+                service: .cursor,
+                sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                weeklyLimit: UsageLimit(used: 27, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            emptyDetail: ""
+        )
+        let provider = make(snapshots: [cursor]).providers.first
+        XCTAssertEqual(provider?.windows.map(\.label), ["Cursor Models", "Other Models"])
+        XCTAssertEqual(provider?.primaryWindowIndex, 1)
+        XCTAssertEqual(provider?.isBlocked, false)
+
+        let claude = ProviderSnapshotBuilder.snapshot(
+            title: "private", service: .claudeCode,
+            metrics: UsageMetrics(
+                service: .claudeCode,
+                weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+                codeReviewLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            emptyDetail: ""
+        )
+        let claudeProvider = make(snapshots: [claude]).providers.first
+        XCTAssertEqual(claudeProvider?.primaryWindowIndex, 0)
+        XCTAssertEqual(claudeProvider?.windows.map(\.role), ["provider", "secondary"])
+        XCTAssertEqual(claudeProvider?.isBlocked, false)
+    }
+
     func testCreditBalancesWithoutAnAllowanceDoNotInventAPublicPercentage() {
         for reading in [UsageLimit.Reading.remainder, .unlimited] {
             let snapshot = ProviderSnapshot(
@@ -213,10 +273,11 @@ final class PublicProfileDocumentTests: XCTestCase {
           "schema": 1,
           "updatedAt": "2026-09-30T08:00:00Z",
           "providers": [{
-            "provider": "Claude Code", "name": "Claude Code",
+            "provider": "Claude Code", "name": "Claude Code", "isBlocked": false,
             "windows": [{
               "label": "Weekly", "usedPercent": 23,
-              "pace": "60% in reserve", "resetsAt": "2027-01-16T11:47:00Z"
+              "pace": "60% in reserve", "resetsAt": "2027-01-16T11:47:00Z",
+              "role": "provider", "isEstimated": false
             }]
           }]
         }
@@ -251,6 +312,7 @@ final class PublicProfileDocumentTests: XCTestCase {
         let allowed: Set<String> = [
             "schema", "updatedAt", "providers", "receipt",
             "provider", "name", "plan", "windows", "label", "usedPercent", "resetsAt", "pace",
+            "primaryWindowIndex", "isBlocked", "role", "isEstimated",
             "tokens30d", "sessions", "models", "dailyTokens", "tokens",
         ]
         XCTAssertEqual(keys.subtracting(allowed), [], "unexpected keys would leave the Mac")

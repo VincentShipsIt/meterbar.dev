@@ -30,6 +30,10 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         /// document, not a write every refresh.
         let resetsAt: Date?
         let pace: String?
+        /// Availability roles are explicit; model-specific quotas never gate
+        /// the provider. Optional for older schema-1 documents.
+        var role: String?
+        var isEstimated: Bool?
     }
 
     struct Provider: Codable, Equatable, Sendable {
@@ -39,6 +43,8 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         let name: String
         let plan: String?
         let windows: [Window]
+        var primaryWindowIndex: Int?
+        var isBlocked: Bool?
     }
 
     struct Model: Codable, Equatable, Sendable {
@@ -89,13 +95,14 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         costSummary: CostSummary?,
         now: Date = Date()
     ) -> PublicProfileDocument {
-        let cards = snapshots.compactMap { snapshot -> (snapshot: ProviderSnapshot, windows: [Window])? in
+        typealias Card = (snapshot: ProviderSnapshot, limits: [SnapshotLimit], windows: [Window])
+        let cards = snapshots.compactMap { snapshot -> Card? in
             guard snapshot.hasMetrics else { return nil }
-            let windows = quotaLimits(of: snapshot)
-                .prefix(maxWindowsPerProvider)
-                .compactMap { window(for: $0, now: now) }
+            let limits = Array(quotaLimits(of: snapshot).filter { sanitizedLabel($0.title) != nil }
+                .prefix(maxWindowsPerProvider))
+            let windows = limits.compactMap { window(for: $0, now: now) }
             guard !windows.isEmpty else { return nil }
-            return (snapshot, windows)
+            return (snapshot, limits, windows)
         }
         var seen: [ServiceType: Int] = [:]
         var providers: [Provider] = []
@@ -122,7 +129,11 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
                     provider: snapshot.service.rawValue,
                     name: name,
                     plan: plan(for: snapshot, snapshots: snapshots, plans: plans),
-                    windows: card.windows
+                    windows: card.windows,
+                    primaryWindowIndex: card.limits.firstIndex {
+                        $0.id == snapshot.presentationPrimaryLimit(now: now)?.id
+                    },
+                    isBlocked: snapshot.hasExhaustedLimit
                 )
             )
         }
@@ -198,21 +209,26 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
     /// which is not a limit and not what this profile is for.
     @MainActor
     private static func quotaLimits(of snapshot: ProviderSnapshot) -> [SnapshotLimit] {
-        snapshot.limits.filter { $0.valueStyle == .quota && $0.usageLimit.hasDepletingMeter }
+        snapshot.presentationLimits.filter { $0.valueStyle == .quota && $0.usageLimit.hasDepletingMeter }
     }
 
     @MainActor
     private static func window(for limit: SnapshotLimit, now: Date) -> Window? {
         guard let label = sanitizedLabel(limit.title) else { return nil }
         let row = SocialLimitsCardContent.row(for: limit, now: now)
-        let reset = limit.usageLimit.resetTime.map {
-            Date(timeIntervalSince1970: ($0.timeIntervalSince1970 / 60).rounded() * 60)
+        let reset = limit.usageLimit.resetTime.flatMap { time -> Date? in
+            guard time >= now.addingTimeInterval(-ProviderBlockingPolicy.resetDueGracePeriod) else {
+                return nil
+            }
+            return Date(timeIntervalSince1970: (time.timeIntervalSince1970 / 60).rounded() * 60)
         }
         return Window(
             label: label,
             usedPercent: min(100, max(0, 100 - row.percentLeft)),
             resetsAt: reset,
-            pace: row.pace.flatMap { sanitizedLabel($0.leftLabel, maxLength: 32) }
+            pace: row.showsBar ? row.pace.flatMap { sanitizedLabel($0.leftLabel, maxLength: 32) } : nil,
+            role: limit.isProviderBlocking ? "provider" : "secondary",
+            isEstimated: limit.usageLimit.isEstimated
         )
     }
 
