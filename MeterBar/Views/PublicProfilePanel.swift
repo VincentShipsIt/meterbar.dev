@@ -10,6 +10,7 @@ struct PublicProfilePanel: View {
     @StateObject private var store: PublicProfileStore
     @State private var showsPreview = false
     @State private var confirmsReset = false
+    @State private var confirmsAbandonReset = false
     @State private var copied = false
 
     init(store: PublicProfileStore = .shared) {
@@ -65,6 +66,12 @@ struct PublicProfilePanel: View {
                     }
                     .font(.caption)
                 }
+
+                if store.canAbandonPendingReset {
+                    Button("Create replacement link…") { confirmsAbandonReset = true }
+                        .disabled(!store.canPublish)
+                        .accessibilityIdentifier("publicProfile.recoverReset")
+                }
             }
         }
         .confirmationDialog(
@@ -75,6 +82,18 @@ struct PublicProfilePanel: View {
             Button("Reset link", role: .destructive) {
                 Task { await store.reset(document: PublicProfileSource.currentDocument()) }
             }
+        }
+        .confirmationDialog(
+            PublicProfilePresentation.abandonResetConfirmation,
+            isPresented: $confirmsAbandonReset,
+            titleVisibility: .visible
+        ) {
+            Button("Create replacement link", role: .destructive) {
+                Task { await store.abandonPendingReset(document: PublicProfileSource.currentDocument()) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(PublicProfilePresentation.abandonResetWarning)
         }
     }
 

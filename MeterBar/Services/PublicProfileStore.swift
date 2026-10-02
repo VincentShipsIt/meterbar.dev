@@ -110,6 +110,12 @@ final class PublicProfileStore: ObservableObject {
     /// Deletion deliberately does not depend on this gate.
     var canPublish: Bool { !isDemoMode() }
 
+    /// Recovery requires explicit acceptance that the old URL was not deleted.
+    var canAbandonPendingReset: Bool {
+        guard isResetPending, let slug, pendingDeletions.contains(slug) else { return false }
+        return keys.key(for: slug) == nil
+    }
+
     // MARK: Intent
 
     func setEnabled(_ enabled: Bool, document: PublicProfileDocument) async {
@@ -159,6 +165,16 @@ final class PublicProfileStore: ObservableObject {
         }
     }
 
+    /// Called only after the user accepts the old profile's server expiry.
+    func abandonPendingReset(document: PublicProfileDocument) async {
+        await serialized { [self] in
+            guard canPublish, canAbandonPendingReset, let slug else { return }
+            pendingDeletions.removeAll { $0 == slug }
+            persist()
+            await completePendingReset(document: document, force: true)
+        }
+    }
+
     /// Called after each refresh by the coordinator.
     func sync(document: PublicProfileDocument) async {
         await serialized { [self] in
@@ -187,7 +203,9 @@ final class PublicProfileStore: ObservableObject {
         status = .syncing
         await flushPendingDeletions(force: force)
         guard pendingDeletions.isEmpty else {
-            status = .error("The old profile could not be deleted. Reset is pending and will retry.")
+            status = .error(canAbandonPendingReset
+                ? "The old profile's deletion key is unavailable. Restore Keychain access or create a replacement link."
+                : "The old profile could not be deleted. Reset is pending and will retry.")
             return
         }
         if let slug { keys.remove(for: slug) }

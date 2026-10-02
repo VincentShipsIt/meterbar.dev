@@ -491,6 +491,131 @@ final class PublicProfileStoreTests: XCTestCase {
         XCTAssertEqual(service.deleteCount, 0)
         XCTAssertEqual(service.publishCount, 1)
         XCTAssertTrue(keys.stored.isEmpty)
+
+        let relaunched = makeStore()
+        await relaunched.resumePendingDeletions()
+        clock.addTimeInterval(PublicProfileStore.flushRetryInterval + 1)
+        await relaunched.sync(document: document())
+        XCTAssertEqual(relaunched.slug, oldSlug)
+        XCTAssertNil(relaunched.profileURL)
+        XCTAssertTrue(relaunched.canAbandonPendingReset)
+        XCTAssertEqual(service.publishCount, 1)
+
+        await relaunched.abandonPendingReset(document: document())
+        let replacement = try XCTUnwrap(relaunched.slug)
+        XCTAssertNotEqual(replacement, oldSlug)
+        XCTAssertNotNil(relaunched.profileURL)
+        XCTAssertFalse(relaunched.isResetPending)
+        XCTAssertFalse(relaunched.canAbandonPendingReset)
+        XCTAssertTrue(relaunched.pendingDeletions.isEmpty)
+        XCTAssertEqual(service.deleteCount, 0)
+        XCTAssertEqual(service.publishCount, 2)
+        XCTAssertEqual(relaunched.status, .live)
+
+        let recovered = makeStore()
+        XCTAssertEqual(recovered.slug, replacement)
+        XCTAssertNotNil(recovered.profileURL)
+        XCTAssertFalse(recovered.isResetPending)
+    }
+
+    func testRestoringMissingResetKeyDeletesBeforePublishingTheReplacement() async throws {
+        let store = makeStore()
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        let oldKey = try XCTUnwrap(keys.stored[oldSlug])
+        keys.stored.removeAll()
+        await store.reset(document: document())
+
+        keys.stored[oldSlug] = oldKey
+        clock.addTimeInterval(PublicProfileStore.flushRetryInterval + 1)
+        await store.sync(document: document())
+
+        XCTAssertFalse(store.canAbandonPendingReset)
+        XCTAssertFalse(store.isResetPending)
+        XCTAssertNotEqual(store.slug, oldSlug)
+        XCTAssertEqual(service.calls[1], .delete(slug: oldSlug, key: oldKey))
+        XCTAssertEqual(service.publishCount, 2)
+        XCTAssertEqual(store.status, .live)
+    }
+
+    func testAbandonResetCannotSkipDeletionWhenTheKeyIsAvailable() async throws {
+        let store = makeStore()
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        service.deleteResult = .failed("offline")
+        await store.reset(document: document())
+
+        await store.abandonPendingReset(document: document())
+
+        XCTAssertFalse(store.canAbandonPendingReset)
+        XCTAssertTrue(store.isResetPending)
+        XCTAssertEqual(store.slug, oldSlug)
+        XCTAssertEqual(store.pendingDeletions, [oldSlug])
+        XCTAssertEqual(service.deleteCount, 1)
+        XCTAssertEqual(service.publishCount, 1)
+    }
+
+    func testAbandonMissingResetKeyWhileDisabledDoesNotPublishOrEnableSharing() async throws {
+        let store = makeStore()
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        keys.stored.removeAll()
+        await store.reset(document: document())
+        await store.setEnabled(false, document: document())
+
+        await store.abandonPendingReset(document: document())
+
+        XCTAssertNotEqual(store.slug, oldSlug)
+        XCTAssertFalse(store.isEnabled)
+        XCTAssertFalse(store.isResetPending)
+        XCTAssertNil(store.profileURL)
+        XCTAssertEqual(store.status, .off)
+        XCTAssertEqual(service.deleteCount, 0)
+        XCTAssertEqual(service.publishCount, 1)
+    }
+
+    func testDemoModeCannotAbandonMissingResetKeyOrMintAReplacement() async throws {
+        var demo = false
+        let store = makeStore(isDemoMode: { demo })
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        keys.stored.removeAll()
+        await store.reset(document: document())
+        demo = true
+
+        await store.abandonPendingReset(document: document())
+
+        XCTAssertEqual(store.slug, oldSlug)
+        XCTAssertTrue(store.isResetPending)
+        XCTAssertEqual(store.pendingDeletions, [oldSlug])
+        XCTAssertTrue(keys.stored.isEmpty)
+        XCTAssertEqual(service.publishCount, 1)
+    }
+
+    func testAbandonMissingResetKeyRecoversFromKeychainSaveFailureAfterRelaunch() async throws {
+        let store = makeStore()
+        await store.setEnabled(true, document: document())
+        let oldSlug = try XCTUnwrap(store.slug)
+        keys.stored.removeAll()
+        await store.reset(document: document())
+        keys.failsSaves = true
+
+        await store.abandonPendingReset(document: document())
+
+        XCTAssertNil(store.slug)
+        XCTAssertNil(store.profileURL)
+        XCTAssertTrue(store.isResetPending)
+        XCTAssertTrue(store.pendingDeletions.isEmpty)
+        XCTAssertEqual(service.publishCount, 1)
+
+        keys.failsSaves = false
+        let relaunched = makeStore()
+        await relaunched.sync(document: document())
+        XCTAssertNotEqual(relaunched.slug, oldSlug)
+        XCTAssertNotNil(relaunched.profileURL)
+        XCTAssertFalse(relaunched.isResetPending)
+        XCTAssertEqual(service.deleteCount, 0)
+        XCTAssertEqual(service.publishCount, 2)
     }
 
     func testDemoRetryMayDeleteButCannotMintOrPublishTheReplacement() async throws {
