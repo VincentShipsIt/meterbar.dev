@@ -9,6 +9,14 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR supersedes its in-flight run: cancel it rather than let
+# three macos-26 jobs finish for a head nobody will merge. Pushes to master
+# keep their own group per ref and are never cancelled, so every landed
+# commit still gets a complete run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The branch-protection-required `build` context includes the full Xcode app and
 # widget build. This keeps entry-point, project wiring, entitlements, and widget
 # regressions from merging behind a SwiftPM-only green check.

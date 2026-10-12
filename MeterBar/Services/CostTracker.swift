@@ -138,11 +138,22 @@ class CostTracker: ObservableObject {
     func refreshMissingDaysInBackground(days: Int = CostWindow.scanWindowDays) async {
         guard !demoMode else { return }
 
-        guard let snapshot = await MainActor.run(body: { () -> (CostSummary?, Date?, Set<ServiceType>)? in
+        guard let snapshot = await MainActor.run(body: { () -> BackgroundRefreshSnapshot? in
             guard !isRefreshInProgress else { return nil }
-            return (costSummary, lastScanDate, providerVisibilityStore.enabledServices)
+            return BackgroundRefreshSnapshot(
+                summary: costSummary,
+                scanDate: lastScanDate,
+                enabledServices: providerVisibilityStore.enabledServices,
+                // Captured here, on the main actor that owns both stores, so the
+                // probe below never reads them from the scan queue. Every
+                // configured account, matching `makeCostSummary`.
+                claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
+                grokAccounts: GrokAccountStore.shared.accounts
+            )
         }) else { return }
-        let (summary, scanDate, enabledServices) = snapshot
+        let summary = snapshot.summary
+        let scanDate = snapshot.scanDate
+        let enabledServices = snapshot.enabledServices
 
         // The filesystem walk `needsBackgroundRefresh` can require is the
         // expensive half of this gate (issue #545): resolve it off the main
@@ -153,9 +164,19 @@ class CostTracker: ObservableObject {
         // own early-outs so an unnecessary walk is never kicked off.
         let evidence: Bool?
         if summary != nil, let scanDate {
+            let claudeAccounts = snapshot.claudeAccounts
+            let grokAccounts = snapshot.grokAccounts
             evidence = await Self.evidenceOfNewTranscripts(
                 since: scanDate,
-                enabledServices: enabledServices
+                enabledServices: enabledServices,
+                probe: { date, services in
+                    CostScanFreshnessProbe.hasNewTranscripts(
+                        since: date,
+                        enabledServices: services,
+                        claudeAccounts: claudeAccounts,
+                        grokAccounts: grokAccounts
+                    )
+                }
             )
         } else {
             evidence = nil
@@ -192,10 +213,12 @@ class CostTracker: ObservableObject {
     /// without constructing a full tracker.
     ///
     /// `newTranscriptsSinceLastScan` is the mtime-evidence probe backing
-    /// `CostSummary`'s "already scanned" gate (issue #517): injectable so
+    /// `CostSummary`'s "already scanned" gate (issue #517): injected so
     /// tests can drive the gate without touching real files on disk.
-    /// Production leaves it at `CostScanFreshnessProbe.hasNewTranscripts`,
-    /// which walks the enabled providers' roots; the same evidence is reused
+    /// Production passes evidence it already resolved off the main actor via
+    /// `evidenceOfNewTranscripts`; there is no default, because walking the
+    /// corpus here would block whichever actor called it (issue #545). The
+    /// same evidence is reused
     /// for all three `needsMissing*` checks below rather than walking the
     /// corpus three times.
     static func needsBackgroundRefresh(
@@ -204,7 +227,7 @@ class CostTracker: ObservableObject {
         enabledServices: Set<ServiceType>,
         days: Int,
         now: Date = Date(),
-        newTranscriptsSinceLastScan: (Date, Set<ServiceType>) -> Bool? = CostScanFreshnessProbe.hasNewTranscripts
+        newTranscriptsSinceLastScan: (Date, Set<ServiceType>) -> Bool?
     ) -> Bool {
         let hasEnabled = hasEnabledCostScanProvider(in: enabledServices)
         guard let summary else { return hasEnabled }
@@ -243,19 +266,20 @@ class CostTracker: ObservableObject {
     /// popover's own `.task` — and everything else queued behind the main
     /// actor — blocked on the walk.
     ///
-    /// `probe` is injectable, mirroring `needsBackgroundRefresh`'s own seam,
+    /// `probe` is required, mirroring `needsBackgroundRefresh`'s own seam,
     /// so tests can drive this without touching real files, the real home
-    /// directory, or the main actor at all. Production leaves it at
-    /// `CostScanFreshnessProbe.hasNewTranscripts`. A cancelled or failed hop
+    /// directory, or the main actor at all. Production passes
+    /// `CostScanFreshnessProbe.hasNewTranscripts` bound to account lists
+    /// captured on the main actor; there is deliberately no default, because
+    /// any default would have to read the main-actor account stores from the
+    /// scan queue. A cancelled or failed hop
     /// to the scan queue answers `nil` — "unknown," the same value the probe
     /// itself returns for a root it could not finish walking — rather than
     /// silently claiming there is no new evidence.
     static func evidenceOfNewTranscripts(
         since lastScanDate: Date,
         enabledServices: Set<ServiceType>,
-        probe: @escaping @Sendable (Date, Set<ServiceType>) -> Bool? = { date, services in
-            CostScanFreshnessProbe.hasNewTranscripts(since: date, enabledServices: services)
-        }
+        probe: @escaping @Sendable (Date, Set<ServiceType>) -> Bool?
     ) async -> Bool? {
         guard let evidence = try? await CostScanExecutor.run({ _ in probe(lastScanDate, enabledServices) }) else {
             return nil
@@ -415,6 +439,16 @@ class CostTracker: ObservableObject {
         }
 
         return latest
+    }
+
+    /// Main-actor state `refreshMissingDaysInBackground` reads once before
+    /// hopping to the scan queue.
+    private struct BackgroundRefreshSnapshot: Sendable {
+        let summary: CostSummary?
+        let scanDate: Date?
+        let enabledServices: Set<ServiceType>
+        let claudeAccounts: [ClaudeCodeAccount]
+        let grokAccounts: [GrokAccount]
     }
 
     /// One budgeted slice: what it computed, and whether the next one can pick

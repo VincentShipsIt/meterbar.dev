@@ -86,6 +86,41 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 604_800)
     }
 
+    /// OpenRouter weeks run Monday through Sunday regardless of the caller's
+    /// calendar. A Sunday-first calendar — the production default, and the
+    /// US locale's — must still land the reset on Monday 00:00 UTC.
+    func testWeeklyKeyLimitResetsOnMondayWhateverTheCalendarsFirstWeekday() throws {
+        let credits = try decodeCredits(#"{"data":{"total_credits":20,"total_usage":5}}"#)
+        let key = try decodeKey(
+            #"{"data":{"limit":10,"limit_reset":"weekly","limit_remaining":4,"usage":6,"is_free_tier":false}}"#
+        )
+        var sundayFirst = Calendar(identifier: .gregorian)
+        sundayFirst.firstWeekday = 1
+
+        let defaultCalendarMetrics = OpenRouterService.map(
+            credits: credits.data,
+            key: key.data,
+            now: date(2026, 7, 15, 16)
+        )
+        let sundayFirstMetrics = OpenRouterService.map(
+            credits: credits.data,
+            key: key.data,
+            now: date(2026, 7, 15, 16),
+            calendar: sundayFirst
+        )
+        // Sunday itself is still inside the Monday-started week.
+        let onSundayMetrics = OpenRouterService.map(
+            credits: credits.data,
+            key: key.data,
+            now: date(2026, 7, 19, 23),
+            calendar: sundayFirst
+        )
+
+        XCTAssertEqual(defaultCalendarMetrics.sessionLimit?.resetTime, date(2026, 7, 20))
+        XCTAssertEqual(sundayFirstMetrics.sessionLimit?.resetTime, date(2026, 7, 20))
+        XCTAssertEqual(onSundayMetrics.sessionLimit?.resetTime, date(2026, 7, 20))
+    }
+
     // MARK: - Poll observations
 
     /// OpenRouter denominates `usage` and `usage_daily` in dollars, so the
