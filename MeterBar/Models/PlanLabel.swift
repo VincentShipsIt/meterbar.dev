@@ -1,0 +1,49 @@
+import Foundation
+import MeterBarShared
+
+/// The short account-type label a provider card shows beside its name
+/// ("Max 20x", "Pro", "Ultra"). Providers report plan tokens in their own
+/// shapes, so each is normalised here once and the card only renders the result.
+enum PlanLabel {
+    /// - Parameters:
+    ///   - token: the provider's raw plan token (`subscriptionType`, `plan_type`,
+    ///     `membershipType`, Grok tier, Z.ai level).
+    ///   - rateLimitTier: Claude's tier token (`default_claude_max_20x`), which
+    ///     is what distinguishes Max 5x from Max 20x.
+    static func make(service: ServiceType, token: String?, rateLimitTier: String? = nil) -> String? {
+        guard let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
+            return nil
+        }
+        switch service {
+        case .grok:
+            // Already human-facing ("SuperGrok").
+            return token
+        case .claudeCode:
+            let base = words(token)
+            guard let multiplier = claudeMultiplier(from: rateLimitTier) else { return base }
+            return "\(base) \(multiplier)"
+        case .codexCli:
+            return token.lowercased() == "prolite" ? "Pro Lite" : words(token)
+        case .cursor, .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot:
+            return words(token)
+        }
+    }
+
+    private static func words(_ token: String) -> String {
+        token
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
+    }
+
+    /// `default_claude_max_20x` → `20x`; tiers with no multiplier return nil.
+    private static func claudeMultiplier(from tier: String?) -> String? {
+        guard let tier else { return nil }
+        return tier
+            .split(whereSeparator: { $0 == "_" || $0 == "-" })
+            .map { $0.lowercased() }
+            .first { part in
+                part.hasSuffix("x") && Int(part.dropLast()) != nil
+            }
+    }
+}

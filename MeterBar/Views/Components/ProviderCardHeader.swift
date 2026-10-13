@@ -20,11 +20,13 @@ struct ProviderCardHeader: View {
         let title: String
         let subtitle: String
         let statusText: String
+        let planLabel: String?
 
         init(snapshot: ProviderSnapshot) {
             title = snapshot.title
             subtitle = snapshot.updatedText
             statusText = ProviderCardPresentation.statusText(for: snapshot)
+            planLabel = snapshot.planLabel
         }
     }
 
@@ -39,10 +41,16 @@ struct ProviderCardHeader: View {
             ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(content.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(content.title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    if let plan = content.planLabel {
+                        MeterBarChip(plan, tint: snapshot.accentColor)
+                            .accessibilityLabel("\(plan) plan")
+                    }
+                }
                 Text(content.subtitle)
                     .font(.caption2)
                     .foregroundColor(.secondary)
