@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 # A new push to a PR supersedes its in-flight run: cancel it rather than let
-# three macos-26 jobs finish for a head nobody will merge. Pushes to master
-# keep their own group per ref and are never cancelled, so every landed
-# commit still gets a complete run.
+# three macos-26 jobs finish for a head nobody will merge. A master push gets a
+# group of its own, keyed by commit: GitHub keeps only one pending run per
+# group and replaces it on the next push even without cancel-in-progress, so a
+# shared master group could drop the run for a landed commit.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The branch-protection-required `build` context includes the full Xcode app and
