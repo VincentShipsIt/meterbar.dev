@@ -743,11 +743,14 @@ enum ProviderSnapshotBuilder {
             .grok: input.grokAccounts.first(where: \.isDefault)?.id,
             .openRouter: input.openRouterAccounts.first(where: \.isDefault)?.id
         ].compactMapValues { $0 }
+        let multiAccountServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok, .openRouter]
         return cards.map { card in
             guard card.isAccountCard, let label = input.planLabels[card.service] else { return card }
-            let siblings = cards.filter { $0.isAccountCard && $0.service == card.service }
-            let ownsCredentials = siblings.count == 1
-                || (card.accountID != nil && card.accountID == defaultIDs[card.service])
+            let isDefaultAccount = card.accountID != nil && card.accountID == defaultIDs[card.service]
+            // Multi-profile providers keep their live credentials on the
+            // default profile only, so a lone custom profile never inherits it.
+            // Single-account providers have one card that owns them.
+            let ownsCredentials = multiAccountServices.contains(card.service) ? isDefaultAccount : true
             guard ownsCredentials else { return card }
             var labelled = card
             labelled.planLabel = label

@@ -41,4 +41,21 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(cards.first { $0.accountID == CodexAccount.defaultID }?.planLabel, "Pro")
         XCTAssertNil(cards.first { $0.accountID == custom.id }?.planLabel)
     }
+
+    func testLoneCustomProfileDoesNotInheritTheDefaultAccountsPlan() {
+        let custom = CodexAccount(id: UUID(), name: "Work", homeDirectory: "/tmp/work")
+        var input = ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            claudeAccounts: [],
+            claudeAccountMetrics: [:],
+            enabledServices: [.codexCli]
+        )
+        var disabledDefault = CodexAccount.defaultAccount
+        disabledDefault.isEnabled = false
+        input.codexAccounts = [disabledDefault, custom]
+        input.planLabels = [.codexCli: "Pro"]
+        let cards = ProviderSnapshotBuilder.snapshots(input)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertNil(cards.first?.planLabel)
+    }
 }
