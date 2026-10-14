@@ -186,6 +186,19 @@ struct QuotaEventSettingsView: View {
             .frame(maxWidth: 300)
         }
 
+        SettingsRowView(
+            title: "Allow delivery through system proxy / fake-IP DNS",
+            detail: "Skips the public-address checks. A local proxy can read the payload. "
+                + "Literal private and loopback URLs stay blocked."
+        ) {
+            Toggle("Allow delivery through system proxy / fake-IP DNS", isOn: Binding(
+                get: { store.configuration.webhookAllowsSystemProxyOrFakeIPDNS },
+                set: { store.setWebhookAllowsSystemProxyOrFakeIPDNS($0) }
+            ))
+            .labelsHidden()
+            .meterBarSwitch()
+        }
+
         if !store.configuration.webhookURLString.isEmpty,
            store.configuration.validatedWebhookURL == nil {
             SettingsNotice(

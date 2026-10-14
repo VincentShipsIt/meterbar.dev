@@ -92,6 +92,66 @@ final class QuotaWebhookClientTests: XCTestCase {
         }
     }
 
+    func testBenchmarkFakeIPRangeStaysNonPublic() {
+        XCTAssertTrue(QuotaWebhookURLPolicy.isUnsafeAddressLiteral("198.18.0.5"))
+        XCTAssertNil(QuotaWebhookURLPolicy.validatedURL("https://198.18.0.5/meterbar"))
+        XCTAssertFalse(QuotaWebhookURLPolicy.hostResolvesOnlyToPublicAddresses("198.18.0.5"))
+    }
+
+    func testFakeIPResolutionDeliversOnlyWhenProxyOptInIsOn() async throws {
+        let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
+        let payload = makePayload()
+        StubURLProtocol.handler = { _ in
+            (
+                try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)),
+                Data()
+            )
+        }
+
+        let blocked = await makeClient(hostIsPublic: { _ in false })
+            .post(payload: payload, to: url, allowsSystemProxyOrFakeIPDNS: false)
+        XCTAssertEqual(blocked, .failed("Webhook host is not public."))
+
+        let delivered = await makeClient(hostIsPublic: { _ in false })
+            .post(payload: payload, to: url, allowsSystemProxyOrFakeIPDNS: true)
+        XCTAssertEqual(delivered, .succeeded)
+    }
+
+    func testLoopbackAndFakeIPRemoteAddressesSucceedOnlyWhenProxyOptInIsOn() async throws {
+        let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
+        StubURLProtocol.handler = { _ in
+            (
+                try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)),
+                Data()
+            )
+        }
+
+        for address in ["127.0.0.1", "198.18.0.5"] {
+            let blocked = await makeClient(observedRemoteAddress: address)
+                .post(payload: makePayload(), to: url, allowsSystemProxyOrFakeIPDNS: false)
+            XCTAssertEqual(blocked, .failed("Webhook connected to a non-public address."), address)
+
+            let delivered = await makeClient(observedRemoteAddress: address)
+                .post(payload: makePayload(), to: url, allowsSystemProxyOrFakeIPDNS: true)
+            XCTAssertEqual(delivered, .succeeded, address)
+        }
+    }
+
+    func testLiteralPrivateURLStaysRejectedWhenProxyOptInIsOn() async throws {
+        StubURLProtocol.handler = { _ in
+            XCTFail("Transport must not start for a literal private URL.")
+            throw URLError(.badURL)
+        }
+
+        let result = await makeClient().post(
+            payload: makePayload(),
+            to: try XCTUnwrap(URL(string: "https://10.0.0.1/meterbar")),
+            allowsSystemProxyOrFakeIPDNS: true
+        )
+
+        XCTAssertEqual(result, .failed("Webhook URL is not allowed."))
+    }
+
     func testPostsOnlyTheVersionedMinimalJSONContractWithoutSecrets() async throws {
         let client = makeClient()
         let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
@@ -267,13 +327,26 @@ final class QuotaWebhookClientTests: XCTestCase {
         XCTAssertEqual(connectionDelegate.observedAddressCount, 0)
     }
 
-    private func makeClient() -> QuotaWebhookClient {
+    private func makeClient(
+        hostIsPublic: @escaping @Sendable (String) async -> Bool = { _ in true },
+        observedRemoteAddress: String? = nil
+    ) -> QuotaWebhookClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
+        let connectionDelegate = QuotaWebhookConnectionDelegate()
+        let recordedAddress = observedRemoteAddress
         return QuotaWebhookClient(
             configuration: configuration,
             timeout: 0.1,
-            hostIsPublic: { _ in true }
+            hostIsPublic: hostIsPublic,
+            connectionDelegate: connectionDelegate,
+            taskCreatedForTesting: { task in
+                guard let recordedAddress else { return }
+                connectionDelegate.recordRemoteAddress(
+                    recordedAddress,
+                    forTaskIdentifier: task.taskIdentifier
+                )
+            }
         )
     }
 

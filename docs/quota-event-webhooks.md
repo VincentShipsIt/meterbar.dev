@@ -79,11 +79,26 @@ MeterBar sends only the fields documented above.
 
 Webhook URLs must use HTTPS on port 443 with no embedded credentials or
 fragment. Literal loopback, link-local, private, multicast, single-label LAN,
-and common local-service hosts are rejected. MeterBar also resolves the host
-immediately before delivery and refuses it if any resolved address is
-non-public. Redirects are never followed. Requests use an ephemeral,
-cookie-free, credential-free session with bounded timeouts; failures are
-nonfatal and do not block other events or the local-command lane.
+and common local-service hosts are rejected. Those literal checks always
+apply.
+
+By default, MeterBar also resolves the host immediately before delivery and
+refuses it if any resolved address is non-public. After the request is sent,
+MeterBar reads the address URLSession connected to and reports failure when
+that address is non-public. That after-send check detects the connection. It
+does not prevent the body from leaving the machine. Redirects are never
+followed.
+
+Users who route traffic through a local proxy or a fake-IP DNS resolver
+(addresses in `198.18.0.0/15`) can turn on **Allow delivery through system
+proxy / fake-IP DNS**. That opt-in is off by default. While it is on, MeterBar
+skips the resolved-address check and the after-send connected-address check.
+The proxy can read the payload. Literal private and loopback URLs stay
+blocked.
+
+Requests use an ephemeral, cookie-free, credential-free session with bounded
+timeouts; failures are nonfatal and do not block other events or the
+local-command lane.
 
 ## Local command environment
 

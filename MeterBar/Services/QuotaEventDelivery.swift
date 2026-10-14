@@ -80,7 +80,11 @@ nonisolated struct QuotaEventDeliveryHandlers: Sendable {
                 guard let url = configuration.validatedWebhookURL else {
                     return .failed("Webhook URL is not allowed.")
                 }
-                switch await webhookClient.post(payload: payload, to: url) {
+                switch await webhookClient.post(
+                    payload: payload,
+                    to: url,
+                    allowsSystemProxyOrFakeIPDNS: configuration.webhookAllowsSystemProxyOrFakeIPDNS
+                ) {
                 case .succeeded: return .succeeded
                 case let .failed(message): return .failed(message)
                 }
