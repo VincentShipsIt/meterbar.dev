@@ -19,13 +19,16 @@ nonisolated enum CostScanFreshnessProbe {
     /// Whether any enabled provider's transcripts changed after `lastScanDate`.
     ///
     /// Resolves the same roots a real scan would (`ClaudeCostScanner`,
-    /// `CodexCostScanner`, `GrokCostScanner`), so this is the production
-    /// default `CostTracker.evidenceOfNewTranscripts` injects. Tests should
-    /// inject their own closure rather than call this directly — it reads
-    /// real account stores and home directories. Callers are expected to run
-    /// this off the main actor (see `CostTracker.evidenceOfNewTranscripts`);
-    /// it does no actor hopping itself so it stays trivially callable from a
-    /// plain background queue.
+    /// `CodexCostScanner`, `GrokCostScanner`), so this is the probe
+    /// `CostTracker.refreshMissingDaysInBackground` hands to
+    /// `CostTracker.evidenceOfNewTranscripts`. Callers are expected to run
+    /// this off the main actor; it does no actor hopping itself so it stays
+    /// trivially callable from a plain background queue.
+    ///
+    /// The account lists arrive as values captured on the main actor rather
+    /// than being read from `ClaudeCodeAccountStore` / `GrokAccountStore`
+    /// here: those stores are main-actor state that Settings can mutate while
+    /// this walk runs on the scan queue.
     ///
     /// - Returns: `true`/`false` when every enabled provider's roots could be
     ///   walked in full; `nil` when at least one could not (an unreadable
@@ -33,7 +36,9 @@ nonisolated enum CostScanFreshnessProbe {
     ///   in that case.
     static func hasNewTranscripts(
         since lastScanDate: Date,
-        enabledServices: Set<ServiceType>
+        enabledServices: Set<ServiceType>,
+        claudeAccounts: [ClaudeCodeAccount],
+        grokAccounts: [GrokAccount]
     ) -> Bool? {
         let providers = CostScanProvider.allCases.filter { enabledServices.contains($0.service) }
         guard !providers.isEmpty else { return false }
@@ -41,7 +46,7 @@ nonisolated enum CostScanFreshnessProbe {
         var sawIncompleteWalk = false
         for provider in providers {
             let evidence = hasNewTranscripts(
-                in: roots(for: provider),
+                in: roots(for: provider, claudeAccounts: claudeAccounts, grokAccounts: grokAccounts),
                 since: lastScanDate,
                 fileNames: fileNames(for: provider)
             )
@@ -185,16 +190,20 @@ nonisolated enum CostScanFreshnessProbe {
         }
     }
 
-    private static func roots(for provider: CostScanProvider) -> [URL] {
+    private static func roots(
+        for provider: CostScanProvider,
+        claudeAccounts: [ClaudeCodeAccount],
+        grokAccounts: [GrokAccount]
+    ) -> [URL] {
         switch provider {
         case .claude:
-            ClaudeCostScanner.projectRoots(accounts: ClaudeCodeAccountStore.shared.accounts)
+            ClaudeCostScanner.projectRoots(accounts: claudeAccounts)
         case .codex:
             CodexCostScanner.rolloutDirectories(
                 in: URL(fileURLWithPath: CodexHomeDirectory.path(), isDirectory: true)
             )
         case .grok:
-            GrokCostScanner.sessionRoots(accounts: GrokAccountStore.shared.accounts)
+            GrokCostScanner.sessionRoots(accounts: grokAccounts)
         }
     }
 
