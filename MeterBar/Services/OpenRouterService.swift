@@ -245,6 +245,10 @@ final class OpenRouterService: ObservableObject {
         guard let rawValue else { return (nil, nil) }
         var utc = calendar
         utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        // OpenRouter's weeks run Monday through Sunday. Pin that here rather
+        // than inheriting the caller's first weekday: the default gregorian
+        // calendar starts on Sunday, which put the reset a day early.
+        utc.firstWeekday = 2
 
         switch rawValue.lowercased() {
         case "daily":

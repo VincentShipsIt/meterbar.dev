@@ -6,7 +6,7 @@ import Foundation
 /// card shows tokens and an approximate cost, not a percentage or billing total.
 enum ApiUsageService {
     /// Safety cap on pagination so a misbehaving API can never loop forever.
-    private static let maxUsagePages = 50
+    nonisolated private static let maxUsagePages = 50
 
     static func fetch(
         provider: ApiProvider,
@@ -249,7 +249,7 @@ private struct ModelTokenAccumulator {
 
 // MARK: - Anthropic response DTOs
 
-struct AnthropicUsageResponse: Codable {
+nonisolated struct AnthropicUsageResponse: Codable {
     let data: [AnthropicUsageBucket]
     let hasMore: Bool?
     let nextPage: String?
@@ -261,11 +261,11 @@ struct AnthropicUsageResponse: Codable {
     }
 }
 
-struct AnthropicUsageBucket: Codable {
+nonisolated struct AnthropicUsageBucket: Codable {
     let results: [AnthropicUsageResult]
 }
 
-struct AnthropicUsageResult: Codable {
+nonisolated struct AnthropicUsageResult: Codable {
     let uncachedInputTokens: Int?
     let cacheReadInputTokens: Int?
     let cacheCreation: AnthropicCacheCreation?
@@ -299,7 +299,7 @@ struct AnthropicUsageResult: Codable {
     }
 }
 
-struct AnthropicCacheCreation: Codable {
+nonisolated struct AnthropicCacheCreation: Codable {
     let ephemeral1HourInputTokens: Int?
     let ephemeral5MinuteInputTokens: Int?
 
@@ -311,7 +311,7 @@ struct AnthropicCacheCreation: Codable {
 
 // MARK: - OpenAI response DTOs
 
-struct OpenAIUsageResponse: Codable {
+nonisolated struct OpenAIUsageResponse: Codable {
     let data: [OpenAIUsageBucket]
     let hasMore: Bool?
     let nextPage: String?
@@ -323,11 +323,11 @@ struct OpenAIUsageResponse: Codable {
     }
 }
 
-struct OpenAIUsageBucket: Codable {
+nonisolated struct OpenAIUsageBucket: Codable {
     let results: [OpenAIUsageResult]
 }
 
-struct OpenAIUsageResult: Codable {
+nonisolated struct OpenAIUsageResult: Codable {
     let inputTokens: Int?
     /// The portion of `inputTokens` served from cache — priced at a
     /// discounted cache-read rate rather than the full input rate (#537).
