@@ -48,6 +48,9 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
     var localArguments: [String]
     var webhookDeliveryEnabled: Bool
     var webhookURLString: String
+    /// Skips the pre-send DNS check and the after-send connected-address check.
+    /// Literal private, loopback, and link-local URLs stay rejected.
+    var webhookAllowsSystemProxyOrFakeIPDNS: Bool
     var enabledQuotaEvents: Set<QuotaEventKind>
     var enabledProviders: Set<ServiceType>
     var enabledAccounts: Set<QuotaEventAccountSelection>
@@ -60,6 +63,7 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         localArguments: [],
         webhookDeliveryEnabled: false,
         webhookURLString: "",
+        webhookAllowsSystemProxyOrFakeIPDNS: false,
         enabledQuotaEvents: [],
         enabledProviders: [],
         enabledAccounts: [],
@@ -106,6 +110,7 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         case localArguments
         case webhookDeliveryEnabled
         case webhookURLString
+        case webhookAllowsSystemProxyOrFakeIPDNS
         case enabledQuotaEvents
         case enabledProviders
         case enabledAccounts
@@ -119,6 +124,7 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         localArguments: [String],
         webhookDeliveryEnabled: Bool,
         webhookURLString: String,
+        webhookAllowsSystemProxyOrFakeIPDNS: Bool = false,
         enabledQuotaEvents: Set<QuotaEventKind>,
         enabledProviders: Set<ServiceType>,
         enabledAccounts: Set<QuotaEventAccountSelection>,
@@ -130,6 +136,7 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         self.localArguments = localArguments
         self.webhookDeliveryEnabled = webhookDeliveryEnabled
         self.webhookURLString = webhookURLString
+        self.webhookAllowsSystemProxyOrFakeIPDNS = webhookAllowsSystemProxyOrFakeIPDNS
         self.enabledQuotaEvents = enabledQuotaEvents
         self.enabledProviders = enabledProviders
         self.enabledAccounts = enabledAccounts
@@ -157,6 +164,10 @@ nonisolated struct QuotaEventIntegrationConfiguration: Codable, Equatable, Senda
         localArguments = values.decodeTolerantly([String].self, forKey: .localArguments) ?? []
         webhookDeliveryEnabled = values.decodeTolerantly(Bool.self, forKey: .webhookDeliveryEnabled) ?? false
         webhookURLString = values.decodeTolerantly(String.self, forKey: .webhookURLString) ?? ""
+        webhookAllowsSystemProxyOrFakeIPDNS = values.decodeTolerantly(
+            Bool.self,
+            forKey: .webhookAllowsSystemProxyOrFakeIPDNS
+        ) ?? false
         enabledQuotaEvents = values.decodeSetTolerantly(QuotaEventKind.self, forKey: .enabledQuotaEvents) ?? []
         enabledProviders = values.decodeSetTolerantly(ServiceType.self, forKey: .enabledProviders) ?? []
         enabledAccounts = values.decodeSetTolerantly(
@@ -262,6 +273,12 @@ final class QuotaEventSettingsStore: ObservableObject {
         if enabled, configuration.validatedWebhookURL == nil { return }
         guard enabled != configuration.webhookDeliveryEnabled else { return }
         configuration.webhookDeliveryEnabled = enabled
+        persist()
+    }
+
+    func setWebhookAllowsSystemProxyOrFakeIPDNS(_ allowed: Bool) {
+        guard allowed != configuration.webhookAllowsSystemProxyOrFakeIPDNS else { return }
+        configuration.webhookAllowsSystemProxyOrFakeIPDNS = allowed
         persist()
     }
 

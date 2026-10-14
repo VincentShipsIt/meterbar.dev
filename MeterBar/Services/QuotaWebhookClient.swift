@@ -7,8 +7,9 @@ nonisolated enum QuotaWebhookPostResult: Equatable, Sendable {
 }
 
 /// Blocks redirects and records the address URLSession actually connected to.
-/// The record closes the DNS-rebinding gap between the policy's pre-flight DNS
-/// lookup and URLSession's independent lookup at connection time.
+/// The record detects a DNS-rebinding mismatch after the request body has
+/// already been sent. It changes the reported result. It does not prevent
+/// the connection.
 nonisolated final class QuotaWebhookConnectionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var remoteAddresses: [Int: String] = [:]
@@ -97,13 +98,16 @@ nonisolated final class QuotaWebhookClient: @unchecked Sendable {
 
     func post(
         payload: QuotaEventPayload,
-        to url: URL
+        to url: URL,
+        allowsSystemProxyOrFakeIPDNS: Bool = false
     ) async -> QuotaWebhookPostResult {
         guard QuotaWebhookURLPolicy.validatedURL(url.absoluteString) != nil else {
             return .failed("Webhook URL is not allowed.")
         }
-        guard let host = url.host, await hostIsPublic(host) else {
-            return .failed("Webhook host is not public.")
+        if !allowsSystemProxyOrFakeIPDNS {
+            guard let host = url.host, await hostIsPublic(host) else {
+                return .failed("Webhook host is not public.")
+            }
         }
 
         let encoder = JSONEncoder()
@@ -135,7 +139,11 @@ nonisolated final class QuotaWebhookClient: @unchecked Sendable {
         // `remoteAddress`. Fail open in that case: treating an absent metric as
         // hostile would break deterministic tests and could disable legitimate
         // webhook delivery if a future OS stops populating the field.
-        if let observedAddress,
+        // The comparison runs after the body has been sent, so it detects a
+        // non-public connection. It does not prevent one. The proxy opt-in
+        // skips this detection because the connected address is the proxy.
+        if !allowsSystemProxyOrFakeIPDNS,
+           let observedAddress,
            QuotaWebhookURLPolicy.isUnsafeAddressLiteral(observedAddress) {
             AppLog.app.error("Webhook connected to a non-public address; delivery rejected.")
             return .failed("Webhook connected to a non-public address.")
