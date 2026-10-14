@@ -1104,15 +1104,12 @@ public enum ProviderReadinessEvaluator {
     // MARK: Muse Code
 
     public static func museCode(_ input: MuseCodeReadinessInput) -> ProviderReadiness {
-        let installedRecovery = input.probe == .notSignedIn || input.probe == .disabled
-            ? museAuthRecovery(input.probe)
-            : nil
         let installed = ReadinessCheck(
             id: ReadinessCheckID.installed,
             title: "Sign-in source",
             level: input.probe == .notSignedIn || input.probe == .disabled ? .fail : .pass,
             detail: museSourceDetail(input.probe),
-            recovery: installedRecovery
+            recovery: input.probe == .notSignedIn ? "Run `muse login`." : nil
         )
         let auth = ReadinessCheck(
             id: ReadinessCheckID.auth,

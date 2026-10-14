@@ -65,20 +65,12 @@ final class MuseCodeCredentialReaderTests: XCTestCase {
         XCTAssertFalse(String(describing: harness.read()).contains("mk-inference-secret-value"))
     }
 
-    func testKeychainPayloadWithoutDeviceCodeTokenIsRejected() {
-        let secrets = [
-            #"{"api_key":"dca:do-not-use-inference-key","secret_schema_version":1}"#,
-            #"{"access_token":"","api_key":"mk-secret"}"#,
-            #"{"access_token":null,"api_key":"mk-secret"}"#,
-            #"{"access_token":"dca:"}"#,
-        ]
-        for secret in secrets {
-            let harness = ReaderHarness()
-            harness.load = .data(Self.meta(#""mechanism":"oauth","subs_active":true"#))
-            harness.outcome = .value(Data(secret.utf8))
-            XCTAssertEqual(harness.read(), .rejectedToken, secret)
-            XCTAssertEqual(harness.keychainModes, [.background])
-        }
+    func testKeychainAPIKeyAloneIsRejected() {
+        let secret = #"{"api_key":"dca:do-not-use-inference-key","secret_schema_version":1}"#
+        let harness = ReaderHarness()
+        harness.load = .data(Self.meta(#""mechanism":"oauth","subs_active":true"#))
+        harness.outcome = .value(Data(secret.utf8))
+        XCTAssertEqual(harness.read(), .needsConnect)
     }
 
     func testNonDeviceCodeKeychainTokenIsRejected() {
@@ -106,22 +98,25 @@ final class MuseCodeCredentialReaderTests: XCTestCase {
         XCTAssertTrue(harness.keychainModes.isEmpty)
     }
 
-    func testWrongTypedSubscriptionFlagIsUnreadable() {
+    func testWrongTypedSubscriptionFlagStillReadsKeychain() {
         let harness = ReaderHarness()
         harness.load = .data(Self.meta(#""mechanism":"oauth","subs_active":1"#))
         harness.outcome = .value(Data(Self.keychainSecret.utf8))
-        XCTAssertEqual(harness.read(), .unreadable)
-        XCTAssertTrue(harness.keychainModes.isEmpty)
+        XCTAssertEqual(harness.read(), .token("dca:keychain-token"))
+        XCTAssertEqual(harness.keychainModes, [.background])
     }
 
-    func testInteractionRequiredAndDeniedNeedKeychainAccess() {
-        for outcome in [ClaudeKeychainReadOutcome<Data>.interactionRequired, .denied] {
-            let harness = ReaderHarness()
-            harness.load = .data(Self.meta(#""mechanism":"OAuth","subs_active":true"#))
-            harness.outcome = outcome
-            XCTAssertEqual(harness.read(), .needsKeychainAccess)
-            XCTAssertEqual(harness.keychainModes, [.background])
-        }
+    func testInteractionRequiredNeedsKeychainAccessAndCancelNeedsConnect() {
+        let blocked = ReaderHarness()
+        blocked.load = .data(Self.meta(#""mechanism":"OAuth","subs_active":true"#))
+        blocked.outcome = .interactionRequired
+        XCTAssertEqual(blocked.read(), .needsKeychainAccess)
+        XCTAssertEqual(blocked.keychainModes, [.background])
+
+        let cancelled = ReaderHarness()
+        cancelled.load = .data(Self.meta(#""mechanism":"oauth","subs_active":true"#))
+        cancelled.outcome = .denied
+        XCTAssertEqual(cancelled.read(), .needsConnect)
     }
 
     func testKeychainFailureIsUnreadable() {
