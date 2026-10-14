@@ -46,6 +46,25 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    func testMuseCodeStaysOffWhenTheHiddenSetPredatesIt() {
+        withIsolatedDefaults { defaults in
+            defaults.set(
+                ["Claude Code", "Codex CLI"],
+                forKey: StorageKeys.hiddenProviderServices
+            )
+            let loaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(loaded.isEnabled(.museCode))
+            XCTAssertFalse(defaults.bool(forKey: StorageKeys.museCodeProviderEnabled))
+            XCTAssertFalse(loaded.isEnabled(.kimiCode))
+
+            loaded.set(.museCode, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.museCode))
+            XCTAssertTrue(defaults.bool(forKey: StorageKeys.museCodeProviderEnabled))
+            XCTAssertFalse(reloaded.isEnabled(.githubCopilot))
+        }
+    }
+
     func testGitHubCopilotIsOffByDefaultAndItsOptInPersistsIndependently() {
         withIsolatedDefaults { defaults in
             let initial = ProviderVisibilityStore(userDefaults: defaults)

@@ -147,6 +147,30 @@ final class ProviderCapabilitiesTests: XCTestCase {
         XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.githubCopilot))
     }
 
+    func testMuseCodeIsASingleAccountOptInProviderWithoutAStatusPage() {
+        XCTAssertEqual(
+            ServiceType.museCode.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.museCode.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.museCode.isOptInByDefault)
+        XCTAssertFalse(ServiceType.museCode.hasStatusPage)
+        XCTAssertNil(ServiceType.museCode.statusPageURL)
+        XCTAssertEqual(ServiceType.museCode.cliIdentifier, "muse-code")
+        XCTAssertFalse(ServiceType.museCode.hasBundledLogo)
+        XCTAssertFalse(ServiceType.museCode.assetName.isEmpty)
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.museCode))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.museCode))
+    }
+
     func testSessionWakeIsAnExplicitExceptionForGrok() {
         XCTAssertTrue(ServiceType.grok.isMultiAccount)
         XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
@@ -432,7 +456,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
             grokError: .apiError("grok"),
             kimiCodeError: .apiError("kimi"),
             zaiCodingPlanError: .apiError("zai"),
-            githubCopilotError: .apiError("copilot")
+            githubCopilotError: .apiError("copilot"),
+            museCodeError: .apiError("muse")
         )
         XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
     }

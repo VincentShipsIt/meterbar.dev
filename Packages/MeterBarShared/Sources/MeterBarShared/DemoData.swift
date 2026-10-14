@@ -49,7 +49,8 @@ public enum DemoData {
             .grok: grok(now: now),
             .kimiCode: kimiCode(now: now),
             .zaiCodingPlan: zaiCodingPlan(now: now),
-            .githubCopilot: githubCopilot(now: now)
+            .githubCopilot: githubCopilot(now: now),
+            .museCode: museCode(now: now)
         ]
     }
 
@@ -198,6 +199,29 @@ public enum DemoData {
                     label: "MCP tools"
                 )
             ],
+            lastUpdated: now
+        )
+    }
+
+    /// Muse Code: synthetic session and weekly percents, both green. The plan
+    /// label is not part of `UsageMetrics`.
+    private static func museCode(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .museCode,
+            sessionLimit: UsageLimit(
+                used: 21,
+                total: 100,
+                resetTime: now.addingTimeInterval(2 * 3_600),
+                windowSeconds: sessionWindowSeconds,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 44,
+                total: 100,
+                resetTime: now.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
             lastUpdated: now
         )
     }

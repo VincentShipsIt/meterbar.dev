@@ -155,6 +155,8 @@ extension ServiceType {
             return "Z.ai"
         case .githubCopilot:
             return "GitHub"
+        case .museCode:
+            return "Muse Code"
         }
     }
 
@@ -173,7 +175,7 @@ extension ServiceType {
         case .githubCopilot:
             // Copilot is a component of GitHub's own Statuspage.
             return "https://www.githubstatus.com/"
-        case .kimiCode, .zaiCodingPlan:
+        case .kimiCode, .zaiCodingPlan, .museCode:
             // No verified first-party status page; `hasStatusPage` keeps this
             // out of every status surface and the monitor never polls it.
             return ""

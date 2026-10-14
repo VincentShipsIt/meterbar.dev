@@ -175,6 +175,16 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 0,
             sessionCount: 0
+        ),
+        // Muse Code quota is a subscription gauge, not a token log.
+        DemoProviderCost(
+            provider: .museCode,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 0,
+            sessionCount: 0
         )
     ]
 

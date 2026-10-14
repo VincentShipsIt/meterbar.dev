@@ -130,18 +130,39 @@ final class ProviderSnapshotTests: XCTestCase {
                 .grok: makeMetrics(service: .grok, weekly: 50),
                 .kimiCode: makeMetrics(service: .kimiCode, weekly: 60),
                 .zaiCodingPlan: makeMetrics(service: .zaiCodingPlan, weekly: 70),
-                .githubCopilot: makeMetrics(service: .githubCopilot, weekly: 80)
+                .githubCopilot: makeMetrics(service: .githubCopilot, weekly: 80),
+                .museCode: makeMetrics(service: .museCode, weekly: 85)
             ]
         ))
 
         XCTAssertEqual(
             snapshots.map(\.service),
-            [.claudeCode, .codexCli, .githubCopilot, .cursor, .grok, .kimiCode, .openRouter, .zaiCodingPlan]
+            [
+                .claudeCode, .codexCli, .githubCopilot, .cursor, .grok, .kimiCode, .museCode, .openRouter,
+                .zaiCodingPlan
+            ]
         )
         XCTAssertEqual(
             snapshots.map(\.title),
-            ["Claude", "Codex", "Copilot", "Cursor", "Grok", "Kimi", "OpenRouter", "Z.ai"]
+            ["Claude", "Codex", "Copilot", "Cursor", "Grok", "Kimi", "Muse", "OpenRouter", "Z.ai"]
         )
+    }
+
+    func testFreshnessNoteOverridesTheUpdatedStampWhileBarsRemain() throws {
+        let note = "Window idle, usage not reported. As of 2026-10-13 12:00 UTC."
+        var input = makeInput(
+            metrics: [.museCode: makeMetrics(service: .museCode, session: 21)],
+            enabledServices: [.museCode]
+        )
+        input.simpleProviderFreshness[.museCode] = note
+        let snapshot = try XCTUnwrap(ProviderSnapshotBuilder.snapshots(input).first)
+        XCTAssertEqual(snapshot.updatedText, note)
+        XCTAssertTrue(snapshot.hasMetrics)
+
+        var empty = makeInput(enabledServices: [.museCode])
+        empty.simpleProviderFreshness[.museCode] = note
+        let blank = try XCTUnwrap(ProviderSnapshotBuilder.snapshots(empty).first { $0.service == .museCode })
+        XCTAssertNotEqual(blank.updatedText, note)
     }
 
     /// Two accounts on one subscription stay adjacent even when their labels
@@ -198,8 +219,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
         ))
 
-        // Popover shows all enabled providers (Codex/Claude/OpenRouter/Grok as empty-state cards)…
-        XCTAssertEqual(snapshots.count, 8)
+        // Popover shows every enabled provider, including empty-state cards.
+        XCTAssertEqual(snapshots.count, 9)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -458,7 +479,8 @@ final class ProviderSnapshotTests: XCTestCase {
                  .grok,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot: return .session
+                 .githubCopilot,
+                 .museCode: return .session
             }
         case .weekly:
             switch service {
@@ -469,7 +491,8 @@ final class ProviderSnapshotTests: XCTestCase {
                  .grok,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot: return .weekly
+                 .githubCopilot,
+                 .museCode: return .weekly
             }
         case .codeReview:
             switch service {
@@ -480,7 +503,8 @@ final class ProviderSnapshotTests: XCTestCase {
                  .grok,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot: return .codeReview
+                 .githubCopilot,
+                 .museCode: return .codeReview
             }
         case .additional:
             return .quota

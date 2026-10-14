@@ -165,6 +165,9 @@ nonisolated public enum ProviderReadinessInspector {
         },
         githubCopilotReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
             [ProviderReadinessInspector.githubCopilotReport(refreshError: error)]
+        },
+        museCodeReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.museCodeReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
@@ -186,6 +189,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return zaiCodingPlanReport(refreshErrors[provider], now)
             case .githubCopilot:
                 return githubCopilotReport(refreshErrors[provider], now)
+            case .museCode:
+                return museCodeReport(refreshErrors[provider], now)
             }
         }
     }
@@ -406,6 +411,18 @@ nonisolated public enum ProviderReadinessInspector {
             ZaiCodingPlanReadinessInput(
                 hasAPIKey: hasAPIKey(),
                 region: region(),
+                refreshError: sanitize(refreshError)
+            )
+        )
+    }
+
+    static func museCodeReport(
+        refreshError: ServiceError? = nil,
+        credential: () -> MuseCodeCredentialProbe = { MuseCodeService.currentProbe() }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.museCode(
+            MuseCodeReadinessInput(
+                probe: credential(),
                 refreshError: sanitize(refreshError)
             )
         )

@@ -58,6 +58,13 @@ extension ProviderSettingsFacts {
                     nil,
                     GitHubCopilotService.shared.lastError?.localizedDescription
                 )
+            case .museCode:
+                (
+                    MuseCodeService.shared.hasAccess,
+                    MuseCodeService.shared.planName,
+                    nil,
+                    MuseCodeService.shared.lastError?.localizedDescription
+                )
             }
 
         return ProviderSettingsFacts(
