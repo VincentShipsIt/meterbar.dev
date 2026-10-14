@@ -120,29 +120,27 @@ final class MuseCodeService: ObservableObject, SimpleUsageProviding {
         try await run(interactive: false, honorInterval: true)
     }
 
-    /// The only path allowed to show the macOS Keychain prompt. It bypasses the
-    /// 60-second mint interval and still respects a 429 cooldown.
+    /// The only path allowed to show the macOS Keychain prompt. It still
+    /// respects a 429 cooldown and the 60-second mint interval.
     @discardableResult
     func connect() async throws -> UsageMetrics {
-        try await run(interactive: true, honorInterval: false)
+        try await run(interactive: true, honorInterval: true)
     }
 
     // MARK: - Coalesce
 
     private func run(interactive: Bool, honorInterval: Bool) async throws -> UsageMetrics {
         guard dependencies.isEnabled() else {
-            return localAnswer(nil)
+            lastError = .notAuthenticated
+            throw ServiceError.notAuthenticated
         }
         if let flight = inFlight {
-            // A prompt must not ride a silent Keychain refusal. Reuse a flight
-            // that already sent a request; otherwise start a prompted read.
+            // A prompt must not ride a silent read. Wait it out, then start
+            // the prompted read unless that read already started the interval.
             if interactive, !flight.interactive {
-                let shared = try await flight.task.value
+                _ = try? await flight.task.value
                 if inFlight?.id == flight.id {
                     inFlight = nil
-                }
-                if replay != nil || blockedUntil != nil {
-                    return shared
                 }
                 return try await run(interactive: true, honorInterval: honorInterval)
             }
@@ -176,19 +174,20 @@ final class MuseCodeService: ObservableObject, SimpleUsageProviding {
         }
         switch credential {
         case .disabled:
-            return localAnswer(nil)
+            lastError = .notAuthenticated
+            throw ServiceError.notAuthenticated
         case .notSignedIn:
-            return localAnswer(MuseCodeCopy.notSignedIn)
+            try failSignIn(MuseCodeCopy.notSignedIn)
         case .rejectedToken:
-            return localAnswer(MuseCodeCopy.rejectedToken)
+            try failSignIn(MuseCodeCopy.rejectedToken)
         case .unreadable:
-            return localAnswer(MuseCodeCopy.unreadable)
+            try failSignIn(MuseCodeCopy.unreadable)
         case .noSubscription:
             return localAnswer(MuseCodeCopy.noSubscription)
         case .needsConnect:
-            return localAnswer(MuseCodeCopy.needsConnect)
+            return unanswered(MuseCodeCopy.needsConnect)
         case .needsKeychainAccess:
-            return localAnswer(MuseCodeCopy.needsKeychainAccess)
+            return unanswered(MuseCodeCopy.needsKeychainAccess)
         case let .token(token):
             return try await fetchQuota(token: token, honorInterval: honorInterval)
         }
@@ -196,8 +195,30 @@ final class MuseCodeService: ObservableObject, SimpleUsageProviding {
 
     /// An answer with no bars. Clears the retained reading so a later idle
     /// response cannot invent a percentage from it.
-    private func localAnswer(_ note: String?) -> UsageMetrics {
+    private func localAnswer(_ note: String) -> UsageMetrics {
         applyAnswer(metrics: emptyMetrics(), plan: nil, statusNote: note, asOfNote: nil, error: nil)
+    }
+
+    /// Connect and Keychain states are answers. They do not mint a key and they
+    /// leave a previous reading in place for a later idle response.
+    private func unanswered(_ note: String) -> UsageMetrics {
+        applyAnswer(
+            metrics: emptyMetrics(),
+            plan: planName,
+            statusNote: note,
+            asOfNote: nil,
+            error: nil,
+            keepAsLastGood: true
+        )
+    }
+
+    private func failSignIn(_ note: String) throws -> Never {
+        planName = nil
+        statusNote = note
+        asOfNote = nil
+        lastError = .notAuthenticated
+        lastGood = nil
+        throw ServiceError.notAuthenticated
     }
 
     // MARK: - Network
@@ -242,14 +263,12 @@ final class MuseCodeService: ObservableObject, SimpleUsageProviding {
             throw error
         }
         if status == 401 || status == 403 {
-            let metrics = emptyMetrics()
-            planName = nil
             statusNote = MuseCodeCopy.reconnect
             asOfNote = nil
             lastError = .notAuthenticated
-            lastGood = nil
-            remember(at: sentAt, metrics: metrics, error: nil)
-            return metrics
+            let error = ServiceError.notAuthenticated
+            remember(at: sentAt, metrics: nil, error: error)
+            throw error
         }
         guard (200 ... 299).contains(status) else {
             let error = ServiceError.apiError("HTTP \(status)")
