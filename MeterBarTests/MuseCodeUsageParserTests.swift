@@ -66,7 +66,7 @@ final class MuseCodeUsageParserTests: XCTestCase {
         )) else {
             return XCTFail("expected quota")
         }
-        XCTAssertEqual(session?.used, 150)
+        XCTAssertEqual(session?.used, 100)
         XCTAssertEqual(session?.total, 100)
         XCTAssertEqual(session?.percentage, 100)
         XCTAssertEqual(session?.isAtLimit, true)

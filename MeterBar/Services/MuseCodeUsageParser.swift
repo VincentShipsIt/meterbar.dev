@@ -96,7 +96,7 @@ nonisolated enum MuseCodeUsageParser {
             seconds = nil
         }
         return UsageLimit(
-            used: Double(percent),
+            used: min(Double(percent), 100),
             total: 100,
             resetTime: resetDate(object["resets_at"]),
             windowSeconds: seconds,

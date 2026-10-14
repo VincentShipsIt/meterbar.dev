@@ -25,6 +25,11 @@ final class MuseCodeReadinessTests: XCTestCase {
         let report = ProviderReadinessEvaluator.museCode(MuseCodeReadinessInput(probe: .disabled))
         XCTAssertEqual(report.provider, .museCode)
         XCTAssertTrue(report.checks.contains { $0.detail == "Muse Code is off." })
+        XCTAssertTrue(report.checks.contains {
+            $0.id == ReadinessCheckID.installed
+                && $0.level == .fail
+                && $0.recovery == "Turn on Muse Code in Providers settings."
+        })
         XCTAssertFalse(report.checks.contains { $0.level == .pass && $0.id == ReadinessCheckID.auth })
     }
 

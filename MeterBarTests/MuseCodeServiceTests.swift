@@ -65,31 +65,36 @@ final class MuseCodeServiceTests: XCTestCase {
             harness.now = origin.addingTimeInterval(61)
             harness.enqueue(harness.http(status))
 
-            do {
-                _ = try await harness.service.fetchUsageMetrics()
-                XCTFail("expected notAuthenticated for \(status)")
-            } catch {
-                guard case .notAuthenticated = error as? ServiceError else {
-                    return XCTFail("expected notAuthenticated, got \(error)")
-                }
-            }
+            let rejected = try await harness.service.fetchUsageMetrics()
+            XCTAssertFalse(rejected.hasData)
+            XCTAssertEqual(harness.requests.count, 2)
             XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.reconnect)
+            XCTAssertNil(harness.service.asOfNote)
             guard case .notAuthenticated = harness.service.lastError else {
                 return XCTFail("expected notAuthenticated for \(status)")
             }
             assertNoSecrets(in: [
                 harness.service.statusNote,
-                harness.service.lastError?.localizedDescription
+                harness.service.lastError?.localizedDescription,
+                encoded(rejected)
             ])
+
+            harness.now = origin.addingTimeInterval(90)
+            let replayed = try await harness.service.fetchUsageMetrics()
+            XCTAssertFalse(replayed.hasData)
+            XCTAssertEqual(harness.requests.count, 2)
+            guard case .notAuthenticated = harness.service.lastError else {
+                return XCTFail("replay should keep notAuthenticated for \(status)")
+            }
 
             harness.now = origin.addingTimeInterval(122)
             harness.enqueue(harness.idle())
             let idle = try await harness.service.fetchUsageMetrics()
-            XCTAssertEqual(idle.sessionLimit?.used, 22)
-            XCTAssertEqual(idle.lastUpdated, first.lastUpdated)
-            XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.asOf(iso(first.lastUpdated)))
-            XCTAssertEqual(harness.service.asOfNote, MuseCodeCopy.asOf(iso(first.lastUpdated)))
-            assertNoSecrets(in: [encoded(idle), harness.service.statusNote, harness.service.asOfNote])
+            XCTAssertFalse(idle.hasData)
+            XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.idle)
+            XCTAssertNil(harness.service.asOfNote)
+            XCTAssertNil(harness.service.lastError)
+            assertNoSecrets(in: [encoded(idle), harness.service.statusNote])
         }
     }
 
@@ -157,14 +162,10 @@ final class MuseCodeServiceTests: XCTestCase {
         let harness = ServiceHarness(now: origin)
         harness.enabled = false
         XCTAssertFalse(harness.service.hasAccess)
-        do {
-            _ = try await harness.service.fetchUsageMetrics()
-            XCTFail("expected notAuthenticated")
-        } catch {
-            guard case .notAuthenticated = error as? ServiceError else {
-                return XCTFail("expected notAuthenticated, got \(error)")
-            }
-        }
+        let metrics = try await harness.service.fetchUsageMetrics()
+        XCTAssertFalse(metrics.hasData)
+        XCTAssertNil(harness.service.lastError)
+        XCTAssertNil(harness.service.statusNote)
         XCTAssertEqual(harness.fileExistsCalls, 0)
         XCTAssertEqual(harness.authLoads, 0)
         XCTAssertEqual(harness.keychainReads, 0)
@@ -193,21 +194,17 @@ final class MuseCodeServiceTests: XCTestCase {
         let harness = ServiceHarness(now: origin, inlineToken: false)
         _ = try await harness.service.fetchUsageMetrics()
         _ = try await harness.service.connect()
-        XCTAssertEqual(harness.requests.count, 1)
-        XCTAssertEqual(harness.keychainModes, [.background])
-
-        harness.now = origin.addingTimeInterval(61)
-        _ = try await harness.service.connect()
         XCTAssertEqual(harness.requests.count, 2)
         XCTAssertEqual(harness.keychainModes, [.background, .interactive])
 
-        harness.now = origin.addingTimeInterval(122)
+        harness.now = origin.addingTimeInterval(61)
         harness.enqueue(harness.http(429, retryAfter: "120"))
         do {
             _ = try await harness.service.connect()
             XCTFail("expected HTTP 429")
         } catch {
             assertAPIError(error, "HTTP 429")
+            assertNoSecrets(in: [error.localizedDescription, String(describing: error)])
         }
         let reads = harness.keychainReads
         do {
@@ -250,6 +247,46 @@ final class MuseCodeServiceTests: XCTestCase {
         XCTAssertEqual(connected.sessionLimit?.used, 22)
         XCTAssertEqual(harness.keychainModes, [.background, .interactive])
         XCTAssertEqual(harness.requests.count, 1)
+    }
+
+    func testSignInAnswersAreEmptyAndClearALaterIdle() async throws {
+        let harness = ServiceHarness(now: origin)
+        let first = try await harness.service.fetchUsageMetrics()
+        XCTAssertEqual(first.sessionLimit?.used, 22)
+
+        harness.now = origin.addingTimeInterval(61)
+        harness.authOverride = .missing
+        let signedOut = try await harness.service.fetchUsageMetrics()
+        XCTAssertFalse(signedOut.hasData)
+        XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.notSignedIn)
+        XCTAssertNil(harness.service.lastError)
+        XCTAssertEqual(harness.requests.count, 1)
+
+        harness.now = origin.addingTimeInterval(62)
+        harness.authOverride = .data(Data(
+            #"{"providers":{"meta":{"mechanism":"oauth","access_token":"not-dca"}}}"#.utf8
+        ))
+        let rejected = try await harness.service.fetchUsageMetrics()
+        XCTAssertFalse(rejected.hasData)
+        XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.rejectedToken)
+        XCTAssertNil(harness.service.lastError)
+
+        harness.now = origin.addingTimeInterval(63)
+        harness.authOverride = .unreadable
+        let unreadable = try await harness.service.fetchUsageMetrics()
+        XCTAssertFalse(unreadable.hasData)
+        XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.unreadable)
+        XCTAssertNil(harness.service.lastError)
+        XCTAssertEqual(harness.requests.count, 1)
+
+        harness.now = origin.addingTimeInterval(122)
+        harness.authOverride = nil
+        harness.enqueue(harness.idle())
+        let idle = try await harness.service.fetchUsageMetrics()
+        XCTAssertFalse(idle.hasData)
+        XCTAssertEqual(harness.service.statusNote, MuseCodeCopy.idle)
+        XCTAssertNil(harness.service.asOfNote)
+        XCTAssertNil(harness.service.lastError)
     }
 
     private func iso(_ date: Date) -> String {
@@ -312,6 +349,7 @@ private nonisolated final class ServiceHarness: @unchecked Sendable {
     let gate = MuseCodeSuspendGate()
     var suspend = false
     var blockBackground = false
+    var authOverride: MuseCodeAuthLoad?
 
     private let lock = NSLock()
     private var instant: Date
@@ -401,6 +439,7 @@ private nonisolated final class ServiceHarness: @unchecked Sendable {
 
     fileprivate func noteAuth() -> MuseCodeAuthLoad {
         locked { loads += 1 }
+        if let authOverride { return authOverride }
         return .data(authFile())
     }
 
