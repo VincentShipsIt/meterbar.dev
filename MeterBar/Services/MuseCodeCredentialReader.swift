@@ -121,10 +121,9 @@ nonisolated enum MuseCodeCredentialReader {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         guard mechanism == "oauth" else { return .notSignedIn }
-        // A numeric 0/1 is not a JSON bool. Do not treat it as inactive or active.
-        if meta.keys.contains("subs_active") {
-            guard let active = jsonBool(meta["subs_active"]) else { return .unreadable }
-            if !active { return .noSubscription }
+        // A numeric 0/1 is not a JSON bool. Ignore it and still read the Keychain.
+        if let active = jsonBool(meta["subs_active"]), !active {
+            return .noSubscription
         }
         return keychainResult(context.keychain(context.accessMode))
     }
@@ -146,21 +145,28 @@ nonisolated enum MuseCodeCredentialReader {
             return tokenInKeychainPayload(data)
         case .notFound:
             return .needsConnect
-        case .interactionRequired, .denied:
+        case .interactionRequired:
             return .needsKeychainAccess
+        case .denied:
+            return .needsConnect
         case .failure:
             return .unreadable
         }
     }
 
     /// The secret is JSON. Only `access_token` is read; `api_key` is never used,
-    /// even when that field itself starts with `dca:`. A missing, blank, or
-    /// non-device-code access token is rejected and does not become Connect.
+    /// even when that field itself starts with `dca:`. A missing or blank
+    /// access token still needs Connect.
     private static func tokenInKeychainPayload(_ data: Data) -> Result {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return .unreadable
         }
-        guard let token = deviceCodeToken(root["access_token"]) else { return .rejectedToken }
+        guard let raw = root["access_token"] else { return .needsConnect }
+        if raw is NSNull { return .needsConnect }
+        if let text = raw as? String, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .needsConnect
+        }
+        guard let token = deviceCodeToken(raw) else { return .rejectedToken }
         return .token(token)
     }
 
