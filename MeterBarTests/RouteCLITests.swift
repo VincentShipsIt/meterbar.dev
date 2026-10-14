@@ -12,8 +12,9 @@ final class RouteCLITests: XCTestCase {
     func testAllEightProviderIdentifiersUseTheSharedCanonicalMapping() {
         let services: [ServiceType] = [
             .claudeCode, .codexCli, .cursor, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot,
+            .museCode,
         ]
-        let tokens = ["claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot"]
+        let tokens = ["claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot", "muse-code"]
         XCTAssertEqual(services.map(\.cliIdentifier), tokens)
         XCTAssertEqual(ServiceType.cliIdentifiers, tokens.joined(separator: ", "))
         for (service, token) in zip(services, tokens) {
@@ -22,7 +23,7 @@ final class RouteCLITests: XCTestCase {
     }
 
     func testNewProviderCachesCannotOptInWithoutAuthoritativeVisibility() {
-        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot]
+        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
         let metrics = Dictionary(uniqueKeysWithValues: services.map {
             ($0, Fixtures.metrics($0, session: Fixtures.limit(used: 0)))
         })
@@ -36,9 +37,9 @@ final class RouteCLITests: XCTestCase {
         let candidates = RoutingCandidateAssembler.assemble(
             metrics: metrics, accounts: accounts, configuration: nil, health: [:]
         ).filter { services.contains($0.service) }
-        XCTAssertEqual(candidates.count, 3)
+        XCTAssertEqual(candidates.count, 4)
         XCTAssertTrue(candidates.allSatisfy { !$0.isEnabled && $0.accountID == nil && $0.accountName == nil })
-        XCTAssertEqual(Fixtures.route(candidates).rejectionCodes, Array(repeating: .providerDisabled, count: 3))
+        XCTAssertEqual(Fixtures.route(candidates).rejectionCodes, Array(repeating: .providerDisabled, count: 4))
     }
 
     func testMalformedVisibilityCannotEnableCachedNewProviders() throws {
@@ -62,7 +63,7 @@ final class RouteCLITests: XCTestCase {
     }
 
     func testEnabledNewProvidersStayAccountlessAndUnsupportedInCLIOutput() throws {
-        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot]
+        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
         let metrics = Dictionary(uniqueKeysWithValues: services.map {
             ($0, Fixtures.metrics($0, session: Fixtures.limit(used: 0)))
         })
@@ -81,7 +82,7 @@ final class RouteCLITests: XCTestCase {
             ),
             health: [:]
         )
-        XCTAssertEqual(candidates.count, 3)
+        XCTAssertEqual(candidates.count, 4)
         XCTAssertTrue(candidates.allSatisfy { $0.isEnabled && $0.accountID == nil && $0.accountName == nil })
         let result = evaluate(task: "implementation", candidates: candidates)
         let json = try decode(result)
@@ -91,7 +92,7 @@ final class RouteCLITests: XCTestCase {
         let rejected = try XCTUnwrap(json["rejected"] as? [[String: Any]])
         XCTAssertEqual(
             rejected.compactMap { $0["code"] as? String },
-            Array(repeating: "provider_unsupported", count: 3)
+            Array(repeating: "provider_unsupported", count: 4)
         )
         XCTAssertTrue(rejected.allSatisfy { $0["account"] == nil || $0["account"] is NSNull })
         XCTAssertFalse(result.jsonOutput.contains("PrivateBillingSubject"))
@@ -108,12 +109,14 @@ final class RouteCLITests: XCTestCase {
                 ),
             ],
             configuration: UsageRefreshConfigurationStore.Snapshot(
-                hiddenServices: [.kimiCode, .zaiCodingPlan, .githubCopilot],
+                hiddenServices: [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode],
                 claudeAccounts: [], codexAccounts: []
             ),
             health: [:]
         )
-        XCTAssertFalse(candidates.contains { [.kimiCode, .zaiCodingPlan, .githubCopilot].contains($0.service) })
+        XCTAssertFalse(candidates.contains {
+            [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode].contains($0.service)
+        })
     }
 
     // MARK: - Input resolution

@@ -21,7 +21,8 @@ nonisolated enum AccountFailoverProvider: String, CaseIterable, Codable, Sendabl
              .grok,
              .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot: return nil
+             .githubCopilot,
+             .museCode: return nil
         }
     }
 }

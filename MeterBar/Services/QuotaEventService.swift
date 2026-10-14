@@ -149,7 +149,8 @@ nonisolated enum QuotaEventSnapshotCatalog {
         case .cursor,
              .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot:
+             .githubCopilot,
+             .museCode:
             return nil
         }
     }

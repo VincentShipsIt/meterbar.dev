@@ -68,7 +68,7 @@ final class ServiceTypeTests: XCTestCase {
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 8)
+        XCTAssertEqual(ServiceType.allCases.count, 9)
     }
 
     func testCodable() throws {

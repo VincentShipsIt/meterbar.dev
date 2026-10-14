@@ -17,6 +17,7 @@ enum ProviderLogoKind: Equatable {
     case kimiCode
     case zaiCodingPlan
     case githubCopilot
+    case museCode
 
     static func forService(_ service: ServiceType) -> ProviderLogoKind {
         switch service {
@@ -36,6 +37,8 @@ enum ProviderLogoKind: Equatable {
             return .zaiCodingPlan
         case .githubCopilot:
             return .githubCopilot
+        case .museCode:
+            return .museCode
         }
     }
 
@@ -76,7 +79,8 @@ enum ProviderLogoKind: Equatable {
             return "ProviderIcon-grok"
         case .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot:
+             .githubCopilot,
+             .museCode:
             return nil
         }
     }
@@ -103,6 +107,8 @@ enum ProviderLogoKind: Equatable {
             return ServiceType.zaiCodingPlan.iconName
         case .githubCopilot:
             return ServiceType.githubCopilot.iconName
+        case .museCode:
+            return ServiceType.museCode.iconName
         }
     }
 }

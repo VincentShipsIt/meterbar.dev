@@ -20,7 +20,7 @@
 > MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
 A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
-OpenRouter, Grok, Kimi Code, Z.ai, and GitHub Copilot usage at a glance — then tells you which provider still has
+OpenRouter, Grok, Kimi Code, Z.ai, GitHub Copilot, and Muse Code usage at a glance — then tells you which provider still has
 headroom, warns you before you hit a wall, and can resume your blocked sessions
 by itself once a limit resets.
 
@@ -40,7 +40,7 @@ by itself once a limit resets.
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
-- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, and GitHub Copilot
+- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, and Muse Code
 - **Provider Status**: Service-health monitoring for every provider that publishes a status page, so you can tell a provider outage apart from your own exhausted quota
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
@@ -82,6 +82,7 @@ by itself once a limit resets.
 | **Kimi Code** | Kimi Code's own sign-in file (read-only), or an API key stored in Keychain. Off until you enable it in Settings → Providers | 5-hour and weekly windows, monthly windows when the plan reports them, booster-wallet balance |
 | **Z.ai GLM Coding Plan** | Coding Plan API key stored in Keychain; you choose the international (`api.z.ai`) or mainland (`open.bigmodel.cn`) region. Off until you enable it in Settings → Providers | 5-hour and weekly credit windows, monthly MCP tool allowance, and a peak / off-peak indicator |
 | **GitHub Copilot** | Fine-grained token stored in Keychain, read through GitHub's documented billing API. Off until you enable it in Settings → Providers | A monthly budget bar **only** for organization-managed licences with a user-level budget (needs the billing role). Personal and legacy plans show their usage state — GitHub documents no allowance for them, so MeterBar does not guess one |
+| **Muse Code** | Read-only Muse CLI sign-in (`muse login`). Off until you enable it in Settings → Providers. The first Connect may ask for Keychain access — choose Always Allow | Session and weekly windows when the account reports them. An idle 5-hour window is not shown as 0% |
 
 ## Installation
 
@@ -296,7 +297,7 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot)
+# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code)
 meterbar usage --provider claude
 
 # Show token costs from the app's last local scan
@@ -310,7 +311,7 @@ meterbar cost --json
 meterbar route --task implementation
 ```
 
-`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai and GitHub Copilot are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the three newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
+`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai, GitHub Copilot, and Muse Code are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the four newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Usage tab), so the CLI and the app always show the same numbers.

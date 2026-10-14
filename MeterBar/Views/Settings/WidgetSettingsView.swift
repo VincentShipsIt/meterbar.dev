@@ -58,7 +58,8 @@ enum WidgetSettingsAccountProjection {
             case .cursor,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot:
+                 .githubCopilot,
+                 .museCode:
                 return [
                     WidgetSettingsAccountOption(
                         id: .provider(service),
@@ -140,7 +141,8 @@ struct WidgetSettingsPreviewData {
                  .openRouter,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot:
+                 .githubCopilot,
+                 .museCode:
                 accountMetrics = nil
             }
             guard optionIDs.contains(option.id), let accountMetrics, accountMetrics.hasData else {

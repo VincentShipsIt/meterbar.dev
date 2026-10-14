@@ -19,6 +19,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case kimiCode
         case zaiCodingPlan
         case githubCopilot
+        case museCode
 
         var service: ServiceType {
             switch self {
@@ -30,12 +31,13 @@ final class ProviderPresentationHealthTests: XCTestCase {
             case .kimiCode: return .kimiCode
             case .zaiCodingPlan: return .zaiCodingPlan
             case .githubCopilot: return .githubCopilot
+            case .museCode: return .museCode
             }
         }
 
         var isFlat: Bool {
             self == .cursor || self == .openRouter || self == .kimiCode || self == .zaiCodingPlan || self ==
-                .githubCopilot
+                .githubCopilot || self == .museCode
         }
     }
 
@@ -628,6 +630,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                     ? [OpenRouterAccount.defaultID: true]
                     : [:],
                 simpleProviderAccess: kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot
+                    || kind == .museCode
                     ? [kind.service: true]
                     : [:]
             )
@@ -673,6 +676,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
         case (.githubCopilot, .transientFailure),
              (.githubCopilot, .sustainedOrParseFailure):
             lastErrors.simpleProviders = [.githubCopilot: .apiError("Copilot refresh failed")]
+        case (.museCode, .transientFailure), (.museCode, .sustainedOrParseFailure):
+            lastErrors.simpleProviders = [.museCode: .apiError("Muse Code refresh failed")]
         default:
             break
         }
@@ -716,8 +721,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 ? [OpenRouterAccount.defaultID: true]
                 : [:],
             grokHasAccess: kind == .grok && refresh != .unprobed,
-            simpleProviderAccess: (kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot)
-                && refresh != .unprobed
+            simpleProviderAccess: (
+                kind == .kimiCode || kind == .zaiCodingPlan || kind == .githubCopilot || kind == .museCode
+            ) && refresh != .unprobed
                 ? [kind.service: true]
                 : [:],
             lastErrors: lastErrors

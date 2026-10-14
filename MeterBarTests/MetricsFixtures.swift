@@ -23,6 +23,7 @@ enum MetricsFixtures {
         case .kimiCode: return kimiCode()
         case .zaiCodingPlan: return zaiCodingPlan()
         case .githubCopilot: return githubCopilot()
+        case .museCode: return museCode()
         }
     }
 
@@ -129,6 +130,28 @@ enum MetricsFixtures {
                 total: 25,
                 resetTime: referenceDate.addingTimeInterval(12 * 24 * 3600),
                 periodKind: .monthly
+            ),
+            lastUpdated: referenceDate
+        )
+    }
+
+    /// Documented/synthetic Muse Code windows. Percents are not a live capture.
+    static func museCode() -> UsageMetrics {
+        UsageMetrics(
+            service: .museCode,
+            sessionLimit: UsageLimit(
+                used: 21,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(2 * 3_600),
+                windowSeconds: 5 * 3_600,
+                periodKind: .session
+            ),
+            weeklyLimit: UsageLimit(
+                used: 44,
+                total: 100,
+                resetTime: referenceDate.addingTimeInterval(3 * 24 * 3_600),
+                windowSeconds: 7 * 24 * 3_600,
+                periodKind: .weekly
             ),
             lastUpdated: referenceDate
         )

@@ -61,6 +61,7 @@ final class SocialCardBrandTests: XCTestCase {
             .kimiCode: MeterBarTheme.BrandAccentDark.kimiCode,
             .zaiCodingPlan: MeterBarTheme.BrandAccentDark.zaiCodingPlan,
             .githubCopilot: MeterBarTheme.BrandAccentDark.githubCopilot,
+            .museCode: MeterBarTheme.BrandAccentDark.museCode,
         ]
 
         for service in ServiceType.allCases {

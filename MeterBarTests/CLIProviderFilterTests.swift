@@ -27,6 +27,9 @@ final class CLIProviderFilterTests: XCTestCase {
         XCTAssertEqual(CLIProviderFilter.select("copilot"), [.githubCopilot])
         XCTAssertEqual(CLIProviderFilter.select("github"), [.githubCopilot])
         XCTAssertEqual(ServiceType.githubCopilot.cliIdentifier, "copilot")
+        XCTAssertEqual(CLIProviderFilter.select("muse-code"), [.museCode])
+        XCTAssertEqual(CLIProviderFilter.select("muse"), [.museCode])
+        XCTAssertEqual(ServiceType.museCode.cliIdentifier, "muse-code")
     }
 
     func testAnUnmatchedFilterSelectsNothingRatherThanEverything() {

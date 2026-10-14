@@ -48,6 +48,10 @@ struct ProviderSnapshot: Identifiable {
     /// for the same memberwise-initializer reason as `authNotice`.
     var planLabel: String?
 
+    /// Replaces "Updated …" when a retained reading must say when it was taken.
+    /// Defaulted so existing memberwise construction keeps the relative stamp.
+    var freshnessNote: String?
+
     /// The two things a `ProviderSnapshot` can represent. See `cardRole`'s
     /// doc comment for why this needs to be modeled explicitly instead of
     /// inferred from `id`/`title`.
@@ -77,6 +81,9 @@ struct ProviderSnapshot: Identifiable {
     }
 
     var updatedText: String {
+        if let freshnessNote, !freshnessNote.isEmpty {
+            return freshnessNote
+        }
         guard let updatedAt else { return "No data" }
         return "Updated \(UsageFormat.relative(updatedAt))"
     }
@@ -467,6 +474,9 @@ enum ProviderSnapshotBuilder {
         /// card instead of the generic setup prompt (Copilot's usage-only and
         /// unsupported account shapes).
         var simpleProviderNotes: [ServiceType: String] = [:]
+        /// Header stamp for a retained simple-provider reading, such as Muse's
+        /// idle window. Unused when the card has no bars.
+        var simpleProviderFreshness: [ServiceType: String] = [:]
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
         /// Plan label per provider, from the live CLI/API credentials. Those
         /// credentials belong to the default account, so only that card (or the
@@ -491,6 +501,7 @@ enum ProviderSnapshotBuilder {
             var kimiCodeService: KimiCodeService = .shared
             var zaiCodingPlanService: ZaiCodingPlanService = .shared
             var githubCopilotService: GitHubCopilotService = .shared
+            var museCodeService: MuseCodeService = .shared
         }
 
         /// Builds Input here so lastError / parse health / Grok access cannot
@@ -529,10 +540,15 @@ enum ProviderSnapshotBuilder {
                 simpleProviderAccess: [
                     .kimiCode: stores.kimiCodeService.hasAccess,
                     .zaiCodingPlan: stores.zaiCodingPlanService.hasAccess,
-                    .githubCopilot: stores.githubCopilotService.hasAccess
+                    .githubCopilot: stores.githubCopilotService.hasAccess,
+                    .museCode: stores.museCodeService.hasAccess
                 ],
                 simpleProviderNotes: [
                     .githubCopilot: stores.githubCopilotService.supportNote,
+                    .museCode: stores.museCodeService.statusNote
+                ].compactMapValues { $0 },
+                simpleProviderFreshness: [
+                    .museCode: stores.museCodeService.asOfNote
                 ].compactMapValues { $0 },
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
@@ -542,7 +558,8 @@ enum ProviderSnapshotBuilder {
                     simpleProviders: [
                         .kimiCode: stores.kimiCodeService.lastError,
                         .zaiCodingPlan: stores.zaiCodingPlanService.lastError,
-                        .githubCopilot: stores.githubCopilotService.lastError
+                        .githubCopilot: stores.githubCopilotService.lastError,
+                        .museCode: stores.museCodeService.lastError
                     ].compactMapValues { $0 }
                 ),
                 planLabels: [
@@ -726,7 +743,8 @@ enum ProviderSnapshotBuilder {
                         ? "Waiting for refresh"
                         : service.simpleProviderSetupPrompt),
                 accountID: nil,
-                authNotice: notice(for: service, accountID: nil, metrics: metrics, input: input)
+                authNotice: notice(for: service, accountID: nil, metrics: metrics, input: input),
+                freshnessNote: metrics == nil ? nil : input.simpleProviderFreshness[service]
             ))
         }
 
@@ -803,10 +821,11 @@ enum ProviderSnapshotBuilder {
             usesAPIKey = false
         case .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot:
+             .githubCopilot,
+             .museCode:
             lastError = input.lastErrors.simpleProviders[service]
             probed = input.simpleProviderAccess[service]
-            usesAPIKey = service != .kimiCode
+            usesAPIKey = service != .kimiCode && service != .museCode
         }
 
         let parseHealth = input.parseHealth[service]
@@ -871,7 +890,8 @@ enum ProviderSnapshotBuilder {
         metrics: UsageMetrics?,
         emptyDetail: String,
         accountID: UUID? = nil,
-        authNotice: ProviderAuthNotice? = nil
+        authNotice: ProviderAuthNotice? = nil,
+        freshnessNote: String? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             // Disambiguate by account id so two accounts that share a display
@@ -886,7 +906,8 @@ enum ProviderSnapshotBuilder {
             extraUsage: metrics?.extraUsage,
             resetCreditsAvailable: metrics?.resetCreditsAvailable,
             accountID: accountID,
-            authNotice: authNotice
+            authNotice: authNotice,
+            freshnessNote: freshnessNote
         )
     }
 
