@@ -218,7 +218,8 @@ final class UsageNotificationCoordinator {
             case .cursor,
                  .kimiCode,
                  .zaiCodingPlan,
-                 .githubCopilot:
+                 .githubCopilot,
+                 .museCode:
                 assertionFailure(
                     "account-scoped notifications for \(service.rawValue) have no routing"
                 )

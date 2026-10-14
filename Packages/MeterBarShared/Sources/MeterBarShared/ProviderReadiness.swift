@@ -506,6 +506,31 @@ public enum KimiCodeCredentialProbe: String, Codable, Sendable, Equatable {
     case unreadable
 }
 
+/// What MeterBar found for the Muse CLI sign-in. The probe reports the
+/// outcome only — never a token, a path, an email, or a Keychain secret.
+public enum MuseCodeCredentialProbe: String, Codable, Sendable, Equatable {
+    case disabled
+    case notSignedIn
+    case ready
+    case rejectedToken
+    case needsConnect
+    case needsKeychainAccess
+    case noSubscription
+    case unreadable
+}
+
+/// Fixture-able facts for the Muse Code provider. Quota text stays on the
+/// card; this input is only the sign-in outcome plus the last refresh error.
+public struct MuseCodeReadinessInput: Sendable {
+    public var probe: MuseCodeCredentialProbe
+    public var refreshError: String?
+
+    public init(probe: MuseCodeCredentialProbe, refreshError: String? = nil) {
+        self.probe = probe
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the Kimi Code provider, which reads either the
 /// official OAuth artifact or a user-supplied API key from the Keychain.
 public struct KimiCodeReadinessInput: Sendable {
@@ -1073,6 +1098,102 @@ public enum ProviderReadinessEvaluator {
             return "Kimi Code's OAuth credential was found but has expired."
         case (.unreadable, _):
             return "A Kimi Code credential file exists but is not readable."
+        }
+    }
+
+    // MARK: Muse Code
+
+    public static func museCode(_ input: MuseCodeReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "Sign-in source",
+            level: input.probe == .notSignedIn || input.probe == .disabled ? .fail : .pass,
+            detail: museSourceDetail(input.probe),
+            recovery: input.probe == .notSignedIn ? "Run `muse login`." : nil
+        )
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "Credentials",
+            level: input.probe == .ready || input.probe == .noSubscription ? .pass : .fail,
+            detail: museAuthDetail(input.probe),
+            recovery: museAuthRecovery(input.probe)
+        )
+        let readable = input.probe == .ready
+        let data = ReadinessCheck(
+            id: ReadinessCheckID.data,
+            title: "Usage readable",
+            level: readable ? .pass : .warn,
+            detail: readable
+                ? "Quota is read from the Muse account endpoint when the window reports usage."
+                : museDataDetail(input.probe)
+        )
+        return ProviderReadiness(
+            provider: .museCode,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    private static func museSourceDetail(_ probe: MuseCodeCredentialProbe) -> String {
+        switch probe {
+        case .disabled:
+            return "Muse Code is off."
+        case .notSignedIn:
+            return MuseCodeCopy.notSignedIn
+        case .unreadable:
+            return MuseCodeCopy.unreadable
+        case .rejectedToken:
+            return MuseCodeCopy.rejectedToken
+        case .ready, .noSubscription, .needsConnect, .needsKeychainAccess:
+            return "Muse CLI OAuth sign-in was found."
+        }
+    }
+
+    private static func museAuthDetail(_ probe: MuseCodeCredentialProbe) -> String {
+        switch probe {
+        case .ready:
+            return "Muse Code sign-in is readable."
+        case .noSubscription:
+            return MuseCodeCopy.noSubscription
+        case .needsKeychainAccess:
+            return MuseCodeCopy.needsKeychainAccess
+        case .needsConnect:
+            return MuseCodeCopy.needsConnect
+        case .rejectedToken:
+            return MuseCodeCopy.rejectedToken
+        case .unreadable:
+            return MuseCodeCopy.unreadable
+        case .notSignedIn:
+            return MuseCodeCopy.notSignedIn
+        case .disabled:
+            return "Muse Code is off."
+        }
+    }
+
+    private static func museAuthRecovery(_ probe: MuseCodeCredentialProbe) -> String? {
+        switch probe {
+        case .ready, .noSubscription:
+            return nil
+        case .notSignedIn, .rejectedToken, .unreadable:
+            return "Run `muse login`."
+        case .needsKeychainAccess, .needsConnect:
+            return "Choose Connect Muse Code and select Always Allow."
+        case .disabled:
+            return "Turn on Muse Code in Providers settings."
+        }
+    }
+
+    private static func museDataDetail(_ probe: MuseCodeCredentialProbe) -> String {
+        switch probe {
+        case .noSubscription:
+            return MuseCodeCopy.noSubscription
+        case .needsKeychainAccess:
+            return MuseCodeCopy.needsKeychainAccess
+        case .needsConnect:
+            return MuseCodeCopy.needsConnect
+        case .ready:
+            return "Quota is read from the Muse account endpoint when the window reports usage."
+        case .notSignedIn, .rejectedToken, .unreadable, .disabled:
+            return "Usage becomes readable once Muse Code is signed in and the token can be read."
         }
     }
 

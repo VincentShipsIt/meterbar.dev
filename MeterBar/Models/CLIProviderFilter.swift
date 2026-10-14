@@ -50,5 +50,6 @@ nonisolated public enum CLIProviderFilter {
     private static func matches(_ service: ServiceType, _ needle: String) -> Bool {
         service.rawValue.lowercased().contains(needle)
             || service.displayName.lowercased().contains(needle)
+            || service.cliIdentifier == needle
     }
 }

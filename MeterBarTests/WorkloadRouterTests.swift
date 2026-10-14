@@ -11,14 +11,14 @@ final class WorkloadRouterTests: XCTestCase {
 
     func testWorkloadRoutingCapabilityIsExplicitForEveryTrackedProvider() {
         let supported: Set<ServiceType> = [.claudeCode, .codexCli, .cursor, .openRouter, .grok]
-        XCTAssertEqual(ServiceType.allCases.count, 8)
+        XCTAssertEqual(ServiceType.allCases.count, 9)
         for service in ServiceType.allCases {
             XCTAssertEqual(service.supportsWorkloadRouting, supported.contains(service), service.rawValue)
         }
     }
 
     func testNewProvidersCannotBypassTheSharedRoutingCapability() {
-        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode] {
             for cost in [RoutingCostPreference.headroom, .balanced, .cost] {
                 let policy = Fixtures.policy {
                     $0.providerPreference = [service]
@@ -40,7 +40,7 @@ final class WorkloadRouterTests: XCTestCase {
             $0.providerScope = .preferredOnly
             $0.providerPreference = [.claudeCode]
         }
-        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode] {
             let candidates = [
                 RoutingCandidate(service: service, metrics: nil),
                 Fixtures.candidate(service, session: Fixtures.limit(used: .nan)),
@@ -62,13 +62,13 @@ final class WorkloadRouterTests: XCTestCase {
     func testUnsupportedProvidersNeverEnterRankingFallbacksOrCostReasons() {
         let supported = [Fixtures.candidate(.claudeCode, used: 30), Fixtures.candidate(.codexCli, used: 40)]
         let expected = Fixtures.route(supported)
-        let unsupported = [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot].map {
+        let unsupported = [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode].map {
             Fixtures.candidate($0, used: 0)
         }
         let decision = Fixtures.route(unsupported + supported)
         XCTAssertEqual(decision.recommendation, expected.recommendation)
         XCTAssertEqual(decision.fallbacks, expected.fallbacks)
-        XCTAssertEqual(decision.rejected.map(\.code.rawValue), Array(repeating: "provider_unsupported", count: 3))
+        XCTAssertEqual(decision.rejected.map(\.code.rawValue), Array(repeating: "provider_unsupported", count: 4))
         XCTAssertEqual(decision, Fixtures.route((unsupported + supported).reversed()))
     }
 
@@ -81,7 +81,7 @@ final class WorkloadRouterTests: XCTestCase {
     }
 
     func testUnsupportedProviderRejectionsNeverExposeInjectedAccountLabels() throws {
-        let candidates = [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot].map {
+        let candidates = [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode].map {
             Fixtures.account($0, id: Fixtures.uuid(42), name: "PrivateBillingSubject", used: 0)
         }
         let decision = Fixtures.route(candidates)

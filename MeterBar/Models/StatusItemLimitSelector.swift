@@ -126,7 +126,7 @@ nonisolated enum StatusItemAutoSelectionPolicy {
             return ["session", "weekly"]
         case .cursor, .openRouter, .grok:
             return ["weekly", "session"]
-        case .kimiCode, .zaiCodingPlan:
+        case .kimiCode, .zaiCodingPlan, .museCode:
             return ["session", "weekly"]
         case .githubCopilot:
             return ["weekly", "session"]
@@ -161,7 +161,8 @@ nonisolated enum StatusItemAutoSelectionPolicy {
              .grok,
              .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot:
+             .githubCopilot,
+             .museCode:
             return []
         }
     }

@@ -12,6 +12,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case kimiCode = "Kimi Code"
     case zaiCodingPlan = "Z.ai Coding Plan"
     case githubCopilot = "GitHub Copilot"
+    case museCode = "Muse Code"
 
     public var id: String { rawValue }
 
@@ -28,6 +29,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode: return "Kimi Code"
         case .zaiCodingPlan: return "Z.ai GLM Coding Plan"
         case .githubCopilot: return "GitHub Copilot"
+        case .museCode: return "Muse Code"
         }
     }
 
@@ -51,6 +53,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode: return "Kimi"
         case .zaiCodingPlan: return "Z.ai"
         case .githubCopilot: return "Copilot"
+        case .museCode: return "Muse"
         }
     }
 
@@ -65,6 +68,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode: return "moon.stars.fill"
         case .zaiCodingPlan: return "z.circle.fill"
         case .githubCopilot: return "sparkles"
+        case .museCode: return "circle.grid.cross.fill"
         }
     }
 
@@ -80,6 +84,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode: return "KimiCodeIcon"
         case .zaiCodingPlan: return "ZaiCodingPlanIcon"
         case .githubCopilot: return "GitHubCopilotIcon"
+        case .museCode: return "MuseCodeIcon"
         }
     }
 
@@ -88,7 +93,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var hasBundledLogo: Bool {
         switch self {
         case .claudeCode, .codexCli, .cursor, .grok: return true
-        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot: return false
+        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return false
         }
     }
 
@@ -103,6 +108,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode: return 5
         case .zaiCodingPlan: return 6
         case .githubCopilot: return 7
+        case .museCode: return 8
         }
     }
 
@@ -113,7 +119,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var hasStatusPage: Bool {
         switch self {
         case .claudeCode, .codexCli, .cursor, .openRouter, .grok, .githubCopilot: return true
-        case .kimiCode, .zaiCodingPlan: return false
+        case .kimiCode, .zaiCodingPlan, .museCode: return false
         }
     }
 
@@ -127,7 +133,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
              .grok: true
         case .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot: false
+             .githubCopilot,
+             .museCode: false
         }
     }
 
@@ -144,7 +151,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// page is where they are switched on.
     public var isOptInByDefault: Bool {
         switch self {
-        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot: return true
+        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return true
         case .claudeCode, .codexCli, .cursor, .grok: return false
         }
     }
@@ -166,7 +173,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var writesLocalTokenLogs: Bool {
         switch self {
         case .claudeCode, .codexCli, .grok: return true
-        case .cursor, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot: return false
+        case .cursor, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return false
         }
     }
 
@@ -242,7 +249,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return .model(label: modelLimitLabel)
         case .cursor: return .onDemand
-        case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot: return .codeReview
+        case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode:
+            return .codeReview
         }
     }
 

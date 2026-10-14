@@ -17,6 +17,7 @@ public extension ServiceType {
         case .kimiCode: "kimi"
         case .zaiCodingPlan: "zai"
         case .githubCopilot: "copilot"
+        case .museCode: "muse-code"
         }
     }
 

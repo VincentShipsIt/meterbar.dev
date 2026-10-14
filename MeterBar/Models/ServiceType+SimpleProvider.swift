@@ -7,7 +7,7 @@ import MeterBarShared
 extension ServiceType {
     /// In display order. Adding a provider here is what makes the popover and
     /// dashboard build a card for it (`ProviderSnapshotBuilder`).
-    static let simpleProviderCases: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot]
+    static let simpleProviderCases: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
 
     /// What the empty card asks for when no credential is readable.
     var simpleProviderSetupPrompt: String {
@@ -27,6 +27,8 @@ extension ServiceType {
                 localized: "provider.copilot.setup_prompt",
                 defaultValue: "Add a GitHub token and your username"
             )
+        case .museCode:
+            return MuseCodeCopy.setupPrompt
         case .claudeCode, .codexCli, .cursor, .openRouter, .grok:
             return ""
         }

@@ -71,6 +71,8 @@ struct ProviderSettingsFacts {
             "Z.ai monitor quota API (API key)"
         case .githubCopilot:
             "GitHub billing REST API (fine-grained token)"
+        case .museCode:
+            "Muse CLI sign-in + api.meta.ai account endpoint"
         }
     }
 
@@ -100,6 +102,9 @@ struct ProviderSettingsFacts {
             return subscriptionType?.capitalized.nilIfEmpty
         case .githubCopilot:
             return nil
+        case .museCode:
+            // The tier name is provider data and stays as given.
+            return subscriptionType?.nilIfEmpty
         }
     }
 

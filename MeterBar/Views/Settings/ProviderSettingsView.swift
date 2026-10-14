@@ -345,6 +345,10 @@ struct ProviderSettingsView: View {
             GitHubCopilotSettingsSection {
                 Task { await dataManager.refresh(service: .githubCopilot) }
             }
+        case .museCode:
+            MuseCodeSettingsSection {
+                Task { await dataManager.refresh(service: .museCode) }
+            }
         }
     }
 
@@ -383,7 +387,8 @@ struct ProviderSettingsView: View {
             }
         case .kimiCode,
              .zaiCodingPlan,
-             .githubCopilot:
+             .githubCopilot,
+             .museCode:
             // Kimi's booster wallet is shown inside its own panel; the Z.ai plan has none.
             EmptyView()
         }
@@ -1059,7 +1064,8 @@ struct ProviderSettingsView: View {
                 case .openRouter,
                      .kimiCode,
                      .zaiCodingPlan,
-                     .githubCopilot:
+                     .githubCopilot,
+                     .museCode:
                     break
                 case .grok:
                     grok.checkAccess()
