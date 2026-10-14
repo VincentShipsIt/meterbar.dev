@@ -16,8 +16,11 @@ import urllib.request
 
 BOT_LOGINS = {"coderabbitai", "coderabbitai[bot]"}
 APP_SLUGS = {"coderabbit", "coderabbitai"}
+# A walkthrough can name a feature "rate-limit cooldowns". That noun phrase is
+# not a skipped review. Skip copy still matches "rate limit", "rate limited",
+# and "rate limit reached".
 BLOCKED = re.compile(
-    r"rate[ -]limit|review limit reached|review skipped|skipped review|"
+    r"rate[ -]limit(?:ed|s)?\b(?!\s+cooldowns?)|review limit reached|review skipped|skipped review|"
     r"no review(?: was)? (?:performed|happened|generated|occurred)\b|"
     r"no review\s*(?:[.!]|$)|"
     r"review (?:was |is )?(?:not performed|not completed|disabled)|"
