@@ -23,7 +23,7 @@ struct Guard: AsyncParsableCommand {
 
     @Option(
         name: .shortAndLong,
-        help: "Provider to check (claude, codex, cursor, openrouter, grok, kimi, zai, copilot)."
+        help: "Provider to check (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code)."
     )
     var provider: String = QuotaGuardCLI.defaultProvider
 

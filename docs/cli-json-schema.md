@@ -16,7 +16,7 @@ same versioned usage/cost documents over a local HTTP endpoint instead of standa
 - Optional values are omitted when the provider or cached source did not supply them.
 - JSON is the only content written to standard output for these commands.
 
-Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, `grok`, `kimi`, `zai`, and `copilot`.
+Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, `grok`, `kimi`, `zai`, `copilot`, and `muse-code`.
 
 ## Usage
 
@@ -94,7 +94,7 @@ also includes an additive `accounts` array — one entry per cached profile, nev
 `GROK_HOME`, or token.
 
 `accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor which stays
-provider-only and never gets fake accounts, as do Kimi Code, Z.ai, and GitHub Copilot). OpenRouter entries are one per managed API key.
+provider-only and never gets fake accounts, as do Kimi Code, Z.ai, GitHub Copilot, and Muse Code). OpenRouter entries are one per managed API key.
 
 ```json
 {
@@ -543,7 +543,7 @@ cadence selectors `daily`, `monthly`, `billing`, and `unknown` resolve a reporte
 period in `additionalLimits`. `--min-remaining` is a percentage of quota that must remain;
 without it, only exhaustion blocks. `--config-dir` narrows the check to one configured Claude
 Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex config dir, or
-Grok `GROK_HOME`). Cursor, OpenRouter, Kimi Code, Z.ai, and GitHub Copilot have no per-account directories and are rejected.
+Grok `GROK_HOME`). Cursor, OpenRouter, Kimi Code, Z.ai, GitHub Copilot, and Muse Code have no per-account directories and are rejected.
 The JSON `window` field stays `session`, `weekly`, or `codeReview`. Additive `periodKind` names
 the reported cadence. Human `message` text uses that cadence ("monthly", never "weekly" for a
 monthly Grok allowance).
@@ -689,8 +689,8 @@ malformed non-null value uses that task's default; valid integers retain the doc
 
 ### How a candidate is judged
 
-Routing currently supports Claude Code, Codex, Cursor, OpenRouter and Grok. Kimi, Z.ai and Copilot
-remain available for usage tracking but are not eligible for routing. Enabling them yields
+Routing currently supports Claude Code, Codex, Cursor, OpenRouter and Grok. Kimi, Z.ai, Copilot and
+Muse Code remain available for usage tracking but are not eligible for routing. Enabling them yields
 `provider_unsupported` before policy, quota or cost evaluation; they never enter recommendations
 or fallbacks, and Copilot budgets are not described as included subscription quota.
 
@@ -702,7 +702,7 @@ is retained as a disabled/rejected candidate, never a recommendation or fallback
 empty account list disables that provider's provider-wide fallback. With legacy caches and no
 configuration, cached accounts remain eligible; with no account snapshots, a configured provider
 with an enabled account may use its provider-wide cache.
-Kimi, Z.ai and Copilot are always provider-wide with no account identity; stray account-cache
+Kimi, Z.ai, Copilot and Muse Code are always provider-wide with no account identity; stray account-cache
 entries are ignored. They remain disabled when the authoritative visibility projection is missing
 or unreadable, even when a fresh provider-wide snapshot is cached. Hidden providers remain omitted.
 
@@ -886,7 +886,7 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 `overall` is `pass`. Multi-account providers (Claude, Codex, Grok) emit one object per enabled
 profile, plus a provider-wide aggregate when more than one profile is enabled. `accountId` is
 MeterBar's local profile id and `accountName` is the user-facing display name; both are omitted
-for provider-wide reports (Cursor, OpenRouter, Kimi Code, Z.ai, GitHub Copilot, and the aggregate). Filesystem paths, credentials,
+for provider-wide reports (Cursor, OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and the aggregate). Filesystem paths, credentials,
 tokens, passwords, authorization headers, and raw response bodies are never emitted. Diagnostic
 messages may use standard error, but standard output remains one JSON document.
 

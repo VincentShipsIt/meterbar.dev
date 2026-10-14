@@ -40,6 +40,9 @@ public enum WidgetPlaceholderMetrics {
         case .githubCopilot:
             used = 36
             resetDelay = 12 * 24 * 60 * 60
+        case .museCode:
+            used = 22
+            resetDelay = 3 * 24 * 60 * 60
         }
         return UsageMetrics(
             service: service,

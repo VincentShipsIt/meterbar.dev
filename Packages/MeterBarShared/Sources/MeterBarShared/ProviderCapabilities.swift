@@ -119,6 +119,18 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 hasAccountScopedNotifications: false,
                 hasAccountScopedQuotaEvents: false
             )
+        case .museCode:
+            // One Muse CLI sign-in and one account. No overage wallet, banked
+            // resets, or per-account config directory.
+            return ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
         case .openRouter:
             // Multi-key: each managed API key is an account. Extra usage, reset
             // redemption, guard config directories, and Session Wake have no
