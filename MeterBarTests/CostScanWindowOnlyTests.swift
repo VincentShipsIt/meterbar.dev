@@ -127,7 +127,8 @@ final class CostScanWindowOnlyTests: XCTestCase {
                 summary: nil,
                 lastScanDate: nil,
                 enabledServices: [.claudeCode],
-                days: 30
+                days: 30,
+                newTranscriptsSinceLastScan: { _, _ in nil }
             )
         )
         XCTAssertFalse(
@@ -135,7 +136,8 @@ final class CostScanWindowOnlyTests: XCTestCase {
                 summary: nil,
                 lastScanDate: nil,
                 enabledServices: [.cursor],
-                days: 30
+                days: 30,
+                newTranscriptsSinceLastScan: { _, _ in nil }
             )
         )
     }

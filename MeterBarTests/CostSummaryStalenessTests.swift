@@ -388,6 +388,43 @@ final class CostSummaryStalenessTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(evidence))
     }
 
+    /// The probe runs on the scan queue, so it must resolve roots from the
+    /// account lists its caller captured on the main actor — never from the
+    /// main-actor `GrokAccountStore` / `ClaudeCodeAccountStore`. An account
+    /// that exists only in the passed list must still be walked.
+    func testProbeResolvesRootsFromThePassedAccountsNotTheStores() throws {
+        let home = try makeCorpusDirectory()
+        // Far enough ahead that nothing in the developer's real ~/.grok can
+        // qualify; only the fixture below is stamped after it.
+        let cutoff = Date().addingTimeInterval(86_400)
+        let session = home
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("session-1", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try writeCorpusFile(in: session, name: "updates.jsonl", modified: cutoff.addingTimeInterval(60))
+        try FileManager.default.setAttributes(
+            [.modificationDate: cutoff.addingTimeInterval(60)],
+            ofItemAtPath: session.path
+        )
+        let account = GrokAccount(id: UUID(), name: "Fixture", homeDirectory: home.path)
+
+        let withAccount = CostScanFreshnessProbe.hasNewTranscripts(
+            since: cutoff,
+            enabledServices: [.grok],
+            claudeAccounts: [],
+            grokAccounts: [account]
+        )
+        let withoutAccount = CostScanFreshnessProbe.hasNewTranscripts(
+            since: cutoff,
+            enabledServices: [.grok],
+            claudeAccounts: [],
+            grokAccounts: []
+        )
+
+        XCTAssertEqual(withAccount, true)
+        XCTAssertNotEqual(withoutAccount, true)
+    }
+
     // MARK: - Off-main-actor evidence (issue #545)
 
     /// The regression this issue asks for directly: the popover's own

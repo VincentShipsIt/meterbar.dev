@@ -110,7 +110,7 @@ nonisolated final class CostScanCancellationToken: @unchecked Sendable {
 
 /// Guarantees the continuation handed to `CostScanExecutor.run` is resumed
 /// exactly once, whichever of "cancelled" and "work finished" happens first.
-private final class CostScanHandoff<Value: Sendable>: @unchecked Sendable {
+nonisolated private final class CostScanHandoff<Value: Sendable>: @unchecked Sendable {
     let token = CostScanCancellationToken()
 
     private let lock = NSLock()
