@@ -737,17 +737,17 @@ enum ProviderSnapshotBuilder {
     /// the sole account card, or the default account when several exist.
     private static func applyingPlanLabels(to cards: [ProviderSnapshot], input: Input) -> [ProviderSnapshot] {
         guard !input.planLabels.isEmpty else { return cards }
-        let defaultIDs: [ServiceType: UUID?] = [
+        let defaultIDs: [ServiceType: UUID] = [
             .claudeCode: input.claudeAccounts.first(where: \.isDefault)?.id,
             .codexCli: input.codexAccounts.first(where: \.isDefault)?.id,
             .grok: input.grokAccounts.first(where: \.isDefault)?.id,
             .openRouter: input.openRouterAccounts.first(where: \.isDefault)?.id
-        ]
+        ].compactMapValues { $0 }
         return cards.map { card in
             guard card.isAccountCard, let label = input.planLabels[card.service] else { return card }
             let siblings = cards.filter { $0.isAccountCard && $0.service == card.service }
             let ownsCredentials = siblings.count == 1
-                || (card.accountID != nil && card.accountID == defaultIDs[card.service] ?? nil)
+                || (card.accountID != nil && card.accountID == defaultIDs[card.service])
             guard ownsCredentials else { return card }
             var labelled = card
             labelled.planLabel = label

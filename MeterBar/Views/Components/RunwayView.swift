@@ -12,7 +12,7 @@ import SwiftUI
 struct RunwayView: View {
     let limit: SnapshotLimit
     let accentColor: Color
-    var now: Date = Date()
+    var now = Date()
 
     private var content: RunwayContent? { RunwayContent(limit: limit.usageLimit, now: now) }
 
@@ -153,9 +153,9 @@ struct RunwayContent: Equatable {
         }
 
         geometry = Geometry(
-            idealStart: CGPoint(x: 0, y: 0),
+            idealStart: .zero,
             idealEnd: CGPoint(x: 1, y: 1),
-            actualStart: CGPoint(x: 0, y: 0),
+            actualStart: .zero,
             now: CGPoint(x: elapsedShare, y: usedShare),
             projectionEnd: projectionEnd
         )
