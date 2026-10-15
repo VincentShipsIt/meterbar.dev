@@ -44,6 +44,10 @@ struct ProviderSnapshot: Identifiable {
     /// logo". A `var` for the same memberwise-initializer reason as
     /// `authNotice`.
     var logoKindOverride: ProviderLogoKind?
+    /// Account type ("Max 20x", "Pro") when the provider reports one. A `var`
+    /// for the same memberwise-initializer reason as `authNotice`.
+    var planLabel: String?
+
     /// Replaces "Updated …" when a retained reading must say when it was taken.
     /// Defaulted so existing memberwise construction keeps the relative stamp.
     var freshnessNote: String?
@@ -474,6 +478,10 @@ enum ProviderSnapshotBuilder {
         /// idle window. Unused when the card has no bars.
         var simpleProviderFreshness: [ServiceType: String] = [:]
         var lastErrors: ProviderPresentationHealth.LastErrors = .init()
+        /// Plan label per provider, from the live CLI/API credentials. Those
+        /// credentials belong to the default account, so only that card (or the
+        /// sole enabled card) shows it; a custom profile never inherits it.
+        var planLabels: [ServiceType: String] = [:]
 
         /// Live stores the popover, dashboard, and settings cards share.
         /// Grouped so `live(stores:parseHealth:)` stays under the parameter cap.
@@ -553,7 +561,21 @@ enum ProviderSnapshotBuilder {
                         .githubCopilot: stores.githubCopilotService.lastError,
                         .museCode: stores.museCodeService.lastError
                     ].compactMapValues { $0 }
-                )
+                ),
+                planLabels: [
+                    .claudeCode: PlanLabel.make(
+                        service: .claudeCode,
+                        token: stores.claudeCodeService.subscriptionType,
+                        rateLimitTier: stores.claudeCodeService.rateLimitTier
+                    ),
+                    .codexCli: PlanLabel.make(service: .codexCli, token: stores.codexCliService.subscriptionType),
+                    .cursor: PlanLabel.make(service: .cursor, token: stores.cursorService.subscriptionType),
+                    .grok: PlanLabel.make(service: .grok, token: stores.grokService.subscriptionType),
+                    .zaiCodingPlan: PlanLabel.make(
+                        service: .zaiCodingPlan,
+                        token: stores.zaiCodingPlanService.planName
+                    )
+                ].compactMapValues { $0 }
             )
         }
     }
@@ -726,7 +748,32 @@ enum ProviderSnapshotBuilder {
             ))
         }
 
-        return orderedForDisplay(result)
+        return orderedForDisplay(applyingPlanLabels(to: result, input: input))
+    }
+
+    /// Stamps each provider's plan onto the card that owns the live credentials:
+    /// the sole account card, or the default account when several exist.
+    private static func applyingPlanLabels(to cards: [ProviderSnapshot], input: Input) -> [ProviderSnapshot] {
+        guard !input.planLabels.isEmpty else { return cards }
+        let defaultIDs: [ServiceType: UUID] = [
+            .claudeCode: input.claudeAccounts.first(where: \.isDefault)?.id,
+            .codexCli: input.codexAccounts.first(where: \.isDefault)?.id,
+            .grok: input.grokAccounts.first(where: \.isDefault)?.id,
+            .openRouter: input.openRouterAccounts.first(where: \.isDefault)?.id
+        ].compactMapValues { $0 }
+        let multiAccountServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok, .openRouter]
+        return cards.map { card in
+            guard card.isAccountCard, let label = input.planLabels[card.service] else { return card }
+            let isDefaultAccount = card.accountID != nil && card.accountID == defaultIDs[card.service]
+            // Multi-profile providers keep their live credentials on the
+            // default profile only, so a lone custom profile never inherits it.
+            // Single-account providers have one card that owns them.
+            let ownsCredentials = multiAccountServices.contains(card.service) ? isDefaultAccount : true
+            guard ownsCredentials else { return card }
+            var labelled = card
+            labelled.planLabel = label
+            return labelled
+        }
     }
 
     /// Connection-health overlay for one card. Claude states still win for
