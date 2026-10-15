@@ -43,6 +43,9 @@ public enum WidgetPlaceholderMetrics {
         case .museCode:
             used = 22
             resetDelay = 3 * 24 * 60 * 60
+        case .claudePlatform:
+            used = 38
+            resetDelay = 14 * 24 * 60 * 60
         }
         return UsageMetrics(
             service: service,

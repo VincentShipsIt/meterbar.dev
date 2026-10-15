@@ -85,7 +85,10 @@ struct Usage: ParsableCommand {
 
     @Option(
         name: .shortAndLong,
-        help: "Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code)"
+        help: """
+        Filter by provider \
+        (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code, claude-platform)
+        """
     )
     var provider: String?
 
@@ -392,7 +395,10 @@ struct Doctor: ParsableCommand {
 
     @Option(
         name: .shortAndLong,
-        help: "Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code)"
+        help: """
+        Filter by provider \
+        (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code, claude-platform)
+        """
     )
     var provider: String?
 

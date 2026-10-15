@@ -72,7 +72,7 @@ nonisolated public enum CLIUsageTextReport {
             lines += limitLines(
                 "  \(service.sessionQuotaTitle(limitTotal: session.total, periodKind: session.periodKind))",
                 session,
-                currency: service == .openRouter
+                currency: service == .openRouter || service == .claudePlatform
             )
         }
         if let weekly = metric.weeklyLimit,
@@ -80,7 +80,7 @@ nonisolated public enum CLIUsageTextReport {
             lines += limitLines(
                 "  \(service.weeklyQuotaTitle(limitTotal: weekly.total, periodKind: weekly.periodKind))",
                 weekly,
-                currency: service == .openRouter
+                currency: service == .openRouter || service == .claudePlatform
             )
         }
         if let codeReview = metric.codeReviewLimit {

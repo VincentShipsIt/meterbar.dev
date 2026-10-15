@@ -7,7 +7,9 @@ import MeterBarShared
 extension ServiceType {
     /// In display order. Adding a provider here is what makes the popover and
     /// dashboard build a card for it (`ProviderSnapshotBuilder`).
-    static let simpleProviderCases: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
+    static let simpleProviderCases: [ServiceType] = [
+        .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform
+    ]
 
     /// What the empty card asks for when no credential is readable.
     var simpleProviderSetupPrompt: String {
@@ -29,6 +31,11 @@ extension ServiceType {
             )
         case .museCode:
             return MuseCodeCopy.setupPrompt
+        case .claudePlatform:
+            return String(
+                localized: "provider.claude_platform.setup_prompt",
+                defaultValue: "Add your Claude Console session to see API credit"
+            )
         case .claudeCode, .codexCli, .cursor, .openRouter, .grok:
             return ""
         }

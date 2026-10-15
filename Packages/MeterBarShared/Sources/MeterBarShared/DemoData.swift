@@ -50,7 +50,8 @@ public enum DemoData {
             .kimiCode: kimiCode(now: now),
             .zaiCodingPlan: zaiCodingPlan(now: now),
             .githubCopilot: githubCopilot(now: now),
-            .museCode: museCode(now: now)
+            .museCode: museCode(now: now),
+            .claudePlatform: claudePlatform(now: now)
         ]
     }
 
@@ -237,6 +238,23 @@ public enum DemoData {
                 resetTime: now.addingTimeInterval(12 * 24 * 3_600),
                 periodKind: .monthly
             ),
+            lastUpdated: now
+        )
+    }
+
+    /// Claude Platform: the soonest-expiring monthly API credit grant in the
+    /// weekly slot (dollars) and a purchased grant as an additional row.
+    private static func claudePlatform(now: Date) -> UsageMetrics {
+        UsageMetrics(
+            service: .claudePlatform,
+            weeklyLimit: UsageLimit(
+                used: 75.25,
+                total: 200,
+                resetTime: now.addingTimeInterval(14 * 24 * 3_600)
+            ),
+            additionalLimits: [
+                UsageLimit(used: 37.5, total: 100, resetTime: nil, label: "Purchased credit")
+            ],
             lastUpdated: now
         )
     }

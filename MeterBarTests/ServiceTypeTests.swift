@@ -68,7 +68,7 @@ final class ServiceTypeTests: XCTestCase {
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 9)
+        XCTAssertEqual(ServiceType.allCases.count, 10)
     }
 
     func testCodable() throws {
@@ -115,13 +115,15 @@ final class ServiceTypeTests: XCTestCase {
     // shared title must not call either one "Weekly".
     func testWeeklyQuotaTitle() {
         XCTAssertEqual(ServiceType.openRouter.weeklyQuotaTitle, "Account credits")
+        XCTAssertEqual(ServiceType.claudePlatform.weeklyQuotaTitle, "Account credits")
         XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle, "Monthly")
         XCTAssertEqual(
             ServiceType.cursor.weeklyQuotaTitle(limitTotal: ServiceType.cursorIncludedPoolTotal),
             "Other Models"
         )
         XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle(limitTotal: 500), "Monthly")
-        for service in ServiceType.allCases where service != .openRouter && service != .cursor {
+        for service in ServiceType.allCases
+        where service != .openRouter && service != .cursor && service != .claudePlatform {
             XCTAssertEqual(service.weeklyQuotaTitle, "Weekly")
         }
     }

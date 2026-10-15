@@ -444,7 +444,8 @@ nonisolated extension ServiceType {
         switch self {
         case .openRouter,
              .githubCopilot: return .utc
-        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan, .museCode: return .local
+        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan, .museCode,
+             .claudePlatform: return .local
         }
     }
 }

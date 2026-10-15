@@ -188,6 +188,7 @@ enum MeterBarTheme {
     static let zaiCodingPlan = NSColor(srgbRed: 240 / 255, green: 196 / 255, blue: 64 / 255, alpha: 1)
     static let githubCopilot = NSColor(srgbRed: 196 / 255, green: 203 / 255, blue: 226 / 255, alpha: 1)
     static let museCode = NSColor(srgbRed: 168 / 255, green: 176 / 255, blue: 255 / 255, alpha: 1)
+    static let claudePlatform = NSColor(srgbRed: 226 / 255, green: 172 / 255, blue: 96 / 255, alpha: 1)
   }
 
   static let codexAccent = Color.adaptive(
@@ -229,6 +230,10 @@ enum MeterBarTheme {
   static let museCodeAccent = Color.adaptive(
     light: NSColor(srgbRed: 72 / 255, green: 64 / 255, blue: 176 / 255, alpha: 1),
     dark: BrandAccentDark.museCode
+  )
+  static let claudePlatformAccent = Color.adaptive(
+    light: NSColor(srgbRed: 150 / 255, green: 96 / 255, blue: 24 / 255, alpha: 1),
+    dark: BrandAccentDark.claudePlatform
   )
 
   /// The app's own accent. Follows the user's system accent color.
@@ -314,6 +319,8 @@ enum MeterBarTheme {
       return githubCopilotAccent
     case .museCode:
       return museCodeAccent
+    case .claudePlatform:
+      return claudePlatformAccent
     }
   }
 

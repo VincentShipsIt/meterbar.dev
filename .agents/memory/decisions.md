@@ -126,3 +126,7 @@ Against that it buys a new invalidation surface — archive schema drift, a corr
 - Origins exist only as a scan-period rollup (no per-day split). The table flags them when the window is narrower; the origin-concentration insight is suppressed then.
 - "What To Use Next" is quota data and lives at the top of Limits. Overview keeps its one-line tile.
 - The routing UI planned in epic #513 (phase 2) extends the Usage page's side column (`UsageColumnsLayout`).
+
+## A documented `--provider` token selects exactly one provider
+
+**Accepted 2026-10-15.** `CLIProviderFilter` matched `--provider` as a substring of a provider's raw value or display name. That held while no name contained another's token, but "Claude Platform" contains `claude`, so `meterbar usage --provider claude` would have returned both. A needle that is a `cliIdentifier` now matches only that provider; anything else keeps the case-insensitive substring match (`platform`, `glm`, `z.ai`). Token meaning is part of the CLI contract in `docs/cli-json-schema.md`.

@@ -1172,6 +1172,72 @@
           }
         }
       }
+    },
+    "provider.claude_platform.setup_prompt": {
+      "comment": "Empty-state prompt on the Claude Platform provider card when no Console session is saved.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add your Claude Console session to see API credit"
+          }
+        }
+      }
+    },
+    "settings.claude_platform.notice": {
+      "comment": "Explanatory note at the top of the Claude Platform settings panel. Claude Console and platform.claude.com are product and host names; sessionKey is a cookie name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reads your Claude Console API credit balance and credit grants, including the monthly API credit a Max or Team plan includes. An API key cannot read billing, so sign in at platform.claude.com, copy the Cookie header from any request there, and paste it below. MeterBar keeps only the sessionKey value, in macOS Keychain, and sends it to platform.claude.com alone. It expires periodically; paste a fresh one when asked. These are the Console's own billing endpoints, not a documented API."
+          }
+        }
+      }
+    },
+    "settings.claude_platform.key_placeholder": {
+      "comment": "Placeholder in the secure field where the user pastes the Cookie header copied from platform.claude.com.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cookie header from platform.claude.com"
+          }
+        }
+      }
+    },
+    "settings.claude_platform.open_console": {
+      "comment": "Button that opens the Claude Console billing page in the browser.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Console"
+          }
+        }
+      }
+    },
+    "settings.claude_platform.unauthenticated": {
+      "comment": "Error card shown when the Claude Console rejects the saved session.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Console rejected the session. Sign in at platform.claude.com and paste a fresh Cookie header."
+          }
+        }
+      }
+    },
+    "settings.claude_platform.credit": {
+      "comment": "Row label for the Claude Console API credit summary: balance, month-to-date spend and next credit expiry.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API credit"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

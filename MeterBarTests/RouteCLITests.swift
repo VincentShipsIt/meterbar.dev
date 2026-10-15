@@ -12,9 +12,12 @@ final class RouteCLITests: XCTestCase {
     func testAllEightProviderIdentifiersUseTheSharedCanonicalMapping() {
         let services: [ServiceType] = [
             .claudeCode, .codexCli, .cursor, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot,
-            .museCode,
+            .museCode, .claudePlatform,
         ]
-        let tokens = ["claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot", "muse-code"]
+        let tokens = [
+            "claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot", "muse-code",
+            "claude-platform",
+        ]
         XCTAssertEqual(services.map(\.cliIdentifier), tokens)
         XCTAssertEqual(ServiceType.cliIdentifiers, tokens.joined(separator: ", "))
         for (service, token) in zip(services, tokens) {
@@ -23,7 +26,7 @@ final class RouteCLITests: XCTestCase {
     }
 
     func testNewProviderCachesCannotOptInWithoutAuthoritativeVisibility() {
-        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
+        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform]
         let metrics = Dictionary(uniqueKeysWithValues: services.map {
             ($0, Fixtures.metrics($0, session: Fixtures.limit(used: 0)))
         })
@@ -37,9 +40,9 @@ final class RouteCLITests: XCTestCase {
         let candidates = RoutingCandidateAssembler.assemble(
             metrics: metrics, accounts: accounts, configuration: nil, health: [:]
         ).filter { services.contains($0.service) }
-        XCTAssertEqual(candidates.count, 4)
+        XCTAssertEqual(candidates.count, 5)
         XCTAssertTrue(candidates.allSatisfy { !$0.isEnabled && $0.accountID == nil && $0.accountName == nil })
-        XCTAssertEqual(Fixtures.route(candidates).rejectionCodes, Array(repeating: .providerDisabled, count: 4))
+        XCTAssertEqual(Fixtures.route(candidates).rejectionCodes, Array(repeating: .providerDisabled, count: 5))
     }
 
     func testMalformedVisibilityCannotEnableCachedNewProviders() throws {
@@ -63,7 +66,7 @@ final class RouteCLITests: XCTestCase {
     }
 
     func testEnabledNewProvidersStayAccountlessAndUnsupportedInCLIOutput() throws {
-        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode]
+        let services: [ServiceType] = [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform]
         let metrics = Dictionary(uniqueKeysWithValues: services.map {
             ($0, Fixtures.metrics($0, session: Fixtures.limit(used: 0)))
         })
@@ -82,7 +85,7 @@ final class RouteCLITests: XCTestCase {
             ),
             health: [:]
         )
-        XCTAssertEqual(candidates.count, 4)
+        XCTAssertEqual(candidates.count, 5)
         XCTAssertTrue(candidates.allSatisfy { $0.isEnabled && $0.accountID == nil && $0.accountName == nil })
         let result = evaluate(task: "implementation", candidates: candidates)
         let json = try decode(result)
@@ -92,7 +95,7 @@ final class RouteCLITests: XCTestCase {
         let rejected = try XCTUnwrap(json["rejected"] as? [[String: Any]])
         XCTAssertEqual(
             rejected.compactMap { $0["code"] as? String },
-            Array(repeating: "provider_unsupported", count: 4)
+            Array(repeating: "provider_unsupported", count: 5)
         )
         XCTAssertTrue(rejected.allSatisfy { $0["account"] == nil || $0["account"] is NSNull })
         XCTAssertFalse(result.jsonOutput.contains("PrivateBillingSubject"))

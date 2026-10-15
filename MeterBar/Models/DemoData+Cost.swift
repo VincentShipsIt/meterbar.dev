@@ -185,6 +185,16 @@ extension DemoData {
             cacheReadTokens: 0,
             costUSD: 0,
             sessionCount: 0
+        ),
+        // Claude Platform is a credit balance read from the Console, not a token log.
+        DemoProviderCost(
+            provider: .claudePlatform,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            costUSD: 0,
+            sessionCount: 0
         )
     ]
 
