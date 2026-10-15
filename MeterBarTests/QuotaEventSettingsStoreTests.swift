@@ -52,6 +52,52 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
         XCTAssertEqual(configuration.enabledQuotaEvents, [.warning, .recovered])
         XCTAssertEqual(configuration.enabledProviders, [.codexCli])
         XCTAssertEqual(configuration.enabledAccounts, [account])
+        XCTAssertFalse(configuration.webhookAllowsSystemProxyOrFakeIPDNS)
+    }
+
+    func testSystemProxyWebhookOptInDefaultsOffAndRoundTrips() throws {
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(store.configuration.webhookAllowsSystemProxyOrFakeIPDNS)
+
+        store.setWebhookAllowsSystemProxyOrFakeIPDNS(true)
+
+        let reloaded = QuotaEventSettingsStore(userDefaults: defaults).configuration
+        XCTAssertTrue(reloaded.webhookAllowsSystemProxyOrFakeIPDNS)
+        let stored = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: try XCTUnwrap(defaults.data(forKey: StorageKeys.quotaEventIntegrations))
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(stored["webhookAllowsSystemProxyOrFakeIPDNS"] as? Bool, true)
+
+        store.setWebhookAllowsSystemProxyOrFakeIPDNS(false)
+        XCTAssertFalse(
+            QuotaEventSettingsStore(userDefaults: defaults).configuration.webhookAllowsSystemProxyOrFakeIPDNS
+        )
+    }
+
+    func testMissingProxyOptInKeyStaysOffWithoutRewritingStorage() throws {
+        let written = QuotaEventIntegrationConfiguration(
+            localDeliveryEnabled: false,
+            localExecutablePath: "",
+            localArguments: [],
+            webhookDeliveryEnabled: true,
+            webhookURLString: "https://hooks.example.com/meterbar",
+            enabledQuotaEvents: [.warning],
+            enabledProviders: [.cursor],
+            enabledAccounts: [],
+            enabledWakeEvents: []
+        )
+        let data = try encoded(written) { object in
+            object.removeValue(forKey: "webhookAllowsSystemProxyOrFakeIPDNS")
+        }
+        defaults.set(data, forKey: StorageKeys.quotaEventIntegrations)
+
+        let store = QuotaEventSettingsStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.configuration.webhookAllowsSystemProxyOrFakeIPDNS)
+        XCTAssertEqual(store.configuration.webhookURLString, "https://hooks.example.com/meterbar")
+        XCTAssertEqual(defaults.data(forKey: StorageKeys.quotaEventIntegrations), data)
     }
 
     func testMigratesExistingSessionWakeHooksOnceWithoutChangingBehavior() throws {
