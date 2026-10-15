@@ -482,6 +482,9 @@ enum ProviderSnapshotBuilder {
         /// credentials belong to the default account, so only that card (or the
         /// sole enabled card) shows it; a custom profile never inherits it.
         var planLabels: [ServiceType: String] = [:]
+        /// Account type per account id, for providers where each profile has its
+        /// own (OpenRouter keys). Wins over `planLabels` for that card.
+        var accountPlanLabels: [UUID: String] = [:]
 
         /// Live stores the popover, dashboard, and settings cards share.
         /// Grouped so `live(stores:parseHealth:)` stays under the parameter cap.
@@ -574,8 +577,12 @@ enum ProviderSnapshotBuilder {
                     .zaiCodingPlan: PlanLabel.make(
                         service: .zaiCodingPlan,
                         token: stores.zaiCodingPlanService.planName
-                    )
-                ].compactMapValues { $0 }
+                    ),
+                    .museCode: PlanLabel.make(service: .museCode, token: stores.museCodeService.planName)
+                ].compactMapValues { $0 },
+                accountPlanLabels: stores.openRouterService.accountIsFreeTier.compactMapValues {
+                    PlanLabel.openRouterTier(isFreeTier: $0)
+                }
             )
         }
     }
@@ -754,7 +761,7 @@ enum ProviderSnapshotBuilder {
     /// Stamps each provider's plan onto the card that owns the live credentials:
     /// the sole account card, or the default account when several exist.
     private static func applyingPlanLabels(to cards: [ProviderSnapshot], input: Input) -> [ProviderSnapshot] {
-        guard !input.planLabels.isEmpty else { return cards }
+        guard !input.planLabels.isEmpty || !input.accountPlanLabels.isEmpty else { return cards }
         let defaultIDs: [ServiceType: UUID] = [
             .claudeCode: input.claudeAccounts.first(where: \.isDefault)?.id,
             .codexCli: input.codexAccounts.first(where: \.isDefault)?.id,
@@ -763,6 +770,11 @@ enum ProviderSnapshotBuilder {
         ].compactMapValues { $0 }
         let multiAccountServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok, .openRouter]
         return cards.map { card in
+            if card.isAccountCard, let id = card.accountID, let label = input.accountPlanLabels[id] {
+                var labelled = card
+                labelled.planLabel = label
+                return labelled
+            }
             guard card.isAccountCard, let label = input.planLabels[card.service] else { return card }
             let isDefaultAccount = card.accountID != nil && card.accountID == defaultIDs[card.service]
             // Multi-profile providers keep their live credentials on the

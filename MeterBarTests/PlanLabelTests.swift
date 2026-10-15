@@ -58,4 +58,37 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(cards.count, 1)
         XCTAssertNil(cards.first?.planLabel)
     }
+
+    func testOpenRouterTierReflectsWhetherCreditsWereEverBought() {
+        XCTAssertEqual(PlanLabel.openRouterTier(isFreeTier: true), "Free")
+        XCTAssertEqual(PlanLabel.openRouterTier(isFreeTier: false), "Pay as you go")
+        XCTAssertNil(PlanLabel.openRouterTier(isFreeTier: nil))
+    }
+
+    func testEachOpenRouterKeyCarriesItsOwnTier() {
+        let free = OpenRouterAccount(id: UUID(), name: "Side project")
+        let paid = OpenRouterAccount(id: UUID(), name: "Work")
+        var input = ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            claudeAccounts: [],
+            claudeAccountMetrics: [:],
+            enabledServices: [.openRouter]
+        )
+        input.openRouterAccounts = [free, paid]
+        input.accountPlanLabels = [free.id: "Free", paid.id: "Pay as you go"]
+        let cards = ProviderSnapshotBuilder.snapshots(input)
+        XCTAssertEqual(cards.first { $0.accountID == free.id }?.planLabel, "Free")
+        XCTAssertEqual(cards.first { $0.accountID == paid.id }?.planLabel, "Pay as you go")
+    }
+
+    func testMuseCodePlanIsLabelled() {
+        var input = ProviderSnapshotBuilder.Input(
+            metrics: [:],
+            claudeAccounts: [],
+            claudeAccountMetrics: [:],
+            enabledServices: [.museCode]
+        )
+        input.planLabels = [.museCode: PlanLabel.make(service: .museCode, token: "pro") ?? ""]
+        XCTAssertEqual(ProviderSnapshotBuilder.snapshots(input).first?.planLabel, "Pro")
+    }
 }
