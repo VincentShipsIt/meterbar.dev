@@ -29,6 +29,13 @@ enum PlanLabel {
         }
     }
 
+    /// OpenRouter has no subscription: every key is prepaid credits, and the one
+    /// account-type signal is whether the account has ever bought any.
+    static func openRouterTier(isFreeTier: Bool?) -> String? {
+        guard let isFreeTier else { return nil }
+        return isFreeTier ? "Free" : "Pay as you go"
+    }
+
     private static func words(_ token: String) -> String {
         token
             .replacingOccurrences(of: "_", with: " ")

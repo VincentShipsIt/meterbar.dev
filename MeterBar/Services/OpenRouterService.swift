@@ -26,6 +26,10 @@ final class OpenRouterService: ObservableObject {
     /// `UsageDataManager` folds these into one provider-wide ledger entry.
     private(set) var latestAccountObservations: [UUID: ProviderUsageObservation] = [:]
 
+    /// Whether each key's account has ever paid for credits, from `/key`'s
+    /// documented `is_free_tier`. Absent until the key's first successful poll.
+    @Published private(set) var accountIsFreeTier: [UUID: Bool] = [:]
+
     private let keychain: KeychainManager
     private let fetchData: @Sendable (URLRequest) async throws -> Data
 
@@ -75,6 +79,7 @@ final class OpenRouterService: ObservableObject {
         let deleted = keychain.delete(key: Self.keychainKey(for: accountID))
         accountLastErrors[accountID] = nil
         latestAccountObservations[accountID] = nil
+        accountIsFreeTier[accountID] = nil
         if accountLastErrors.isEmpty {
             lastError = nil
         }
@@ -92,6 +97,7 @@ final class OpenRouterService: ObservableObject {
             let fetched = try await Self.fetchRemotely(apiKey: apiKey, fetchData: fetchData)
             accountLastErrors[account.id] = nil
             latestAccountObservations[account.id] = fetched.observation
+            accountIsFreeTier[account.id] = fetched.isFreeTier
             // The aggregate clears only when every managed key is healthy;
             // otherwise another key's failure remains the provider-wide state.
             if accountLastErrors.isEmpty {
@@ -112,6 +118,7 @@ final class OpenRouterService: ObservableObject {
     private struct FetchedUsage: Sendable {
         let metrics: UsageMetrics
         let observation: ProviderUsageObservation
+        let isFreeTier: Bool?
     }
 
     /// Runs both network legs and the decode off the main actor — see
@@ -132,7 +139,8 @@ final class OpenRouterService: ObservableObject {
             let metrics = map(credits: credits.data, key: key.data)
             return FetchedUsage(
                 metrics: metrics,
-                observation: observation(key: key.data, at: metrics.lastUpdated)
+                observation: observation(key: key.data, at: metrics.lastUpdated),
+                isFreeTier: key.data.isFreeTier
             )
         }
     }
