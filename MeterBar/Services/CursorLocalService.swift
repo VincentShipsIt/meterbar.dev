@@ -328,10 +328,11 @@ class CursorLocalService: ObservableObject {
                 token: token,
                 fetchData: fetchData
             )
-            // Both DashboardService reads are optional. A failure must not drop
-            // the usage-summary bars.
-            let sandStatus = await fetchSandUsageStatus(token: token, fetchData: fetchData)
-            let planInfo = await fetchPlanInfo(token: token, fetchData: fetchData)
+            // Independent optional reads. Concurrent so a hung call costs one
+            // timeout, not two. A failure must not drop the usage-summary bars.
+            async let sandFetch = fetchSandUsageStatus(token: token, fetchData: fetchData)
+            async let planFetch = fetchPlanInfo(token: token, fetchData: fetchData)
+            let (sandStatus, planInfo) = await (sandFetch, planFetch)
             let metrics = mapSummary(
                 summaryData,
                 sandStatus: sandStatus,
