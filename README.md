@@ -76,7 +76,7 @@ by itself once a limit resets.
 |---------|-------------|-----------------|
 | **Claude Code** | Keychain OAuth token (`/api/oauth/usage`); CLI `/usage` fallback | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
-| **Cursor** | Local SQLite database | Monthly usage |
+| **Cursor** | Local SQLite database | Included usage pools (monthly on legacy Cursor plans; weekly on The X Subscription, see below) |
 | **OpenRouter** | User-provided API key stored in Keychain | Account credits, spend, per-key limits |
 | **Grok** | Cached `grok login` session, accessed by the official CLI | Weekly quota, reset time, extra credits |
 | **Kimi Code** | Kimi Code's own sign-in file (read-only), or an API key stored in Keychain. Off until you enable it in Settings → Providers | 5-hour and weekly windows, monthly windows when the plan reports them, booster-wallet balance |
@@ -149,13 +149,14 @@ open MeterBar.xcodeproj
 
 1. Install and log into Cursor IDE
 2. The app automatically reads from Cursor's local database
+3. On 2026-10-12 SpaceXAI announced The X Subscription, which merges Grok, Cursor and X Premium into one plan with a single weekly usage pool shared across Cursor, Grok Build and other Grok products. Legacy Cursor plans stay monthly. MeterBar labels the reset from whatever window Cursor reports; whether Cursor's usage endpoints report the new weekly pool has not been verified against a live X Subscription account.
 
 ### Grok
 
 1. Install [Grok Build](https://x.ai/cli)
 2. Log in: `grok login`
 3. Enable Grok under **Settings → General → Tracked Providers**
-4. MeterBar asks the official CLI for weekly billing over ACP. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
+4. Grok uses one weekly pool shared across all Grok products (and, on The X Subscription, Cursor). MeterBar asks the official CLI for weekly billing over ACP; that call has not been re-verified against an X Subscription account. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
 
 To track more than one Grok Build account, give each CLI login a distinct
 `GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
