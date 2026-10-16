@@ -250,7 +250,7 @@ public enum DemoData {
             weeklyLimit: UsageLimit(
                 used: 75.25,
                 total: 200,
-                resetTime: now.addingTimeInterval(14 * 24 * 3_600)
+                resetTime: nil
             ),
             additionalLimits: [
                 UsageLimit(used: 37.5, total: 100, resetTime: nil, label: "Purchased credit")

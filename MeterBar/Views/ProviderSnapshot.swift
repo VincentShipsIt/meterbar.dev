@@ -1047,7 +1047,7 @@ enum ProviderSnapshotBuilder {
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
                 usageLimit: additional,
-                valueStyle: .quota
+                valueStyle: service == .claudePlatform && additional.reading == .measured ? .currency : .quota
             ))
         }
         return result

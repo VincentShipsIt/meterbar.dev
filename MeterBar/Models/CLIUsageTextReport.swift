@@ -90,7 +90,8 @@ nonisolated public enum CLIUsageTextReport {
         for additional in metric.additionalLimits {
             lines += limitLines(
                 "  \(service.additionalQuotaTitleKey(for: additional).englishTitle)",
-                additional
+                additional,
+                currency: service == .claudePlatform
             )
         }
         return lines
