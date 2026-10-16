@@ -169,8 +169,8 @@ final class ServiceTypeTests: XCTestCase {
         )
     }
 
-    /// Cursor Ultra's weekly Grok Bot pool is an additional bar, not the
-    /// weekly slot. The weekly slot's percent-of-100 pool stays Other Models.
+    /// Cursor Ultra's extra Grok Bot pool is an additional bar, not the
+    /// weekly slot. A monthly percent pool in the weekly slot stays Other Models.
     func testCursorAdditionalWeeklyPercentPoolIsGrokBot() {
         let additional = UsageLimit(
             used: 18,
@@ -182,17 +182,31 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: additional).englishTitle, "Grok Bot")
     }
 
-    func testCursorWeeklySlotPercentPoolStaysOtherModels() {
+    func testCursorWeeklySlotPercentPoolTitlesWeeklyOnlyWhenThePeriodIsWeekly() {
         XCTAssertEqual(
             ServiceType.cursor.weeklyQuotaTitleKey(limitTotal: ServiceType.cursorIncludedPoolTotal),
             .otherModels
+        )
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(
+                limitTotal: ServiceType.cursorIncludedPoolTotal,
+                periodKind: .monthly
+            ),
+            .otherModels
+        )
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(
+                limitTotal: ServiceType.cursorIncludedPoolTotal,
+                periodKind: .weekly
+            ),
+            .weekly
         )
         XCTAssertEqual(
             ServiceType.cursor.weeklyQuotaTitle(
                 limitTotal: ServiceType.cursorIncludedPoolTotal,
                 periodKind: .weekly
             ),
-            "Other Models"
+            "Weekly"
         )
         XCTAssertNotEqual(
             ServiceType.cursor.weeklyQuotaTitleKey(
