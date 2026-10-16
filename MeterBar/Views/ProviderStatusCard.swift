@@ -232,12 +232,16 @@ struct ProviderStatusCard: View {
                 // is what adds used/pace text and the seven-day sparkline.
                 VStack(alignment: .leading, spacing: 9) {
                     ForEach(snapshot.limits) { limit in
-                        LimitRow(
-                            limit: limit,
-                            accentColor: snapshot.accentColor,
-                            density: limitDensity,
-                            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
-                        )
+                        if limitDensity == .compact, RunwayView.isEligible(limit) {
+                            RunwayView(limit: limit, accentColor: snapshot.accentColor)
+                        } else {
+                            LimitRow(
+                                limit: limit,
+                                accentColor: snapshot.accentColor,
+                                density: limitDensity,
+                                resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                            )
+                        }
                     }
                 }
             }
