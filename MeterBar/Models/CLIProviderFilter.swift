@@ -47,9 +47,14 @@ nonisolated public enum CLIProviderFilter {
         return trimmed.lowercased()
     }
 
+    /// A documented `--provider` token names exactly one provider: `claude` must
+    /// not also select "Claude Platform" just because that name contains it.
+    /// Anything that is not a token falls back to the substring match.
     private static func matches(_ service: ServiceType, _ needle: String) -> Bool {
-        service.rawValue.lowercased().contains(needle)
+        if ServiceType.fromCLIIdentifier(needle) != nil {
+            return service.cliIdentifier == needle
+        }
+        return service.rawValue.lowercased().contains(needle)
             || service.displayName.lowercased().contains(needle)
-            || service.cliIdentifier == needle
     }
 }

@@ -30,7 +30,8 @@ enum DiagnosticsRunner {
         kimiCodeError: ServiceError? = nil,
         zaiCodingPlanError: ServiceError? = nil,
         githubCopilotError: ServiceError? = nil,
-        museCodeError: ServiceError? = nil
+        museCodeError: ServiceError? = nil,
+        claudePlatformError: ServiceError? = nil
     ) -> [ServiceType: ServiceError] {
         var result: [ServiceType: ServiceError] = [:]
         if claudeDefaultAccountEnabled, let claudeError {
@@ -59,6 +60,9 @@ enum DiagnosticsRunner {
         }
         if let museCodeError {
             result[.museCode] = museCodeError
+        }
+        if let claudePlatformError {
+            result[.claudePlatform] = claudePlatformError
         }
         return result
     }

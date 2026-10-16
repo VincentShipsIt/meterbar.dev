@@ -505,6 +505,7 @@ enum ProviderSnapshotBuilder {
             var zaiCodingPlanService: ZaiCodingPlanService = .shared
             var githubCopilotService: GitHubCopilotService = .shared
             var museCodeService: MuseCodeService = .shared
+            var claudePlatformService: ClaudePlatformService = .shared
         }
 
         /// Builds Input here so lastError / parse health / Grok access cannot
@@ -544,14 +545,17 @@ enum ProviderSnapshotBuilder {
                     .kimiCode: stores.kimiCodeService.hasAccess,
                     .zaiCodingPlan: stores.zaiCodingPlanService.hasAccess,
                     .githubCopilot: stores.githubCopilotService.hasAccess,
-                    .museCode: stores.museCodeService.hasAccess
+                    .museCode: stores.museCodeService.hasAccess,
+                    .claudePlatform: stores.claudePlatformService.hasAccess
                 ],
                 simpleProviderNotes: [
                     .githubCopilot: stores.githubCopilotService.supportNote,
-                    .museCode: stores.museCodeService.statusNote
+                    .museCode: stores.museCodeService.statusNote,
+                    .claudePlatform: stores.claudePlatformService.statusNote
                 ].compactMapValues { $0 },
                 simpleProviderFreshness: [
-                    .museCode: stores.museCodeService.asOfNote
+                    .museCode: stores.museCodeService.asOfNote,
+                    .claudePlatform: stores.claudePlatformService.balanceNote
                 ].compactMapValues { $0 },
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
@@ -562,7 +566,8 @@ enum ProviderSnapshotBuilder {
                         .kimiCode: stores.kimiCodeService.lastError,
                         .zaiCodingPlan: stores.zaiCodingPlanService.lastError,
                         .githubCopilot: stores.githubCopilotService.lastError,
-                        .museCode: stores.museCodeService.lastError
+                        .museCode: stores.museCodeService.lastError,
+                        .claudePlatform: stores.claudePlatformService.lastError
                     ].compactMapValues { $0 }
                 ),
                 planLabels: [
@@ -834,7 +839,8 @@ enum ProviderSnapshotBuilder {
         case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode:
+             .museCode,
+             .claudePlatform:
             lastError = input.lastErrors.simpleProviders[service]
             probed = input.simpleProviderAccess[service]
             usesAPIKey = service != .kimiCode && service != .museCode
@@ -1002,7 +1008,7 @@ enum ProviderSnapshotBuilder {
                     periodKind: session.periodKind
                 ),
                 usageLimit: session,
-                valueStyle: service == .openRouter || service == .githubCopilot ? .currency : .quota
+                valueStyle: service.usesCurrencyValueStyle ? .currency : .quota
             ))
         }
         if let weekly = metrics.weeklyLimit,
@@ -1015,7 +1021,7 @@ enum ProviderSnapshotBuilder {
                     periodKind: weekly.periodKind
                 ),
                 usageLimit: weekly,
-                valueStyle: service == .openRouter || service == .githubCopilot ? .currency : .quota
+                valueStyle: service.usesCurrencyValueStyle ? .currency : .quota
             ))
         }
         if let codeReview = metrics.codeReviewLimit {
@@ -1041,7 +1047,7 @@ enum ProviderSnapshotBuilder {
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
                 usageLimit: additional,
-                valueStyle: .quota
+                valueStyle: service == .claudePlatform && additional.reading == .measured ? .currency : .quota
             ))
         }
         return result
@@ -1158,5 +1164,16 @@ extension Array where Element == ProviderSnapshot {
             )
         }
         return ProviderRecommendationPlanner.rank(candidates: candidates, now: now)
+    }
+}
+
+extension ServiceType {
+    /// Providers whose limit windows are dollar amounts rather than a request
+    /// or token quota.
+    var usesCurrencyValueStyle: Bool {
+        switch self {
+        case .openRouter, .githubCopilot, .claudePlatform: return true
+        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan, .museCode: return false
+        }
     }
 }

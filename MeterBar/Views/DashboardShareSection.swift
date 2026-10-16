@@ -70,6 +70,7 @@ struct DashboardShareSection: View {
         case .zaiCodingPlan: return "Z.ai Coding Plan usage polls"
         case .githubCopilot: return "GitHub billing polls"
         case .museCode: return "Muse Code usage polls"
+        case .claudePlatform: return "Claude Console credit polls"
         }
     }
 

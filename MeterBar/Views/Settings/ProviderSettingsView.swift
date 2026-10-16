@@ -349,6 +349,10 @@ struct ProviderSettingsView: View {
             MuseCodeSettingsSection {
                 Task { await dataManager.refresh(service: .museCode) }
             }
+        case .claudePlatform:
+            ClaudePlatformSettingsSection {
+                Task { await dataManager.refresh(service: .claudePlatform) }
+            }
         }
     }
 
@@ -388,7 +392,8 @@ struct ProviderSettingsView: View {
         case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode:
+             .museCode,
+             .claudePlatform:
             // Kimi's booster wallet is shown inside its own panel; the Z.ai plan has none.
             EmptyView()
         }
@@ -1065,7 +1070,8 @@ struct ProviderSettingsView: View {
                      .kimiCode,
                      .zaiCodingPlan,
                      .githubCopilot,
-                     .museCode:
+                     .museCode,
+                     .claudePlatform:
                     break
                 case .grok:
                     grok.checkAccess()

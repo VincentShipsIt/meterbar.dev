@@ -168,6 +168,9 @@ nonisolated public enum ProviderReadinessInspector {
         },
         museCodeReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
             [ProviderReadinessInspector.museCodeReport(refreshError: error)]
+        },
+        claudePlatformReport: (ServiceError?, Date) -> [ProviderReadiness] = { error, _ in
+            [ProviderReadinessInspector.claudePlatformReport(refreshError: error)]
         }
     ) -> [ProviderReadiness] {
         ServiceType.allCases.flatMap { provider -> [ProviderReadiness] in
@@ -191,6 +194,8 @@ nonisolated public enum ProviderReadinessInspector {
                 return githubCopilotReport(refreshErrors[provider], now)
             case .museCode:
                 return museCodeReport(refreshErrors[provider], now)
+            case .claudePlatform:
+                return claudePlatformReport(refreshErrors[provider], now)
             }
         }
     }
@@ -396,6 +401,20 @@ nonisolated public enum ProviderReadinessInspector {
                 hasUsername: config.username != nil,
                 scope: config.scope,
                 hasOrganization: config.organization != nil,
+                support: support(),
+                refreshError: sanitize(refreshError)
+            )
+        )
+    }
+
+    static func claudePlatformReport(
+        refreshError: ServiceError? = nil,
+        hasSessionKey: () -> Bool = { ClaudePlatformService.shared.hasSessionKey },
+        support: () -> ClaudePlatformAccountSupport? = { ClaudePlatformSupportSetting.load() }
+    ) -> ProviderReadiness {
+        ProviderReadinessEvaluator.claudePlatform(
+            ClaudePlatformReadinessInput(
+                hasSessionKey: hasSessionKey(),
                 support: support(),
                 refreshError: sanitize(refreshError)
             )

@@ -13,6 +13,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case zaiCodingPlan = "Z.ai Coding Plan"
     case githubCopilot = "GitHub Copilot"
     case museCode = "Muse Code"
+    case claudePlatform = "Claude Platform"
 
     public var id: String { rawValue }
 
@@ -30,6 +31,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .zaiCodingPlan: return "Z.ai GLM Coding Plan"
         case .githubCopilot: return "GitHub Copilot"
         case .museCode: return "Muse Code"
+        case .claudePlatform: return "Claude Platform"
         }
     }
 
@@ -54,6 +56,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .zaiCodingPlan: return "Z.ai"
         case .githubCopilot: return "Copilot"
         case .museCode: return "Muse"
+        case .claudePlatform: return "Console"
         }
     }
 
@@ -69,6 +72,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .zaiCodingPlan: return "z.circle.fill"
         case .githubCopilot: return "sparkles"
         case .museCode: return "circle.grid.cross.fill"
+        case .claudePlatform: return "creditcard.fill"
         }
     }
 
@@ -85,6 +89,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .zaiCodingPlan: return "ZaiCodingPlanIcon"
         case .githubCopilot: return "GitHubCopilotIcon"
         case .museCode: return "MuseCodeIcon"
+        case .claudePlatform: return "ClaudePlatformIcon"
         }
     }
 
@@ -93,7 +98,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var hasBundledLogo: Bool {
         switch self {
         case .claudeCode, .codexCli, .cursor, .grok: return true
-        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return false
+        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform: return false
         }
     }
 
@@ -109,6 +114,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .zaiCodingPlan: return 6
         case .githubCopilot: return 7
         case .museCode: return 8
+        case .claudePlatform: return 9
         }
     }
 
@@ -119,7 +125,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var hasStatusPage: Bool {
         switch self {
         case .claudeCode, .codexCli, .cursor, .openRouter, .grok, .githubCopilot: return true
-        case .kimiCode, .zaiCodingPlan, .museCode: return false
+        case .kimiCode, .zaiCodingPlan, .museCode, .claudePlatform: return false
         }
     }
 
@@ -134,7 +140,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode: false
+             .museCode,
+             .claudePlatform: false
         }
     }
 
@@ -151,7 +158,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// page is where they are switched on.
     public var isOptInByDefault: Bool {
         switch self {
-        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return true
+        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform: return true
         case .claudeCode, .codexCli, .cursor, .grok: return false
         }
     }
@@ -173,7 +180,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var writesLocalTokenLogs: Bool {
         switch self {
         case .claudeCode, .codexCli, .grok: return true
-        case .cursor, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode: return false
+        case .cursor, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
+            return false
         }
     }
 
@@ -249,7 +257,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return .model(label: modelLimitLabel)
         case .cursor: return .onDemand
-        case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode:
+        case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
             return .codeReview
         }
     }
@@ -318,7 +326,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         // Provider-specific exceptions win first: OpenRouter's credit balance
         // and Cursor's included pool are never a reported cadence, so the
         // `periodKind` override below must not retitle them "Monthly".
-        if self == .openRouter {
+        if self == .openRouter || self == .claudePlatform {
             return .accountCredits
         }
         if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {

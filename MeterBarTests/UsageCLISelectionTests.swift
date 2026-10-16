@@ -24,6 +24,7 @@ final class UsageCLISelectionTests: XCTestCase {
         .zaiCodingPlan: MetricsFixtures.zaiCodingPlan(),
         .githubCopilot: MetricsFixtures.githubCopilot(),
         .museCode: MetricsFixtures.museCode(),
+        .claudePlatform: MetricsFixtures.claudePlatform(),
     ]
 
     private lazy var accounts: [AccountUsageSnapshot] = [
@@ -71,6 +72,7 @@ final class UsageCLISelectionTests: XCTestCase {
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .zaiCodingPlan })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .githubCopilot })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .museCode })
+        XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .claudePlatform })
         XCTAssertNotNil(selection.metrics[.cursor])
         XCTAssertNotNil(selection.metrics[.openRouter])
         XCTAssertNotNil(selection.metrics[.kimiCode])

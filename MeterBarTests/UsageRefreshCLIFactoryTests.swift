@@ -61,6 +61,62 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadMetrics()[.zaiCodingPlan]?.sessionLimit?.used, 12)
     }
 
+    func testClaudePlatformRefreshKeepsTheLastGoodCreditWhenTheConsoleFailsAndSkipsWhenDisabled() async throws {
+        let keychain = KeychainManager(
+            backend: SeededKeychainBackend(),
+            currentService: "test.claudeplatform.refresh",
+            legacyServices: []
+        )
+        XCTAssertTrue(keychain.save(key: ClaudePlatformService.keychainKey, value: "sk-ant-sid01-fixture"))
+        let requests = LockedCounter()
+        let failing = LockedFlag()
+        let org = "22222222-2222-4222-8222-222222222222"
+        let service = ClaudePlatformService(
+            keychain: keychain,
+            fetch: { request in
+                requests.increment()
+                if failing.value { return .init(data: Data(), statusCode: 503) }
+                let path = request.url?.path ?? ""
+                if path == "/api/organizations" {
+                    return .init(data: Data(#"[{"uuid":"\#(org)","name":"Org","capabilities":["api"]}]"#.utf8), statusCode: 200)
+                }
+                if path.hasSuffix("/prepaid/credits") {
+                    return .init(
+                        data: Data(
+                            #"{"amount":10000,"currency":"USD","tranches":[{"remaining_amount_minor_units":2500,"granted_amount_minor_units":10000,"program_id":"api_credits"}],"promo_tranches":[]}"#
+                                .utf8
+                        ),
+                        statusCode: 200
+                    )
+                }
+                return .init(data: Data(#"{"amount":0}"#.utf8), statusCode: 200)
+            },
+            settingsDirectory: nil
+        )
+
+        let disabled = try makeFixture(accounts: [], additionalSimpleProviders: [.claudePlatform: service])
+        await disabled.manager.refresh(service: .claudePlatform)
+        XCTAssertEqual(requests.value, 0, "a disabled provider performs no credential reads or requests")
+
+        let fixture = try makeFixture(
+            accounts: [],
+            additionalSimpleProviders: [.claudePlatform: service],
+            enabledSimpleProvider: .claudePlatform
+        )
+        await fixture.manager.refresh(service: .claudePlatform)
+        XCTAssertEqual(fixture.manager.metrics[.claudePlatform]?.weeklyLimit?.used ?? 0, 75, accuracy: 0.0001)
+
+        failing.value = true
+        await fixture.manager.refresh(service: .claudePlatform)
+        XCTAssertEqual(
+            fixture.manager.metrics[.claudePlatform]?.weeklyLimit?.used ?? 0, 75, accuracy: 0.0001,
+            "a Console outage keeps the last good reading"
+        )
+        XCTAssertTrue(service.hasAccess, "an outage is not a credential problem")
+        fixture.store.flushPendingWrites()
+        XCTAssertNotNil(fixture.store.loadMetrics()[.claudePlatform])
+    }
+
     func testFactoryRefreshesOnlyConfiguredEnabledKeysInProjectedOrder() async throws {
         let first = OpenRouterAccount(id: UUID(), name: "First key")
         let second = OpenRouterAccount(id: UUID(), name: "Second key")
@@ -319,6 +375,7 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
                 .zaiCodingPlan: unused,
                 .githubCopilot: unused,
                 .museCode: unused,
+                .claudePlatform: unused,
             ],
             openRouter: provider,
             grok: unused,
@@ -352,4 +409,39 @@ final class UsageRefreshCLIFactoryTests: XCTestCase {
         return defaults
     }
 
+}
+
+private nonisolated final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+}
+
+private nonisolated final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+
+    var value: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
+    }
 }

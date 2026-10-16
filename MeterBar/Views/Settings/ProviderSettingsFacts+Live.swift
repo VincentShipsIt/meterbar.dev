@@ -65,6 +65,13 @@ extension ProviderSettingsFacts {
                     nil,
                     MuseCodeService.shared.lastError?.localizedDescription
                 )
+            case .claudePlatform:
+                (
+                    ClaudePlatformService.shared.hasAccess,
+                    nil,
+                    nil,
+                    ClaudePlatformService.shared.lastError?.localizedDescription
+                )
             }
 
         return ProviderSettingsFacts(

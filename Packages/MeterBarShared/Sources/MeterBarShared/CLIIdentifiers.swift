@@ -18,6 +18,7 @@ public extension ServiceType {
         case .zaiCodingPlan: "zai"
         case .githubCopilot: "copilot"
         case .museCode: "muse-code"
+        case .claudePlatform: "claude-platform"
         }
     }
 

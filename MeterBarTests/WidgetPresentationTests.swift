@@ -835,7 +835,7 @@ final class WidgetPresentationTests: XCTestCase {
         case (.openRouter, .session): return .keyLimit
         case (.cursor, .session): return isIncludedPool ? .cursorModels : .session
         case (_, .session): return .session
-        case (.openRouter, .weekly): return .accountCredits
+        case (.openRouter, .weekly), (.claudePlatform, .weekly): return .accountCredits
         case (.cursor, .weekly): return isIncludedPool ? .otherModels : .monthly
         case (_, .weekly): return .weekly
         }

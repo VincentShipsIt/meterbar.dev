@@ -22,7 +22,8 @@ nonisolated enum AccountFailoverProvider: String, CaseIterable, Codable, Sendabl
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode: return nil
+             .museCode,
+             .claudePlatform: return nil
         }
     }
 }

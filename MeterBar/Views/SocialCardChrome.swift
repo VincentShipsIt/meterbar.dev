@@ -42,6 +42,7 @@ enum SocialCardPalette {
         case .zaiCodingPlan: return Color(nsColor: MeterBarTheme.BrandAccentDark.zaiCodingPlan)
         case .githubCopilot: return Color(nsColor: MeterBarTheme.BrandAccentDark.githubCopilot)
         case .museCode: return Color(nsColor: MeterBarTheme.BrandAccentDark.museCode)
+        case .claudePlatform: return Color(nsColor: MeterBarTheme.BrandAccentDark.claudePlatform)
         }
     }
 

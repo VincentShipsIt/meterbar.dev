@@ -82,6 +82,7 @@ struct ProviderCatalogSettingsView: View {
         case .zaiCodingPlan: return "Track GLM Coding Plan 5-hour and weekly credits and peak hours from an API key."
         case .githubCopilot: return "Track Copilot AI-credit budgets where GitHub documents one."
         case .museCode: return "Track Muse Code session and weekly quota from the Muse CLI sign-in."
+        case .claudePlatform: return "Track Claude Console API credit, including the monthly Max credit."
         }
     }
 

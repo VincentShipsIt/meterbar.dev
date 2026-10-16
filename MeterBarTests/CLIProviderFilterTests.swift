@@ -30,6 +30,20 @@ final class CLIProviderFilterTests: XCTestCase {
         XCTAssertEqual(CLIProviderFilter.select("muse-code"), [.museCode])
         XCTAssertEqual(CLIProviderFilter.select("muse"), [.museCode])
         XCTAssertEqual(ServiceType.museCode.cliIdentifier, "muse-code")
+        XCTAssertEqual(CLIProviderFilter.select("claude-platform"), [.claudePlatform])
+        XCTAssertEqual(CLIProviderFilter.select("platform"), [.claudePlatform])
+        XCTAssertEqual(ServiceType.claudePlatform.cliIdentifier, "claude-platform")
+    }
+
+    func testTheClaudeTokenStaysClaudeCodeOnly() {
+        XCTAssertEqual(CLIProviderFilter.select("claude"), [.claudeCode])
+        XCTAssertEqual(CLIProviderFilter.select("Claude"), [.claudeCode])
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: MetricsFixtures.claudeCode(),
+            .claudePlatform: MetricsFixtures.claudePlatform()
+        ]
+        XCTAssertEqual(Set(CLIProviderFilter.apply("claude", to: metrics).keys), [.claudeCode])
+        XCTAssertEqual(Set(CLIProviderFilter.apply("claude-platform", to: metrics).keys), [.claudePlatform])
     }
 
     func testAnUnmatchedFilterSelectsNothingRatherThanEverything() {
