@@ -17,10 +17,16 @@ class CursorLocalService: ObservableObject {
     // API endpoint (from Vibeviewer: https://github.com/MarveleE/Vibeviewer)
     nonisolated private static let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
 
-    /// Cursor Ultra weekly Grok Bot entitlement. Not MeterBar's Grok
-    /// provider and not present on `/api/usage-summary`.
+    /// Weekly included pool. On a merged Cursor / SpaceXAI / X account this is
+    /// the shared allowance. On an older account it stays an extra Grok Bot bar.
+    /// Not MeterBar's Grok provider and not present on `/api/usage-summary`.
     nonisolated private static let sandUsageEndpoint =
         "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
+
+    /// Plan cadence for the included pool. `includedUsagePeriod` says whether
+    /// that pool is weekly; `billingCycleEnd` on usage-summary is the invoice.
+    nonisolated private static let planInfoEndpoint =
+        "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo"
 
     /// Production and tests share this seam so the off-main regression can
     /// probe through a *stored* `@Sendable` closure — the exact shape that
@@ -307,7 +313,7 @@ class CursorLocalService: ObservableObject {
         let membershipType: String?
     }
 
-    /// Runs both network legs and the decode off the main actor — see
+    /// Runs the network legs and the decode off the main actor — see
     /// `ServiceSupport.detached` for the SIGSEGV rationale (the 1.8.38 Cursor
     /// refresh crash is this service's case). Nothing in the detached scope
     /// touches main-actor state.
@@ -322,14 +328,20 @@ class CursorLocalService: ObservableObject {
                 token: token,
                 fetchData: fetchData
             )
-            // Grok Bot weekly pool is a separate optional Connect RPC. Failure
-            // must not drop the three usage-summary bars.
-            let sandStatus = await fetchSandUsageStatus(token: token, fetchData: fetchData)
-            let metrics = mapSummary(summaryData, sandStatus: sandStatus)
+            // Independent optional reads. Concurrent so a hung call costs one
+            // timeout, not two. A failure must not drop the usage-summary bars.
+            async let sandFetch = fetchSandUsageStatus(token: token, fetchData: fetchData)
+            async let planFetch = fetchPlanInfo(token: token, fetchData: fetchData)
+            let (sandStatus, planInfo) = await (sandFetch, planFetch)
+            let metrics = mapSummary(
+                summaryData,
+                sandStatus: sandStatus,
+                planInfo: planInfo
+            )
             return FetchedUsage(
                 metrics: metrics,
                 observation: observation(summaryData, at: metrics.lastUpdated),
-                membershipType: summaryData.membershipType
+                membershipType: membershipType(summary: summaryData.membershipType, planInfo: planInfo)
             )
         }
     }
@@ -403,37 +415,65 @@ class CursorLocalService: ObservableObject {
     /// only when the selected shape carries none of those is the assumed quota
     /// substituted and flagged `isEstimated`.
     ///
-    /// Optional `sandStatus` is Cursor Ultra's weekly Grok Bot pool. It is
-    /// attached as `additionalLimits` when the payload maps; omitted status
-    /// leaves the three usage-summary bars unchanged.
+    /// Optional `sandStatus` is the weekly included pool. When the account is
+    /// on the merged weekly plan (`GetPlanInfo.includedUsagePeriod` ends in
+    /// `WEEKLY`, or sand `isUnified`), that pool replaces the usage-summary
+    /// percent bars: those bars still reset with the invoice cycle. The same
+    /// pool is not also attached as a Grok Bot row. Older accounts keep the
+    /// percent bars and, when sand maps, the extra Grok Bot row.
+    ///
+    /// `isMerged` alone does not switch the mapping. A weekly plan whose sand
+    /// pool does not map keeps the percent bars, moves their reset to
+    /// `includedUsageResetsAt`, and leaves `windowSeconds` unset.
     nonisolated static func mapSummary(
         _ summaryData: CursorUsageSummaryResponse,
-        sandStatus: CursorSandUsageStatusResponse? = nil
+        sandStatus: CursorSandUsageStatusResponse? = nil,
+        planInfo: CursorPlanInfoResponse? = nil
     ) -> UsageMetrics {
         let cycle = billingCycle(from: summaryData)
 
         let usage = selectedUsage(from: summaryData)
         let plan = usage.plan
-        let additionalLimits = [sandStatus].compactMap(mapSandUsage)
+        let sandLimit = mapSandUsage(sandStatus)
+        let additionalLimits = sandLimit.map { [$0] } ?? []
+        let weeklyIncluded = planInfo?.planInfo?.isWeeklyIncluded == true
+        let unified = weeklyIncluded || sandStatus?.isUnified == true
 
         if let autoPercent = plan?.autoPercentUsed, let apiPercent = plan?.apiPercentUsed {
+            let onDemand = onDemandLimit(
+                from: usage.onDemand,
+                resetTime: cycle.resetTime,
+                windowSeconds: cycle.windowSeconds
+            )
+            if unified, let sandLimit {
+                return UsageMetrics(
+                    service: .cursor,
+                    sessionLimit: nil,
+                    weeklyLimit: sandLimit,
+                    codeReviewLimit: onDemand,
+                    additionalLimits: []
+                )
+            }
+            let included = includedUsageWindow(
+                billing: cycle,
+                planInfo: planInfo,
+                useWeeklyReset: weeklyIncluded
+            )
             return UsageMetrics(
                 service: .cursor,
                 sessionLimit: percentPoolLimit(
                     autoPercent,
-                    resetTime: cycle.resetTime,
-                    windowSeconds: cycle.windowSeconds
+                    resetTime: included.resetTime,
+                    windowSeconds: included.windowSeconds,
+                    periodKind: included.periodKind
                 ),
                 weeklyLimit: percentPoolLimit(
                     apiPercent,
-                    resetTime: cycle.resetTime,
-                    windowSeconds: cycle.windowSeconds
+                    resetTime: included.resetTime,
+                    windowSeconds: included.windowSeconds,
+                    periodKind: included.periodKind
                 ),
-                codeReviewLimit: onDemandLimit(
-                    from: usage.onDemand,
-                    resetTime: cycle.resetTime,
-                    windowSeconds: cycle.windowSeconds
-                ),
+                codeReviewLimit: onDemand,
                 additionalLimits: additionalLimits
             )
         }
@@ -546,18 +586,43 @@ class CursorLocalService: ObservableObject {
         return (end, windowSeconds)
     }
 
+    /// Invoice cycle for an unmerged account. A weekly included plan moves the
+    /// reset to `includedUsageResetsAt` and does not invent a window length.
+    nonisolated private static func includedUsageWindow(
+        billing: (resetTime: Date?, windowSeconds: TimeInterval?),
+        planInfo: CursorPlanInfoResponse?,
+        useWeeklyReset: Bool
+    ) -> (resetTime: Date?, windowSeconds: TimeInterval?, periodKind: UsageLimit.PeriodKind) {
+        guard useWeeklyReset else {
+            return (billing.resetTime, billing.windowSeconds, .monthly)
+        }
+        return (planInfo?.planInfo?.includedUsageResetsAt, nil, .weekly)
+    }
+
+    /// `GetPlanInfo.planName` ("Ultra") wins over usage-summary `membershipType`
+    /// ("unified_ultra"). An empty name leaves the summary token in place.
+    nonisolated static func membershipType(
+        summary: String?,
+        planInfo: CursorPlanInfoResponse?
+    ) -> String? {
+        if let name = planInfo?.planInfo?.planName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return name
+        }
+        return summary
+    }
+
     /// One included pool as the dashboard draws it: `used` is already a
     /// 0…100 percent, so the denominator is 100 rather than a request grant.
-    /// The pool resets with the monthly billing cycle, so `periodKind` is
-    /// always `.monthly` — that cadence drives the shared "Monthly reset in
-    /// Xd" blocked-card headline (see `ResetCountdownWindow.cadenceTitle`).
-    /// Returns `nil` — rather than a plausible-looking clamped gauge — when
-    /// `percentUsed` fails the `plausiblePercent` range check. See that
-    /// function's doc for the shape of drift this can and cannot catch.
+    /// Unmerged pools reset with the billing cycle (`.monthly`). A weekly
+    /// included plan uses `.weekly` so the row titles Weekly. Returns `nil`
+    /// — rather than a plausible-looking clamped gauge — when `percentUsed`
+    /// fails the `plausiblePercent` range check.
     nonisolated private static func percentPoolLimit(
         _ percentUsed: Double,
         resetTime: Date?,
-        windowSeconds: TimeInterval?
+        windowSeconds: TimeInterval?,
+        periodKind: UsageLimit.PeriodKind
     ) -> UsageLimit? {
         guard let used = plausiblePercent(percentUsed) else { return nil }
         return UsageLimit(
@@ -566,7 +631,7 @@ class CursorLocalService: ObservableObject {
             resetTime: resetTime,
             windowSeconds: windowSeconds,
             isEstimated: false,
-            periodKind: .monthly
+            periodKind: periodKind
         )
     }
 
@@ -695,6 +760,37 @@ class CursorLocalService: ObservableObject {
             return nil
         }
     }
+
+    /// Optional plan cadence. Network, 401, and decode failures return nil so
+    /// the required usage-summary path still succeeds.
+    nonisolated private static func fetchPlanInfo(
+        token: String,
+        fetchData: @Sendable (URLRequest) async throws -> Data
+    ) async -> CursorPlanInfoResponse? {
+        guard let url = URL(string: planInfoEndpoint) else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.timeoutInterval = ServiceSupport.usageRequestTimeout
+
+        for (key, value) in aiserverHeaders(token: token) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        do {
+            let data = try await fetchData(request)
+            return try JSONDecoder().decode(CursorPlanInfoResponse.self, from: data)
+        } catch {
+            let serviceError = ServiceSupport.serviceError(from: error)
+            AppLog.usage.error(
+                "Cursor plan info fetch failed: \(serviceError.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
 }
 
 // MARK: - Response Models
@@ -779,7 +875,8 @@ nonisolated struct CursorTeamUsage: Decodable {
 }
 
 /// Response from `POST …/DashboardService/GetSandUsageStatus`.
-/// Cursor Ultra weekly Grok Bot entitlement. Live keys are camelCase.
+/// Weekly included pool. `isUnified` marks the shared Cursor / SpaceXAI / X
+/// allowance. Live keys are camelCase. Unknown keys are ignored.
 nonisolated struct CursorSandUsageStatusResponse: Decodable {
     let currentPeriodStart: String?
     let nextResetTimestampUtc: String?
@@ -789,4 +886,77 @@ nonisolated struct CursorSandUsageStatusResponse: Decodable {
     let includedLimitZero: Bool?
     let availableBankedResetCount: Int?
     let usesPooledEnterpriseAllowance: Bool?
+    let isUnified: Bool?
+}
+
+/// Response from `POST …/DashboardService/GetPlanInfo`.
+/// Connect JSON stringifies int64, so the reset instant arrives as a string
+/// of epoch milliseconds. `billingCycleEnd` on this payload is the invoice,
+/// not the included-usage reset.
+nonisolated struct CursorPlanInfoResponse: Decodable {
+    let planInfo: Info?
+    let isMerged: Bool?
+
+    nonisolated struct Info: Decodable {
+        let planName: String?
+        let includedUsagePeriod: String?
+        let includedUsageResetsAt: Date?
+
+        var isWeeklyIncluded: Bool {
+            includedUsagePeriod?.uppercased().hasSuffix("WEEKLY") == true
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case planName
+            case includedUsagePeriod
+            case includedUsageResetsAt
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            planName = try container.decodeIfPresent(String.self, forKey: .planName)
+            includedUsagePeriod = try container.decodeIfPresent(String.self, forKey: .includedUsagePeriod)
+            includedUsageResetsAt = try container
+                .decodeIfPresent(CursorJSONEpoch.self, forKey: .includedUsageResetsAt)?
+                .date
+        }
+    }
+}
+
+/// Epoch instant from a Connect JSON int64. Values above 1e12 are milliseconds.
+/// Smaller finite values are seconds.
+nonisolated struct CursorJSONEpoch: Decodable {
+    let date: Date
+
+    private static let millisecondThreshold: Double = 1_000_000_000_000
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try Self.rawValue(from: container)
+        guard raw.isFinite, raw >= 0 else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Cursor epoch was not a finite instant"
+            )
+        }
+        let seconds = raw > Self.millisecondThreshold ? raw / 1000 : raw
+        date = Date(timeIntervalSince1970: seconds)
+    }
+
+    private static func rawValue(from container: SingleValueDecodingContainer) throws -> Double {
+        if let string = try? container.decode(String.self) {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let parsed = Double(trimmed) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Cursor epoch string was not numeric"
+                )
+            }
+            return parsed
+        }
+        if let int = try? container.decode(Int64.self) {
+            return Double(int)
+        }
+        return try container.decode(Double.self)
+    }
 }

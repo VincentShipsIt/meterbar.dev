@@ -303,14 +303,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     /// Display title for the long ("weekly") quota window. The shared window id
-    /// stays `weekly` across providers, but its real cadence does not: Cursor's
-    /// resets with `billingCycleEnd` (monthly), and OpenRouter's is a credit
-    /// balance rather than a window at all. Centralized here for the same reason
-    /// as `codeReviewQuotaTitle` — the popover, widget, and CLI each used to
+    /// stays `weekly` across providers, but its real cadence does not: an
+    /// unmerged Cursor pool resets with `billingCycleEnd` (monthly), a merged
+    /// included pool is weekly, and OpenRouter's is a credit balance rather
+    /// than a window at all. Centralized here for the same reason as
+    /// `codeReviewQuotaTitle` — the popover, widget, and CLI each used to
     /// spell out the OpenRouter exception inline.
     ///
-    /// Pass `limitTotal` when the concrete window is known: Cursor's percent
-    /// pools title as **Other Models**, matching the dashboard; a request-count
+    /// Pass `limitTotal` when the concrete window is known: Cursor's monthly
+    /// percent pools title as **Other Models**. A percent pool whose
+    /// `periodKind` is `.weekly` titles **Weekly**. A request-count
     /// billing-cycle quota stays **Monthly**.
     public func weeklyQuotaTitle(
         limitTotal: Double?,
@@ -324,12 +326,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         periodKind: UsageLimit.PeriodKind? = nil
     ) -> QuotaTitleKey {
         // Provider-specific exceptions win first: OpenRouter's credit balance
-        // and Cursor's included pool are never a reported cadence, so the
-        // `periodKind` override below must not retitle them "Monthly".
+        // and Cursor's monthly included pool are never a reported cadence, so
+        // the `periodKind` override below must not retitle them "Monthly".
+        // A weekly included pool is the shared allowance and keeps that name.
         if self == .openRouter || self == .claudePlatform {
             return .accountCredits
         }
         if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
+            if periodKind == .weekly {
+                return .weekly
+            }
             return .otherModels
         }
         if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {

@@ -465,6 +465,10 @@ final class CursorLocalServiceTests: XCTestCase {
         try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: Data(json.utf8))
     }
 
+    private func decodePlan(_ json: String) throws -> CursorPlanInfoResponse {
+        try JSONDecoder().decode(CursorPlanInfoResponse.self, from: Data(json.utf8))
+    }
+
     private let sandLiveKeysJSON = """
     {
       "currentPeriodStart": "2026-08-10T00:00:00.000Z",
@@ -522,6 +526,271 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(grokBot.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
         XCTAssertEqual(grokBot.windowSeconds, 7 * 24 * 3_600)
         XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: grokBot), .grokBot)
+    }
+
+    /// Merged Cursor / SpaceXAI / X billing reports one weekly included pool
+    /// on GetSandUsageStatus (`isUnified`). That pool is the Cursor card's
+    /// bar. The usage-summary percent fields stay on the invoice cycle and
+    /// must not keep drawing the old monthly Cursor Models / Other Models rows,
+    /// and the same pool must not also split out as a second Grok Bot card.
+    func testUnifiedSandPoolReplacesMonthlyIncludedBars() throws {
+        let summary = """
+        {
+          "billingCycleStart": "2026-10-01T00:00:00Z",
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "membershipType": "unified_ultra",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 0, "apiPercentUsed": 0 },
+            "onDemand": { "used": 3, "limit": 20, "enabled": true }
+          }
+        }
+        """
+        let sand = """
+        {
+          "currentPeriodStart": "2026-10-16T10:47:06.910Z",
+          "nextResetTimestampUtc": "2026-10-23T10:47:06.910Z",
+          "usagePercent": 15.465294701687878,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true,
+          "isUnified": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        let weekly = try XCTUnwrap(metrics.weeklyLimit)
+        XCTAssertEqual(weekly.used, 15.465294701687878)
+        XCTAssertEqual(weekly.total, ServiceType.cursorIncludedPoolTotal)
+        XCTAssertEqual(weekly.periodKind, .weekly)
+        XCTAssertEqual(weekly.resetTime, FlexibleISO8601.date(from: "2026-10-23T10:47:06.910Z"))
+        let start = try XCTUnwrap(FlexibleISO8601.date(from: "2026-10-16T10:47:06.910Z"))
+        let end = try XCTUnwrap(weekly.resetTime)
+        XCTAssertEqual(weekly.windowSeconds, end.timeIntervalSince(start))
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 3)
+        XCTAssertEqual(metrics.codeReviewLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(
+                limitTotal: weekly.total,
+                periodKind: weekly.periodKind
+            ),
+            .weekly
+        )
+    }
+
+    /// A weekly plan period is enough on its own. Sand does not also have to
+    /// set `isUnified` before its pool replaces the invoice-cycle bars.
+    func testWeeklyPlanPeriodUsesSandPoolWithoutUnifiedFlag() throws {
+        let summary = """
+        {
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 0, "apiPercentUsed": 0 }
+          }
+        }
+        """
+        let sand = """
+        {
+          "currentPeriodStart": "2026-10-16T10:47:06.910Z",
+          "nextResetTimestampUtc": "2026-10-23T10:47:06.910Z",
+          "usagePercent": 15.5,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let plan = """
+        {
+          "planInfo": { "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY" }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand),
+            planInfo: try decodePlan(plan)
+        )
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 15.5)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-10-23T10:47:06.910Z"))
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    /// `isMerged` is the billing-account flag. The included pool stays on the
+    /// invoice cycle until the plan period is weekly or sand says `isUnified`.
+    func testMergedFlagAloneKeepsMonthlyIncludedBars() throws {
+        let summary = """
+        {
+          "billingCycleStart": "2026-10-01T00:00:00Z",
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 }
+          }
+        }
+        """
+        let sand = """
+        {
+          "currentPeriodStart": "2026-08-10T00:00:00Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00Z",
+          "usagePercent": 18.5,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let plan = """
+        {
+          "isMerged": true,
+          "planInfo": {
+            "planName": "Ultra",
+            "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_MONTHLY"
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand),
+            planInfo: try decodePlan(plan)
+        )
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.sessionLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.additionalLimits.count, 1)
+        XCTAssertEqual(
+            ServiceType.cursor.weeklyQuotaTitleKey(
+                limitTotal: metrics.weeklyLimit?.total,
+                periodKind: metrics.weeklyLimit?.periodKind
+            ),
+            .otherModels
+        )
+    }
+
+    /// Sand reported unified billing but no usable percent. There is no weekly
+    /// pool to draw, and no plan reset to move the invoice bars onto.
+    func testUnifiedFlagWithoutSandPoolKeepsMonthlyIncludedBars() throws {
+        let summary = """
+        {
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 0, "apiPercentUsed": 0 }
+          }
+        }
+        """
+        let sand = """
+        {
+          "isUnified": true,
+          "hasNonZeroIncludedLimit": true
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            sandStatus: try decodeSand(sand)
+        )
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 0)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    /// The plan says the included pool is weekly, but sand did not map. Keep
+    /// the usage-summary percents and point them at the plan reset. Do not
+    /// invent a 7-day window from the invoice cycle.
+    func testWeeklyPlanWithoutSandPoolRetargetsIncludedBars() throws {
+        let summary = """
+        {
+          "billingCycleStart": "2026-10-01T00:00:00Z",
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 4, "apiPercentUsed": 64 },
+            "onDemand": { "used": 2, "limit": 10, "enabled": true }
+          }
+        }
+        """
+        let plan = """
+        {
+          "planInfo": {
+            "planName": "Ultra",
+            "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY",
+            "includedUsageResetsAt": "1792752426910"
+          }
+        }
+        """
+        let metrics = CursorLocalService.mapSummary(
+            try decodeSummary(summary),
+            planInfo: try decodePlan(plan)
+        )
+        let reset = Date(timeIntervalSince1970: Double(1_792_752_426_910) / 1000)
+
+        XCTAssertEqual(metrics.sessionLimit?.used, 4)
+        XCTAssertEqual(metrics.sessionLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.sessionLimit?.resetTime, reset)
+        XCTAssertNil(metrics.sessionLimit?.windowSeconds)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, reset)
+        XCTAssertNil(metrics.weeklyLimit?.windowSeconds)
+        XCTAssertEqual(metrics.codeReviewLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
+        XCTAssertNotNil(metrics.codeReviewLimit?.windowSeconds)
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+    }
+
+    func testPlanInfoDecodesStringMillisecondReset() throws {
+        let plan = """
+        {
+          "planInfo": {
+            "planName": "Ultra",
+            "includedUsagePeriod": "included_usage_period_weekly",
+            "includedUsageResetsAt": "1792752426910"
+          },
+          "isMerged": true
+        }
+        """
+        let decoded = try decodePlan(plan)
+
+        XCTAssertEqual(decoded.isMerged, true)
+        XCTAssertEqual(decoded.planInfo?.planName, "Ultra")
+        XCTAssertEqual(decoded.planInfo?.isWeeklyIncluded, true)
+        XCTAssertEqual(
+            decoded.planInfo?.includedUsageResetsAt,
+            Date(timeIntervalSince1970: Double(1_792_752_426_910) / 1000)
+        )
+    }
+
+    func testPlanInfoDecodesNumericSecondResetAndMonthlyPeriod() throws {
+        let plan = """
+        {
+          "planInfo": {
+            "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_MONTHLY",
+            "includedUsageResetsAt": 1792752426
+          }
+        }
+        """
+        let decoded = try decodePlan(plan)
+
+        XCTAssertEqual(decoded.planInfo?.isWeeklyIncluded, false)
+        XCTAssertEqual(
+            decoded.planInfo?.includedUsageResetsAt,
+            Date(timeIntervalSince1970: 1_792_752_426)
+        )
+    }
+
+    func testMembershipPrefersNonEmptyPlanName() throws {
+        let named = #"{ "planInfo": { "planName": " Ultra " } }"#
+        XCTAssertEqual(
+            CursorLocalService.membershipType(summary: "unified_ultra", planInfo: try decodePlan(named)),
+            "Ultra"
+        )
+
+        let blank = #"{ "planInfo": { "planName": "  " } }"#
+        XCTAssertEqual(
+            CursorLocalService.membershipType(summary: "unified_ultra", planInfo: try decodePlan(blank)),
+            "unified_ultra"
+        )
     }
 
     func testMapSandOmitsWindowWhenPeriodStartMissing() throws {
@@ -850,6 +1119,64 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(fetched.metrics.weeklyLimit?.total, 100)
         XCTAssertEqual(fetched.observation?.runningTotal, 10)
         XCTAssertEqual(fetched.metrics.additionalLimits.first?.used, 12)
+    }
+
+    /// A merged account's plan name and weekly pool come from the DashboardService
+    /// reads. usage-summary still supplies on-demand and the request observation.
+    func testFetchRemotelyUsesPlanNameAndUnifiedWeeklyPool() async throws {
+        let summaryJSON = """
+        {
+          "billingCycleStart": "2026-10-01T00:00:00Z",
+          "billingCycleEnd": "2026-11-01T00:00:00Z",
+          "membershipType": "unified_ultra",
+          "individualUsage": {
+            "plan": { "autoPercentUsed": 0, "apiPercentUsed": 0 }
+          }
+        }
+        """
+        let sandJSON = """
+        {
+          "currentPeriodStart": "2026-10-16T10:47:06.910Z",
+          "nextResetTimestampUtc": "2026-10-23T10:47:06.910Z",
+          "usagePercent": 15.5,
+          "hasNonZeroIncludedLimit": true,
+          "isUnified": true
+        }
+        """
+        let planJSON = """
+        {
+          "planInfo": {
+            "planName": "Ultra",
+            "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY",
+            "includedUsageResetsAt": "1792752426910"
+          }
+        }
+        """
+
+        let fetched = try await CursorLocalService.fetchRemotely(
+            userId: "user-test",
+            token: "tok-test",
+            fetchData: { request in
+                let path = request.url?.absoluteString ?? ""
+                if path.contains("usage-summary") {
+                    return Data(summaryJSON.utf8)
+                }
+                if path.contains("GetSandUsageStatus") {
+                    return Data(sandJSON.utf8)
+                }
+                if path.contains("GetPlanInfo") {
+                    return Data(planJSON.utf8)
+                }
+                throw ServiceError.invalidURL
+            }
+        )
+
+        XCTAssertEqual(fetched.membershipType, "Ultra")
+        XCTAssertNil(fetched.metrics.sessionLimit)
+        XCTAssertEqual(fetched.metrics.weeklyLimit?.used, 15.5)
+        XCTAssertEqual(fetched.metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertTrue(fetched.metrics.additionalLimits.isEmpty)
+        XCTAssertNil(fetched.observation)
     }
 
     /// The stronger pin for the same 1.8.38 crash: even when the poll is
