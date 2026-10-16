@@ -41,6 +41,11 @@ nonisolated enum ServiceSupport {
             origin: "https://chatgpt.com",
             referer: "https://chatgpt.com/"
         )
+
+        static let claudePlatform = BrowserSite(
+            origin: "https://platform.claude.com",
+            referer: "https://platform.claude.com/settings/billing"
+        )
     }
 
     /// Headers that make a request look like it came from `site`'s own web

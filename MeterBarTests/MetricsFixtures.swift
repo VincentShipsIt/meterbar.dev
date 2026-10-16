@@ -24,6 +24,7 @@ enum MetricsFixtures {
         case .zaiCodingPlan: return zaiCodingPlan()
         case .githubCopilot: return githubCopilot()
         case .museCode: return museCode()
+        case .claudePlatform: return claudePlatform()
         }
     }
 
@@ -131,6 +132,19 @@ enum MetricsFixtures {
                 resetTime: referenceDate.addingTimeInterval(12 * 24 * 3600),
                 periodKind: .monthly
             ),
+            lastUpdated: referenceDate
+        )
+    }
+
+    /// Synthetic Claude Console credit: the monthly subscription grant in the
+    /// weekly slot and a purchased grant beside it. Dollars, no reset time.
+    static func claudePlatform() -> UsageMetrics {
+        UsageMetrics(
+            service: .claudePlatform,
+            weeklyLimit: UsageLimit(used: 75.25, total: 200, resetTime: nil),
+            additionalLimits: [
+                UsageLimit(used: 37.5, total: 100, resetTime: nil, label: "Purchased credit")
+            ],
             lastUpdated: referenceDate
         )
     }

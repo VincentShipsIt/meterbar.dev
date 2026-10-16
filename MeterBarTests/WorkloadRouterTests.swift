@@ -11,14 +11,14 @@ final class WorkloadRouterTests: XCTestCase {
 
     func testWorkloadRoutingCapabilityIsExplicitForEveryTrackedProvider() {
         let supported: Set<ServiceType> = [.claudeCode, .codexCli, .cursor, .openRouter, .grok]
-        XCTAssertEqual(ServiceType.allCases.count, 9)
+        XCTAssertEqual(ServiceType.allCases.count, 10)
         for service in ServiceType.allCases {
             XCTAssertEqual(service.supportsWorkloadRouting, supported.contains(service), service.rawValue)
         }
     }
 
     func testNewProvidersCannotBypassTheSharedRoutingCapability() {
-        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform] {
             for cost in [RoutingCostPreference.headroom, .balanced, .cost] {
                 let policy = Fixtures.policy {
                     $0.providerPreference = [service]
@@ -40,7 +40,7 @@ final class WorkloadRouterTests: XCTestCase {
             $0.providerScope = .preferredOnly
             $0.providerPreference = [.claudeCode]
         }
-        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode] {
+        for service in [ServiceType.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform] {
             let candidates = [
                 RoutingCandidate(service: service, metrics: nil),
                 Fixtures.candidate(service, session: Fixtures.limit(used: .nan)),

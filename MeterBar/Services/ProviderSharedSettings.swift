@@ -115,3 +115,19 @@ nonisolated struct GitHubCopilotAccountConfig: Equatable {
     private static let organizationKey = "githubCopilotOrganization"
     private static let supportKey = "githubCopilotSupport"
 }
+
+/// The last Claude Console account classification, persisted as a secret-free
+/// token so the CLI's `doctor` can report it without a request. The session
+/// cookie itself stays in the Keychain and never reaches the app group.
+nonisolated enum ClaudePlatformSupportSetting {
+    private static let key = "claudePlatformSupport"
+
+    static func load(directory: URL? = SharedMetricsStore.containerURL) -> ClaudePlatformAccountSupport? {
+        ProviderSharedSettings.value(for: key, directory: directory)
+            .flatMap(ClaudePlatformAccountSupport.init(rawValue:))
+    }
+
+    static func save(_ support: ClaudePlatformAccountSupport?, directory: URL? = SharedMetricsStore.containerURL) {
+        ProviderSharedSettings.set(support?.rawValue, for: key, directory: directory)
+    }
+}

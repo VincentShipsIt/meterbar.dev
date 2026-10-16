@@ -171,6 +171,30 @@ final class ProviderCapabilitiesTests: XCTestCase {
         XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.museCode))
     }
 
+    func testClaudePlatformIsASingleAccountOptInCreditProviderWithoutAStatusPage() {
+        XCTAssertEqual(
+            ServiceType.claudePlatform.capabilities,
+            ProviderCapabilities(
+                isMultiAccount: false,
+                supportsExtraUsage: false,
+                supportsResetRedemption: false,
+                supportsGuardConfigDirectory: false,
+                supportsSessionWake: false,
+                hasAccountScopedNotifications: false,
+                hasAccountScopedQuotaEvents: false
+            )
+        )
+        XCTAssertFalse(ServiceType.claudePlatform.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.claudePlatform.isOptInByDefault)
+        XCTAssertFalse(ServiceType.claudePlatform.hasStatusPage)
+        XCTAssertNil(ServiceType.claudePlatform.statusPageURL)
+        XCTAssertFalse(ServiceType.claudePlatform.supportsWorkloadRouting)
+        XCTAssertFalse(ServiceType.claudePlatform.hasBundledLogo)
+        XCTAssertFalse(ServiceType.claudePlatform.assetName.isEmpty)
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.claudePlatform))
+        XCTAssertTrue(QuotaEventSnapshotCatalog.flatProviders.contains(.claudePlatform))
+    }
+
     func testSessionWakeIsAnExplicitExceptionForGrok() {
         XCTAssertTrue(ServiceType.grok.isMultiAccount)
         XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
@@ -457,7 +481,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
             kimiCodeError: .apiError("kimi"),
             zaiCodingPlanError: .apiError("zai"),
             githubCopilotError: .apiError("copilot"),
-            museCodeError: .apiError("muse")
+            museCodeError: .apiError("muse"),
+            claudePlatformError: .apiError("claude-platform")
         )
         XCTAssertEqual(Set(errors.keys), Set(ServiceType.allCases))
     }

@@ -131,20 +131,21 @@ final class ProviderSnapshotTests: XCTestCase {
                 .kimiCode: makeMetrics(service: .kimiCode, weekly: 60),
                 .zaiCodingPlan: makeMetrics(service: .zaiCodingPlan, weekly: 70),
                 .githubCopilot: makeMetrics(service: .githubCopilot, weekly: 80),
-                .museCode: makeMetrics(service: .museCode, weekly: 85)
+                .museCode: makeMetrics(service: .museCode, weekly: 85),
+                .claudePlatform: makeMetrics(service: .claudePlatform, weekly: 15)
             ]
         ))
 
         XCTAssertEqual(
             snapshots.map(\.service),
             [
-                .claudeCode, .codexCli, .githubCopilot, .cursor, .grok, .kimiCode, .museCode, .openRouter,
-                .zaiCodingPlan
+                .claudeCode, .codexCli, .claudePlatform, .githubCopilot, .cursor, .grok, .kimiCode, .museCode,
+                .openRouter, .zaiCodingPlan
             ]
         )
         XCTAssertEqual(
             snapshots.map(\.title),
-            ["Claude", "Codex", "Copilot", "Cursor", "Grok", "Kimi", "Muse", "OpenRouter", "Z.ai"]
+            ["Claude", "Codex", "Console", "Copilot", "Cursor", "Grok", "Kimi", "Muse", "OpenRouter", "Z.ai"]
         )
     }
 
@@ -220,7 +221,7 @@ final class ProviderSnapshotTests: XCTestCase {
         ))
 
         // Popover shows every enabled provider, including empty-state cards.
-        XCTAssertEqual(snapshots.count, 9)
+        XCTAssertEqual(snapshots.count, 10)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
         XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
@@ -480,11 +481,12 @@ final class ProviderSnapshotTests: XCTestCase {
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
-                 .museCode: return .session
+                 .museCode,
+                 .claudePlatform: return .session
             }
         case .weekly:
             switch service {
-            case .openRouter: return .accountCredits
+            case .openRouter, .claudePlatform: return .accountCredits
             case .cursor: return isIncludedPool ? .otherModels : .monthly
             case .claudeCode,
                  .codexCli,
@@ -504,7 +506,8 @@ final class ProviderSnapshotTests: XCTestCase {
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
-                 .museCode: return .codeReview
+                 .museCode,
+                 .claudePlatform: return .codeReview
             }
         case .additional:
             return .quota

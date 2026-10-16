@@ -219,7 +219,8 @@ final class UsageNotificationCoordinator {
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
-                 .museCode:
+                 .museCode,
+                 .claudePlatform:
                 assertionFailure(
                     "account-scoped notifications for \(service.rawValue) have no routing"
                 )

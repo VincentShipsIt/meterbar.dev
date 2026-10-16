@@ -20,7 +20,7 @@
 > MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
 A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
-OpenRouter, Grok, Kimi Code, Z.ai, GitHub Copilot, and Muse Code usage at a glance — then tells you which provider still has
+OpenRouter, Grok, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Console API credit at a glance — then tells you which provider still has
 headroom, warns you before you hit a wall, and can resume your blocked sessions
 by itself once a limit resets.
 
@@ -40,7 +40,7 @@ by itself once a limit resets.
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
-- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, and Muse Code
+- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, Muse Code, and Claude Platform (Console API credit)
 - **Provider Status**: Service-health monitoring for every provider that publishes a status page, so you can tell a provider outage apart from your own exhausted quota
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
@@ -83,6 +83,7 @@ by itself once a limit resets.
 | **Z.ai GLM Coding Plan** | Coding Plan API key stored in Keychain; you choose the international (`api.z.ai`) or mainland (`open.bigmodel.cn`) region. Off until you enable it in Settings → Providers | 5-hour and weekly credit windows, monthly MCP tool allowance, and a peak / off-peak indicator |
 | **GitHub Copilot** | Fine-grained token stored in Keychain, read through GitHub's documented billing API. Off until you enable it in Settings → Providers | A monthly budget bar **only** for organization-managed licences with a user-level budget (needs the billing role). Personal and legacy plans show their usage state — GitHub documents no allowance for them, so MeterBar does not guess one |
 | **Muse Code** | Read-only Muse CLI sign-in (`muse login`). Off until you enable it in Settings → Providers. The first Connect may ask for Keychain access — choose Always Allow | Session and weekly windows when the account reports them. An idle 5-hour window is not shown as 0% |
+| **Claude Platform** | Your Claude Console session: paste the `Cookie` header from a signed-in `platform.claude.com` request in Settings → Providers. MeterBar keeps only the `sessionKey` value in Keychain and sends it to `platform.claude.com` alone; no browser cookie store is read. An `sk-ant` API key cannot read billing, so it is not used. Off until you enable it. The cookie expires periodically and MeterBar asks for a fresh one when the Console rejects it | The API credit for your Console API organization: the monthly API credit a Max or Team plan includes (soonest-expiring grant, as a dollar bar), purchased credit, other grants, and month-to-date spend. Credit grants expire rather than reset, so no reset countdown is shown. Reads the Console's own billing endpoints, which are not a documented API |
 
 ## Installation
 
@@ -297,7 +298,7 @@ meterbar usage
 # JSON output for scripts
 meterbar usage --json
 
-# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code)
+# Filter by provider (claude, codex, cursor, openrouter, grok, kimi, zai, copilot, muse-code, claude-platform)
 meterbar usage --provider claude
 
 # Show token costs from the app's last local scan
@@ -311,7 +312,7 @@ meterbar cost --json
 meterbar route --task implementation
 ```
 
-`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai, GitHub Copilot, and Muse Code are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the four newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
+`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the five newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Usage tab), so the CLI and the app always show the same numbers.
@@ -371,6 +372,7 @@ It then uses the respective local source or API to fetch current usage data:
 - Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
 - Grok: official `grok agent` ACP `_x.ai/billing` for the weekly gauge; grok.com `ConsumerUiSvc/GetRemainingResets` for usage-limit resets
+- Claude Platform (opt-in): read-only `GET`s to `platform.claude.com/api/organizations`, `…/prepaid/credits` and `…/current_spend` with the pasted `sessionKey` cookie
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
 - Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).

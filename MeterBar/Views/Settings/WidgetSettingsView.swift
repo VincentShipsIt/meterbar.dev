@@ -59,7 +59,8 @@ enum WidgetSettingsAccountProjection {
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
-                 .museCode:
+                 .museCode,
+                 .claudePlatform:
                 return [
                     WidgetSettingsAccountOption(
                         id: .provider(service),
@@ -142,7 +143,8 @@ struct WidgetSettingsPreviewData {
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
-                 .museCode:
+                 .museCode,
+                 .claudePlatform:
                 accountMetrics = nil
             }
             guard optionIDs.contains(option.id), let accountMetrics, accountMetrics.hasData else {
@@ -194,6 +196,13 @@ struct WidgetSettingsPreviewData {
         now: Date
     ) -> UsageMetrics {
         let used = [28.0, 54.0, 76.0, 41.0, 63.0][index % 5]
+        if service == .claudePlatform {
+            return UsageMetrics(
+                service: service,
+                weeklyLimit: UsageLimit(used: used, total: 100, resetTime: nil),
+                lastUpdated: now
+            )
+        }
         return UsageMetrics(
             service: service,
             sessionLimit: UsageLimit(

@@ -65,6 +65,21 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         }
     }
 
+    func testClaudePlatformStaysOffWhenTheHiddenSetPredatesIt() {
+        withIsolatedDefaults { defaults in
+            defaults.set(["Claude Code", "Codex CLI"], forKey: StorageKeys.hiddenProviderServices)
+            let loaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertFalse(loaded.isEnabled(.claudePlatform))
+            XCTAssertFalse(defaults.bool(forKey: StorageKeys.claudePlatformProviderEnabled))
+
+            loaded.set(.claudePlatform, isEnabled: true)
+            let reloaded = ProviderVisibilityStore(userDefaults: defaults)
+            XCTAssertTrue(reloaded.isEnabled(.claudePlatform))
+            XCTAssertTrue(defaults.bool(forKey: StorageKeys.claudePlatformProviderEnabled))
+            XCTAssertFalse(reloaded.isEnabled(.museCode), "another opt-in provider must stay off")
+        }
+    }
+
     func testGitHubCopilotIsOffByDefaultAndItsOptInPersistsIndependently() {
         withIsolatedDefaults { defaults in
             let initial = ProviderVisibilityStore(userDefaults: defaults)

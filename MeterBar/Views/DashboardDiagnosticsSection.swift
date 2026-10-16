@@ -136,7 +136,8 @@ struct DashboardDiagnosticsSection: View {
             kimiCodeError: KimiCodeService.shared.lastError,
             zaiCodingPlanError: ZaiCodingPlanService.shared.lastError,
             githubCopilotError: GitHubCopilotService.shared.lastError,
-            museCodeError: MuseCodeService.shared.lastError
+            museCodeError: MuseCodeService.shared.lastError,
+            claudePlatformError: ClaudePlatformService.shared.lastError
         )
         let accountErrors = DiagnosticsRunner.accountRefreshErrors(
             claudeAccountErrors: Dictionary(

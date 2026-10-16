@@ -59,6 +59,8 @@ final class ProviderVisibilityStore: ObservableObject {
             userDefaults.set(enabled, forKey: StorageKeys.githubCopilotProviderEnabled)
         case .museCode:
             userDefaults.set(enabled, forKey: StorageKeys.museCodeProviderEnabled)
+        case .claudePlatform:
+            userDefaults.set(enabled, forKey: StorageKeys.claudePlatformProviderEnabled)
         case .grok:
             userDefaults.set(enabled, forKey: StorageKeys.grokProviderEnabled)
         case .claudeCode, .codexCli, .cursor:
@@ -86,6 +88,9 @@ final class ProviderVisibilityStore: ObservableObject {
         }
         if !userDefaults.bool(forKey: StorageKeys.museCodeProviderEnabled) {
             hiddenServices.insert(.museCode)
+        }
+        if !userDefaults.bool(forKey: StorageKeys.claudePlatformProviderEnabled) {
+            hiddenServices.insert(.claudePlatform)
         }
         // Grok is a first-class provider, so only an explicit opt-out hides it.
         // While it was opt-in, `load()` inserted it into `hiddenServices` and any

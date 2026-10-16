@@ -14,7 +14,7 @@ public enum WidgetPlaceholderMetrics {
 
     private static func metrics(for service: ServiceType, now: Date) -> UsageMetrics {
         let used: Double
-        let resetDelay: TimeInterval
+        let resetDelay: TimeInterval?
         switch service {
         case .claudeCode:
             used = 72
@@ -43,13 +43,16 @@ public enum WidgetPlaceholderMetrics {
         case .museCode:
             used = 22
             resetDelay = 3 * 24 * 60 * 60
+        case .claudePlatform:
+            used = 38
+            resetDelay = nil
         }
         return UsageMetrics(
             service: service,
             weeklyLimit: UsageLimit(
                 used: used,
                 total: 100,
-                resetTime: now.addingTimeInterval(resetDelay),
+                resetTime: resetDelay.map { now.addingTimeInterval($0) },
                 windowSeconds: 7 * 24 * 60 * 60
             ),
             lastUpdated: now

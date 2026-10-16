@@ -138,7 +138,8 @@ nonisolated enum RoutingCandidateAssembler {
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode:
+             .museCode,
+             .claudePlatform:
             return []
         }
     }

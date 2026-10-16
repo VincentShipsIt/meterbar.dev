@@ -558,6 +558,24 @@ public struct ZaiCodingPlanReadinessInput: Sendable {
     }
 }
 
+/// Fixture-able facts for the Claude Console credit provider (session cookie).
+public struct ClaudePlatformReadinessInput: Sendable {
+    public var hasSessionKey: Bool
+    /// The last classification the app persisted, or `nil` before the first refresh.
+    public var support: ClaudePlatformAccountSupport?
+    public var refreshError: String?
+
+    public init(
+        hasSessionKey: Bool,
+        support: ClaudePlatformAccountSupport? = nil,
+        refreshError: String? = nil
+    ) {
+        self.hasSessionKey = hasSessionKey
+        self.support = support
+        self.refreshError = refreshError
+    }
+}
+
 /// Fixture-able facts for the GitHub Copilot billing provider (fine-grained token).
 public struct GitHubCopilotReadinessInput: Sendable {
     public var hasToken: Bool
@@ -983,6 +1001,65 @@ public enum ProviderReadinessEvaluator {
         }
         return ProviderReadiness(
             provider: .githubCopilot,
+            checks: [installed, auth, data, refreshCheck(input.refreshError)]
+        )
+    }
+
+    // MARK: Claude Platform
+
+    public static func claudePlatform(_ input: ClaudePlatformReadinessInput) -> ProviderReadiness {
+        let installed = ReadinessCheck(
+            id: ReadinessCheckID.installed,
+            title: "App required",
+            level: .pass,
+            detail: "No local app or CLI is read; only the Claude Console billing endpoints are used."
+        )
+        let auth = ReadinessCheck(
+            id: ReadinessCheckID.auth,
+            title: "Console session",
+            level: input.hasSessionKey ? .pass : .fail,
+            detail: input.hasSessionKey
+                ? "A platform.claude.com session cookie is configured."
+                : "The platform.claude.com session cookie is missing.",
+            recovery: input.hasSessionKey
+                ? nil
+                : "Paste the Cookie header from a signed-in platform.claude.com request in MeterBar Settings."
+        )
+        let data: ReadinessCheck
+        switch (input.hasSessionKey, input.support) {
+        case (false, _):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Credit readable",
+                level: .warn,
+                detail: "API credit becomes readable once a Console session is configured."
+            )
+        case (true, nil):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Credit readable",
+                level: .warn,
+                detail: "The account has not been checked yet.",
+                recovery: "Run `meterbar refresh`, or refresh in the app."
+            )
+        case let (true, support?) where support.isReadable:
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Credit readable",
+                level: .pass,
+                detail: support.message
+            )
+        case let (true, support?):
+            data = ReadinessCheck(
+                id: ReadinessCheckID.data,
+                title: "Credit readable",
+                level: .warn,
+                detail: support.message,
+                recovery: "MeterBar does not guess a balance for this account shape."
+            )
+        }
+        return ProviderReadiness(
+            provider: .claudePlatform,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
     }

@@ -150,7 +150,8 @@ nonisolated enum QuotaEventSnapshotCatalog {
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
-             .museCode:
+             .museCode,
+             .claudePlatform:
             return nil
         }
     }
