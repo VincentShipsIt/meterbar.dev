@@ -47,6 +47,44 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         XCTAssertEqual(metrics.extraUsage?.detail, "$8.50 credits · $12.25 / $50.00 on demand")
     }
 
+    /// Captured from a live `_x.ai/billing` call on grok 1.0.62 against an X
+    /// Subscription Ultra account (2026-10-17). The weekly window carries no
+    /// per-period percent and no on-demand cap, only the account-wide percent.
+    func testLiveXSubscriptionPayloadMapsToWeeklyGaugeWithResetDate() throws {
+        let result = try decodeResult(
+            """
+            {
+              "config": {
+                "creditUsagePercent": 30.0,
+                "currentPeriod": {
+                  "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                  "start": "2026-10-16T10:47:06.910+00:00",
+                  "end": "2026-10-23T10:47:06.910+00:00"
+                },
+                "prepaidBalance": { "val": 0 },
+                "isUnifiedBillingUser": true,
+                "billingPeriodStart": "2026-10-16T10:47:06.910+00:00",
+                "billingPeriodEnd": "2026-10-23T10:47:06.910+00:00"
+              },
+              "subscription_tier": "SuperGrok Heavy"
+            }
+            """
+        )
+
+        let metrics = try GrokCLIUsageService.map(result, now: Date(timeIntervalSince1970: 1_000))
+
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 30)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 7 * 24 * 60 * 60)
+        XCTAssertEqual(
+            metrics.weeklyLimit?.resetTime,
+            FlexibleISO8601.date(from: "2026-10-23T10:47:06.910+00:00")
+        )
+        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(result.subscriptionTier, "SuperGrok Heavy")
+    }
+
     func testUsagePeriodsMapOntoSessionAndWeeklyWindowsWithWorkingPace() throws {
         let result = try decodeResult(
             """
