@@ -36,24 +36,28 @@ struct ProviderCardHeader: View {
 
     var content: Content { Content(snapshot: snapshot) }
 
-    /// Fixed metrics for the header grid. Everything on the top row shares one
-    /// centre line, and the subtitle hangs from the title's leading edge, so
-    /// the logo, title, plan chip, status badge and chevron can never drift
-    /// against a two-line block the way a vertically centred layout did.
+    /// Fixed metrics for the header grid. The identity column is the name over
+    /// the refresh subtitle, so the subtitle's leading edge is the title's x
+    /// (logo column + gap) and lines up with the rows under the card. Status,
+    /// the live chip, and the chevron stay in that same row, top-aligned with
+    /// the name. Hanging the subtitle under the whole row wraps the name and
+    /// status onto a second line and drops the wider refresh text out of the
+    /// row's width.
     enum Layout {
         static let logoSize: CGFloat = 17
         static let columnSpacing: CGFloat = 7
         static let titleSpacing: CGFloat = 5
-        static let rowSpacing: CGFloat = 2
+        /// Gap between the provider name and the refresh subtitle.
+        static let rowSpacing: CGFloat = 1
         /// Subtitle indent: the logo column plus its gap, i.e. the title's x.
         static let subtitleInset: CGFloat = logoSize + columnSpacing
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-            HStack(alignment: .center, spacing: Layout.columnSpacing) {
-                ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
+        HStack(alignment: .top, spacing: Layout.columnSpacing) {
+            ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
 
+            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                 HStack(spacing: Layout.titleSpacing) {
                     Text(content.title)
                         .font(.subheadline)
@@ -65,25 +69,25 @@ struct ProviderCardHeader: View {
                     }
                 }
 
-                Spacer(minLength: 0)
+                Text(content.subtitle)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
 
-                if showsLiveAccount {
-                    MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
-                        .accessibilityLabel("Live CLI account")
-                }
+            Spacer(minLength: 0)
 
-                ProviderCardStatusLabel(snapshot: snapshot)
-
-                if showsDisclosureChevron {
-                    CardDisclosureChevron()
-                }
+            if showsLiveAccount {
+                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                    .accessibilityLabel("Live CLI account")
             }
 
-            Text(content.subtitle)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .padding(.leading, Layout.subtitleInset)
+            ProviderCardStatusLabel(snapshot: snapshot)
+
+            if showsDisclosureChevron {
+                CardDisclosureChevron()
+            }
         }
     }
 }
