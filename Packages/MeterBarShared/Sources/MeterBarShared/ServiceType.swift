@@ -93,15 +93,6 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether an asset-catalog logo ships for the provider. The rest use their
-    /// SF Symbol (`iconName`) wherever a logo would go.
-    public var hasBundledLogo: Bool {
-        switch self {
-        case .claudeCode, .codexCli, .cursor, .grok: return true
-        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform: return false
-        }
-    }
-
     /// Stable display ordering (most-used services first).
     public var sortOrder: Int {
         switch self {

@@ -429,19 +429,12 @@ struct WidgetProviderIcon: View {
     let size: CGFloat
 
     var body: some View {
-        // OpenRouter has no shipped logo yet, so it keeps the SF Symbol. Grok's
-        // asset is a template imageset rather than the full-color logos the
-        // others ship, since its mark is monochrome and has to hold up against
-        // the widget's appearance-following background.
-        if !service.hasBundledLogo {
-            Image(systemName: service.iconName)
-                .font(.system(size: size, weight: .semibold))
-                .frame(width: size, height: size)
-        } else {
-            Image(service.assetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-        }
+        // Every provider ships its official mark as a template imageset: the
+        // marks are monochrome and have to hold up against the widget's
+        // appearance-following background.
+        Image(service.assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
     }
 }
