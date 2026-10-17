@@ -316,6 +316,8 @@ struct UsageDashboardView: View {
             DashboardStatusSection()
         case .usage:
             DashboardUsageSection(summary: visibleCostSummary)
+        case .routing:
+            DashboardRoutingSection()
         case .diagnostics:
             DashboardDiagnosticsSection(
                 reports: $readinessReports,

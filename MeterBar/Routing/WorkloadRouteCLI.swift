@@ -151,7 +151,9 @@ nonisolated public enum WorkloadRouteCLI {
         return result(from: response, report: report)
     }
 
-    private static func loadCandidates() -> [RoutingCandidate] {
+    /// The cached snapshots, configuration, and health the CLI routes over;
+    /// the Routing page reads the same inputs so the two cannot disagree.
+    static func loadCandidates() -> [RoutingCandidate] {
         let store = SharedDataStore.shared
         store.flushPendingWrites()
         return RoutingCandidateAssembler.assemble(

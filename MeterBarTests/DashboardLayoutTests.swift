@@ -27,7 +27,7 @@ final class DashboardLayoutTests: XCTestCase {
     func testSidebarOrderLeadsWithMonitoringPagesThenHealthThenUtilities() {
         XCTAssertEqual(
             DashboardSection.sidebarOrder,
-            [.overview, .limits, .usage, .status, .diagnostics, .share]
+            [.overview, .limits, .usage, .status, .routing, .diagnostics, .share]
         )
     }
 

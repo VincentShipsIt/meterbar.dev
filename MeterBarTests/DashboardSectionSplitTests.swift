@@ -23,6 +23,7 @@ final class DashboardSectionSplitTests: XCTestCase {
             [
                 .overview: .usage,
                 .limits: .usage,
+                .routing: .usage,
                 .diagnostics: .usage,
                 .usage: .costs,
                 .share: .costs,
@@ -599,6 +600,10 @@ final class DashboardSectionSplitTests: XCTestCase {
 
     func testStatusSectionRenders() {
         assertRenders(DashboardStatusSection())
+    }
+
+    func testRoutingSectionRenders() {
+        assertRenders(DashboardRoutingSection())
     }
 
     func testDiagnosticsSectionRenders() {
