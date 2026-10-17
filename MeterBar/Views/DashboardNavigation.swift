@@ -65,6 +65,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case status = "Status"
     case usage = "Usage"
     case diagnostics = "Diagnostics"
+    case routing = "Routing"
     case share = "Share"
 
     var id: String { rawValue }
@@ -81,6 +82,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "chart.xyaxis.line"
         case .diagnostics:
             return "stethoscope"
+        case .routing:
+            return "arrow.triangle.branch"
         case .share:
             return "square.and.arrow.up.fill"
         }
@@ -101,6 +104,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         .limits,
         .usage,
         .status,
+        .routing,
         .diagnostics,
         .share,
     ]
@@ -117,6 +121,8 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return "Where tokens and spend go, and how to trim them"
         case .diagnostics:
             return "Provider setup health"
+        case .routing:
+            return "Where each kind of work would go right now"
         case .share:
             return "Social card export"
         }
@@ -138,7 +144,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
             return .providerStatus
         case .usage, .share:
             return .costs
-        case .overview, .limits, .diagnostics:
+        case .overview, .limits, .routing, .diagnostics:
             return .usage
         }
     }
