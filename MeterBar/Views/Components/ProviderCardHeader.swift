@@ -36,12 +36,25 @@ struct ProviderCardHeader: View {
 
     var content: Content { Content(snapshot: snapshot) }
 
-    var body: some View {
-        HStack(spacing: 7) {
-            ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+    /// Fixed metrics for the header grid. Everything on the top row shares one
+    /// centre line, and the subtitle hangs from the title's leading edge, so
+    /// the logo, title, plan chip, status badge and chevron can never drift
+    /// against a two-line block the way a vertically centred layout did.
+    enum Layout {
+        static let logoSize: CGFloat = 17
+        static let columnSpacing: CGFloat = 7
+        static let titleSpacing: CGFloat = 5
+        static let rowSpacing: CGFloat = 2
+        /// Subtitle indent: the logo column plus its gap, i.e. the title's x.
+        static let subtitleInset: CGFloat = logoSize + columnSpacing
+    }
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+            HStack(alignment: .center, spacing: Layout.columnSpacing) {
+                ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
+
+                HStack(spacing: Layout.titleSpacing) {
                     Text(content.title)
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -51,25 +64,26 @@ struct ProviderCardHeader: View {
                             .accessibilityLabel("\(plan) plan")
                     }
                 }
-                Text(content.subtitle)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if showsLiveAccount {
+                    MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                        .accessibilityLabel("Live CLI account")
+                }
+
+                ProviderCardStatusLabel(snapshot: snapshot)
+
+                if showsDisclosureChevron {
+                    CardDisclosureChevron()
+                }
             }
-            .layoutPriority(1)
 
-            Spacer(minLength: 0)
-
-            if showsLiveAccount {
-                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
-                    .accessibilityLabel("Live CLI account")
-            }
-
-            ProviderCardStatusLabel(snapshot: snapshot)
-
-            if showsDisclosureChevron {
-                CardDisclosureChevron()
-            }
+            Text(content.subtitle)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .padding(.leading, Layout.subtitleInset)
         }
     }
 }

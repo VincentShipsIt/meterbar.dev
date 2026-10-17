@@ -12,6 +12,39 @@ private extension UsageStatus {
     }
 }
 
+/// The official brand mark the app itself ships (`MeterBar/Resources`), so the
+/// README never shows a stand-in glyph for a provider.
+struct ScreenshotProviderMark: View {
+    let service: ServiceType
+
+    private var resource: String {
+        switch service {
+        case .claudeCode: return "ProviderIcon-claude"
+        case .codexCli: return "ProviderIcon-codex"
+        case .cursor: return "ProviderIcon-cursor"
+        case .openRouter: return "ProviderIcon-openrouter"
+        case .grok: return "ProviderIcon-grok"
+        case .kimiCode: return "ProviderIcon-kimi"
+        case .zaiCodingPlan: return "ProviderIcon-zai"
+        case .githubCopilot: return "ProviderIcon-copilot"
+        case .museCode: return "ProviderIcon-muse"
+        case .claudePlatform: return "ProviderIcon-claudeplatform"
+        }
+    }
+
+    var body: some View {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("MeterBar/Resources/\(resource).svg")
+        let image = NSImage(contentsOf: url) ?? NSImage()
+        image.isTemplate = true
+        return Image(nsImage: image)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 16, height: 16)
+    }
+}
+
 struct WallpaperView: View {
     var body: some View {
         ZStack {
@@ -161,7 +194,7 @@ struct ServiceSnapshotRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
+                ScreenshotProviderMark(service: metrics.service)
                     .foregroundColor(metrics.overallStatus.color)
                 Text(metrics.service.displayName)
                     .font(.headline)
@@ -202,7 +235,7 @@ struct ClaudeCodeSnapshotRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
+                ScreenshotProviderMark(service: metrics.service)
                     .foregroundColor(metrics.overallStatus.color)
                 Text(metrics.service.displayName)
                     .font(.headline)
@@ -252,7 +285,7 @@ struct CursorSnapshotRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
+                ScreenshotProviderMark(service: metrics.service)
                     .foregroundColor(.blue)
                 Text(metrics.service.displayName)
                     .font(.headline)
@@ -364,7 +397,7 @@ struct WidgetServiceCompactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: metrics.service.iconName)
+                ScreenshotProviderMark(service: metrics.service)
                     .foregroundColor(metrics.overallStatus.color)
                 Text(metrics.service.displayName)
                     .font(.subheadline)

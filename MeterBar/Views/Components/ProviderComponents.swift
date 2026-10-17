@@ -77,15 +77,19 @@ enum ProviderLogoKind: Equatable {
         case .openai:
             return "ProviderIcon-openai"
         case .openRouter:
-            return nil
+            return "ProviderIcon-openrouter"
         case .grok:
             return "ProviderIcon-grok"
-        case .kimiCode,
-             .zaiCodingPlan,
-             .githubCopilot,
-             .museCode,
-             .claudePlatform:
-            return nil
+        case .kimiCode:
+            return "ProviderIcon-kimi"
+        case .zaiCodingPlan:
+            return "ProviderIcon-zai"
+        case .githubCopilot:
+            return "ProviderIcon-copilot"
+        case .museCode:
+            return "ProviderIcon-muse"
+        case .claudePlatform:
+            return "ProviderIcon-claudeplatform"
         }
     }
 
