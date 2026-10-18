@@ -48,6 +48,12 @@ struct DashboardRoutingSection: View {
                 }
             }
 
+            if let preview {
+                PopoverRoutingTaskPicker(options: preview.rows.compactMap { row in
+                    RoutingTaskID(token: row.taskID).map { PopoverRoutingLine.Option(id: $0, name: row.taskName) }
+                })
+            }
+
             DashboardCardCaption(text: Self.caption)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
