@@ -108,22 +108,12 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         var providers: [Provider] = []
         for card in cards.prefix(maxProviders) {
             let snapshot = card.snapshot
-            let name: String
-            switch snapshot.cardRole {
-            case .account:
-                let ordinal = (seen[snapshot.service] ?? 0) + 1
-                seen[snapshot.service] = ordinal
-                let total = cards.filter { $0.snapshot.isAccountCard && $0.snapshot.service == snapshot.service }.count
-                name = total > 1
-                    ? "\(snapshot.service.displayName) \(ordinal)"
-                    : snapshot.service.displayName
-            case .subPool:
-                // A sub-pool's title is a product label ("Grok Bot"), never an
-                // account name; the parent is named for the same reason the
-                // share card names it.
-                name = sanitizedLabel(snapshot.title).map { "\($0) on \(snapshot.service.displayName)" }
-                    ?? snapshot.service.displayName
-            }
+            let ordinal = (seen[snapshot.service] ?? 0) + 1
+            seen[snapshot.service] = ordinal
+            let total = cards.filter { $0.snapshot.service == snapshot.service }.count
+            let name = total > 1
+                ? "\(snapshot.service.displayName) \(ordinal)"
+                : snapshot.service.displayName
             providers.append(
                 Provider(
                     provider: snapshot.service.rawValue,
@@ -190,13 +180,13 @@ nonisolated struct PublicProfileDocument: Codable, Equatable, Sendable {
         snapshots: [ProviderSnapshot],
         plans: [ServiceType: String]
     ) -> String? {
-        guard snapshot.isAccountCard, snapshots.accountCardCount(for: snapshot.service) == 1 else {
+        guard snapshots.accountCardCount(for: snapshot.service) == 1 else {
             return nil
         }
         let defaultAccountID: UUID? = switch snapshot.service {
         case .claudeCode: ClaudeCodeAccount.defaultID
         case .codexCli: CodexAccount.defaultID
-        case .grok: GrokAccount.defaultID
+        case .xai: GrokAccount.defaultID
         default: nil
         }
         if let accountID = snapshot.accountID, let defaultAccountID, accountID != defaultAccountID {

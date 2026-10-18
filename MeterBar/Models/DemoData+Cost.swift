@@ -45,7 +45,7 @@ extension DemoData {
             DemoSplit(name: "gpt-5.6-sol", fraction: 0.72),
             DemoSplit(name: "gpt-5.6-luna", fraction: 0.28),
         ],
-        .grok: [
+        .xai: [
             DemoSplit(name: "grok-4.5-build", fraction: 0.74),
             DemoSplit(name: "grok-4.5", fraction: 0.26),
         ],
@@ -61,7 +61,7 @@ extension DemoData {
             DemoSplit(name: "Main chat", fraction: 0.57),
             DemoSplit(name: "Agents", fraction: 0.43),
         ],
-        .grok: [
+        .xai: [
             DemoSplit(name: "Main chat", fraction: 0.61),
             DemoSplit(name: "Agents", fraction: 0.39),
         ],
@@ -117,24 +117,15 @@ extension DemoData {
             costUSD: 68.20,
             sessionCount: 96
         ),
-        // Cursor is billed in dollars, not tokens, so it contributes cost only.
+        // xAI folds the Grok CLI's token spend and Cursor's dollar-only spend.
         DemoProviderCost(
-            provider: .cursor,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
-            costUSD: 41.30,
-            sessionCount: 54
-        ),
-        DemoProviderCost(
-            provider: .grok,
+            provider: .xai,
             inputTokens: 1_850_000,
             outputTokens: 610_000,
             cacheCreationTokens: 0,
             cacheReadTokens: 0,
-            costUSD: 22.40,
-            sessionCount: 41
+            costUSD: 63.70,
+            sessionCount: 95
         ),
         // OpenRouter is billed in dollars, not tokens, so it contributes cost only.
         DemoProviderCost(

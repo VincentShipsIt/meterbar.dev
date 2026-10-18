@@ -62,7 +62,7 @@ final class RefreshCLITimeoutTests: XCTestCase {
             outcome: .success,
             collectedAt: now,
             durationSeconds: 0,
-            outcomes: [ProviderRefreshOutcome(provider: .cursor, state: .refreshed, lastUpdated: now)],
+            outcomes: [ProviderRefreshOutcome(provider: .xai, state: .refreshed, lastUpdated: now)],
             cachedMetrics: [:]
         )
         let object = try XCTUnwrap(

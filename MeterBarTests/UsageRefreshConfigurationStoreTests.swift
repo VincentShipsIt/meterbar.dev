@@ -33,7 +33,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
             userDefaults: visibilityDefaults,
             refreshConfigurationDirectory: tempDirectory
         )
-        visibility.set(.cursor, isEnabled: false)
+        visibility.set(.xai, isEnabled: false)
 
         let claude = ClaudeCodeAccountStore(
             userDefaults: claudeDefaults,
@@ -58,7 +58,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         let snapshot = try XCTUnwrap(
             UsageRefreshConfigurationStore.load(directory: tempDirectory)
         )
-        XCTAssertTrue(snapshot.hiddenServices.contains(.cursor))
+        XCTAssertTrue(snapshot.hiddenServices.contains(.xai))
         XCTAssertEqual(snapshot.claudeAccounts.count, 2)
         XCTAssertEqual(snapshot.claudeAccounts.first(where: \.isDefault)?.isEnabled, false)
         XCTAssertEqual(snapshot.claudeAccounts.first(where: { !$0.isDefault })?.configDirectory, "/tmp/claude-work")
@@ -75,7 +75,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
         let projectedClaude = ClaudeCodeAccountStore(accounts: snapshot.claudeAccounts)
         let projectedCodex = CodexAccountStore(accounts: snapshot.codexAccounts)
         let projectedGrok = GrokAccountStore(accounts: snapshot.grokAccounts)
-        XCTAssertFalse(projectedVisibility.isEnabled(.cursor))
+        XCTAssertFalse(projectedVisibility.isEnabled(.xai))
         XCTAssertEqual(projectedClaude.enabledAccounts.map(\.name), ["Work"])
         XCTAssertEqual(projectedCodex.enabledAccounts.map(\.name), ["Personal"])
         XCTAssertEqual(projectedGrok.enabledAccounts.map(\.name), ["Build"])
@@ -110,7 +110,7 @@ final class UsageRefreshConfigurationStoreTests: XCTestCase {
     }
 
     func testLoadFailsClosedWhenAnyProjectionIsMissing() {
-        UsageRefreshConfigurationStore.saveVisibility([.grok], directory: tempDirectory)
+        UsageRefreshConfigurationStore.saveVisibility([.xai], directory: tempDirectory)
         UsageRefreshConfigurationStore.saveClaudeAccounts(
             [.defaultAccount],
             directory: tempDirectory

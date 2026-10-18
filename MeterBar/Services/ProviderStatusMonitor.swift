@@ -142,12 +142,10 @@ extension ServiceType {
             return "Claude"
         case .codexCli:
             return "OpenAI"
-        case .cursor:
-            return "Cursor"
         case .openRouter:
             return "OpenRouter"
-        case .grok:
-            // Grok's status page is operated under the SpaceXAI brand.
+        case .xai:
+            // xAI's status page is operated under the SpaceXAI brand.
             return "SpaceXAI"
         case .kimiCode:
             return "Kimi Code"
@@ -168,11 +166,9 @@ extension ServiceType {
             return "https://status.claude.com/"
         case .codexCli:
             return "https://status.openai.com/"
-        case .cursor:
-            return "https://status.cursor.com/"
         case .openRouter:
             return "https://status.openrouter.ai/"
-        case .grok:
+        case .xai:
             return "https://status.x.ai/"
         case .githubCopilot:
             // Copilot is a component of GitHub's own Statuspage.
@@ -306,7 +302,7 @@ struct ProviderStatusClient {
         if service == .openRouter {
             return try await fetchOpenRouterReport()
         }
-        if service == .grok {
+        if service == .xai {
             return try await fetchSpaceXAIReport()
         }
         guard let baseURL = service.statusPageURL else {
@@ -351,7 +347,7 @@ struct ProviderStatusClient {
 
     /// status.x.ai is not Statuspage — see `SpaceXAIStatusPageParser`.
     private func fetchSpaceXAIReport() async throws -> ProviderStatusReport {
-        guard let url = ServiceType.grok.statusPageURL else {
+        guard let url = ServiceType.xai.statusPageURL else {
             throw ServiceError.invalidURL
         }
         var request = URLRequest(url: url)
@@ -363,8 +359,8 @@ struct ProviderStatusClient {
         }
         let parsed = try SpaceXAIStatusPageParser.parse(html: html)
         return ProviderStatusReport(
-            service: .grok,
-            pageName: ServiceType.grok.statusPageDisplayName,
+            service: .xai,
+            pageName: ServiceType.xai.statusPageDisplayName,
             pageURL: url,
             summary: parsed.summary,
             components: parsed.components,

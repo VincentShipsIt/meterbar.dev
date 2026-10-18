@@ -40,14 +40,13 @@ enum DiagnosticsRunner {
         if let codexError {
             result[.codexCli] = codexError
         }
-        if let cursorError {
-            result[.cursor] = cursorError
-        }
         if let openRouterError {
             result[.openRouter] = openRouterError
         }
-        if let grokError {
-            result[.grok] = grokError
+        // One xAI provider with two sources (Grok CLI and Cursor); the
+        // Grok CLI failure leads because it carries the profile detail.
+        if let xaiError = grokError ?? cursorError {
+            result[.xai] = xaiError
         }
         if let kimiCodeError {
             result[.kimiCode] = kimiCodeError
@@ -76,7 +75,7 @@ enum DiagnosticsRunner {
         var result: [ServiceType: [UUID: ServiceError]] = [:]
         if !claudeAccountErrors.isEmpty { result[.claudeCode] = claudeAccountErrors }
         if !codexAccountErrors.isEmpty { result[.codexCli] = codexAccountErrors }
-        if !grokAccountErrors.isEmpty { result[.grok] = grokAccountErrors }
+        if !grokAccountErrors.isEmpty { result[.xai] = grokAccountErrors }
         if !openRouterKeyErrors.isEmpty { result[.openRouter] = openRouterKeyErrors }
         return result
     }

@@ -37,14 +37,14 @@ final class WidgetSettingsTests: XCTestCase {
             homeDirectory: "/tmp/grok-work"
         )
         let options = WidgetSettingsAccountProjection.options(
-            enabledServices: [.claudeCode, .codexCli, .cursor, .grok],
+            enabledServices: [.claudeCode, .codexCli, .xai],
             claudeAccounts: [enabledClaude, disabledClaude],
             codexAccounts: [enabledCodex],
             grokAccounts: [enabledGrok]
         )
 
-        XCTAssertEqual(options.map(\.name), ["Claude Work", "Codex Work", "Cursor", "Grok Work"])
-        XCTAssertEqual(options.map(\.service), [.claudeCode, .codexCli, .cursor, .grok])
+        XCTAssertEqual(options.map(\.name), ["Claude Work", "Codex Work", "Grok Work"])
+        XCTAssertEqual(options.map(\.service), [.claudeCode, .codexCli, .xai])
         XCTAssertFalse(options.contains { $0.name == disabledClaude.name })
     }
 
@@ -87,8 +87,8 @@ final class WidgetSettingsTests: XCTestCase {
     func testPlaceholderPreviewUsesEverySupportedFamilyAndCurrentPreferences() {
         let options = [
             WidgetSettingsAccountOption(
-                id: .provider(.cursor),
-                service: .cursor,
+                id: .provider(.xai),
+                service: .xai,
                 name: "Cursor"
             )
         ]
@@ -137,8 +137,8 @@ final class WidgetSettingsTests: XCTestCase {
         let data = WidgetSettingsPreviewData.make(
             options: [
                 WidgetSettingsAccountOption(
-                    id: .provider(.cursor),
-                    service: .cursor,
+                    id: .provider(.xai),
+                    service: .xai,
                     name: "Cursor"
                 )
             ],

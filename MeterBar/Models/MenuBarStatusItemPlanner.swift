@@ -328,7 +328,7 @@ enum MenuBarStatusItemPlanner {
             id: id,
             service: candidate.service,
             selectionKey: selectionKey,
-            logoKind: .forStatusItem(service: candidate.service, windowID: candidate.windowID),
+            logoKind: .forService(candidate.service),
             title: segments.isEmpty ? "" : " " + segments.joined(separator: " "),
             tooltip: "MeterBar: \(suffix)",
             accessibilityLabel: "MeterBar \(suffix)",

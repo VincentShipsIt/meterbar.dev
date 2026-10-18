@@ -74,7 +74,7 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         let selected = candidate(service: .claudeCode, accountOrder: 0)
         let unselected = candidate(service: .codexCli, accountOrder: 0)
         let disabledProvider = candidate(
-            service: .cursor,
+            service: .xai,
             accountOrder: 0,
             isProviderEnabled: false
         )
@@ -195,14 +195,14 @@ final class WidgetPreferencesStoreTests: XCTestCase {
         let accountID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9))
 
         XCTAssertEqual(
-            WidgetAccountIdentifier.provider(.cursor).rawValue,
-            "provider:Cursor"
+            WidgetAccountIdentifier.provider(.xai).rawValue,
+            "provider:xAI"
         )
         XCTAssertEqual(
             WidgetAccountIdentifier.account(service: .claudeCode, id: accountID).rawValue,
             "account:Claude Code:00000000-0000-0000-0000-000000000009"
         )
-        XCTAssertEqual(WidgetAccountIdentifier.provider(.cursor).service, .cursor)
+        XCTAssertEqual(WidgetAccountIdentifier.provider(.xai).service, .xai)
         XCTAssertEqual(
             WidgetAccountIdentifier.account(service: .claudeCode, id: accountID).service,
             .claudeCode

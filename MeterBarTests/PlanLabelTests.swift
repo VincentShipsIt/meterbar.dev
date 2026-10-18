@@ -17,13 +17,13 @@ final class PlanLabelTests: XCTestCase {
     func testProviderTokensAreNormalised() {
         XCTAssertEqual(PlanLabel.make(service: .codexCli, token: "prolite"), "Pro Lite")
         XCTAssertEqual(PlanLabel.make(service: .codexCli, token: "plus"), "Plus")
-        XCTAssertEqual(PlanLabel.make(service: .cursor, token: "pro_plus"), "Pro Plus")
-        XCTAssertEqual(PlanLabel.make(service: .grok, token: "SuperGrok"), "SuperGrok")
+        XCTAssertEqual(PlanLabel.make(service: .xai, token: "pro_plus"), "Pro Plus")
+        XCTAssertEqual(PlanLabel.make(service: .xai, token: "SuperGrok"), "SuperGrok")
     }
 
     func testEmptyTokenYieldsNoLabel() {
-        XCTAssertNil(PlanLabel.make(service: .cursor, token: nil))
-        XCTAssertNil(PlanLabel.make(service: .cursor, token: "  "))
+        XCTAssertNil(PlanLabel.make(service: .xai, token: nil))
+        XCTAssertNil(PlanLabel.make(service: .xai, token: "  "))
     }
 
     func testPlanLandsOnlyOnTheCardThatOwnsTheCredentials() {
@@ -32,12 +32,12 @@ final class PlanLabelTests: XCTestCase {
             metrics: [:],
             claudeAccounts: [],
             claudeAccountMetrics: [:],
-            enabledServices: [.codexCli, .cursor]
+            enabledServices: [.codexCli, .xai]
         )
         input.codexAccounts = [.defaultAccount, custom]
-        input.planLabels = [.codexCli: "Pro", .cursor: "Ultra"]
+        input.planLabels = [.codexCli: "Pro", .xai: "Ultra"]
         let cards = ProviderSnapshotBuilder.snapshots(input)
-        XCTAssertEqual(cards.first { $0.service == .cursor }?.planLabel, "Ultra")
+        XCTAssertEqual(cards.first { $0.service == .xai }?.planLabel, "Ultra")
         XCTAssertEqual(cards.first { $0.accountID == CodexAccount.defaultID }?.planLabel, "Pro")
         XCTAssertNil(cards.first { $0.accountID == custom.id }?.planLabel)
     }

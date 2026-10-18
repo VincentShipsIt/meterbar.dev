@@ -102,6 +102,9 @@ class UsageDataManager: ObservableObject {
     @Published private(set) var claudeCodeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
     @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+    /// Last good reading from the Cursor dashboard leg of xAI, kept so a transient
+    /// failure does not drop legacy Cursor rows from the merged card.
+    private var lastCursorMetrics: UsageMetrics?
     @Published var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
     @Published var isLoading: Bool = false
     @Published var lastError: Error?
@@ -227,7 +230,7 @@ class UsageDataManager: ObservableObject {
             .museCode: MuseCodeService.shared,
             .claudePlatform: ClaudePlatformService.shared,
         ]
-        self.simpleProviders = additionalSimpleProviders.merging([.cursor: cursorService]) { _, explicit in explicit }
+        self.simpleProviders = additionalSimpleProviders.merging([.xai: cursorService]) { _, explicit in explicit }
         self.openRouterService = openRouterService
         self.grokService = grokService
         self.claudeCodeService = claudeCodeService
@@ -347,7 +350,7 @@ class UsageDataManager: ObservableObject {
             isEnabled: providerVisibilityStore.isEnabled(.codexCli) && hasEnabledCodexAccount
         )
         async let grokFetch = grokAccountFetch(
-            isEnabled: providerVisibilityStore.isEnabled(.grok) && hasEnabledGrokAccount
+            isEnabled: providerVisibilityStore.isEnabled(.xai) && hasEnabledGrokAccount
         )
         async let openRouterFetch = openRouterAccountFetch(
             isEnabled: providerVisibilityStore.isEnabled(.openRouter) && hasEnabledOpenRouterKey
@@ -408,7 +411,7 @@ class UsageDataManager: ObservableObject {
         )
 
         foldUniformAccountPhase(
-            .grok,
+            .xai,
             result: grokResult,
             // See the matching comment on the Codex phase above.
             representative: { _ in representativeGrokMetrics(from: grokAccountMetrics) },
@@ -435,14 +438,18 @@ class UsageDataManager: ObservableObject {
 
         // Simple (single-account) providers. On failure the final merge loop
         // below preserves any cached metrics (graceful degradation).
-        newMetrics.merge(simpleResults.metrics) { _, refreshed in refreshed }
-        states.merge(simpleResults.states) { _, refreshed in refreshed }
+        foldCursorSource(simpleResults, newMetrics: &newMetrics, states: &states)
+        newMetrics.merge(simpleResults.metrics.filter { $0.key != .xai }) { _, refreshed in refreshed }
+        states.merge(simpleResults.states.filter { $0.key != .xai }) { _, refreshed in refreshed }
 
         // Merge new metrics with existing cached metrics for services that failed to fetch
         for service in ServiceType.allCases where providerVisibilityStore.isEnabled(service) {
             if service == .claudeCode, !hasEnabledClaudeAccount { continue }
             // Account caches are merged during their provider-specific refresh.
-            if service == .codexCli || service == .grok || service == .openRouter { continue }
+            if service == .codexCli || service == .openRouter { continue }
+            // Grok accounts degrade through their own cache; the merged card
+            // only falls back to its last reading when no Grok data exists.
+            if service == .xai, hasEnabledGrokAccount, !grokAccountMetrics.isEmpty { continue }
             if newMetrics[service] == nil, let cachedMetric = self.metrics[service] {
                 newMetrics[service] = cachedMetric
             }
@@ -505,6 +512,51 @@ class UsageDataManager: ObservableObject {
                 .skipped,
                 providerVisibilityStore.isEnabled(service) ? Self.noEnabledAccountsReason : Self.disabledReason
             )
+        }
+    }
+
+    /// Folds the Cursor dashboard leg into the xAI provider.
+    ///
+    /// xAI is one provider backed by two sources: the Grok CLI accounts (the
+    /// account-aware phase) and the Cursor dashboard (a single-account
+    /// "simple" leg keyed `.xai`). `XAIUsageMerger` draws the shared weekly
+    /// pool once and keeps legacy Cursor monthly rows. A transient Cursor
+    /// failure reuses its last good reading so the legacy rows do not flicker
+    /// away; signing out of Cursor (a skip, not a failure) drops them.
+    private func foldCursorSource(
+        _ simpleResults: SimpleProviderRefresh,
+        newMetrics: inout [ServiceType: UsageMetrics],
+        states: inout [ServiceType: (state: ProviderRefreshState, reason: String?)]
+    ) {
+        let cursorState = simpleResults.states[.xai]
+        var cursor = simpleResults.metrics[.xai]
+        if let cursor {
+            lastCursorMetrics = cursor
+        } else if cursorState?.state == .failed {
+            cursor = lastCursorMetrics
+        } else {
+            lastCursorMetrics = nil
+        }
+        if let merged = XAIUsageMerger.merge(grok: newMetrics[.xai], cursor: cursor) {
+            newMetrics[.xai] = merged
+        }
+
+        let grokState = states[.xai]
+        guard let cursorState else { return }
+        guard let grokState else {
+            states[.xai] = cursorState
+            return
+        }
+        if grokState.state == .refreshed || cursorState.state == .refreshed {
+            states[.xai] = (.refreshed, nil)
+        } else if grokState.state == .failed {
+            states[.xai] = grokState
+        } else if cursorState.state == .failed {
+            states[.xai] = cursorState
+        } else if grokState.reason == Self.disabledReason {
+            states[.xai] = grokState
+        } else {
+            states[.xai] = (.skipped, Self.notSignedInReason)
         }
     }
 
@@ -749,7 +801,7 @@ class UsageDataManager: ObservableObject {
     }
 
     /// Clears one provider's per-account caches (used on disable and when its
-    /// enabled-account set becomes empty). Cursor has no account caches.
+    /// enabled-account set becomes empty). The Cursor leg keeps only a last-good reading.
     private func clearAccountState(for service: ServiceType) {
         switch service {
         case .claudeCode:
@@ -757,12 +809,12 @@ class UsageDataManager: ObservableObject {
             claudeCodeAccountStates = [:]
         case .codexCli:
             codexAccountMetrics = [:]
-        case .grok:
+        case .xai:
             grokAccountMetrics = [:]
+            lastCursorMetrics = nil
         case .openRouter:
             openRouterAccountMetrics = [:]
-        case .cursor,
-             .kimiCode,
+        case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,
@@ -779,12 +831,14 @@ class UsageDataManager: ObservableObject {
             return claudeCodeAccountStore.enabledAccounts.count
         case .codexCli:
             return codexAccountStore.enabledAccounts.count
-        case .grok:
-            return grokAccountStore.enabledAccounts.count
+        case .xai:
+            // The Cursor dashboard is a second source, so xAI has nothing to
+            // fetch only when no Grok account is enabled and Cursor is unreadable.
+            let cursorReadable = simpleProviders[.xai]?.hasAccess ?? false
+            return grokAccountStore.enabledAccounts.isEmpty && !cursorReadable ? 0 : nil
         case .openRouter:
             return openRouterAccountStore.enabledAccounts.count
-        case .cursor,
-             .kimiCode,
+        case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,
@@ -812,7 +866,7 @@ class UsageDataManager: ObservableObject {
         }
 
         // Every account-aware provider with zero enabled accounts has nothing
-        // to fetch; Cursor (single-account) never takes this early-out.
+        // to fetch; xAI counts its Cursor source and the single-account providers never take this early-out.
         if enabledAccountCount(for: service) == 0 {
             clearAccountState(for: service)
             metrics.removeValue(forKey: service)
@@ -829,7 +883,7 @@ class UsageDataManager: ObservableObject {
             if lastError == nil {
                 lastError = error
             }
-            if service == .codexCli || service == .grok || service == .openRouter {
+            if service == .codexCli || service == .openRouter {
                 // Account-aware aggregate metrics carry no account identity. Scoped
                 // per-account caches are restored inside the provider fetcher;
                 // if none exist, showing no data is safer than relabeling a
@@ -931,7 +985,7 @@ class UsageDataManager: ObservableObject {
         grokAccountMetrics[accountID] = refreshedMetrics
         grokAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeGrokMetrics(from: grokAccountMetrics) {
-            metrics[.grok] = representative
+            metrics[.xai] = XAIUsageMerger.merge(grok: representative, cursor: lastCursorMetrics)
         }
         lastError = nil
         publishMetrics()
@@ -939,14 +993,15 @@ class UsageDataManager: ObservableObject {
 
     private func refreshedMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
-        case .cursor,
-             .kimiCode,
+        case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,
              .claudePlatform:
             return try await refreshedSimpleMetrics(for: service)
-        case .claudeCode, .codexCli, .grok, .openRouter:
+        case .xai:
+            return try await refreshedXAIMetrics()
+        case .claudeCode, .codexCli, .openRouter:
             return try await refreshedAccountAwareMetrics(for: service)
         }
     }
@@ -963,6 +1018,41 @@ class UsageDataManager: ObservableObject {
             }
             throw error
         }
+    }
+
+    /// xAI's per-service refresh: the Grok accounts and the Cursor dashboard
+    /// are polled together and folded by `XAIUsageMerger`.
+    private func refreshedXAIMetrics() async throws -> UsageMetrics {
+        let fetch = await fetchGrokAccountMetrics()
+        grokAccountMetrics = mergeAccountMetrics(
+            fetched: fetch.metrics,
+            current: grokAccountMetrics,
+            startGenerations: fetch.metricsGenerationAtStart,
+            currentGenerations: grokAccountMetricsGeneration
+        )
+        if let failure = fetch.firstFailure { lastError = failure }
+
+        var cursor: UsageMetrics?
+        var cursorFailure: Error?
+        if hasProviderAccess(.xai) {
+            do {
+                cursor = try await fetchSimpleProviderMetrics(.xai)
+                lastCursorMetrics = cursor
+                recordUsageObservations(for: [.xai])
+            } catch {
+                cursorFailure = error
+                cursor = lastCursorMetrics
+            }
+        } else {
+            lastCursorMetrics = nil
+        }
+
+        if let merged = XAIUsageMerger.merge(grok: representativeGrokMetrics(from: grokAccountMetrics), cursor: cursor) {
+            if lastError == nil { lastError = cursorFailure }
+            return merged
+        }
+        if let cursorFailure { throw cursorFailure }
+        throw ServiceError.notAuthenticated
     }
 
     /// The account-aware providers' per-service refresh. Each account fetcher
@@ -987,24 +1077,13 @@ class UsageDataManager: ObservableObject {
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeCodexMetrics(from: codexAccountMetrics) { return representative }
             throw ServiceError.notAuthenticated
-        case .grok:
-            let fetch = await fetchGrokAccountMetrics()
-            grokAccountMetrics = mergeAccountMetrics(
-                fetched: fetch.metrics,
-                current: grokAccountMetrics,
-                startGenerations: fetch.metricsGenerationAtStart,
-                currentGenerations: grokAccountMetricsGeneration
-            )
-            if let failure = fetch.firstFailure { lastError = failure }
-            if let representative = representativeGrokMetrics(from: grokAccountMetrics) { return representative }
-            throw ServiceError.notAuthenticated
         case .openRouter:
             let fetch = await fetchOpenRouterAccountMetrics()
             openRouterAccountMetrics = fetch.metrics
             if let failure = fetch.firstFailure { lastError = failure }
             if let representative = representativeOpenRouterMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
-        case .cursor,
+        case .xai,
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
@@ -1091,7 +1170,7 @@ class UsageDataManager: ObservableObject {
             codexAccountMetrics = Self.sharedFallback(.codexCli, from: sharedSnapshots)
         }
         if grokAccountMetrics.isEmpty {
-            grokAccountMetrics = Self.sharedFallback(.grok, from: sharedSnapshots)
+            grokAccountMetrics = Self.sharedFallback(.xai, from: sharedSnapshots)
         }
         if openRouterAccountMetrics.isEmpty {
             openRouterAccountMetrics = Self.sharedFallback(.openRouter, from: sharedSnapshots)
@@ -1296,7 +1375,7 @@ class UsageDataManager: ObservableObject {
             }
         }
 
-        if providerVisibilityStore.isEnabled(.grok),
+        if providerVisibilityStore.isEnabled(.xai),
            !grokAccountStore.enabledAccounts.isEmpty {
             for account in grokAccountStore.enabledAccounts where grokService.canAccess(account: account) {
                 collect(grokAccountMetrics[account.id])
@@ -1539,9 +1618,9 @@ class UsageDataManager: ObservableObject {
         }
 
         if successCount > 0 {
-            parseHealthStore.recordSuccess(.grok)
+            parseHealthStore.recordSuccess(.xai)
         } else if let firstFailure {
-            parseHealthStore.recordFailure(.grok, error: firstFailure)
+            parseHealthStore.recordFailure(.xai, error: firstFailure)
         }
 
         return AccountFetchResult(
@@ -1657,30 +1736,30 @@ class UsageDataManager: ObservableObject {
             return claudeCodeService.hasAccess
         case .codexCli:
             return false
-        case .cursor,
+        case .xai,
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,
              .claudePlatform:
+            // xAI's simple leg is the Cursor dashboard; Grok accounts are
+            // gated separately by their own store.
             return simpleProviders[service]?.hasAccess ?? false
         case .openRouter:
             // Access means at least one enabled key has its Keychain item.
             return openRouterAccountStore.enabledAccounts.contains {
                 openRouterService.canAccess(account: $0)
             }
-        case .grok:
-            return false
         }
     }
 
-    /// Fetch for the providers without multi-account handling (Claude Code,
-    /// Codex, Grok, and OpenRouter have their own account-aware paths).
+    /// Fetch for the single-account providers, including the Cursor leg of xAI
+    /// (Claude Code, Codex, Grok, and OpenRouter have account-aware paths).
     private func fetchSimpleProviderMetrics(_ service: ServiceType) async throws -> UsageMetrics {
         do {
             let result: UsageMetrics
             switch service {
-            case .cursor,
+            case .xai,
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
@@ -1688,7 +1767,7 @@ class UsageDataManager: ObservableObject {
                  .claudePlatform:
                 guard let provider = simpleProviders[service] else { throw ServiceError.notAuthenticated }
                 result = try await provider.fetchUsageMetrics()
-            case .claudeCode, .codexCli, .grok, .openRouter:
+            case .claudeCode, .codexCli, .openRouter:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }
             parseHealthStore.recordSuccess(service)

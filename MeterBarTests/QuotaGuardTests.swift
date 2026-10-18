@@ -40,7 +40,7 @@ final class QuotaGuardTests: XCTestCase {
             target: try target(provider: "grok", window: "weekly"),
             account: .providerWide,
             metrics: metrics(
-                service: .grok,
+                service: .xai,
                 weekly: UsageLimit(used: 100, total: 100, resetTime: now.addingTimeInterval(3_600), periodKind: .monthly)
             ),
             now: now
@@ -57,7 +57,7 @@ final class QuotaGuardTests: XCTestCase {
 
     func testCadenceSelectorFindsMonthlyInTheWeeklySlotAndDailyOverflow() throws {
         let metrics = metrics(
-            service: .grok,
+            service: .xai,
             weekly: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .monthly),
             additional: [
                 UsageLimit(used: 80, total: 100, resetTime: nil, periodKind: .daily)
@@ -90,8 +90,8 @@ final class QuotaGuardTests: XCTestCase {
     func testResolveAcceptsStableProviderTokens() throws {
         XCTAssertEqual(try target(provider: "claude").service, .claudeCode)
         XCTAssertEqual(try target(provider: "codex").service, .codexCli)
-        XCTAssertEqual(try target(provider: " Cursor ").service, .cursor)
-        XCTAssertEqual(try target(provider: "grok").service, .grok)
+        XCTAssertEqual(try target(provider: " Cursor ").service, .xai)
+        XCTAssertEqual(try target(provider: "grok").service, .xai)
     }
 
     func testUnknownProviderIsAUsageErrorNamingTheInput() {
@@ -144,10 +144,10 @@ final class QuotaGuardTests: XCTestCase {
     }
 
     func testConfigDirIsRejectedForProvidersWithoutAccounts() {
-        let cursor = expectFailure(provider: "cursor", configDirectory: "/tmp/x")
-        XCTAssertEqual(cursor.outcome, .usageError)
-        XCTAssertEqual(cursor.code, "unsupported_config_dir")
-        XCTAssertTrue(cursor.message.contains("Cursor"), cursor.message)
+        let kimi = expectFailure(provider: "kimi", configDirectory: "/tmp/x")
+        XCTAssertEqual(kimi.outcome, .usageError)
+        XCTAssertEqual(kimi.code, "unsupported_config_dir")
+        XCTAssertTrue(kimi.message.contains("Kimi"), kimi.message)
 
         let openRouter = expectFailure(provider: "openrouter", configDirectory: "/tmp/x")
         XCTAssertEqual(openRouter.outcome, .usageError)
@@ -157,7 +157,7 @@ final class QuotaGuardTests: XCTestCase {
 
     func testConfigDirIsAcceptedForGrok() throws {
         let resolved = try target(provider: "grok", configDirectory: "/tmp/grok-work")
-        XCTAssertEqual(resolved.service, .grok)
+        XCTAssertEqual(resolved.service, .xai)
         XCTAssertEqual(resolved.configDirectory, "/tmp/grok-work")
     }
 
@@ -430,14 +430,14 @@ final class QuotaGuardTests: XCTestCase {
         let snapshot = AccountUsageSnapshot(
             id: account.id,
             name: account.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 12))
+            metrics: metrics(service: .xai, weekly: limit(used: 12))
         )
 
         let selection = try QuotaGuardAccountResolver.resolve(
             target: try target(provider: "grok", configDirectory: "/tmp/grok-work/"),
             configuration: configuration(grokAccounts: [account]),
             accountSnapshots: [snapshot],
-            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 90))],
+            providerMetrics: [.xai: metrics(service: .xai, weekly: limit(used: 90))],
             defaultDirectories: defaultDirectories
         ).get()
 
@@ -451,7 +451,7 @@ final class QuotaGuardTests: XCTestCase {
         let snapshot = AccountUsageSnapshot(
             id: GrokAccount.defaultID,
             name: GrokAccount.defaultName,
-            metrics: metrics(service: .grok, weekly: limit(used: 8))
+            metrics: metrics(service: .xai, weekly: limit(used: 8))
         )
 
         let selection = try QuotaGuardAccountResolver.resolve(
@@ -477,7 +477,7 @@ final class QuotaGuardTests: XCTestCase {
         let snapshot = AccountUsageSnapshot(
             id: account.id,
             name: account.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 40))
+            metrics: metrics(service: .xai, weekly: limit(used: 40))
         )
 
         let selection = try QuotaGuardAccountResolver.resolve(
@@ -496,14 +496,14 @@ final class QuotaGuardTests: XCTestCase {
         let leftover = AccountUsageSnapshot(
             id: UUID(),
             name: "Gone",
-            metrics: metrics(service: .grok, weekly: limit(used: 1))
+            metrics: metrics(service: .xai, weekly: limit(used: 1))
         )
 
         let failure = QuotaGuardAccountResolver.resolve(
             target: try target(provider: "grok", configDirectory: "/tmp/grok-gone"),
             configuration: configuration(grokAccounts: [.defaultAccount]),
             accountSnapshots: [leftover],
-            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 70))],
+            providerMetrics: [.xai: metrics(service: .xai, weekly: limit(used: 70))],
             defaultDirectories: defaultDirectories
         ).failureValue
 
@@ -521,12 +521,12 @@ final class QuotaGuardTests: XCTestCase {
         let firstSnapshot = AccountUsageSnapshot(
             id: first.id,
             name: first.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 15))
+            metrics: metrics(service: .xai, weekly: limit(used: 15))
         )
         let secondSnapshot = AccountUsageSnapshot(
             id: second.id,
             name: second.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 85))
+            metrics: metrics(service: .xai, weekly: limit(used: 85))
         )
 
         let selection = try QuotaGuardAccountResolver.resolve(
@@ -549,7 +549,7 @@ final class QuotaGuardTests: XCTestCase {
         let snapshot = AccountUsageSnapshot(
             id: account.id,
             name: account.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 21))
+            metrics: metrics(service: .xai, weekly: limit(used: 21))
         )
         let configuration = configuration(grokAccounts: [account])
 
@@ -590,12 +590,12 @@ final class QuotaGuardTests: XCTestCase {
         let cached = AccountUsageSnapshot(
             id: account.id,
             name: account.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 18), ageSeconds: 3_600)
+            metrics: metrics(service: .xai, weekly: limit(used: 18), ageSeconds: 3_600)
         )
         let refreshed = AccountUsageSnapshot(
             id: account.id,
             name: account.name,
-            metrics: metrics(service: .grok, weekly: limit(used: 27), ageSeconds: 5)
+            metrics: metrics(service: .xai, weekly: limit(used: 27), ageSeconds: 5)
         )
         let configuration = configuration(grokAccounts: [account])
         let resolvedTarget = try target(provider: "grok", configDirectory: "/tmp/grok-work")
@@ -604,14 +604,14 @@ final class QuotaGuardTests: XCTestCase {
             target: resolvedTarget,
             configuration: configuration,
             accountSnapshots: [cached],
-            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 99))],
+            providerMetrics: [.xai: metrics(service: .xai, weekly: limit(used: 99))],
             defaultDirectories: defaultDirectories
         ).get()
         let refreshedSelection = try QuotaGuardAccountResolver.resolve(
             target: resolvedTarget,
             configuration: configuration,
             accountSnapshots: [refreshed],
-            providerMetrics: [.grok: metrics(service: .grok, weekly: limit(used: 99))],
+            providerMetrics: [.xai: metrics(service: .xai, weekly: limit(used: 99))],
             defaultDirectories: defaultDirectories
         ).get()
 

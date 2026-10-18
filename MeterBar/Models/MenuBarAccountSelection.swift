@@ -123,10 +123,10 @@ nonisolated enum MenuBarAccountCatalog {
         }
         let grok = grokAccounts.map { account in
             identity(
-                service: .grok,
+                service: .xai,
                 accountID: account.id,
                 rawName: account.name,
-                isEnabled: account.isEnabled && enabledServices.contains(.grok)
+                isEnabled: account.isEnabled && enabledServices.contains(.xai)
             )
         }
         let openRouter = openRouterAccounts.map { account in

@@ -31,12 +31,12 @@ Fields:
 | Field | Type | Values / meaning |
 |---|---|---|
 | `schema_version` | integer | Current major version: `1` |
-| `provider` | string | `Claude Code`, `Codex CLI`, `Cursor`, `OpenRouter`, `Grok`, `Kimi Code`, `Z.ai Coding Plan`, or `GitHub Copilot` |
-| `account.id` | string | Account UUID for Claude Code, Codex CLI, and Grok profiles, or `default` for a single-account provider |
+| `provider` | string | `Claude Code`, `Codex CLI`, `xAI`, `OpenRouter`, `Kimi Code`, `Z.ai Coding Plan`, or `GitHub Copilot` |
+| `account.id` | string | Account UUID for Claude Code, Codex CLI, and xAI (Grok) profiles, or `default` for a single-account provider |
 | `account.name` | string | The user-visible account or provider name |
 | `event` | string | `warning`, `critical`, `exhausted`, or `recovered` |
 | `window` | string | `session`, `weekly`, or `code_review`. Version 1 enum is closed; extra periods reuse a compatible token. |
-| `period_kind` | string, optional | Reported cadence: `session`, `daily`, `weekly`, `monthly`, `billing`, or `unknown`. Omitted when unknown. A monthly Grok allowance stays `window: "weekly"` and adds `"period_kind": "monthly"`. |
+| `period_kind` | string, optional | Reported cadence: `session`, `daily`, `weekly`, `monthly`, `billing`, or `unknown`. Omitted when unknown. A monthly xAI allowance stays `window: "weekly"` and adds `"period_kind": "monthly"`. |
 | `percentage` | number | Provider usage percentage clamped to `0...100` |
 | `band` | string | `healthy`, `tight`, `critical`, or `exhausted` |
 | `timestamp` | string | Time the transition was observed |
@@ -62,8 +62,8 @@ acceptance requirement for fallback accounts. Successful switches remain
 user-visible through the macOS notification and live-account UI state.
 
 Each provider/account/window is tracked independently. Claude Code, Codex CLI,
-and Grok evaluate every enabled profile on its own. A provider-wide `Grok` /
-`default` selection from earlier releases maps to the default Grok profile UUID
+and xAI evaluate every enabled profile on its own. A provider-wide `Grok` or
+`Cursor` / `default` selection from earlier releases maps to the default Grok profile UUID
 and does not also emit a second provider-wide event. The first observation
 primes state; it does not replay cached status as a new event. Repeated states
 are deduplicated, rapid same-event flapping is debounced, and dropping out of a

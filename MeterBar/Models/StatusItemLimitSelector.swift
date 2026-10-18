@@ -33,7 +33,7 @@ nonisolated struct StatusLimitCandidate: Equatable, Sendable {
 
     // MARK: Internal
 
-    /// Legacy Auto identity (e.g. "claude:<uuid>", "codex:<uuid>", "cursor")
+    /// Legacy Auto identity (e.g. "claude:<uuid>", "codex:<uuid>", "xai")
     /// retained byte-for-byte so sticky selection and equal-quota tie-breaks do
     /// not change when the user leaves the new preference set to Auto.
     let key: String
@@ -124,7 +124,7 @@ nonisolated enum StatusItemAutoSelectionPolicy {
         switch service {
         case .claudeCode, .codexCli:
             return ["session", "weekly"]
-        case .cursor, .openRouter, .grok:
+        case .xai, .openRouter:
             return ["weekly", "session"]
         case .kimiCode, .zaiCodingPlan, .museCode:
             return ["session", "weekly"]
@@ -146,34 +146,6 @@ nonisolated enum StatusItemAutoSelectionPolicy {
     ) -> String? {
         preferredWindowIDs(for: service).first { availableWindowIDs.contains($0) }
     }
-
-    /// Windows that join Auto alongside the preferred window. Cursor Ultra's
-    /// Grok Bot pool is its own card in the popover with its own weekly reset,
-    /// so it competes for the menu bar in its own right rather than hiding
-    /// behind Cursor's included pool as a never-selectable extra row.
-    static func additionalAutoWindowIDs(for service: ServiceType) -> Set<String> {
-        switch service {
-        case .cursor:
-            return [ProviderSnapshotBuilder.grokBotLimitID]
-        case .claudeCode,
-             .codexCli,
-             .openRouter,
-             .grok,
-             .kimiCode,
-             .zaiCodingPlan,
-             .githubCopilot,
-             .museCode,
-             .claudePlatform:
-            return []
-        }
-    }
-
-    /// Selection key for an additional Auto window, namespaced under the
-    /// provider's own auto key (`cursor:grokBot`) so the winner stays
-    /// distinguishable from the preferred window in `previousKey` hysteresis.
-    static func additionalAutoSelectionKey(base: String?, windowID: String) -> String? {
-        base.map { "\($0):\(windowID)" }
-    }
 }
 
 enum StatusItemLimitCandidateBuilder {
@@ -192,7 +164,6 @@ enum StatusItemLimitCandidateBuilder {
             for: service,
             availableWindowIDs: availableWindowIDs
         )
-        let additionalAutoWindowIDs = StatusItemAutoSelectionPolicy.additionalAutoWindowIDs(for: service)
         return limits.map { limit in
             let pinKey = StatusItemPinKey.make(
                 service: service,
@@ -202,11 +173,6 @@ enum StatusItemLimitCandidateBuilder {
             let key: String
             if limit.id == autoWindowID {
                 key = autoSelectionKey ?? pinKey
-            } else if additionalAutoWindowIDs.contains(limit.id) {
-                key = StatusItemAutoSelectionPolicy.additionalAutoSelectionKey(
-                    base: autoSelectionKey,
-                    windowID: limit.id
-                ) ?? pinKey
             } else {
                 key = pinKey
             }
@@ -220,7 +186,7 @@ enum StatusItemLimitCandidateBuilder {
                 windowName: limit.title,
                 limit: limit.usageLimit,
                 lastUpdated: lastUpdated,
-                isAutoSelectable: limit.id == autoWindowID || additionalAutoWindowIDs.contains(limit.id)
+                isAutoSelectable: limit.id == autoWindowID
             )
         }
     }
@@ -261,18 +227,7 @@ enum StatusItemLimitSelector {
             return pinned
         }
 
-        var autoCandidates = candidates.filter(\.isAutoSelectable)
-        // Combined mode renders one anchor's Session/Weekly pair side by side
-        // (`combinedContent`). Cursor's Grok Bot pool is a third, differently
-        // shaped window (its own weekly-only quota, branded with Grok's logo)
-        // that does not fit that S/W pairing, so it must not win automatic
-        // selection here — only Selected mode, and an explicit pin, can show
-        // it. See PR #514 review.
-        if windowMode == .combined {
-            autoCandidates = autoCandidates.filter {
-                !StatusItemAutoSelectionPolicy.additionalAutoWindowIDs(for: $0.service).contains($0.windowID)
-            }
-        }
+        let autoCandidates = candidates.filter(\.isAutoSelectable)
         guard !autoCandidates.isEmpty else { return nil }
 
         // A spent quota is always the tightest, so without this it wins every

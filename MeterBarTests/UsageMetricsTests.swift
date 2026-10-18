@@ -24,9 +24,9 @@ final class UsageMetricsTests: XCTestCase {
     }
 
     func testInitializationWithNoLimits() {
-        let metrics = UsageMetrics(service: .cursor)
+        let metrics = UsageMetrics(service: .xai)
 
-        XCTAssertEqual(metrics.service, .cursor)
+        XCTAssertEqual(metrics.service, .xai)
         XCTAssertNil(metrics.sessionLimit)
         XCTAssertNil(metrics.weeklyLimit)
         XCTAssertNil(metrics.codeReviewLimit)
@@ -36,7 +36,7 @@ final class UsageMetricsTests: XCTestCase {
 
     func testHasDataIsTrueWhenOnlyAdditionalLimitsExist() {
         let metrics = UsageMetrics(
-            service: .grok,
+            service: .xai,
             additionalLimits: [
                 UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)
             ]
@@ -94,7 +94,7 @@ final class UsageMetricsTests: XCTestCase {
 
     func testAdditionalLimitsRoundTripAndPreserveCopies() throws {
         let original = UsageMetrics(
-            service: .grok,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .weekly),
             additionalLimits: [
                 UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)

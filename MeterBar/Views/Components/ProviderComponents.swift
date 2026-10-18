@@ -10,10 +10,9 @@ enum ProviderLogoKind: Equatable {
     case overview
     case codex
     case claude
-    case cursor
     case openai
     case openRouter
-    case grok
+    case xai
     case kimiCode
     case zaiCodingPlan
     case githubCopilot
@@ -26,12 +25,10 @@ enum ProviderLogoKind: Equatable {
             return .codex
         case .claudeCode:
             return .claude
-        case .cursor:
-            return .cursor
         case .openRouter:
             return .openRouter
-        case .grok:
-            return .grok
+        case .xai:
+            return .xai
         case .kimiCode:
             return .kimiCode
         case .zaiCodingPlan:
@@ -43,16 +40,6 @@ enum ProviderLogoKind: Equatable {
         case .claudePlatform:
             return .claudePlatform
         }
-    }
-
-    /// Logo for a status-item window. Follows the service except for Cursor
-    /// Ultra's Grok Bot pool, which is branded as Grok in the popover and must
-    /// match in the menu bar.
-    static func forStatusItem(service: ServiceType, windowID: String?) -> ProviderLogoKind {
-        if service == .cursor, windowID == ProviderSnapshotBuilder.grokBotLimitID {
-            return .grok
-        }
-        return forService(service)
     }
 
     static func forApiProvider(_ provider: ApiProvider) -> ProviderLogoKind {
@@ -72,14 +59,12 @@ enum ProviderLogoKind: Equatable {
             return "ProviderIcon-codex"
         case .claude:
             return "ProviderIcon-claude"
-        case .cursor:
-            return "ProviderIcon-cursor"
         case .openai:
             return "ProviderIcon-openai"
         case .openRouter:
             return "ProviderIcon-openrouter"
-        case .grok:
-            return "ProviderIcon-grok"
+        case .xai:
+            return "ProviderIcon-xai"
         case .kimiCode:
             return "ProviderIcon-kimi"
         case .zaiCodingPlan:
@@ -101,14 +86,12 @@ enum ProviderLogoKind: Equatable {
             return ServiceType.codexCli.iconName
         case .claude:
             return ServiceType.claudeCode.iconName
-        case .cursor:
-            return ServiceType.cursor.iconName
         case .openai:
             return "brain"
         case .openRouter:
             return ServiceType.openRouter.iconName
-        case .grok:
-            return ServiceType.grok.iconName
+        case .xai:
+            return ServiceType.xai.iconName
         case .kimiCode:
             return ServiceType.kimiCode.iconName
         case .zaiCodingPlan:

@@ -18,8 +18,7 @@ class CursorLocalService: ObservableObject {
     nonisolated private static let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
 
     /// Weekly included pool. On a merged Cursor / SpaceXAI / X account this is
-    /// the shared allowance. On an older account it stays an extra Grok Bot bar.
-    /// Not MeterBar's Grok provider and not present on `/api/usage-summary`.
+    /// the shared allowance. Not present on `/api/usage-summary`.
     nonisolated private static let sandUsageEndpoint =
         "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
 
@@ -384,7 +383,7 @@ class CursorLocalService: ObservableObject {
         }
         guard let used = plan?.used else { return nil }
         return ProviderUsageObservation(
-            provider: .cursor,
+            provider: .xai,
             unit: .requests,
             runningTotal: Double(used),
             // Cursor publishes no per-day figure, so there is nothing
@@ -398,33 +397,27 @@ class CursorLocalService: ObservableObject {
     }
 
     /// Maps a decoded Cursor usage-summary response onto the shared
-    /// `UsageMetrics` shape. Pure and side-effect-free so it can be fixture-tested
-    /// without the network or Cursor's SQLite DB.
+    /// `UsageMetrics` shape under the single xAI provider. Pure and
+    /// side-effect-free so it can be fixture-tested without the network or
+    /// Cursor's SQLite DB.
     ///
-    /// Current dashboard shape: `plan.autoPercentUsed` (Cursor Models) and
-    /// `plan.apiPercentUsed` (Other Models) are the two included pools. Those
-    /// land on `sessionLimit` / `weeklyLimit` as percentages of 100 so the
-    /// popover can draw the same two bars the dashboard does. Enabled on-demand
-    /// spend, when present, is the third window (`codeReviewLimit`) — it must
-    /// not occupy the session slot, which would hide Cursor Models.
+    /// xAI plans share one weekly pool across Grok and Cursor, so the weekly
+    /// slot (`weeklyLimit`) carries that pool when the account has it: the
+    /// sand status pool wins, and a merged weekly plan with no mappable sand
+    /// pool falls back to the usage-summary bars on the weekly reset. The
+    /// merger prefers Grok's own read of the same pool when it has one.
     ///
-    /// Legacy payloads omit the percent fields. They keep the previous mapping:
-    /// `plan.used` / server quota as the monthly request window, on-demand as
-    /// the session window. The plan denominator comes from the server
-    /// (`plan.limit`, else `plan.breakdown`, else the legacy flat `plan.total`);
-    /// only when the selected shape carries none of those is the assumed quota
+    /// Legacy accounts still on monthly Cursor pools list them as labelled
+    /// `additionalLimits` rows ("Cursor Models" from `plan.autoPercentUsed`,
+    /// "Other Models" from `plan.apiPercentUsed`); without a weekly pool the
+    /// roomiest one (or the request-count quota of a legacy plan) is also the
+    /// `weeklyLimit` headline gauge, titled "Monthly". Enabled on-demand spend
+    /// is `codeReviewLimit`, titled "On-demand".
+    ///
+    /// The plan denominator for the request-count shape comes from the server
+    /// (`plan.limit`, else `plan.breakdown`, else the legacy flat
+    /// `plan.total`); only when none is present is the assumed quota
     /// substituted and flagged `isEstimated`.
-    ///
-    /// Optional `sandStatus` is the weekly included pool. When the account is
-    /// on the merged weekly plan (`GetPlanInfo.includedUsagePeriod` ends in
-    /// `WEEKLY`, or sand `isUnified`), that pool replaces the usage-summary
-    /// percent bars: those bars still reset with the invoice cycle. The same
-    /// pool is not also attached as a Grok Bot row. Older accounts keep the
-    /// percent bars and, when sand maps, the extra Grok Bot row.
-    ///
-    /// `isMerged` alone does not switch the mapping. A weekly plan whose sand
-    /// pool does not map keeps the percent bars, moves their reset to
-    /// `includedUsageResetsAt`, and leaves `windowSeconds` unset.
     nonisolated static func mapSummary(
         _ summaryData: CursorUsageSummaryResponse,
         sandStatus: CursorSandUsageStatusResponse? = nil,
@@ -435,46 +428,66 @@ class CursorLocalService: ObservableObject {
         let usage = selectedUsage(from: summaryData)
         let plan = usage.plan
         let sandLimit = mapSandUsage(sandStatus)
-        let additionalLimits = sandLimit.map { [$0] } ?? []
+        let onDemand = onDemandLimit(
+            from: usage.onDemand,
+            resetTime: cycle.resetTime,
+            windowSeconds: cycle.windowSeconds
+        )
         let weeklyIncluded = planInfo?.planInfo?.isWeeklyIncluded == true
         let unified = weeklyIncluded || sandStatus?.isUnified == true
 
         if let autoPercent = plan?.autoPercentUsed, let apiPercent = plan?.apiPercentUsed {
-            let onDemand = onDemandLimit(
-                from: usage.onDemand,
-                resetTime: cycle.resetTime,
-                windowSeconds: cycle.windowSeconds
-            )
             if unified, let sandLimit {
-                return UsageMetrics(
-                    service: .cursor,
-                    sessionLimit: nil,
-                    weeklyLimit: sandLimit,
-                    codeReviewLimit: onDemand,
-                    additionalLimits: []
-                )
+                return UsageMetrics(service: .xai, weeklyLimit: sandLimit, codeReviewLimit: onDemand)
             }
             let included = includedUsageWindow(
                 billing: cycle,
                 planInfo: planInfo,
                 useWeeklyReset: weeklyIncluded
             )
+            if weeklyIncluded {
+                // A weekly plan whose sand pool did not map: the summary bars
+                // are the best read of the shared pool. The binding (higher)
+                // percent stands for it, so one weekly gauge is drawn.
+                let pools = [autoPercent, apiPercent].compactMap(plausiblePercent)
+                let weekly = pools.max().map {
+                    percentPoolLimit(
+                        $0,
+                        resetTime: included.resetTime,
+                        windowSeconds: included.windowSeconds,
+                        periodKind: .weekly
+                    )
+                } ?? nil
+                return UsageMetrics(
+                    service: .xai,
+                    weeklyLimit: weekly ?? sandLimit,
+                    codeReviewLimit: onDemand
+                )
+            }
+            let autoPool = percentPoolLimit(
+                autoPercent,
+                resetTime: included.resetTime,
+                windowSeconds: included.windowSeconds,
+                periodKind: included.periodKind,
+                label: ServiceType.legacyCursorModelsLabel
+            )
+            let apiPool = percentPoolLimit(
+                apiPercent,
+                resetTime: included.resetTime,
+                windowSeconds: included.windowSeconds,
+                periodKind: included.periodKind,
+                label: ServiceType.legacyOtherModelsLabel
+            )
+            // An account with no weekly pool still needs a headline gauge for
+            // the menu bar and widget. Cursor's included pools spill into each
+            // other, so the roomiest one stands for the account: emptying one
+            // while the other has headroom is not "out".
+            let binding = [autoPool, apiPool].compactMap { $0 }.min { $0.used < $1.used }
             return UsageMetrics(
-                service: .cursor,
-                sessionLimit: percentPoolLimit(
-                    autoPercent,
-                    resetTime: included.resetTime,
-                    windowSeconds: included.windowSeconds,
-                    periodKind: included.periodKind
-                ),
-                weeklyLimit: percentPoolLimit(
-                    apiPercent,
-                    resetTime: included.resetTime,
-                    windowSeconds: included.windowSeconds,
-                    periodKind: included.periodKind
-                ),
+                service: .xai,
+                weeklyLimit: sandLimit ?? binding.map(Self.unlabelled),
                 codeReviewLimit: onDemand,
-                additionalLimits: additionalLimits
+                additionalLimits: [autoPool, apiPool].compactMap { $0 }
             )
         }
 
@@ -482,19 +495,9 @@ class CursorLocalService: ObservableObject {
             // Missing counter: zero is not unknown. `observation()` above refuses
             // this exact shape for the same reason — a renamed or dropped `used`
             // field (even one that still carries `limit`/`serverQuota`) must not
-            // render as a confident "0 used" gauge. Report no weekly window at
+            // render as a confident "0 used" gauge. Report no included window at
             // all rather than invent one.
-            return UsageMetrics(
-                service: .cursor,
-                sessionLimit: onDemandLimit(
-                    from: usage.onDemand,
-                    resetTime: cycle.resetTime,
-                    windowSeconds: cycle.windowSeconds
-                ),
-                weeklyLimit: nil,
-                codeReviewLimit: nil,
-                additionalLimits: additionalLimits
-            )
+            return UsageMetrics(service: .xai, weeklyLimit: sandLimit, codeReviewLimit: onDemand)
         }
 
         let planUsed = Double(usedCount)
@@ -502,25 +505,34 @@ class CursorLocalService: ObservableObject {
         let planTotalIsEstimated = serverQuota == nil
         let planTotal = Double(serverQuota ?? Int(defaultPlanTotal))
 
-        // Billing-cycle window. Named `weeklyLimit` after the shared long-window
-        // slot, not its cadence: it resets at `billingCycleEnd`, which is why
-        // the legacy title for this window is "Monthly".
+        // Billing-cycle request quota of a legacy plan. Its cadence is the
+        // invoice cycle, so it carries the monthly period kind. It is the
+        // headline gauge unless the weekly pool exists, in which case it rides
+        // as an extra row.
+        let requestQuota = UsageLimit(
+            used: planUsed,
+            total: planTotal,
+            resetTime: cycle.resetTime,
+            windowSeconds: cycle.windowSeconds,
+            isEstimated: planTotalIsEstimated,
+            periodKind: .monthly
+        )
         return UsageMetrics(
-            service: .cursor,
-            sessionLimit: onDemandLimit(
-                from: usage.onDemand,
-                resetTime: cycle.resetTime,
-                windowSeconds: cycle.windowSeconds
-            ),
-            weeklyLimit: UsageLimit(
-                used: planUsed,
-                total: planTotal,
-                resetTime: cycle.resetTime,
-                windowSeconds: cycle.windowSeconds,
-                isEstimated: planTotalIsEstimated
-            ),
-            codeReviewLimit: nil,
-            additionalLimits: additionalLimits
+            service: .xai,
+            weeklyLimit: sandLimit ?? requestQuota,
+            codeReviewLimit: onDemand,
+            additionalLimits: sandLimit == nil ? [] : [requestQuota]
+        )
+    }
+
+    nonisolated private static func unlabelled(_ limit: UsageLimit) -> UsageLimit {
+        UsageLimit(
+            used: limit.used,
+            total: limit.total,
+            resetTime: limit.resetTime,
+            windowSeconds: limit.windowSeconds,
+            isEstimated: limit.isEstimated,
+            periodKind: limit.periodKind
         )
     }
 
@@ -535,8 +547,8 @@ class CursorLocalService: ObservableObject {
         return value
     }
 
-    /// Cursor Ultra weekly Grok Bot pool. Matches Grok Bot.app's omit rules
-    /// plus MeterBar's "no phantom 0% bar without a grant" rule.
+    /// The weekly pool Cursor's sand status reports. Follows Grok Bot.app's omit
+    /// rules plus MeterBar's "no phantom 0% bar without a grant" rule.
     nonisolated static func mapSandUsage(_ status: CursorSandUsageStatusResponse?) -> UsageLimit? {
         guard let status else { return nil }
         guard let used = status.usagePercent.flatMap(plausiblePercent) else {
@@ -561,7 +573,7 @@ class CursorLocalService: ObservableObject {
 
         return UsageLimit(
             used: used,
-            total: ServiceType.cursorIncludedPoolTotal,
+            total: ServiceType.xaiPercentPoolTotal,
             resetTime: end,
             windowSeconds: windowSeconds,
             isEstimated: false,
@@ -622,16 +634,18 @@ class CursorLocalService: ObservableObject {
         _ percentUsed: Double,
         resetTime: Date?,
         windowSeconds: TimeInterval?,
-        periodKind: UsageLimit.PeriodKind
+        periodKind: UsageLimit.PeriodKind,
+        label: String? = nil
     ) -> UsageLimit? {
         guard let used = plausiblePercent(percentUsed) else { return nil }
         return UsageLimit(
             used: used,
-            total: ServiceType.cursorIncludedPoolTotal,
+            total: ServiceType.xaiPercentPoolTotal,
             resetTime: resetTime,
             windowSeconds: windowSeconds,
             isEstimated: false,
-            periodKind: periodKind
+            periodKind: periodKind,
+            label: label
         )
     }
 

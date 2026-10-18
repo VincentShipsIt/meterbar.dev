@@ -114,7 +114,7 @@ final class PowerAssertionManagerTests: XCTestCase {
         controller.acquireSucceeds = false
         let manager = makeManager(controller: controller, enabled: true)
 
-        manager.reconcile(snapshots: [snapshot(.cursor, used: 20)])
+        manager.reconcile(snapshots: [snapshot(.xai, used: 20)])
 
         XCTAssertFalse(controller.isHeld)
         XCTAssertFalse(manager.isAssertionHeld)

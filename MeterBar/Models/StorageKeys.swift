@@ -29,7 +29,8 @@ nonisolated enum StorageKeys {
     /// Grok Build is tracked by default; this key records an explicit opt-out.
     /// Absent means enabled — see `ProviderVisibilityStore.load()`, which must
     /// distinguish "never touched" from "turned off" now that the default flipped.
-    static let grokProviderEnabled = "GrokProviderEnabled"
+    /// Kept under its pre-merge name so existing opt-outs still apply to xAI.
+    static let xaiProviderEnabled = "GrokProviderEnabled"
     /// Whether the Dock icon is shown (menu bar item is unaffected).
     static let showInDock = "ShowMeterBarInDock"
     /// Explicit opt-in for holding a user-idle system-sleep assertion while a

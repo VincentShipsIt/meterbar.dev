@@ -180,10 +180,9 @@ enum MeterBarTheme {
   enum BrandAccentDark {
     static let codex = NSColor(srgbRed: 100 / 255, green: 210 / 255, blue: 255 / 255, alpha: 1)
     static let claude = NSColor(srgbRed: 209 / 255, green: 134 / 255, blue: 101 / 255, alpha: 1)
-    static let cursor = NSColor(srgbRed: 99 / 255, green: 210 / 255, blue: 151 / 255, alpha: 1)
     static let openai = NSColor(srgbRed: 106 / 255, green: 216 / 255, blue: 185 / 255, alpha: 1)
     static let openRouter = NSColor(srgbRed: 177 / 255, green: 159 / 255, blue: 255 / 255, alpha: 1)
-    static let grok = NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
+    static let xai = NSColor(srgbRed: 108 / 255, green: 170 / 255, blue: 255 / 255, alpha: 1)
     static let kimiCode = NSColor(srgbRed: 255 / 255, green: 120 / 255, blue: 150 / 255, alpha: 1)
     static let zaiCodingPlan = NSColor(srgbRed: 240 / 255, green: 196 / 255, blue: 64 / 255, alpha: 1)
     static let githubCopilot = NSColor(srgbRed: 196 / 255, green: 203 / 255, blue: 226 / 255, alpha: 1)
@@ -199,10 +198,6 @@ enum MeterBarTheme {
     light: NSColor(srgbRed: 176 / 255, green: 86 / 255, blue: 52 / 255, alpha: 1),
     dark: BrandAccentDark.claude
   )
-  static let cursorAccent = Color.adaptive(
-    light: NSColor(srgbRed: 34 / 255, green: 150 / 255, blue: 92 / 255, alpha: 1),
-    dark: BrandAccentDark.cursor
-  )
   static let openaiAccent = Color.adaptive(
     light: NSColor(srgbRed: 16 / 255, green: 163 / 255, blue: 127 / 255, alpha: 1),
     dark: BrandAccentDark.openai
@@ -211,9 +206,9 @@ enum MeterBarTheme {
     light: NSColor(srgbRed: 105 / 255, green: 82 / 255, blue: 188 / 255, alpha: 1),
     dark: BrandAccentDark.openRouter
   )
-  static let grokAccent = Color.adaptive(
+  static let xaiAccent = Color.adaptive(
     light: NSColor(srgbRed: 33 / 255, green: 103 / 255, blue: 209 / 255, alpha: 1),
-    dark: BrandAccentDark.grok
+    dark: BrandAccentDark.xai
   )
   static let kimiCodeAccent = Color.adaptive(
     light: NSColor(srgbRed: 196 / 255, green: 40 / 255, blue: 88 / 255, alpha: 1),
@@ -305,12 +300,10 @@ enum MeterBarTheme {
       return claudeAccent
     case .codexCli:
       return codexAccent
-    case .cursor:
-      return cursorAccent
     case .openRouter:
       return openRouterAccent
-    case .grok:
-      return grokAccent
+    case .xai:
+      return xaiAccent
     case .kimiCode:
       return kimiCodeAccent
     case .zaiCodingPlan:

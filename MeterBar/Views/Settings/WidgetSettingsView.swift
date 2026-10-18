@@ -37,7 +37,7 @@ enum WidgetSettingsAccountProjection {
                         name: $0.name
                     )
                 }
-            case .grok:
+            case .xai:
                 return grokAccounts.filter(\.isEnabled).map {
                     WidgetSettingsAccountOption(
                         id: .account(service: service, id: $0.id),
@@ -55,8 +55,7 @@ enum WidgetSettingsAccountProjection {
                         name: $0.name
                     )
                 }
-            case .cursor,
-                 .kimiCode,
+            case .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
                  .museCode,
@@ -136,10 +135,9 @@ struct WidgetSettingsPreviewData {
                 accountMetrics = claudeAccountMetrics[accountID]
             case .codexCli:
                 accountMetrics = codexAccountMetrics[accountID]
-            case .grok:
+            case .xai:
                 accountMetrics = grokAccountMetrics[accountID]
-            case .cursor,
-                 .openRouter,
+            case .openRouter,
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,

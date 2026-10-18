@@ -16,7 +16,7 @@ same versioned usage/cost documents over a local HTTP endpoint instead of standa
 - Optional values are omitted when the provider or cached source did not supply them.
 - JSON is the only content written to standard output for these commands.
 
-Provider identifiers are stable tokens: `claude`, `codex`, `cursor`, `openrouter`, `grok`, `kimi`, `zai`, `copilot`, `muse-code`, and `claude-platform`. A token selects exactly that provider (`claude` never also matches `claude-platform`); any other `--provider` value is a case-insensitive substring of a provider name.
+Provider identifiers are stable tokens: `claude`, `codex`, `xai`, `openrouter`, `kimi`, `zai`, `copilot`, `muse-code`, and `claude-platform`. A token selects exactly that provider (`claude` never also matches `claude-platform`); `grok` and `cursor` are retired tokens that still parse as aliases of `xai` (Grok and Cursor are one provider; output always says `xai`); any other `--provider` value is a case-insensitive substring of a provider name.
 
 ## Usage
 
@@ -77,7 +77,7 @@ window omits `reading` and `label`.
 
 `windows[].periodKind` is the additive identity field. It names the provider-reported cadence
 (`session`, `daily`, `weekly`, `monthly`, `billing`, `unknown`) even when `kind` stays a legacy
-slot token. A monthly Grok allowance therefore stays `kind: "weekly"` and adds
+slot token. A monthly xAI allowance therefore stays `kind: "weekly"` and adds
 `"periodKind": "monthly"`. An extra daily period is `kind: "session"` plus
 `"periodKind": "daily"`. The key is omitted when the cache did not record a cadence. Do not
 treat `kind` as the human title or as unique within a provider.
@@ -87,14 +87,13 @@ context. `resetCreditsAvailable` is present only when the provider reports banke
 
 ### Accounts
 
-Claude, Codex, and Grok can have more than one profile. `providers[]` stays the representative
+Claude, Codex, and xAI (Grok profiles) can have more than one profile. `providers[]` stays the representative
 provider-wide snapshot (`loadMetrics()`), so schema-v1 consumers that only read `providers` keep
 working. When the app-group account cache (`loadAccountMetrics()`) has snapshots, the document
 also includes an additive `accounts` array — one entry per cached profile, never a filesystem path,
 `GROK_HOME`, or token.
 
-`accounts` is omitted when that cache is empty (legacy provider-only files, or Cursor which stays
-provider-only and never gets fake accounts, as do Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform). OpenRouter entries are one per managed API key.
+`accounts` is omitted when that cache is empty (legacy provider-only files; the Cursor source folded into xAI has no accounts of its own and never gets fake ones, as do Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform). OpenRouter entries are one per managed API key.
 
 ```json
 {
@@ -463,8 +462,8 @@ Version 1 shape:
       "lastUpdated": "2026-07-20T17:00:00Z"
     },
     {
-      "provider": "cursor",
-      "displayName": "Cursor",
+      "provider": "xai",
+      "displayName": "xAI",
       "state": "failed",
       "reason": "The provider returned an invalid response.",
       "servedFromCache": true,
@@ -477,7 +476,7 @@ Version 1 shape:
     "ageSeconds": 0,
     "isStale": false
   },
-  "message": "1 provider(s) failed to refresh (Cursor); 1 kept last-known-good metrics."
+  "message": "1 provider(s) failed to refresh (xAI); 1 kept last-known-good metrics."
 }
 ```
 
@@ -524,7 +523,7 @@ refresh` is not answered `alreadyRunning` by an abandoned holder.
 ```sh
 meterbar guard --provider claude --limit session --min-remaining 25
 meterbar guard --provider codex --limit weekly --json
-meterbar guard --provider grok --config-dir ~/.grok-work --json
+meterbar guard --provider xai --config-dir ~/.grok-work --json
 meterbar guard --config-dir ~/.claude-work --refresh --json
 ```
 
@@ -542,11 +541,11 @@ cadence selectors `daily`, `monthly`, `billing`, and `unknown` resolve a reporte
 `periodKind` — including a monthly allowance stored in the weekly slot, or an extra daily
 period in `additionalLimits`. `--min-remaining` is a percentage of quota that must remain;
 without it, only exhaustion blocks. `--config-dir` narrows the check to one configured Claude
-Code, OpenAI Codex, or Grok account by its configuration directory (Claude/Codex config dir, or
-Grok `GROK_HOME`). Cursor, OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform have no per-account directories and are rejected.
+Code, OpenAI Codex, or xAI (Grok) account by its configuration directory (Claude/Codex config dir, or
+Grok `GROK_HOME`). OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform have no per-account directories and are rejected.
 The JSON `window` field stays `session`, `weekly`, or `codeReview`. Additive `periodKind` names
 the reported cadence. Human `message` text uses that cadence ("monthly", never "weekly" for a
-monthly Grok allowance).
+monthly xAI allowance).
 
 Version 1 shape:
 
@@ -689,14 +688,14 @@ malformed non-null value uses that task's default; valid integers retain the doc
 
 ### How a candidate is judged
 
-Routing currently supports Claude Code, Codex, Cursor, OpenRouter and Grok. Kimi, Z.ai, Copilot,
+Routing currently supports Claude Code, Codex, xAI and OpenRouter. Kimi, Z.ai, Copilot,
 Muse Code and Claude Platform remain available for usage tracking but are not eligible for routing. Enabling them yields
 `provider_unsupported` before policy, quota or cost evaluation; they never enter recommendations
 or fallbacks, and Copilot budgets are not described as included subscription quota.
 
 A candidate is one provider, or one account of a multi-account provider. When per-account
 snapshots exist a provider is routed per account and its provider-wide roll-up is not counted a
-second time; Cursor is always provider-wide. Providers hidden in MeterBar are not candidates.
+second time. xAI routes per Grok profile; the default profile's card also carries the Cursor source. Providers hidden in MeterBar are not candidates.
 Current account configuration is authoritative: a cached account UUID absent from that configuration
 is retained as a disabled/rejected candidate, never a recommendation or fallback. An explicitly
 empty account list disables that provider's provider-wide fallback. With legacy caches and no
@@ -732,8 +731,7 @@ failures. Cost therefore trades against headroom: an included subscription quota
 one that has more room only as far as the policy's cost preference says.
 
 **Tie-breaker.** Equal scores fall through, in order, to more quota remaining; earlier position in
-the policy's provider preference; provider order (`claude`, `codex`, `cursor`, `openrouter`,
-`grok`); the account's display order; the account id. The last step is total, so the result never
+the policy's provider preference; provider order (`claude`, `codex`, `xai`, `openrouter`); the account's display order; the account id. The last step is total, so the result never
 depends on the order candidates were read. When a tie decided the recommendation, `reasons` says
 which step did.
 
@@ -784,10 +782,10 @@ Version 1 shape for a recommendation:
   ],
   "rejected": [
     {
-      "provider": "cursor",
-      "providerName": "Cursor",
+      "provider": "xai",
+      "providerName": "xAI",
       "code": "quota_exhausted",
-      "message": "Cursor: Cursor Models quota is spent, resets in 3d 4h",
+      "message": "xAI: weekly quota is spent, resets in 3d 4h",
       "freshness": { "lastUpdated": "2026-09-29T16:58:00Z", "ageSeconds": 120, "isStale": false }
     }
   ],
@@ -883,10 +881,10 @@ documents, it is a diagnostic DTO rather than a versioned cache schema:
 ```
 
 `overall` and `checks[].level` are `pass`, `warn`, or `fail`. `healthy` is true only when
-`overall` is `pass`. Multi-account providers (Claude, Codex, Grok) emit one object per enabled
+`overall` is `pass`. Multi-account providers (Claude, Codex, xAI) emit one object per enabled
 profile, plus a provider-wide aggregate when more than one profile is enabled. `accountId` is
 MeterBar's local profile id and `accountName` is the user-facing display name; both are omitted
-for provider-wide reports (Cursor, OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, Claude Platform, and the aggregate). Filesystem paths, credentials,
+for provider-wide reports (OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, Claude Platform, and the aggregate). Filesystem paths, credentials,
 tokens, passwords, authorization headers, and raw response bodies are never emitted. Diagnostic
 messages may use standard error, but standard output remains one JSON document.
 

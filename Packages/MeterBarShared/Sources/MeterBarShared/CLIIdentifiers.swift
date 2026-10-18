@@ -11,9 +11,8 @@ public extension ServiceType {
         switch self {
         case .claudeCode: "claude"
         case .codexCli: "codex"
-        case .cursor: "cursor"
+        case .xai: "xai"
         case .openRouter: "openrouter"
-        case .grok: "grok"
         case .kimiCode: "kimi"
         case .zaiCodingPlan: "zai"
         case .githubCopilot: "copilot"
@@ -29,11 +28,18 @@ public extension ServiceType {
             .joined(separator: ", ")
     }
 
+    /// Tokens scripts used before Grok and Cursor became one xAI provider. They
+    /// still parse (to `.xai`) but are never emitted: JSON always says `xai`.
+    static let legacyCLIIdentifiers: [String: ServiceType] = [
+        "grok": .xai,
+        "cursor": .xai
+    ]
+
     /// Parses a caller-supplied `--provider` value. Tolerant of surrounding
     /// whitespace and casing so shell interpolation doesn't become a usage error.
     static func fromCLIIdentifier(_ raw: String) -> ServiceType? {
         let needle = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return allCases.first { $0.cliIdentifier == needle }
+        return allCases.first { $0.cliIdentifier == needle } ?? legacyCLIIdentifiers[needle]
     }
 }
 

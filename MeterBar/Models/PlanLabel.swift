@@ -15,16 +15,17 @@ enum PlanLabel {
             return nil
         }
         switch service {
-        case .grok:
-            // Already human-facing ("SuperGrok").
-            return token
+        case .xai:
+            // Grok reports a human-facing tier ("SuperGrok"); Cursor reports a
+            // lowercase membership token ("ultra") that needs normalising.
+            return token == token.lowercased() ? words(token) : token
         case .claudeCode:
             let base = words(token)
             guard let multiplier = claudeMultiplier(from: rateLimitTier) else { return base }
             return "\(base) \(multiplier)"
         case .codexCli:
             return token.lowercased() == "prolite" ? "Pro Lite" : words(token)
-        case .cursor, .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot, .museCode, .claudePlatform:
+        case .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot, .museCode, .claudePlatform:
             return words(token)
         }
     }

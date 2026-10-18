@@ -35,9 +35,8 @@ enum SocialCardPalette {
         switch service {
         case .claudeCode: return Color(nsColor: MeterBarTheme.BrandAccentDark.claude)
         case .codexCli: return Color(nsColor: MeterBarTheme.BrandAccentDark.codex)
-        case .cursor: return Color(nsColor: MeterBarTheme.BrandAccentDark.cursor)
         case .openRouter: return Color(nsColor: MeterBarTheme.BrandAccentDark.openRouter)
-        case .grok: return Color(nsColor: MeterBarTheme.BrandAccentDark.grok)
+        case .xai: return Color(nsColor: MeterBarTheme.BrandAccentDark.xai)
         case .kimiCode: return Color(nsColor: MeterBarTheme.BrandAccentDark.kimiCode)
         case .zaiCodingPlan: return Color(nsColor: MeterBarTheme.BrandAccentDark.zaiCodingPlan)
         case .githubCopilot: return Color(nsColor: MeterBarTheme.BrandAccentDark.githubCopilot)

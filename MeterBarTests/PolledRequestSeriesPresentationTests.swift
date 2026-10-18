@@ -32,13 +32,13 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// count behind a currency symbol.
     func testRequestProviderCarriesItsOwnUnit() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 40, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 190, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 40, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 190, at: day(-1)))
 
         let presentation = PolledRequestSeriesPresentation(ledger: ledger, now: day(0))
         let series = try XCTUnwrap(presentation.providers.first)
 
-        XCTAssertEqual(presentation.providers.map(\.provider), [.cursor])
+        XCTAssertEqual(presentation.providers.map(\.provider), [.xai])
         XCTAssertEqual(series.unit, .requests)
         XCTAssertEqual(series.days.map(\.amount), [150])
         XCTAssertEqual(series.total, 150, accuracy: 0.000_001)
@@ -52,9 +52,9 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// heading would misstate the total.
     func testDaysOutsideTheRequestedWindowAreExcluded() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 0, at: day(-60)))
-        ledger.record(observation(.cursor, unit: .requests, total: 500, at: day(-59)))
-        ledger.record(observation(.cursor, unit: .requests, total: 520, at: day(-3)))
+        ledger.record(observation(.xai, unit: .requests, total: 0, at: day(-60)))
+        ledger.record(observation(.xai, unit: .requests, total: 500, at: day(-59)))
+        ledger.record(observation(.xai, unit: .requests, total: 520, at: day(-3)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, requestedDays: 30, now: day(0)).providers.first
@@ -68,9 +68,9 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// it would put a bar off the right edge of the chart.
     func testFutureDatedDaysAreExcluded() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 5, at: day(-1)))
-        ledger.record(observation(.cursor, unit: .requests, total: 11, at: day(0)))
-        ledger.record(observation(.cursor, unit: .requests, total: 99, at: day(4)))
+        ledger.record(observation(.xai, unit: .requests, total: 5, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 11, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 99, at: day(4)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, requestedDays: 30, now: day(0)).providers.first
@@ -107,17 +107,17 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
         // Baseline poll, one day before the window opens: establishes the
         // counter without emitting a row.
         ledger.record(
-            observation(.cursor, unit: .requests, total: 0, at: exactDay(2026, 8, 7)),
+            observation(.xai, unit: .requests, total: 0, at: exactDay(2026, 8, 7)),
             calendar: santiago
         )
         // The oldest day a 30-day window anchored on 9/6 still owes —
         // exactly the boundary a raw, un-renormalized step drifts off.
         ledger.record(
-            observation(.cursor, unit: .requests, total: 500, at: exactDay(2026, 8, 8)),
+            observation(.xai, unit: .requests, total: 500, at: exactDay(2026, 8, 8)),
             calendar: santiago
         )
         ledger.record(
-            observation(.cursor, unit: .requests, total: 520, at: exactDay(2026, 9, 6)),
+            observation(.xai, unit: .requests, total: 520, at: exactDay(2026, 9, 6)),
             calendar: santiago
         )
 
@@ -136,10 +136,10 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
 
     func testDaysAreOrderedOldestFirst() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 0, at: day(-3)))
-        ledger.record(observation(.cursor, unit: .requests, total: 3, at: day(-1)))
-        ledger.record(observation(.cursor, unit: .requests, total: 4, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 10, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 0, at: day(-3)))
+        ledger.record(observation(.xai, unit: .requests, total: 3, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 4, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 10, at: day(0)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -155,8 +155,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// implying the empty stretch before it was a stretch of zero usage.
     func testTrackingStartDateIsCarried() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 400, at: day(-5)))
-        ledger.record(observation(.cursor, unit: .requests, total: 410, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 400, at: day(-5)))
+        ledger.record(observation(.xai, unit: .requests, total: 410, at: day(-1)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -170,7 +170,7 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// whole billing cycle.
     func testFirstPollAloneProducesAnEmptySeriesNotASpike() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 431, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 431, at: day(0)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -185,8 +185,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// that nothing was spent that day, which MeterBar has no way to know.
     func testDaysBeforeTrackingBeganAreAbsentRatherThanZero() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 100, at: day(-1)))
-        ledger.record(observation(.cursor, unit: .requests, total: 130, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 100, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 130, at: day(0)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, requestedDays: 30, now: day(0)).providers.first
@@ -211,8 +211,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// empty.
     func testUnchangedCounterKeepsTheProviderButNotTheDays() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 7, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 7, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 7, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 7, at: day(-1)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -226,8 +226,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// reset, and the card must show the post-reset usage rather than a hole.
     func testCounterResetShowsPostResetUsageAndNeverANegativeDay() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 740, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 12, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 740, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 12, at: day(-1)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -244,8 +244,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// enum.
     func testTotalIsLabelledInRequestsAndCarriesNoCurrencySymbol() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 0, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 1_204, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 0, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 1_204, at: day(-1)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -258,8 +258,8 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
     /// One request is one request, not "1 requests".
     func testSingleRequestIsLabelledInTheSingular() throws {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 8, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 9, at: day(-1)))
+        ledger.record(observation(.xai, unit: .requests, total: 8, at: day(-2)))
+        ledger.record(observation(.xai, unit: .requests, total: 9, at: day(-1)))
 
         let series = try XCTUnwrap(
             PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.first
@@ -272,10 +272,10 @@ final class PolledRequestSeriesPresentationTests: XCTestCase {
 
     func testProvidersAreOrderedDeterministically() {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 1, at: day(-2)))
-        ledger.record(observation(.cursor, unit: .requests, total: 5, at: day(-1)))
-        ledger.record(observation(.grok, unit: .requests, total: 1, at: day(-2)))
-        ledger.record(observation(.grok, unit: .requests, total: 3, at: day(-1)))
+        ledger.record(observation(.openRouter, unit: .requests, total: 1, at: day(-2)))
+        ledger.record(observation(.openRouter, unit: .requests, total: 5, at: day(-1)))
+        ledger.record(observation(.kimiCode, unit: .requests, total: 1, at: day(-2)))
+        ledger.record(observation(.kimiCode, unit: .requests, total: 3, at: day(-1)))
 
         let first = PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.map(\.provider)
         let second = PolledRequestSeriesPresentation(ledger: ledger, now: day(0)).providers.map(\.provider)

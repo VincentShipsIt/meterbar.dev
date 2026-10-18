@@ -135,7 +135,7 @@ final class CostScanWindowOnlyTests: XCTestCase {
             CostTracker.needsBackgroundRefresh(
                 summary: nil,
                 lastScanDate: nil,
-                enabledServices: [.cursor],
+                enabledServices: [.kimiCode],
                 days: 30,
                 newTranscriptsSinceLastScan: { _, _ in nil }
             )

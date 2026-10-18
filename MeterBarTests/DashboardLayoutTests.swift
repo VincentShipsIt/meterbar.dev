@@ -200,7 +200,7 @@ final class DashboardLayoutTests: XCTestCase {
         var dashboardOpens = 0
 
         let commands = ProviderCardCommands.make(
-            snapshot: makeSnapshot(title: "Cursor", service: .cursor),
+            snapshot: makeSnapshot(title: "Cursor", service: .xai),
             refresh: { refreshed.append($0) },
             openStatusPage: { statusOpened.append($0) },
             hide: { hidden.append($0) },
@@ -211,9 +211,9 @@ final class DashboardLayoutTests: XCTestCase {
         // own service — the whole point of the context menu.
         commands.forEach { $0.action() }
 
-        XCTAssertEqual(refreshed, [.cursor])
-        XCTAssertEqual(statusOpened, [.cursor])
-        XCTAssertEqual(hidden, [.cursor])
+        XCTAssertEqual(refreshed, [.xai])
+        XCTAssertEqual(statusOpened, [.xai])
+        XCTAssertEqual(hidden, [.xai])
         XCTAssertEqual(dashboardOpens, 1)
     }
 

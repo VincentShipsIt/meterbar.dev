@@ -16,9 +16,8 @@ nonisolated enum AccountFailoverProvider: String, CaseIterable, Codable, Sendabl
         switch service {
         case .claudeCode: self = .claudeCode
         case .codexCli: self = .codexCli
-        case .cursor,
-             .openRouter,
-             .grok,
+        case .openRouter,
+             .xai,
              .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,

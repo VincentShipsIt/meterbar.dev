@@ -125,7 +125,7 @@ final class DashboardSectionSplitTests: XCTestCase {
         let snapshots = [
             snapshot(id: "claude", title: "Claude", service: .claudeCode),
             snapshot(id: "codex", title: "Codex", service: .codexCli),
-            snapshot(id: "cursor", title: "Cursor", service: .cursor)
+            snapshot(id: "cursor", title: "Cursor", service: .xai)
         ]
 
         XCTAssertEqual(
@@ -409,7 +409,7 @@ final class DashboardSectionSplitTests: XCTestCase {
     func testOverviewSortsAttentionAheadOfHealthyProviders() {
         let snapshots = [
             snapshot(id: "codex", title: "Codex", service: .codexCli),
-            snapshot(id: "cursor", title: "Cursor", service: .cursor, used: 95),
+            snapshot(id: "cursor", title: "Cursor", service: .xai, used: 95),
         ]
 
         XCTAssertEqual(
@@ -484,18 +484,18 @@ final class DashboardSectionSplitTests: XCTestCase {
     func testEnabledSourceLabelsCoverOnlyTheLogBackedProviders() {
         XCTAssertEqual(
             DashboardShareSection.enabledSourceLabels(for: Set(ServiceType.allCases)),
-            ["Claude JSONL", "Codex logs", "Grok JSONL"]
+            ["Claude JSONL", "Codex logs", "Grok JSONL, Cursor local state"]
         )
         XCTAssertEqual(
             DashboardShareSection.enabledSourceLabels(for: [.claudeCode]),
             ["Claude JSONL"]
         )
         XCTAssertEqual(
-            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .grok]),
-            ["Grok JSONL"]
+            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .xai]),
+            ["Grok JSONL, Cursor local state"]
         )
         XCTAssertTrue(
-            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .cursor]).isEmpty,
+            DashboardShareSection.enabledSourceLabels(for: [.openRouter, .kimiCode]).isEmpty,
             "API-only providers contribute no local log source"
         )
     }

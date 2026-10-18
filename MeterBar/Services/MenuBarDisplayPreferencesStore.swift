@@ -367,20 +367,23 @@ final class MenuBarDisplayPreferencesStore: ObservableObject {
         return trimmed.isEmpty ? nil : Self.migratedLegacyPin(trimmed)
     }
 
-    /// Cursor's Grok Bot pool used to derive its pin key from its index in
-    /// `additionalLimits` (`additional-0`, since it is always Cursor's only
-    /// additional window) rather than the stable `grokBot` window id
-    /// `StatusItemLimitCandidateBuilder` now uses (`ProviderSnapshot.
-    /// grokBotLimitID`). `StatusItemLimitSelector.select` compares pins by
-    /// exact string equality, so a pin persisted under the old key would stop
-    /// matching any live candidate after upgrade and silently fall back to
-    /// Auto. Remap it once here so an existing pin survives.
-    nonisolated private static func migratedLegacyPin(_ key: String) -> String {
-        let legacySuffix = ":additional-0"
-        guard key.hasPrefix("\(ServiceType.cursor.rawValue):"), key.hasSuffix(legacySuffix) else {
-            return key
+    /// xAI replaced the separate Grok and Cursor providers, so a pin persisted
+    /// as `Grok:<account>:<window>` or `Cursor:<account>:<window>` would stop
+    /// matching every live candidate and silently fall back to Auto. Remap the
+    /// provider prefix once here. Cursor's retired Grok Bot pool (`grokBot`, or
+    /// the older `additional-0` index key, which only ever meant Grok Bot on
+    /// Cursor) folds into the shared weekly pool; Grok's own `additional-N`
+    /// pins keep their window.
+    nonisolated static func migratedLegacyPin(_ key: String) -> String {
+        for legacyPrefix in ["Cursor:", "Grok:"] where key.hasPrefix(legacyPrefix) {
+            var remainder = String(key.dropFirst(legacyPrefix.count))
+            let retiredSuffixes = legacyPrefix == "Cursor:" ? [":grokBot", ":additional-0"] : [":grokBot"]
+            for retiredSuffix in retiredSuffixes where remainder.hasSuffix(retiredSuffix) {
+                remainder = String(remainder.dropLast(retiredSuffix.count)) + ":weekly"
+            }
+            return "\(ServiceType.xai.rawValue):\(remainder)"
         }
-        return String(key.dropLast(legacySuffix.count)) + ":grokBot"
+        return key
     }
 
     /// Unreadable payloads fall back to the shipped defaults rather than to an

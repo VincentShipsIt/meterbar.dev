@@ -67,7 +67,7 @@ final class MenuBarRotationSequencerTests: XCTestCase {
     func testRotationVisitsEveryProviderInAStableOrderAndWraps() {
         let claude = candidate(key: "claude", percentUsed: 40)
         let codex = candidate(key: "codex", service: .codexCli, percentUsed: 30)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 20)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 20)
         // Deliberately unsorted: the order must come from the sequencer, not
         // from however the probes happened to emit the candidates.
         let candidates = [cursor, claude, codex]
@@ -80,7 +80,7 @@ final class MenuBarRotationSequencerTests: XCTestCase {
     func testRotationSkipsProvidersWithoutData() {
         let fresh = candidate(key: "claude", percentUsed: 40)
         let stale = candidate(key: "codex", service: .codexCli, percentUsed: 30, updatedMinutesAgo: 180)
-        let pinOnly = candidate(key: "cursor", service: .cursor, percentUsed: 20, isAutoSelectable: false)
+        let pinOnly = candidate(key: "cursor", service: .xai, percentUsed: 20, isAutoSelectable: false)
 
         let rotatable = MenuBarRotationSequencer.rotatableCandidates([fresh, stale, pinOnly], now: now)
 

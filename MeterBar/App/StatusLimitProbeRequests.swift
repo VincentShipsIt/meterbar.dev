@@ -87,22 +87,22 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 ))
             }
         }
-        if visibility.isEnabled(.grok) {
+        if visibility.isEnabled(.xai) {
             let enabledAccounts = GrokAccountStore.shared.enabledAccounts
             for account in enabledAccounts {
                 guard let accountMetrics = grokMetrics(
                     for: account,
                     enabledAccountCount: enabledAccounts.count,
                     accountMetrics: UsageDataManager.shared.grokAccountMetrics,
-                    providerMetrics: metrics[.grok]
+                    providerMetrics: metrics[.xai]
                 ) else { continue }
                 let homeDirectory = account.homeDirectory
                 let source = StatusLimitSource(
-                    service: .grok,
+                    service: .xai,
                     accountID: account.id,
-                    accountKey: MenuBarAccountKey.make(service: .grok, accountID: account.id),
+                    accountKey: MenuBarAccountKey.make(service: .xai, accountID: account.id),
                     autoSelectionKey: "grok:\(account.id.uuidString)",
-                    displayName: "\(account.name) (\(ServiceType.grok.displayName))",
+                    displayName: "\(account.name) (\(ServiceType.xai.displayName))",
                     metrics: accountMetrics
                 )
                 requests.append(request(
@@ -111,12 +111,16 @@ nonisolated enum StatusLimitProbeRequestBuilder {
                 ))
             }
         }
-        if visibility.isEnabled(.cursor), let cursorMetrics = metrics[.cursor] {
+        // xAI's Cursor source has no account of its own; it only gets a
+        // standalone row when no Grok profile is enabled to carry the card.
+        if visibility.isEnabled(.xai),
+           GrokAccountStore.shared.enabledAccounts.isEmpty,
+           let cursorMetrics = metrics[.xai] {
             let source = StatusLimitSource(
-                service: .cursor,
+                service: .xai,
                 accountID: nil,
                 autoSelectionKey: "cursor",
-                displayName: ServiceType.cursor.displayName,
+                displayName: ServiceType.xai.displayName,
                 metrics: cursorMetrics
             )
             requests.append(request(

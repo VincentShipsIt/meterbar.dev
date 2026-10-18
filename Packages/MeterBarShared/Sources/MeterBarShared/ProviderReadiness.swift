@@ -64,7 +64,7 @@ public struct ReadinessCheck: Codable, Sendable, Equatable, Identifiable {
 ///
 /// Account identity is MeterBar's local profile id plus the user-facing display
 /// name — never a filesystem path, credential, or provider-side account id.
-/// Cursor and OpenRouter stay provider-wide (`accountID == nil`).
+/// Cursor (under xAI) and OpenRouter stay provider-wide (`accountID == nil`).
 public struct ReadinessIdentity: Codable, Sendable, Equatable, Hashable {
     public let provider: ServiceType
     public let accountID: UUID?
@@ -85,6 +85,10 @@ public struct ReadinessIdentity: Codable, Sendable, Equatable, Hashable {
     }
 
     public var isAccountScoped: Bool { accountID != nil }
+
+    /// The Cursor sign-in xAI reads beside Grok's profiles. It is provider-wide
+    /// (no account id) but named, so it stays distinct from the Grok aggregate.
+    public static let cursorSubscription = Self(provider: .xai, accountID: nil, accountName: "Cursor")
 
     /// Header used by Diagnostics, the setup checklist, and `meterbar doctor`.
     public var displayTitle: String {
@@ -177,6 +181,9 @@ public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
     public var id: String {
         if let accountID = identity.accountID {
             return "\(identity.provider.rawValue):\(accountID.uuidString)"
+        }
+        if let accountName = identity.accountName {
+            return "\(identity.provider.rawValue):\(accountName)"
         }
         return identity.provider.rawValue
     }
@@ -315,7 +322,9 @@ public struct ProviderReadiness: Codable, Sendable, Equatable, Identifiable {
         guard !accountScoped.isEmpty else { return needing }
         let accountProviders = Set(accountScoped.map(\.provider))
         return needing.filter { report in
-            report.identity.isAccountScoped || !accountProviders.contains(report.provider)
+            report.identity.isAccountScoped
+                || report.identity == .cursorSubscription
+                || !accountProviders.contains(report.provider)
         }
     }
 
@@ -862,8 +871,10 @@ public enum ProviderReadinessEvaluator {
                 : "Cursor's local database could not be read."
         )
 
+        // Cursor's report is provider-wide and sits beside Grok's account-scoped
+        // ones under xAI; the name keeps the two apart in titles and ids.
         return ProviderReadiness(
-            provider: .cursor,
+            identity: .cursorSubscription,
             checks: [installed, auth, data, refreshCheck(input.refreshError)]
         )
     }
@@ -1284,7 +1295,7 @@ public enum ProviderReadinessEvaluator {
     public static func grok(_ input: GrokReadinessInput) -> ProviderReadiness {
         let failure = input.refreshError.flatMap(GrokRefreshFailure.init(message:))
         return ProviderReadiness(
-            provider: .grok,
+            provider: .xai,
             checks: [
                 grokInstalledCheck(input, failure: failure),
                 grokAuthCheck(input, failure: failure),

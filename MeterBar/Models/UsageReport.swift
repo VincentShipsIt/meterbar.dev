@@ -954,11 +954,11 @@ nonisolated struct UsageReport: Sendable {
             ))
         }
 
-        if rows.contains(where: { $0.provider == .grok }) {
+        if rows.contains(where: { $0.provider == .xai }) {
             notes.append(UsageDataNote(
                 id: "grok-reported-cost",
                 severity: .info,
-                text: "Grok cost is the amount the CLI reported, not an API-rate estimate."
+                text: "xAI cost is the amount the Grok CLI reported, not an API-rate estimate."
             ))
         }
 

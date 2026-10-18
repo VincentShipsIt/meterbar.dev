@@ -318,17 +318,6 @@
         }
       }
     },
-    "quota.title.grok_bot": {
-      "comment": "Cursor Ultra weekly Grok Bot usage pool.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Grok Bot"
-          }
-        }
-      }
-    },
     "quota.title.key_limit": {
       "localizations": {
         "en": {
@@ -707,17 +696,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Daily"
-          }
-        }
-      }
-    },
-    "widget.quota.grok_bot": {
-      "comment": "Cursor Ultra weekly Grok Bot usage pool.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Grok Bot"
           }
         }
       }

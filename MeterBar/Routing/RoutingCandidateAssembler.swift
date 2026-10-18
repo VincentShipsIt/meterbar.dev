@@ -37,15 +37,16 @@ nonisolated enum RoutingCandidateAssembler {
                 continue
             }
             let configured = configuredAccounts(for: service, in: configuration)
-            let snapshots = service == .cursor ? [] : accounts.filter { $0.metrics.service == service }
+            let snapshots = accounts.filter { $0.metrics.service == service }
 
-            // No per-account snapshots (Cursor, or a cache written before the
-            // account cache existed): the provider-wide snapshot speaks for
-            // the provider. A present configuration with no enabled account is
-            // authoritative; only a missing legacy configuration permits an
-            // unknown account-managed provider. Cursor has no account list.
+            // No per-account snapshots (a Cursor-only xAI user, or a cache
+            // written before the account cache existed): the provider-wide
+            // snapshot speaks for the provider. A present configuration with no
+            // enabled account is authoritative; only a missing legacy
+            // configuration permits an unknown account-managed provider. The
+            // Cursor source of xAI has no account list, so xAI stays routable.
             guard !snapshots.isEmpty else {
-                let isEnabled = service == .cursor || configuration == nil || configured.contains { $0.isEnabled }
+                let isEnabled = service == .xai || configuration == nil || configured.contains { $0.isEnabled }
                 candidates.append(RoutingCandidate(
                     service: service,
                     isEnabled: isEnabled,
@@ -126,7 +127,7 @@ nonisolated enum RoutingCandidateAssembler {
             return configuration.codexAccounts.map {
                 ConfiguredAccount(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
             }
-        case .grok:
+        case .xai:
             return configuration.grokAccounts.map {
                 ConfiguredAccount(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
             }
@@ -134,8 +135,7 @@ nonisolated enum RoutingCandidateAssembler {
             return configuration.openRouterAccounts.map {
                 ConfiguredAccount(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
             }
-        case .cursor,
-             .kimiCode,
+        case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,

@@ -68,9 +68,9 @@ struct ProviderSettingsView: View {
         }
         .sheet(isPresented: $isAddingGrokAccount) {
             AddProviderAccountSheet(
-                providerName: ServiceType.grok.shortName,
-                logoKind: .grok,
-                accent: MeterBarTheme.grokAccent,
+                providerName: ServiceType.xai.shortName,
+                logoKind: .xai,
+                accent: MeterBarTheme.xaiAccent,
                 subtitle: "Use a separate GROK_HOME containing its CLI-managed auth.json.",
                 pathFieldLabel: "GROK_HOME",
                 pathPlaceholder: "Grok home directory"
@@ -326,12 +326,11 @@ struct ProviderSettingsView: View {
         case .codexCli:
             codexCliSection
             providerExtraUsageSection(for: service)
-        case .cursor:
-            cursorSection
         case .openRouter:
             openRouterSection
-        case .grok:
+        case .xai:
             grokSection
+            cursorSection
             providerExtraUsageSection(for: service)
         case .kimiCode:
             KimiCodeSettingsSection {
@@ -377,15 +376,13 @@ struct ProviderSettingsView: View {
                     manageURL: "https://chatgpt.com"
                 )
             }
-        case .cursor:
-            EmptyView()
         case .openRouter:
             EmptyView()
-        case .grok:
+        case .xai:
             SettingsPanelSection(title: "Extra Usage", systemImage: "creditcard", color: MeterBarTheme.warning) {
                 ExtraUsageRow(
-                    title: ServiceType.grok.displayName,
-                    status: dataManager.metrics[.grok]?.extraUsage,
+                    title: ServiceType.xai.displayName,
+                    status: dataManager.metrics[.xai]?.extraUsage,
                     manageURL: "https://grok.com/?_s=usage"
                 )
             }
@@ -731,9 +728,9 @@ struct ProviderSettingsView: View {
 
     private var cursorSection: some View {
         SettingsPanelSection(
-            title: ServiceType.cursor.displayName,
-            logoKind: .cursor,
-            color: MeterBarTheme.cursorAccent
+            title: "Cursor",
+            logoKind: .xai,
+            color: MeterBarTheme.xaiAccent
         ) {
             SettingsRowView(title: "Connection") {
                 HStack(spacing: 8) {
@@ -897,7 +894,7 @@ struct ProviderSettingsView: View {
 
     private var grokSection: some View {
         let hasAccess = grokAccountStore.enabledAccounts.contains(where: grokService.canAccess(account:))
-        return SettingsPanelSection(title: "Grok Build", logoKind: .grok, color: MeterBarTheme.grokAccent) {
+        return SettingsPanelSection(title: "Grok Build", logoKind: .xai, color: MeterBarTheme.xaiAccent) {
             SettingsNotice(
                 text: "MeterBar asks the official Grok CLI for billing data over ACP. "
                     + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
@@ -917,7 +914,7 @@ struct ProviderSettingsView: View {
                             await Task.detached(priority: .userInitiated) {
                                 service.checkAccess()
                             }.value
-                            await dataManager.refresh(service: .grok)
+                            await dataManager.refresh(service: .xai)
                         }
                     } label: {
                         Label(hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
@@ -976,7 +973,7 @@ struct ProviderSettingsView: View {
                             accountName: account.name,
                             isDefault: account.isDefault,
                             isEnabled: account.isEnabled,
-                            accent: MeterBarTheme.grokAccent,
+                            accent: MeterBarTheme.xaiAccent,
                             pathLabel: "GROK_HOME",
                             pathPlaceholder: "Grok home directory",
                             resolvedPath: GrokHomeDirectory.path(for: account),
@@ -1064,8 +1061,6 @@ struct ProviderSettingsView: View {
                     claudeCode.checkAccess()
                 case .codexCli:
                     codexCli.checkAccess(account: codexDefaultAccount)
-                case .cursor:
-                    cursor.checkAccess(forceRescan: true)
                 case .openRouter,
                      .kimiCode,
                      .zaiCodingPlan,
@@ -1073,7 +1068,8 @@ struct ProviderSettingsView: View {
                      .museCode,
                      .claudePlatform:
                     break
-                case .grok:
+                case .xai:
+                    cursor.checkAccess(forceRescan: true)
                     grok.checkAccess()
                 }
             }.value

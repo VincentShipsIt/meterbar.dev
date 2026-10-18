@@ -17,9 +17,8 @@ enum MetricsFixtures {
         switch service {
         case .claudeCode: return claudeCode()
         case .codexCli: return codexCli()
-        case .cursor: return cursor()
         case .openRouter: return openRouter()
-        case .grok: return grok()
+        case .xai: return grok()
         case .kimiCode: return kimiCode()
         case .zaiCodingPlan: return zaiCodingPlan()
         case .githubCopilot: return githubCopilot()
@@ -90,7 +89,7 @@ enum MetricsFixtures {
         onDemandTotal: Double = 20
     ) -> UsageMetrics {
         UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(
                 used: onDemandUsed,
                 total: onDemandTotal,
@@ -107,7 +106,7 @@ enum MetricsFixtures {
 
     static func grok(weeklyUsedPercent: Double = 64) -> UsageMetrics {
         UsageMetrics(
-            service: .grok,
+            service: .xai,
             weeklyLimit: UsageLimit(
                 used: weeklyUsedPercent,
                 total: 100,

@@ -26,24 +26,6 @@ struct ProviderSnapshot: Identifiable {
     /// a `var` only because a defaulted `let` is dropped from the memberwise
     /// initializer entirely, which would leave the builder unable to set it.
     var authNotice: ProviderAuthNotice?
-    /// What kind of card this is — distinct from `service`, which only says
-    /// which provider's data source and branding the card borrows. Two cards
-    /// can share a `service` while meaning very different things: Cursor's
-    /// Grok Bot pool renders with Cursor's logo and accent color, but it is
-    /// not a second Cursor account, just Cursor Ultra's weekly Grok Bot
-    /// entitlement split out for its own header and reset cadence. Any filter
-    /// that means "how many accounts does the user have on this provider" or
-    /// "which card speaks for this account" must key off this property, not
-    /// `service` — see `isAccountCard`. Defaulted to `.account` so every
-    /// existing memberwise construction (previews, tests, every other
-    /// provider's cards) keeps meaning "a real account" without restating it.
-    var cardRole: CardRole = .account
-    /// Logo to draw instead of `service`'s own, for sub-pool cards that
-    /// borrow a provider's data but represent a differently branded
-    /// entitlement (Cursor's Grok Bot pool). `nil` means "use the service
-    /// logo". A `var` for the same memberwise-initializer reason as
-    /// `authNotice`.
-    var logoKindOverride: ProviderLogoKind?
     /// Account type ("Max 20x", "Pro") when the provider reports one. A `var`
     /// for the same memberwise-initializer reason as `authNotice`.
     var planLabel: String?
@@ -52,28 +34,7 @@ struct ProviderSnapshot: Identifiable {
     /// Defaulted so existing memberwise construction keeps the relative stamp.
     var freshnessNote: String?
 
-    /// The two things a `ProviderSnapshot` can represent. See `cardRole`'s
-    /// doc comment for why this needs to be modeled explicitly instead of
-    /// inferred from `id`/`title`.
-    enum CardRole: Equatable {
-        /// A real provider account — what `accountID` identifies. Account-
-        /// scoped rules (dashboard per-provider selection, account counts)
-        /// should match this case.
-        case account
-
-        /// A sub-pool carved out of a parent account's data, sharing the
-        /// parent's `service` purely for branding. Never stands in for the
-        /// parent as an account, however exhausted it is — Cursor's Grok Bot
-        /// card is the motivating example.
-        case subPool
-    }
-
-    /// Convenience for the account-scoped filters described on `cardRole`, so
-    /// call sites read as intent ("keep only the account cards") rather than
-    /// as an enum comparison repeated at every filter.
-    var isAccountCard: Bool { cardRole == .account }
-
-    var logoKind: ProviderLogoKind { logoKindOverride ?? .forService(service) }
+    var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
 
     var displayedExtraUsage: ExtraUsageStatus? {
@@ -95,12 +56,6 @@ struct ProviderSnapshot: Identifiable {
     /// The provider-wide limit closest to exhaustion — what the card's status
     /// reflects. Model-scoped Sonnet/Fable and code-review windows remain
     /// visible on their own rows but do not mean the provider is unavailable.
-    ///
-    /// Cursor's included pools spill over into each other, so the card's status
-    /// follows the pool with the most room: emptying Cursor Models while Other
-    /// Models still has 73% left is not "Out". Only when every pool is gone does
-    /// the roomiest one read exhausted too, and the header agrees with
-    /// `blockingLimits`.
     var primaryLimit: SnapshotLimit? {
         // A credit balance replaces the exhausted subscription window as the
         // glance. Those spent windows are omitted from the list, and this
@@ -108,21 +63,7 @@ struct ProviderSnapshot: Identifiable {
         if let credit = limits.first(where: { $0.usageLimit.reading != .measured }) {
             return credit
         }
-        let providerLimits = limits.filter(\.isProviderBlocking)
-        if hasCursorSpilloverPools {
-            return providerLimits.max { $0.percentLeft < $1.percentLeft }
-        }
-        return providerLimits.min { $0.percentLeft < $1.percentLeft }
-    }
-
-    /// Two or more included Cursor pools (Cursor Models / Other Models). This
-    /// remains local to primary-limit selection; provider blocking itself uses
-    /// `ProviderBlockingPolicy` below so widgets and app cards cannot drift.
-    private var hasCursorSpilloverPools: Bool {
-        guard service == .cursor else { return false }
-        let providerLimits = limits.filter(\.isProviderBlocking)
-        return providerLimits.count >= 2
-            && providerLimits.allSatisfy { ServiceType.isCursorIncludedPool(total: $0.usageLimit.total) }
+        return limits.filter(\.isProviderBlocking).min { $0.percentLeft < $1.percentLeft }
     }
 
     /// Severity band of the primary limit; `nil` when no limits are reported.
@@ -367,8 +308,6 @@ struct SnapshotLimit: Identifiable {
             return String(localized: "quota.title.account_credits", defaultValue: "Account credits")
         case .otherModels:
             return String(localized: "quota.title.other_models", defaultValue: "Other Models")
-        case .grokBot:
-            return String(localized: "quota.title.grok_bot", defaultValue: "Grok Bot")
         case .monthly:
             return String(localized: "quota.title.monthly", defaultValue: "Monthly")
         case .weekly:
@@ -577,8 +516,8 @@ enum ProviderSnapshotBuilder {
                         rateLimitTier: stores.claudeCodeService.rateLimitTier
                     ),
                     .codexCli: PlanLabel.make(service: .codexCli, token: stores.codexCliService.subscriptionType),
-                    .cursor: PlanLabel.make(service: .cursor, token: stores.cursorService.subscriptionType),
-                    .grok: PlanLabel.make(service: .grok, token: stores.grokService.subscriptionType),
+                    .xai: PlanLabel.make(service: .xai, token: stores.grokService.subscriptionType)
+                        ?? PlanLabel.make(service: .xai, token: stores.cursorService.subscriptionType),
                     .zaiCodingPlan: PlanLabel.make(
                         service: .zaiCodingPlan,
                         token: stores.zaiCodingPlanService.planName
@@ -674,15 +613,6 @@ enum ProviderSnapshotBuilder {
             }
         }
 
-        if input.enabledServices.contains(.cursor) {
-            let metrics = input.metrics[.cursor]
-            result.append(contentsOf: cursorSnapshots(
-                metrics: metrics,
-                authNotice: notice(for: .cursor, accountID: nil, metrics: metrics, input: input),
-                cursorHasAccess: input.cursorHasAccess
-            ))
-        }
-
         if input.enabledServices.contains(.openRouter) {
             let enabledAccounts = input.openRouterAccounts.filter(\.isEnabled)
             for account in enabledAccounts {
@@ -714,29 +644,38 @@ enum ProviderSnapshotBuilder {
             }
         }
 
-        if input.enabledServices.contains(.grok) {
+        if input.enabledServices.contains(.xai) {
             let enabledAccounts = input.grokAccounts.filter(\.isEnabled)
+            // The default account's card also carries the Cursor dashboard,
+            // folded into `metrics[.xai]` by `XAIUsageMerger`; every other
+            // profile is Grok-only.
             for account in enabledAccounts {
                 let title = account.isDefault
                     && account.name == GrokAccount.defaultName
                     && enabledAccounts.count == 1
-                    ? ServiceType.grok.shortName
+                    ? ServiceType.xai.shortName
                     : account.name
-                let fallbackMetrics = account.isDefault
-                    && enabledAccounts.count == 1
-                    && input.grokAccountMetrics.isEmpty
-                    ? input.metrics[.grok]
-                    : nil
-                let metrics = input.grokAccountMetrics[account.id] ?? fallbackMetrics
+                let metrics = account.isDefault
+                    ? input.metrics[.xai] ?? input.grokAccountMetrics[account.id]
+                    : input.grokAccountMetrics[account.id]
                 result.append(snapshot(
                     title: title,
-                    service: .grok,
+                    service: .xai,
                     metrics: metrics,
-                    emptyDetail: account.isDefault && input.grokHasAccess
-                        ? "Waiting for refresh"
-                        : "Run grok login",
+                    emptyDetail: xaiEmptyDetail(isDefault: account.isDefault, input: input),
                     accountID: account.id,
-                    authNotice: notice(for: .grok, accountID: account.id, metrics: metrics, input: input)
+                    authNotice: notice(for: .xai, accountID: account.id, metrics: metrics, input: input)
+                ))
+            }
+            // Cursor alone (no Grok profile enabled) still deserves its card.
+            if enabledAccounts.contains(where: \.isDefault) == false, let metrics = input.metrics[.xai] {
+                result.append(snapshot(
+                    title: ServiceType.xai.shortName,
+                    service: .xai,
+                    metrics: metrics,
+                    emptyDetail: xaiEmptyDetail(isDefault: true, input: input),
+                    accountID: nil,
+                    authNotice: notice(for: .xai, accountID: nil, metrics: metrics, input: input)
                 ))
             }
         }
@@ -770,17 +709,17 @@ enum ProviderSnapshotBuilder {
         let defaultIDs: [ServiceType: UUID] = [
             .claudeCode: input.claudeAccounts.first(where: \.isDefault)?.id,
             .codexCli: input.codexAccounts.first(where: \.isDefault)?.id,
-            .grok: input.grokAccounts.first(where: \.isDefault)?.id,
+            .xai: input.grokAccounts.first(where: \.isDefault)?.id,
             .openRouter: input.openRouterAccounts.first(where: \.isDefault)?.id
         ].compactMapValues { $0 }
-        let multiAccountServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok, .openRouter]
+        let multiAccountServices: Set<ServiceType> = [.claudeCode, .codexCli, .xai, .openRouter]
         return cards.map { card in
-            if card.isAccountCard, let id = card.accountID, let label = input.accountPlanLabels[id] {
+            if let id = card.accountID, let label = input.accountPlanLabels[id] {
                 var labelled = card
                 labelled.planLabel = label
                 return labelled
             }
-            guard card.isAccountCard, let label = input.planLabels[card.service] else { return card }
+            guard let label = input.planLabels[card.service] else { return card }
             let isDefaultAccount = card.accountID != nil && card.accountID == defaultIDs[card.service]
             // Multi-profile providers keep their live credentials on the
             // default profile only, so a lone custom profile never inherits it.
@@ -818,13 +757,8 @@ enum ProviderSnapshotBuilder {
             lastError = accountID.flatMap { input.lastErrors.codexAccounts[$0] }
             probed = accountID.flatMap { input.codexAccountAccess[$0] }
             usesAPIKey = false
-        case .grok:
-            lastError = accountID.flatMap { input.lastErrors.grokAccounts[$0] }
-            probed = accountID.flatMap { input.grokAccountAccess[$0] }
-            usesAPIKey = false
-        case .cursor:
-            lastError = input.lastErrors.cursor
-            probed = input.cursorHasAccess
+        case .xai:
+            (lastError, probed) = xaiHealth(accountID: accountID, input: input)
             usesAPIKey = false
         case .openRouter:
             // A key-scoped card speaks only about its own key: another key's
@@ -929,68 +863,33 @@ enum ProviderSnapshotBuilder {
         )
     }
 
-    /// Cursor Ultra's weekly Grok Bot allowance arrives as an additional pool
-    /// alongside the included Cursor Models / Other Models pools, so it would
-    /// otherwise render as a third row on the Cursor card — and never block
-    /// the provider, since only `.session`/`.weekly` kinds do. Splitting it
-    /// into its own card gives it a real header and lets it go "Out" on its
-    /// own cadence instead of hiding behind Cursor's included-pool state.
-    private static func cursorSnapshots(
-        metrics: UsageMetrics?,
-        authNotice: ProviderAuthNotice?,
-        cursorHasAccess: Bool?
-    ) -> [ProviderSnapshot] {
-        let cursor = snapshot(
-            title: ServiceType.cursor.shortName,
-            service: .cursor,
-            metrics: metrics,
-            emptyDetail: cursorHasAccess == true ? "Waiting for refresh" : "Log in to Cursor",
-            authNotice: authNotice
-        )
-        guard let grokBotLimit = cursor.limits.first(where: { $0.quotaTitleKey == .grokBot }) else {
-            return [cursor]
+    /// Empty-card copy for xAI: ready once either source is connected,
+    /// otherwise point at the Grok CLI login (Cursor is the secondary path).
+    private static func xaiEmptyDetail(isDefault: Bool, input: Input) -> String {
+        if isDefault, input.grokHasAccess || input.cursorHasAccess == true {
+            return "Waiting for refresh"
         }
+        return "Run grok login"
+    }
 
-        let cursorWithoutGrokBot = ProviderSnapshot(
-            id: cursor.id,
-            title: cursor.title,
-            service: cursor.service,
-            updatedAt: cursor.updatedAt,
-            limits: cursor.limits.filter { $0.id != grokBotLimit.id },
-            emptyDetail: cursor.emptyDetail,
-            extraUsage: cursor.extraUsage,
-            resetCreditsAvailable: cursor.resetCreditsAvailable,
-            accountID: cursor.accountID,
-            authNotice: cursor.authNotice
-        )
-        let grokBot = ProviderSnapshot(
-            id: "cursor-grokbot-\(cursor.accountID?.uuidString ?? "default")",
-            title: String(localized: "quota.title.grok_bot", defaultValue: "Grok Bot"),
-            service: .cursor,
-            updatedAt: cursor.updatedAt,
-            // Retitled `.weekly` rather than left as `.grokBot`: the card
-            // header already says "Grok Bot", so the row itself only needs
-            // to name the window, and `.weekly` is what makes the limit
-            // `isProviderBlocking` — the whole point of the split.
-            limits: [
-                SnapshotLimit(
-                    id: grokBotLimitID,
-                    kind: .weekly,
-                    quotaTitleKey: .weekly,
-                    usageLimit: grokBotLimit.usageLimit
-                ),
-            ],
-            emptyDetail: cursor.emptyDetail,
-            extraUsage: nil,
-            resetCreditsAvailable: nil,
-            accountID: cursor.accountID,
-            authNotice: cursor.authNotice,
-            cardRole: .subPool,
-            // Cursor's accent color, Grok's glyph: otherwise this card and the
-            // Cursor card are identical twins in the popover.
-            logoKindOverride: .grok
-        )
-        return [cursorWithoutGrokBot, grokBot]
+    /// Connection health for an xAI card. The default card speaks for both
+    /// sources (Grok CLI and the Cursor dashboard): one healthy source is
+    /// enough to stay quiet, so a Grok-only user is never flagged for a Cursor
+    /// login they never had. Custom Grok profiles are Grok-only.
+    private static func xaiHealth(accountID: UUID?, input: Input) -> (ServiceError?, Bool?) {
+        let grokError = accountID.flatMap { input.lastErrors.grokAccounts[$0] }
+        let grokProbed = accountID.flatMap { input.grokAccountAccess[$0] }
+        let isDefaultCard = accountID == nil
+            || accountID == input.grokAccounts.first(where: \.isDefault)?.id
+        guard isDefaultCard else { return (grokError, grokProbed) }
+
+        let cursorError = input.lastErrors.cursor
+        let cursorProbed = input.cursorHasAccess
+        let grokHealthy = grokProbed == true && grokError == nil
+        let cursorHealthy = cursorProbed == true && cursorError == nil
+        if grokHealthy || cursorHealthy { return (nil, true) }
+        let probed = [grokProbed, cursorProbed].contains(true) ? true : (grokProbed ?? cursorProbed)
+        return (grokError ?? cursorError, probed)
     }
 
     static func limits(for metrics: UsageMetrics?, service: ServiceType) -> [SnapshotLimit] {
@@ -1038,12 +937,7 @@ enum ProviderSnapshotBuilder {
         for (index, additional) in metrics.additionalLimits.enumerated() {
             let quotaTitleKey = service.additionalQuotaTitleKey(for: additional)
             result.append(SnapshotLimit(
-                // Cursor's Grok Bot pool keeps a stable id so the menu-bar
-                // candidate builder, its pin key, and the split-out card in
-                // `cursorSnapshots` all agree on which window it is.
-                id: quotaTitleKey == .grokBot
-                    ? grokBotLimitID
-                    : additionalLimitID(for: additional, index: index),
+                id: additionalLimitID(for: additional, index: index),
                 kind: .additional,
                 quotaTitleKey: quotaTitleKey,
                 usageLimit: additional,
@@ -1087,10 +981,6 @@ enum ProviderSnapshotBuilder {
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
             .joined(separator: "-")
     }
-
-    /// Window id of Cursor Ultra's weekly Grok Bot pool, shared by the raw
-    /// limit list, the Grok Bot card's single row, and status-item pin keys.
-    static let grokBotLimitID = "grokBot"
 }
 
 extension Array where Element == ProviderSnapshot {
@@ -1117,7 +1007,7 @@ extension Array where Element == ProviderSnapshot {
     /// two accounts on that provider, which the popover's account-count badge
     /// states outright to the user.
     func accountCardCount(for service: ServiceType) -> Int {
-        filter { $0.service == service && $0.isAccountCard }.count
+        filter { $0.service == service }.count
     }
 
     /// The card that speaks for one provider account. Prefers an exhausted
@@ -1125,7 +1015,7 @@ extension Array where Element == ProviderSnapshot {
     /// provider's next reset, but a sub-pool card can never win this
     /// selection — it is not the account, however exhausted it looks.
     func accountSnapshot(for service: ServiceType) -> ProviderSnapshot? {
-        let matches = filter { $0.service == service && $0.isAccountCard }
+        let matches = filter { $0.service == service }
         return matches.first(where: \.hasExhaustedLimit) ?? matches.first
     }
 }
@@ -1173,7 +1063,7 @@ extension ServiceType {
     var usesCurrencyValueStyle: Bool {
         switch self {
         case .openRouter, .githubCopilot, .claudePlatform: return true
-        case .claudeCode, .codexCli, .cursor, .grok, .kimiCode, .zaiCodingPlan, .museCode: return false
+        case .claudeCode, .codexCli, .xai, .kimiCode, .zaiCodingPlan, .museCode: return false
         }
     }
 }

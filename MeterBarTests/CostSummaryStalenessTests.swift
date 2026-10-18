@@ -150,7 +150,7 @@ final class CostSummaryStalenessTests: XCTestCase {
 
         XCTAssertTrue(
             summary.needsMissingEnabledProviderRefresh(
-                enabledServices: [.claudeCode, .grok],
+                enabledServices: [.claudeCode, .xai],
                 lastScanDate: now,
                 newTranscriptsSinceLastScan: true,
                 now: now,
@@ -164,7 +164,7 @@ final class CostSummaryStalenessTests: XCTestCase {
 
         XCTAssertFalse(
             summary.needsMissingEnabledProviderRefresh(
-                enabledServices: [.claudeCode, .grok],
+                enabledServices: [.claudeCode, .xai],
                 lastScanDate: now,
                 newTranscriptsSinceLastScan: false,
                 now: now,
@@ -410,13 +410,13 @@ final class CostSummaryStalenessTests: XCTestCase {
 
         let withAccount = CostScanFreshnessProbe.hasNewTranscripts(
             since: cutoff,
-            enabledServices: [.grok],
+            enabledServices: [.xai],
             claudeAccounts: [],
             grokAccounts: [account]
         )
         let withoutAccount = CostScanFreshnessProbe.hasNewTranscripts(
             since: cutoff,
-            enabledServices: [.grok],
+            enabledServices: [.xai],
             claudeAccounts: [],
             grokAccounts: []
         )

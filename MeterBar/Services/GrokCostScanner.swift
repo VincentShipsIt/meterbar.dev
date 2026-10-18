@@ -206,7 +206,7 @@ enum GrokCostScanner {
         let pricing = TokenPricing(input: 0, output: 0, cacheCreation: 0, cacheRead: 0)
 
         return (TokenCost(
-            provider: .grok,
+            provider: .xai,
             inputTokens: totals.input,
             outputTokens: totals.output,
             cacheCreationTokens: 0,
@@ -217,12 +217,12 @@ enum GrokCostScanner {
             periodEnd: context.latestDate,
             modelBreakdowns: TokenUsageAggregator.makeBreakdowns(
                 from: context.modelTotals,
-                provider: .grok,
+                provider: .xai,
                 pricing: pricing
             ),
             originBreakdowns: TokenUsageAggregator.makeBreakdowns(
                 from: context.originTotals,
-                provider: .grok,
+                provider: .xai,
                 pricing: pricing
             ),
             projectBreakdowns: TokenUsageAggregator.makeProjectBreakdowns(
@@ -230,18 +230,18 @@ enum GrokCostScanner {
                 modelsByProject: context.projectModelTotals,
                 sessionsByProject: context.projectSessions,
                 sessionModelsByProject: context.projectSessionModels,
-                provider: .grok,
+                provider: .xai,
                 pricing: pricing
             ),
             sessionBreakdowns: TokenUsageAggregator.makeSessionBreakdowns(
                 from: TokenUsageAggregator.flattenSessions(context.projectSessions),
                 modelsBySession: TokenUsageAggregator.flattenSessionModels(context.projectSessionModels),
-                provider: .grok,
+                provider: .xai,
                 pricing: pricing
             )
         ), TokenUsageAggregator.makeDailyUsage(
             from: context.dailyTotals,
-            provider: .grok,
+            provider: .xai,
             pricing: pricing,
             modelsByDay: context.dailyModelTotals,
             projectsByDay: context.dailyProjectTotals,
@@ -250,7 +250,7 @@ enum GrokCostScanner {
             projectSessionModelsByDay: context.dailyProjectSessionModels
         ), TokenUsageAggregator.makeHourlyUsage(
             from: context.hourlyTotals,
-            provider: .grok,
+            provider: .xai,
             pricing: pricing
         ))
     }

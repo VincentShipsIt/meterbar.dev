@@ -120,7 +120,7 @@ nonisolated public enum ProviderReadinessInspector {
             grokReport: { error, date in
                 grokReports(
                     refreshError: error,
-                    accountRefreshErrors: accountRefreshErrors[.grok] ?? [:],
+                    accountRefreshErrors: accountRefreshErrors[.xai] ?? [:],
                     now: date,
                     accounts: configuredGrokAccounts,
                     accountMetrics: snapshotsByID,
@@ -180,12 +180,12 @@ nonisolated public enum ProviderReadinessInspector {
                 return claudeReport(refreshErrors[provider], now)
             case .codexCli:
                 return codexReport(refreshErrors[provider], now)
-            case .cursor:
-                return cursorReport(refreshErrors[provider], now)
             case .openRouter:
                 return openRouterReport(refreshErrors[provider], now)
-            case .grok:
-                return grokReport(refreshErrors[provider], now)
+            case .xai:
+                // One provider, two sources: the Grok CLI profiles and the
+                // Cursor subscription each keep their own readiness rows.
+                return grokReport(refreshErrors[provider], now) + cursorReport(refreshErrors[provider], now)
             case .kimiCode:
                 return kimiCodeReport(refreshErrors[provider], now)
             case .zaiCodingPlan:
@@ -510,7 +510,7 @@ nonisolated public enum ProviderReadinessInspector {
         _ = now
         _ = accountMetrics
         return pack(
-            provider: .grok,
+            provider: .xai,
             accountReports: grokAccountReports(
                 accounts: accounts,
                 refreshError: refreshError,
@@ -535,7 +535,7 @@ nonisolated public enum ProviderReadinessInspector {
         authProbe: ((GrokAccount) -> (exists: Bool, readable: Bool))? = nil
     ) -> ProviderReadiness {
         let reports = pack(
-            provider: .grok,
+            provider: .xai,
             accountReports: grokAccountReports(
                 accounts: accounts,
                 refreshError: refreshError,
@@ -545,7 +545,7 @@ nonisolated public enum ProviderReadinessInspector {
             )
         )
         return reports.first { !$0.identity.isAccountScoped } ?? reports.first ?? ProviderReadiness(
-            identity: .provider(.grok),
+            identity: .provider(.xai),
             checks: []
         )
     }
@@ -574,7 +574,7 @@ nonisolated public enum ProviderReadinessInspector {
                     refreshError: sanitize(accountRefreshErrors[account.id])
                 )
             )
-            .withIdentity(.account(.grok, id: account.id, name: account.name))
+            .withIdentity(.account(.xai, id: account.id, name: account.name))
         }
     }
 
@@ -629,7 +629,9 @@ nonisolated public enum ProviderReadinessInspector {
             )
         }
         return decorated.map { report in
-            guard !report.identity.isAccountScoped else { return report }
+            // The Cursor sign-in is provider-wide but named: it is its own
+            // source, not the aggregate of the Grok profiles beside it.
+            guard !report.identity.isAccountScoped, report.identity != .cursorSubscription else { return report }
             let siblings = decorated.filter {
                 $0.identity.isAccountScoped && $0.provider == report.provider
             }

@@ -9,20 +9,25 @@ import XCTest
 final class RouteCLITests: XCTestCase {
     private typealias Fixtures = RoutingFixtures
 
-    func testAllEightProviderIdentifiersUseTheSharedCanonicalMapping() {
+    func testEveryProviderIdentifierUsesTheSharedCanonicalMapping() {
         let services: [ServiceType] = [
-            .claudeCode, .codexCli, .cursor, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot,
+            .claudeCode, .codexCli, .xai, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot,
             .museCode, .claudePlatform,
         ]
         let tokens = [
-            "claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot", "muse-code",
-            "claude-platform",
+            "claude", "codex", "xai", "openrouter", "kimi", "zai", "copilot", "muse-code", "claude-platform",
         ]
         XCTAssertEqual(services.map(\.cliIdentifier), tokens)
         XCTAssertEqual(ServiceType.cliIdentifiers, tokens.joined(separator: ", "))
         for (service, token) in zip(services, tokens) {
             XCTAssertEqual(ServiceType.fromCLIIdentifier("  \(token.uppercased())  "), service)
         }
+    }
+
+    func testRetiredGrokAndCursorTokensStayAliasesOfXAI() {
+        XCTAssertEqual(ServiceType.fromCLIIdentifier("grok"), .xai)
+        XCTAssertEqual(ServiceType.fromCLIIdentifier(" Cursor "), .xai)
+        XCTAssertEqual(ServiceType.xai.cliIdentifier, "xai")
     }
 
     func testNewProviderCachesCannotOptInWithoutAuthoritativeVisibility() {
@@ -80,7 +85,7 @@ final class RouteCLITests: XCTestCase {
                 )
             },
             configuration: UsageRefreshConfigurationStore.Snapshot(
-                hiddenServices: [.claudeCode, .codexCli, .cursor, .openRouter, .grok],
+                hiddenServices: [.claudeCode, .codexCli, .xai, .openRouter, .xai],
                 claudeAccounts: [], codexAccounts: []
             ),
             health: [:]
@@ -347,8 +352,8 @@ final class RouteCLITests: XCTestCase {
         let hostile = [
             Fixtures.account(.claudeCode, id: Fixtures.uuid(1), name: "vincent@example.com", used: 10),
             Fixtures.account(.codexCli, id: Fixtures.uuid(2), name: "/Users/vincent/.codex", used: 20),
-            Fixtures.account(.grok, id: Fixtures.uuid(3), name: "~/.grok-work", used: 30),
-            Fixtures.candidate(.cursor, used: 100),
+            Fixtures.account(.xai, id: Fixtures.uuid(3), name: "~/.grok-work", used: 30),
+            Fixtures.candidate(.xai, used: 100),
             RoutingCandidate(service: .openRouter, metrics: nil),
         ]
         var policy = RoutingPolicyDefaults.policy(for: .implementation)
@@ -414,7 +419,7 @@ final class RouteCLITests: XCTestCase {
             candidates: [
                 Fixtures.account(.codexCli, id: Fixtures.uuid(1), name: "Work", used: 26),
                 Fixtures.account(.claudeCode, id: Fixtures.uuid(2), name: "Personal", used: 60),
-                RoutingCandidate(service: .cursor, metrics: nil),
+                RoutingCandidate(service: .xai, metrics: nil),
             ]
         )
 
@@ -425,7 +430,7 @@ final class RouteCLITests: XCTestCase {
             "  • Uses included subscription quota",
             "Fallback: Claude · Personal · standard model",
             "Skipped:",
-            "  • No usage cached yet for Cursor",
+            "  • No usage cached yet for xAI",
         ])
     }
 
@@ -435,12 +440,12 @@ final class RouteCLITests: XCTestCase {
             candidates: [
                 Fixtures.candidate(.claudeCode, used: 10),
                 Fixtures.candidate(.codexCli, used: 20),
-                Fixtures.candidate(.grok, used: 30),
+                Fixtures.candidate(.xai, used: 30),
             ]
         )
         XCTAssertTrue(result.details.contains("Fallbacks:"))
         XCTAssertTrue(result.details.contains("  1. Codex · premium model"))
-        XCTAssertTrue(result.details.contains("  2. Grok · premium model"))
+        XCTAssertTrue(result.details.contains("  2. xAI · premium model"))
     }
 
     func testTheHumanReportExplainsEveryRejectionWhenNothingIsEligible() {
@@ -483,10 +488,10 @@ final class RouteCLITests: XCTestCase {
         XCTAssertEqual(claude.first?.accountName, "Work")
     }
 
-    func testProvidersWithoutAccountSnapshotsUseTheirProviderWideSnapshotAndCursorAlwaysDoes() {
+    func testProvidersWithoutAccountSnapshotsUseTheirProviderWideSnapshotAndXAIAlwaysDoes() {
         let candidates = RoutingCandidateAssembler.assemble(
             metrics: [
-                .cursor: Fixtures.metrics(.cursor, session: Fixtures.limit(used: 20)),
+                .xai: Fixtures.metrics(.xai, session: Fixtures.limit(used: 20)),
                 .codexCli: Fixtures.metrics(.codexCli, session: Fixtures.limit(used: 30)),
             ],
             accounts: [],
@@ -496,23 +501,23 @@ final class RouteCLITests: XCTestCase {
 
         XCTAssertEqual(Set(candidates.map(\.service)), Set(ServiceType.allCases))
         XCTAssertTrue(candidates.allSatisfy { $0.accountID == nil })
-        XCTAssertNotNil(candidates.first { $0.service == .cursor }?.metrics)
-        XCTAssertNil(candidates.first { $0.service == .grok }?.metrics)
+        XCTAssertNotNil(candidates.first { $0.service == .xai }?.metrics)
+        XCTAssertNil(candidates.first { $0.service == .openRouter }?.metrics)
     }
 
     func testHiddenProvidersAreNeverCandidates() {
         let configuration = UsageRefreshConfigurationStore.Snapshot(
-            hiddenServices: [.openRouter, .cursor],
+            hiddenServices: [.openRouter, .xai],
             claudeAccounts: [],
             codexAccounts: []
         )
         let candidates = RoutingCandidateAssembler.assemble(
-            metrics: [.cursor: Fixtures.metrics(.cursor, session: Fixtures.limit(used: 20))],
+            metrics: [.xai: Fixtures.metrics(.xai, session: Fixtures.limit(used: 20))],
             accounts: [],
             configuration: configuration,
             health: [:]
         )
-        XCTAssertFalse(candidates.contains { $0.service == .cursor || $0.service == .openRouter })
+        XCTAssertFalse(candidates.contains { $0.service == .xai || $0.service == .openRouter })
     }
 
     func testConfiguredAccountsSetOrderEnablementAndSurfaceAnAccountWithNoSnapshot() {
@@ -639,10 +644,10 @@ final class RouteCLITests: XCTestCase {
         let candidates = RoutingCandidateAssembler.assemble(
             metrics: metrics, accounts: [], configuration: configuration, health: [:]
         )
-        XCTAssertEqual(Fixtures.route(candidates).chain, ["cursor"])
+        XCTAssertEqual(Fixtures.route(candidates).chain, ["xai"])
         XCTAssertEqual(
-            candidates.filter { $0.service.supportsWorkloadRouting && $0.service != .cursor }.map(\.isEnabled),
-            [false, false, false, false]
+            candidates.filter { $0.service.supportsWorkloadRouting && $0.service != .xai }.map(\.isEnabled),
+            [false, false, false]
         )
     }
 
@@ -707,7 +712,7 @@ final class RouteCLITests: XCTestCase {
         let now = Fixtures.now
         func record(failures: Int, mismatches: Int = 0) -> ProviderParseHealthRecord {
             ProviderParseHealthRecord(
-                provider: .grok,
+                provider: .xai,
                 lastSuccess: now,
                 lastAttempt: now,
                 consecutiveFailures: failures,
@@ -724,12 +729,12 @@ final class RouteCLITests: XCTestCase {
         XCTAssertEqual(RoutingCandidateAssembler.routingHealth(record(failures: 2, mismatches: 2)), .failing)
 
         let candidates = RoutingCandidateAssembler.assemble(
-            metrics: [.grok: Fixtures.metrics(.grok, session: Fixtures.limit(used: 20))],
+            metrics: [.xai: Fixtures.metrics(.xai, session: Fixtures.limit(used: 20))],
             accounts: [],
             configuration: nil,
-            health: [.grok: record(failures: 3)]
+            health: [.xai: record(failures: 3)]
         )
-        XCTAssertEqual(candidates.first { $0.service == .grok }?.health, .failing)
+        XCTAssertEqual(candidates.first { $0.service == .xai }?.health, .failing)
     }
 
     func testEndToEndFromCachesToDecisionForASingleProviderUser() throws {
@@ -737,7 +742,7 @@ final class RouteCLITests: XCTestCase {
             metrics: [.claudeCode: Fixtures.metrics(.claudeCode, session: Fixtures.limit(used: 35))],
             accounts: [],
             configuration: UsageRefreshConfigurationStore.Snapshot(
-                hiddenServices: [.cursor, .openRouter, .grok],
+                hiddenServices: [.xai, .openRouter, .xai],
                 claudeAccounts: [.defaultAccount],
                 codexAccounts: []
             ),

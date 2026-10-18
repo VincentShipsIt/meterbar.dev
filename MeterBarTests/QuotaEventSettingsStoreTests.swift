@@ -84,7 +84,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
             webhookDeliveryEnabled: true,
             webhookURLString: "https://hooks.example.com/meterbar",
             enabledQuotaEvents: [.warning],
-            enabledProviders: [.cursor],
+            enabledProviders: [.xai],
             enabledAccounts: [],
             enabledWakeEvents: []
         )
@@ -133,15 +133,15 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
 
     func testSelectionRequiresMatchingEventProviderAndAccount() {
         let store = QuotaEventSettingsStore(userDefaults: defaults)
-        let selectedAccount = QuotaEventAccountSelection(provider: .cursor, accountID: "selected")
+        let selectedAccount = QuotaEventAccountSelection(provider: .xai, accountID: "selected")
         store.setQuotaEventEnabled(true, for: .critical)
-        store.setProviderEnabled(true, for: .cursor)
+        store.setProviderEnabled(true, for: .xai)
         store.setAccountEnabled(true, for: selectedAccount)
 
-        let selected = payload(provider: .cursor, accountID: "selected", event: .critical)
-        let wrongEvent = payload(provider: .cursor, accountID: "selected", event: .warning)
-        let wrongProvider = payload(provider: .grok, accountID: "selected", event: .critical)
-        let wrongAccount = payload(provider: .cursor, accountID: "other", event: .critical)
+        let selected = payload(provider: .xai, accountID: "selected", event: .critical)
+        let wrongEvent = payload(provider: .xai, accountID: "selected", event: .warning)
+        let wrongProvider = payload(provider: .claudeCode, accountID: "selected", event: .critical)
+        let wrongAccount = payload(provider: .xai, accountID: "other", event: .critical)
 
         XCTAssertTrue(store.configuration.includes(selected))
         XCTAssertFalse(store.configuration.includes(wrongEvent))
@@ -150,13 +150,13 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
     }
 
     func testMigratesLegacyGrokDefaultSelectionWithoutDuplicatingTheDefaultProfile() throws {
-        let legacy = QuotaEventAccountSelection(provider: .grok, accountID: "default")
+        let legacy = QuotaEventAccountSelection(provider: .xai, accountID: "default")
         let defaultProfile = QuotaEventAccountSelection(
-            provider: .grok,
+            provider: .xai,
             accountID: GrokAccount.defaultID.uuidString
         )
         let work = QuotaEventAccountSelection(
-            provider: .grok,
+            provider: .xai,
             accountID: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF"
         )
         let stored = QuotaEventIntegrationConfiguration(
@@ -166,7 +166,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
             webhookDeliveryEnabled: true,
             webhookURLString: "https://hooks.example.com/meterbar",
             enabledQuotaEvents: [.warning, .critical],
-            enabledProviders: [.grok],
+            enabledProviders: [.xai],
             enabledAccounts: [legacy, defaultProfile, work],
             enabledWakeEvents: []
         )
@@ -181,28 +181,28 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.configuration.enabledAccounts, [defaultProfile, work])
         XCTAssertEqual(reloaded.enabledAccounts, [defaultProfile, work])
         XCTAssertTrue(store.configuration.includes(
-            payload(provider: .grok, accountID: GrokAccount.defaultID.uuidString, event: .critical)
+            payload(provider: .xai, accountID: GrokAccount.defaultID.uuidString, event: .critical)
         ))
         XCTAssertFalse(store.configuration.includes(
-            payload(provider: .grok, accountID: "default", event: .critical)
+            payload(provider: .xai, accountID: "default", event: .critical)
         ))
         XCTAssertTrue(store.configuration.includes(
-            payload(provider: .grok, accountID: work.accountID, event: .warning)
+            payload(provider: .xai, accountID: work.accountID, event: .warning)
         ))
     }
 
     func testLegacyGrokDefaultSelectionStillMatchesTheDefaultProfilePayload() {
         let store = QuotaEventSettingsStore(userDefaults: defaults)
         store.setQuotaEventEnabled(true, for: .exhausted)
-        store.setProviderEnabled(true, for: .grok)
-        store.setAccountEnabled(true, for: QuotaEventAccountSelection(provider: .grok, accountID: "default"))
+        store.setProviderEnabled(true, for: .xai)
+        store.setAccountEnabled(true, for: QuotaEventAccountSelection(provider: .xai, accountID: "default"))
 
         XCTAssertTrue(store.configuration.includes(
-            payload(provider: .grok, accountID: GrokAccount.defaultID.uuidString, event: .exhausted)
+            payload(provider: .xai, accountID: GrokAccount.defaultID.uuidString, event: .exhausted)
         ))
         XCTAssertFalse(store.configuration.includes(
             payload(
-                provider: .grok,
+                provider: .xai,
                 accountID: "C3D4E5F6-A7B8-4901-8234-567890ABCDEF",
                 event: .exhausted
             )
@@ -217,10 +217,10 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
         )
         let store = QuotaEventSettingsStore(userDefaults: defaults)
         store.setQuotaEventEnabled(true, for: .critical)
-        store.setProviderEnabled(true, for: .grok)
+        store.setProviderEnabled(true, for: .xai)
         store.setAccountEnabled(
             true,
-            for: QuotaEventAccountSelection(provider: .grok, accountID: removed.id.uuidString)
+            for: QuotaEventAccountSelection(provider: .xai, accountID: removed.id.uuidString)
         )
 
         let remaining = QuotaEventSnapshotCatalog.snapshots(
@@ -229,7 +229,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
                 grokAccounts: [.defaultAccount],
                 grokAccountMetrics: [GrokAccount.defaultID: payloadMetrics()]
             ),
-            enabledServices: [.grok]
+            enabledServices: [.xai]
         )
         let selectable = QuotaEventSnapshotCatalog.selectableAccounts(
             claudeAccounts: [],
@@ -270,7 +270,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
             webhookDeliveryEnabled: true,
             webhookURLString: "https://hooks.example.com/meterbar",
             enabledQuotaEvents: [.warning, .critical],
-            enabledProviders: [.codexCli, .cursor],
+            enabledProviders: [.codexCli, .xai],
             enabledAccounts: [account],
             enabledWakeEvents: [.quotaExhausted]
         )
@@ -304,7 +304,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
     /// change it — the unread parts of a future schema must reach a build
     /// that does understand them intact.
     func testFutureVersionedConfigurationIsNeverPersistedOnLoad() throws {
-        let legacyGrokDefault = QuotaEventAccountSelection(provider: .grok, accountID: "default")
+        let legacyGrokDefault = QuotaEventAccountSelection(provider: .xai, accountID: "default")
         let written = QuotaEventIntegrationConfiguration(
             version: QuotaEventIntegrationConfiguration.currentVersion + 1,
             localDeliveryEnabled: false,
@@ -313,7 +313,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
             webhookDeliveryEnabled: false,
             webhookURLString: "",
             enabledQuotaEvents: [],
-            enabledProviders: [.grok],
+            enabledProviders: [.xai],
             enabledAccounts: [legacyGrokDefault],
             enabledWakeEvents: []
         )
@@ -346,7 +346,7 @@ final class QuotaEventSettingsStoreTests: XCTestCase {
 
     private func payloadMetrics() -> UsageMetrics {
         UsageMetrics(
-            service: .grok,
+            service: .xai,
             sessionLimit: UsageLimit(
                 used: 50,
                 total: 100,

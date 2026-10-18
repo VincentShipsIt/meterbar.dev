@@ -115,10 +115,10 @@ final class ProviderUsageObservationTests: XCTestCase {
     func testDroppingCounterIsTreatedAsAResetAndNeverEmitsANegativeRow() {
         var ledger = ProviderUsageLedger()
 
-        ledger.record(observation(.cursor, unit: .requests, total: 480, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 12, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 480, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 12, at: day(2)), calendar: calendar)
 
-        let series = ledger.dailySeries(for: .cursor)
+        let series = ledger.dailySeries(for: .xai)
         XCTAssertEqual(series.count, 1)
         XCTAssertEqual(series.first?.date, day(2))
         XCTAssertEqual(series.first?.amount ?? 0, 12, accuracy: 1e-9)
@@ -135,11 +135,11 @@ final class ProviderUsageObservationTests: XCTestCase {
     func testBaselineFollowsThePostResetCounterSoTheNextDeltaIsCorrect() {
         var ledger = ProviderUsageLedger()
 
-        ledger.record(observation(.cursor, unit: .requests, total: 480, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 12, at: day(2)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 30, at: day(3)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 480, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 12, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 30, at: day(3)), calendar: calendar)
 
-        let series = ledger.dailySeries(for: .cursor)
+        let series = ledger.dailySeries(for: .xai)
         XCTAssertEqual(series.map(\.date), [day(2), day(3)])
         XCTAssertEqual(series.last?.amount ?? 0, 18, accuracy: 1e-9)
     }
@@ -153,13 +153,13 @@ final class ProviderUsageObservationTests: XCTestCase {
     func testTotalAcrossAResetEqualsTheSumOfBothCycles() {
         var ledger = ProviderUsageLedger()
 
-        ledger.record(observation(.cursor, unit: .requests, total: 0, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 200, at: day(2)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 500, at: day(3)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 0, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 200, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 500, at: day(3)), calendar: calendar)
         // Cycle rolls over: the counter zeroes and climbs again.
-        ledger.record(observation(.cursor, unit: .requests, total: 40, at: day(4)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 40, at: day(4)), calendar: calendar)
 
-        let total = ledger.dailySeries(for: .cursor).reduce(0) { $0 + $1.amount }
+        let total = ledger.dailySeries(for: .xai).reduce(0) { $0 + $1.amount }
         XCTAssertEqual(total, 540, accuracy: 1e-9)
     }
 
@@ -288,14 +288,14 @@ final class ProviderUsageObservationTests: XCTestCase {
         var ledger = ProviderUsageLedger()
 
         ledger.record(observation(.openRouter, unit: .usd, total: 10, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 100, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 100, at: day(1)), calendar: calendar)
         ledger.record(observation(.openRouter, unit: .usd, total: 12, at: day(2)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 140, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 140, at: day(2)), calendar: calendar)
 
         XCTAssertEqual(ledger.unit(for: .openRouter), .usd)
-        XCTAssertEqual(ledger.unit(for: .cursor), .requests)
+        XCTAssertEqual(ledger.unit(for: .xai), .requests)
         XCTAssertEqual(ledger.dailySeries(for: .openRouter).first?.amount ?? 0, 2, accuracy: 1e-9)
-        XCTAssertEqual(ledger.dailySeries(for: .cursor).first?.amount ?? 0, 40, accuracy: 1e-9)
+        XCTAssertEqual(ledger.dailySeries(for: .xai).first?.amount ?? 0, 40, accuracy: 1e-9)
     }
 
     /// Only dollar-denominated entries can produce cost rows.
@@ -307,12 +307,12 @@ final class ProviderUsageObservationTests: XCTestCase {
     func testRequestDenominatedEntriesProduceNoUSDRows() {
         var ledger = ProviderUsageLedger()
 
-        ledger.record(observation(.cursor, unit: .requests, total: 100, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .requests, total: 140, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 100, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 140, at: day(2)), calendar: calendar)
 
-        XCTAssertEqual(ledger.dailyUSDSeries(for: .cursor), [])
-        XCTAssertFalse(ledger.usdProviders.contains(.cursor))
-        XCTAssertFalse(ledger.dailySeries(for: .cursor).isEmpty)
+        XCTAssertEqual(ledger.dailyUSDSeries(for: .xai), [])
+        XCTAssertFalse(ledger.usdProviders.contains(.xai))
+        XCTAssertFalse(ledger.dailySeries(for: .xai).isEmpty)
     }
 
     /// A provider whose reported unit changes starts a fresh baseline.
@@ -323,11 +323,11 @@ final class ProviderUsageObservationTests: XCTestCase {
     func testUnitChangeRestartsTheBaselineInsteadOfDifferencingAcrossUnits() {
         var ledger = ProviderUsageLedger()
 
-        ledger.record(observation(.cursor, unit: .requests, total: 400, at: day(1)), calendar: calendar)
-        ledger.record(observation(.cursor, unit: .usd, total: 5, at: day(2)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .requests, total: 400, at: day(1)), calendar: calendar)
+        ledger.record(observation(.xai, unit: .usd, total: 5, at: day(2)), calendar: calendar)
 
-        XCTAssertEqual(ledger.dailySeries(for: .cursor), [])
-        XCTAssertEqual(ledger.unit(for: .cursor), .usd)
+        XCTAssertEqual(ledger.dailySeries(for: .xai), [])
+        XCTAssertEqual(ledger.unit(for: .xai), .usd)
     }
 
     // MARK: - Day boundaries

@@ -25,8 +25,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
             switch self {
             case .claude: return .claudeCode
             case .codex: return .codexCli
-            case .grok: return .grok
-            case .cursor: return .cursor
+            case .grok: return .xai
+            case .cursor: return .xai
             case .openRouter: return .openRouter
             case .kimiCode: return .kimiCode
             case .zaiCodingPlan: return .zaiCodingPlan
@@ -49,7 +49,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 access: .signedIn,
                 refresh: .success,
                 lastUpdated: freshAt,
-                parseHealth: .success(provider: .cursor, at: freshAt),
+                parseHealth: .success(provider: .xai, at: freshAt),
                 now: now
             )
         )
@@ -99,7 +99,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 access: .signedIn,
                 refresh: .sustainedOrParseFailure,
                 lastUpdated: freshAt,
-                parseHealth: parseFailureRecord(provider: .grok, at: freshAt),
+                parseHealth: parseFailureRecord(provider: .xai, at: freshAt),
                 now: now
             ),
             .attention("Refresh failed")
@@ -172,7 +172,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 access: .signedIn,
                 refresh: .transientFailure,
                 lastUpdated: nil,
-                parseHealth: transientFailureRecord(provider: .cursor, at: freshAt),
+                parseHealth: transientFailureRecord(provider: .xai, at: freshAt),
                 now: now
             )
         )
@@ -184,7 +184,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 access: .unprobed,
                 refresh: .sustainedOrParseFailure,
                 lastUpdated: nil,
-                parseHealth: sustainedFailureRecord(provider: .cursor, at: freshAt),
+                parseHealth: sustainedFailureRecord(provider: .xai, at: freshAt),
                 now: now
             )
         )
@@ -194,7 +194,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
         let lastSuccess = now.addingTimeInterval(-30)
         let lastAttempt = now
         let health = relaunchParseFailureRecord(
-            provider: .cursor,
+            provider: .xai,
             lastSuccess: lastSuccess,
             lastAttempt: lastAttempt
         )
@@ -343,7 +343,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 parseHealth: [
                     .claudeCode: .success(provider: .claudeCode, at: freshAt),
                     .codexCli: .success(provider: .codexCli, at: freshAt),
-                    .grok: .success(provider: .grok, at: freshAt)
+                    .xai: .success(provider: .xai, at: freshAt)
                 ],
                 codexAccounts: [.defaultAccount, codexWork],
                 codexAccountMetrics: [
@@ -353,8 +353,8 @@ final class ProviderPresentationHealthTests: XCTestCase {
                 codexAccountAccess: [CodexAccount.defaultID: true, codexWork.id: true],
                 grokAccounts: [.defaultAccount, grokWork],
                 grokAccountMetrics: [
-                    GrokAccount.defaultID: healthyMetrics(.grok, lastUpdated: freshAt),
-                    grokWork.id: healthyMetrics(.grok, lastUpdated: freshAt)
+                    GrokAccount.defaultID: healthyMetrics(.xai, lastUpdated: freshAt),
+                    grokWork.id: healthyMetrics(.xai, lastUpdated: freshAt)
                 ],
                 grokAccountAccess: [GrokAccount.defaultID: true, grokWork.id: true],
                 claudeAccounts: [.defaultAccount, claudeWork],
@@ -362,7 +362,7 @@ final class ProviderPresentationHealthTests: XCTestCase {
                     ClaudeCodeAccount.defaultID: healthyMetrics(.claudeCode, lastUpdated: freshAt),
                     claudeWork.id: healthyMetrics(.claudeCode, lastUpdated: freshAt)
                 ],
-                enabledServices: [.claudeCode, .codexCli, .grok],
+                enabledServices: [.claudeCode, .codexCli, .xai],
                 claudeAccountStates: [
                     ClaudeCodeAccount.defaultID: .connected(.oauth),
                     claudeWork.id: .error("Work refresh failed")
@@ -481,16 +481,16 @@ final class ProviderPresentationHealthTests: XCTestCase {
     func testSignedOutCursorWithFreshCacheIsNotHealthy() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
-                metrics: [.cursor: healthyMetrics(.cursor, lastUpdated: freshAt)],
+                metrics: [.xai: healthyMetrics(.xai, lastUpdated: freshAt)],
                 now: now,
                 claudeAccounts: [],
                 claudeAccountMetrics: [:],
-                enabledServices: [.cursor],
+                enabledServices: [.xai],
                 cursorHasAccess: false
             )
         )
 
-        let card = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        let card = try XCTUnwrap(snapshots.first { $0.service == .xai })
         XCTAssertEqual(card.authNotice, .loginRequired)
         XCTAssertEqual(card.band, .healthy, "The cached percentages stay healthy")
         XCTAssertEqual(ProviderCardPresentation.statusText(for: card), "Login required")
@@ -551,15 +551,15 @@ final class ProviderPresentationHealthTests: XCTestCase {
     func testUnprobedCursorWithFreshCacheIsNotTreatedAsSignedOut() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
-                metrics: [.cursor: healthyMetrics(.cursor, lastUpdated: freshAt)],
+                metrics: [.xai: healthyMetrics(.xai, lastUpdated: freshAt)],
                 now: now,
                 claudeAccounts: [],
                 claudeAccountMetrics: [:],
-                enabledServices: [.cursor]
+                enabledServices: [.xai]
             )
         )
 
-        let card = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        let card = try XCTUnwrap(snapshots.first { $0.service == .xai })
         XCTAssertNil(card.authNotice, "Unknown/unprobed is not a fabricated login failure")
         XCTAssertEqual(ProviderCardPresentation.statusText(for: card), QuotaBand.healthy.shortLabel)
     }
@@ -567,18 +567,18 @@ final class ProviderPresentationHealthTests: XCTestCase {
     func testCursorClaudeLoginStateDoesNotLeakOntoAFreshCursorCard() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(
             ProviderSnapshotBuilder.Input(
-                metrics: [.cursor: healthyMetrics(.cursor, lastUpdated: freshAt)],
+                metrics: [.xai: healthyMetrics(.xai, lastUpdated: freshAt)],
                 now: now,
-                parseHealth: [.cursor: .success(provider: .cursor, at: freshAt)],
+                parseHealth: [.xai: .success(provider: .xai, at: freshAt)],
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: [.cursor],
+                enabledServices: [.xai],
                 claudeAccountStates: [ClaudeCodeAccount.defaultID: .needsLogin],
                 cursorHasAccess: true
             )
         )
 
-        let cursor = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        let cursor = try XCTUnwrap(snapshots.first { $0.service == .xai })
         XCTAssertNil(cursor.authNotice)
         XCTAssertEqual(ProviderCardPresentation.statusText(for: cursor), QuotaBand.healthy.shortLabel)
     }
@@ -703,7 +703,9 @@ final class ProviderPresentationHealthTests: XCTestCase {
             codexAccounts: kind == .codex ? [.defaultAccount] : [],
             codexAccountMetrics: kind == .codex ? metrics.map { [CodexAccount.defaultID: $0] } ?? [:] : [:],
             codexAccountAccess: kind == .codex && refresh != .unprobed ? [CodexAccount.defaultID: true] : [:],
-            grokAccounts: kind == .grok ? [.defaultAccount] : [],
+            // The Cursor source has no account of its own; it rides on the
+            // default Grok profile's card, which the app always keeps.
+            grokAccounts: kind == .grok || kind == .cursor ? [.defaultAccount] : [],
             grokAccountMetrics: kind == .grok ? metrics.map { [GrokAccount.defaultID: $0] } ?? [:] : [:],
             grokAccountAccess: kind == .grok && refresh != .unprobed ? [GrokAccount.defaultID: true] : [:],
             claudeAccounts: kind == .claude ? [.defaultAccount] : [],

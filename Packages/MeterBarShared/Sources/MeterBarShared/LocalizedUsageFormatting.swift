@@ -403,15 +403,7 @@ public enum LocalizedUsageFormat {
                 defaultValue: "Other Models",
                 bundle: bundle,
                 locale: locale,
-                comment: "Cursor included-usage pool for third-party API models."
-            )
-        case .grokBot:
-            return String(
-                localized: "widget.quota.grok_bot",
-                defaultValue: "Grok Bot",
-                bundle: bundle,
-                locale: locale,
-                comment: "Cursor Ultra weekly Grok Bot usage pool."
+                comment: "Legacy Cursor included-usage pool for third-party API models."
             )
         case .monthly:
             return String(

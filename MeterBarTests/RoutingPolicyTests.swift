@@ -104,7 +104,7 @@ final class RoutingPolicyTests: XCTestCase {
             name: "  Review   the\nthing ",
             providerPreference: [.codexCli, .claudeCode, .codexCli],
             accounts: [account, account],
-            modelAliases: [.codexCli: "ok.alias-1", .claudeCode: "no/slash", .grok: "a@b", .cursor: ""],
+            modelAliases: [.codexCli: "ok.alias-1", .claudeCode: "no/slash", .xai: "a@b", .openRouter: ""],
             minimumRemainingPercent: 250,
             maximumDeficitPercent: -4,
             maximumFallbacks: 99
@@ -206,6 +206,20 @@ final class RoutingPolicyTests: XCTestCase {
         XCTAssertEqual(decoded.modelAliases, [.codexCli: "gpt-test-1"])
     }
 
+    func testLegacyGrokAndCursorProviderKeysMergeIntoXAIWithoutTrapping() throws {
+        let json = """
+        {
+          "task": "review",
+          "providerPreference": ["Grok", "Cursor", "Codex CLI"],
+          "modelAliases": {"Grok": "grok-alias", "Cursor": "cursor-alias"}
+        }
+        """
+        let decoded = try JSONDecoder().decode(RoutingPolicy.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.providerPreference, [.xai, .codexCli])
+        XCTAssertEqual(decoded.modelAliases, [.xai: "cursor-alias"])
+    }
+
     func testAPolicyWithoutAValidTaskCannotBeDecoded() {
         XCTAssertThrowsError(try JSONDecoder().decode(RoutingPolicy.self, from: Data("{}".utf8)))
         XCTAssertThrowsError(try JSONDecoder().decode(RoutingPolicy.self, from: Data(#"{"task":"No Good!"}"#.utf8)))
@@ -281,7 +295,7 @@ final class RoutingPolicyTests: XCTestCase {
 
     func testDocumentRoundTripsThroughTheStandardCodec() throws {
         var edited = RoutingPolicyDefaults.policy(for: .research)
-        edited.providerPreference = [.grok]
+        edited.providerPreference = [.xai]
         let document = try RoutingPolicyDocument(policies: [
             edited,
             RoutingPolicy(task: XCTUnwrap(RoutingTaskID(token: "triage")), name: "Triage"),

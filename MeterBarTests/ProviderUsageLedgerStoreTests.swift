@@ -108,7 +108,7 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
 
         try rewriteEntries(url) { entry in
             var entry = entry
-            if entry["provider"] as? String == ServiceType.cursor.rawValue {
+            if entry["provider"] as? String == ServiceType.xai.rawValue {
                 entry["provider"] = "Fusion"
             }
             return entry
@@ -118,7 +118,7 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.entries.map(\.provider), [.openRouter])
         XCTAssertEqual(loaded.entries.first, saved.entry(for: .openRouter))
-        XCTAssertTrue(loaded.dailySeries(for: .cursor).isEmpty)
+        XCTAssertTrue(loaded.dailySeries(for: .xai).isEmpty)
     }
 
     /// A structurally broken entry degrades the same way an unknown provider
@@ -134,7 +134,7 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
                 : entry
         }
 
-        XCTAssertEqual(ProviderUsageLedgerStore.load(from: url).entries.map(\.provider), [.cursor])
+        XCTAssertEqual(ProviderUsageLedgerStore.load(from: url).entries.map(\.provider), [.xai])
     }
 
     /// Truncated or hand-edited JSON must not crash the poll that reads it.
@@ -201,8 +201,8 @@ final class ProviderUsageLedgerStoreTests: XCTestCase {
         let start = Date(timeIntervalSince1970: 1_780_000_000)
         ledger.record(observation(.openRouter, unit: .usd, total: 4, at: start))
         ledger.record(observation(.openRouter, unit: .usd, total: 9, at: start.addingTimeInterval(86_400)))
-        ledger.record(observation(.cursor, unit: .requests, total: 40, at: start))
-        ledger.record(observation(.cursor, unit: .requests, total: 61, at: start.addingTimeInterval(86_400)))
+        ledger.record(observation(.xai, unit: .requests, total: 40, at: start))
+        ledger.record(observation(.xai, unit: .requests, total: 61, at: start.addingTimeInterval(86_400)))
         return ledger
     }
 

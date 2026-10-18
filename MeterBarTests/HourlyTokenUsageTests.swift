@@ -160,7 +160,7 @@ final class HourlyTokenUsageTests: XCTestCase {
         ])
         XCTAssertTrue(
             claudeOnly.needsMissingEnabledProviderRefresh(
-                enabledServices: [.claudeCode, .grok],
+                enabledServices: [.claudeCode, .xai],
                 lastScanDate: now.addingTimeInterval(-86_400),
                 now: now,
                 calendar: calendar
@@ -176,7 +176,7 @@ final class HourlyTokenUsageTests: XCTestCase {
         )
         XCTAssertFalse(
             claudeOnly.needsMissingEnabledProviderRefresh(
-                enabledServices: [.claudeCode, .grok],
+                enabledServices: [.claudeCode, .xai],
                 lastScanDate: now,
                 now: now,
                 calendar: calendar
@@ -186,10 +186,10 @@ final class HourlyTokenUsageTests: XCTestCase {
     }
 
     func testHourlyBackfillOnlyRunsForEnabledLogScanners() {
-        XCTAssertFalse(CostTracker.hasEnabledCostScanProvider(in: [.cursor, .openRouter]))
+        XCTAssertFalse(CostTracker.hasEnabledCostScanProvider(in: [.kimiCode, .openRouter]))
         XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.claudeCode]))
-        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.codexCli, .cursor]))
-        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.grok]))
+        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.codexCli, .xai]))
+        XCTAssertTrue(CostTracker.hasEnabledCostScanProvider(in: [.xai]))
     }
 
     private func makeSummary(

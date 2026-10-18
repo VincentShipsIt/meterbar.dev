@@ -19,8 +19,8 @@
 
 > MeterBar ships outside the Mac App Store. The app is not sandboxed — it must read other tools’ local logs and credentials. Install with Homebrew or download a notarized build from [Releases](https://github.com/VincentShipsIt/meterbar.dev/releases).
 
-A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, Cursor,
-OpenRouter, Grok, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Console API credit at a glance — then tells you which provider still has
+A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, xAI (Grok and Cursor),
+OpenRouter, Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Console API credit at a glance — then tells you which provider still has
 headroom, warns you before you hit a wall, and can resume your blocked sessions
 by itself once a limit resets.
 
@@ -40,7 +40,7 @@ by itself once a limit resets.
 
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Per-Account Menu Bar Items**: Give up to 4 Claude/Codex accounts their own status item, or use one merged item with an in-menu account switcher (Settings → General → Menu Bar Accounts)
-- **Multi-Service Support**: Track Claude Code, Codex CLI, Cursor, OpenRouter, Grok, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, Muse Code, and Claude Platform (Console API credit)
+- **Multi-Service Support**: Track Claude Code, Codex CLI, xAI (Grok and Cursor in one card), OpenRouter, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, Muse Code, and Claude Platform (Console API credit)
 - **Provider Status**: Service-health monitoring for every provider that publishes a status page, so you can tell a provider outage apart from your own exhausted quota
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Zero Configuration for CLI Providers**: Reuses local CLI sign-ins without password entry
@@ -76,9 +76,8 @@ by itself once a limit resets.
 |---------|-------------|-----------------|
 | **Claude Code** | Keychain OAuth token (`/api/oauth/usage`); CLI `/usage` fallback | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
-| **Cursor** | Local SQLite database | Included usage pools (monthly on legacy Cursor plans; weekly on The X Subscription, see below) |
 | **OpenRouter** | User-provided API key stored in Keychain | Account credits, spend, per-key limits |
-| **Grok** | Cached `grok login` session, accessed by the official CLI | Weekly quota, reset time, extra credits |
+| **xAI** | Cached `grok login` session (official CLI) plus Cursor's local database. One card, one weekly gauge | Shared weekly pool, reset time, extra credits; legacy Cursor accounts add their monthly pools and on-demand spend as extra rows |
 | **Kimi Code** | Kimi Code's own sign-in file (read-only), or an API key stored in Keychain. Off until you enable it in Settings → Providers | 5-hour and weekly windows, monthly windows when the plan reports them, booster-wallet balance |
 | **Z.ai GLM Coding Plan** | Coding Plan API key stored in Keychain; you choose the international (`api.z.ai`) or mainland (`open.bigmodel.cn`) region. Off until you enable it in Settings → Providers | 5-hour and weekly credit windows, monthly MCP tool allowance, and a peak / off-peak indicator |
 | **GitHub Copilot** | Fine-grained token stored in Keychain, read through GitHub's documented billing API. Off until you enable it in Settings → Providers | A monthly budget bar **only** for organization-managed licences with a user-level budget (needs the billing role). Personal and legacy plans show their usage state — GitHub documents no allowance for them, so MeterBar does not guess one |
@@ -146,18 +145,16 @@ open MeterBar.xcodeproj
 3. Select your team/workspace when prompted
 4. The app automatically reads credentials from `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default)
 
-### Cursor
+### xAI (Grok and Cursor)
 
-1. Install and log into Cursor IDE
-2. The app automatically reads from Cursor's local database
-3. On 2026-10-12 SpaceXAI announced The X Subscription, which merges Grok, Cursor and X Premium into one plan with a single weekly usage pool shared across Cursor, Grok Build and other Grok products. Legacy Cursor plans stay monthly. MeterBar labels the reset from whatever window Cursor reports; whether Cursor's usage endpoints report the new weekly pool has not been verified against a live X Subscription account.
+xAI tiers share one pool of AI usage across Grok and Cursor, refreshed weekly, so MeterBar shows a single xAI card. It reads two sources and merges them; either one is enough.
 
-### Grok
+1. Install [Grok Build](https://x.ai/cli) and log in: `grok login`
+2. Optional: install and log into Cursor IDE. MeterBar reads Cursor's local database, so Cursor accounts on legacy monthly plans keep their "Cursor Models" / "Other Models" pools and on-demand spend as extra rows on the same card.
+3. Enable xAI under **Settings → General → Tracked Providers**
+4. MeterBar asks the official Grok CLI for weekly billing over ACP; that call has not been re-verified against a live merged-plan account. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
 
-1. Install [Grok Build](https://x.ai/cli)
-2. Log in: `grok login`
-3. Enable Grok under **Settings → General → Tracked Providers**
-4. Grok uses one weekly pool shared across all Grok products (and, on The X Subscription, Cursor). MeterBar asks the official CLI for weekly billing over ACP; that call has not been re-verified against an X Subscription account. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
+`meterbar usage --provider xai` selects this card. The older `--provider grok` and `--provider cursor` tokens still work as aliases; JSON output always says `xai`. Settings saved before the merge (Grok or Cursor visibility, menu bar pins, widget choices) migrate to xAI automatically.
 
 To track more than one Grok Build account, give each CLI login a distinct
 `GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
@@ -313,7 +310,7 @@ meterbar cost --json
 meterbar route --task implementation
 ```
 
-`meterbar route` recommends Claude Code, Codex, Cursor, OpenRouter or Grok from cached quota and health. Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the five newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
+`meterbar route` recommends Claude Code, Codex, xAI or OpenRouter from cached quota and health. Kimi Code, Z.ai, GitHub Copilot, Muse Code, and Claude Platform are tracked but return `provider_unsupported` when enabled; they never enter recommendations or fallbacks. Known hidden providers are omitted, and missing or unreadable configuration cannot enable the five newer providers. Route exits with 0 for a recommendation, 11 for a known capability, enablement, policy or quota restriction, 12 when every rejection is a data problem (or there are no candidates), and 13 for invalid input. See [the CLI JSON contract](docs/cli-json-schema.md).
 
 `meterbar cost` reports the MeterBar app's cached 30-day scan (run one from
 the app's Usage tab), so the CLI and the app always show the same numbers.
@@ -365,19 +362,19 @@ macOS Keychain           # Claude Code OAuth token (Claude Code-credentials)
 claude /usage            # Claude Code usage fallback (CLI output)
 ~/.claude/               # Claude Code account metadata and local sessions
 $CODEX_HOME/auth.json    # Codex CLI OAuth token (defaults to ~/.codex/auth.json)
-~/Library/Application Support/Cursor/  # Cursor local DB
-$GROK_HOME/auth.json     # Grok CLI login (weekly quota via ACP; resets via grok.com)
+~/Library/Application Support/Cursor/  # Cursor local DB (xAI card, legacy Cursor pools)
+$GROK_HOME/auth.json     # Grok CLI login (xAI weekly quota via ACP; resets via grok.com)
 ```
 
 It then uses the respective local source or API to fetch current usage data:
 - Claude Code (primary): `https://api.anthropic.com/api/oauth/usage`, using the `Claude Code-credentials` Keychain OAuth token
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
-- Grok: official `grok agent` ACP `_x.ai/billing` for the weekly gauge; grok.com `ConsumerUiSvc/GetRemainingResets` for usage-limit resets
+- xAI (Grok source): official `grok agent` ACP `_x.ai/billing` for the weekly gauge; grok.com `ConsumerUiSvc/GetRemainingResets` for usage-limit resets
 - Claude Platform (opt-in): read-only `GET`s to `platform.claude.com/api/organizations`, `…/prepaid/credits` and `…/current_spend` with the pasted `sessionKey` cookie
 
 Claude Code usage reads the authenticated `/api/oauth/usage` endpoint — the same data Claude Code's own `/usage` screen shows — because `claude /usage` no longer renders in a headless (non-interactive) spawn. Parsing the CLI output is kept as a fallback and can be forced by turning off "Claude Code OAuth usage" in Settings.
 - Explicitly scoped Claude accounts are tracked by running `claude /usage` with each account's configured `CLAUDE_CONFIG_DIR` (they have no profile-specific Keychain token of their own).
-- Cursor: Local SQLite queries
+- xAI (Cursor source): Local SQLite queries
 
 **No provider API keys are required for CLI-backed services** - the app reuses local Claude Code, Codex, and Grok sign-ins. The unscoped default Claude Code account's Keychain OAuth token is read to fetch usage (a one-time macOS Keychain prompt on first launch). Grok weekly quota still goes through the official CLI; the cached login token is used only for usage-limit resets and is never logged.
 
@@ -421,7 +418,7 @@ Make sure you're logged into the CLI tool:
 ```bash
 claude login   # For Claude Code
 codex login    # For Codex CLI
-grok login     # For Grok Build
+grok login     # For xAI (Grok Build)
 ```
 
 If the app still shows "Not Connected" or "Not configured", re-run the login command. MeterBar treats expired local OAuth tokens as disconnected so it does not keep making failing usage requests.

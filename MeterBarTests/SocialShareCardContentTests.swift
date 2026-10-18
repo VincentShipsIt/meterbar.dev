@@ -139,7 +139,7 @@ final class SocialShareCardContentTests: XCTestCase {
             ),
             DailyTokenUsage(
                 date: Date(timeIntervalSince1970: 86400 * 4),
-                provider: .cursor,
+                provider: .xai,
                 inputTokens: 12,
                 outputTokens: 8,
                 cacheReadTokens: 0,
@@ -281,7 +281,7 @@ final class SocialShareCardContentTests: XCTestCase {
             ]
         )
         XCTAssertEqual(week[1].tokens, 560)
-        XCTAssertEqual(week[1].tokens(for: .grok), 0)
+        XCTAssertEqual(week[1].tokens(for: .xai), 0)
     }
 
     /// A provider with no tokens on a day must not reach the chart at all: a
@@ -289,10 +289,10 @@ final class SocialShareCardContentTests: XCTestCase {
     func testDayBurnDropsProvidersWithNoTokens() {
         let day = SocialShareDayBurn(slices: [
             SocialShareProviderSlice(provider: .claudeCode, tokens: 0),
-            SocialShareProviderSlice(provider: .grok, tokens: 5),
+            SocialShareProviderSlice(provider: .xai, tokens: 5),
         ])
 
-        XCTAssertEqual(day.slices, [SocialShareProviderSlice(provider: .grok, tokens: 5)])
+        XCTAssertEqual(day.slices, [SocialShareProviderSlice(provider: .xai, tokens: 5)])
     }
 
     /// The stack order is the *week's*, not each day's. A per-day sort flips
@@ -306,11 +306,11 @@ final class SocialShareCardContentTests: XCTestCase {
             ]),
             SocialShareDayBurn(slices: [
                 SocialShareProviderSlice(provider: .claudeCode, tokens: 700),
-                SocialShareProviderSlice(provider: .grok, tokens: 50),
+                SocialShareProviderSlice(provider: .xai, tokens: 50),
             ]),
         ])
 
-        XCTAssertEqual(content.chartProviders, [.codexCli, .claudeCode, .grok])
+        XCTAssertEqual(content.chartProviders, [.codexCli, .claudeCode, .xai])
         XCTAssertEqual(content.dailyTokenTotals, [1_000, 750])
     }
 

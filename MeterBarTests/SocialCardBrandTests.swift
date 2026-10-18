@@ -55,9 +55,8 @@ final class SocialCardBrandTests: XCTestCase {
         let expected: [ServiceType: NSColor] = [
             .claudeCode: MeterBarTheme.BrandAccentDark.claude,
             .codexCli: MeterBarTheme.BrandAccentDark.codex,
-            .cursor: MeterBarTheme.BrandAccentDark.cursor,
             .openRouter: MeterBarTheme.BrandAccentDark.openRouter,
-            .grok: MeterBarTheme.BrandAccentDark.grok,
+            .xai: MeterBarTheme.BrandAccentDark.xai,
             .kimiCode: MeterBarTheme.BrandAccentDark.kimiCode,
             .zaiCodingPlan: MeterBarTheme.BrandAccentDark.zaiCodingPlan,
             .githubCopilot: MeterBarTheme.BrandAccentDark.githubCopilot,
@@ -126,24 +125,12 @@ final class SocialCardBrandTests: XCTestCase {
     }
 
     /// The limits card puts the provider's mark beside MeterBar's, which only
-    /// works if the content carries it — and Cursor's Grok Bot pool proves the
-    /// card must follow `logoKind` (the pool is branded Grok) rather than the
-    /// service it borrows its data from.
+    /// works if the content carries it. The merged xAI card carries the xAI mark.
     func testLimitsContentCarriesTheProvidersOwnLogo() {
-        var snapshot = ProviderSnapshot(
-            id: "cursor.grokbot",
-            title: "Grok Bot",
-            service: .cursor,
-            updatedAt: Date(timeIntervalSince1970: 0),
-            limits: [],
-            emptyDetail: "",
-            extraUsage: nil,
-            resetCreditsAvailable: nil,
-            accountID: nil
-        )
-        snapshot.logoKindOverride = .grok
+        let snapshot = Self.snapshot(id: "xai", title: "xAI", service: .xai)
 
-        XCTAssertEqual(SocialLimitsCardContent(snapshot: snapshot).providerLogo, .grok)
+        XCTAssertEqual(SocialLimitsCardContent(snapshot: snapshot).providerLogo, .xai)
+        XCTAssertEqual(SocialLimitsCardContent(snapshot: snapshot).providerLogo?.resourceName, "ProviderIcon-xai")
     }
 
     /// Every provider whose mark ships as an SVG must actually resolve to that
@@ -165,33 +152,6 @@ final class SocialCardBrandTests: XCTestCase {
                 "\(service) falls back to the SF Symbol \(kind.fallbackSystemName) instead of \(resourceName)"
             )
         }
-    }
-
-    /// Cursor Ultra's Grok Bot pool is branded Grok and titled "Grok Bot", so a
-    /// gallery shows it beside a real Grok account — two cards, same mark,
-    /// near-identical names, routinely opposite statuses. Posted standalone,
-    /// nothing on the card says which Grok is out, so a sub-pool card names the
-    /// account it is carved out of, in the masthead and in the caption.
-    func testSubPoolCardNamesTheAccountItIsCarvedOutOf() {
-        var pool = Self.snapshot(id: "cursor.grokbot", title: "Grok Bot", service: .cursor)
-        pool.cardRole = .subPool
-        pool.logoKindOverride = .grok
-
-        let content = SocialLimitsCardContent(snapshot: pool)
-
-        XCTAssertEqual(content.providerQualifier, "Cursor")
-        XCTAssertTrue(
-            content.shareCaption.contains("Grok Bot on Cursor"),
-            "a posted caption must say which account the pool belongs to"
-        )
-    }
-
-    /// An ordinary provider card names its own service already; qualifying it
-    /// would say the same thing twice.
-    func testOrdinaryProviderCardCarriesNoQualifier() {
-        let account = Self.snapshot(id: "grok", title: "Grok", service: .grok)
-
-        XCTAssertNil(SocialLimitsCardContent(snapshot: account).providerQualifier)
     }
 
     private static func snapshot(id: String, title: String, service: ServiceType) -> ProviderSnapshot {

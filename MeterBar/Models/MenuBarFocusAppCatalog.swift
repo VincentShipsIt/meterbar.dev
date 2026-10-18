@@ -49,7 +49,7 @@ nonisolated enum MenuBarFocusAppCatalog {
     /// Only apps whose provider is unambiguous ship mapped. Terminals are left
     /// to the user on purpose: a terminal window says nothing about which CLI is
     /// running in it, and MeterBar does not look.
-    static let defaultMapping: [String: ServiceType] = [cursorBundleID: .cursor]
+    static let defaultMapping: [String: ServiceType] = [cursorBundleID: .xai]
 
     /// Settings rows: the catalog plus anything the user has already mapped,
     /// so a mapping never becomes invisible (and un-editable) just because the

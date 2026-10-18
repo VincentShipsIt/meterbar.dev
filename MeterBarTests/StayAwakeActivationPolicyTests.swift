@@ -44,7 +44,7 @@ final class StayAwakeActivationPolicyTests: XCTestCase {
             isManuallyEnabled: true,
             snapshots: [
                 StayAwakeUsageSnapshot(
-                    provider: .grok,
+                    provider: .xai,
                     isProviderEnabled: true,
                     sessionUsedPercentage: nil
                 ),
@@ -67,7 +67,7 @@ final class StayAwakeActivationPolicyTests: XCTestCase {
         let decision = StayAwakeActivationPolicy.decision(
             isManuallyEnabled: true,
             snapshots: [
-                snapshot(.cursor, used: 10),
+                snapshot(.xai, used: 10),
                 snapshot(.codexCli, used: 30),
                 snapshot(.claudeCode, used: 100),
             ]

@@ -10,8 +10,8 @@ final class MetricsCodecTests: XCTestCase {
                 sessionLimit: UsageLimit(used: 42, total: 100, resetTime: nil, windowSeconds: 5 * 60 * 60),
                 weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: Date(timeIntervalSince1970: 2_000_000_000))
             ),
-            .cursor: UsageMetrics(
-                service: .cursor,
+            .xai: UsageMetrics(
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 250, total: 500, resetTime: nil)
             )
         ]
@@ -22,7 +22,7 @@ final class MetricsCodecTests: XCTestCase {
         XCTAssertEqual(decoded.count, 2)
         XCTAssertEqual(decoded[.claudeCode]?.sessionLimit?.used, 42)
         XCTAssertEqual(decoded[.claudeCode]?.weeklyLimit?.resetTime, Date(timeIntervalSince1970: 2_000_000_000))
-        XCTAssertEqual(decoded[.cursor]?.weeklyLimit?.total, 500)
+        XCTAssertEqual(decoded[.xai]?.weeklyLimit?.total, 500)
     }
 
     func testWireFormatKeysAreServiceRawValues() throws {
@@ -55,7 +55,7 @@ final class MetricsCodecTests: XCTestCase {
         let decoded = MetricsCodec.decode(Data(json.utf8))
 
         XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded[.cursor]?.weeklyLimit?.used, 5)
+        XCTAssertEqual(decoded[.xai]?.weeklyLimit?.used, 5)
     }
 
     func testMalformedEntryIsDroppedNotFatal() throws {

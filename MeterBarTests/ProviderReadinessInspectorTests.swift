@@ -38,7 +38,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         defer { fixtures.tearDown() }
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.grok],
+            providers: [.xai],
             grokAccounts: [fixtures.healthy, fixtures.missing],
             grokIsCLIInstalled: true,
             parseHealth: [:],
@@ -70,7 +70,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         var disabledDefault = GrokAccount.defaultAccount
         disabledDefault.isEnabled = false
         let reports = ProviderReadinessInspector.reports(
-            providers: [.grok],
+            providers: [.xai],
             grokAccounts: [disabledDefault, fixtures.healthy],
             grokIsCLIInstalled: true,
             parseHealth: [:],
@@ -236,21 +236,21 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         let failingID = UUID()
         let healthy = GrokAccount(id: healthyID, name: "Healthy", homeDirectory: nil)
         let failing = GrokAccount(id: failingID, name: "Broken", homeDirectory: nil)
-        let recent = UsageMetrics(service: .grok, lastUpdated: now.addingTimeInterval(-60))
+        let recent = UsageMetrics(service: .xai, lastUpdated: now.addingTimeInterval(-60))
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.grok],
+            providers: [.xai],
             accountRefreshErrors: [
-                .grok: [failingID: .parsingError("HTTP 500 <body>")],
+                .xai: [failingID: .parsingError("HTTP 500 <body>")],
             ],
             now: now,
             grokAccounts: [healthy, failing],
             grokIsCLIInstalled: true,
             grokAuthProbe: { _ in (true, true) },
             parseHealth: [
-                .grok: .success(provider: .grok, at: now.addingTimeInterval(-60)),
+                .xai: .success(provider: .xai, at: now.addingTimeInterval(-60)),
             ],
-            cachedMetrics: [.grok: recent],
+            cachedMetrics: [.xai: recent],
             cachedAccountMetrics: [
                 AccountUsageSnapshot(id: healthyID, name: "Healthy", metrics: recent),
             ]
@@ -275,7 +275,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         defer { fixtures.tearDown() }
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.grok],
+            providers: [.xai],
             grokAccounts: [fixtures.healthy, fixtures.missing],
             grokIsCLIInstalled: true,
             parseHealth: [:],
@@ -298,7 +298,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testReportsGatherOnlyRequestedProvidersInStableOrder() {
         var gathered: [ServiceType] = []
         let reports = ProviderReadinessInspector.reports(
-            providers: [.cursor, .codexCli],
+            providers: [.xai, .codexCli],
             refreshErrors: [:],
             now: Date(timeIntervalSince1970: 1_000),
             claudeReport: { _, _ in
@@ -310,19 +310,20 @@ final class ProviderReadinessInspectorTests: XCTestCase {
                 return [self.report(for: .codexCli)]
             },
             cursorReport: { _, _ in
-                gathered.append(.cursor)
-                return [self.report(for: .cursor)]
-            }
+                gathered.append(.xai)
+                return [self.report(for: .xai)]
+            },
+            grokReport: { _, _ in [] }
         )
 
-        XCTAssertEqual(gathered, [.codexCli, .cursor])
-        XCTAssertEqual(reports.map(\.provider), [.codexCli, .cursor])
+        XCTAssertEqual(gathered, [.codexCli, .xai])
+        XCTAssertEqual(reports.map(\.provider), [.codexCli, .xai])
     }
 
     func testUnrelatedProvidersAreNotProbedWhenFiltered() {
         var probed: [ServiceType] = []
         _ = ProviderReadinessInspector.reports(
-            providers: [.grok],
+            providers: [.xai],
             refreshErrors: [:],
             now: Date(timeIntervalSince1970: 2_000),
             claudeReport: { _, _ in
@@ -334,20 +335,22 @@ final class ProviderReadinessInspectorTests: XCTestCase {
                 return [self.report(for: .codexCli)]
             },
             cursorReport: { _, _ in
-                probed.append(.cursor)
-                return [self.report(for: .cursor)]
+                probed.append(.xai)
+                return [self.report(for: .xai)]
             },
             openRouterReport: { _, _ in
                 probed.append(.openRouter)
                 return [self.report(for: .openRouter)]
             },
             grokReport: { _, _ in
-                probed.append(.grok)
-                return [self.report(for: .grok)]
+                probed.append(.xai)
+                return [self.report(for: .xai)]
             }
         )
 
-        XCTAssertEqual(probed, [.grok])
+        // xAI reads two sources (Grok profiles, then the Cursor sign-in); no
+        // other provider is probed.
+        XCTAssertEqual(probed, [.xai, .xai])
     }
 
     func testRecentClaudeUsageSkipsCredentialRead() {
@@ -565,7 +568,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testParseHealthAddsImmediateFormatMismatchCheckWithStalenessThreshold() {
         let now = Date(timeIntervalSince1970: 40_000)
         let record = ProviderParseHealthRecord(
-            provider: .cursor,
+            provider: .xai,
             lastSuccess: now.addingTimeInterval(-60),
             lastAttempt: now,
             consecutiveFailures: 1,
@@ -573,13 +576,13 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.cursor],
+            providers: [.xai],
             now: now,
-            parseHealth: [.cursor: record],
+            parseHealth: [.xai: record],
             cachedMetrics: [:],
             cachedAccountMetrics: []
         )
-        let check = reports.first?.check(ReadinessCheckID.parseHealth)
+        let check = cursorSourceReport(in: reports)?.check(ReadinessCheckID.parseHealth)
 
         XCTAssertEqual(check?.level, .fail)
         XCTAssertTrue(check?.detail.contains("format") ?? false)
@@ -589,33 +592,33 @@ final class ProviderReadinessInspectorTests: XCTestCase {
     func testFreshPayloadSupersedesOlderParseHealthTimestamp() {
         let now = Date(timeIntervalSince1970: 50_000)
         let record = ProviderParseHealthRecord.success(
-            provider: .cursor,
+            provider: .xai,
             at: now.addingTimeInterval(-ProviderParseHealthRecord.staleAfter - 1)
         )
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             lastUpdated: now.addingTimeInterval(-60)
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.cursor],
+            providers: [.xai],
             now: now,
-            parseHealth: [.cursor: record],
-            cachedMetrics: [.cursor: metrics],
+            parseHealth: [.xai: record],
+            cachedMetrics: [.xai: metrics],
             cachedAccountMetrics: []
         )
 
-        XCTAssertEqual(reports.first?.check(ReadinessCheckID.parseHealth)?.level, .pass)
+        XCTAssertEqual(cursorSourceReport(in: reports)?.check(ReadinessCheckID.parseHealth)?.level, .pass)
     }
 
     func testPersistedFailureReplacesContradictoryNoErrorRefreshCheck() {
         let now = Date(timeIntervalSince1970: 60_000)
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             lastUpdated: now.addingTimeInterval(-ProviderParseHealthRecord.staleAfter - 60)
         )
         let record = ProviderParseHealthRecord(
-            provider: .cursor,
+            provider: .xai,
             lastSuccess: metrics.lastUpdated,
             lastAttempt: now.addingTimeInterval(-60),
             consecutiveFailures: 1,
@@ -623,16 +626,22 @@ final class ProviderReadinessInspectorTests: XCTestCase {
         )
 
         let reports = ProviderReadinessInspector.reports(
-            providers: [.cursor],
+            providers: [.xai],
             now: now,
-            parseHealth: [.cursor: record],
-            cachedMetrics: [.cursor: metrics],
+            parseHealth: [.xai: record],
+            cachedMetrics: [.xai: metrics],
             cachedAccountMetrics: []
         )
-        let refresh = reports.first?.check(ReadinessCheckID.refresh)
+        let refresh = cursorSourceReport(in: reports)?.check(ReadinessCheckID.refresh)
 
         XCTAssertEqual(refresh?.level, .warn)
         XCTAssertTrue(refresh?.detail.contains("latest recorded refresh failed") ?? false)
+    }
+
+    /// xAI lists the Grok profiles first; the Cursor sign-in is the provider-wide
+    /// source these provider-level health records describe.
+    private func cursorSourceReport(in reports: [ProviderReadiness]) -> ProviderReadiness? {
+        reports.first { $0.identity == .cursorSubscription }
     }
 
     func testHttpStatusExtraction() {
@@ -701,7 +710,7 @@ final class ProviderReadinessInspectorTests: XCTestCase {
                 return []
             },
             cursorReport: { _, _ in
-                probed.append(.cursor)
+                probed.append(.xai)
                 return []
             },
             kimiCodeReport: { _, _ in

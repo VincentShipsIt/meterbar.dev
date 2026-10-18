@@ -55,16 +55,12 @@ struct UsageWidgetProvider: TimelineProvider {
                     service: .codexCli,
                     weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil)
                 ),
-                .cursor: UsageMetrics(
-                    service: .cursor,
-                    weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
-                ),
                 .claudeCode: UsageMetrics(
                     service: .claudeCode,
                     weeklyLimit: UsageLimit(used: 90, total: 100, resetTime: nil)
                 ),
-                .grok: UsageMetrics(
-                    service: .grok,
+                .xai: UsageMetrics(
+                    service: .xai,
                     weeklyLimit: UsageLimit(used: 47, total: 100, resetTime: nil)
                 ),
                 .openRouter: UsageMetrics(

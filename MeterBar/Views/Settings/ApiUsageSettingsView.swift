@@ -30,7 +30,7 @@ struct ApiUsageSettingsView: View {
     private var showExtraUsageSection: Bool {
         (providerVisibility.isEnabled(.claudeCode) && claudeExtraUsageStatus != nil)
             || providerVisibility.isEnabled(.codexCli)
-            || providerVisibility.isEnabled(.grok)
+            || providerVisibility.isEnabled(.xai)
     }
 
     private var claudeExtraUsageStatus: ExtraUsageStatus? {
@@ -66,10 +66,10 @@ struct ApiUsageSettingsView: View {
                 )
             }
 
-            if providerVisibility.isEnabled(.grok) {
+            if providerVisibility.isEnabled(.xai) {
                 ExtraUsageRow(
-                    title: ServiceType.grok.displayName,
-                    status: dataManager.metrics[.grok]?.extraUsage,
+                    title: ServiceType.xai.displayName,
+                    status: dataManager.metrics[.xai]?.extraUsage,
                     manageURL: "https://grok.com/?_s=usage"
                 )
             }

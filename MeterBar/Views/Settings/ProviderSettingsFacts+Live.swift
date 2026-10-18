@@ -26,17 +26,10 @@ extension ProviderSettingsFacts {
                 )
             case .codexCli:
                 codexLiveState()
-            case .cursor:
-                (
-                    CursorLocalService.shared.hasAccess,
-                    CursorLocalService.shared.subscriptionType,
-                    nil,
-                    CursorLocalService.shared.lastError?.localizedDescription
-                )
             case .openRouter:
                 openRouterLiveState()
-            case .grok:
-                grokLiveState()
+            case .xai:
+                xaiLiveState()
             case .kimiCode:
                 (
                     KimiCodeService.shared.hasAccess,
@@ -112,20 +105,23 @@ extension ProviderSettingsFacts {
     }
 
     @MainActor
-    private static func grokLiveState() -> (
+    private static func xaiLiveState() -> (
         hasAccess: Bool,
         subscription: String?,
         tier: String?,
         error: String?
     ) {
-        let service = GrokCLIUsageService.shared
+        let grok = GrokCLIUsageService.shared
+        let cursor = CursorLocalService.shared
         let accounts = GrokAccountStore.shared.enabledAccounts
-        return (
-            accounts.contains(where: service.canAccess(account:)),
-            service.subscriptionType,
-            nil,
-            service.firstError(for: accounts)?.localizedDescription
-        )
+        let grokConnected = accounts.contains(where: grok.canAccess(account:))
+        let hasAccess = grokConnected || cursor.hasAccess
+        // One healthy source keeps the card quiet; a Grok-only user is never
+        // flagged for a Cursor login they never had.
+        let error = hasAccess
+            ? nil
+            : (grok.firstError(for: accounts) ?? cursor.lastError)?.localizedDescription
+        return (hasAccess, grok.subscriptionType ?? cursor.subscriptionType?.capitalized, nil, error)
     }
 
     /// OpenRouter is connected when any enabled key has its Keychain item —

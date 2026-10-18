@@ -84,7 +84,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         // Only unambiguous editors ship mapped. Terminals stay unmapped because
         // MeterBar never guesses which CLI is running inside one.
         XCTAssertEqual(store.focusAppMapping, MenuBarFocusAppCatalog.defaultMapping)
-        XCTAssertEqual(store.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .cursor)
+        XCTAssertEqual(store.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .xai)
         XCTAssertNil(store.focusAppMapping["com.apple.Terminal"])
     }
 
@@ -97,7 +97,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
 
         XCTAssertTrue(reloaded.followsFocusedApp)
         XCTAssertEqual(reloaded.focusAppMapping["com.apple.Terminal"], .claudeCode)
-        XCTAssertEqual(reloaded.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .cursor)
+        XCTAssertEqual(reloaded.focusAppMapping[MenuBarFocusAppCatalog.cursorBundleID], .xai)
     }
 
     func testClearingEveryMappingSurvivesRelaunchInsteadOfRestoringDefaults() {
@@ -121,7 +121,7 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
     func testBlankBundleIdentifiersAreNotMapped() {
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
-        store.setFocusMapping(.grok, forBundleID: "   ")
+        store.setFocusMapping(.xai, forBundleID: "   ")
 
         XCTAssertNil(store.focusAppMapping["   "])
         XCTAssertNil(store.focusAppMapping[""])
@@ -318,40 +318,53 @@ final class MenuBarDisplayPreferencesStoreTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: StorageKeys.statusItemPinnedCandidate))
     }
 
-    /// `StatusItemLimitCandidateBuilder` used to derive Cursor's Grok Bot pin
-    /// key from its index in `additionalLimits` (`additional-0`, since it is
-    /// always Cursor's only additional window). It now derives it from the
-    /// stable `grokBot` window id instead. `StatusItemLimitSelector.select`
-    /// matches pins by exact string equality, so a pin persisted under the
-    /// old key would otherwise stop matching any live candidate after
-    /// upgrade and silently reset to Auto. See PR #514 review.
-    func testLegacyGrokBotAdditionalPinMigratesToTheStableWindowIDOnLoad() {
-        defaults.set(
-            "\(ServiceType.cursor.rawValue):account-id:additional-0",
-            forKey: StorageKeys.statusItemPinnedCandidate
-        )
+    /// Pins persisted before the Grok and Cursor providers merged into xAI carry
+    /// the old provider raw value. `StatusItemLimitSelector.select` matches pins
+    /// by exact string equality, so without a migration they would stop
+    /// matching any live candidate and silently reset to Auto.
+    func testLegacyProviderPrefixesMigrateToXAIOnLoad() {
+        let cases: [(legacy: String, migrated: String)] = [
+            ("Cursor:default:weekly", "xAI:default:weekly"),
+            ("Grok:account-id:session", "xAI:account-id:session"),
+            ("Grok:account-id:additional-0", "xAI:account-id:additional-0"),
+            ("xAI:account-id:weekly", "xAI:account-id:weekly"),
+            ("Claude Code:default:session", "Claude Code:default:session"),
+        ]
+        for testCase in cases {
+            defaults.set(testCase.legacy, forKey: StorageKeys.statusItemPinnedCandidate)
 
-        let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+            let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
-        XCTAssertEqual(store.pinnedCandidateKey, "\(ServiceType.cursor.rawValue):account-id:grokBot")
-        XCTAssertEqual(
-            defaults.string(forKey: StorageKeys.statusItemPinnedCandidate),
-            "\(ServiceType.cursor.rawValue):account-id:grokBot"
-        )
+            XCTAssertEqual(store.pinnedCandidateKey, testCase.migrated, testCase.legacy)
+            XCTAssertEqual(
+                defaults.string(forKey: StorageKeys.statusItemPinnedCandidate),
+                testCase.migrated,
+                "\(testCase.legacy) is written back so the rewrite happens once"
+            )
+        }
     }
 
-    /// The legacy suffix only ever applied to Cursor's Grok Bot pool. Any
-    /// other provider's `additional-0` pin (e.g. Grok's own additional
-    /// windows) must pass through untouched.
-    func testNonCursorAdditionalPinIsNotRewritten() {
-        defaults.set(
-            "\(ServiceType.grok.rawValue):account-id:additional-0",
-            forKey: StorageKeys.statusItemPinnedCandidate
-        )
+    /// Cursor's Grok Bot pool no longer has its own card, so its pins fold
+    /// into the shared weekly window, whether keyed by the stable id or by the
+    /// older `additional-0` index.
+    func testRetiredCursorGrokBotPinsFoldIntoTheSharedWeeklyWindow() {
+        for retired in ["Cursor:account-id:grokBot", "Cursor:account-id:additional-0", "Grok:account-id:grokBot"] {
+            defaults.set(retired, forKey: StorageKeys.statusItemPinnedCandidate)
+
+            let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
+
+            XCTAssertEqual(store.pinnedCandidateKey, "xAI:account-id:weekly", retired)
+        }
+    }
+
+    /// Grok's own additional windows must pass through untouched: only
+    /// Cursor's `additional-0` ever meant the retired Grok Bot pool.
+    func testGrokAdditionalPinIsNotFoldedIntoWeekly() {
+        defaults.set("Grok:account-id:additional-0", forKey: StorageKeys.statusItemPinnedCandidate)
 
         let store = MenuBarDisplayPreferencesStore(userDefaults: defaults)
 
-        XCTAssertEqual(store.pinnedCandidateKey, "\(ServiceType.grok.rawValue):account-id:additional-0")
+        XCTAssertEqual(store.pinnedCandidateKey, "xAI:account-id:additional-0")
     }
 
     func testLabelFormatterCoversMetricAndDensityOptions() {

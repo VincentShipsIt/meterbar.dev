@@ -119,18 +119,17 @@ final class ProviderStatusMonitorTests: XCTestCase {
     func testServiceTypeStatusPageURLs() throws {
         XCTAssertEqual(ServiceType.claudeCode.statusPageDisplayName, "Claude")
         XCTAssertEqual(ServiceType.codexCli.statusPageDisplayName, "OpenAI")
-        XCTAssertEqual(ServiceType.cursor.statusPageDisplayName, "Cursor")
         XCTAssertEqual(ServiceType.openRouter.statusPageDisplayName, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.statusPageDisplayName, "SpaceXAI")
+        XCTAssertEqual(ServiceType.xai.statusPageDisplayName, "SpaceXAI")
 
         XCTAssertEqual(try XCTUnwrap(ServiceType.claudeCode.statusPageURL).absoluteString, "https://status.claude.com/")
         XCTAssertEqual(try XCTUnwrap(ServiceType.codexCli.statusPageURL).absoluteString, "https://status.openai.com/")
-        XCTAssertEqual(try XCTUnwrap(ServiceType.cursor.statusPageURL).absoluteString, "https://status.cursor.com/")
+        XCTAssertEqual(try XCTUnwrap(ServiceType.xai.statusPageURL).absoluteString, "https://status.x.ai/")
         XCTAssertEqual(
             try XCTUnwrap(ServiceType.openRouter.statusPageURL).absoluteString,
             "https://status.openrouter.ai/"
         )
-        XCTAssertEqual(try XCTUnwrap(ServiceType.grok.statusPageURL).absoluteString, "https://status.x.ai/")
+        XCTAssertEqual(try XCTUnwrap(ServiceType.xai.statusPageURL).absoluteString, "https://status.x.ai/")
     }
 
     func testOpenRouterStatusPageMapsOperationalHTML() async throws {
@@ -415,10 +414,10 @@ final class ProviderStatusMonitorTests: XCTestCase {
             return (response, Data(Self.spaceXAIHealthyHTML.utf8))
         }
 
-        let report = try await client.fetchReport(for: .grok)
+        let report = try await client.fetchReport(for: .xai)
 
         XCTAssertEqual(requestedPaths.value, ["/"])
-        XCTAssertEqual(report.service, .grok)
+        XCTAssertEqual(report.service, .xai)
         XCTAssertEqual(report.pageName, "SpaceXAI")
         XCTAssertEqual(report.pageURL.absoluteString, "https://status.x.ai/")
         XCTAssertEqual(report.summary.indicator, .none)

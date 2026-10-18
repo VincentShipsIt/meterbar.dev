@@ -40,8 +40,8 @@ final class SharedDataStoreTests: XCTestCase {
         XCTAssertEqual(Set(loaded.keys), Set(metrics.keys))
         XCTAssertEqual(loaded[.claudeCode]?.sessionLimit, metrics[.claudeCode]?.sessionLimit)
         XCTAssertEqual(loaded[.codexCli]?.resetCreditsAvailable, 2)
-        XCTAssertEqual(loaded[.cursor]?.weeklyLimit?.total, 500)
-        XCTAssertEqual(loaded[.grok]?.resetCreditsAvailable, 1)
+        XCTAssertEqual(loaded[.xai]?.weeklyLimit?.total, 100)
+        XCTAssertEqual(loaded[.xai]?.resetCreditsAvailable, 1)
         XCTAssertEqual(loaded[.openRouter]?.sessionLimit?.total, 40)
     }
 
@@ -66,12 +66,12 @@ final class SharedDataStoreTests: XCTestCase {
         store.flushPendingWrites()
 
         // A subsequent save with a single provider replaces the file wholesale.
-        store.saveMetrics([.cursor: MetricsFixtures.cursor(planUsed: 400)])
+        store.saveMetrics([.xai: MetricsFixtures.cursor(planUsed: 400)])
         store.flushPendingWrites()
 
         let loaded = store.loadMetrics()
-        XCTAssertEqual(Set(loaded.keys), [.cursor])
-        XCTAssertEqual(loaded[.cursor]?.weeklyLimit?.used, 400)
+        XCTAssertEqual(Set(loaded.keys), [.xai])
+        XCTAssertEqual(loaded[.xai]?.weeklyLimit?.used, 400)
     }
 
     func testAccountMetricsRoundTripPreservesLabelsAndIndependentUsage() {

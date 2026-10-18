@@ -103,21 +103,21 @@ final class ProviderVisibilityStoreTests: XCTestCase {
             let store = ProviderVisibilityStore(userDefaults: defaults)
             XCTAssertTrue(store.isEnabled(.claudeCode))
             XCTAssertTrue(store.isEnabled(.codexCli))
-            XCTAssertTrue(store.isEnabled(.cursor))
+            XCTAssertTrue(store.isEnabled(.xai))
 
             store.set(.claudeCode, isEnabled: false)
-            store.set(.cursor, isEnabled: false)
+            store.set(.xai, isEnabled: false)
 
             let reloaded = ProviderVisibilityStore(userDefaults: defaults)
             XCTAssertFalse(reloaded.isEnabled(.claudeCode))
             XCTAssertTrue(reloaded.isEnabled(.codexCli))
-            XCTAssertFalse(reloaded.isEnabled(.cursor))
+            XCTAssertFalse(reloaded.isEnabled(.xai))
 
             reloaded.set(.claudeCode, isEnabled: true)
             let relaunchedAgain = ProviderVisibilityStore(userDefaults: defaults)
             XCTAssertTrue(relaunchedAgain.isEnabled(.claudeCode))
             // Re-showing Claude Code must not resurrect the still-hidden Cursor.
-            XCTAssertFalse(relaunchedAgain.isEnabled(.cursor))
+            XCTAssertFalse(relaunchedAgain.isEnabled(.xai))
         }
     }
 
@@ -125,20 +125,20 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         withIsolatedDefaults { defaults in
             let store = ProviderVisibilityStore(userDefaults: defaults)
 
-            XCTAssertTrue(store.isEnabled(.grok))
+            XCTAssertTrue(store.isEnabled(.xai))
         }
     }
 
     func testGrokCanStillBeTurnedOffAndStaysOff() {
         withIsolatedDefaults { defaults in
             let store = ProviderVisibilityStore(userDefaults: defaults)
-            store.set(.grok, isEnabled: false)
+            store.set(.xai, isEnabled: false)
 
             let reloaded = ProviderVisibilityStore(userDefaults: defaults)
-            XCTAssertFalse(reloaded.isEnabled(.grok))
+            XCTAssertFalse(reloaded.isEnabled(.xai))
 
-            reloaded.set(.grok, isEnabled: true)
-            XCTAssertTrue(ProviderVisibilityStore(userDefaults: defaults).isEnabled(.grok))
+            reloaded.set(.xai, isEnabled: true)
+            XCTAssertTrue(ProviderVisibilityStore(userDefaults: defaults).isEnabled(.xai))
         }
     }
 
@@ -153,7 +153,7 @@ final class ProviderVisibilityStoreTests: XCTestCase {
 
             let store = ProviderVisibilityStore(userDefaults: defaults)
 
-            XCTAssertTrue(store.isEnabled(.grok))
+            XCTAssertTrue(store.isEnabled(.xai))
         }
     }
 
@@ -162,11 +162,11 @@ final class ProviderVisibilityStoreTests: XCTestCase {
         // that decision must outlive the promotion.
         withIsolatedDefaults { defaults in
             defaults.set(["Grok"], forKey: StorageKeys.hiddenProviderServices)
-            defaults.set(false, forKey: StorageKeys.grokProviderEnabled)
+            defaults.set(false, forKey: StorageKeys.xaiProviderEnabled)
 
             let store = ProviderVisibilityStore(userDefaults: defaults)
 
-            XCTAssertFalse(store.isEnabled(.grok))
+            XCTAssertFalse(store.isEnabled(.xai))
         }
     }
 

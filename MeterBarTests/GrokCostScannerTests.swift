@@ -329,7 +329,7 @@ final class GrokCostScannerTests: XCTestCase {
         let daily = try XCTUnwrap(scanDaily(roots: [root], days: 30)).first
 
         let row = try XCTUnwrap(daily)
-        XCTAssertEqual(row.provider, .grok)
+        XCTAssertEqual(row.provider, .xai)
         XCTAssertEqual(row.inputTokens, 1_000)
         XCTAssertEqual(row.outputTokens, 250)
         XCTAssertEqual(row.cacheReadTokens, 4_000)
@@ -392,7 +392,7 @@ final class GrokCostScannerTests: XCTestCase {
         )?.2)
 
         XCTAssertEqual(rows.count, 2, "the cutoff event shares an hour bucket with the next event")
-        XCTAssertEqual(rows.map(\.provider), [.grok, .grok])
+        XCTAssertEqual(rows.map(\.provider), [.xai, .xai])
         XCTAssertEqual(rows.reduce(0) { $0 + $1.totalTokens }, 385)
     }
 
@@ -510,7 +510,7 @@ final class GrokCostScannerTests: XCTestCase {
 
     // MARK: - Summary wiring
 
-    /// The whole point of the change: `.grok` has to reach `costs[]` and
+    /// The whole point of the change: `.xai` has to reach `costs[]` and
     /// `dailyUsage[]`, and only when the provider toggle says so.
     func testSummaryIncludesGrokRowsOnlyWhenTheProviderIsEnabled() throws {
         let home = try makeTemporaryDirectory(prefix: "GrokHome")
@@ -545,8 +545,8 @@ final class GrokCostScannerTests: XCTestCase {
             session: CostScanSession(cutoff: cutoff, options: .unlimited)
         )
 
-        XCTAssertEqual(enabled.summary.costs.map(\.provider), [.grok])
-        XCTAssertEqual(enabled.summary.dailyUsage.map(\.provider), [.grok])
+        XCTAssertEqual(enabled.summary.costs.map(\.provider), [.xai])
+        XCTAssertEqual(enabled.summary.dailyUsage.map(\.provider), [.xai])
         XCTAssertNil(enabled.summary.lifetime)
         XCTAssertTrue(disabled.summary.costs.isEmpty)
     }

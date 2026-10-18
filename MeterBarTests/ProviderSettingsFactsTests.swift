@@ -5,7 +5,7 @@ import XCTest
 /// Unit coverage for the `ProviderSettingsFacts` derivation extracted from the
 /// SettingsView monolith. The whole point of the value type is that every
 /// displayed string/color is derived from plain primitives, so it is testable
-/// without live provider services. Every case must cover `.grok`, which the
+/// without live provider services. Every case must cover `.xai`, which the
 /// original (pre-Grok) split omitted.
 final class ProviderSettingsFactsTests: XCTestCase {
     // MARK: - Helpers
@@ -68,8 +68,8 @@ final class ProviderSettingsFactsTests: XCTestCase {
     }
 
     func testNoticeLeavesOtherErrorsUntouched() {
-        XCTAssertEqual(facts(service: .grok, errorText: "HTTP 500").noticeText, "HTTP 500")
-        XCTAssertNil(facts(service: .grok).noticeText)
+        XCTAssertEqual(facts(service: .xai, errorText: "HTTP 500").noticeText, "HTTP 500")
+        XCTAssertNil(facts(service: .xai).noticeText)
     }
 
     // MARK: - sourceText (one branch per service, including Grok)
@@ -77,9 +77,8 @@ final class ProviderSettingsFactsTests: XCTestCase {
     func testSourceTextCoversEveryService() {
         XCTAssertEqual(facts(service: .claudeCode).sourceText, "Claude CLI /usage")
         XCTAssertEqual(facts(service: .codexCli).sourceText, "~/.codex/auth.json + ChatGPT usage API")
-        XCTAssertEqual(facts(service: .cursor).sourceText, "Cursor local state + usage API")
         XCTAssertEqual(facts(service: .openRouter).sourceText, "OpenRouter credits + key APIs")
-        XCTAssertEqual(facts(service: .grok).sourceText, "Grok Build ACP billing + usage reset API")
+        XCTAssertEqual(facts(service: .xai).sourceText, "Grok Build ACP billing + Cursor usage API")
     }
 
     // MARK: - planText
@@ -99,7 +98,7 @@ final class ProviderSettingsFactsTests: XCTestCase {
 
     func testCodexAndCursorCapitalizePlan() {
         XCTAssertEqual(facts(service: .codexCli, subscriptionType: "plus").planText, "Plus")
-        XCTAssertEqual(facts(service: .cursor, subscriptionType: "pro").planText, "Pro")
+        XCTAssertEqual(facts(service: .xai, subscriptionType: "pro").planText, "Pro")
     }
 
     func testOpenRouterHasNoPlan() {
@@ -108,19 +107,19 @@ final class ProviderSettingsFactsTests: XCTestCase {
 
     func testGrokPlanIsShownVerbatim() {
         // Grok's token is already human-facing, so it is not title-cased.
-        XCTAssertEqual(facts(service: .grok, subscriptionType: "SuperGrok").planText, "SuperGrok")
-        XCTAssertNil(facts(service: .grok, subscriptionType: "").planText)
+        XCTAssertEqual(facts(service: .xai, subscriptionType: "SuperGrok").planText, "SuperGrok")
+        XCTAssertNil(facts(service: .xai, subscriptionType: "").planText)
     }
 
     // MARK: - statusText
 
     func testStatusTextDisabledBeatsEverything() {
-        let derived = facts(service: .grok, isEnabled: false, hasAccess: true, worstBand: .critical)
+        let derived = facts(service: .xai, isEnabled: false, hasAccess: true, worstBand: .critical)
         XCTAssertEqual(derived.statusText, "Disabled")
     }
 
     func testStatusTextNotConnectedWhenNoAccess() {
-        XCTAssertEqual(facts(service: .cursor, hasAccess: false).statusText, "Not connected")
+        XCTAssertEqual(facts(service: .xai, hasAccess: false).statusText, "Not connected")
     }
 
     func testStatusTextRefreshFailedOnError() {
@@ -133,7 +132,7 @@ final class ProviderSettingsFactsTests: XCTestCase {
     }
 
     func testStatusTextAuthNoticeBeatsAHealthyBand() {
-        var derived = facts(service: .cursor, worstBand: .healthy)
+        var derived = facts(service: .xai, worstBand: .healthy)
         derived.authNotice = .stale(since: Date())
         XCTAssertEqual(derived.statusText, "Stale")
         XCTAssertEqual(derived.statusColor, .secondary)
@@ -168,12 +167,12 @@ final class ProviderSettingsFactsTests: XCTestCase {
     // MARK: - statusColor
 
     func testStatusColorSecondaryUntilEnabledAndConnected() {
-        XCTAssertEqual(facts(service: .grok, isEnabled: false).statusColor, .secondary)
-        XCTAssertEqual(facts(service: .grok, hasAccess: false).statusColor, .secondary)
+        XCTAssertEqual(facts(service: .xai, isEnabled: false).statusColor, .secondary)
+        XCTAssertEqual(facts(service: .xai, hasAccess: false).statusColor, .secondary)
     }
 
     func testStatusColorWarningOnError() {
-        XCTAssertEqual(facts(service: .grok, errorText: "boom").statusColor, MeterBarTheme.warning)
+        XCTAssertEqual(facts(service: .xai, errorText: "boom").statusColor, MeterBarTheme.warning)
     }
 
     func testStatusColorFollowsWorstBand() {

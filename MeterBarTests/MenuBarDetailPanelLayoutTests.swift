@@ -150,7 +150,7 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         return ProviderSnapshot(
             id: "cursor",
             title: "Cursor",
-            service: .cursor,
+            service: .xai,
             updatedAt: Date(),
             limits: [
                 SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
@@ -301,7 +301,7 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             rootView: MenuBarProviderDetailContent(
                 snapshot: cursorSnapshot(),
                 dailyUsage: ProviderDailyUsageSeries.make(
-                    service: .cursor,
+                    service: .kimiCode,
                     dailyUsage: [],
                     ledger: ProviderUsageLedger(),
                     accountCount: 1

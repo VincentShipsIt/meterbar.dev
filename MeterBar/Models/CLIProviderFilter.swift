@@ -51,8 +51,9 @@ nonisolated public enum CLIProviderFilter {
     /// not also select "Claude Platform" just because that name contains it.
     /// Anything that is not a token falls back to the substring match.
     private static func matches(_ service: ServiceType, _ needle: String) -> Bool {
-        if ServiceType.fromCLIIdentifier(needle) != nil {
-            return service.cliIdentifier == needle
+        // Includes the legacy `grok` / `cursor` tokens, which resolve to xAI.
+        if let tokenService = ServiceType.fromCLIIdentifier(needle) {
+            return service == tokenService
         }
         return service.rawValue.lowercased().contains(needle)
             || service.displayName.lowercased().contains(needle)

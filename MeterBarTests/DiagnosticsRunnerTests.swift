@@ -53,7 +53,7 @@ final class DiagnosticsRunnerTests: XCTestCase {
 
         XCTAssertNotNil(result[.claudeCode]?[ClaudeCodeAccount.defaultID])
         XCTAssertNotNil(result[.codexCli]?[work])
-        XCTAssertNil(result[.grok])
+        XCTAssertNil(result[.xai])
     }
 
     func testAccountRefreshErrorsDoNotCopyAProviderClaudeErrorOntoTheDefaultAccount() {
@@ -77,9 +77,9 @@ final class DiagnosticsRunnerTests: XCTestCase {
         )
 
         XCTAssertNotNil(result[.codexCli])
-        XCTAssertNotNil(result[.cursor])
+        XCTAssertNotNil(result[.xai])
         XCTAssertNotNil(result[.openRouter])
-        XCTAssertNotNil(result[.grok])
+        XCTAssertNotNil(result[.xai])
     }
 
     func testSummaryReturnsNilForEmptyReports() {

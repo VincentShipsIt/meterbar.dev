@@ -12,7 +12,8 @@ public struct ProviderBlockingCandidate: Equatable, Sendable {
         /// model-scoped or code-review allowance.
         case secondary
         /// A pool with its own availability state, separate from the parent
-        /// provider. Cursor's Grok Bot allowance is the current example.
+        /// provider. No provider reports one today; the role stays for pools
+        /// that appear later.
         case independentSubPool
     }
 
@@ -71,17 +72,9 @@ public enum ProviderBlockingPolicy {
         let exhausted = providerWindows.filter {
             !$0.limit.isEstimated && $0.limit.isAtLimit
         }
-        let hasCursorSpilloverPools = service == .cursor
-            && providerWindows.count >= 2
-            && providerWindows.allSatisfy {
-                ServiceType.isCursorIncludedPool(total: $0.limit.total)
-            }
-        let providerBlockers = hasCursorSpilloverPools && exhausted.count != providerWindows.count
-            ? []
-            : exhausted
 
         return ProviderBlockingEvaluation(
-            providerBlockers: providerBlockers,
+            providerBlockers: exhausted,
             independentSubPoolBlockers: independent
         )
     }

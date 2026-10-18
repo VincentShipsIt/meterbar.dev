@@ -34,7 +34,7 @@ final class QuotaEventServiceTests: XCTestCase {
                 codexAccounts: [codex],
                 codexAccountMetrics: [codex.id: usage(service: .codexCli, used: 50)],
                 grokAccounts: [grok],
-                grokAccountMetrics: [grok.id: usage(service: .grok, used: 50)],
+                grokAccountMetrics: [grok.id: usage(service: .xai, used: 50)],
                 openRouterAccounts: [.defaultAccount],
                 openRouterAccountMetrics: [
                     OpenRouterAccount.defaultID: usage(service: .openRouter, used: 50)
@@ -43,7 +43,7 @@ final class QuotaEventServiceTests: XCTestCase {
             enabledServices: Set(ServiceType.allCases)
         )
 
-        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.grok))
+        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.xai))
         XCTAssertEqual(snapshots.count, ServiceType.allCases.count)
         XCTAssertEqual(Set(snapshots.map(\.provider)), Set(ServiceType.allCases))
         XCTAssertEqual(
@@ -55,7 +55,7 @@ final class QuotaEventServiceTests: XCTestCase {
             QuotaEventAccount(id: codex.id.uuidString, name: codex.name)
         )
         XCTAssertEqual(
-            snapshots.first { $0.provider == .grok }?.account,
+            snapshots.first { $0.provider == .xai }?.account,
             QuotaEventAccount(id: grok.id.uuidString, name: grok.name)
         )
         let encoded = try? JSONEncoder().encode(snapshots.map(\.account))
@@ -87,21 +87,21 @@ final class QuotaEventServiceTests: XCTestCase {
             codexAccounts: [],
             grokAccounts: [personal, work, disabled]
         )
-        let grok = selectable.filter { $0.provider == .grok }
+        let grok = selectable.filter { $0.provider == .xai }
 
         XCTAssertEqual(grok.map(\.accountID), [personal.id.uuidString, work.id.uuidString])
         XCTAssertEqual(Set(grok.map(\.name)), ["Personal", "Work"])
         XCTAssertEqual(
             grok.map(\.selection),
             [
-                QuotaEventAccountSelection(provider: .grok, accountID: personal.id.uuidString),
-                QuotaEventAccountSelection(provider: .grok, accountID: work.id.uuidString),
+                QuotaEventAccountSelection(provider: .xai, accountID: personal.id.uuidString),
+                QuotaEventAccountSelection(provider: .xai, accountID: work.id.uuidString),
             ]
         )
         XCTAssertFalse(grok.contains { $0.accountID == disabled.id.uuidString })
         XCTAssertFalse(grok.contains { $0.accountID == "default" })
-        XCTAssertFalse(selectable.contains { $0.provider == .grok && $0.name == ServiceType.grok.displayName })
-        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.grok))
+        XCTAssertFalse(selectable.contains { $0.provider == .xai && $0.name == ServiceType.xai.displayName })
+        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.xai))
     }
 
     func testCatalogEvaluatesEnabledGrokProfilesIndependentlyAndOmitsDisabledOnes() {
@@ -117,19 +117,19 @@ final class QuotaEventServiceTests: XCTestCase {
         )
         disabled.isEnabled = false
         let snapshots = QuotaEventSnapshotCatalog.snapshots(
-            metrics: [.grok: usage(service: .grok, used: 10)],
+            metrics: [.xai: usage(service: .xai, used: 10)],
             accounts: QuotaEventAccountInputs(
                 grokAccounts: [.defaultAccount, work, disabled],
                 grokAccountMetrics: [
-                    GrokAccount.defaultID: usage(service: .grok, used: 50),
-                    work.id: usage(service: .grok, used: 91),
-                    disabled.id: usage(service: .grok, used: 100),
+                    GrokAccount.defaultID: usage(service: .xai, used: 50),
+                    work.id: usage(service: .xai, used: 91),
+                    disabled.id: usage(service: .xai, used: 100),
                 ]
             ),
-            enabledServices: [.grok]
+            enabledServices: [.xai]
         )
 
-        XCTAssertEqual(snapshots.map(\.provider), [.grok, .grok])
+        XCTAssertEqual(snapshots.map(\.provider), [.xai, .xai])
         XCTAssertEqual(
             Set(snapshots.map(\.account)),
             [
@@ -147,19 +147,19 @@ final class QuotaEventServiceTests: XCTestCase {
 
     func testLegacyProviderWideGrokSnapshotDoesNotCoexistWithAccountSnapshots() {
         let snapshots = QuotaEventSnapshotCatalog.snapshots(
-            metrics: [.grok: usage(service: .grok, used: 76)],
+            metrics: [.xai: usage(service: .xai, used: 76)],
             accounts: QuotaEventAccountInputs(
                 grokAccounts: [.defaultAccount],
-                grokAccountMetrics: [GrokAccount.defaultID: usage(service: .grok, used: 76)]
+                grokAccountMetrics: [GrokAccount.defaultID: usage(service: .xai, used: 76)]
             ),
-            enabledServices: [.grok]
+            enabledServices: [.xai]
         )
 
         XCTAssertEqual(snapshots.count, 1)
-        XCTAssertEqual(snapshots.first?.provider, .grok)
+        XCTAssertEqual(snapshots.first?.provider, .xai)
         XCTAssertEqual(snapshots.first?.account.id, GrokAccount.defaultID.uuidString)
         XCTAssertEqual(snapshots.first?.account.name, GrokAccount.defaultName)
-        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.grok))
+        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.xai))
     }
 
     func testCatalogUsesAggregateFallbackOnlyWhenOneEnabledAccountOwnsIt() {
@@ -203,8 +203,8 @@ final class QuotaEventServiceTests: XCTestCase {
             webhookDeliveryEnabled: true,
             webhookURLString: "https://hooks.example.com/meterbar",
             enabledQuotaEvents: [.critical],
-            enabledProviders: [.cursor],
-            enabledAccounts: [.init(provider: .cursor, accountID: account.id)],
+            enabledProviders: [.xai],
+            enabledAccounts: [.init(provider: .xai, accountID: account.id)],
             enabledWakeEvents: []
         )
 
@@ -255,11 +255,11 @@ final class QuotaEventServiceTests: XCTestCase {
             webhookDeliveryEnabled: false,
             webhookURLString: "",
             enabledQuotaEvents: [.warning, .critical, .exhausted, .recovered],
-            enabledProviders: [.grok],
+            enabledProviders: [.xai],
             enabledAccounts: [
-                QuotaEventAccountSelection(provider: .grok, accountID: "default"),
-                QuotaEventAccountSelection(provider: .grok, accountID: defaultAccount.id),
-                QuotaEventAccountSelection(provider: .grok, accountID: workAccount.id),
+                QuotaEventAccountSelection(provider: .xai, accountID: "default"),
+                QuotaEventAccountSelection(provider: .xai, accountID: defaultAccount.id),
+                QuotaEventAccountSelection(provider: .xai, accountID: workAccount.id),
             ],
             enabledWakeEvents: []
         )
@@ -267,9 +267,9 @@ final class QuotaEventServiceTests: XCTestCase {
         let primed = await service.observe(
             snapshots: [
                 QuotaEventSnapshot(
-                    provider: .grok,
+                    provider: .xai,
                     account: QuotaEventAccount(id: "default", name: "Grok"),
-                    metrics: usage(service: .grok, used: 50)
+                    metrics: usage(service: .xai, used: 50)
                 ),
             ],
             configuration: configuration,
@@ -278,16 +278,16 @@ final class QuotaEventServiceTests: XCTestCase {
         delivered.removeAll()
         let migratedSameBand = await service.observe(
             snapshots: [
-                QuotaEventSnapshot(provider: .grok, account: defaultAccount, metrics: usage(service: .grok, used: 50)),
-                QuotaEventSnapshot(provider: .grok, account: workAccount, metrics: usage(service: .grok, used: 50)),
+                QuotaEventSnapshot(provider: .xai, account: defaultAccount, metrics: usage(service: .xai, used: 50)),
+                QuotaEventSnapshot(provider: .xai, account: workAccount, metrics: usage(service: .xai, used: 50)),
             ],
             configuration: configuration,
             now: now.addingTimeInterval(1)
         )
         let crossed = await service.observe(
             snapshots: [
-                QuotaEventSnapshot(provider: .grok, account: defaultAccount, metrics: usage(service: .grok, used: 91)),
-                QuotaEventSnapshot(provider: .grok, account: workAccount, metrics: usage(service: .grok, used: 76)),
+                QuotaEventSnapshot(provider: .xai, account: defaultAccount, metrics: usage(service: .xai, used: 91)),
+                QuotaEventSnapshot(provider: .xai, account: workAccount, metrics: usage(service: .xai, used: 76)),
             ],
             configuration: configuration,
             now: now.addingTimeInterval(2)
@@ -311,9 +311,9 @@ final class QuotaEventServiceTests: XCTestCase {
 
     private func snapshot(account: QuotaEventAccount, used: Double) -> QuotaEventSnapshot {
         QuotaEventSnapshot(
-            provider: .cursor,
+            provider: .xai,
             account: account,
-            metrics: usage(service: .cursor, used: used)
+            metrics: usage(service: .xai, used: used)
         )
     }
 

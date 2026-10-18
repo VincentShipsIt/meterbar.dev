@@ -390,7 +390,7 @@ final class UsageDataManagerTests: XCTestCase {
         // and still leaves the shared cache untouched.
         let report = await manager.refreshAll()
         XCTAssertEqual(report.outcome(for: .codexCli)?.state, .skipped)
-        XCTAssertEqual(report.outcome(for: .cursor)?.state, .skipped)
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .skipped)
         sharedStore.flushPendingWrites()
         XCTAssertTrue(sharedStore.loadMetrics().isEmpty)
     }
@@ -409,10 +409,10 @@ final class UsageDataManagerTests: XCTestCase {
         let report = await manager.refreshAll()
 
         XCTAssertEqual(health.records[.codexCli]?.consecutiveFailures, 0)
-        XCTAssertEqual(health.records[.cursor]?.consecutiveFailures, 1)
-        XCTAssertTrue(health.records[.cursor]?.lastFailureWasShapeMismatch ?? false)
+        XCTAssertEqual(health.records[.xai]?.consecutiveFailures, 1)
+        XCTAssertTrue(health.records[.xai]?.lastFailureWasShapeMismatch ?? false)
         XCTAssertEqual(report.outcome(for: .codexCli)?.state, .refreshed)
-        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .failed)
     }
 
     func testRefreshAllMergesBothEnabledProviders() async {
@@ -422,13 +422,13 @@ final class UsageDataManagerTests: XCTestCase {
 
         await manager.refreshAll()
 
-        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .cursor])
+        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .xai])
         XCTAssertEqual(manager.metrics[.codexCli]?.resetCreditsAvailable, 2)
         XCTAssertFalse(manager.isLoading)
 
         // The merged snapshot is mirrored to the App Group file for the widget.
         sharedStore.flushPendingWrites()
-        XCTAssertEqual(Set(sharedStore.loadMetrics().keys), [.codexCli, .cursor])
+        XCTAssertEqual(Set(sharedStore.loadMetrics().keys), [.codexCli, .xai])
     }
 
     func testKimiCodeIsOffUntilEnabledAndThenRefreshesLikeAnyProvider() async {
@@ -503,7 +503,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refreshAll()
@@ -531,7 +531,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refreshAll(trigger: .background)
@@ -559,7 +559,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refreshAll()
@@ -583,7 +583,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refreshAll()
@@ -614,7 +614,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            hidden: [.codexCli, .xai, .openRouter, .xai],
             preloadClaudeAccountMetrics: [ClaudeCodeAccount.defaultID: cached]
         )
 
@@ -660,7 +660,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            hidden: [.codexCli, .xai, .openRouter, .xai],
             preloadClaudeAccountMetrics: [work.id: MetricsFixtures.claudeCode(sessionUsedPercent: 12)]
         )
 
@@ -709,7 +709,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            hidden: [.codexCli, .xai, .openRouter, .xai],
             preloadClaudeAccountMetrics: [
                 work.id: MetricsFixtures.claudeCode(sessionUsedPercent: 12)
             ]
@@ -752,7 +752,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refresh(service: .claudeCode)
@@ -797,7 +797,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refresh(service: .claudeCode)
@@ -838,7 +838,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
         await manager.refreshAll()
         XCTAssertFalse(manager.claudeCodeAccountStates.isEmpty)
@@ -867,7 +867,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             providerVisibilityStore: visibility,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
         await manager.refreshAll()
         XCTAssertFalse(manager.claudeCodeAccountStates.isEmpty)
@@ -897,7 +897,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            hidden: [.codexCli, .xai, .openRouter, .xai],
             preloadClaudeAccountMetrics: [ClaudeCodeAccount.defaultID: cached]
         )
 
@@ -928,7 +928,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok],
+            hidden: [.codexCli, .xai, .openRouter, .xai],
             preloadSharedAccountMetrics: [snapshot]
         )
 
@@ -1102,12 +1102,12 @@ final class UsageDataManagerTests: XCTestCase {
     func testAdaptiveSchedulerReschedulesToFastBoundWhenQuotaMoves() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let cached = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
             lastUpdated: now.addingTimeInterval(-60)
         )
         let refreshed = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 11, total: 100, resetTime: nil),
             lastUpdated: now
         )
@@ -1117,7 +1117,7 @@ final class UsageDataManagerTests: XCTestCase {
             codex: codex,
             cursor: cursor,
             hidden: [.codexCli],
-            preload: [.cursor: cached],
+            preload: [.xai: cached],
             savedRefreshInterval: .adaptive,
             schedulesAutoRefresh: true,
             adaptiveNow: { now }
@@ -1151,7 +1151,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             grok: provider,
             grokAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter],
+            hidden: [.codexCli, .openRouter],
             preloadGrokAccountMetrics: [
                 GrokAccount.defaultID: cachedDefault,
                 work.id: cachedWork
@@ -1165,7 +1165,7 @@ final class UsageDataManagerTests: XCTestCase {
 
         await manager.refreshAll()
 
-        XCTAssertEqual(manager.metrics[.grok]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(manager.metrics[.xai]?.weeklyLimit?.used, 18)
         XCTAssertEqual(manager.grokAccountMetrics[work.id]?.weeklyLimit?.used, 88)
         XCTAssertEqual(try XCTUnwrap(manager.scheduledRefreshInterval), 60, accuracy: 0.01)
         XCTAssertEqual(manager.effectiveRefreshReason, AdaptiveRefreshReason.recentQuotaMovement.displayText)
@@ -1317,8 +1317,8 @@ final class UsageDataManagerTests: XCTestCase {
         let report = await manager.refreshAll(trigger: .userInitiated)
 
         XCTAssertEqual(cursor.fetchCount, 0)
-        XCTAssertEqual(report.outcome(for: .cursor)?.state, .skipped)
-        XCTAssertEqual(report.outcome(for: .cursor)?.reason, "Another MeterBar refresh is already running.")
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .skipped)
+        XCTAssertEqual(report.outcome(for: .xai)?.reason, "Another MeterBar refresh is already running.")
         XCTAssertFalse(manager.isLoading)
     }
 
@@ -1336,7 +1336,7 @@ final class UsageDataManagerTests: XCTestCase {
 
         let report = await manager.refreshAll()
 
-        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .failed)
         let contender = WakeLock(lockURL: lockURL, legacyLockURLs: [], holderKind: .cli)
         XCTAssertEqual(contender.acquire(), .acquired)
         contender.release()
@@ -1382,7 +1382,7 @@ final class UsageDataManagerTests: XCTestCase {
         await manager.refreshAll()
         XCTAssertEqual(manager.refreshGeneration, 1)
 
-        await manager.refresh(service: .cursor)
+        await manager.refresh(service: .xai)
         XCTAssertEqual(manager.refreshGeneration, 2)
     }
 
@@ -1419,14 +1419,14 @@ final class UsageDataManagerTests: XCTestCase {
         let (manager, _) = makeManager(
             codex: codex,
             cursor: cursor,
-            hidden: [.cursor],
-            preload: [.cursor: MetricsFixtures.cursor()]
+            hidden: [.xai],
+            preload: [.xai: MetricsFixtures.cursor()]
         )
 
-        await manager.refresh(service: .cursor)
+        await manager.refresh(service: .xai)
 
         XCTAssertEqual(cursor.fetchCount, 0)
-        XCTAssertNil(manager.metrics[.cursor])
+        XCTAssertNil(manager.metrics[.xai])
         XCTAssertEqual(manager.refreshGeneration, 1)
     }
 
@@ -1457,7 +1457,7 @@ final class UsageDataManagerTests: XCTestCase {
     func testWakeRefreshesWhenEnabledCachedDataIsTenMinutesOld() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let staleMetrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
             lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds)
         )
@@ -1467,7 +1467,7 @@ final class UsageDataManagerTests: XCTestCase {
             codex: codex,
             cursor: cursor,
             hidden: [.codexCli],
-            preload: [.cursor: staleMetrics]
+            preload: [.xai: staleMetrics]
         )
 
         await manager.refreshAfterWakeIfNeeded(now: now)
@@ -1478,7 +1478,7 @@ final class UsageDataManagerTests: XCTestCase {
     func testWakeDoesNotRefreshFreshOrManualOnlyData() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let freshMetrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
             lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds + 1)
         )
@@ -1488,14 +1488,14 @@ final class UsageDataManagerTests: XCTestCase {
             codex: codex,
             cursor: cursor,
             hidden: [.codexCli],
-            preload: [.cursor: freshMetrics]
+            preload: [.xai: freshMetrics]
         )
 
         await manager.refreshAfterWakeIfNeeded(now: now)
         XCTAssertEqual(cursor.fetchCount, 0)
 
-        manager.metrics[.cursor] = UsageMetrics(
-            service: .cursor,
+        manager.metrics[.xai] = UsageMetrics(
+            service: .xai,
             weeklyLimit: freshMetrics.weeklyLimit,
             lastUpdated: now.addingTimeInterval(-RefreshInterval.tenMinutes.seconds)
         )
@@ -1508,7 +1508,7 @@ final class UsageDataManagerTests: XCTestCase {
     func testWakeIgnoresMissingMetricsForInaccessibleCodexAccounts() async {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let freshMetrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 1, total: 10, resetTime: now),
             lastUpdated: now
         )
@@ -1517,7 +1517,7 @@ final class UsageDataManagerTests: XCTestCase {
         let (manager, _) = makeManager(
             codex: codex,
             cursor: cursor,
-            preload: [.cursor: freshMetrics]
+            preload: [.xai: freshMetrics]
         )
 
         await manager.refreshAfterWakeIfNeeded(now: now)
@@ -1533,25 +1533,25 @@ final class UsageDataManagerTests: XCTestCase {
         let (manager, _) = makeManager(
             codex: codex,
             cursor: cursor,
-            preload: [.codexCli: MetricsFixtures.codexCli(), .cursor: cachedCursor]
+            preload: [.codexCli: MetricsFixtures.codexCli(), .xai: cachedCursor]
         )
 
         let report = await manager.refreshAll()
 
         // Codex refreshed; Cursor degraded gracefully to its cached value.
-        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .cursor])
-        XCTAssertEqual(manager.metrics[.cursor]?.weeklyLimit?.used, 999)
+        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .xai])
+        XCTAssertEqual(manager.metrics[.xai]?.weeklyLimit?.used, 999)
         XCTAssertNotNil(manager.lastError)
         XCTAssertEqual(report.outcome(for: .codexCli)?.state, .refreshed)
-        XCTAssertEqual(report.outcome(for: .cursor)?.state, .failed)
-        XCTAssertEqual(report.outcome(for: .cursor)?.servedFromCache, true)
-        XCTAssertEqual(report.outcome(for: .cursor)?.lastUpdated, cachedCursor.lastUpdated)
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .failed)
+        XCTAssertEqual(report.outcome(for: .xai)?.servedFromCache, true)
+        XCTAssertEqual(report.outcome(for: .xai)?.lastUpdated, cachedCursor.lastUpdated)
     }
 
     func testRefreshAllSkipsDisabledProvider() async {
         let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.codexCli()))
         let cursor = StubProvider(hasAccess: true, result: .success(MetricsFixtures.cursor()))
-        let (manager, _) = makeManager(codex: codex, cursor: cursor, hidden: [.cursor])
+        let (manager, _) = makeManager(codex: codex, cursor: cursor, hidden: [.xai])
 
         await manager.refreshAll()
 
@@ -1567,7 +1567,7 @@ final class UsageDataManagerTests: XCTestCase {
         await manager.refreshAll()
 
         XCTAssertEqual(codex.fetchCount, 0, "provider without access must not be fetched")
-        XCTAssertEqual(Set(manager.metrics.keys), [.cursor])
+        XCTAssertEqual(Set(manager.metrics.keys), [.xai])
     }
 
     func testRefreshSingleDisabledServiceRemovesIt() async {
@@ -1576,16 +1576,16 @@ final class UsageDataManagerTests: XCTestCase {
         let (manager, sharedStore) = makeManager(
             codex: codex,
             cursor: cursor,
-            hidden: [.cursor],
-            preload: [.cursor: MetricsFixtures.cursor()]
+            hidden: [.xai],
+            preload: [.xai: MetricsFixtures.cursor()]
         )
 
         // Cursor is disabled, so refreshing it should drop the cached entry.
-        await manager.refresh(service: .cursor)
+        await manager.refresh(service: .xai)
 
-        XCTAssertNil(manager.metrics[.cursor])
+        XCTAssertNil(manager.metrics[.xai])
         sharedStore.flushPendingWrites()
-        XCTAssertNil(sharedStore.loadMetrics()[.cursor])
+        XCTAssertNil(sharedStore.loadMetrics()[.xai])
     }
 
     func testRefreshAllFetchesIndependentCodexAccountsAndBridgesLabels() async throws {
@@ -1635,7 +1635,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             grok: provider,
             grokAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter],
+            hidden: [.codexCli, .openRouter],
             preloadGrokAccountMetrics: [work.id: cachedWork]
         )
 
@@ -1643,10 +1643,10 @@ final class UsageDataManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 18)
         XCTAssertEqual(manager.grokAccountMetrics[work.id]?.weeklyLimit?.used, 67)
-        XCTAssertEqual(manager.metrics[.grok]?.weeklyLimit?.used, 18)
-        XCTAssertEqual(report.outcome(for: .grok)?.state, .refreshed)
+        XCTAssertEqual(manager.metrics[.xai]?.weeklyLimit?.used, 18)
+        XCTAssertEqual(report.outcome(for: .xai)?.state, .refreshed)
         sharedStore.flushPendingWrites()
-        let grokSnapshots = sharedStore.loadAccountMetrics().filter { $0.metrics.service == .grok }
+        let grokSnapshots = sharedStore.loadAccountMetrics().filter { $0.metrics.service == .xai }
         XCTAssertEqual(grokSnapshots.map(\.name), [GrokAccount.defaultName, "Work"])
     }
 
@@ -1672,7 +1672,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         await manager.refreshAll()
@@ -1699,7 +1699,7 @@ final class UsageDataManagerTests: XCTestCase {
             codex: provider,
             cursor: cursor,
             codexAccountStore: accountStore,
-            hidden: [.cursor, .openRouter, .grok]
+            hidden: [.xai, .openRouter, .xai]
         )
 
         await manager.refreshAll()
@@ -1727,7 +1727,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             grok: provider,
             grokAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter]
+            hidden: [.codexCli, .openRouter]
         )
 
         await manager.refreshAll()
@@ -1757,7 +1757,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             codexAccountStore: codexStore,
-            hidden: [.openRouter, .grok]
+            hidden: [.openRouter]
         )
 
         await manager.refreshAll()
@@ -1793,7 +1793,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: accountStore,
-            hidden: [.codexCli, .cursor, .openRouter, .grok]
+            hidden: [.codexCli, .xai, .openRouter, .xai]
         )
 
         let report = await manager.refreshAll()
@@ -1867,7 +1867,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: ClaudeCodeAccountStore(userDefaults: accountDefaults),
-            hidden: [.openRouter, .grok]
+            hidden: [.openRouter, .xai]
         )
     }
 
@@ -2136,7 +2136,7 @@ final class UsageDataManagerTests: XCTestCase {
         // post-redemption fixture is built by hand here to show the spent
         // credit going to zero, matching what a real redemption reports.
         let redeemed = UsageMetrics(
-            service: .grok,
+            service: .xai,
             weeklyLimit: UsageLimit(
                 used: 0,
                 total: 100,
@@ -2155,8 +2155,8 @@ final class UsageDataManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.resetCreditsAvailable, 0)
         XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 0)
-        XCTAssertEqual(manager.metrics[.grok]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(manager.metrics[.xai]?.resetCreditsAvailable, 0)
         sharedStore.flushPendingWrites()
-        XCTAssertEqual(sharedStore.loadMetrics()[.grok]?.resetCreditsAvailable, 0)
+        XCTAssertEqual(sharedStore.loadMetrics()[.xai]?.resetCreditsAvailable, 0)
     }
 }

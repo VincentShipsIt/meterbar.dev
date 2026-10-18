@@ -12,9 +12,9 @@ final class CLIUsageTextReportTests: XCTestCase {
 
     func testCursorCodeReviewWindowIsTitledOnDemand() {
         let text = render(
-            .cursor,
+            .xai,
             metric: UsageMetrics(
-                service: .cursor,
+                service: .xai,
                 codeReviewLimit: UsageLimit(used: 12, total: 50, resetTime: nil),
                 lastUpdated: referenceDate
             )
@@ -132,28 +132,28 @@ final class CLIUsageTextReportTests: XCTestCase {
         let text = CLIUsageTextReport.lines(
             for: [
                 .claudeCode: MetricsFixtures.claudeCode(),
-                .cursor: MetricsFixtures.cursor(),
+                .xai: MetricsFixtures.cursor(),
             ],
             accounts: [work, personal]
         ).joined(separator: "\n")
 
         XCTAssertTrue(text.contains("▸ Claude Code · Personal"), text)
         XCTAssertTrue(text.contains("▸ Claude Code · Work"), text)
-        XCTAssertTrue(text.contains("▸ Cursor"), text)
+        XCTAssertTrue(text.contains("▸ xAI"), text)
         XCTAssertFalse(text.contains("▸ Claude Code\n"), text)
     }
 
     func testProviderOnlyOutputIsUnchangedWhenTheAccountCacheIsMissing() {
         let metric = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             codeReviewLimit: UsageLimit(used: 12, total: 50, resetTime: nil),
             lastUpdated: referenceDate
         )
-        let withoutAccounts = CLIUsageTextReport.lines(for: [.cursor: metric])
-        let withEmptyAccounts = CLIUsageTextReport.lines(for: [.cursor: metric], accounts: [])
+        let withoutAccounts = CLIUsageTextReport.lines(for: [.xai: metric])
+        let withEmptyAccounts = CLIUsageTextReport.lines(for: [.xai: metric], accounts: [])
 
         XCTAssertEqual(withoutAccounts, withEmptyAccounts)
-        XCTAssertTrue(withoutAccounts.joined(separator: "\n").contains("▸ Cursor"))
+        XCTAssertTrue(withoutAccounts.joined(separator: "\n").contains("▸ xAI"))
     }
 
     func testUnknownAccountFilterPrintsADeterministicEmptyMessage() {
@@ -175,9 +175,9 @@ final class CLIUsageTextReportTests: XCTestCase {
 
     func testGrokMonthlyWeeklySlotIsTitledMonthlyNeverWeekly() {
         let text = render(
-            .grok,
+            .xai,
             metric: UsageMetrics(
-                service: .grok,
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly),
                 lastUpdated: referenceDate
             )
@@ -189,9 +189,9 @@ final class CLIUsageTextReportTests: XCTestCase {
 
     func testAdditionalLimitsAppearInTheTextReport() {
         let text = render(
-            .grok,
+            .xai,
             metric: UsageMetrics(
-                service: .grok,
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
                 additionalLimits: [
                     UsageLimit(used: 12, total: 100, resetTime: nil, periodKind: .daily)

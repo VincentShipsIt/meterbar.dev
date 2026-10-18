@@ -17,9 +17,8 @@ final class UsageCLISelectionTests: XCTestCase {
     private lazy var metrics: [ServiceType: UsageMetrics] = [
         .claudeCode: MetricsFixtures.claudeCode(sessionUsedPercent: 10),
         .codexCli: MetricsFixtures.codexCli(sessionUsedPercent: 20),
-        .cursor: MetricsFixtures.cursor(),
         .openRouter: openRouterMetrics,
-        .grok: MetricsFixtures.grok(),
+        .xai: MetricsFixtures.grok(),
         .kimiCode: MetricsFixtures.kimiCode(),
         .zaiCodingPlan: MetricsFixtures.zaiCodingPlan(),
         .githubCopilot: MetricsFixtures.githubCopilot(),
@@ -57,23 +56,22 @@ final class UsageCLISelectionTests: XCTestCase {
                 "claude:Work",
                 "codex:Default CLI Profile",
                 "codex:Work",
-                "grok:Team",
+                "xai:Team",
             ]
         )
         XCTAssertEqual(Set(selection.metrics.keys), Set(ServiceType.allCases))
     }
 
-    func testCursorAndOpenRouterStayProviderOnlyWithNoFakeAccounts() {
+    func testOpenRouterAndSimpleProvidersStayProviderOnlyWithNoFakeAccounts() {
         let selection = resolve()
 
-        XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .cursor })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .openRouter })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .kimiCode })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .zaiCodingPlan })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .githubCopilot })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .museCode })
         XCTAssertFalse(selection.accounts.contains { $0.metrics.service == .claudePlatform })
-        XCTAssertNotNil(selection.metrics[.cursor])
+        XCTAssertNotNil(selection.metrics[.xai])
         XCTAssertNotNil(selection.metrics[.openRouter])
         XCTAssertNotNil(selection.metrics[.kimiCode])
     }

@@ -201,12 +201,12 @@ final class UsageNotificationCoordinator {
                     bundle: codex,
                     fallbackMetrics: metrics[.codexCli]
                 )
-            case .grok:
+            case .xai:
                 return planInput(
-                    service: .grok,
-                    providerEnabled: isEnabled(.grok),
+                    service: .xai,
+                    providerEnabled: isEnabled(.xai),
                     bundle: grok,
-                    fallbackMetrics: metrics[.grok]
+                    fallbackMetrics: metrics[.xai]
                 )
             case .openRouter:
                 return planInput(
@@ -215,8 +215,7 @@ final class UsageNotificationCoordinator {
                     bundle: openRouter,
                     fallbackMetrics: metrics[.openRouter]
                 )
-            case .cursor,
-                 .kimiCode,
+            case .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
                  .museCode,

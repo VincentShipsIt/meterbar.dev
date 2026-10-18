@@ -29,6 +29,15 @@ final class MenuBarSmokeTests: XCTestCase {
         func fetchUsageMetrics(account: CodexAccount) async throws -> UsageMetrics { metrics }
     }
 
+    /// Grok CLI source with no signed-in account, so the merged xAI provider
+    /// reads only the injected Cursor stub.
+    private final class SignedOutGrokProvider: GrokUsageProviding {
+        func canAccess(account: GrokAccount) -> Bool { false }
+        func fetchUsageMetrics(account: GrokAccount) async throws -> UsageMetrics {
+            throw URLError(.userAuthenticationRequired)
+        }
+    }
+
     private var tempDirectory: URL!
     private var suiteName: String!
     private var savedRefreshInterval: Any?
@@ -74,17 +83,19 @@ final class MenuBarSmokeTests: XCTestCase {
         let cacheDefaults = try XCTUnwrap(UserDefaults(suiteName: baseSuite))
         let visibilityDefaults = try XCTUnwrap(UserDefaults(suiteName: "\(baseSuite)-vis"))
         let visibility = ProviderVisibilityStore(userDefaults: visibilityDefaults)
-        // Claude Code and Grok are the two providers this smoke test does not
-        // stub, and both read a locally installed CLI. Hide them so the
-        // assertions describe the injected fixtures rather than whichever CLIs
-        // happen to be signed in on the machine running the suite.
+        // Claude Code reads a locally installed CLI this test does not stub, so
+        // hide it. xAI stays on, but its Grok source is stubbed signed-out and
+        // its account store isolated, so the assertions describe the injected
+        // fixtures rather than whichever CLIs are signed in on this machine.
         visibility.set(.claudeCode, isEnabled: false)
-        visibility.set(.grok, isEnabled: false)
+        let grokAccountDefaults = try XCTUnwrap(UserDefaults(suiteName: "\(baseSuite)-vis"))
         let sharedStore = SharedDataStore(directoryOverride: tempDirectory) {}
 
         let manager = UsageDataManager(
             codexCliService: codex,
             cursorService: cursor,
+            grokService: SignedOutGrokProvider(),
+            grokAccountStore: GrokAccountStore(userDefaults: grokAccountDefaults),
             providerVisibilityStore: visibility,
             sharedStore: sharedStore,
             cacheDefaults: cacheDefaults,
@@ -93,13 +104,13 @@ final class MenuBarSmokeTests: XCTestCase {
 
         // 2. "Inject fixture usage data": a refresh pulls from the fixture providers.
         await manager.refreshAll()
-        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .cursor])
+        XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .xai])
         XCTAssertFalse(manager.isLoading)
 
         // 3. Shared-data update: the widget bridge file reflects the new snapshot.
         sharedStore.flushPendingWrites()
         let bridged = sharedStore.loadMetrics()
-        XCTAssertEqual(Set(bridged.keys), [.codexCli, .cursor])
+        XCTAssertEqual(Set(bridged.keys), [.codexCli, .xai])
         XCTAssertEqual(bridged[.codexCli]?.weeklyLimit?.used, MetricsFixtures.codexCli().weeklyLimit?.used)
 
         // The persisted cache blob is also written (survives relaunch).

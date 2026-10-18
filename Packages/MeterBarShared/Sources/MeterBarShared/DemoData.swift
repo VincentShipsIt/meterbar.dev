@@ -38,15 +38,14 @@ public enum DemoData {
     /// Synthetic provider metrics for demo mode, keyed by service.
     ///
     /// Covers every `ServiceType` so demo / regression surfaces can exercise
-    /// Grok and OpenRouter without credentials. Adding a provider is a fixture
+    /// xAI and OpenRouter without credentials. Adding a provider is a fixture
     /// gap the capability parity tests fail on.
     public static func metrics(now: Date = Date()) -> [ServiceType: UsageMetrics] {
         [
             .claudeCode: claudeCode(now: now),
             .codexCli: codexCli(now: now),
-            .cursor: cursor(now: now),
             .openRouter: openRouter(now: now),
-            .grok: grok(now: now),
+            .xai: xai(now: now),
             .kimiCode: kimiCode(now: now),
             .zaiCodingPlan: zaiCodingPlan(now: now),
             .githubCopilot: githubCopilot(now: now),
@@ -84,38 +83,6 @@ public enum DemoData {
         )
     }
 
-    /// Cursor: two included percent pools plus the weekly Grok Bot bar,
-    /// all green. The included pools have no window seconds (matching the
-    /// real usage-summary mapping). Grok Bot carries a ~7-day window.
-    private static func cursor(now: Date) -> UsageMetrics {
-        let reset = now.addingTimeInterval(28 * 24 * 3_600)
-        return UsageMetrics(
-            service: .cursor,
-            sessionLimit: UsageLimit(
-                used: 18,
-                total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: reset,
-                periodKind: .monthly
-            ),
-            weeklyLimit: UsageLimit(
-                used: 42,
-                total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: reset,
-                periodKind: .monthly
-            ),
-            additionalLimits: [
-                UsageLimit(
-                    used: 22,
-                    total: ServiceType.cursorIncludedPoolTotal,
-                    resetTime: now.addingTimeInterval(5 * 24 * 3_600),
-                    windowSeconds: weeklyWindowSeconds,
-                    periodKind: .weekly
-                )
-            ],
-            lastUpdated: now
-        )
-    }
-
     /// OpenRouter: key-limit + account-credits windows matching production
     /// mapping (`sessionLimit` = key spend cap, `weeklyLimit` = credit
     /// balance). Dollar amounts stay comfortably green.
@@ -137,12 +104,26 @@ public enum DemoData {
         )
     }
 
-    /// Grok: a weekly-style window plus extra usage and a banked reset.
-    /// Production often has no session period — do not invent one.
-    private static func grok(now: Date) -> UsageMetrics {
+    /// xAI: the shared weekly pool (Grok and Cursor draw on it, so one gauge),
+    /// Cursor's on-demand spend, extra usage and a banked reset. Production
+    /// often has no session period — do not invent one.
+    private static func xai(now: Date) -> UsageMetrics {
         UsageMetrics(
-            service: .grok,
-            weeklyLimit: weeklyLimit(usedPercent: 47, now: now),
+            service: .xai,
+            weeklyLimit: UsageLimit(
+                used: 47,
+                total: 100,
+                resetTime: now.addingTimeInterval(24 * 3_600),
+                windowSeconds: weeklyWindowSeconds,
+                periodKind: .weekly
+            ),
+            // 3 of 20 after 6 of 30 days: comfortably in reserve on trajectory.
+            codeReviewLimit: UsageLimit(
+                used: 3,
+                total: 20,
+                resetTime: now.addingTimeInterval(24 * 24 * 3_600),
+                windowSeconds: 30 * 24 * 3_600
+            ),
             extraUsage: ExtraUsageStatus(state: .on, detail: "$10.00 credits"),
             resetCreditsAvailable: 1,
             lastUpdated: now

@@ -36,7 +36,7 @@ extension ServiceType {
                 localized: "provider.claude_platform.setup_prompt",
                 defaultValue: "Add your Claude Console session to see API credit"
             )
-        case .claudeCode, .codexCli, .cursor, .openRouter, .grok:
+        case .claudeCode, .codexCli, .openRouter, .xai:
             return ""
         }
     }

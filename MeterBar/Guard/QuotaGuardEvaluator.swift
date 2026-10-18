@@ -324,7 +324,7 @@ nonisolated enum QuotaGuardAccountResolver {
                     )
                 )
             }
-        case .grok:
+        case .xai:
             candidates = configuration.grokAccounts.map {
                 (
                     id: $0.id,

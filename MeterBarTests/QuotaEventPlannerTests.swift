@@ -40,7 +40,7 @@ final class QuotaEventPlannerTests: XCTestCase {
         XCTAssertEqual(critical.map(\.event), [.critical])
         XCTAssertEqual(exhausted.map(\.event), [.exhausted])
         XCTAssertEqual(recovered.map(\.event), [.recovered])
-        XCTAssertEqual(exhausted.first?.provider, .cursor)
+        XCTAssertEqual(exhausted.first?.provider, .xai)
         XCTAssertEqual(exhausted.first?.account, account)
         XCTAssertEqual(exhausted.first?.window, .session)
         XCTAssertEqual(exhausted.first?.percentage, 100)
@@ -207,10 +207,10 @@ final class QuotaEventPlannerTests: XCTestCase {
     func testMonthlyWeeklySlotKeepsWeeklyWindowAndAddsPeriodKind() throws {
         var planner = QuotaEventPlanner(debounceInterval: 60)
         let primed = QuotaEventSnapshot(
-            provider: .grok,
+            provider: .xai,
             account: account,
             metrics: UsageMetrics(
-                service: .grok,
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil, periodKind: .monthly),
                 lastUpdated: start
             )
@@ -220,10 +220,10 @@ final class QuotaEventPlannerTests: XCTestCase {
         let events = planner.evaluate(
             snapshots: [
                 QuotaEventSnapshot(
-                    provider: .grok,
+                    provider: .xai,
                     account: account,
                     metrics: UsageMetrics(
-                        service: .grok,
+                        service: .xai,
                         weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .monthly),
                         lastUpdated: start
                     )
@@ -250,10 +250,10 @@ final class QuotaEventPlannerTests: XCTestCase {
         var planner = QuotaEventPlanner(debounceInterval: 60)
         func snapshot(daily: Double, billing: Double, unknown: Double) -> QuotaEventSnapshot {
             QuotaEventSnapshot(
-                provider: .grok,
+                provider: .xai,
                 account: account,
                 metrics: UsageMetrics(
-                    service: .grok,
+                    service: .xai,
                     weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .weekly),
                     additionalLimits: [
                         UsageLimit(used: daily, total: 100, resetTime: nil, periodKind: .daily),
@@ -287,10 +287,10 @@ final class QuotaEventPlannerTests: XCTestCase {
         used: Double
     ) -> QuotaEventSnapshot {
         QuotaEventSnapshot(
-            provider: .cursor,
+            provider: .xai,
             account: account,
             metrics: UsageMetrics(
-                service: .cursor,
+                service: .xai,
                 sessionLimit: UsageLimit(
                     used: used,
                     total: 100,
@@ -307,10 +307,10 @@ final class QuotaEventPlannerTests: XCTestCase {
         weeklyUsed: Double
     ) -> QuotaEventSnapshot {
         QuotaEventSnapshot(
-            provider: .grok,
+            provider: .xai,
             account: account,
             metrics: UsageMetrics(
-                service: .grok,
+                service: .xai,
                 sessionLimit: UsageLimit(
                     used: sessionUsed,
                     total: 100,

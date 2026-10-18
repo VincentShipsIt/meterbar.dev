@@ -69,8 +69,7 @@ enum ProviderCardPresentation {
         for snapshot: ProviderSnapshot,
         failoverSettings: AccountFailoverSettingsStore
     ) -> Bool {
-        guard snapshot.isAccountCard,
-              let accountID = snapshot.accountID,
+        guard let accountID = snapshot.accountID,
               let provider = AccountFailoverProvider(service: snapshot.service),
               failoverSettings.isEnabled(for: provider)
         else { return false }
@@ -105,7 +104,7 @@ enum ProviderCardPresentation {
         isAuthenticated: Bool,
         hasResolvedAccount: Bool
     ) -> Bool {
-        guard snapshot.service == .codexCli || snapshot.service == .grok, !hasPendingConsumption else {
+        guard snapshot.service == .codexCli || snapshot.service == .xai, !hasPendingConsumption else {
             return false
         }
         return CodexResetCreditEligibility.isEligible(

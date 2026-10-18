@@ -203,7 +203,7 @@ final class QuotaWebhookClientTests: XCTestCase {
         let client = makeClient()
         let url = try XCTUnwrap(QuotaWebhookURLPolicy.validatedURL("https://hooks.example.com/meterbar"))
         let payload = QuotaEventPayload(
-            provider: .grok,
+            provider: .xai,
             account: QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: "Work"),
             event: .warning,
             window: .weekly,
@@ -220,7 +220,7 @@ final class QuotaWebhookClientTests: XCTestCase {
                 Set(object.keys),
                 ["schema_version", "provider", "account", "event", "window", "percentage", "band", "timestamp"]
             )
-            XCTAssertEqual(object["provider"] as? String, ServiceType.grok.rawValue)
+            XCTAssertEqual(object["provider"] as? String, ServiceType.xai.rawValue)
             let account = try XCTUnwrap(object["account"] as? [String: Any])
             XCTAssertEqual(Set(account.keys), ["id", "name"])
             XCTAssertEqual(account["id"] as? String, GrokAccount.defaultID.uuidString)
@@ -377,7 +377,7 @@ final class QuotaWebhookClientTests: XCTestCase {
 
     private func makePayload() -> QuotaEventPayload {
         QuotaEventPayload(
-            provider: .cursor,
+            provider: .xai,
             account: QuotaEventAccount(id: "default", name: "Cursor"),
             event: .warning,
             window: .session,

@@ -6,33 +6,29 @@ final class ServiceTypeTests: XCTestCase {
     func testRawValues() {
         XCTAssertEqual(ServiceType.claudeCode.rawValue, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.rawValue, "Codex CLI")
-        XCTAssertEqual(ServiceType.cursor.rawValue, "Cursor")
+        XCTAssertEqual(ServiceType.xai.rawValue, "xAI")
         XCTAssertEqual(ServiceType.openRouter.rawValue, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.rawValue, "Grok")
     }
 
     func testDisplayNames() {
         XCTAssertEqual(ServiceType.claudeCode.displayName, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.displayName, "OpenAI Codex")
-        XCTAssertEqual(ServiceType.cursor.displayName, "Cursor")
+        XCTAssertEqual(ServiceType.xai.displayName, "xAI")
         XCTAssertEqual(ServiceType.openRouter.displayName, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.displayName, "Grok")
     }
 
     func testIconNames() {
         XCTAssertEqual(ServiceType.claudeCode.iconName, "terminal")
         XCTAssertEqual(ServiceType.codexCli.iconName, "terminal.fill")
-        XCTAssertEqual(ServiceType.cursor.iconName, "cursorarrow.click")
+        XCTAssertEqual(ServiceType.xai.iconName, "bolt.fill")
         XCTAssertEqual(ServiceType.openRouter.iconName, "point.3.connected.trianglepath.dotted")
-        XCTAssertEqual(ServiceType.grok.iconName, "bolt.fill")
     }
 
     func testIdProperty() {
         XCTAssertEqual(ServiceType.claudeCode.id, "Claude Code")
         XCTAssertEqual(ServiceType.codexCli.id, "Codex CLI")
-        XCTAssertEqual(ServiceType.cursor.id, "Cursor")
+        XCTAssertEqual(ServiceType.xai.id, "xAI")
         XCTAssertEqual(ServiceType.openRouter.id, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.id, "Grok")
     }
 
     /// The compact brand form, for places where the full product name would
@@ -43,9 +39,8 @@ final class ServiceTypeTests: XCTestCase {
     func testShortNames() {
         XCTAssertEqual(ServiceType.claudeCode.shortName, "Claude")
         XCTAssertEqual(ServiceType.codexCli.shortName, "Codex")
-        XCTAssertEqual(ServiceType.cursor.shortName, "Cursor")
+        XCTAssertEqual(ServiceType.xai.shortName, "xAI")
         XCTAssertEqual(ServiceType.openRouter.shortName, "OpenRouter")
-        XCTAssertEqual(ServiceType.grok.shortName, "Grok")
         XCTAssertEqual(ServiceType.kimiCode.displayName, "Kimi Code")
         XCTAssertEqual(ServiceType.kimiCode.shortName, "Kimi")
         XCTAssertEqual(ServiceType.zaiCodingPlan.displayName, "Z.ai GLM Coding Plan")
@@ -68,7 +63,7 @@ final class ServiceTypeTests: XCTestCase {
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(ServiceType.allCases.count, 10)
+        XCTAssertEqual(ServiceType.allCases.count, 9)
     }
 
     func testCodable() throws {
@@ -89,9 +84,35 @@ final class ServiceTypeTests: XCTestCase {
         let claudeCode = try decoder.decode(ServiceType.self, from: claudeCodeJSON)
         XCTAssertEqual(claudeCode, .claudeCode)
 
-        let cursorJSON = "\"Cursor\"".data(using: .utf8)!
-        let cursor = try decoder.decode(ServiceType.self, from: cursorJSON)
-        XCTAssertEqual(cursor, .cursor)
+        let xaiJSON = "\"xAI\"".data(using: .utf8)!
+        XCTAssertEqual(try decoder.decode(ServiceType.self, from: xaiJSON), .xai)
+    }
+
+    /// Caches, visibility, widget configuration and iCloud payloads written
+    /// before the Grok/Cursor merge carry the old raw values; they must keep
+    /// decoding, and both land on the one xAI provider.
+    func testLegacyGrokAndCursorRawValuesDecodeToXAI() throws {
+        let decoder = JSONDecoder()
+        for legacy in ["Grok", "Cursor"] {
+            let data = Data("\"\(legacy)\"".utf8)
+            XCTAssertEqual(try decoder.decode(ServiceType.self, from: data), .xai, legacy)
+            XCTAssertEqual(ServiceType(rawValue: legacy), .xai, legacy)
+        }
+        XCTAssertNil(ServiceType(rawValue: "Nope"))
+    }
+
+    /// Encoding always writes the new canonical value, never a legacy one.
+    func testEncodingWritesTheCanonicalRawValue() throws {
+        let data = try JSONEncoder().encode(ServiceType.xai)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "\"xAI\"")
+    }
+
+    /// Dictionaries keyed by `ServiceType` encode as `[String, Value]` arrays;
+    /// a legacy key must still decode rather than fail the whole payload.
+    func testLegacyRawValueDecodesAsDictionaryKey() throws {
+        let json = Data(#"["Grok", 1]"#.utf8)
+        let decoded = try JSONDecoder().decode([ServiceType: Int].self, from: json)
+        XCTAssertEqual(decoded[.xai], 1)
     }
 
     // Centralized rule (popover, dashboard, widget, and notification copy all
@@ -103,142 +124,101 @@ final class ServiceTypeTests: XCTestCase {
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Fable")
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: "Sonnet"), "Sonnet")
         XCTAssertEqual(ServiceType.claudeCode.codeReviewQuotaTitle(modelLimitLabel: nil), "Model")
-        XCTAssertEqual(ServiceType.cursor.codeReviewQuotaTitle(modelLimitLabel: nil), "On-demand")
-        for service in ServiceType.allCases where service != .claudeCode && service != .cursor {
+        XCTAssertEqual(ServiceType.xai.codeReviewQuotaTitle(modelLimitLabel: nil), "On-demand")
+        for service in ServiceType.allCases where service != .claudeCode && service != .xai {
             XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: "Fable"), "Code Review")
             XCTAssertEqual(service.codeReviewQuotaTitle(modelLimitLabel: nil), "Code Review")
         }
     }
 
     // The long quota window is not weekly for every provider: OpenRouter's is a
-    // credit balance and Cursor's resets with the monthly billing cycle, so the
-    // shared title must not call either one "Weekly".
+    // credit balance, so the shared title must not call it "Weekly". xAI's
+    // shared pool is weekly, like every other provider's long window.
     func testWeeklyQuotaTitle() {
         XCTAssertEqual(ServiceType.openRouter.weeklyQuotaTitle, "Account credits")
         XCTAssertEqual(ServiceType.claudePlatform.weeklyQuotaTitle, "Account credits")
-        XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle, "Monthly")
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitle(limitTotal: ServiceType.cursorIncludedPoolTotal),
-            "Other Models"
-        )
-        XCTAssertEqual(ServiceType.cursor.weeklyQuotaTitle(limitTotal: 500), "Monthly")
         for service in ServiceType.allCases
-        where service != .openRouter && service != .cursor && service != .claudePlatform {
+        where service != .openRouter && service != .claudePlatform {
             XCTAssertEqual(service.weeklyQuotaTitle, "Weekly")
         }
     }
 
     func testSessionQuotaTitle() {
         XCTAssertEqual(ServiceType.openRouter.sessionQuotaTitle(limitTotal: nil), "Key limit")
-        XCTAssertEqual(ServiceType.cursor.sessionQuotaTitle(limitTotal: 20), "Session")
-        XCTAssertEqual(
-            ServiceType.cursor.sessionQuotaTitle(limitTotal: ServiceType.cursorIncludedPoolTotal),
-            "Cursor Models"
-        )
+        XCTAssertEqual(ServiceType.xai.sessionQuotaTitle(limitTotal: 20), "Session")
+        XCTAssertEqual(ServiceType.xai.sessionQuotaTitle(limitTotal: ServiceType.xaiPercentPoolTotal), "Session")
         XCTAssertEqual(ServiceType.claudeCode.sessionQuotaTitle(limitTotal: 100), "Session")
     }
 
-    /// A Grok monthly (or billing) allowance occupies the legacy weekly slot
-    /// but must never be titled Weekly.
-    func testGrokWeeklySlotHonorsReportedPeriodKind() {
+    /// A monthly (or billing) allowance in the weekly slot must never be
+    /// titled Weekly.
+    func testXAIWeeklySlotHonorsReportedPeriodKind() {
         XCTAssertEqual(
-            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .monthly),
+            ServiceType.xai.weeklyQuotaTitle(limitTotal: 100, periodKind: .monthly),
             "Monthly"
         )
         XCTAssertEqual(
-            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .billing),
+            ServiceType.xai.weeklyQuotaTitle(limitTotal: 100, periodKind: .billing),
             "Billing cycle"
         )
         XCTAssertEqual(
-            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .weekly),
+            ServiceType.xai.weeklyQuotaTitle(limitTotal: 100, periodKind: .weekly),
             "Weekly"
         )
         XCTAssertEqual(
-            ServiceType.grok.weeklyQuotaTitle(limitTotal: 100, periodKind: .unknown),
+            ServiceType.xai.weeklyQuotaTitle(limitTotal: 100, periodKind: .unknown),
             "Quota"
         )
         XCTAssertEqual(
-            ServiceType.grok.sessionQuotaTitle(limitTotal: 100, periodKind: .session),
+            ServiceType.xai.sessionQuotaTitle(limitTotal: 100, periodKind: .session),
             "Session"
         )
         XCTAssertEqual(
-            ServiceType.grok.additionalQuotaTitleKey(
+            ServiceType.xai.additionalQuotaTitleKey(
                 for: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .daily)
             ),
             .daily
         )
     }
 
-    /// Cursor Ultra's extra Grok Bot pool is an additional bar, not the
-    /// weekly slot. A monthly percent pool in the weekly slot stays Other Models.
-    func testCursorAdditionalWeeklyPercentPoolIsGrokBot() {
-        let additional = UsageLimit(
-            used: 18,
-            total: ServiceType.cursorIncludedPoolTotal,
-            resetTime: nil,
-            periodKind: .weekly
+    /// Legacy Cursor accounts keep their monthly pools as labelled additional
+    /// limits; the exact labels route back to the localized titles, any other
+    /// label stays provider data.
+    func testLegacyCursorPoolLabelsRouteToTheirLocalizedTitles() {
+        let models = UsageLimit(
+            used: 20, total: 100, resetTime: nil, periodKind: .monthly,
+            label: ServiceType.legacyCursorModelsLabel
         )
-        XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: additional), .grokBot)
-        XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: additional).englishTitle, "Grok Bot")
+        let other = UsageLimit(
+            used: 30, total: 100, resetTime: nil, periodKind: .monthly,
+            label: ServiceType.legacyOtherModelsLabel
+        )
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: models), .cursorModels)
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: other), .otherModels)
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: models).englishTitle, "Cursor Models")
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: other).englishTitle, "Other Models")
     }
 
-    func testCursorWeeklySlotPercentPoolTitlesWeeklyOnlyWhenThePeriodIsWeekly() {
+    func testOtherAdditionalLabelsStayVerbatimAndOtherProvidersDoNotRemapLegacyLabels() {
+        let custom = UsageLimit(used: 1, total: 10, resetTime: nil, label: "Grok Imagine")
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: custom), .model(label: "Grok Imagine"))
+        let legacy = UsageLimit(used: 1, total: 10, resetTime: nil, label: ServiceType.legacyCursorModelsLabel)
         XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(limitTotal: ServiceType.cursorIncludedPoolTotal),
-            .otherModels
-        )
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .monthly
-            ),
-            .otherModels
-        )
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .weekly
-            ),
-            .weekly
-        )
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitle(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .weekly
-            ),
-            "Weekly"
-        )
-        XCTAssertNotEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .weekly
-            ),
-            .grokBot
+            ServiceType.codexCli.additionalQuotaTitleKey(for: legacy),
+            .model(label: ServiceType.legacyCursorModelsLabel)
         )
     }
 
-    /// Once Cursor's included pools carry `periodKind: .monthly` (the pool
-    /// resets with the billing cycle), the provider exception must still win:
-    /// the periodKind override is a fallback for slots with no dedicated
-    /// title, not a way to retitle Cursor Models / Other Models as "Monthly".
-    func testCursorIncludedPoolOutranksPeriodKindOverride() {
+    func testIsXAIPercentPool() {
+        XCTAssertTrue(ServiceType.isXAIPercentPool(total: 100))
+        XCTAssertFalse(ServiceType.isXAIPercentPool(total: 500))
+    }
+
+    /// A non-percent xAI total in a monthly slot falls through to the
+    /// periodKind override.
+    func testXAIPeriodKindOverridesApplyToNonPercentTotals() {
         XCTAssertEqual(
-            ServiceType.cursor.sessionQuotaTitleKey(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .monthly
-            ),
-            .cursorModels
-        )
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
-                limitTotal: ServiceType.cursorIncludedPoolTotal,
-                periodKind: .monthly
-            ),
-            .otherModels
-        )
-        // A non-pool Cursor total still falls through to the periodKind override.
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(limitTotal: 500, periodKind: .monthly),
+            ServiceType.xai.weeklyQuotaTitleKey(limitTotal: 500, periodKind: .monthly),
             .monthly
         )
     }

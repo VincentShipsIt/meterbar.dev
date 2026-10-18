@@ -248,7 +248,7 @@ final class GrokCLIUsageService: ObservableObject {
         }
 
         return UsageMetrics(
-            service: .grok,
+            service: .xai,
             sessionLimit: sessionLimit,
             weeklyLimit: weeklyLimit,
             extraUsage: config.extraUsageStatus,

@@ -75,9 +75,8 @@ struct ProviderCatalogSettingsView: View {
         switch service {
         case .claudeCode: return "Track Pro/Max quota via Claude CLI profiles."
         case .codexCli: return "Track Codex CLI quota from local Codex auth."
-        case .cursor: return "Track Cursor quota from local Cursor state."
         case .openRouter: return "Track credit balance, spend, and per-key limits."
-        case .grok: return "Track Grok Build session and weekly quota from its cached CLI login."
+        case .xai: return "Track the shared Grok and Cursor weekly pool from the Grok CLI login and local Cursor state."
         case .kimiCode: return "Track Kimi Code 5-hour and weekly quota from its sign-in or an API key."
         case .zaiCodingPlan: return "Track GLM Coding Plan 5-hour and weekly credits and peak hours from an API key."
         case .githubCopilot: return "Track Copilot AI-credit budgets where GitHub documents one."

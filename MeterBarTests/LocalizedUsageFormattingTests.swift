@@ -74,7 +74,6 @@ final class LocalizedUsageFormattingTests: XCTestCase {
             .cursorModels,
             .accountCredits,
             .otherModels,
-            .grokBot,
             .monthly,
             .weekly,
             .codeReview,

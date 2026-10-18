@@ -132,12 +132,29 @@ final class ProviderParseHealthStore: ObservableObject {
         persist()
     }
 
+    /// Legacy Grok and Cursor records both decode to `.xai`, so a plain
+    /// unique-key dictionary would trap on an upgraded install. Keep the record
+    /// with the newest success (the merged card stays quiet while one source is
+    /// healthy), falling back to the newest attempt.
+    nonisolated static func keyedByProvider(
+        _ records: [ProviderParseHealthRecord]
+    ) -> [ServiceType: ProviderParseHealthRecord] {
+        Dictionary(records.map { ($0.provider, $0) }) { current, other in
+            let currentSuccess = current.lastSuccess ?? .distantPast
+            let otherSuccess = other.lastSuccess ?? .distantPast
+            if currentSuccess != otherSuccess {
+                return currentSuccess > otherSuccess ? current : other
+            }
+            return current.lastAttempt >= other.lastAttempt ? current : other
+        }
+    }
+
     nonisolated static func persistedRecords(from userDefaults: UserDefaults) -> [ServiceType: ProviderParseHealthRecord] {
         guard let data = userDefaults.data(forKey: storageKey),
               let decoded = try? JSONDecoder().decode([ProviderParseHealthRecord].self, from: data) else {
             return [:]
         }
-        return Dictionary(uniqueKeysWithValues: decoded.map { ($0.provider, $0) })
+        return keyedByProvider(decoded)
     }
 
     nonisolated static func sharedRecords() -> [ServiceType: ProviderParseHealthRecord] {
@@ -176,7 +193,7 @@ final class ProviderParseHealthStore: ObservableObject {
               let decoded = try? JSONDecoder().decode([ProviderParseHealthRecord].self, from: data) else {
             return nil
         }
-        return Dictionary(uniqueKeysWithValues: decoded.map { ($0.provider, $0) })
+        return keyedByProvider(decoded)
     }
 
     nonisolated private static func encodedRecords(

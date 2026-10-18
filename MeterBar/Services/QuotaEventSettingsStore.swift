@@ -21,14 +21,14 @@ nonisolated struct QuotaEventAccountSelection: Codable, Equatable, Hashable, Sen
     /// Existing provider-wide Grok opt-ins used `default`. The default Grok
     /// profile now has a stable UUID, so rewrite that one identifier in place.
     var normalizedForPersistence: QuotaEventAccountSelection {
-        guard provider == .grok, accountID == "default" else { return self }
-        return QuotaEventAccountSelection(provider: .grok, accountID: GrokAccount.defaultID.uuidString)
+        guard provider == .xai, accountID == "default" else { return self }
+        return QuotaEventAccountSelection(provider: .xai, accountID: GrokAccount.defaultID.uuidString)
     }
 
     func matches(_ payload: QuotaEventPayload) -> Bool {
         guard provider == payload.provider else { return false }
         if accountID == payload.account.id { return true }
-        return provider == .grok
+        return provider == .xai
             && accountID == "default"
             && payload.account.id == GrokAccount.defaultID.uuidString
     }

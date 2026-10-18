@@ -53,7 +53,7 @@ final class WidgetPresentationTests: XCTestCase {
             metrics: [
                 .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 10),
                 .codexCli: makeMetrics(.codexCli, weeklyUsed: 20),
-                .cursor: makeMetrics(.cursor, weeklyUsed: 30)
+                .xai: makeMetrics(.xai, weeklyUsed: 30)
             ],
             preferences: preferences,
             family: .medium
@@ -67,11 +67,11 @@ final class WidgetPresentationTests: XCTestCase {
     func testEveryFamilyAppliesTheSameProviderOrderingBeforeItsBudget() {
         let metrics: [ServiceType: UsageMetrics] = [
             .openRouter: makeMetrics(.openRouter, weeklyUsed: 40),
-            .cursor: makeMetrics(.cursor, weeklyUsed: 30),
+            .xai: makeMetrics(.xai, weeklyUsed: 30),
             .codexCli: makeMetrics(.codexCli, weeklyUsed: 20),
             .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 10)
         ]
-        let expectedOrder: [ServiceType] = [.claudeCode, .codexCli, .cursor, .openRouter]
+        let expectedOrder: [ServiceType] = [.claudeCode, .codexCli, .xai, .openRouter]
 
         let small = presentation(metrics: metrics, family: .small)
         let medium = presentation(metrics: metrics, family: .medium)
@@ -92,7 +92,7 @@ final class WidgetPresentationTests: XCTestCase {
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, sessionUsed: 99, weeklyUsed: 10),
             .codexCli: makeMetrics(.codexCli, sessionUsed: 5, weeklyUsed: 80),
-            .cursor: makeMetrics(.cursor, sessionUsed: 60, weeklyUsed: 80)
+            .xai: makeMetrics(.xai, sessionUsed: 60, weeklyUsed: 80)
         ]
 
         let result = presentation(
@@ -101,7 +101,7 @@ final class WidgetPresentationTests: XCTestCase {
             family: .large
         )
 
-        XCTAssertEqual(result.rows.map(\.service), [.codexCli, .cursor, .claudeCode])
+        XCTAssertEqual(result.rows.map(\.service), [.codexCli, .xai, .claudeCode])
     }
 
     func testUrgencyOrderingIncludesVisibleAdditionalLimits() {
@@ -110,8 +110,8 @@ final class WidgetPresentationTests: XCTestCase {
         preferences.visibleQuotaWindows = [.weekly]
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90),
-            .cursor: makeMetrics(
-                .cursor,
+            .xai: makeMetrics(
+                .xai,
                 weeklyUsed: 10,
                 additionalLimits: [
                     UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly)
@@ -125,7 +125,7 @@ final class WidgetPresentationTests: XCTestCase {
             family: .large
         )
 
-        XCTAssertEqual(uniqueServices(in: result), [.cursor, .claudeCode])
+        XCTAssertEqual(uniqueServices(in: result), [.xai, .claudeCode])
     }
 
     func testSecondaryAdditionalExhaustionDoesNotOverrideProviderUrgency() {
@@ -134,8 +134,8 @@ final class WidgetPresentationTests: XCTestCase {
         preferences.visibleQuotaWindows = [.weekly]
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, weeklyUsed: 90),
-            .cursor: makeMetrics(
-                .cursor,
+            .xai: makeMetrics(
+                .xai,
                 weeklyUsed: 10,
                 additionalLimits: [
                     UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily)
@@ -149,7 +149,7 @@ final class WidgetPresentationTests: XCTestCase {
             family: .large
         )
 
-        XCTAssertEqual(result.rows.map(\.service), [.claudeCode, .cursor])
+        XCTAssertEqual(result.rows.map(\.service), [.claudeCode, .xai])
         XCTAssertFalse(result.rows.contains(where: \.isBlocked))
     }
 
@@ -159,8 +159,8 @@ final class WidgetPresentationTests: XCTestCase {
         preferences.visibleQuotaWindows = [.session]
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, sessionUsed: 20, weeklyUsed: 90),
-            .cursor: makeMetrics(
-                .cursor,
+            .xai: makeMetrics(
+                .xai,
                 sessionUsed: 5,
                 weeklyUsed: 10,
                 additionalLimits: [
@@ -175,7 +175,7 @@ final class WidgetPresentationTests: XCTestCase {
             family: .large
         )
 
-        XCTAssertEqual(uniqueServices(in: result), [.cursor, .claudeCode])
+        XCTAssertEqual(uniqueServices(in: result), [.xai, .claudeCode])
     }
 
     func testUsedAndRemainingModesProduceComplementaryValues() throws {
@@ -233,7 +233,7 @@ final class WidgetPresentationTests: XCTestCase {
                 codeReviewUsed: 30,
                 modelLimitLabel: "Fable"
             ),
-            .cursor: makeMetrics(.cursor, sessionUsed: nil, weeklyUsed: 40)
+            .xai: makeMetrics(.xai, sessionUsed: nil, weeklyUsed: 40)
         ]
 
         let result = presentation(
@@ -248,15 +248,12 @@ final class WidgetPresentationTests: XCTestCase {
                 "Claude Code:session",
                 "Claude Code:weekly",
                 "Claude Code:codeReview",
-                "Cursor:weekly"
+                "xAI:weekly"
             ]
         )
         XCTAssertEqual(result.rows[2].quotaTitle, "Fable")
-        // The shared window id stays `weekly`; only Cursor's display copy
-        // follows its billing-cycle reset. Percent-of-100 pools match the
-        // dashboard's Other Models bar.
         XCTAssertEqual(result.rows[1].quotaTitle, "Weekly")
-        XCTAssertEqual(result.rows[3].quotaTitle, "Other Models")
+        XCTAssertEqual(result.rows[3].quotaTitle, "Weekly")
     }
 
     func testResetAndFreshnessMetadataObeyIndependentToggles() throws {
@@ -470,23 +467,23 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertNotEqual(row.summaryText, "OUT")
     }
 
-    func testOneDepletedCursorSpilloverPoolDoesNotBlockEitherPool() {
+    func testOneDepletedXAIWindowBlocksTheProvider() {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = [.session, .weekly]
         let result = presentation(
-            metrics: [.cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 20)],
+            metrics: [.xai: makeMetrics(.xai, sessionUsed: 100, weeklyUsed: 20)],
             preferences: preferences
         )
 
         XCTAssertEqual(result.rows.count, 2)
-        XCTAssertFalse(result.rows.contains(where: \.isBlocked))
+        XCTAssertTrue(result.rows.contains(where: \.isBlocked))
     }
 
-    func testBothDepletedCursorSpilloverPoolsBlockTheProvider() {
+    func testBothDepletedXAIWindowsBlockTheProvider() {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = [.session, .weekly]
         let result = presentation(
-            metrics: [.cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 100)],
+            metrics: [.xai: makeMetrics(.xai, sessionUsed: 100, weeklyUsed: 100)],
             preferences: preferences
         )
 
@@ -495,37 +492,35 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertTrue(result.rows.allSatisfy { $0.summaryText == "OUT" })
     }
 
-    func testExhaustedGrokBotPoolIsBlockedSeparatelyFromCursorProvider() throws {
+    func testExhaustedAdditionalXAIPoolDoesNotBlockTheProvider() throws {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = [.session, .weekly]
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
             additionalLimits: [
-                UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly)
+                UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly, label: "Spend pool")
             ],
             lastUpdated: now
         )
-        let result = presentation(metrics: [.cursor: metrics], preferences: preferences)
+        let result = presentation(metrics: [.xai: metrics], preferences: preferences)
 
-        let grokBot = try XCTUnwrap(result.rows.first { $0.quotaTitleKey == .grokBot })
-        XCTAssertTrue(grokBot.isBlocked)
-        XCTAssertEqual(grokBot.summaryText, "OUT")
-        XCTAssertTrue(grokBot.isAdditionalLimit)
-        XCTAssertTrue(result.rows.filter { !$0.isAdditionalLimit }.allSatisfy { !$0.isBlocked })
+        let pool = try XCTUnwrap(result.rows.first { $0.quotaTitleKey == .model(label: "Spend pool") })
+        XCTAssertTrue(pool.isAdditionalLimit)
+        XCTAssertFalse(pool.isBlocked, "a legacy Cursor pool is secondary and never blocks xAI")
+        XCTAssertFalse(result.rows.contains(where: \.isBlocked))
     }
 
-    func testProviderBlockerLeadsWhenIndependentPoolHasLaterReset() throws {
+    func testProviderBlockerLeadsAndKeepsTheSelectedRowBudget() throws {
         let sessionReset = now.addingTimeInterval(60 * 60)
         let weeklyReset = now.addingTimeInterval(2 * 60 * 60)
-        let grokBotReset = now.addingTimeInterval(3 * 60 * 60)
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 100, total: 100, resetTime: sessionReset),
             weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: weeklyReset),
             additionalLimits: [
-                UsageLimit(used: 100, total: 100, resetTime: grokBotReset, periodKind: .weekly)
+                UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .weekly, label: "Other Models")
             ],
             lastUpdated: now
         )
@@ -534,7 +529,7 @@ final class WidgetPresentationTests: XCTestCase {
         hiddenPreferences.visibleQuotaWindows = [.session]
         hiddenPreferences.showsResetTime = true
         let hidden = presentation(
-            metrics: [.cursor: metrics],
+            metrics: [.xai: metrics],
             preferences: hiddenPreferences,
             family: .small
         )
@@ -543,22 +538,8 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(hidden.rows.count, 1, "the blocker must keep the selected row budget")
         XCTAssertFalse(hiddenHeadline.isAdditionalLimit)
         XCTAssertTrue(hiddenHeadline.isBlocked)
-        XCTAssertEqual(hiddenHeadline.quotaTitleKey, .otherModels)
+        XCTAssertEqual(hiddenHeadline.quotaTitleKey, .weekly)
         XCTAssertEqual(hiddenHeadline.resetTime, weeklyReset)
-
-        var visiblePreferences = hiddenPreferences
-        visiblePreferences.visibleQuotaWindows = [.session, .weekly]
-        let visible = presentation(
-            metrics: [.cursor: metrics],
-            preferences: visiblePreferences,
-            family: .small
-        )
-        let grokBot = try XCTUnwrap(visible.rows.first { $0.quotaTitleKey == .grokBot })
-
-        XCTAssertFalse(visible.rows[0].isAdditionalLimit, "the parent provider outage must lead")
-        XCTAssertEqual(visible.rows[0].quotaTitleKey, .otherModels)
-        XCTAssertTrue(grokBot.isBlocked, "headline precedence must not clear the independent blocked state")
-        XCTAssertEqual(grokBot.resetTime, grokBotReset)
     }
 
     func testBlockedResetTimeHonorsRecentDueGraceAndHidesExpiredDates() throws {
@@ -600,23 +581,22 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertNil(expired.resetTime)
     }
 
-    func testHiddenAdditionalLimitCanBlockAnAccount() throws {
+    func testHiddenAdditionalLimitDoesNotBlockAnAccount() throws {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = [.session]
-        preferences.showsResetTime = true
-        let resetTime = now.addingTimeInterval(3 * 60 * 60)
         let result = presentation(
             metrics: [
-                .cursor: UsageMetrics(
-                    service: .cursor,
+                .xai: UsageMetrics(
+                    service: .xai,
                     sessionLimit: UsageLimit(used: 12, total: 100, resetTime: nil),
                     weeklyLimit: UsageLimit(used: 23, total: 100, resetTime: nil),
                     additionalLimits: [
                         UsageLimit(
                             used: 100,
-                            total: ServiceType.cursorIncludedPoolTotal,
-                            resetTime: resetTime,
-                            periodKind: .weekly
+                            total: ServiceType.xaiPercentPoolTotal,
+                            resetTime: nil,
+                            periodKind: .weekly,
+                            label: "Other Models"
                         )
                     ],
                     lastUpdated: now
@@ -627,11 +607,9 @@ final class WidgetPresentationTests: XCTestCase {
         let row = try XCTUnwrap(result.rows.first)
 
         XCTAssertEqual(result.rows.count, 1)
-        XCTAssertTrue(row.isBlocked)
-        XCTAssertTrue(row.isAdditionalLimit)
-        XCTAssertEqual(row.quotaWindow, .weekly)
-        XCTAssertEqual(row.quotaTitle, "Grok Bot")
-        XCTAssertEqual(row.resetTime, resetTime)
+        XCTAssertFalse(row.isBlocked)
+        XCTAssertFalse(row.isAdditionalLimit)
+        XCTAssertEqual(row.quotaWindow, .session)
     }
 
     func testUrgencyAndOverflowAccountForBlockersHiddenByWindowPreferences() {
@@ -640,8 +618,8 @@ final class WidgetPresentationTests: XCTestCase {
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, sessionUsed: 100, weeklyUsed: 10),
             .codexCli: makeMetrics(.codexCli, sessionUsed: 100, weeklyUsed: 20),
-            .cursor: makeMetrics(.cursor, sessionUsed: 100, weeklyUsed: 30),
-            .grok: makeMetrics(.grok, sessionUsed: nil, weeklyUsed: 99)
+            .xai: makeMetrics(.xai, sessionUsed: 100, weeklyUsed: 30),
+            .openRouter: makeMetrics(.openRouter, sessionUsed: nil, weeklyUsed: 99)
         ]
 
         let result = presentation(metrics: metrics, preferences: preferences, family: .medium)
@@ -649,7 +627,7 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(result.rows.count, 2)
         XCTAssertEqual(result.hiddenRowCount, 2)
         XCTAssertTrue(result.rows.allSatisfy(\.isBlocked))
-        XCTAssertFalse(result.rows.contains { $0.service == .grok })
+        XCTAssertFalse(result.rows.contains { $0.service == .openRouter })
     }
 
     func testExplicitMissingSelectionIsUnavailableRatherThanHealthy() throws {
@@ -703,7 +681,7 @@ final class WidgetPresentationTests: XCTestCase {
         noSelectionPreferences.accountSelection = .explicit([])
 
         let noSelection = presentation(
-            metrics: [.cursor: makeMetrics(.cursor, weeklyUsed: 20)],
+            metrics: [.xai: makeMetrics(.xai, weeklyUsed: 20)],
             preferences: noSelectionPreferences
         )
         let unavailable = presentation(metrics: [:])
@@ -721,7 +699,7 @@ final class WidgetPresentationTests: XCTestCase {
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: makeMetrics(.claudeCode, sessionUsed: 10, weeklyUsed: 20),
             .codexCli: makeMetrics(.codexCli, sessionUsed: 30, weeklyUsed: 40),
-            .cursor: makeMetrics(.cursor, sessionUsed: nil, weeklyUsed: 50)
+            .xai: makeMetrics(.xai, sessionUsed: nil, weeklyUsed: 50)
         ]
 
         let result = presentation(
@@ -795,10 +773,10 @@ final class WidgetPresentationTests: XCTestCase {
     /// and CLI take `quotaTitle`, the widget extension localizes
     /// `quotaTitleKey`. The extension used to re-derive the routing from
     /// `(service, quotaWindow)` on its own side, so this pins the two to the
-    /// same answer for every provider, window, and Cursor pool shape.
+    /// same answer for every provider, window, and pool shape.
     func testQuotaTitleIsDerivedFromTheSharedRoutingKey() {
         for service in ServiceType.allCases {
-            for total in [ServiceType.cursorIncludedPoolTotal, 500] {
+            for total in [ServiceType.xaiPercentPoolTotal, 500] {
                 for row in allWindowRows(service: service, total: total) {
                     XCTAssertEqual(
                         row.quotaTitle,
@@ -820,23 +798,21 @@ final class WidgetPresentationTests: XCTestCase {
     }
 
     /// The routing table itself, spelled out once so a change to it has to be
-    /// deliberate. Cursor's included pools are the percent-of-100 shape;
-    /// anything else is the legacy request quota.
+    /// deliberate.
     private func expectedQuotaTitleKey(
         service: ServiceType,
         window: WidgetQuotaWindow,
         total: Double
     ) -> ServiceType.QuotaTitleKey {
-        let isIncludedPool = ServiceType.isCursorIncludedPool(total: total)
         switch (service, window) {
         case (.claudeCode, .codeReview): return .model(label: "Fable")
-        case (.cursor, .codeReview): return .onDemand
+        case (.xai, .codeReview): return .onDemand
         case (_, .codeReview): return .codeReview
         case (.openRouter, .session): return .keyLimit
-        case (.cursor, .session): return isIncludedPool ? .cursorModels : .session
+        case (.xai, .session): return .session
         case (_, .session): return .session
         case (.openRouter, .weekly), (.claudePlatform, .weekly): return .accountCredits
-        case (.cursor, .weekly): return isIncludedPool ? .otherModels : .monthly
+        case (.xai, .weekly): return .weekly
         case (_, .weekly): return .weekly
         }
     }
@@ -898,15 +874,15 @@ final class WidgetPresentationTests: XCTestCase {
         preferences.visibleQuotaWindows = [.weekly]
         let presentation = presentation(
             metrics: [
-                .grok: UsageMetrics(
-                    service: .grok,
+                .xai: UsageMetrics(
+                    service: .xai,
                     weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly),
                     lastUpdated: now
                 )
             ],
             preferences: preferences
         )
-        let row = presentation.rows.first { $0.service == .grok && $0.quotaWindow == .weekly }
+        let row = presentation.rows.first { $0.service == .xai && $0.quotaWindow == .weekly }
 
         XCTAssertEqual(row?.quotaTitleKey, .monthly)
         XCTAssertEqual(row?.quotaTitle, "Monthly")
@@ -918,8 +894,8 @@ final class WidgetPresentationTests: XCTestCase {
         preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
         let presentation = presentation(
             metrics: [
-                .grok: UsageMetrics(
-                    service: .grok,
+                .xai: UsageMetrics(
+                    service: .xai,
                     sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .session),
                     weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
                     additionalLimits: [
@@ -930,36 +906,37 @@ final class WidgetPresentationTests: XCTestCase {
             ],
             preferences: preferences
         )
-        let titles = presentation.rows.filter { $0.service == .grok }.map(\.quotaTitle)
+        let titles = presentation.rows.filter { $0.service == .xai }.map(\.quotaTitle)
 
         XCTAssertTrue(titles.contains("Session"))
         XCTAssertTrue(titles.contains("Weekly"))
         XCTAssertTrue(titles.contains("Daily"), titles.joined(separator: ", "))
     }
 
-    func testCursorAdditionalWeeklyPercentPoolIsTitledGrokBotNotOtherModels() {
+    func testLegacyCursorMonthlyPoolsKeepTheirTitlesInsideTheXAICard() {
         var preferences = WidgetPreferences.defaults
         preferences.visibleQuotaWindows = Set(WidgetQuotaWindow.allCases)
         let presentation = presentation(
             metrics: [
-                .cursor: UsageMetrics(
-                    service: .cursor,
-                    sessionLimit: UsageLimit(
-                        used: 4,
-                        total: ServiceType.cursorIncludedPoolTotal,
-                        resetTime: nil
-                    ),
+                .xai: UsageMetrics(
+                    service: .xai,
                     weeklyLimit: UsageLimit(
                         used: 64,
-                        total: ServiceType.cursorIncludedPoolTotal,
+                        total: ServiceType.xaiPercentPoolTotal,
                         resetTime: nil
                     ),
                     additionalLimits: [
                         UsageLimit(
                             used: 18,
-                            total: ServiceType.cursorIncludedPoolTotal,
+                            total: ServiceType.xaiPercentPoolTotal,
                             resetTime: nil,
-                            periodKind: .weekly
+                            label: ServiceType.legacyCursorModelsLabel
+                        ),
+                        UsageLimit(
+                            used: 22,
+                            total: ServiceType.xaiPercentPoolTotal,
+                            resetTime: nil,
+                            label: ServiceType.legacyOtherModelsLabel
                         )
                     ],
                     lastUpdated: now
@@ -967,14 +944,11 @@ final class WidgetPresentationTests: XCTestCase {
             ],
             preferences: preferences
         )
-        let titles = presentation.rows.filter { $0.service == .cursor }.map(\.quotaTitle)
-        let keys = presentation.rows.filter { $0.service == .cursor }.map(\.quotaTitleKey)
+        let keys = presentation.rows.filter { $0.service == .xai }.map(\.quotaTitleKey)
 
-        XCTAssertTrue(titles.contains("Cursor Models"), titles.joined(separator: ", "))
-        XCTAssertTrue(titles.contains("Other Models"), titles.joined(separator: ", "))
-        XCTAssertTrue(titles.contains("Grok Bot"), titles.joined(separator: ", "))
-        XCTAssertTrue(keys.contains(.grokBot), "\(keys)")
-        XCTAssertEqual(keys.filter { $0 == .otherModels }.count, 1)
+        XCTAssertTrue(keys.contains(.weekly), "\(keys)")
+        XCTAssertTrue(keys.contains(.cursorModels), "\(keys)")
+        XCTAssertTrue(keys.contains(.otherModels), "\(keys)")
     }
 
     func testCreditRemainderLeadsTheWidgetWithoutAPercentOrBar() {

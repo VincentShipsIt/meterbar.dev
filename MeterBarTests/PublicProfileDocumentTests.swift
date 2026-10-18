@@ -35,20 +35,19 @@ final class PublicProfileDocumentTests: XCTestCase {
         XCTAssertNil(provider?.windows.first?.pace)
     }
 
-    func testCursorSpilloverPrimaryAndSecondaryRolesReachPublicConsumers() {
-        let cursor = ProviderSnapshotBuilder.snapshot(
-            title: "private", service: .cursor,
+    func testXAIWeeklyWindowIsThePrimaryWindowForPublicConsumers() {
+        let xai = ProviderSnapshotBuilder.snapshot(
+            title: "private", service: .xai,
             metrics: UsageMetrics(
-                service: .cursor,
-                sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil),
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 27, total: 100, resetTime: nil),
                 lastUpdated: now
             ),
             emptyDetail: ""
         )
-        let provider = make(snapshots: [cursor]).providers.first
-        XCTAssertEqual(provider?.windows.map(\.label), ["Cursor Models", "Other Models"])
-        XCTAssertEqual(provider?.primaryWindowIndex, 1)
+        let provider = make(snapshots: [xai]).providers.first
+        XCTAssertEqual(provider?.windows.map(\.label), ["Weekly"])
+        XCTAssertEqual(provider?.primaryWindowIndex, 0)
         XCTAssertEqual(provider?.isBlocked, false)
 
         let claude = ProviderSnapshotBuilder.snapshot(
@@ -104,26 +103,16 @@ final class PublicProfileDocumentTests: XCTestCase {
         let doc = make(snapshots: [
             Self.snapshot(id: "a", title: "work", service: .codexCli),
             Self.snapshot(id: "b", title: "personal", service: .codexCli),
-            Self.snapshot(id: "c", title: "me", service: .cursor),
+            Self.snapshot(id: "c", title: "me", service: .xai),
         ])
 
-        XCTAssertEqual(doc.providers.map(\.name), ["OpenAI Codex 1", "OpenAI Codex 2", "Cursor"])
+        XCTAssertEqual(doc.providers.map(\.name), ["OpenAI Codex 1", "OpenAI Codex 2", "xAI"])
         XCTAssertFalse(doc.jsonString.contains("work"))
         XCTAssertFalse(doc.jsonString.contains("personal"))
     }
 
-    func testSubPoolIsNamedWithItsParentAndCarriesNoPlan() {
-        var pool = Self.snapshot(id: "p", title: "Grok Bot", service: .cursor)
-        pool.cardRole = .subPool
-
-        let doc = make(snapshots: [pool], plans: [.cursor: "Ultra"])
-
-        XCTAssertEqual(doc.providers.first?.name, "Grok Bot on Cursor")
-        XCTAssertNil(doc.providers.first?.plan)
-    }
-
     func testMultiAccountProvidersDoNotShareAProviderWidePlan() {
-        for service in [ServiceType.claudeCode, .codexCli, .grok, .cursor, .zaiCodingPlan] {
+        for service in [ServiceType.claudeCode, .codexCli, .xai, .zaiCodingPlan] {
             let doc = make(
                 snapshots: [
                     Self.snapshot(id: "a", title: "work", service: service),
@@ -152,7 +141,7 @@ final class PublicProfileDocumentTests: XCTestCase {
         )
         let capped = Self.snapshot(id: "capped", title: "private", service: .codexCli, accountID: UUID())
         let filler = (0 ..< (PublicProfileDocument.maxProviders - 1)).map { index in
-            Self.snapshot(id: "cursor-\(index)", title: "private", service: .cursor)
+            Self.snapshot(id: "cursor-\(index)", title: "private", service: .xai)
         }
         for snapshots in [[visible, filtered], [visible] + filler + [capped]] {
             let doc = make(snapshots: snapshots, plans: [.codexCli: "Pro"])
@@ -163,7 +152,7 @@ final class PublicProfileDocumentTests: XCTestCase {
     }
 
     func testCustomOnlyAccountsDoNotInheritTheDefaultAccountPlan() {
-        for service in [ServiceType.claudeCode, .codexCli, .grok] {
+        for service in [ServiceType.claudeCode, .codexCli, .xai] {
             let doc = make(
                 snapshots: [Self.snapshot(id: "custom", title: "private", service: service, accountID: UUID())],
                 plans: [service: "Pro"]
@@ -177,7 +166,7 @@ final class PublicProfileDocumentTests: XCTestCase {
         let defaults: [(ServiceType, UUID)] = [
             (.claudeCode, ClaudeCodeAccount.defaultID),
             (.codexCli, CodexAccount.defaultID),
-            (.grok, GrokAccount.defaultID),
+            (.xai, GrokAccount.defaultID),
         ]
         for (service, accountID) in defaults {
             for identity in [accountID, nil] as [UUID?] {
@@ -188,23 +177,13 @@ final class PublicProfileDocumentTests: XCTestCase {
                 XCTAssertEqual(doc.providers.first?.plan, "Pro", service.rawValue)
             }
         }
-        for service in [ServiceType.cursor, .zaiCodingPlan] {
+        for service in [ServiceType.zaiCodingPlan] {
             let doc = make(
                 snapshots: [Self.snapshot(id: "sole", title: "private", service: service, accountID: UUID())],
                 plans: [service: "Pro"]
             )
             XCTAssertEqual(doc.providers.first?.plan, "Pro", service.rawValue)
         }
-    }
-
-    func testSubPoolDoesNotInflateAccountCountOrReceiveAPlan() {
-        let parent = Self.snapshot(id: "parent", title: "private", service: .cursor)
-        var pool = Self.snapshot(id: "pool", title: "Grok Bot", service: .cursor)
-        pool.cardRole = .subPool
-
-        let doc = make(snapshots: [parent, pool], plans: [.cursor: "Ultra"])
-
-        XCTAssertEqual(doc.providers.map(\.plan), ["Ultra", nil])
     }
 
     /// The only free-text fields are allowlisted by character set, so an email,
@@ -214,14 +193,14 @@ final class PublicProfileDocumentTests: XCTestCase {
             snapshots: [
                 Self.snapshot(id: "a", title: "x", service: .claudeCode),
                 Self.snapshot(id: "b", title: "x", service: .codexCli),
-                Self.snapshot(id: "c", title: "x", service: .cursor),
-                Self.snapshot(id: "d", title: "x", service: .grok),
+                Self.snapshot(id: "c", title: "x", service: .xai),
+                Self.snapshot(id: "d", title: "x", service: .openRouter),
             ],
             plans: [
                 .claudeCode: "Max 20x",
                 .codexCli: "me@example.com",
-                .cursor: "/Users/me/.cursor",
-                .grok: String(repeating: "a", count: 40),
+                .xai: "/Users/me/.cursor",
+                .openRouter: String(repeating: "a", count: 40),
             ]
         )
 
@@ -298,10 +277,8 @@ final class PublicProfileDocumentTests: XCTestCase {
     /// The whole document may only ever contain these keys. A new field has to
     /// be added here on purpose, which is the point.
     func testDocumentContainsOnlyAllowlistedKeys() throws {
-        var pool = Self.snapshot(id: "p", title: "Grok Bot", service: .cursor)
-        pool.cardRole = .subPool
         let doc = make(
-            snapshots: [Self.snapshot(id: "a", title: "me@example.com", service: .claudeCode), pool],
+            snapshots: [Self.snapshot(id: "a", title: "me@example.com", service: .claudeCode)],
             plans: [.claudeCode: "Pro"],
             cost: Self.costSummary(models: ["claude-opus-5-5"])
         )
