@@ -110,8 +110,7 @@ struct RoutingPolicyEditorCard: View {
         }
     }
 
-    @ViewBuilder
-    private var accountRows: some View {
+    @ViewBuilder private var accountRows: some View {
         GridRow {
             label("Accounts")
             VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.sm) {
@@ -136,8 +135,7 @@ struct RoutingPolicyEditorCard: View {
         }
     }
 
-    @ViewBuilder
-    private var modelRows: some View {
+    @ViewBuilder private var modelRows: some View {
         GridRow {
             label("Model tier")
             Picker("Model tier", selection: binding(\.modelTier)) {
@@ -165,8 +163,7 @@ struct RoutingPolicyEditorCard: View {
         }
     }
 
-    @ViewBuilder
-    private var quotaRows: some View {
+    @ViewBuilder private var quotaRows: some View {
         GridRow {
             label("Minimum remaining")
             Stepper(value: binding(\.minimumRemainingPercent), in: 0...100, step: 5) {
@@ -190,8 +187,7 @@ struct RoutingPolicyEditorCard: View {
         }
     }
 
-    @ViewBuilder
-    private var rankingRows: some View {
+    @ViewBuilder private var rankingRows: some View {
         GridRow {
             label("Cost")
             VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.xs) {
