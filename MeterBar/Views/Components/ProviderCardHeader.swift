@@ -36,12 +36,29 @@ struct ProviderCardHeader: View {
 
     var content: Content { Content(snapshot: snapshot) }
 
-    var body: some View {
-        HStack(spacing: 7) {
-            ProviderLogoView(kind: snapshot.logoKind, size: 17, foregroundColor: snapshot.accentColor)
+    /// Fixed metrics for the header grid. The identity column is the name over
+    /// the refresh subtitle, so the subtitle's leading edge is the title's x
+    /// (logo column + gap) and lines up with the rows under the card. Status,
+    /// the live chip, and the chevron stay in that same row, top-aligned with
+    /// the name. Hanging the subtitle under the whole row wraps the name and
+    /// status onto a second line and drops the wider refresh text out of the
+    /// row's width.
+    enum Layout {
+        static let logoSize: CGFloat = 17
+        static let columnSpacing: CGFloat = 7
+        static let titleSpacing: CGFloat = 5
+        /// Gap between the provider name and the refresh subtitle.
+        static let rowSpacing: CGFloat = 1
+        /// Subtitle indent: the logo column plus its gap, i.e. the title's x.
+        static let subtitleInset: CGFloat = logoSize + columnSpacing
+    }
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
+    var body: some View {
+        HStack(alignment: .top, spacing: Layout.columnSpacing) {
+            ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
+
+            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                HStack(spacing: Layout.titleSpacing) {
                     Text(content.title)
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -51,6 +68,7 @@ struct ProviderCardHeader: View {
                             .accessibilityLabel("\(plan) plan")
                     }
                 }
+
                 Text(content.subtitle)
                     .font(.caption2)
                     .foregroundColor(.secondary)
