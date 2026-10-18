@@ -341,6 +341,6 @@ struct RunwayContent: Equatable {
     private static func thinned(_ ticks: [Tick]) -> [Tick] {
         guard ticks.count > maxTicks else { return ticks }
         let stride = Int((Double(ticks.count) / Double(maxTicks)).rounded(.up))
-        return ticks.enumerated().filter { $0.offset % stride == 0 }.map(\.element)
+        return ticks.enumerated().filter { $0.offset.isMultiple(of: stride) }.map(\.element)
     }
 }
