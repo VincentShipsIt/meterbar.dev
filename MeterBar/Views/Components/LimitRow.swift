@@ -49,16 +49,21 @@ struct LimitRow: View {
     /// the bar, so VoiceOver must speak it too instead of a used figure the
     /// row never draws. `now` is injected so tests can pin the countdown.
     func accessibilityValueText(now: Date) -> String {
-        let usage = limit.localizedAccessibilityValue
-        guard content.showsFooter(density: density),
-              content.showsReset,
-              let reset = ResetCountdownLabel.counterText(
+        var parts = [limit.localizedAccessibilityValue]
+        if content.showsFooter(density: density),
+           content.showsReset,
+           let reset = ResetCountdownLabel.counterText(
                 title: nil,
                 limit: limit.usageLimit,
                 format: resetTimeFormat,
                 now: now
-              ) else { return usage }
-        return "\(usage), \(reset)"
+           ) {
+            parts.append(reset)
+        }
+        if let footnote = content.footnote(density: density) {
+            parts.append(footnote)
+        }
+        return parts.joined(separator: ", ")
     }
 
     // Every surface that draws a `LimitRow` already sits inside a card, so the
@@ -80,6 +85,12 @@ struct LimitRow: View {
             // countdown; used/pace text is what the hover detail panel adds.
             if content.showsFooter(density: density) {
                 footer
+            }
+            if let footnote = content.footnote(density: density) {
+                Text(footnote)
+                    .font(density.footerFont)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         // One combined VoiceOver element per limit row across all three
@@ -219,6 +230,12 @@ extension LimitRow {
         func showsFooter(density: LimitRow.Density) -> Bool {
             guard showsFooter else { return false }
             return density.showsUsedAndPace || showsReset
+        }
+
+        /// The explanatory note under the gauge. The terse popover card leaves
+        /// it out; the hover panel and dashboard carry it.
+        func footnote(density: LimitRow.Density) -> String? {
+            density.showsUsedAndPace ? limit.localizedFootnote : nil
         }
 
         var showsEstimatedTag: Bool { isEstimated }
