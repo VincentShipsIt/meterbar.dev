@@ -1,13 +1,17 @@
 import MeterBarShared
 import SwiftUI
 
-// Routing page: where each kind of work would go right now. Read-only; it asks
-// the same pure router as `meterbar route`, over the same cached snapshots, so
-// the page and the CLI cannot disagree. It recommends and never switches an
-// account or launches anything.
+// Routing page: where each kind of work would go right now. It asks the same
+// pure router as `meterbar route`, over the same cached snapshots, so the page
+// and the CLI cannot disagree. It recommends and never switches an account or
+// launches anything. Edit Policies changes how the router ranks; nothing is
+// saved until Save.
 
 struct DashboardRoutingSection: View {
     @State private var preview: RoutingPreview?
+    @State private var editor: RoutingPolicyEditor?
+    @State private var accountOptions: [RoutingPolicyEditor.AccountOption] = []
+    @State private var saveError: String?
 
     static let caption = "Recommendations only. MeterBar never switches an account or starts a task."
 
@@ -21,7 +25,22 @@ struct DashboardRoutingSection: View {
                 }
             }
 
-            if let preview {
+            if let editing = Binding($editor) {
+                RoutingPolicyEditorBar(
+                    editor: editing.wrappedValue,
+                    saveError: saveError,
+                    onSave: save,
+                    onCancel: cancelEditing,
+                    onResetAll: { editor?.resetAll() }
+                )
+                ForEach(RoutingTaskID.builtIn, id: \.self) { task in
+                    RoutingPolicyEditorCard(task: task, editor: editing, accounts: accountOptions)
+                }
+            } else if let preview {
+                HStack {
+                    Spacer()
+                    Button("Edit Policies", action: startEditing)
+                }
                 ForEach(preview.rows) { row in
                     DashboardCard(title: row.taskName, trailing: row.isCustomized ? "Customized" : nil) {
                         RoutingRowView(row: row)
@@ -37,12 +56,40 @@ struct DashboardRoutingSection: View {
 
     private func reload() {
         let policies = RoutingPolicyStore.load()
+        let candidates = WorkloadRouteCLI.loadCandidates()
+        accountOptions = RoutingPolicyEditor.accountOptions(from: candidates)
         preview = RoutingPreview.make(
             catalog: policies.catalog,
             notice: policies.notice,
-            candidates: WorkloadRouteCLI.loadCandidates(),
+            candidates: candidates,
             now: Date()
         )
+    }
+
+    private func startEditing() {
+        saveError = nil
+        editor = RoutingPolicyEditor(catalog: RoutingPolicyStore.load().catalog)
+    }
+
+    private func cancelEditing() {
+        saveError = nil
+        editor = nil
+    }
+
+    private func save() {
+        guard var draft = editor else { return }
+        do {
+            try draft.save()
+            saveError = nil
+            editor = nil
+            reload()
+        } catch RoutingPolicyEditor.SaveError.blocked(let reason) {
+            saveError = reason
+        } catch RoutingPolicyEditor.SaveError.storage(let reason) {
+            saveError = reason
+        } catch {
+            saveError = error.localizedDescription
+        }
     }
 }
 
