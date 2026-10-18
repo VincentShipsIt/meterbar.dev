@@ -185,25 +185,46 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertNotEqual(content.subtitle, snapshot.service.displayName)
     }
 
-    /// The panel dropped the status word entirely, so a stale or logged-out
-    /// provider looked healthy the moment the pointer landed on it.
-    func testHeaderCarriesTheSameStatusWordAsTheCard() {
-        let healthy = snapshot()
-        XCTAssertEqual(
-            ProviderCardHeader.Content(snapshot: healthy).statusText,
-            ProviderCardPresentation.statusText(for: healthy)
-        )
-
-        let loginRequired = ProviderSnapshotBuilder.snapshot(
-            title: "shipshitdev",
+    private func quotaSnapshot(used: Double, notice: ProviderAuthNotice?) -> ProviderSnapshot {
+        ProviderSnapshotBuilder.snapshot(
+            title: "Work",
             service: .claudeCode,
-            metrics: nil,
-            emptyDetail: "Run claude login"
+            metrics: UsageMetrics(
+                service: .claudeCode,
+                sessionLimit: UsageLimit(used: used, total: 100, resetTime: nil)
+            ),
+            emptyDetail: "Run claude login",
+            accountID: UUID(),
+            authNotice: notice
         )
-        XCTAssertEqual(
-            ProviderCardHeader.Content(snapshot: loginRequired).statusText,
-            ProviderCardPresentation.statusText(for: loginRequired)
-        )
+    }
+
+    /// A working provider needs no badge. Quota health is already in the bars and charts, so
+    /// "Healthy", "Tight" and "Critical" are noise on the header.
+    func testHeaderStaysQuietWhileTheConnectionIsHealthy() {
+        XCTAssertNil(ProviderCardHeader.Content(snapshot: snapshot()).statusText)
+        XCTAssertNil(ProviderCardHeader.Content(snapshot: quotaSnapshot(used: 12, notice: nil)).statusText)
+        XCTAssertNil(ProviderCardHeader.Content(snapshot: quotaSnapshot(used: 80, notice: nil)).statusText)
+        XCTAssertNil(ProviderCardHeader.Content(snapshot: quotaSnapshot(used: 95, notice: nil)).statusText)
+    }
+
+    /// The panel once dropped the status word entirely, so a logged-out provider looked healthy the
+    /// moment the pointer landed on it. The header speaks up for exactly these states, on both surfaces.
+    func testHeaderNamesABrokenOrStaleConnection() {
+        let notices: [ProviderAuthNotice] = [
+            .loginRequired,
+            .stale(since: Date(timeIntervalSince1970: 1_720_000_000)),
+            .attention("boom"),
+            .notConnected
+        ]
+        for notice in notices {
+            let broken = quotaSnapshot(used: 12, notice: notice)
+            XCTAssertEqual(ProviderCardHeader.Content(snapshot: broken).statusText, notice.shortLabel)
+            XCTAssertEqual(
+                ProviderCardHeader.Content(snapshot: broken).statusText,
+                ProviderCardPresentation.statusText(for: broken)
+            )
+        }
     }
 
     /// The panel's own freshness note (#530) must reflect the cost scan it was
@@ -315,9 +336,9 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
-    func testHeaderAlwaysRendersInlineStatusWithOrWithoutDisclosureChevron() {
+    func testHeaderRendersABrokenConnectionInlineWithOrWithoutDisclosureChevron() {
         for showsChevron in [true, false] {
-            let currentSnapshot = snapshot()
+            let currentSnapshot = quotaSnapshot(used: 12, notice: .loginRequired)
             let expectedStatus = ProviderCardPresentation.statusText(for: currentSnapshot)
             let headerHost = NSHostingView(
                 rootView: ProviderCardHeader(
@@ -371,5 +392,63 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
                 "ProviderCardHeader(chevron: \(showsChevron)) should keep status inline"
             )
         }
+    }
+
+    // MARK: - Runway rows
+
+    private let rowsNow = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func rowLimit(
+        _ id: String,
+        kind: SnapshotLimit.Kind,
+        window: TimeInterval? = 5 * 3_600,
+        isEstimated: Bool = false
+    ) -> SnapshotLimit {
+        SnapshotLimit(
+            id: id,
+            kind: kind,
+            title: id,
+            usageLimit: UsageLimit(
+                used: 30,
+                total: 100,
+                resetTime: rowsNow.addingTimeInterval(3_600),
+                windowSeconds: window,
+                isEstimated: isEstimated
+            )
+        )
+    }
+
+    /// The hover shows charts, one per window. The popover card keeps the bars.
+    func testSessionAndWeeklyRenderAsRunwaysInTheirOwnOrder() {
+        let rows = MenuBarProviderDetailContent.rows(
+            for: [rowLimit("session", kind: .session), rowLimit("weekly", kind: .weekly, window: 604_800)],
+            now: rowsNow
+        )
+
+        XCTAssertEqual(rows.map(\.limit.id), ["session", "weekly"])
+        XCTAssertEqual(rows.map(\.isRunway), [true, true])
+    }
+
+    func testWindowsThatCannotBeChartedFallBackToTheirBar() {
+        let rows = MenuBarProviderDetailContent.rows(
+            for: [
+                rowLimit("session", kind: .session),
+                rowLimit("model", kind: .additional),
+                rowLimit("estimated", kind: .weekly, window: 604_800, isEstimated: true),
+                rowLimit("no-window", kind: .weekly, window: nil)
+            ],
+            now: rowsNow
+        )
+
+        XCTAssertEqual(rows.map(\.isRunway), [true, false, false, false])
+    }
+
+    func testLegendAppearsOnlyWhenARunwayIsShown() {
+        let charted = MenuBarProviderDetailContent.rows(for: [rowLimit("session", kind: .session)], now: rowsNow)
+        let barsOnly = MenuBarProviderDetailContent.rows(for: [rowLimit("model", kind: .additional)], now: rowsNow)
+
+        XCTAssertTrue(MenuBarProviderDetailContent.showsRunwayLegend(for: charted))
+        XCTAssertFalse(MenuBarProviderDetailContent.showsRunwayLegend(for: barsOnly))
+        XCTAssertFalse(MenuBarProviderDetailContent.showsRunwayLegend(for: []))
     }
 }

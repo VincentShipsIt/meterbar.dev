@@ -10,8 +10,11 @@ import SwiftUI
 /// provider, and a logged-out account looked healthy the moment the pointer
 /// landed on it. One component keeps them identical; the only legitimate
 /// difference is the disclosure chevron, which belongs to the card because the
-/// panel is already the thing it discloses. Status always stays beside the
-/// provider identity; only compact terminal summaries center it against a card.
+/// panel is already the thing it discloses. The status chip appears only for a
+/// broken or out-of-date connection (see
+/// `ProviderCardPresentation.connectionStatusText`); a working provider shows
+/// none. It stays beside the provider identity when present; only compact
+/// terminal summaries center it against a card.
 struct ProviderCardHeader: View {
     /// Display strings for the header, with no SwiftUI attached so each rule is
     /// directly assertable and the two surfaces can be compared value-to-value.
@@ -19,13 +22,14 @@ struct ProviderCardHeader: View {
     struct Content: Equatable {
         let title: String
         let subtitle: String
-        let statusText: String
+        /// `nil` while the connection is fine, so a working provider carries no chip.
+        let statusText: String?
         let planLabel: String?
 
         init(snapshot: ProviderSnapshot) {
             title = snapshot.title
             subtitle = snapshot.updatedText
-            statusText = ProviderCardPresentation.statusText(for: snapshot)
+            statusText = ProviderCardPresentation.connectionStatusText(for: snapshot)
             planLabel = snapshot.planLabel
         }
     }
@@ -83,7 +87,9 @@ struct ProviderCardHeader: View {
                     .accessibilityLabel("Live CLI account")
             }
 
-            ProviderCardStatusLabel(snapshot: snapshot)
+            if content.statusText != nil {
+                ProviderCardStatusLabel(snapshot: snapshot)
+            }
 
             if showsDisclosureChevron {
                 CardDisclosureChevron()
