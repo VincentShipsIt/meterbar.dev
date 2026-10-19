@@ -142,3 +142,11 @@ Against that it buys a new invalidation surface — archive schema drift, a corr
 ## A documented `--provider` token selects exactly one provider
 
 **Accepted 2026-10-15.** `CLIProviderFilter` matched `--provider` as a substring of a provider's raw value or display name. That held while no name contained another's token, but "Claude Platform" contains `claude`, so `meterbar usage --provider claude` would have returned both. A needle that is a `cliIdentifier` now matches only that provider; anything else keeps the case-insensitive substring match (`platform`, `glm`, `z.ai`). Token meaning is part of the CLI contract in `docs/cli-json-schema.md`.
+
+## The popover shows bars, the hover shows the charts
+
+**Accepted 2026-10-18.** The popover card never mixes forms: every limit is a `LimitRow` bar. The hover detail panel draws one annotated `RunwayView` per Session and Weekly window (outlook headline, time axis, Now marker, shortfall zone, "N% left"), one shared `RunwayLegend`, then the seven-day strip. Limits that cannot be projected (estimated, no window, credits, model and review windows, an exhausted window) stay `LimitRow(.detail)` bars in the hover.
+
+- The provider header carries a status chip only when the connection needs attention (`authNotice`: login required, stale, needs attention, not connected). A working provider shows no "Healthy", "Tight" or "Critical" word; the bar already says that. Terminal compact cards keep their own `ProviderCardStatusLabel`.
+- Axis ticks are hourly for windows of a day or less and local midnights for longer ones, thinned to `RunwayContent.maxTicks`.
+- The chart is two points joined by a line (average burn since the window opened), not a sampled history. Do not draw it as one.
