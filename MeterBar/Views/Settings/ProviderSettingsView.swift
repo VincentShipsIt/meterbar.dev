@@ -329,8 +329,7 @@ struct ProviderSettingsView: View {
         case .openRouter:
             openRouterSection
         case .xai:
-            grokSection
-            cursorSection
+            xaiSourcesSection
             providerExtraUsageSection(for: service)
         case .kimiCode:
             KimiCodeSettingsSection {
@@ -726,57 +725,6 @@ struct ProviderSettingsView: View {
         }
     }
 
-    private var cursorSection: some View {
-        SettingsPanelSection(
-            title: "Cursor",
-            logoKind: .xai,
-            color: MeterBarTheme.xaiAccent
-        ) {
-            SettingsRowView(title: "Connection") {
-                HStack(spacing: 8) {
-                    StatusPill(
-                        title: cursorService.hasAccess ? "Connected" : "Not Connected",
-                        isConnected: cursorService.hasAccess
-                    )
-
-                    Button {
-                        // forceRescan walks the whole Cursor directory tree —
-                        // the worst main-thread stall in the app; run detached.
-                        Task {
-                            let service = cursorService
-                            await Task.detached(priority: .userInitiated) {
-                                service.checkAccess(forceRescan: true)
-                            }.value
-                            if cursorService.hasAccess {
-                                await dataManager.refreshForExplicitAction(.manualRefresh)
-                            }
-                        }
-                    } label: {
-                        Label(cursorService.hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
-                            .labelStyle(.iconOnly)
-                    }
-                    .buttonStyle(.bordered)
-                    .help(cursorService.hasAccess ? "Refresh" : "Check again")
-                }
-            }
-
-            if let subscriptionType = cursorService.subscriptionType, cursorService.hasAccess {
-                SettingsRowView(title: "Plan") {
-                    Text(subscriptionType.capitalized)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                }
-            } else if !cursorService.hasAccess {
-                EmptyStateCard(
-                    systemImage: "person.crop.circle.badge.exclamationmark",
-                    title: "Not connected",
-                    message: "Log in to Cursor IDE, then Check Again.",
-                    tone: .warning
-                )
-            }
-        }
-    }
-
     private var openRouterSection: some View {
         let hasAccess = openRouterAccountStore.enabledAccounts.contains {
             openRouterService.canAccess(account: $0)
@@ -892,36 +840,40 @@ struct ProviderSettingsView: View {
         }
     }
 
-    private var grokSection: some View {
-        let hasAccess = grokAccountStore.enabledAccounts.contains(where: grokService.canAccess(account:))
-        return SettingsPanelSection(title: "Grok Build", logoKind: .xai, color: MeterBarTheme.xaiAccent) {
+    /// xAI is one subscription read through two sources, so Settings shows one
+    /// connection status; the plan lives in the Overview row above.
+    private var xaiSummary: XAISettingsSummary {
+        XAISettingsSummary(
+            grokConnected: grokAccountStore.enabledAccounts.contains(where: grokService.canAccess(account:)),
+            cursorConnected: cursorService.hasAccess,
+            grokPlan: grokService.subscriptionType,
+            cursorPlan: cursorService.subscriptionType
+        )
+    }
+
+    private var xaiSourcesSection: some View {
+        let summary = xaiSummary
+        return SettingsPanelSection(title: "Connection", logoKind: .xai, color: MeterBarTheme.xaiAccent) {
             SettingsNotice(
-                text: "MeterBar asks the official Grok CLI for billing data over ACP. "
-                    + "The CLI owns authentication; MeterBar never reads or stores the cached token.",
+                text: "MeterBar asks the official Grok CLI for billing data over ACP and reads the Cursor "
+                    + "IDE login for the same subscription. The CLI owns authentication; MeterBar never "
+                    + "reads or stores the cached token.",
                 color: .secondary
             )
 
-            SettingsRowView(title: "Connection") {
+            SettingsRowView(title: "Connection", detail: summary.sourcesText) {
                 HStack(spacing: 8) {
-                    StatusPill(
-                        title: hasAccess ? "Connected" : "Not Connected",
-                        isConnected: hasAccess
-                    )
+                    StatusPill(title: summary.statusTitle, isConnected: summary.isConnected)
 
                     Button {
-                        Task {
-                            let service = grokService
-                            await Task.detached(priority: .userInitiated) {
-                                service.checkAccess()
-                            }.value
-                            await dataManager.refresh(service: .xai)
-                        }
+                        refreshProvider(.xai)
                     } label: {
-                        Label(hasAccess ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
+                        Label(summary.isConnected ? "Refresh" : "Check again", systemImage: "arrow.clockwise")
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
-                    .help(hasAccess ? "Refresh" : "Check again")
+                    .help(summary.isConnected ? "Refresh" : "Check again")
+                    .disabled(dataManager.isLoading)
 
                     Button("Install / Sign In") {
                         if let url = URL(string: "https://x.ai/cli") {
@@ -932,21 +884,17 @@ struct ProviderSettingsView: View {
                 }
             }
 
-            if let subscriptionType = grokService.subscriptionType, grokService.hasAccess {
-                SettingsRowView(title: "Plan") {
-                    Text(subscriptionType)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                }
-            } else if !hasAccess {
+            if !summary.isConnected {
                 SettingsNotice(
-                    text: "Install Grok Build and run `grok login`; no password or API key is entered in MeterBar.",
+                    text: "Install the Grok CLI and run `grok login`, or sign in to Cursor IDE, then Check Again. "
+                        + "No password or API key is entered in MeterBar.",
                     color: MeterBarTheme.warning
                 )
             }
 
-            if let error = grokService.firstError(for: grokAccountStore.enabledAccounts) {
-                SettingsNotice(text: error.localizedDescription, color: MeterBarTheme.warning)
+            let grokError = grokService.firstError(for: grokAccountStore.enabledAccounts)
+            if !summary.isConnected, let grokError {
+                SettingsNotice(text: grokError.localizedDescription, color: MeterBarTheme.warning)
             }
 
             SettingsDivider()

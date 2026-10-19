@@ -157,7 +157,7 @@ xAI tiers share one pool of AI usage across Grok and Cursor, refreshed weekly, s
 `meterbar usage --provider xai` selects this card. The older `--provider grok` and `--provider cursor` tokens still work as aliases; JSON output always says `xai`. Settings saved before the merge (Grok or Cursor visibility, menu bar pins, widget choices) migrate to xAI automatically.
 
 To track more than one Grok Build account, give each CLI login a distinct
-`GROK_HOME`, then add that directory under **Settings → Providers → Grok Build**:
+`GROK_HOME`, then add that directory under **Settings → Providers → xAI → Connection**:
 
 ```bash
 GROK_HOME=~/.grok-work grok login
