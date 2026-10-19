@@ -332,7 +332,8 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         exhausted: Bool,
         resetCreditsAvailable: Int? = nil,
         accountID: UUID? = nil,
-        hasResetTime: Bool = true
+        hasResetTime: Bool = true,
+        kind: SnapshotLimit.Kind = .weekly
     ) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: exhausted ? 100 : 40,
@@ -346,7 +347,7 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
             service: .codexCli,
             updatedAt: Date(),
             limits: [
-                SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
+                SnapshotLimit(id: "weekly", kind: kind, title: "Weekly", usageLimit: weekly)
             ],
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
@@ -383,12 +384,17 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
-    /// Each `.compact` row carries its own reset countdown, so a card whose
-    /// limits report a reset time must be taller than one whose limits don't.
+    /// Each `.compact` bar row carries its own reset countdown, so a card whose
+    /// bars report a reset time must be taller than one whose bars don't. An
+    /// `.additional` window is used because Session and Weekly draw as donuts,
+    /// which keep the countdown inside a fixed-height ring row.
     func testCompactCardGrowsForPerRowResetWhenAResetTimeExists() {
-        let withReset = ProviderStatusCard(snapshot: snapshot(exhausted: false), limitDensity: .compact)
+        let withReset = ProviderStatusCard(
+            snapshot: snapshot(exhausted: false, kind: .additional),
+            limitDensity: .compact
+        )
         let withoutReset = ProviderStatusCard(
-            snapshot: snapshot(exhausted: false, hasResetTime: false),
+            snapshot: snapshot(exhausted: false, hasResetTime: false, kind: .additional),
             limitDensity: .compact
         )
         let withResetHost = NSHostingView(rootView: withReset.frame(width: 320))

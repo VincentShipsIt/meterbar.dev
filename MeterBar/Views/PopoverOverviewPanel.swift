@@ -83,6 +83,32 @@ struct PopoverOverviewPanel: View {
             .filter { enabledProviders.contains($0.provider) }
     }
 
+    /// The cards the stack draws. A provider the setup checklist already names
+    /// is not drawn a second time as an "Offline" row.
+    private var visibleSnapshots: [ProviderSnapshot] {
+        Self.visibleSnapshots(snapshots, setupProviders: Set(providersNeedingSetup.map(\.provider)))
+    }
+
+    /// Drops the offline row of a provider that "Finish setup" lists, so a
+    /// single unconfigured provider reads once ("Muse Code · Action needed")
+    /// instead of twice ("Muse Code" in the checklist, "Muse · Offline" below it).
+    ///
+    /// Only a provider with exactly one card qualifies. The checklist is per
+    /// provider, so with several accounts an offline account's card may be the
+    /// only place that names it.
+    static func visibleSnapshots(
+        _ snapshots: [ProviderSnapshot],
+        setupProviders: Set<ServiceType>
+    ) -> [ProviderSnapshot] {
+        snapshots.filter { snapshot in
+            guard !snapshot.hasMetrics,
+                  snapshot.isAccountCard,
+                  setupProviders.contains(snapshot.service)
+            else { return true }
+            return snapshots.filter { $0.service == snapshot.service }.count > 1
+        }
+    }
+
     /// Captures *which* tiles the panel shows, not their values. The panel
     /// refreshes periodically; animating on this key means a routine data tick
     /// (a number moving, a countdown ticking) does not re-trigger the tile
@@ -112,7 +138,7 @@ struct PopoverOverviewPanel: View {
             showsRecommendationHint: showsRecommendationHint,
             isEmpty: snapshots.isEmpty,
             setupProviders: providersNeedingSetup.map(\.provider),
-            snapshotIDs: snapshots.map(\.id)
+            snapshotIDs: visibleSnapshots.map(\.id)
         )
     }
 
@@ -157,7 +183,7 @@ struct PopoverOverviewPanel: View {
             }
 
             VStack(spacing: 8) {
-                ForEach(snapshots) { snapshot in
+                ForEach(visibleSnapshots) { snapshot in
                     ProviderStatusCard(
                         snapshot: snapshot,
                         onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },

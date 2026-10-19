@@ -8,10 +8,9 @@ import SwiftUI
 /// card showed the refresh time, and dropped the status word entirely — so
 /// hovering a card replaced it with something that read like a different
 /// provider, and a logged-out account looked healthy the moment the pointer
-/// landed on it. One component keeps them identical; the only legitimate
-/// difference is the disclosure chevron, which belongs to the card because the
-/// panel is already the thing it discloses. The status chip appears only for a
-/// broken or out-of-date connection (see
+/// landed on it. One component keeps them identical. The card carries no
+/// disclosure chevron: the whole card is the control, and hovering it opens the
+/// panel. The status chip appears only for a broken or out-of-date connection (see
 /// `ProviderCardPresentation.connectionStatusText`); a working provider shows
 /// none. It stays beside the provider identity when present; only compact
 /// terminal summaries center it against a card.
@@ -35,15 +34,14 @@ struct ProviderCardHeader: View {
     }
 
     let snapshot: ProviderSnapshot
-    var showsDisclosureChevron: Bool = false
     var showsLiveAccount: Bool = false
 
     var content: Content { Content(snapshot: snapshot) }
 
     /// Fixed metrics for the header grid. The identity column is the name over
     /// the refresh subtitle, so the subtitle's leading edge is the title's x
-    /// (logo column + gap) and lines up with the rows under the card. Status,
-    /// the live chip, and the chevron stay in that same row, top-aligned with
+    /// (logo column + gap) and lines up with the rows under the card. Status
+    /// and the live chip stay in that same row, top-aligned with
     /// the name. Hanging the subtitle under the whole row wraps the name and
     /// status onto a second line and drops the wider refresh text out of the
     /// row's width.
@@ -89,10 +87,6 @@ struct ProviderCardHeader: View {
 
             if content.statusText != nil {
                 ProviderCardStatusLabel(snapshot: snapshot)
-            }
-
-            if showsDisclosureChevron {
-                CardDisclosureChevron()
             }
         }
     }
