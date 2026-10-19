@@ -59,7 +59,7 @@ enum ProviderStatusPageGuard {
     static func blockedReason(for response: URLResponse, data: Data, pageName: String) -> String? {
         guard let http = response as? HTTPURLResponse else { return nil }
         let mitigated = http.value(forHTTPHeaderField: "cf-mitigated")?.lowercased() == "challenge"
-        let body = String(decoding: data.prefix(64 * 1024), as: UTF8.self).lowercased()
+        let body = String((String(bytes: data, encoding: .utf8) ?? "").prefix(64 * 1024)).lowercased()
         let hasChallengeMarker = challengeMarkers.contains { body.contains($0) }
         let fromEdgeNetwork = http.value(forHTTPHeaderField: "cf-ray") != nil
             || http.value(forHTTPHeaderField: "x-amz-cf-id") != nil
