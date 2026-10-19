@@ -17,13 +17,85 @@ struct ProviderStatusReport: Identifiable, Equatable {
     let summary: ProviderStatusSummary
     let components: [ProviderStatusComponent]
     let fetchedAt: Date
+    /// Set when the status page was reached but its health could not be read
+    /// (bot challenge, browser-rendered page). Such a report says nothing about
+    /// the provider, so it never counts as an issue.
+    var unreadableReason: String?
 
     var displayName: String {
         service.statusPageDisplayName
     }
 
+    var isUnreadable: Bool {
+        unreadableReason != nil
+    }
+
+    var headline: String {
+        isUnreadable ? "Unchecked" : summary.indicator.summaryLabel
+    }
+
     var hasIssue: Bool {
-        summary.indicator.hasIssue || components.contains { $0.hasIssue }
+        guard !isUnreadable else { return false }
+        return summary.indicator.hasIssue || components.contains { $0.hasIssue }
+    }
+}
+
+/// The status page answered, but with something other than status data: a bot
+/// challenge or a page that only renders in a browser. Surfaced as an
+/// unreadable report rather than an outage or a parse failure.
+struct ProviderStatusPageUnreadable: Error, Equatable {
+    let reason: String
+}
+
+enum ProviderStatusPageGuard {
+    private static let challengeMarkers = [
+        "attention required! | cloudflare",
+        "just a moment...",
+        "cf-chl",
+        "cf-browser-verification",
+        "enable javascript and cookies to continue"
+    ]
+
+    static func blockedReason(for response: URLResponse, data: Data, pageName: String) -> String? {
+        guard let http = response as? HTTPURLResponse else { return nil }
+        let mitigated = http.value(forHTTPHeaderField: "cf-mitigated")?.lowercased() == "challenge"
+        let body = String((String(bytes: data, encoding: .utf8) ?? "").prefix(64 * 1024)).lowercased()
+        let hasChallengeMarker = challengeMarkers.contains { body.contains($0) }
+
+        let blocked: Bool
+        switch http.statusCode {
+        case 403, 429, 503:
+            blocked = mitigated || hasChallengeMarker
+        default:
+            blocked = mitigated || (hasChallengeMarker && (200...299).contains(http.statusCode))
+        }
+        guard blocked else { return nil }
+        return "\(pageName) blocked MeterBar's automated status check, so its live status can't be shown here. "
+            + "Open the status page in your browser."
+    }
+
+    /// True when the document carries no visible text outside `<head>`,
+    /// `<script>` and `<style>` — a client-rendered shell with no status data.
+    static func isScriptRenderedShell(html: String) -> Bool {
+        var body = html
+        if let bodyStart = body.range(of: "<body", options: .caseInsensitive) {
+            body = String(body[bodyStart.lowerBound...])
+        } else if let headEnd = body.range(of: "</head>", options: .caseInsensitive) {
+            body = String(body[headEnd.upperBound...])
+        } else {
+            return false
+        }
+        for tag in ["script", "style", "noscript"] {
+            body = body.replacingOccurrences(
+                of: "(?is)<\(tag)\\b[^>]*>.*?</\(tag)>",
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        let text = body
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty
     }
 }
 
@@ -299,6 +371,23 @@ struct ProviderStatusClient {
     let session: URLSession
 
     func fetchReport(for service: ServiceType) async throws -> ProviderStatusReport {
+        do {
+            return try await loadReport(for: service)
+        } catch let unreadable as ProviderStatusPageUnreadable {
+            guard let url = service.statusPageURL else { throw ServiceError.invalidURL }
+            return ProviderStatusReport(
+                service: service,
+                pageName: service.statusPageDisplayName,
+                pageURL: url,
+                summary: ProviderStatusSummary(indicator: .unknown, description: nil, updatedAt: nil),
+                components: [],
+                fetchedAt: Date(),
+                unreadableReason: unreadable.reason
+            )
+        }
+    }
+
+    private func loadReport(for service: ServiceType) async throws -> ProviderStatusReport {
         if service == .openRouter {
             return try await fetchOpenRouterReport()
         }
@@ -309,7 +398,7 @@ struct ProviderStatusClient {
             throw ServiceError.invalidURL
         }
 
-        let parsedStatus = try await fetchStatus(from: baseURL)
+        let parsedStatus = try await fetchStatus(from: baseURL, pageName: service.statusPageDisplayName)
         let components = (try? await fetchComponents(from: baseURL)) ?? []
         return ProviderStatusReport(
             service: service,
@@ -326,9 +415,18 @@ struct ProviderStatusClient {
             throw ServiceError.invalidURL
         }
         let (data, response) = try await fetch(from: url)
-        try ServiceSupport.validate(response, data: data)
+        try validatePage(response, data: data, pageName: "OpenRouter")
         guard let html = String(data: data, encoding: .utf8) else {
             throw ServiceError.parsingError(nil)
+        }
+        // status.openrouter.ai now serves an empty shell that renders in the
+        // browser, so there is no text to read and no public feed to fall back on.
+        // Checked first so the phrase inside a script cannot read as healthy.
+        if ProviderStatusPageGuard.isScriptRenderedShell(html: html) {
+            throw ProviderStatusPageUnreadable(
+                reason: "OpenRouter's status page only renders in a browser and publishes no feed MeterBar "
+                    + "can read. Open the status page to see current status."
+            )
         }
         let operational = html.localizedCaseInsensitiveContains("All Systems Operational")
         return ProviderStatusReport(
@@ -353,7 +451,7 @@ struct ProviderStatusClient {
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         let (data, response) = try await fetch(request)
-        try ServiceSupport.validate(response, data: data)
+        try validatePage(response, data: data, pageName: ServiceType.grok.statusPageDisplayName)
         guard let html = String(data: data, encoding: .utf8) else {
             throw ServiceError.parsingError(nil)
         }
@@ -368,14 +466,24 @@ struct ProviderStatusClient {
         )
     }
 
+    /// `ServiceSupport.validate`, except a bot challenge or edge-network block
+    /// becomes `ProviderStatusPageUnreadable` instead of a generic HTTP error.
+    private func validatePage(_ response: URLResponse, data: Data, pageName: String) throws {
+        if let reason = ProviderStatusPageGuard.blockedReason(for: response, data: data, pageName: pageName) {
+            throw ProviderStatusPageUnreadable(reason: reason)
+        }
+        try ServiceSupport.validate(response, data: data)
+    }
+
     private func fetchStatus(
-        from baseURL: URL
+        from baseURL: URL,
+        pageName: String
     ) async throws -> (pageName: String?, summary: ProviderStatusSummary) {
         let url = baseURL.appendingPathComponent("api/v2/status.json")
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         let (data, response) = try await fetch(request)
-        try ServiceSupport.validate(response, data: data)
+        try validatePage(response, data: data, pageName: pageName)
         return try ProviderStatusFeedParser.parseStatuspageStatus(data: data)
     }
 
