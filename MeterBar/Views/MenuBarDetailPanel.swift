@@ -268,6 +268,35 @@ struct MenuBarProviderDetailContent: View {
     snapshot.detailLimits
   }
 
+  /// One line of the hover panel: a Session or Weekly window drawn as an
+  /// annotated runway chart, or any other limit as the plain detail bar.
+  enum DetailRow {
+    case runway(SnapshotLimit)
+    case bar(SnapshotLimit)
+
+    var limit: SnapshotLimit {
+      switch self {
+      case .runway(let limit), .bar(let limit): limit
+      }
+    }
+
+    var isRunway: Bool {
+      if case .runway = self { true } else { false }
+    }
+  }
+
+  /// The popover keeps bars; the hover is where the charts live. Every limit
+  /// that can be projected becomes a runway, in the card's own order, and the
+  /// rest (estimated, no window, credits, model and review windows) stay bars.
+  static func rows(for limits: [SnapshotLimit], now: Date = Date()) -> [DetailRow] {
+    limits.map { RunwayContent.isEligible($0, now: now) ? .runway($0) : .bar($0) }
+  }
+
+  /// The three-line key is shown once, and only when a chart is on screen.
+  static func showsRunwayLegend(for rows: [DetailRow]) -> Bool {
+    rows.contains { $0.isRunway }
+  }
+
   /// The identity row this panel shows, exposed so it can be asserted equal to
   /// the card's.
   var headerContent: ProviderCardHeader.Content {
@@ -303,10 +332,11 @@ struct MenuBarProviderDetailContent: View {
     )
   }
 
-  // Same order and same spacings as `ProviderStatusCard.expandedCardBody`: the
-  // reset counter and the limit rows are drawn flat inside this one surface, not
-  // wrapped in cards of their own. The extra width buys the fuller `.detail`
-  // row footer (used + pace beside each row's reset) and the sparkline below.
+  // Same order as `ProviderStatusCard.expandedCardBody`: the reset counter and
+  // the limits are drawn flat inside this one surface, not wrapped in cards of
+  // their own. Where the card shows a bar, the hover shows the chart behind it
+  // (one runway per Session and Weekly window, one shared legend), then the
+  // week of usage below.
   private var detailRows: some View {
     VStack(alignment: .leading, spacing: 10) {
       if detailLimits.isEmpty {
@@ -322,14 +352,23 @@ struct MenuBarProviderDetailContent: View {
           format: menuBarDisplayPreferences.resetTimeFormat
         )
       } else {
-        VStack(alignment: .leading, spacing: 9) {
-          ForEach(detailLimits) { limit in
-            LimitRow(
-              limit: limit,
-              accentColor: snapshot.accentColor,
-              density: .detail,
-              resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
-            )
+        let rows = Self.rows(for: detailLimits)
+        VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.lg) {
+          ForEach(rows, id: \.limit.id) { row in
+            switch row {
+            case .runway(let limit):
+              RunwayView(limit: limit, accentColor: snapshot.accentColor)
+            case .bar(let limit):
+              LimitRow(
+                limit: limit,
+                accentColor: snapshot.accentColor,
+                density: .detail,
+                resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+              )
+            }
+          }
+          if Self.showsRunwayLegend(for: rows) {
+            RunwayLegend(accentColor: snapshot.accentColor)
           }
         }
       }

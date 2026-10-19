@@ -228,20 +228,17 @@ struct ProviderStatusCard: View {
                 )
             } else {
                 // Each window resets on its own schedule, so every row shows
-                // its own countdown (`LimitRow` footer). The hover detail panel
-                // is what adds used/pace text and the seven-day sparkline.
+                // its own countdown (`LimitRow` footer). The card is bars only;
+                // the runway charts and the seven-day sparkline live in the
+                // hover detail panel.
                 VStack(alignment: .leading, spacing: 9) {
                     ForEach(snapshot.limits) { limit in
-                        if limitDensity == .compact, RunwayView.isEligible(limit) {
-                            RunwayView(limit: limit, accentColor: snapshot.accentColor)
-                        } else {
-                            LimitRow(
-                                limit: limit,
-                                accentColor: snapshot.accentColor,
-                                density: limitDensity,
-                                resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
-                            )
-                        }
+                        LimitRow(
+                            limit: limit,
+                            accentColor: snapshot.accentColor,
+                            density: limitDensity,
+                            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                        )
                     }
                 }
             }
