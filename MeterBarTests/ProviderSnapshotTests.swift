@@ -668,11 +668,11 @@ final class ProviderSnapshotTests: XCTestCase {
     // gauge says so, but only while there are credits for that to matter.
     func testCursorWeeklyRowExplainsIncludedUsageComesBeforeCredits() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
         XCTAssertEqual(
@@ -684,29 +684,29 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testCursorWeeklyRowHasNoNoteWithoutCredits() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
     }
 
     func testCursorSessionRowNeverCarriesTheCreditsNote() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertNil(limits.first { $0.id == "session" }?.footnote)
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
     }
 
-    func testOtherProvidersNeverGetTheCursorCreditsNote() {
+    func testOtherProvidersNeverGetThexAICreditsNote() {
         let metrics = UsageMetrics(
             service: .claudeCode,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
@@ -720,11 +720,11 @@ final class ProviderSnapshotTests: XCTestCase {
     // Cursor sometimes omits the pool reset; the row must not invent one.
     func testCursorWeeklyRowWithoutResetShowsNoReset() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
             .first { $0.id == "weekly" }
 
         XCTAssertNotNil(weekly)

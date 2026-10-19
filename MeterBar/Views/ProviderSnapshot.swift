@@ -942,7 +942,7 @@ enum ProviderSnapshotBuilder {
                 ),
                 usageLimit: weekly,
                 valueStyle: service.usesCurrencyValueStyle ? .currency : .quota,
-                footnote: service == .cursor && metrics.codeReviewLimit != nil ? .includedBeforeCredits : nil
+                footnote: service == .xai && metrics.codeReviewLimit != nil ? .includedBeforeCredits : nil
             ))
         }
         if let codeReview = metrics.codeReviewLimit {
