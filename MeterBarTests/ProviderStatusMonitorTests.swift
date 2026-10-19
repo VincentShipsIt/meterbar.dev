@@ -463,9 +463,9 @@ final class ProviderStatusMonitorTests: XCTestCase {
             body: Self.cloudflareChallengeHTML
         )
 
-        let report = try await client.fetchReport(for: .grok)
+        let report = try await client.fetchReport(for: .xai)
 
-        XCTAssertEqual(report.service, .grok)
+        XCTAssertEqual(report.service, .xai)
         XCTAssertTrue(report.isUnreadable)
         XCTAssertEqual(report.headline, "Unchecked")
         XCTAssertEqual(report.summary.indicator, .unknown)
@@ -530,7 +530,7 @@ final class ProviderStatusMonitorTests: XCTestCase {
         )
 
         do {
-            _ = try await client.fetchReport(for: .grok)
+            _ = try await client.fetchReport(for: .xai)
             XCTFail("A bare 403 must remain a fetch error")
         } catch {
             XCTAssertNil(error as? ProviderStatusPageUnreadable)

@@ -451,7 +451,7 @@ struct ProviderStatusClient {
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         let (data, response) = try await fetch(request)
-        try validatePage(response, data: data, pageName: ServiceType.grok.statusPageDisplayName)
+        try validatePage(response, data: data, pageName: ServiceType.xai.statusPageDisplayName)
         guard let html = String(data: data, encoding: .utf8) else {
             throw ServiceError.parsingError(nil)
         }
