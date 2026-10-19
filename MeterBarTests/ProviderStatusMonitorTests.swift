@@ -426,6 +426,137 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertFalse(report.hasIssue)
     }
 
+    // MARK: - Unreadable pages (bot challenge, browser-rendered shell)
+
+    private static let cloudflareChallengeHTML = """
+    <!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head>
+    <body><h1>Sorry, you have been blocked</h1><div id="cf-wrapper"></div></body></html>
+    """
+
+    private static let openRouterShellHTML = """
+    <!doctype html><html lang="en"><head><meta charset="utf-8"><title>openrouter</title>
+    <meta name="description" content="Welcome to openrouter. See real-time and historical system health.">
+    <script type="module" src="/assets/index.js"></script></head>
+    <body><div id="root"></div><script>window.__BOOT__ = {}</script></body></html>
+    """
+
+    private func makeClient(
+        statusCode: Int,
+        headers: [String: String] = [:],
+        body: String
+    ) -> ProviderStatusClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: nil, headerFields: headers)
+            )
+            return (response, Data(body.utf8))
+        }
+        return ProviderStatusClient(session: URLSession(configuration: configuration))
+    }
+
+    func testGrokBotChallengeYieldsUnreadableReportNotOutage() async throws {
+        let client = makeClient(
+            statusCode: 403,
+            headers: ["cf-mitigated": "challenge", "Server": "cloudflare"],
+            body: Self.cloudflareChallengeHTML
+        )
+
+        let report = try await client.fetchReport(for: .grok)
+
+        XCTAssertEqual(report.service, .grok)
+        XCTAssertTrue(report.isUnreadable)
+        XCTAssertEqual(report.headline, "Unchecked")
+        XCTAssertEqual(report.summary.indicator, .unknown)
+        XCTAssertTrue(report.components.isEmpty)
+        XCTAssertFalse(report.hasIssue)
+        XCTAssertTrue(try XCTUnwrap(report.unreadableReason).contains("blocked"))
+        XCTAssertTrue(try XCTUnwrap(report.unreadableReason).contains("SpaceXAI"))
+    }
+
+    func testStatuspageBotChallengeYieldsUnreadableReport() async throws {
+        let client = makeClient(statusCode: 403, body: Self.cloudflareChallengeHTML)
+
+        let report = try await client.fetchReport(for: .claudeCode)
+
+        XCTAssertTrue(report.isUnreadable)
+        XCTAssertFalse(report.hasIssue)
+    }
+
+    func testOpenRouterScriptRenderedShellYieldsUnreadableReport() async throws {
+        let client = makeClient(statusCode: 200, body: Self.openRouterShellHTML)
+
+        let report = try await client.fetchReport(for: .openRouter)
+
+        XCTAssertTrue(report.isUnreadable)
+        XCTAssertEqual(report.headline, "Unchecked")
+        XCTAssertFalse(report.hasIssue)
+        XCTAssertTrue(try XCTUnwrap(report.unreadableReason).contains("OpenRouter"))
+    }
+
+    func testOpenRouterPageWithStatusTextIsNotTreatedAsShell() async throws {
+        let client = makeClient(
+            statusCode: 200,
+            body: "<html><head><title>x</title></head><body><h1>Partial outage</h1></body></html>"
+        )
+
+        let report = try await client.fetchReport(for: .openRouter)
+
+        XCTAssertFalse(report.isUnreadable)
+        XCTAssertEqual(report.summary.indicator, .unknown)
+    }
+
+    func testOpenRouterShellWithOperationalPhraseInScriptIsStillUnreadable() async throws {
+        let client = makeClient(
+            statusCode: 200,
+            body: """
+            <html><head><title>openrouter</title></head>
+            <body><div id="root"></div><script>var s = "All Systems Operational"</script></body></html>
+            """
+        )
+
+        let report = try await client.fetchReport(for: .openRouter)
+
+        XCTAssertTrue(report.isUnreadable)
+        XCTAssertFalse(report.hasIssue)
+    }
+
+    func testPlainForbiddenWithoutChallengeStaysAnErrorEvenBehindCloudflare() async {
+        let client = makeClient(
+            statusCode: 403,
+            headers: ["cf-ray": "abc123-SJC", "Server": "cloudflare"],
+            body: "Forbidden"
+        )
+
+        do {
+            _ = try await client.fetchReport(for: .grok)
+            XCTFail("A bare 403 must remain a fetch error")
+        } catch {
+            XCTAssertNil(error as? ProviderStatusPageUnreadable)
+        }
+    }
+
+    func testServerErrorWithoutChallengeStaysAnError() async {
+        let client = makeClient(statusCode: 503, body: "Service Unavailable")
+
+        do {
+            _ = try await client.fetchReport(for: .claudeCode)
+            XCTFail("A bare 503 must remain a fetch error")
+        } catch {
+            XCTAssertNil(error as? ProviderStatusPageUnreadable)
+        }
+    }
+
+    func testScriptRenderedShellDetection() {
+        XCTAssertTrue(ProviderStatusPageGuard.isScriptRenderedShell(html: Self.openRouterShellHTML))
+        XCTAssertFalse(ProviderStatusPageGuard.isScriptRenderedShell(
+            html: "<html><head></head><body><p>All Systems Operational</p></body></html>"
+        ))
+        XCTAssertFalse(ProviderStatusPageGuard.isScriptRenderedShell(html: "not html at all"))
+    }
+
     private final class LockedBox<Value>: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: Value

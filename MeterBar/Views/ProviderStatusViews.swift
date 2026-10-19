@@ -103,7 +103,7 @@ private struct ProviderStatusDisclosureRow: View {
 
     private var headline: String {
         if let report {
-            return report.summary.indicator.summaryLabel
+            return report.headline
         }
         return error == nil ? "Loading" : "Unavailable"
     }
@@ -173,7 +173,7 @@ private struct ProviderStatusDisclosureRow: View {
             statusError(error)
         } else if let report {
             if report.components.isEmpty {
-                Text("No component details published by \(report.pageName).")
+                Text(report.unreadableReason ?? "No component details published by \(report.pageName).")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
@@ -317,7 +317,9 @@ struct MenuBarStatusDetailContent: View {
     }
 
     private var worstIndicator: ProviderStatusIndicator {
-        reports
+        let readable = reports.filter { !$0.isUnreadable }
+        if readable.isEmpty, !reports.isEmpty { return .unknown }
+        return readable
             .map(\.summary.indicator)
             .max { $0.rank < $1.rank } ?? (statusMonitor.isRefreshing ? .unknown : .none)
     }
@@ -328,8 +330,12 @@ struct MenuBarStatusDetailContent: View {
         }
 
         let issueCount = reports.filter(\.hasIssue).count
+        let unreadableCount = reports.filter(\.isUnreadable).count
+        if !reports.isEmpty, unreadableCount == reports.count {
+            return "Provider status pages couldn't be checked"
+        }
         if issueCount == 0, reports.count == ServiceType.statusPageServices.count {
-            return "All provider pages operational"
+            return unreadableCount == 0 ? "All provider pages operational" : "All readable provider pages operational"
         }
         if issueCount == 1 {
             return "1 provider needs attention"
@@ -421,7 +427,7 @@ private struct MenuBarStatusDetailProviderSection: View {
 
     private var headline: String {
         if let report {
-            return report.summary.indicator.summaryLabel
+            return report.headline
         }
         return error == nil ? "Loading" : "Unavailable"
     }
@@ -480,7 +486,7 @@ private struct MenuBarStatusDetailProviderSection: View {
                     .foregroundStyle(.secondary)
             } else if let report {
                 if report.components.isEmpty {
-                    Text("No component details published by \(report.pageName).")
+                    Text(report.unreadableReason ?? "No component details published by \(report.pageName).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
