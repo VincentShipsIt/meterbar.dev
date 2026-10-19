@@ -660,6 +660,73 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(limits.map(\.title), ["Cursor Models", "Other Models", "On-demand"])
     }
 
+    // Cursor spends the included pool before it touches credits, so the weekly
+    // gauge says so, but only while there are credits for that to matter.
+    func testCursorWeeklyRowExplainsIncludedUsageComesBeforeCredits() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
+        XCTAssertEqual(
+            limits.first { $0.id == "weekly" }?.localizedFootnote,
+            "Included usage is spent before credits."
+        )
+        XCTAssertNil(limits.first { $0.id == "codeReview" }?.footnote)
+    }
+
+    func testCursorWeeklyRowHasNoNoteWithoutCredits() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
+    }
+
+    func testCursorSessionRowNeverCarriesTheCreditsNote() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+
+        XCTAssertNil(limits.first { $0.id == "session" }?.footnote)
+        XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
+    }
+
+    func testOtherProvidersNeverGetTheCursorCreditsNote() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+        )
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .claudeCode)
+
+        XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
+    }
+
+    // Cursor sometimes omits the pool reset; the row must not invent one.
+    func testCursorWeeklyRowWithoutResetShowsNoReset() {
+        let metrics = UsageMetrics(
+            service: .cursor,
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+        )
+        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+            .first { $0.id == "weekly" }
+
+        XCTAssertNotNil(weekly)
+        XCTAssertFalse(weekly.map { LimitRow.RowContent(limit: $0).showsReset } ?? true)
+    }
+
     func testCursorSinglePoolExhaustionDoesNotCollapseTheCard() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Cursor",

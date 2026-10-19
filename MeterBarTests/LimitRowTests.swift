@@ -45,6 +45,45 @@ final class LimitRowTests: XCTestCase {
         )
     }
 
+    // MARK: - Footnote
+
+    func testFootnoteShowsOnWiderDensitiesOnly() {
+        var limit = quotaLimit(used: 40)
+        limit.footnote = .includedBeforeCredits
+        let content = LimitRow.RowContent(limit: limit)
+
+        XCTAssertEqual(content.footnote(density: .regular), "Included usage is spent before credits.")
+        XCTAssertEqual(content.footnote(density: .detail), "Included usage is spent before credits.")
+        XCTAssertNil(content.footnote(density: .compact))
+    }
+
+    func testNoFootnoteByDefault() {
+        let content = LimitRow.RowContent(limit: quotaLimit(used: 40))
+
+        XCTAssertNil(content.footnote(density: .regular))
+    }
+
+    func testFootnoteIsSpokenByVoiceOver() {
+        var limit = quotaLimit(used: 40)
+        limit.footnote = .includedBeforeCredits
+        let row = LimitRow(limit: limit, accentColor: .blue, density: .regular)
+
+        XCTAssertTrue(row.accessibilityValueText.hasSuffix("Included usage is spent before credits."))
+    }
+
+    func testFootnoteAddsHeightToTheRow() {
+        var noted = quotaLimit(used: 40)
+        noted.footnote = .includedBeforeCredits
+        let withNote = NSHostingView(rootView: LimitRow(limit: noted, accentColor: .blue).frame(width: 320))
+        let without = NSHostingView(
+            rootView: LimitRow(limit: quotaLimit(used: 40), accentColor: .blue).frame(width: 320)
+        )
+        withNote.layoutSubtreeIfNeeded()
+        without.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(withNote.fittingSize.height, without.fittingSize.height)
+    }
+
     // MARK: - Trailing value
 
     func testQuotaTrailingShowsPercentLeftWhenHasRoom() {
