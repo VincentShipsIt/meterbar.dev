@@ -261,7 +261,7 @@ struct NotificationDecider {
     }
 
     /// Fallback keys must not swallow account-scoped keys that share the
-    /// `"Grok-"` prefix. Account keys include a UUID between the service and
+    /// `"xAI-"` prefix. Account keys include a UUID between the service and
     /// the window token.
     private static func isOwnedNotificationKey(
         _ key: String,
@@ -309,8 +309,8 @@ struct NotificationDecider {
     }
 
     /// Whether exhausting this window prevents normal use of the provider.
-    /// Cursor's two included pools spill over into each other, so a single
-    /// empty pool is not a hard stop unless the other is empty too.
+    /// xAI's legacy Cursor monthly pools spill over into each other, so a
+    /// single empty pool is not a hard stop unless the other is empty too.
     private static func blocksProvider(
         service: ServiceType,
         quotaKind: QuotaKind,
@@ -318,10 +318,10 @@ struct NotificationDecider {
     ) -> Bool {
         if metrics.extraUsage?.state == .on { return false }
         if quotaKind == .codeReview { return false }
-        if service == .cursor {
-            let sessionOut = metrics.sessionLimit?.isAtLimit == true
+        if service == .xai {
             let weeklyOut = metrics.weeklyLimit?.isAtLimit == true
-            return sessionOut && weeklyOut
+            guard let sessionLimit = metrics.sessionLimit else { return weeklyOut }
+            return sessionLimit.isAtLimit && weeklyOut
         }
         return true
     }

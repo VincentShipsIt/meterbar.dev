@@ -180,7 +180,7 @@ final class UsageBarGeometryTests: XCTestCase {
 }
 
 /// The reserve band and the pace marker are drawn *on top of* the provider accent
-/// fill, so hue alone can't carry them: Cursor's and OpenAI's accents are already
+/// fill, so hue alone can't carry them: OpenAI's accent is already
 /// green. Both tokens must therefore separate from every accent by luminance, in
 /// light and dark appearance.
 @MainActor
@@ -188,10 +188,9 @@ final class UsageBarContrastTests: XCTestCase {
     private let accents: [(String, Color)] = [
         ("codex", MeterBarTheme.codexAccent),
         ("claude", MeterBarTheme.claudeAccent),
-        ("cursor", MeterBarTheme.cursorAccent),
         ("openai", MeterBarTheme.openaiAccent),
         ("openRouter", MeterBarTheme.openRouterAccent),
-        ("grok", MeterBarTheme.grokAccent)
+        ("xai", MeterBarTheme.xaiAccent)
     ]
 
     func testReserveBandSeparatesFromEveryAccentInBothAppearances() {
@@ -217,7 +216,7 @@ final class UsageBarContrastTests: XCTestCase {
             let band = composite(
                 overlay: MeterBarTheme.reserveBand,
                 opacity: UsageBar.bandOpacity,
-                over: MeterBarTheme.cursorAccent,
+                over: MeterBarTheme.xaiAccent,
                 appearanceName: name
             )
             let casing = composite(

@@ -7,6 +7,18 @@ status: active
 
 Live ADRs only.
 
+## Grok, Grok Bot and Cursor are one xAI provider
+
+**Accepted 2026-10-18.** x.ai/pricing (checked 2026-10-18) sells one set of tiers (Free, Plus $8, Premium $30, Super $100, Ultra $200) whose AI usage is "a pool shared across Grok and Cursor", refreshed weekly. Separate Grok, Grok Bot and Cursor providers would show one allowance three times, so they are merged into `ServiceType.xai` (display name "xAI", official x.ai mark).
+
+- **One weekly gauge.** `XAIUsageMerger` folds the Grok CLI billing read and the Cursor dashboard read: weekly/session Grok-first, on-demand spend Cursor-first, additional limits unioned. Legacy Cursor accounts keep their monthly pools ("Cursor Models" / "Other Models") and on-demand spend as extra rows; a lone monthly Cursor quota is demoted to an extra row when Grok has a weekly gauge. The separate "Grok Bot" card and `.grokBot` special-casing are gone.
+- **Both data sources stay.** Grok CLI ACP billing (multi-account via `GROK_HOME` profiles) and the Cursor session-JWT usage read. The default profile's card merges both; custom Grok profiles are Grok-only. Health is quiet while either source is connected.
+- **Old data keeps decoding.** `ServiceType(rawValue:)` maps the retired "Grok" and "Cursor" values to `.xai`, and `MetricsCodec` folds collisions through the merger, so caches, visibility, menu-bar prefs, widget config, routing policy, quota-event settings, the usage ledger, cost summaries and iCloud snapshots survive. A legacy `default` quota-event selection still maps to the default Grok profile UUID.
+- **CLI.** Canonical token `xai`; `--provider grok` and `--provider cursor` stay as aliases (`ServiceType.legacyCLIIdentifiers`). JSON `provider` now says `xAI`: a breaking change for scripts that matched `Grok` or `Cursor`, recorded in `docs/cli-json-schema.md`.
+- **Status.** `status.x.ai` (SpaceXAI) is the sole source; Cursor's Statuspage row was dropped.
+- **Logo.** The official x.ai header symbol, copied verbatim from the live site on 2026-10-18 (the official asset zip returned Cloudflare 403). Swap in the exact file if one is obtained.
+- **Unverified.** No live X Subscription account was available; shapes follow fixtures and the earlier captures in `providers.md`.
+
 ## The workload router recommends; it never executes
 
 **Accepted 2026-09-29** (epic #513, Phase 1). `WorkloadRouter` in `MeterBarShared` is a pure function from a task policy, cached quota snapshots, provider health, and an injected `now` to a `RoutingDecision`. The app and `meterbar route` both call it, so identical inputs give identical decisions. It has no clock, disk, network, credential, or subprocess access by construction (`RouteCLITests` scans its sources for the forbidden APIs), and it never sees a prompt: the task is named explicitly by the caller.
@@ -58,7 +70,7 @@ Typography stays SF (Rounded for display, Mono for the terminal-ish lines). Mete
 
 Two rules follow from the card drawing a filled bar under every row. A quota row drops its used-percent when it has a pace label — the bar already says how much is used, and the words were crowding out the two facts the bar cannot show, pace and reset. An estimated row has no pace, so it keeps the number rather than being left with a bare countdown; a currency row keeps its "$… spent" because an absolute amount is not something a bar encodes.
 
-A sub-pool card names the account it is carved out of ("Grok Bot on Cursor"), in the masthead and in the caption. Cursor Ultra's Grok Bot entitlement is branded Grok and titled "Grok Bot", so the gallery shows it next to a real Grok account: same mark, near-identical name, routinely the opposite status. In the app that ambiguity survives because the cards sit in a page you already understand; posted as a standalone image nothing says which Grok is out.
+A sub-pool card names the account it is carved out of ("Grok Bot on Cursor", before the xAI merge), in the masthead and in the caption. Before the xAI merge, Cursor Ultra's Grok Bot entitlement was branded Grok and titled "Grok Bot", so the gallery showed it next to a real Grok account: same mark, near-identical name, routinely the opposite status. In the app that ambiguity survives because the cards sit in a page you already understand; posted as a standalone image nothing says which Grok is out.
 
 Page content caps at `UsageDashboardView.maximumContentWidth` (1280) and centres, on the shell rather than per page. An uncapped page on an ultrawide is not more room: a quota bar stretched to 1800pt makes 7% left indistinguishable from 4%, because the eye cannot judge a ratio across that distance. Pages doing their own column math take `contentViewportWidth`, not the raw viewport, or they deal columns for a width they are never given. The gallery does not answer ultrawide by adding columns: these cards are fixed-aspect artwork authored at 1200x675 whose row text is 18pt at export scale, so a third column pushes it below legibility — the cap keeps cards at a readable size and leaves the margin empty on purpose.
 

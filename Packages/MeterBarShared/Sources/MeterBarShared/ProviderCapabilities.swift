@@ -63,7 +63,7 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 hasAccountScopedNotifications: true,
                 hasAccountScopedQuotaEvents: true
             )
-        case .grok:
+        case .xai:
             return ProviderCapabilities(
                 isMultiAccount: true,
                 supportsExtraUsage: true,
@@ -72,16 +72,6 @@ public struct ProviderCapabilities: Equatable, Sendable {
                 supportsSessionWake: false,
                 hasAccountScopedNotifications: true,
                 hasAccountScopedQuotaEvents: true
-            )
-        case .cursor:
-            return ProviderCapabilities(
-                isMultiAccount: false,
-                supportsExtraUsage: false,
-                supportsResetRedemption: false,
-                supportsGuardConfigDirectory: false,
-                supportsSessionWake: false,
-                hasAccountScopedNotifications: false,
-                hasAccountScopedQuotaEvents: false
             )
         case .kimiCode:
             // One credential (the official OAuth artifact or one API key) and

@@ -857,7 +857,7 @@ final class UsageReportTests: XCTestCase {
     }
 
     func testGrokCostIsNotedAsReportedNotEstimated() {
-        let rows = [Self.dailyRow(daysAgo: 0, provider: .grok, input: 10, output: 1, cacheWrite: 0, cacheRead: 5, cost: 1)]
+        let rows = [Self.dailyRow(daysAgo: 0, provider: .xai, input: 10, output: 1, cacheWrite: 0, cacheRead: 5, cost: 1)]
         let report = Self.report(Self.summary(daily: rows), .week)
 
         XCTAssertNotNil(report.notes.first { $0.id == "grok-reported-cost" })

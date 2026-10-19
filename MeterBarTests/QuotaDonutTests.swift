@@ -136,7 +136,7 @@ final class QuotaDonutTests: XCTestCase {
         let muse = offline(.museCode, title: "Muse")
 
         XCTAssertEqual(PopoverOverviewPanel.visibleSnapshots([muse], setupProviders: []).map(\.id), [muse.id])
-        XCTAssertEqual(PopoverOverviewPanel.visibleSnapshots([muse], setupProviders: [.cursor]).map(\.id), [muse.id])
+        XCTAssertEqual(PopoverOverviewPanel.visibleSnapshots([muse], setupProviders: [.xai]).map(\.id), [muse.id])
     }
 
     func testCardsWithDataAreNeverHiddenBySetup() {

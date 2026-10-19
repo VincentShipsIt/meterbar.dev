@@ -45,7 +45,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     ) -> MenuBarFocusContext {
         MenuBarFocusContext(
             bundleID: bundleID,
-            mapping: mapping ?? [cursorBundleID: .cursor, terminalBundleID: .claudeCode],
+            mapping: mapping ?? [cursorBundleID: .xai, terminalBundleID: .claudeCode],
             visibleServices: visibleServices
         )
     }
@@ -66,19 +66,19 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testMappedFrontmostAppSelectsThatProvidersQuota() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let selection = select([claude, cursor], bundleID: cursorBundleID)
 
         XCTAssertEqual(selection?.key, "cursor")
-        XCTAssertEqual(selection?.service, .cursor)
+        XCTAssertEqual(selection?.service, .xai)
     }
 
     func testMappedTerminalFollowsTheProviderTheUserChoseForIt() {
         // The mapping is the whole story: MeterBar never inspects which CLI is
         // running inside the terminal.
         let claude = candidate(key: "claude:gen", percentUsed: 20)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertEqual(select([claude, cursor], bundleID: terminalBundleID)?.service, .claudeCode)
     }
@@ -123,7 +123,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testUnmappedFrontmostAppFallsBackToAutoSelection() {
         let claude = candidate(key: "claude:gen", percentUsed: 20)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertNil(select([claude, cursor], bundleID: unknownBundleID))
     }
@@ -137,7 +137,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testMappingToAHiddenProviderIsTreatedAsUnmapped() {
         let claude = candidate(key: "claude:gen", percentUsed: 20)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let selection = select(
             [claude, cursor],
@@ -157,7 +157,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     func testMappingToAProviderWithNoAutoSelectableWindowIsTreatedAsUnmapped() {
         let cursorReview = candidate(
             key: "Cursor:default:codeReview",
-            service: .cursor,
+            service: .xai,
             percentUsed: 10,
             windowName: "Code Review",
             isAutoSelectable: false
@@ -169,16 +169,16 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     /// A zero total reads as 100% left, which makes the window MeterBar can
     /// measure least look like the one with the most headroom.
     func testMappingToAProviderWithOnlyAnUnmeasurableWindowIsTreatedAsUnmapped() {
-        let cursorSession = candidate(key: "Cursor:default:session", service: .cursor, percentUsed: 0, total: 0)
+        let cursorSession = candidate(key: "Cursor:default:session", service: .xai, percentUsed: 0, total: 0)
 
         XCTAssertNil(select([cursorSession], bundleID: cursorBundleID))
     }
 
     func testUnmeasurableWindowNeverStandsInForTheFocusedProvidersSpentOne() {
-        let cursorSession = candidate(key: "Cursor:default:session", service: .cursor, percentUsed: 0, total: 0)
+        let cursorSession = candidate(key: "Cursor:default:session", service: .xai, percentUsed: 0, total: 0)
         let cursorWeekly = candidate(
             key: "Cursor:default:weekly",
-            service: .cursor,
+            service: .xai,
             percentUsed: 100,
             windowName: "Weekly"
         )
@@ -190,7 +190,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testCriticalQuotaElsewhereOverridesTheFocusMapping() {
         let claude = candidate(key: "claude:gen", percentUsed: 92)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertEqual(QuotaBand.forLimit(claude.limit), .critical)
         XCTAssertNil(select([claude, cursor], bundleID: cursorBundleID))
@@ -198,14 +198,14 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testExhaustedQuotaElsewhereOverridesTheFocusMapping() {
         let claude = candidate(key: "claude:gen", percentUsed: 100)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertNil(select([claude, cursor], bundleID: cursorBundleID))
     }
 
     func testFocusFollowingResumesOnceTheCriticalQuotaClears() {
         let recovered = candidate(key: "claude:gen", percentUsed: 60)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertEqual(select([recovered, cursor], bundleID: cursorBundleID)?.key, "cursor")
     }
@@ -213,7 +213,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     func testTightQuotaElsewhereDoesNotOverrideTheFocusMapping() {
         // Only the critical/exhausted bands take priority; "tight" is normal.
         let claude = candidate(key: "claude:gen", percentUsed: 80)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         XCTAssertEqual(QuotaBand.forLimit(claude.limit), .tight)
         XCTAssertEqual(select([claude, cursor], bundleID: cursorBundleID)?.key, "cursor")
@@ -222,7 +222,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     func testFocusedProviderInCriticalStaysSelected() {
         // The override exists to surface a quota the user cannot see; when the
         // focused provider is the critical one there is nothing to surface.
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 95)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 95)
         let claude = candidate(key: "claude:gen", percentUsed: 20)
 
         XCTAssertEqual(select([cursor, claude], bundleID: cursorBundleID)?.key, "cursor")
@@ -230,12 +230,12 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testHiddenProviderInCriticalDoesNotOverrideTheFocusMapping() {
         let hiddenClaude = candidate(key: "claude:gen", percentUsed: 95)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let selection = select(
             [hiddenClaude, cursor],
             bundleID: cursorBundleID,
-            visibleServices: [.cursor]
+            visibleServices: [.xai]
         )
 
         XCTAssertEqual(selection?.key, "cursor")
@@ -267,7 +267,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
         let cursor = candidate(
             key: "cursor",
-            service: .cursor,
+            service: .xai,
             percentUsed: 40,
             displayName: "Cursor",
             windowName: "Monthly"
@@ -276,7 +276,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
         let descriptors = plan([claude, cursor], focus: context(bundleID: cursorBundleID))
 
         XCTAssertEqual(descriptors.count, 1)
-        XCTAssertEqual(descriptors.first?.service, .cursor)
+        XCTAssertEqual(descriptors.first?.service, .xai)
         XCTAssertEqual(descriptors.first?.selectionKey, "cursor")
         XCTAssertEqual(descriptors.first?.title, " 60%")
         // Focus behaves like Auto, not like a pin: no window qualifier.
@@ -285,7 +285,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testMergedModeWithoutFocusBehavesExactlyAsBefore() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let baseline = plan([claude, cursor])
 
@@ -300,7 +300,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testPinBeatsTheFocusMapping() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, pinKey: "Claude Code:gen:session")
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let descriptors = plan(
             [claude, cursor],
@@ -313,7 +313,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testFocusMappingBeatsRotationWhenBothAreEnabled() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let descriptors = plan(
             [claude, cursor],
@@ -326,7 +326,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testUnmappedFocusedAppKeepsAutoEvenWithADefensiveRotationTick() {
         let claude = candidate(key: "claude:gen", percentUsed: 20, activeMinutesAgo: 1)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let descriptors = plan(
             [claude, cursor],
@@ -339,7 +339,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
 
     func testFocusIsIgnoredOutsideMergedMode() {
         let claude = candidate(key: "claude:gen", percentUsed: 20)
-        let cursor = candidate(key: "cursor", service: .cursor, percentUsed: 40)
+        let cursor = candidate(key: "cursor", service: .xai, percentUsed: 40)
 
         let focused = plan([claude, cursor], mode: .perProvider, focus: context(bundleID: cursorBundleID))
 
@@ -359,7 +359,7 @@ final class MenuBarFocusSelectionTests: XCTestCase {
     }
 
     func testDefaultMappingOnlyCoversUnambiguousApps() {
-        XCTAssertEqual(MenuBarFocusAppCatalog.defaultMapping, [MenuBarFocusAppCatalog.cursorBundleID: .cursor])
+        XCTAssertEqual(MenuBarFocusAppCatalog.defaultMapping, [MenuBarFocusAppCatalog.cursorBundleID: .xai])
     }
 
     func testCatalogRowsIncludeAppsTheUserMappedThemselves() {

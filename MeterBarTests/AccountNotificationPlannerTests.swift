@@ -550,11 +550,11 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let personalWarns = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: accounts,
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 95),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10)
                     ]
                 )
             ],
@@ -562,23 +562,23 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(personalWarns.notifications.map(\.key), [
-            "Grok-\(grokAccountID.uuidString)-weekly-warn"
+            "xAI-\(grokAccountID.uuidString)-weekly-warn"
         ])
         XCTAssertEqual(personalWarns.notifications.map(\.serviceDisplayName), [
-            "Personal (Grok)"
+            "Personal (xAI)"
         ])
         XCTAssertFalse(personalWarns.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+            $0.hasPrefix("xAI-\(secondGrokAccountID.uuidString)-weekly")
         })
 
         let workExhausts = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: accounts,
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 95),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -586,21 +586,21 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(workExhausts.notifications.map(\.key), [
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ])
         XCTAssertEqual(workExhausts.notifications.map(\.level), [.critical])
         XCTAssertTrue(workExhausts.notifiedKeys.contains(
-            "Grok-\(grokAccountID.uuidString)-weekly-warn"
+            "xAI-\(grokAccountID.uuidString)-weekly-warn"
         ))
 
         let personalExhausts = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: accounts,
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -608,17 +608,17 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(personalExhausts.notifications.map(\.key), [
-            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+            "xAI-\(grokAccountID.uuidString)-weekly-critical"
         ])
 
         let personalRecovers = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: accounts,
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -627,20 +627,20 @@ final class AccountNotificationPlannerTests: XCTestCase {
         )
         XCTAssertTrue(personalRecovers.notifications.isEmpty)
         XCTAssertFalse(personalRecovers.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(grokAccountID.uuidString)-weekly")
+            $0.hasPrefix("xAI-\(grokAccountID.uuidString)-weekly")
         })
         XCTAssertTrue(personalRecovers.notifiedKeys.contains(
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ))
 
         let workRecovers = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: accounts,
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10)
                     ]
                 )
             ],
@@ -649,20 +649,20 @@ final class AccountNotificationPlannerTests: XCTestCase {
         )
         XCTAssertTrue(workRecovers.notifications.isEmpty)
         XCTAssertFalse(workRecovers.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+            $0.hasPrefix("xAI-\(secondGrokAccountID.uuidString)-weekly")
         })
     }
 
     func testGrokEnableDisableDeleteAndRenameReconcilesNotificationState() {
         let enabledInput = input(
-            service: .grok,
+            service: .xai,
             accounts: [
                 account(id: grokAccountID, name: "Personal"),
                 account(id: secondGrokAccountID, name: "Work")
             ],
             accountMetrics: [
-                grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
             ]
         )
         let first = planner.plan(inputs: [enabledInput], alreadyNotified: [], now: now)
@@ -671,14 +671,14 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let disabled = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [
                         account(id: grokAccountID, name: "Personal", isEnabled: false),
                         account(id: secondGrokAccountID, name: "Work")
                     ],
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -687,10 +687,10 @@ final class AccountNotificationPlannerTests: XCTestCase {
         )
         XCTAssertTrue(disabled.notifications.isEmpty)
         XCTAssertFalse(disabled.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(grokAccountID.uuidString)")
+            $0.hasPrefix("xAI-\(grokAccountID.uuidString)")
         })
         XCTAssertTrue(disabled.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)")
+            $0.hasPrefix("xAI-\(secondGrokAccountID.uuidString)")
         })
 
         let reenabled = planner.plan(
@@ -699,16 +699,16 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(reenabled.notifications.map(\.key), [
-            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+            "xAI-\(grokAccountID.uuidString)-weekly-critical"
         ])
 
         let deleted = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [account(id: secondGrokAccountID, name: "Work")],
                     accountMetrics: [
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -717,16 +717,16 @@ final class AccountNotificationPlannerTests: XCTestCase {
         )
         XCTAssertTrue(deleted.notifications.isEmpty)
         XCTAssertTrue(deleted.notifiedKeys.contains(
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ))
 
         let renamed = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [account(id: secondGrokAccountID, name: "Studio")],
                     accountMetrics: [
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -738,10 +738,10 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let recoveredThenCrossed = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [account(id: secondGrokAccountID, name: "Studio")],
                     accountMetrics: [
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10)
                     ]
                 )
             ],
@@ -751,10 +751,10 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let renamedCrossing = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [account(id: secondGrokAccountID, name: "Studio")],
                     accountMetrics: [
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -762,10 +762,10 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(renamedCrossing.notifications.map(\.serviceDisplayName), [
-            "Studio (Grok)"
+            "Studio (xAI)"
         ])
         XCTAssertEqual(renamedCrossing.notifications.map(\.key), [
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ])
     }
 
@@ -773,20 +773,20 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let defaultAccount = account(id: grokAccountID, name: GrokAccount.defaultName)
         let work = account(id: secondGrokAccountID, name: "Work")
         let legacyKeys: Set<String> = [
-            "Grok-weekly-warn",
-            "Grok-weekly-critical"
+            "xAI-weekly-warn",
+            "xAI-weekly-critical"
         ]
 
         let migrated = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [defaultAccount, work],
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 10)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 10)
                     ],
-                    fallbackMetrics: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                    fallbackMetrics: metrics(service: .xai, used: 0, weeklyUsed: 100),
                     representativeAccountID: grokAccountID
                 )
             ],
@@ -798,23 +798,23 @@ final class AccountNotificationPlannerTests: XCTestCase {
             migrated.notifications.isEmpty,
             "The representative profile must inherit the legacy Grok band without a duplicate banner."
         )
-        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-warn"))
-        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-critical"))
+        XCTAssertFalse(migrated.notifiedKeys.contains("xAI-weekly-warn"))
+        XCTAssertFalse(migrated.notifiedKeys.contains("xAI-weekly-critical"))
         XCTAssertTrue(migrated.notifiedKeys.contains(
-            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+            "xAI-\(grokAccountID.uuidString)-weekly-critical"
         ))
         XCTAssertFalse(migrated.notifiedKeys.contains {
-            $0.hasPrefix("Grok-\(secondGrokAccountID.uuidString)-weekly")
+            $0.hasPrefix("xAI-\(secondGrokAccountID.uuidString)-weekly")
         })
 
         let workCrosses = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [defaultAccount, work],
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ]
                 )
             ],
@@ -822,7 +822,7 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(workCrosses.notifications.map(\.key), [
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ])
     }
 
@@ -830,20 +830,20 @@ final class AccountNotificationPlannerTests: XCTestCase {
         let defaultAccount = account(id: grokAccountID, name: GrokAccount.defaultName)
         let work = account(id: secondGrokAccountID, name: "Work")
         let legacyKeys: Set<String> = [
-            "Grok-weekly-warn",
-            "Grok-weekly-critical"
+            "xAI-weekly-warn",
+            "xAI-weekly-critical"
         ]
 
         let migrated = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [defaultAccount, work],
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 95)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 95)
                     ],
-                    fallbackMetrics: metrics(service: .grok, used: 0, weeklyUsed: 100),
+                    fallbackMetrics: metrics(service: .xai, used: 0, weeklyUsed: 100),
                     representativeAccountID: grokAccountID
                 )
             ],
@@ -853,30 +853,30 @@ final class AccountNotificationPlannerTests: XCTestCase {
 
         XCTAssertEqual(
             migrated.notifications.map(\.key),
-            ["Grok-\(secondGrokAccountID.uuidString)-weekly-warn"],
+            ["xAI-\(secondGrokAccountID.uuidString)-weekly-warn"],
             "A non-representative profile already in-band must still fire; fallback only represented the default home."
         )
-        XCTAssertTrue(migrated.notifications.allSatisfy { $0.serviceDisplayName == "Work (Grok)" })
+        XCTAssertTrue(migrated.notifications.allSatisfy { $0.serviceDisplayName == "Work (xAI)" })
         XCTAssertFalse(
             migrated.notifications.contains { $0.key.contains(grokAccountID.uuidString) },
             "The representative profile must inherit the legacy band without a duplicate banner."
         )
         XCTAssertTrue(migrated.notifiedKeys.contains(
-            "Grok-\(grokAccountID.uuidString)-weekly-critical"
+            "xAI-\(grokAccountID.uuidString)-weekly-critical"
         ))
         XCTAssertTrue(migrated.notifiedKeys.contains(
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-warn"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-warn"
         ))
-        XCTAssertFalse(migrated.notifiedKeys.contains("Grok-weekly-critical"))
+        XCTAssertFalse(migrated.notifiedKeys.contains("xAI-weekly-critical"))
 
         let workExhausts = planner.plan(
             inputs: [
                 input(
-                    service: .grok,
+                    service: .xai,
                     accounts: [defaultAccount, work],
                     accountMetrics: [
-                        grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                        secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100)
+                        grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                        secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100)
                     ],
                     representativeAccountID: grokAccountID
                 )
@@ -885,7 +885,7 @@ final class AccountNotificationPlannerTests: XCTestCase {
             now: now
         )
         XCTAssertEqual(workExhausts.notifications.map(\.key), [
-            "Grok-\(secondGrokAccountID.uuidString)-weekly-critical"
+            "xAI-\(secondGrokAccountID.uuidString)-weekly-critical"
         ])
         XCTAssertTrue(workExhausts.notifications.allSatisfy { $0.level == .critical })
     }
@@ -898,8 +898,8 @@ final class AccountNotificationPlannerTests: XCTestCase {
                     account(id: secondGrokAccountID, name: "Work")
                 ],
                 accountMetrics: [
-                    grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 18),
-                    secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 88)
+                    grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 18),
+                    secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 88)
                 ],
                 defaultID: grokAccountID
             ),
@@ -915,8 +915,8 @@ final class AccountNotificationPlannerTests: XCTestCase {
                     account(id: secondGrokAccountID, name: "Work")
                 ],
                 accountMetrics: [
-                    grokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 100),
-                    secondGrokAccountID: metrics(service: .grok, used: 0, weeklyUsed: 40)
+                    grokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 100),
+                    secondGrokAccountID: metrics(service: .xai, used: 0, weeklyUsed: 40)
                 ],
                 defaultID: grokAccountID
             ),

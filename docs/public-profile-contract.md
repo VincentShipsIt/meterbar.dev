@@ -73,19 +73,18 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
 ```
 
 - `provider` is the app's exact `ServiceType.rawValue`: `Claude Code`,
-  `Codex CLI`, `Cursor`, `OpenRouter`, `Grok`, `Kimi Code`, `Z.ai Coding Plan`,
+  `Codex CLI`, `xAI`, `OpenRouter`, `Kimi Code`, `Z.ai Coding Plan`,
   or `GitHub Copilot`. The site maps it to a logo and color. Unknown ids
   should render with a neutral mark. Only quota windows are published;
   currency budgets are omitted, including Copilot's monthly dollar budget.
   A currency-only provider does not acquire an invented quota window.
 - `name` is the provider's display name, with an ordinal for a second account
-  of the same provider (`OpenAI Codex 2`), or `<pool> on <parent>` for a
-  sub-pool (`Grok Bot on Cursor`). It is never an account name.
+  of the same provider (`OpenAI Codex 2`). It is never an account name.
 - `plan`, `pace` and `resetsAt` may be `null` or absent. `resetsAt` is rounded
   to the minute. `plan` is included only when its account ownership is
   unambiguous across the full snapshot input, before window sanitization or
   provider caps. Multiple account cards suppress the provider-wide plan;
-  sub-pools never count as accounts or carry a plan. Claude, Codex and Grok
+  Claude, Codex and xAI (Grok profiles)
   custom accounts cannot inherit the default account's plan. A sole default
   account or legacy provider-wide snapshot without an account id may retain it.
 - `usedPercent` is 0-100. The card shows "left", which is `100 - usedPercent`.
@@ -93,8 +92,8 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
   (`provider` or `secondary`) and `isEstimated` (boolean). Each provider has
   `primaryWindowIndex` (an index into its sanitized windows, omitted if the
   primary window was filtered out) and `isBlocked` (boolean). These come from
-  the app's provider availability policy, including Cursor's included-pool
-  spillover and paid extra usage; model-specific limits do not block the parent.
+  the app's provider availability policy, including xAI's merged weekly pool
+  and paid extra usage; model-specific limits do not block the parent.
   Older documents remain valid. When a provider is blocked, the app publishes
   only blocking windows; the site uses the same compact presentation. Exhausted
   measured rows show their reset without a progress bar, and reset dates older

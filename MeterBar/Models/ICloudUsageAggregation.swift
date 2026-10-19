@@ -44,8 +44,7 @@ nonisolated struct ICloudQuotaSnapshot: Codable, Equatable, Sendable {
 
     @MainActor
     init?(snapshot: ProviderSnapshot, externalAccountIdentity: String?) {
-        guard snapshot.isAccountCard,
-              let capturedAt = snapshot.updatedAt,
+        guard let capturedAt = snapshot.updatedAt,
               !snapshot.limits.isEmpty,
               let accountIdentity = Self.accountIdentity(
                   provider: snapshot.service,

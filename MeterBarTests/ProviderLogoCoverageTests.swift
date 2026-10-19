@@ -10,7 +10,7 @@ import XCTest
 final class ProviderLogoCoverageTests: XCTestCase {
     private var brandedKinds: [ProviderLogoKind] {
         [
-            .codex, .claude, .cursor, .openai, .openRouter, .grok,
+            .codex, .claude, .xai, .openai, .openRouter, .xai,
             .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform,
         ]
     }

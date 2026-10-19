@@ -132,7 +132,7 @@ nonisolated enum QuotaEventSnapshotCatalog {
                 },
                 accounts.codexAccountMetrics
             )
-        case .grok:
+        case .xai:
             return (
                 accounts.grokAccounts.map {
                     AccountMetricIdentity(id: $0.id, name: $0.name, isEnabled: $0.isEnabled)
@@ -146,8 +146,7 @@ nonisolated enum QuotaEventSnapshotCatalog {
                 },
                 accounts.openRouterAccountMetrics
             )
-        case .cursor,
-             .kimiCode,
+        case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
              .museCode,

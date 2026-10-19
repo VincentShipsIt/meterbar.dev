@@ -107,7 +107,7 @@ struct CostScanLoadingChart: View {
                     LinearGradient(
                       colors: [
                         MeterBarTheme.codexAccent.opacity(0.18 + wave * 0.16),
-                        MeterBarTheme.cursorAccent.opacity(0.16 + seed * 0.20),
+                        MeterBarTheme.xaiAccent.opacity(0.16 + seed * 0.20),
                       ],
                       startPoint: .bottom,
                       endPoint: .top

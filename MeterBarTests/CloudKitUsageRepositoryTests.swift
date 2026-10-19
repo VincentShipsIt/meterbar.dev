@@ -478,7 +478,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
 
     func testRollupOnTheOldestRetainedDayIsKept() {
         let expired = CloudKitUsageRepository.expiredRollupRecordIDs(
-            among: [recordID("rollup-\(ServiceType.cursor.rawValue)-2026-06-05")],
+            among: [recordID("rollup-\(ServiceType.xai.rawValue)-2026-06-05")],
             now: Self.retentionNow,
             retentionDayCount: ICloudUsageAggregation.retentionDayCount,
             calendar: calendar(for: "UTC")
@@ -488,7 +488,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
     }
 
     func testRollupOneDayBeyondRetentionIsDeleted() {
-        let stale = recordID("rollup-\(ServiceType.cursor.rawValue)-2026-06-04")
+        let stale = recordID("rollup-\(ServiceType.xai.rawValue)-2026-06-04")
 
         let expired = CloudKitUsageRepository.expiredRollupRecordIDs(
             among: [stale],
@@ -513,7 +513,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         // 2026-09-01T23:00:00Z is already 2026-09-02 in Tokyo, which moves the
         // cutoff a day later than a UTC reading of the same instant would.
         let now = Date(timeIntervalSince1970: 1_788_303_600)
-        let borderline = recordID("rollup-\(ServiceType.grok.rawValue)-2026-06-04")
+        let borderline = recordID("rollup-\(ServiceType.xai.rawValue)-2026-06-04")
 
         XCTAssertEqual(
             CloudKitUsageRepository.expiredRollupRecordIDs(
@@ -580,7 +580,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         nowComponents.day = 6
         nowComponents.hour = 10
         let now = try XCTUnwrap(calendar.date(from: nowComponents))
-        let oldestRetained = recordID("rollup-\(ServiceType.cursor.rawValue)-2026-06-09")
+        let oldestRetained = recordID("rollup-\(ServiceType.xai.rawValue)-2026-06-09")
 
         let expired = CloudKitUsageRepository.expiredRollupRecordIDs(
             among: [oldestRetained],
@@ -667,7 +667,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         let calendar = calendar(for: "Europe/London")
         let day = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_780_000_000))
         let name = ICloudDailyUsageRollup.recordName(
-            provider: .cursor,
+            provider: .xai,
             day: day,
             calendar: calendar
         )
@@ -694,7 +694,7 @@ final class CloudKitUsageRepositoryTests: XCTestCase {
         for retention in [0, -1] {
             XCTAssertTrue(
                 CloudKitUsageRepository.expiredRollupRecordIDs(
-                    among: [recordID("rollup-\(ServiceType.cursor.rawValue)-2020-01-01")],
+                    among: [recordID("rollup-\(ServiceType.xai.rawValue)-2020-01-01")],
                     now: Self.retentionNow,
                     retentionDayCount: retention,
                     calendar: calendar(for: "UTC")

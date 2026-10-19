@@ -317,13 +317,13 @@ struct ProviderStatusCard: View {
     }
 
     private var grokAccount: GrokAccount? {
-        guard snapshot.service == .grok, let accountID = snapshot.accountID else { return nil }
+        guard snapshot.service == .xai, let accountID = snapshot.accountID else { return nil }
         return grokAccounts.accounts.first { $0.id == accountID }
     }
 
     private var resetCreditAccountID: UUID? {
         if snapshot.service == .codexCli { return codexAccount?.id }
-        if snapshot.service == .grok { return grokAccount?.id }
+        if snapshot.service == .xai { return grokAccount?.id }
         return nil
     }
 
@@ -331,7 +331,7 @@ struct ProviderStatusCard: View {
     /// so a multi-account popover confirms which home directory is being spent.
     private var resetCreditAccountName: String {
         if snapshot.service == .codexCli { return codexAccount?.name ?? snapshot.title }
-        if snapshot.service == .grok { return grokAccount?.name ?? snapshot.title }
+        if snapshot.service == .xai { return grokAccount?.name ?? snapshot.title }
         return snapshot.title
     }
 
@@ -355,7 +355,7 @@ struct ProviderStatusCard: View {
             do {
                 if snapshot.service == .codexCli, let codexAccount {
                     try await consumeCodexResetCredit(account: codexAccount)
-                } else if snapshot.service == .grok, let grokAccount {
+                } else if snapshot.service == .xai, let grokAccount {
                     try await consumeGrokResetCredit(account: grokAccount)
                 }
             } catch {

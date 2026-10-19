@@ -85,30 +85,18 @@ final class DemoDataTests: XCTestCase {
 
     // MARK: - Provider specifics
 
-    func testCodexExposesBankedResetCreditsAndCursorHasNoPacedWindow() {
+    func testCodexExposesBankedResetCreditsAndXAIHasOneWeeklyGauge() {
         let metrics = DemoData.metrics(now: now)
 
         XCTAssertEqual(metrics[.codexCli]?.resetCreditsAvailable, 2)
-        XCTAssertEqual(metrics[.grok]?.resetCreditsAvailable, 1)
+        XCTAssertEqual(metrics[.xai]?.resetCreditsAvailable, 1)
         XCTAssertNotNil(metrics[.claudeCode]?.extraUsage)
-        XCTAssertNotNil(metrics[.grok]?.extraUsage)
-        XCTAssertNil(metrics[.grok]?.sessionLimit)
-        // Cursor included pools have no window seconds, so no pace label.
-        // Grok Bot is a separate weekly additional bar with a ~7-day window.
-        XCTAssertNil(metrics[.cursor]?.sessionLimit?.pace(now: now))
-        XCTAssertNil(metrics[.cursor]?.weeklyLimit?.pace(now: now))
-        XCTAssertEqual(metrics[.cursor]?.sessionLimit?.periodKind, .monthly)
-        XCTAssertEqual(metrics[.cursor]?.weeklyLimit?.periodKind, .monthly)
-        XCTAssertEqual(metrics[.cursor]?.additionalLimits.count, 1)
-        XCTAssertEqual(metrics[.cursor]?.additionalLimits.first?.periodKind, .weekly)
-        XCTAssertEqual(metrics[.cursor]?.additionalLimits.first?.total, ServiceType.cursorIncludedPoolTotal)
-        XCTAssertEqual(
-            ServiceType.cursor.additionalQuotaTitleKey(
-                for: metrics[.cursor]?.additionalLimits.first
-                    ?? UsageLimit(used: 0, total: 0, resetTime: nil)
-            ),
-            .grokBot
-        )
+        XCTAssertNotNil(metrics[.xai]?.extraUsage)
+        XCTAssertNil(metrics[.xai]?.sessionLimit)
+        // One weekly gauge for the shared Grok + Cursor pool; no second pool row.
+        XCTAssertEqual(metrics[.xai]?.weeklyLimit?.periodKind, .weekly)
+        XCTAssertNotNil(metrics[.xai]?.codeReviewLimit)
+        XCTAssertTrue(metrics[.xai]?.additionalLimits.isEmpty == true)
     }
 
     // MARK: - Cost summary: non-alarming, synthetic breakdowns only

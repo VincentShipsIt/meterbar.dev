@@ -38,7 +38,6 @@ final class LocalizationResourceContractTests: XCTestCase {
             "quota.title.weekly",
             "quota.title.cursor_models",
             "quota.title.other_models",
-            "quota.title.grok_bot",
             "reset.titled_in",
             "reset.window_reset",
             "reset.exhausted_limits",
@@ -122,7 +121,6 @@ final class LocalizationResourceContractTests: XCTestCase {
             "widget.quota.session",
             "widget.quota.account_credits",
             "widget.quota.other_models",
-            "widget.quota.grok_bot",
             "widget.quota.monthly",
             "widget.quota.weekly",
             "widget.quota.daily",
@@ -149,7 +147,6 @@ final class LocalizationResourceContractTests: XCTestCase {
             "widget.quota.session",
             "widget.quota.account_credits",
             "widget.quota.other_models",
-            "widget.quota.grok_bot",
             "widget.quota.monthly",
             "widget.quota.weekly",
             "widget.quota.daily",
@@ -225,7 +222,6 @@ final class LocalizationResourceContractTests: XCTestCase {
         (.session, "quota.title.session"),
         (.accountCredits, "quota.title.account_credits"),
         (.otherModels, "quota.title.other_models"),
-        (.grokBot, "quota.title.grok_bot"),
         (.monthly, "quota.title.monthly"),
         (.weekly, "quota.title.weekly"),
         (.daily, "quota.title.daily"),
@@ -249,7 +245,7 @@ final class LocalizationResourceContractTests: XCTestCase {
     func testCLIMachineTokensRemainStableAndOutsideTheCatalogs() throws {
         XCTAssertEqual(
             ServiceType.allCases.sorted { $0.sortOrder < $1.sortOrder }.map(\.cliIdentifier),
-            ["claude", "codex", "cursor", "openrouter", "grok", "kimi", "zai", "copilot", "muse-code", "claude-platform"]
+            ["claude", "codex", "xai", "openrouter", "kimi", "zai", "copilot", "muse-code", "claude-platform"]
         )
 
         let reservedTokens: Set<String> = [

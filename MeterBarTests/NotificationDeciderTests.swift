@@ -436,10 +436,10 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertEqual(result.notifications.first?.title, "Work (OpenAI Codex) Session Limit Reached")
     }
 
-    func testGrokMonthlyWeeklySlotNotificationIsTitledMonthly() {
+    func testXAIMonthlyWeeklySlotNotificationIsTitledMonthly() {
         let result = decider().evaluate(
             metrics: metrics(
-                service: .grok,
+                service: .xai,
                 weekly: UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .monthly)
             ),
             providerEnabled: true,
@@ -448,14 +448,14 @@ final class NotificationDeciderTests: XCTestCase {
         )
 
         XCTAssertEqual(result.notifications.first?.quotaDisplayName, "Monthly")
-        XCTAssertEqual(result.notifications.first?.title, "Grok Monthly Limit Reached")
+        XCTAssertEqual(result.notifications.first?.title, "xAI Monthly Limit Reached")
         XCTAssertFalse(result.notifications.contains { $0.quotaDisplayName == "Weekly" })
     }
 
     func testAdditionalLimitsFireIndependentThresholdNotifications() {
         let result = decider().evaluate(
             metrics: metrics(
-                service: .grok,
+                service: .xai,
                 weekly: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .weekly),
                 additional: [
                     UsageLimit(used: 100, total: 100, resetTime: nil, periodKind: .daily),
@@ -475,9 +475,9 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertEqual(
             Set(result.notifications.map(\.key)),
             [
-                "Grok-additional-0-critical",
-                "Grok-additional-1-warn",
-                "Grok-additional-2-warn",
+                "xAI-additional-0-critical",
+                "xAI-additional-1-warn",
+                "xAI-additional-2-warn",
             ]
         )
         XCTAssertTrue(result.notifications.allSatisfy { !$0.blocksProvider })

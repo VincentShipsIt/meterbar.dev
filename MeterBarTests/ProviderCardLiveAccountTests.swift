@@ -24,8 +24,7 @@ final class ProviderCardLiveAccountTests: XCTestCase {
 
     private func snapshot(
         service: ServiceType = .codexCli,
-        accountID: UUID?,
-        cardRole: ProviderSnapshot.CardRole = .account
+        accountID: UUID?
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             id: "codex",
@@ -36,8 +35,7 @@ final class ProviderCardLiveAccountTests: XCTestCase {
             emptyDetail: "",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: accountID,
-            cardRole: cardRole
+            accountID: accountID
         )
     }
 
@@ -69,18 +67,14 @@ final class ProviderCardLiveAccountTests: XCTestCase {
         ))
     }
 
-    func testLiveChipNeverShownForSubPoolOrUnsupportedProviders() {
+    func testLiveChipNeverShownForUnsupportedProviders() {
         let store = AccountFailoverSettingsStore(userDefaults: defaults)
         let accountID = UUID()
         store.setEnabled(true, for: .codexCli)
         store.setActiveAccountID(accountID, for: .codexCli)
 
         XCTAssertFalse(ProviderCardPresentation.showsLiveAccount(
-            for: snapshot(accountID: accountID, cardRole: .subPool),
-            failoverSettings: store
-        ))
-        XCTAssertFalse(ProviderCardPresentation.showsLiveAccount(
-            for: snapshot(service: .cursor, accountID: accountID),
+            for: snapshot(service: .xai, accountID: accountID),
             failoverSettings: store
         ))
     }

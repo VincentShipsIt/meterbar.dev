@@ -234,7 +234,7 @@ final class APIIntegrationTests: XCTestCase {
                 }
             }
 
-            XCTAssertEqual(metrics.service, .cursor)
+            XCTAssertEqual(metrics.service, .xai)
 
         } catch {
             print("❌ FAILED: \(error.localizedDescription)")

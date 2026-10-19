@@ -48,16 +48,16 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.service, .cursor)
+        XCTAssertEqual(metrics.service, .xai)
         XCTAssertEqual(metrics.weeklyLimit?.used, 137)
         XCTAssertEqual(metrics.weeklyLimit?.total, 750)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-08-01T00:00:00Z"))
         XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, 31 * 24 * 3_600)
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.sessionLimit?.total, 20)
-        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
-        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, 31 * 24 * 3_600)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 4)
+        XCTAssertEqual(metrics.codeReviewLimit?.total, 20)
+        XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, false)
+        XCTAssertEqual(metrics.codeReviewLimit?.windowSeconds, 31 * 24 * 3_600)
         XCTAssertNotNil(metrics.weeklyLimit?.pace(now: Date(timeIntervalSince1970: 1_783_036_800)))
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
     }
@@ -182,9 +182,9 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
-        XCTAssertEqual(metrics.sessionLimit?.used, 8)
-        XCTAssertEqual(metrics.sessionLimit?.total ?? 0, 12, accuracy: 0.0001)
-        XCTAssertEqual(metrics.sessionLimit?.isEstimated, true)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 8)
+        XCTAssertEqual(metrics.codeReviewLimit?.total ?? 0, 12, accuracy: 0.0001)
+        XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, true)
     }
 
     func testMapSummaryOmitsSessionLimitWhenOnDemandAllZero() throws {
@@ -247,8 +247,8 @@ final class CursorLocalServiceTests: XCTestCase {
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 40)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
-        XCTAssertEqual(metrics.sessionLimit?.used, 3)
-        XCTAssertEqual(metrics.sessionLimit?.total, 15)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 3)
+        XCTAssertEqual(metrics.codeReviewLimit?.total, 15)
     }
 
     func testMapSummaryUsesTeamOnDemandWithTeamPlan() throws {
@@ -267,9 +267,9 @@ final class CursorLocalServiceTests: XCTestCase {
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 240)
-        XCTAssertEqual(metrics.sessionLimit?.used, 18)
-        XCTAssertEqual(metrics.sessionLimit?.total, 60)
-        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
+        XCTAssertEqual(metrics.codeReviewLimit?.used, 18)
+        XCTAssertEqual(metrics.codeReviewLimit?.total, 60)
+        XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, false)
     }
 
     func testMapSummaryTreatsMissingUsedCounterAsUnknownNotZero() throws {
@@ -302,17 +302,17 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.sessionLimit?.total, 100)
-        XCTAssertEqual(metrics.sessionLimit?.isEstimated, false)
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 4)
+        XCTAssertEqual(metrics.additionalLimits.first?.total, 100)
+        XCTAssertEqual(metrics.additionalLimits.first?.isEstimated, false)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4)
         XCTAssertEqual(metrics.weeklyLimit?.total, 100)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
         XCTAssertNil(metrics.weeklyLimit?.windowSeconds, "End without start cannot invent a cycle length")
-        XCTAssertNil(metrics.sessionLimit?.windowSeconds)
+        XCTAssertNil(metrics.additionalLimits.first?.windowSeconds)
         XCTAssertNil(metrics.codeReviewLimit)
         XCTAssertNotEqual(metrics.overallStatus, .critical)
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
     }
 
     /// Cursor's included pools reset with the monthly billing cycle. Both
@@ -329,7 +329,7 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.additionalLimits.first?.periodKind, .monthly)
         XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
     }
 
@@ -351,16 +351,16 @@ final class CursorLocalServiceTests: XCTestCase {
         let expectedWindow = 31 * 24 * 3_600.0
         let reset = FlexibleISO8601.date(from: "2026-09-10T00:00:00Z")
 
-        XCTAssertEqual(metrics.sessionLimit?.resetTime, reset)
+        XCTAssertEqual(metrics.additionalLimits.first?.resetTime, reset)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, reset)
         XCTAssertEqual(metrics.codeReviewLimit?.resetTime, reset)
-        XCTAssertEqual(metrics.sessionLimit?.windowSeconds, expectedWindow)
+        XCTAssertEqual(metrics.additionalLimits.first?.windowSeconds, expectedWindow)
         XCTAssertEqual(metrics.weeklyLimit?.windowSeconds, expectedWindow)
         XCTAssertEqual(metrics.codeReviewLimit?.windowSeconds, expectedWindow)
 
         let start = try XCTUnwrap(FlexibleISO8601.date(from: "2026-08-10T00:00:00Z"))
         let now = start.addingTimeInterval(15 * 24 * 3_600)
-        XCTAssertNotNil(metrics.sessionLimit?.pace(now: now))
+        XCTAssertNotNil(metrics.additionalLimits.first?.pace(now: now))
         XCTAssertNotNil(metrics.weeklyLimit?.pace(now: now))
     }
 
@@ -392,7 +392,7 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4)
         XCTAssertNotEqual(metrics.weeklyLimit?.used, 99)
         XCTAssertNotEqual(metrics.weeklyLimit?.used, 495)
     }
@@ -408,8 +408,8 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 4)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4)
         XCTAssertEqual(metrics.codeReviewLimit?.used, 12)
         XCTAssertEqual(metrics.codeReviewLimit?.total, 40)
         XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, false)
@@ -425,11 +425,11 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 0)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 0)
         XCTAssertEqual(metrics.weeklyLimit?.used, 0)
-        XCTAssertEqual(metrics.sessionLimit?.total, 100)
+        XCTAssertEqual(metrics.additionalLimits.first?.total, 100)
         XCTAssertEqual(metrics.weeklyLimit?.total, 100)
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
     }
 
     func testMapSummaryRejectsOutOfRangeIncludedPoolPercent() throws {
@@ -443,11 +443,12 @@ final class CursorLocalServiceTests: XCTestCase {
         """#
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
 
-        XCTAssertNil(metrics.sessionLimit, "An out-of-range percent must be reported unknown, not clamped")
+        XCTAssertEqual(metrics.additionalLimits.count, 1, "An out-of-range percent must be reported unknown, not clamped")
+        XCTAssertEqual(metrics.additionalLimits.first?.label, ServiceType.legacyOtherModelsLabel)
         XCTAssertEqual(metrics.weeklyLimit?.used, 40)
     }
 
-    func testMapSummaryWithoutSandStatusLeavesAdditionalLimitsEmpty() throws {
+    func testMapSummaryWithoutSandStatusKeepsOnlyTheLegacyPoolRows() throws {
         let json = """
         {
           "individualUsage": {
@@ -456,10 +457,15 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
         let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(
+            metrics.additionalLimits.map(\.label),
+            [ServiceType.legacyCursorModelsLabel, ServiceType.legacyOtherModelsLabel]
+        )
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4, "Roomiest legacy pool is the headline gauge")
+        XCTAssertNil(metrics.weeklyLimit?.label)
     }
 
-    // MARK: - Grok Bot (GetSandUsageStatus)
+    // MARK: - Shared weekly pool (GetSandUsageStatus)
 
     private func decodeSand(_ json: String) throws -> CursorSandUsageStatusResponse {
         try JSONDecoder().decode(CursorSandUsageStatusResponse.self, from: Data(json.utf8))
@@ -489,7 +495,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(status.hasNonZeroIncludedLimit, true)
     }
 
-    func testMapSummaryAttachesGrokBotWeeklyPercentPoolFromSandStatus() throws {
+    func testMapSummaryKeepsLegacyMonthlyPoolsBesideTheSharedWeeklyPool() throws {
         let summary = """
         {
           "billingCycleStart": "2026-08-01T00:00:00Z",
@@ -514,25 +520,32 @@ final class CursorLocalServiceTests: XCTestCase {
             sandStatus: try decodeSand(sand)
         )
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        // The sand pool is the one weekly gauge; the legacy monthly Cursor
+        // pools ride along as labelled extra rows, never as session/weekly.
+        XCTAssertNil(metrics.sessionLimit)
         XCTAssertEqual(metrics.codeReviewLimit?.used, 2)
-        XCTAssertEqual(metrics.additionalLimits.count, 1)
-        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
-        XCTAssertEqual(grokBot.used, 18.5)
-        XCTAssertEqual(grokBot.total, ServiceType.cursorIncludedPoolTotal)
-        XCTAssertEqual(grokBot.periodKind, .weekly)
-        XCTAssertEqual(grokBot.isEstimated, false)
-        XCTAssertEqual(grokBot.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
-        XCTAssertEqual(grokBot.windowSeconds, 7 * 24 * 3_600)
-        XCTAssertEqual(ServiceType.cursor.additionalQuotaTitleKey(for: grokBot), .grokBot)
+        let weekly = try XCTUnwrap(metrics.weeklyLimit)
+        XCTAssertEqual(weekly.used, 18.5)
+        XCTAssertEqual(weekly.total, ServiceType.xaiPercentPoolTotal)
+        XCTAssertEqual(weekly.periodKind, .weekly)
+        XCTAssertEqual(weekly.isEstimated, false)
+        XCTAssertEqual(weekly.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
+        XCTAssertEqual(weekly.windowSeconds, 7 * 24 * 3_600)
+
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
+        let models = try XCTUnwrap(metrics.additionalLimits.first)
+        let other = try XCTUnwrap(metrics.additionalLimits.last)
+        XCTAssertEqual(models.used, 4)
+        XCTAssertEqual(other.used, 64)
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: models), .cursorModels)
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: other), .otherModels)
     }
 
     /// Merged Cursor / SpaceXAI / X billing reports one weekly included pool
     /// on GetSandUsageStatus (`isUnified`). That pool is the Cursor card's
     /// bar. The usage-summary percent fields stay on the invoice cycle and
     /// must not keep drawing the old monthly Cursor Models / Other Models rows,
-    /// and the same pool must not also split out as a second Grok Bot card.
+    /// and the same pool must not also draw a second gauge.
     func testUnifiedSandPoolReplacesMonthlyIncludedBars() throws {
         let summary = """
         {
@@ -564,7 +577,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
         let weekly = try XCTUnwrap(metrics.weeklyLimit)
         XCTAssertEqual(weekly.used, 15.465294701687878)
-        XCTAssertEqual(weekly.total, ServiceType.cursorIncludedPoolTotal)
+        XCTAssertEqual(weekly.total, ServiceType.xaiPercentPoolTotal)
         XCTAssertEqual(weekly.periodKind, .weekly)
         XCTAssertEqual(weekly.resetTime, FlexibleISO8601.date(from: "2026-10-23T10:47:06.910Z"))
         let start = try XCTUnwrap(FlexibleISO8601.date(from: "2026-10-16T10:47:06.910Z"))
@@ -573,7 +586,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.codeReviewLimit?.used, 3)
         XCTAssertEqual(metrics.codeReviewLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
         XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
+            ServiceType.xai.weeklyQuotaTitleKey(
                 limitTotal: weekly.total,
                 periodKind: weekly.periodKind
             ),
@@ -653,19 +666,20 @@ final class CursorLocalServiceTests: XCTestCase {
             planInfo: try decodePlan(plan)
         )
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
-        XCTAssertEqual(metrics.sessionLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
-        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
-        XCTAssertEqual(metrics.additionalLimits.count, 1)
-        XCTAssertEqual(
-            ServiceType.cursor.weeklyQuotaTitleKey(
-                limitTotal: metrics.weeklyLimit?.total,
-                periodKind: metrics.weeklyLimit?.periodKind
-            ),
-            .otherModels
-        )
+        // The sand pool is the weekly gauge; the monthly invoice pools stay
+        // as labelled rows on the invoice cycle.
+        XCTAssertNil(metrics.sessionLimit)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 18.5)
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
+        let models = try XCTUnwrap(metrics.additionalLimits.first)
+        let other = try XCTUnwrap(metrics.additionalLimits.last)
+        XCTAssertEqual(models.used, 4)
+        XCTAssertEqual(models.periodKind, .monthly)
+        XCTAssertEqual(models.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
+        XCTAssertEqual(other.used, 64)
+        XCTAssertEqual(other.periodKind, .monthly)
+        XCTAssertEqual(ServiceType.xai.additionalQuotaTitleKey(for: other), .otherModels)
     }
 
     /// Sand reported unified billing but no usable percent. There is no weekly
@@ -690,11 +704,11 @@ final class CursorLocalServiceTests: XCTestCase {
             sandStatus: try decodeSand(sand)
         )
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 0)
-        XCTAssertEqual(metrics.sessionLimit?.periodKind, .monthly)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 0)
+        XCTAssertEqual(metrics.additionalLimits.first?.periodKind, .monthly)
         XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-11-01T00:00:00Z"))
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
     }
 
     /// The plan says the included pool is weekly, but sand did not map. Keep
@@ -726,10 +740,8 @@ final class CursorLocalServiceTests: XCTestCase {
         )
         let reset = Date(timeIntervalSince1970: Double(1_792_752_426_910) / 1000)
 
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.sessionLimit?.periodKind, .weekly)
-        XCTAssertEqual(metrics.sessionLimit?.resetTime, reset)
-        XCTAssertNil(metrics.sessionLimit?.windowSeconds)
+        // One weekly gauge: the binding (higher) of the two summary percents.
+        XCTAssertNil(metrics.sessionLimit)
         XCTAssertEqual(metrics.weeklyLimit?.used, 64)
         XCTAssertEqual(metrics.weeklyLimit?.periodKind, .weekly)
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, reset)
@@ -806,7 +818,7 @@ final class CursorLocalServiceTests: XCTestCase {
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
-        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+        let grokBot = try XCTUnwrap(metrics.weeklyLimit)
         XCTAssertEqual(grokBot.resetTime, FlexibleISO8601.date(from: "2026-08-17T00:00:00Z"))
         XCTAssertNil(grokBot.windowSeconds, "Start missing must not invent a 7-day window")
     }
@@ -835,7 +847,7 @@ final class CursorLocalServiceTests: XCTestCase {
                 try decodeSummary(summary),
                 sandStatus: try decodeSand(sand)
             )
-            let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+            let grokBot = try XCTUnwrap(metrics.weeklyLimit)
             XCTAssertNil(grokBot.windowSeconds)
         }
     }
@@ -867,9 +879,9 @@ final class CursorLocalServiceTests: XCTestCase {
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
-        XCTAssertEqual(metrics.sessionLimit?.used, 4)
-        XCTAssertEqual(metrics.weeklyLimit?.used, 64)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
+        XCTAssertEqual(metrics.additionalLimits.first?.used, 4)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4)
     }
 
     func testMapSandOmitsBarWhenUsesPooledEnterpriseAllowance() throws {
@@ -885,7 +897,7 @@ final class CursorLocalServiceTests: XCTestCase {
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.additionalLimits.count, 2)
     }
 
     func testMapSandOmitsPhantomZeroWhenIncludedLimitIsZero() throws {
@@ -900,7 +912,8 @@ final class CursorLocalServiceTests: XCTestCase {
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
-        XCTAssertTrue(metrics.additionalLimits.isEmpty)
+        XCTAssertEqual(metrics.weeklyLimit?.used, 4, "No sand bar; the roomiest legacy pool is the gauge")
+        XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
     }
 
     func testMapSandKeepsZeroPercentWhenIncludedLimitIsNonZero() throws {
@@ -915,7 +928,7 @@ final class CursorLocalServiceTests: XCTestCase {
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
-        let grokBot = try XCTUnwrap(metrics.additionalLimits.first)
+        let grokBot = try XCTUnwrap(metrics.weeklyLimit)
         XCTAssertEqual(grokBot.used, 0)
         XCTAssertEqual(grokBot.total, 100)
         XCTAssertEqual(grokBot.periodKind, .weekly)
@@ -954,7 +967,7 @@ final class CursorLocalServiceTests: XCTestCase {
 
         let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: observedAt))
 
-        XCTAssertEqual(observation.provider, .cursor)
+        XCTAssertEqual(observation.provider, .xai)
         XCTAssertEqual(observation.unit, .requests)
         XCTAssertEqual(observation.runningTotal, 137)
         XCTAssertEqual(observation.observedAt, observedAt)
@@ -1113,12 +1126,12 @@ final class CursorLocalServiceTests: XCTestCase {
             )
         }.value
 
-        XCTAssertEqual(fetched.metrics.service, .cursor)
+        XCTAssertEqual(fetched.metrics.service, .xai)
         XCTAssertEqual(fetched.membershipType, "pro")
-        XCTAssertEqual(fetched.metrics.weeklyLimit?.used, 10)
-        XCTAssertEqual(fetched.metrics.weeklyLimit?.total, 100)
+        XCTAssertEqual(fetched.metrics.weeklyLimit?.used, 12)
+        XCTAssertEqual(fetched.metrics.additionalLimits.first?.used, 10)
+        XCTAssertEqual(fetched.metrics.additionalLimits.first?.total, 100)
         XCTAssertEqual(fetched.observation?.runningTotal, 10)
-        XCTAssertEqual(fetched.metrics.additionalLimits.first?.used, 12)
     }
 
     /// A merged account's plan name and weekly pool come from the DashboardService
@@ -1233,7 +1246,7 @@ final class CursorLocalServiceTests: XCTestCase {
             fetchData: fetchData
         )
 
-        XCTAssertEqual(fetched.metrics.service, .cursor)
+        XCTAssertEqual(fetched.metrics.service, .xai)
         XCTAssertTrue(recorder.wasCalled)
         XCTAssertFalse(
             recorder.wasCalledOnMainThread,

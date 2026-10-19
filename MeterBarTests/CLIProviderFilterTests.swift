@@ -16,7 +16,7 @@ final class CLIProviderFilterTests: XCTestCase {
     func testFilterMatchesRawValueOrDisplayNameCaseInsensitively() {
         XCTAssertEqual(CLIProviderFilter.select("claude"), [.claudeCode])
         XCTAssertEqual(CLIProviderFilter.select("CLAUDE"), [.claudeCode])
-        XCTAssertEqual(CLIProviderFilter.select(" Cursor "), [.cursor])
+        XCTAssertEqual(CLIProviderFilter.select(" Cursor "), [.xai])
         XCTAssertEqual(CLIProviderFilter.select("router"), [.openRouter])
         XCTAssertEqual(CLIProviderFilter.select("kimi"), [.kimiCode])
         XCTAssertEqual(CLIProviderFilter.select("Kimi Code"), [.kimiCode])
@@ -33,6 +33,15 @@ final class CLIProviderFilterTests: XCTestCase {
         XCTAssertEqual(CLIProviderFilter.select("claude-platform"), [.claudePlatform])
         XCTAssertEqual(CLIProviderFilter.select("platform"), [.claudePlatform])
         XCTAssertEqual(ServiceType.claudePlatform.cliIdentifier, "claude-platform")
+    }
+
+    func testXAIAnswersToItsTokenAndBothRetiredTokens() {
+        for token in ["xai", "XAI", "grok", "Grok", "cursor", " Cursor "] {
+            XCTAssertEqual(CLIProviderFilter.select(token), [.xai], token)
+        }
+        XCTAssertEqual(ServiceType.xai.cliIdentifier, "xai")
+        let metrics: [ServiceType: UsageMetrics] = [.claudeCode: metric(.claudeCode), .xai: metric(.xai)]
+        XCTAssertEqual(Set(CLIProviderFilter.apply("grok", to: metrics).keys), [.xai])
     }
 
     func testTheClaudeTokenStaysClaudeCodeOnly() {
@@ -64,7 +73,7 @@ final class CLIProviderFilterTests: XCTestCase {
         let message = CLIProviderFilter.emptyReportMessage(for: "cursor")
 
         XCTAssertNotEqual(message, CLIProviderFilter.noMatchesMessage)
-        XCTAssertTrue(message.contains(ServiceType.cursor.displayName), message)
+        XCTAssertTrue(message.contains(ServiceType.xai.displayName), message)
         XCTAssertTrue(message.contains("meterbar refresh"), message)
     }
 
@@ -83,11 +92,11 @@ final class CLIProviderFilterTests: XCTestCase {
     func testSelectionFiltersACachedMetricsSnapshot() {
         let metrics: [ServiceType: UsageMetrics] = [
             .claudeCode: metric(.claudeCode),
-            .cursor: metric(.cursor)
+            .xai: metric(.xai)
         ]
 
-        XCTAssertEqual(Set(CLIProviderFilter.apply("cursor", to: metrics).keys), [.cursor])
-        XCTAssertEqual(Set(CLIProviderFilter.apply(nil, to: metrics).keys), [.claudeCode, .cursor])
+        XCTAssertEqual(Set(CLIProviderFilter.apply("cursor", to: metrics).keys), [.xai])
+        XCTAssertEqual(Set(CLIProviderFilter.apply(nil, to: metrics).keys), [.claudeCode, .xai])
         XCTAssertTrue(CLIProviderFilter.apply("clod", to: metrics).isEmpty)
     }
 

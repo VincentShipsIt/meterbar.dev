@@ -176,7 +176,7 @@ final class MeterBarChipTests: XCTestCase {
         ProviderSnapshot(
             id: "cursor",
             title: "Cursor",
-            service: .cursor,
+            service: .xai,
             updatedAt: Date(),
             limits: [
                 SnapshotLimit(

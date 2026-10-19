@@ -208,7 +208,7 @@ extension RoutingPolicy: Codable {
         self.task = task
         name = Self.tolerant(String.self, values, .name) ?? base.name
         providerPreference = Self.tolerant([FailableBox<ServiceType>].self, values, .providerPreference)
-            .map { $0.compactMap(\.value) } ?? base.providerPreference
+            .map { Self.uniqued($0.compactMap(\.value)) } ?? base.providerPreference
         providerScope = Self.tolerant(RoutingProviderScope.self, values, .providerScope) ?? base.providerScope
         accountSelection = Self.tolerant(RoutingAccountSelection.self, values, .accountSelection)
             ?? base.accountSelection
@@ -217,9 +217,14 @@ extension RoutingPolicy: Codable {
         modelTier = Self.tolerant(RoutingModelTier.self, values, .modelTier) ?? base.modelTier
         modelAliases = Self.tolerant([String: String].self, values, .modelAliases)
             .map { raw in
-                Dictionary(uniqueKeysWithValues: raw.compactMap { key, alias in
-                    ServiceType(rawValue: key).map { ($0, alias) }
-                })
+                // Legacy "Grok" and "Cursor" keys both decode to `.xai`; sort the
+                // keys so the surviving alias is deterministic.
+                Dictionary(
+                    raw.sorted { $0.key < $1.key }.compactMap { key, alias in
+                        ServiceType(rawValue: key).map { ($0, alias) }
+                    },
+                    uniquingKeysWith: { first, _ in first }
+                )
             } ?? base.modelAliases
         minimumRemainingPercent = Self.tolerant(Int.self, values, .minimumRemainingPercent)
             ?? base.minimumRemainingPercent

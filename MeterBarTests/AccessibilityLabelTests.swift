@@ -140,7 +140,7 @@ final class AccessibilityLabelTests: XCTestCase {
         let snapshot = ProviderSnapshot(
             id: "cursor",
             title: "Cursor",
-            service: .cursor,
+            service: .xai,
             updatedAt: nil,
             limits: [],
             emptyDetail: "Log in to Cursor",

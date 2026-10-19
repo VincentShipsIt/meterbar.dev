@@ -102,7 +102,6 @@ struct PopoverOverviewPanel: View {
     ) -> [ProviderSnapshot] {
         snapshots.filter { snapshot in
             guard !snapshot.hasMetrics,
-                  snapshot.isAccountCard,
                   setupProviders.contains(snapshot.service)
             else { return true }
             return snapshots.filter { $0.service == snapshot.service }.count > 1

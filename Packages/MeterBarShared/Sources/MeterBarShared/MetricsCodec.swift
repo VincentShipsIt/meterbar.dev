@@ -23,13 +23,29 @@ public enum MetricsCodec {
             return [:]
         }
 
-        return keyed.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            guard let service = ServiceType(rawValue: pair.key),
-                  let metrics = pair.value.value else {
-                return
-            }
-            result[service] = metrics
+        var decoded: [String: UsageMetrics] = [:]
+        for (key, box) in keyed {
+            guard ServiceType(rawValue: key) != nil, let metrics = box.value else { continue }
+            decoded[key] = metrics
         }
+
+        // Caches written before the xAI merge hold separate "Grok" and "Cursor"
+        // entries that both resolve to `.xai`. Fold them into one card instead
+        // of letting dictionary order pick a winner and drop the other source.
+        var result: [ServiceType: UsageMetrics] = [:]
+        for (key, metrics) in decoded where !ServiceType.legacyXAIRawValues.contains(key) {
+            if let service = ServiceType(rawValue: key) {
+                result[service] = metrics
+            }
+        }
+        let xai = XAIUsageMerger.merge(
+            grok: decoded[ServiceType.xai.rawValue] ?? decoded["Grok"],
+            cursor: decoded["Cursor"]
+        )
+        if let xai {
+            result[.xai] = xai
+        }
+        return result
     }
 
     public static func encodeAccounts(_ snapshots: [AccountUsageSnapshot]) -> Data? {

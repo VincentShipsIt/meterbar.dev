@@ -61,9 +61,9 @@ final class ProviderVisibilityStore: ObservableObject {
             userDefaults.set(enabled, forKey: StorageKeys.museCodeProviderEnabled)
         case .claudePlatform:
             userDefaults.set(enabled, forKey: StorageKeys.claudePlatformProviderEnabled)
-        case .grok:
-            userDefaults.set(enabled, forKey: StorageKeys.grokProviderEnabled)
-        case .claudeCode, .codexCli, .cursor:
+        case .xai:
+            userDefaults.set(enabled, forKey: StorageKeys.xaiProviderEnabled)
+        case .claudeCode, .codexCli:
             break
         }
         save()
@@ -92,15 +92,18 @@ final class ProviderVisibilityStore: ObservableObject {
         if !userDefaults.bool(forKey: StorageKeys.claudePlatformProviderEnabled) {
             hiddenServices.insert(.claudePlatform)
         }
-        // Grok is a first-class provider, so only an explicit opt-out hides it.
-        // While it was opt-in, `load()` inserted it into `hiddenServices` and any
-        // later `save()` persisted "Grok" into the hidden list — including for
-        // users who never opened the setting. An entry there is therefore not a
-        // decision on its own; only the preference key is.
-        if userDefaults.object(forKey: StorageKeys.grokProviderEnabled) as? Bool == false {
-            hiddenServices.insert(.grok)
+        // xAI is a first-class provider, so only an explicit opt-out hides it.
+        // The hidden list may carry the legacy "Grok" or "Cursor" entries,
+        // which both decode to `.xai`. "Grok" was never a decision on its own
+        // (see below) and a hidden Cursor must not hide the merged provider
+        // for someone who still uses Grok, so only the preference key decides.
+        // While Grok was opt-in, `load()` inserted it into `hiddenServices` and
+        // any later `save()` persisted it into the hidden list — including for
+        // users who never opened the setting.
+        if userDefaults.object(forKey: StorageKeys.xaiProviderEnabled) as? Bool == false {
+            hiddenServices.insert(.xai)
         } else {
-            hiddenServices.remove(.grok)
+            hiddenServices.remove(.xai)
         }
     }
 

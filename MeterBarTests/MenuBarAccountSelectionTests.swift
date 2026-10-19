@@ -80,13 +80,13 @@ final class MenuBarAccountSelectionTests: XCTestCase {
             claudeAccounts: [claude],
             codexAccounts: [codex],
             grokAccounts: [grok],
-            enabledServices: [.claudeCode, .codexCli, .grok]
+            enabledServices: [.claudeCode, .codexCli, .xai]
         )
 
         XCTAssertEqual(identities.map(\.key), [
             "\(ServiceType.claudeCode.rawValue):\(claude.id.uuidString)",
             "\(ServiceType.codexCli.rawValue):\(codex.id.uuidString)",
-            "\(ServiceType.grok.rawValue):\(grok.id.uuidString)"
+            "\(ServiceType.xai.rawValue):\(grok.id.uuidString)"
         ])
         XCTAssertEqual(identities.map(\.displayName), ["Work", "Personal", "Build"])
         XCTAssertEqual(identities.map(\.badge), ["W", "P", "B"])

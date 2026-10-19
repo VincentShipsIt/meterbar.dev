@@ -168,7 +168,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         let series = tokenSeries([
             tokenRow(-1, provider: .claudeCode, tokens: 30),
             tokenRow(-1, provider: .codexCli, tokens: 4000),
-            tokenRow(0, provider: .grok, tokens: 4000)
+            tokenRow(0, provider: .xai, tokens: 4000)
         ])
 
         XCTAssertEqual(series.totalValue, 30)
@@ -233,7 +233,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .xai,
                 unit: .requests,
                 runningTotal: 0,
                 observedAt: day(-4)
@@ -242,7 +242,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .xai,
                 unit: .requests,
                 runningTotal: 12,
                 observedAt: day(-2)
@@ -251,7 +251,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
 
         let series = ProviderDailyUsageSeries(
-            service: .cursor,
+            service: .xai,
             ledger: ledger,
             dayCount: 7,
             now: now,
@@ -298,7 +298,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .xai,
                 unit: .requests,
                 runningTotal: 3,
                 observedAt: day(-2)
@@ -307,7 +307,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
 
         let series = ProviderDailyUsageSeries(
-            service: .cursor,
+            service: .xai,
             ledger: ledger,
             dayCount: 7,
             now: now,
@@ -322,7 +322,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
     /// different empty state from "polled, and the week was quiet".
     func testLedgerWithoutAnEntryHasNoHistory() {
         let series = ProviderDailyUsageSeries(
-            service: .cursor,
+            service: .xai,
             ledger: ProviderUsageLedger(),
             dayCount: 7,
             now: now,
@@ -369,7 +369,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .openRouter,
                 unit: .requests,
                 runningTotal: 5,
                 observedAt: day(-1)
@@ -378,7 +378,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
 
         let cursor = ProviderDailyUsageSeries.make(
-            service: .cursor,
+            service: .openRouter,
             dailyUsage: [tokenRow(-1, provider: .claudeCode, tokens: 900)],
             ledger: ledger,
             accountCount: 1,
@@ -405,14 +405,13 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
     func testOnlyLogWritingProvidersReportLocalTokenHistory() {
         XCTAssertTrue(ServiceType.claudeCode.writesLocalTokenLogs)
         XCTAssertTrue(ServiceType.codexCli.writesLocalTokenLogs)
-        XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
-        XCTAssertFalse(ServiceType.cursor.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.xai.writesLocalTokenLogs)
         XCTAssertFalse(ServiceType.openRouter.writesLocalTokenLogs)
     }
 
     func testPolledProvidersHideOverviewUntilLedgerHasHistory() {
         let emptyCursor = ProviderDailyUsageSeries.make(
-            service: .cursor,
+            service: .openRouter,
             dailyUsage: [],
             ledger: ProviderUsageLedger(),
             accountCount: 1,
@@ -424,7 +423,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .openRouter,
                 unit: .requests,
                 runningTotal: 0,
                 observedAt: day(-4)
@@ -433,7 +432,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .openRouter,
                 unit: .requests,
                 runningTotal: 12,
                 observedAt: day(-2)
@@ -441,7 +440,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
             calendar: calendar
         )
         let cursorWithHistory = ProviderDailyUsageSeries.make(
-            service: .cursor,
+            service: .openRouter,
             dailyUsage: [],
             ledger: ledger,
             accountCount: 1,
@@ -465,7 +464,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .openRouter,
                 unit: .requests,
                 runningTotal: 10,
                 observedAt: day(-1)
@@ -474,7 +473,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
         ledger.record(
             ProviderUsageObservation(
-                provider: .cursor,
+                provider: .openRouter,
                 unit: .requests,
                 runningTotal: 31_268,
                 observedAt: day(0)
@@ -483,7 +482,7 @@ final class ProviderDailyUsageSeriesTests: XCTestCase {
         )
 
         let series = ProviderDailyUsageSeries(
-            service: .cursor,
+            service: .openRouter,
             ledger: ledger,
             dayCount: 7,
             now: now,

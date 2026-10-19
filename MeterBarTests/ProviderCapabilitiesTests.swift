@@ -45,7 +45,7 @@ final class ProviderCapabilitiesTests: XCTestCase {
             )
         )
         XCTAssertEqual(
-            ServiceType.grok.capabilities,
+            ServiceType.xai.capabilities,
             ProviderCapabilities(
                 isMultiAccount: true,
                 supportsExtraUsage: true,
@@ -68,19 +68,6 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 hasAccountScopedQuotaEvents: true
             ),
             "openRouter"
-        )
-        XCTAssertEqual(
-            ServiceType.cursor.capabilities,
-            ProviderCapabilities(
-                isMultiAccount: false,
-                supportsExtraUsage: false,
-                supportsResetRedemption: false,
-                supportsGuardConfigDirectory: false,
-                supportsSessionWake: false,
-                hasAccountScopedNotifications: false,
-                hasAccountScopedQuotaEvents: false
-            ),
-            "cursor"
         )
     }
 
@@ -194,12 +181,12 @@ final class ProviderCapabilitiesTests: XCTestCase {
     }
 
     func testSessionWakeIsAnExplicitExceptionForGrok() {
-        XCTAssertTrue(ServiceType.grok.isMultiAccount)
-        XCTAssertTrue(ServiceType.grok.writesLocalTokenLogs)
-        XCTAssertTrue(ServiceType.grok.supportsGuardConfigDirectory)
-        XCTAssertTrue(ServiceType.grok.hasAccountScopedNotifications)
-        XCTAssertTrue(ServiceType.grok.hasAccountScopedQuotaEvents)
-        XCTAssertFalse(ServiceType.grok.supportsSessionWake)
+        XCTAssertTrue(ServiceType.xai.isMultiAccount)
+        XCTAssertTrue(ServiceType.xai.writesLocalTokenLogs)
+        XCTAssertTrue(ServiceType.xai.supportsGuardConfigDirectory)
+        XCTAssertTrue(ServiceType.xai.hasAccountScopedNotifications)
+        XCTAssertTrue(ServiceType.xai.hasAccountScopedQuotaEvents)
+        XCTAssertFalse(ServiceType.xai.supportsSessionWake)
     }
 
     // MARK: - Generic list helpers
@@ -211,9 +198,9 @@ final class ProviderCapabilitiesTests: XCTestCase {
         )
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.claudeCode))
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.codexCli))
-        XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.grok))
+        XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.xai))
         XCTAssertFalse(UsageNotificationCoordinator.flatNotificationServices.contains(.openRouter))
-        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.cursor))
+        XCTAssertTrue(UsageNotificationCoordinator.flatNotificationServices.contains(.kimiCode))
     }
 
     func testFlatQuotaEventProvidersAreExactlyThoseWithoutAccountScopedQuotaEvents() {
@@ -223,7 +210,7 @@ final class ProviderCapabilitiesTests: XCTestCase {
         )
         XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.claudeCode))
         XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.codexCli))
-        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.grok))
+        XCTAssertFalse(QuotaEventSnapshotCatalog.flatProviders.contains(.xai))
     }
 
     func testGuardConfigDirectoryFollowsTheCapabilityFlag() {
@@ -236,8 +223,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
         }
         XCTAssertTrue(ServiceType.claudeCode.supportsGuardConfigDirectory)
         XCTAssertTrue(ServiceType.codexCli.supportsGuardConfigDirectory)
-        XCTAssertTrue(ServiceType.grok.supportsGuardConfigDirectory)
-        XCTAssertFalse(ServiceType.cursor.supportsGuardConfigDirectory)
+        XCTAssertTrue(ServiceType.xai.supportsGuardConfigDirectory)
+        XCTAssertFalse(ServiceType.kimiCode.supportsGuardConfigDirectory)
         XCTAssertFalse(ServiceType.openRouter.supportsGuardConfigDirectory)
     }
 
@@ -264,8 +251,8 @@ final class ProviderCapabilitiesTests: XCTestCase {
                 XCTAssertNotNil(metric?.resetCreditsAvailable, "\(service) supports reset redemption")
             }
         }
-        XCTAssertNil(metrics[.grok]?.sessionLimit, "do not invent a Grok session bar")
-        XCTAssertNotNil(metrics[.grok]?.weeklyLimit)
+        XCTAssertNil(metrics[.xai]?.sessionLimit, "do not invent a Grok session bar")
+        XCTAssertNotNil(metrics[.xai]?.weeklyLimit)
         XCTAssertEqual(
             ServiceType.openRouter.sessionQuotaTitleKey(limitTotal: metrics[.openRouter]?.sessionLimit?.total),
             .keyLimit
@@ -513,15 +500,15 @@ final class ProviderCapabilitiesTests: XCTestCase {
             return DashboardShareSection.sourceLabel(for: service)
         }
         XCTAssertEqual(labels, expected)
-        XCTAssertTrue(labels.contains("Grok JSONL"))
+        XCTAssertTrue(labels.contains("Grok JSONL, Cursor local state"))
         XCTAssertFalse(labels.contains(where: { $0.localizedCaseInsensitiveContains("OpenRouter") }))
         XCTAssertEqual(
             DashboardShareSection.enabledSourceLabels(for: [.openRouter]),
             []
         )
         XCTAssertEqual(
-            DashboardShareSection.enabledSourceLabels(for: [.grok]),
-            ["Grok JSONL"]
+            DashboardShareSection.enabledSourceLabels(for: [.xai]),
+            ["Grok JSONL, Cursor local state"]
         )
     }
 }

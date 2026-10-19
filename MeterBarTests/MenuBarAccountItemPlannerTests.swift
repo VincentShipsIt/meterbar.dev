@@ -209,7 +209,7 @@ final class MenuBarAccountItemPlannerTests: XCTestCase {
         let candidates = [
             candidate(key: "claude:a", accountKey: "claudeCode:a"),
             candidate(key: "codex:b", accountKey: "codexCli:b", service: .codexCli),
-            candidate(key: "cursor", accountKey: nil, service: .cursor)
+            candidate(key: "cursor", accountKey: nil, service: .xai)
         ]
         let entry = MenuBarAccountItemEntry(
             id: "claudeCode:a",
@@ -230,7 +230,7 @@ final class MenuBarAccountItemPlannerTests: XCTestCase {
     func testCandidateFilterPassesEverythingThroughForTheAggregateEntry() {
         let candidates = [
             candidate(key: "claude:a", accountKey: "claudeCode:a"),
-            candidate(key: "cursor", accountKey: nil, service: .cursor)
+            candidate(key: "cursor", accountKey: nil, service: .xai)
         ]
 
         XCTAssertEqual(

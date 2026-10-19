@@ -42,7 +42,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
     }
 
     func testUntrackedCodexProviderDropsEveryCodexProfile() {
-        let availability = makeAvailability(enabledServices: [.claudeCode, .grok])
+        let availability = makeAvailability(enabledServices: [.claudeCode, .xai])
 
         XCTAssertFalse(availability.menuBarKeys.contains(codexDefaultKey))
         XCTAssertFalse(availability.menuBarKeys.contains(codexCustomKey))
@@ -176,7 +176,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
         menuBarSelection.select(grokDefaultKey)
 
         apply(
-            makeAvailability(enabledServices: [.codexCli, .grok]),
+            makeAvailability(enabledServices: [.codexCli, .xai]),
             menuBarSelection: menuBarSelection
         )
 
@@ -228,7 +228,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
     }
 
     private var grokDefaultKey: String {
-        MenuBarAccountKey.make(service: .grok, accountID: GrokAccount.defaultID)
+        MenuBarAccountKey.make(service: .xai, accountID: GrokAccount.defaultID)
     }
 
     private var claudeDefaultKey: String {
@@ -240,7 +240,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
     }
 
     private var grokCustomKey: String {
-        MenuBarAccountKey.make(service: .grok, accountID: grokCustomID)
+        MenuBarAccountKey.make(service: .xai, accountID: grokCustomID)
     }
 
     private var codexCustomWidgetID: WidgetAccountIdentifier {
@@ -248,7 +248,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
     }
 
     private var grokDefaultWidgetID: WidgetAccountIdentifier {
-        .account(service: .grok, id: GrokAccount.defaultID)
+        .account(service: .xai, id: GrokAccount.defaultID)
     }
 
     private var claudeDefaultWidgetID: WidgetAccountIdentifier {
@@ -297,7 +297,7 @@ final class ProviderAccountSelectionReconcilerTests: XCTestCase {
         grokCustomEnabled: Bool = true,
         claudeAccountsIncludeCustom: Bool = true,
         grokAccountsIncludeCustom: Bool = true,
-        enabledServices: Set<ServiceType> = [.claudeCode, .codexCli, .grok]
+        enabledServices: Set<ServiceType> = [.claudeCode, .codexCli, .xai]
     ) -> ProviderAccountSelectionAvailability {
         ProviderAccountSelectionAvailability(
             claudeAccounts: [.defaultAccount] + (claudeAccountsIncludeCustom ? [

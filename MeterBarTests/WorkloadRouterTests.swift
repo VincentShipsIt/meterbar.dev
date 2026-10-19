@@ -10,8 +10,8 @@ final class WorkloadRouterTests: XCTestCase {
     private typealias Fixtures = RoutingFixtures
 
     func testWorkloadRoutingCapabilityIsExplicitForEveryTrackedProvider() {
-        let supported: Set<ServiceType> = [.claudeCode, .codexCli, .cursor, .openRouter, .grok]
-        XCTAssertEqual(ServiceType.allCases.count, 10)
+        let supported: Set<ServiceType> = [.claudeCode, .codexCli, .xai, .openRouter]
+        XCTAssertEqual(ServiceType.allCases.count, 9)
         for service in ServiceType.allCases {
             XCTAssertEqual(service.supportsWorkloadRouting, supported.contains(service), service.rawValue)
         }
@@ -122,8 +122,8 @@ final class WorkloadRouterTests: XCTestCase {
         let candidates = [
             Fixtures.candidate(.claudeCode, used: 40),
             Fixtures.candidate(.codexCli, used: 40),
-            Fixtures.candidate(.grok, used: 10),
-            Fixtures.candidate(.cursor, used: 100),
+            Fixtures.candidate(.xai, used: 10),
+            Fixtures.candidate(.xai, used: 100),
             Fixtures.candidate(.openRouter, used: 10, age: 9 * 3600),
             Fixtures.account(.claudeCode, id: Fixtures.uuid(9), name: "Personal", used: 40, order: 1),
         ]
@@ -234,7 +234,7 @@ final class WorkloadRouterTests: XCTestCase {
     }
 
     func testCandidateWithNoSnapshotIsRejected() {
-        let missing = RoutingCandidate(service: .cursor, metrics: nil)
+        let missing = RoutingCandidate(service: .xai, metrics: nil)
         let decision = Fixtures.route([missing, Fixtures.candidate(.claudeCode)])
 
         XCTAssertEqual(decision.rejected.first?.code, .snapshotMissing)
@@ -341,28 +341,28 @@ final class WorkloadRouterTests: XCTestCase {
     func testEstimatedQuotaAtItsLimitIsStillExhaustedWhenEstimatesAreAllowed() {
         let policy = Fixtures.policy(.research) { $0.allowsEstimatedQuota = true }
         let decision = Fixtures.route(policy, [
-            Fixtures.candidate(.cursor, session: Fixtures.limit(used: 500, total: 500, estimated: true)),
+            Fixtures.candidate(.xai, session: Fixtures.limit(used: 500, total: 500, estimated: true)),
         ])
         XCTAssertEqual(decision.rejectionCodes, [.quotaExhausted])
     }
 
-    func testProviderSpecificPoolNamesKeepTheirCapitalsInMessages() {
+    func testXAIMessagesNameTheBlockingWindowAndKeepTheBrandCapitalised() {
         let spent = Fixtures.route([Fixtures.candidate(
-            .cursor,
+            .xai,
             session: Fixtures.limit(used: 100),
             weekly: Fixtures.limit(used: 100)
         )])
         XCTAssertTrue(
-            spent.rejected.first?.message.contains("Cursor Models quota is spent") == true,
+            spent.rejected.first?.message.contains("xAI: session quota is spent") == true,
             spent.rejected.first?.message ?? ""
         )
 
         let open = Fixtures.route([Fixtures.candidate(
-            .cursor,
+            .xai,
             session: Fixtures.limit(used: 40),
             weekly: Fixtures.limit(used: 40)
         )])
-        XCTAssertEqual(open.recommendation?.reasons.first?.message, "60% Cursor Models quota remains")
+        XCTAssertEqual(open.recommendation?.reasons.first?.message, "60% session quota remains")
     }
 
     func testMinimumHeadroomIsInclusiveAtTheBoundary() {
@@ -376,15 +376,25 @@ final class WorkloadRouterTests: XCTestCase {
         XCTAssertTrue(below.rejected.first?.message.contains("30%") == true)
     }
 
-    func testCursorIncludedPoolsSpillOverSoOneSpentPoolDoesNotBlockTheProvider() {
-        let auto = Fixtures.limit(used: 100)
-        let api = Fixtures.limit(used: 40)
-        let decision = Fixtures.route([Fixtures.candidate(.cursor, session: auto, weekly: api)])
+    func testLegacyCursorPoolsSpillOverSoOneSpentPoolDoesNotBlockXAI() {
+        // A legacy monthly Cursor account headlines its roomiest pool; the
+        // spent pool stays a secondary row and must not reject the provider.
+        let spentPool = Fixtures.limit(used: 100)
+        let decision = Fixtures.route([
+            Fixtures.candidate(
+                .xai,
+                session: nil,
+                weekly: Fixtures.limit(used: 40),
+                additional: [spentPool, Fixtures.limit(used: 40)]
+            ),
+        ])
 
         XCTAssertEqual(decision.outcome, .recommended)
         XCTAssertEqual(decision.recommendation?.quota.percentLeft, 60)
 
-        let bothSpent = Fixtures.route([Fixtures.candidate(.cursor, session: auto, weekly: Fixtures.limit(used: 100))])
+        let bothSpent = Fixtures.route([
+            Fixtures.candidate(.xai, session: nil, weekly: Fixtures.limit(used: 100), additional: [spentPool]),
+        ])
         XCTAssertEqual(bothSpent.rejectionCodes, [.quotaExhausted])
     }
 
@@ -392,7 +402,7 @@ final class WorkloadRouterTests: XCTestCase {
 
     func testEstimatedQuotaIsRejectedUnlessThePolicyAllowsIt() {
         let estimated = Fixtures.candidate(
-            .cursor,
+            .xai,
             session: Fixtures.limit(used: 100, total: 500, estimated: true)
         )
 
@@ -608,11 +618,11 @@ final class WorkloadRouterTests: XCTestCase {
         let candidates = [
             Fixtures.candidate(.claudeCode, used: 10),
             Fixtures.candidate(.codexCli, used: 30),
-            Fixtures.candidate(.cursor, used: 50),
-            Fixtures.candidate(.grok, used: 70),
+            Fixtures.candidate(.xai, used: 50),
+            Fixtures.candidate(.openRouter, used: 70),
         ]
         let all = Fixtures.route(candidates)
-        XCTAssertEqual(all.chain, ["claude", "codex", "cursor", "grok"])
+        XCTAssertEqual(all.chain, ["claude", "codex", "xai", "openrouter"])
         XCTAssertEqual(all.fallbacks.map(\.rank), [2, 3, 4])
 
         let capped = Fixtures.route(Fixtures.policy { $0.maximumFallbacks = 1 }, candidates)
@@ -627,27 +637,27 @@ final class WorkloadRouterTests: XCTestCase {
         let candidates = [
             Fixtures.candidate(.claudeCode, used: 10), // 90, unlisted
             Fixtures.candidate(.codexCli, used: 30), // 70, unlisted
-            Fixtures.candidate(.cursor, used: 50), // 50 + 15
-            Fixtures.candidate(.grok, used: 70), // 30 + 25
+            Fixtures.candidate(.xai, used: 50), // 50 + 15
+            Fixtures.candidate(.openRouter, used: 70), // 30 + 25
         ]
         let byScore = Fixtures.route(Fixtures.policy {
-            $0.providerPreference = [.grok, .cursor]
+            $0.providerPreference = [.openRouter, .xai]
         }, candidates)
-        XCTAssertEqual(byScore.chain, ["claude", "codex", "cursor", "grok"])
+        XCTAssertEqual(byScore.chain, ["claude", "codex", "xai", "openrouter"])
 
         let byPreference = Fixtures.route(Fixtures.policy {
-            $0.providerPreference = [.grok, .cursor]
+            $0.providerPreference = [.openRouter, .xai]
             $0.fallbackOrder = .policyPreference
         }, candidates)
         XCTAssertEqual(byPreference.recommendation?.provider, "claude")
-        XCTAssertEqual(byPreference.chain, ["claude", "grok", "cursor", "codex"])
+        XCTAssertEqual(byPreference.chain, ["claude", "openrouter", "xai", "codex"])
 
         let capped = Fixtures.route(Fixtures.policy {
-            $0.providerPreference = [.grok, .cursor]
+            $0.providerPreference = [.openRouter, .xai]
             $0.fallbackOrder = .policyPreference
             $0.maximumFallbacks = 2
         }, candidates)
-        XCTAssertEqual(capped.chain, ["claude", "grok", "cursor"])
+        XCTAssertEqual(capped.chain, ["claude", "openrouter", "xai"])
         XCTAssertEqual(capped.fallbacks.map(\.rank), [2, 3])
     }
 
@@ -655,7 +665,7 @@ final class WorkloadRouterTests: XCTestCase {
         let decision = Fixtures.route([
             Fixtures.candidate(.claudeCode, used: 10),
             Fixtures.candidate(.codexCli, used: 100),
-            Fixtures.candidate(.cursor, used: 20, age: 5 * 3600),
+            Fixtures.candidate(.xai, used: 20, age: 5 * 3600),
         ])
         XCTAssertEqual(decision.chain, ["claude"])
         XCTAssertEqual(Set(decision.rejectionCodes), [.quotaExhausted, .snapshotStale])
@@ -686,7 +696,7 @@ final class WorkloadRouterTests: XCTestCase {
         let decision = Fixtures.route([
             Fixtures.candidate(.claudeCode, used: 100),
             Fixtures.candidate(.codexCli, used: 95),
-            Fixtures.candidate(.cursor, used: 100, enabled: false),
+            Fixtures.candidate(.xai, used: 100, enabled: false),
         ])
 
         XCTAssertEqual(decision.outcome, .noEligibleCandidate)
@@ -708,7 +718,7 @@ final class WorkloadRouterTests: XCTestCase {
     func testEveryCandidateStaleOrMissingIsDataUnavailable() {
         let decision = Fixtures.route([
             Fixtures.candidate(.claudeCode, used: 5, age: 9 * 3600),
-            RoutingCandidate(service: .cursor, metrics: nil),
+            RoutingCandidate(service: .xai, metrics: nil),
         ])
         XCTAssertEqual(decision.outcome, .dataUnavailable)
         XCTAssertEqual(decision.exitCode, 12)
@@ -748,7 +758,7 @@ final class WorkloadRouterTests: XCTestCase {
         let decision = Fixtures.route([
             Fixtures.account(.claudeCode, id: Fixtures.uuid(1), name: "vincent@example.com", used: 10, order: 0),
             Fixtures.account(.codexCli, id: Fixtures.uuid(2), name: "/Users/vincent/.codex", used: 20, order: 0),
-            Fixtures.account(.grok, id: Fixtures.uuid(3), name: "  Team   Grok ", used: 30, order: 0),
+            Fixtures.account(.xai, id: Fixtures.uuid(3), name: "  Team   Grok ", used: 30, order: 0),
         ])
 
         XCTAssertEqual(decision.recommendation?.account?.label, "Account 01000000")

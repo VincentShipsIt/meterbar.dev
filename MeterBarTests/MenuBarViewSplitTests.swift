@@ -202,7 +202,7 @@ final class ProviderCardPresentationTests: XCTestCase {
         )
         XCTAssertTrue(
             ProviderCardPresentation.showsResetCreditAction(
-                snapshot: snapshot(used: 100, resetCreditsAvailable: 1, service: .grok),
+                snapshot: snapshot(used: 100, resetCreditsAvailable: 1, service: .xai),
                 hasPendingConsumption: false,
                 isAuthenticated: true,
                 hasResolvedAccount: true

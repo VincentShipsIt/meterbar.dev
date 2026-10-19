@@ -17,8 +17,8 @@ final class SettingsSidebarNavigationTests: XCTestCase {
 
     func testProviderRowsListOnlyTrackedProvidersInDisplayOrder() {
         XCTAssertEqual(
-            SettingsSidebarModel.trackedProviders(enabledServices: [.grok, .claudeCode, .cursor]),
-            [.claudeCode, .cursor, .grok],
+            SettingsSidebarModel.trackedProviders(enabledServices: [.xai, .claudeCode]),
+            [.claudeCode, .xai],
             "provider rows follow ServiceType.sortOrder, not Set iteration order"
         )
     }
@@ -82,15 +82,15 @@ final class SettingsSidebarNavigationTests: XCTestCase {
         let navigation = DashboardNavigationStore.shared
         navigation.openSettings(.general)
 
-        navigation.selectSettingsItem(.provider(.cursor))
+        navigation.selectSettingsItem(.provider(.xai))
 
-        XCTAssertEqual(navigation.selectedSettingsProvider, .cursor)
-        XCTAssertEqual(navigation.settingsSidebarItem, .provider(.cursor))
+        XCTAssertEqual(navigation.selectedSettingsProvider, .xai)
+        XCTAssertEqual(navigation.settingsSidebarItem, .provider(.xai))
     }
 
     func testSelectingAPageClearsTheFocusedProvider() {
         let navigation = DashboardNavigationStore.shared
-        navigation.selectSettingsItem(.provider(.grok))
+        navigation.selectSettingsItem(.provider(.xai))
 
         navigation.selectSettingsItem(.section(.widget))
 
@@ -115,7 +115,7 @@ final class SettingsSidebarNavigationTests: XCTestCase {
     /// turned back on.
     func testUntrackingTheSelectedProviderFallsBackToAllProviders() {
         let navigation = DashboardNavigationStore.shared
-        navigation.selectSettingsItem(.provider(.cursor))
+        navigation.selectSettingsItem(.provider(.xai))
 
         navigation.settingsProvidersChanged(enabledServices: [.claudeCode, .codexCli])
 
@@ -125,11 +125,11 @@ final class SettingsSidebarNavigationTests: XCTestCase {
 
     func testTrackingOtherProvidersKeepsTheCurrentSelection() {
         let navigation = DashboardNavigationStore.shared
-        navigation.selectSettingsItem(.provider(.cursor))
+        navigation.selectSettingsItem(.provider(.xai))
 
-        navigation.settingsProvidersChanged(enabledServices: [.cursor, .grok])
+        navigation.settingsProvidersChanged(enabledServices: [.xai, .xai])
 
-        XCTAssertEqual(navigation.selectedSettingsProvider, .cursor)
+        XCTAssertEqual(navigation.selectedSettingsProvider, .xai)
     }
 
     // MARK: - Rendering

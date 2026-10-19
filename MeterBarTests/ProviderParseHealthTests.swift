@@ -64,30 +64,30 @@ final class ProviderParseHealthTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 17_000)
         let store = ProviderParseHealthStore(userDefaults: defaults)
 
-        store.recordFailure(.cursor, error: ServiceError.parsingError(nil), at: now)
-        store.recordFailure(.cursor, error: ServiceError.apiError("Request timed out"), at: now + 1)
-        store.recordFailure(.cursor, error: ServiceError.parsingError(nil), at: now + 2)
+        store.recordFailure(.xai, error: ServiceError.parsingError(nil), at: now)
+        store.recordFailure(.xai, error: ServiceError.apiError("Request timed out"), at: now + 1)
+        store.recordFailure(.xai, error: ServiceError.parsingError(nil), at: now + 2)
 
         // parse, api, parse: never two consecutive mismatches, and only
         // three total failures reach the ordinary sustained threshold.
-        XCTAssertTrue(store.records[.cursor]?.needsAttention(now: now + 2) ?? false)
-        XCTAssertEqual(store.records[.cursor]?.consecutiveFailures, 3)
+        XCTAssertTrue(store.records[.xai]?.needsAttention(now: now + 2) ?? false)
+        XCTAssertEqual(store.records[.xai]?.consecutiveFailures, 3)
     }
 
     func testOrdinaryFailureNeedsThreeAttemptsAndSuccessResetsCounter() {
         let now = Date(timeIntervalSince1970: 20_000)
         let store = ProviderParseHealthStore(userDefaults: defaults)
         for offset in 0..<2 {
-            store.recordFailure(.cursor, error: ServiceError.apiError("Request timed out"), at: now + Double(offset))
+            store.recordFailure(.xai, error: ServiceError.apiError("Request timed out"), at: now + Double(offset))
         }
-        XCTAssertFalse(store.records[.cursor]?.needsAttention(now: now + 2) ?? true)
+        XCTAssertFalse(store.records[.xai]?.needsAttention(now: now + 2) ?? true)
 
-        store.recordFailure(.cursor, error: ServiceError.apiError("Request timed out"), at: now + 2)
-        XCTAssertTrue(store.records[.cursor]?.needsAttention(now: now + 2) ?? false)
+        store.recordFailure(.xai, error: ServiceError.apiError("Request timed out"), at: now + 2)
+        XCTAssertTrue(store.records[.xai]?.needsAttention(now: now + 2) ?? false)
 
-        store.recordSuccess(.cursor, at: now + 3)
-        XCTAssertEqual(store.records[.cursor]?.consecutiveFailures, 0)
-        XCTAssertFalse(store.records[.cursor]?.needsAttention(now: now + 3) ?? true)
+        store.recordSuccess(.xai, at: now + 3)
+        XCTAssertEqual(store.records[.xai]?.consecutiveFailures, 0)
+        XCTAssertFalse(store.records[.xai]?.needsAttention(now: now + 3) ?? true)
     }
 
     func testSuccessfulDataBecomesStaleAfterPublishedThreshold() {
@@ -123,5 +123,39 @@ final class ProviderParseHealthTests: XCTestCase {
         )
 
         XCTAssertEqual(records[.codexCli]?.lastSuccess, now)
+    }
+
+    func testLegacyGrokAndCursorRecordsCollapseToOneXAIRecordKeepingNewestSuccess() throws {
+        let now = Date(timeIntervalSince1970: 50_000)
+        let legacy = """
+        [
+          {"provider":"Grok","lastSuccess":\(now.timeIntervalSinceReferenceDate - 100),
+           "lastAttempt":\(now.timeIntervalSinceReferenceDate - 100),
+           "consecutiveFailures":0,"lastFailureWasShapeMismatch":false},
+          {"provider":"Cursor","lastSuccess":\(now.timeIntervalSinceReferenceDate),
+           "lastAttempt":\(now.timeIntervalSinceReferenceDate),
+           "consecutiveFailures":0,"lastFailureWasShapeMismatch":false}
+        ]
+        """
+        defaults.set(Data(legacy.utf8), forKey: ProviderParseHealthStore.storageKey)
+
+        let records = ProviderParseHealthStore.persistedRecords(from: defaults)
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[.xai]?.lastSuccess?.timeIntervalSinceReferenceDate, now.timeIntervalSinceReferenceDate)
+    }
+
+    func testKeyedByProviderFallsBackToNewestAttemptWhenNeitherEverSucceeded() {
+        let older = ProviderParseHealthRecord(
+            provider: .xai, lastSuccess: nil, lastAttempt: Date(timeIntervalSince1970: 1),
+            consecutiveFailures: 1, lastFailureWasShapeMismatch: false
+        )
+        let newer = ProviderParseHealthRecord(
+            provider: .xai, lastSuccess: nil, lastAttempt: Date(timeIntervalSince1970: 2),
+            consecutiveFailures: 4, lastFailureWasShapeMismatch: false
+        )
+
+        XCTAssertEqual(ProviderParseHealthStore.keyedByProvider([older, newer])[.xai], newer)
+        XCTAssertEqual(ProviderParseHealthStore.keyedByProvider([newer, older])[.xai], newer)
     }
 }

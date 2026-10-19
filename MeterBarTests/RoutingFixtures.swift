@@ -43,6 +43,7 @@ enum RoutingFixtures {
         session: UsageLimit? = nil,
         weekly: UsageLimit? = nil,
         codeReview: UsageLimit? = nil,
+        additional: [UsageLimit] = [],
         age: TimeInterval = 60
     ) -> UsageMetrics {
         UsageMetrics(
@@ -50,6 +51,7 @@ enum RoutingFixtures {
             sessionLimit: session,
             weeklyLimit: weekly,
             codeReviewLimit: codeReview,
+            additionalLimits: additional,
             lastUpdated: now.addingTimeInterval(-age)
         )
     }
@@ -60,6 +62,7 @@ enum RoutingFixtures {
         used: Double = 30,
         session: UsageLimit? = nil,
         weekly: UsageLimit? = nil,
+        additional: [UsageLimit] = [],
         age: TimeInterval = 60,
         health: RoutingProviderHealth = .healthy,
         enabled: Bool = true
@@ -67,7 +70,13 @@ enum RoutingFixtures {
         RoutingCandidate(
             service: service,
             isEnabled: enabled,
-            metrics: metrics(service, session: session ?? limit(used: used), weekly: weekly, age: age),
+            metrics: metrics(
+                service,
+                session: session ?? limit(used: used),
+                weekly: weekly,
+                additional: additional,
+                age: age
+            ),
             health: health
         )
     }

@@ -32,70 +32,36 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         )
     }
 
-    /// The menu-bar glyph follows the winning window, not just its service:
-    /// Cursor's Grok Bot pool must show Grok's logo, everything else keeps the
-    /// provider logo, and the placeholder before first data carries none.
-    func testDescriptorCarriesGrokLogoForCursorGrokBotWindow() {
-        let grokBot = StatusLimitCandidate(
-            key: "cursor:grokBot",
-            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
-            service: .cursor,
-            accountKey: nil,
-            displayName: "Cursor",
-            windowID: "grokBot",
-            windowName: "Grok Bot",
-            limit: UsageLimit(used: 17, total: 100, resetTime: nil),
-            lastActivity: nil,
-            isAutoSelectable: true
-        )
-        let cursorWeekly = candidate(key: "cursor", service: .cursor, percentUsed: 100, windowName: "Weekly")
+    /// The menu-bar glyph follows the provider. xAI is one provider, so its
+    /// logo is the same whichever window wins, and the placeholder before first
+    /// data carries none.
+    func testDescriptorCarriesTheXAILogo() {
+        let weekly = candidate(key: "xai", service: .xai, percentUsed: 100, windowName: "Weekly")
 
-        let descriptors = plan([cursorWeekly, grokBot])
-
-        XCTAssertEqual(descriptors.map(\.selectionKey), ["cursor:grokBot"])
-        XCTAssertEqual(descriptors.map(\.logoKind), [.grok])
-        XCTAssertEqual(plan([cursorWeekly]).map(\.logoKind), [.cursor])
+        XCTAssertEqual(plan([weekly]).map(\.logoKind), [.xai])
     }
 
     /// Combined mode renders one anchor's Session/Weekly pair
     /// (`combinedContent` only ever looks up `windowID == "session"` /
-    /// `"weekly"` for the winning service+account). Cursor's Grok Bot pool is
-    /// a third, differently shaped window that used to be able to win
-    /// automatic selection whenever Cursor's own weekly quota ran out —
-    /// pairing the Grok logo with Cursor's own (unrelated) S/W numbers and
-    /// never actually showing the Grok Bot quota. Grok Bot must not win
-    /// automatic selection in Combined mode; Cursor's own S/W stays selected
-    /// even though it is the exhausted one. See PR #514 review.
-    func testCombinedModeDoesNotLetGrokBotWinOverExhaustedCursorWeekly() {
+    /// `"weekly"` for the winning service+account). An exhausted weekly keeps
+    /// the anchor, so the pair still reads Session and Weekly together.
+    func testCombinedModeKeepsTheExhaustedWeeklyAnchor() {
         let cursorSession = candidate(
             key: "cursor",
-            service: .cursor,
+            service: .xai,
             percentUsed: 40,
             windowName: "Session",
             isAutoSelectable: false
         )
         let cursorWeekly = candidate(
             key: "cursor",
-            service: .cursor,
+            service: .xai,
             percentUsed: 100,
             windowName: "Weekly"
         )
-        let grokBot = StatusLimitCandidate(
-            key: "cursor:grokBot",
-            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
-            service: .cursor,
-            accountKey: nil,
-            displayName: "Cursor",
-            windowID: "grokBot",
-            windowName: "Grok Bot",
-            limit: UsageLimit(used: 20, total: 100, resetTime: nil),
-            lastActivity: nil,
-            isAutoSelectable: true
-        )
+        let descriptors = plan([cursorSession, cursorWeekly], windowMode: .combined)
 
-        let descriptors = plan([cursorSession, cursorWeekly, grokBot], windowMode: .combined)
-
-        XCTAssertEqual(descriptors.map(\.logoKind), [.cursor])
+        XCTAssertEqual(descriptors.map(\.logoKind), [.xai])
         XCTAssertEqual(descriptors.map(\.selectionKey), ["cursor"])
         XCTAssertEqual(descriptors.first?.title, " S60% · W0%")
     }

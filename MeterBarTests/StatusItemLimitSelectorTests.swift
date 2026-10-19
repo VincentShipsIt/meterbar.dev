@@ -54,22 +54,22 @@ final class StatusItemLimitSelectorTests: XCTestCase {
     func testProviderAutoWindowPolicyPreservesExistingWindowsAndAddsOpenRouterCredits() {
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .claudeCode), "session")
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .codexCli), "session")
-        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .cursor), "weekly")
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .xai), "weekly")
         XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .openRouter), "weekly")
-        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .grok), "weekly")
+        XCTAssertEqual(StatusItemAutoSelectionPolicy.windowID(for: .xai), "weekly")
     }
 
     func testGrokWeeklyQuotaProducesAnAutomaticAccountCandidate() {
         let limits = ProviderSnapshotBuilder.limits(
             for: UsageMetrics(
-                service: .grok,
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 35, total: 100, resetTime: now.addingTimeInterval(3_600))
             ),
-            service: .grok
+            service: .xai
         )
 
         let seeds = StatusItemLimitCandidateBuilder.seeds(
-            service: .grok,
+            service: .xai,
             accountID: UUID(),
             autoSelectionKey: "grok:profile",
             displayName: "Work (Grok)",
@@ -110,60 +110,41 @@ final class StatusItemLimitSelectorTests: XCTestCase {
         XCTAssertNil(seeds.first { $0.windowID == "weekly" })
     }
 
-    private func cursorMetricsWithGrokBot(weeklyUsed: Double, grokBotUsed: Double) -> UsageMetrics {
+    private func legacyCursorPoolMetrics(weeklyUsed: Double, poolUsed: Double) -> UsageMetrics {
         UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .monthly),
             weeklyLimit: UsageLimit(used: weeklyUsed, total: 100, resetTime: nil, periodKind: .monthly),
             additionalLimits: [
-                UsageLimit(used: grokBotUsed, total: 100, resetTime: now.addingTimeInterval(3_600), periodKind: .weekly)
+                UsageLimit(used: poolUsed, total: 100, resetTime: now.addingTimeInterval(3_600), periodKind: .weekly)
             ]
         )
     }
 
-    /// Cursor Ultra's Grok Bot pool is its own card in the popover, so it must
-    /// also be its own automatic menu-bar candidate instead of hiding as a
-    /// never-selectable "additional" limit behind Cursor's weekly pool.
-    func testCursorGrokBotPoolProducesItsOwnAutomaticCandidate() {
+    /// A legacy Cursor account's extra pools stay rows on the one xAI card;
+    /// only the headline window competes for the menu bar, so a pool can never
+    /// become a second automatic candidate for the same provider.
+    func testLegacyCursorPoolsDoNotBecomeSeparateAutomaticCandidates() {
         let limits = ProviderSnapshotBuilder.limits(
-            for: cursorMetricsWithGrokBot(weeklyUsed: 100, grokBotUsed: 17),
-            service: .cursor
+            for: legacyCursorPoolMetrics(weeklyUsed: 100, poolUsed: 17),
+            service: .xai
         )
         let seeds = StatusItemLimitCandidateBuilder.seeds(
-            service: .cursor,
+            service: .xai,
             accountID: nil,
-            autoSelectionKey: "cursor",
-            displayName: "Cursor",
+            autoSelectionKey: "xai",
+            displayName: "xAI",
             limits: limits
         )
 
         let auto = seeds.filter(\.isAutoSelectable)
-        XCTAssertEqual(auto.map(\.windowID), ["weekly", "grokBot"])
-        XCTAssertEqual(auto.map(\.key), ["cursor", "cursor:grokBot"])
+        XCTAssertEqual(auto.map(\.windowID), ["weekly"])
+        XCTAssertEqual(auto.map(\.key), ["xai"])
         XCTAssertEqual(
-            auto.last?.pinKey,
-            StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot")
+            auto.first?.pinKey,
+            StatusItemPinKey.make(service: .xai, accountID: nil, windowID: "weekly")
         )
-        XCTAssertEqual(auto.last?.windowName, "Grok Bot")
-    }
-
-    /// With Claude, Codex and Cursor's weekly pool all spent, the Grok Bot pool
-    /// is the only quota left and must win instead of the pool falling back to
-    /// a spent Claude window.
-    func testGrokBotWinsWhenEveryOtherAutomaticCandidateIsSpent() {
-        let claude = candidate(key: "claude:default", percentUsed: 100, activeMinutesAgo: 1)
-        let codex = candidate(key: "codex:default", percentUsed: 100, service: .codexCli)
-        let cursorWeekly = candidate(key: "cursor", percentUsed: 100, windowName: "Weekly", service: .cursor)
-        let grokBot = candidate(
-            key: "cursor:grokBot",
-            percentUsed: 17,
-            displayName: "Cursor",
-            pinKey: StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot"),
-            windowName: "Grok Bot",
-            service: .cursor
-        )
-
-        XCTAssertEqual(select([claude, codex, cursorWeekly, grokBot])?.key, "cursor:grokBot")
+        XCTAssertEqual(auto.first?.windowName, "Monthly")
     }
 
     /// When OpenAI temporarily disables the 5-hour window, Codex still reports a
@@ -203,7 +184,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
             percentUsed: 19,
             activeMinutesAgo: 1,
             windowName: "Weekly",
-            service: .grok
+            service: .xai
         )
         XCTAssertEqual(select([idleClaude, activeGrok])?.key, "grok:default")
     }

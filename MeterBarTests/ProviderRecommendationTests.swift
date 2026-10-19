@@ -9,8 +9,8 @@ final class ProviderRecommendationTests: XCTestCase {
 
     func testRanksCandidatesByBindingWindowHeadroom() {
         let recommendation = rank([
-            makeCandidate(id: "tight", service: .grok, session: limit(used: 90)),
-            makeCandidate(id: "roomy", service: .cursor, session: limit(used: 20)),
+            makeCandidate(id: "tight", service: .xai, session: limit(used: 90)),
+            makeCandidate(id: "roomy", service: .xai, session: limit(used: 20)),
             makeCandidate(id: "middling", service: .codexCli, session: limit(used: 60))
         ])
 
@@ -40,13 +40,13 @@ final class ProviderRecommendationTests: XCTestCase {
     func testWindowTitleFollowsTheProviderVocabulary() {
         let recommendation = rank([
             makeCandidate(id: "credits", service: .openRouter, weekly: limit(used: 10)),
-            makeCandidate(id: "monthly", service: .cursor, weekly: limit(used: 20)),
+            makeCandidate(id: "monthly", service: .xai, weekly: limit(used: 20)),
             makeCandidate(id: "key", service: .openRouter, displayOrder: 1, session: limit(used: 30))
         ])
 
         XCTAssertEqual(
             recommendation.rows.map(\.windowTitle),
-            ["Account credits", "Other Models", "Key limit"]
+            ["Account credits", "Weekly", "Key limit"]
         )
     }
 
@@ -54,7 +54,7 @@ final class ProviderRecommendationTests: XCTestCase {
         let recommendation = rank([
             makeCandidate(
                 id: "grok-monthly",
-                service: .grok,
+                service: .xai,
                 weekly: UsageLimit(used: 40, total: 100, resetTime: nil, periodKind: .monthly)
             )
         ])
@@ -64,7 +64,7 @@ final class ProviderRecommendationTests: XCTestCase {
 
     func testEqualScoresFallBackToStableProviderOrder() {
         let recommendation = rank([
-            makeCandidate(id: "grok", service: .grok, session: limit(used: 40)),
+            makeCandidate(id: "grok", service: .xai, session: limit(used: 40)),
             makeCandidate(id: "claude-b", service: .claudeCode, displayOrder: 1, session: limit(used: 40)),
             makeCandidate(id: "claude-a", service: .claudeCode, displayOrder: 0, session: limit(used: 40))
         ])
@@ -133,8 +133,8 @@ final class ProviderRecommendationTests: XCTestCase {
         let recommendation = rank([
             makeCandidate(id: "late", service: .claudeCode, session: limit(used: 100, resetIn: 3 * 3_600)),
             makeCandidate(id: "unknown-reset", service: .codexCli, session: limit(used: 120)),
-            makeCandidate(id: "healthy", service: .cursor, session: limit(used: 50)),
-            makeCandidate(id: "soon", service: .grok, session: limit(used: 100, resetIn: 1_800))
+            makeCandidate(id: "healthy", service: .xai, session: limit(used: 50)),
+            makeCandidate(id: "soon", service: .xai, session: limit(used: 100, resetIn: 1_800))
         ])
 
         XCTAssertEqual(recommendation.rows.map(\.id), ["healthy", "soon", "late", "unknown-reset"])
@@ -206,7 +206,7 @@ final class ProviderRecommendationTests: XCTestCase {
 
     func testMissingSnapshotsAndMissingBindingWindowsListAsNoData() {
         let recommendation = rank([
-            makeCandidate(id: "ranked", service: .cursor, session: limit(used: 40)),
+            makeCandidate(id: "ranked", service: .xai, session: limit(used: 40)),
             makeCandidate(id: "never-fetched", service: .claudeCode, updatedSecondsAgo: nil),
             makeCandidate(id: "no-window", service: .codexCli)
         ])
@@ -260,22 +260,22 @@ final class ProviderRecommendationTests: XCTestCase {
 
     func testSingleCandidateIsItsOwnTopRecommendation() {
         let recommendation = rank([
-            makeCandidate(id: "solo", service: .cursor, weekly: limit(used: 18, resetIn: 3 * 86_400))
+            makeCandidate(id: "solo", service: .xai, weekly: limit(used: 18, resetIn: 3 * 86_400))
         ])
 
         XCTAssertEqual(recommendation.rows.count, 1)
         XCTAssertEqual(recommendation.top?.id, "solo")
         XCTAssertFalse(recommendation.isEmpty)
         XCTAssertFalse(recommendation.isFullyExhausted)
-        XCTAssertEqual(recommendation.top?.summary, "Cursor — 82% left on Other Models, resets in 3d")
+        XCTAssertEqual(recommendation.top?.summary, "xAI — 82% left on Weekly, resets in 3d")
     }
 
     func testHeadlineNamesTheTopPickAndItsNumbers() {
         let recommendation = rank([
-            makeCandidate(id: "solo", service: .cursor, weekly: limit(used: 18, resetIn: 3 * 86_400))
+            makeCandidate(id: "solo", service: .xai, weekly: limit(used: 18, resetIn: 3 * 86_400))
         ])
 
-        XCTAssertEqual(recommendation.headline, "Use Cursor next — 82% left on other models, resets in 3d")
+        XCTAssertEqual(recommendation.headline, "Use xAI next — 82% left on weekly, resets in 3d")
     }
 
     func testHeadlineSaysSoWhenEveryWindowIsSpent() {
@@ -374,7 +374,7 @@ final class ProviderRecommendationTests: XCTestCase {
         let candidate = ProviderRecommendationCandidate(
             id: "grok",
             name: "Grok",
-            service: .grok,
+            service: .xai,
             displayOrder: 0,
             metrics: nil
         )

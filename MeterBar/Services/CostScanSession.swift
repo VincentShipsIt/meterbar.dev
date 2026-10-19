@@ -379,7 +379,7 @@ nonisolated enum CostScanProvider: Sendable, Hashable, CaseIterable {
         switch self {
         case .claude: .claudeCode
         case .codex: .codexCli
-        case .grok: .grok
+        case .grok: .xai
         }
     }
 

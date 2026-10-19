@@ -32,7 +32,7 @@ enum ICloudQuotaSnapshotSource {
                 guard let metrics = dataManager.claudeCodeAccountMetrics[account.id] ?? fallback else { return nil }
                 return ClaudeInput(account: account, metrics: metrics)
             }
-        let cursorMetrics = dataManager.metrics[.cursor]
+        let cursorMetrics = dataManager.metrics[.xai]
         let codexService = CodexCliLocalService.shared
         let claudeService = ClaudeCodeLocalService.shared
         let cursorService = CursorLocalService.shared

@@ -118,38 +118,38 @@ final class AppDelegateSplitTests: XCTestCase {
     }
 
     func testProviderStatusMenuTitleReportsUnavailableAndChecking() {
-        let errored = StatusMenuBuilder.StatusSnapshot(errors: [.cursor: "offline"])
+        let errored = StatusMenuBuilder.StatusSnapshot(errors: [.xai: "offline"])
         XCTAssertEqual(
-            StatusMenuBuilder.providerStatusMenuTitle(for: .cursor, status: errored),
-            "\(ServiceType.cursor.statusPageDisplayName) — Unavailable"
+            StatusMenuBuilder.providerStatusMenuTitle(for: .xai, status: errored),
+            "\(ServiceType.xai.statusPageDisplayName) — Unavailable"
         )
         XCTAssertEqual(
             StatusMenuBuilder.providerStatusMenuTitle(
-                for: .cursor,
+                for: .xai,
                 status: StatusMenuBuilder.StatusSnapshot()
             ),
-            "\(ServiceType.cursor.statusPageDisplayName) — Checking..."
+            "\(ServiceType.xai.statusPageDisplayName) — Checking..."
         )
     }
 
     func testProviderStatusMenuIndicatorPrefersReportThenErrorThenUnknown() {
         let reported = StatusMenuBuilder.StatusSnapshot(
-            reports: [.cursor: Self.report(indicator: .major, description: nil)]
+            reports: [.xai: Self.report(indicator: .major, description: nil)]
         )
         XCTAssertEqual(
-            StatusMenuBuilder.providerStatusMenuIndicator(for: .cursor, status: reported),
+            StatusMenuBuilder.providerStatusMenuIndicator(for: .xai, status: reported),
             .major
         )
         XCTAssertEqual(
             StatusMenuBuilder.providerStatusMenuIndicator(
-                for: .cursor,
-                status: StatusMenuBuilder.StatusSnapshot(errors: [.cursor: "offline"])
+                for: .xai,
+                status: StatusMenuBuilder.StatusSnapshot(errors: [.xai: "offline"])
             ),
             .critical
         )
         XCTAssertEqual(
             StatusMenuBuilder.providerStatusMenuIndicator(
-                for: .cursor,
+                for: .xai,
                 status: StatusMenuBuilder.StatusSnapshot()
             ),
             .unknown
@@ -193,9 +193,9 @@ final class AppDelegateSplitTests: XCTestCase {
             target: nil,
             actions: Self.actions,
             showInDock: true,
-            status: StatusMenuBuilder.StatusSnapshot(errors: [.cursor: "Request timed out"])
+            status: StatusMenuBuilder.StatusSnapshot(errors: [.xai: "Request timed out"])
         )
-        let erroredItems = errored.makeProviderStatusSubmenu(for: .cursor).items
+        let erroredItems = errored.makeProviderStatusSubmenu(for: .xai).items
         XCTAssertEqual(erroredItems[0].title, "Request timed out")
         XCTAssertFalse(erroredItems[0].isEnabled)
 
@@ -205,7 +205,7 @@ final class AppDelegateSplitTests: XCTestCase {
             showInDock: true,
             status: StatusMenuBuilder.StatusSnapshot()
         )
-        XCTAssertEqual(pending.makeProviderStatusSubmenu(for: .cursor).items[0].title, "Checking status...")
+        XCTAssertEqual(pending.makeProviderStatusSubmenu(for: .xai).items[0].title, "Checking status...")
     }
 
     func testStatusComponentMenuItemNestsGroupChildren() {
@@ -398,7 +398,7 @@ final class AppDelegateSplitTests: XCTestCase {
 
     func testGrokMetricsFallsBackOnlyForASoleDefaultAccountWithoutAccountData() {
         let providerMetrics = UsageMetrics(
-            service: .grok,
+            service: .xai,
             sessionLimit: UsageLimit(used: 65, total: 100, resetTime: nil)
         )
 
@@ -430,7 +430,7 @@ final class AppDelegateSplitTests: XCTestCase {
         let seed = StatusLimitCandidateSeed(
             key: "cursor",
             pinKey: "cursor:default:weekly",
-            service: .cursor,
+            service: .xai,
             displayName: "Cursor",
             windowName: "Weekly",
             limit: UsageLimit(used: 42, total: 100, resetTime: nil),
@@ -443,7 +443,7 @@ final class AppDelegateSplitTests: XCTestCase {
         XCTAssertEqual(candidates.count, 1)
         XCTAssertEqual(candidates[0].key, "cursor")
         XCTAssertEqual(candidates[0].pinKey, "cursor:default:weekly")
-        XCTAssertEqual(candidates[0].service, .cursor)
+        XCTAssertEqual(candidates[0].service, .xai)
         XCTAssertEqual(candidates[0].displayName, "Cursor")
         XCTAssertEqual(candidates[0].windowName, "Weekly")
         XCTAssertEqual(candidates[0].lastActivity, probed)
@@ -609,9 +609,9 @@ final class AppDelegateSplitTests: XCTestCase {
         )
         XCTAssertFalse(services.contains(.claudeCode))
         XCTAssertFalse(services.contains(.codexCli))
-        XCTAssertFalse(services.contains(.grok))
+        XCTAssertFalse(services.contains(.xai))
         XCTAssertFalse(services.contains(.openRouter))
-        XCTAssertEqual(services, [.cursor, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform])
+        XCTAssertEqual(services, [.kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform])
         XCTAssertEqual(
             services.count,
             ServiceType.allCases.filter { !$0.hasAccountScopedNotifications }.count

@@ -21,7 +21,7 @@ Set the credential/storage boundary now: approved credential source and preceden
 
 ## Choose a current implementation lane
 
-Search open issues/PRs before claiming the surface. Record owned paths on the issue and use a separate `git wt` tree under `.worktrees/`; preserve active work. Before adding a pattern, read three comparable service/parser/settings implementations on the chosen base and their tests. On master, start with `CursorLocalService`, `OpenRouterService` and `GrokCLIUsageService`; their credential and account models differ, so copy only the applicable seam.
+Search open issues/PRs before claiming the surface. Record owned paths on the issue and use a separate `git wt` tree under `.worktrees/`; preserve active work. Before adding a pattern, read three comparable service/parser/settings implementations on the chosen base and their tests. On master, start with `CursorLocalService` (the Cursor source of the xAI provider), `OpenRouterService` and `GrokCLIUsageService` (its Grok source); their credential and account models differ, so copy only the applicable seam.
 
 Read [the prepared stack](references/prepared-stack.md) when Kimi, Z.ai, Copilot or their reusable seams are relevant. Verify merge state and actual source at use time. **Unmerged code is a dependency, not an available master API.** Name required PRs, base branch and merge order; do not transplant a sibling's entire implementation or silently build against absent symbols. Resolve consequential support/auth choices before writing code.
 

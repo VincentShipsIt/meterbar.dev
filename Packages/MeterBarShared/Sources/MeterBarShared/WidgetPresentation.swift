@@ -114,8 +114,8 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
     /// show both the parent account and the independently blocked sub-pool.
     ///
     /// A normal additional row still belongs to its account. An exhausted
-    /// independent row does not: saying "Cursor, OUT" would imply Cursor's
-    /// healthy primary pools are blocked when only Grok Bot is exhausted.
+    /// independent row does not: saying "xAI, OUT" would imply the account's
+    /// healthy primary pools are blocked when only that one pool is exhausted.
     /// Returning a localization key keeps the policy shared without choosing
     /// the widget extension's or Settings app's resource bundle here.
     public var compactIdentityQuotaTitleKey: ServiceType.QuotaTitleKey? {
@@ -656,10 +656,7 @@ public enum WidgetPresentationPlanner {
                 window: widgetWindow(for: limit.periodKind),
                 limit: limit,
                 isAdditional: true,
-                blockingRole: metrics.service == .cursor
-                    && metrics.service.additionalQuotaTitleKey(for: limit) == .grokBot
-                    ? .independentSubPool
-                    : .secondary
+                blockingRole: .secondary
             )
         }
         return candidates

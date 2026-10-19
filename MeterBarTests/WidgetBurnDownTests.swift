@@ -56,7 +56,7 @@ final class WidgetBurnDownTests: XCTestCase {
     func testBurnDownPlaceholderCoversEveryProviderIncludingCursor() throws {
         let metrics = WidgetPlaceholderMetrics.burnDown(now: now)
         XCTAssertEqual(Set(metrics.keys), Set(ServiceType.allCases))
-        XCTAssertNotNil(metrics[.cursor], "Burn Down placeholder omitted Cursor")
+        XCTAssertNotNil(metrics[.xai], "Burn Down placeholder omitted Cursor")
         for service in ServiceType.allCases {
             let metric = try? XCTUnwrap(metrics[service], "\(service) missing from Burn Down placeholder")
             XCTAssertEqual(metric?.service, service)
@@ -65,10 +65,10 @@ final class WidgetBurnDownTests: XCTestCase {
         }
 
         let cursorOnly = presentation(
-            metrics: [ .cursor: try XCTUnwrap(metrics[.cursor]) ],
+            metrics: [ .xai: try XCTUnwrap(metrics[.xai]) ],
             family: .small
         )
-        XCTAssertEqual(cursorOnly.rows.map(\.service), [.cursor])
+        XCTAssertEqual(cursorOnly.rows.map(\.service), [.xai])
         XCTAssertNil(cursorOnly.emptyState)
     }
 
@@ -225,7 +225,7 @@ final class WidgetBurnDownTests: XCTestCase {
         let metricsByService: [ServiceType: UsageMetrics] = [
             .claudeCode: metrics(.claudeCode, used: 10, resetTime: resetTime),
             .codexCli: metrics(.codexCli, used: 20, resetTime: resetTime),
-            .cursor: metrics(.cursor, used: 30, resetTime: resetTime)
+            .xai: metrics(.xai, used: 30, resetTime: resetTime)
         ]
 
         let small = presentation(metrics: metricsByService, family: .small)

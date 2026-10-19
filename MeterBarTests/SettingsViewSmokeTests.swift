@@ -22,14 +22,14 @@ final class SettingsViewSmokeTests: XCTestCase {
         // the migrated not-connected notices lay out where the old stacked
         // SettingsNotices used to.
         let section = SettingsPanelSection(
-            title: "Cursor",
+            title: "xAI",
             systemImage: "person.crop.circle",
-            color: MeterBarTheme.cursorAccent
+            color: MeterBarTheme.xaiAccent
         ) {
             EmptyStateCard(
                 systemImage: "person.crop.circle.badge.exclamationmark",
                 title: "Not connected",
-                message: "Log in to Cursor IDE, then Check Again.",
+                message: "Log in to Grok or Cursor, then Check Again.",
                 tone: .warning
             )
         }

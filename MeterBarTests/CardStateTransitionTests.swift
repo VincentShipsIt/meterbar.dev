@@ -80,11 +80,11 @@ final class CardStateTransitionTests: XCTestCase {
             ProviderSnapshotBuilder.Input(
                 metrics: [
                     .codexCli: makeMetrics(service: .codexCli, weekly: 10),
-                    .cursor: makeMetrics(service: .cursor, weekly: 30)
+                    .xai: makeMetrics(service: .xai, weekly: 30)
                 ],
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: [.codexCli, .cursor]
+                enabledServices: [.codexCli, .xai]
             )
         )
         XCTAssertFalse(snapshots.isEmpty, "fixture must produce provider cards to exercise the ForEach branch")
@@ -118,12 +118,11 @@ final class CardStateTransitionTests: XCTestCase {
             ProviderSnapshotBuilder.Input(
                 metrics: [
                     .codexCli: makeMetrics(service: .codexCli, weekly: 10),
-                    .cursor: makeMetrics(service: .cursor, weekly: 30),
-                    .grok: makeMetrics(service: .grok, weekly: 80)
+                    .xai: makeMetrics(service: .xai, weekly: 30)
                 ],
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: [.codexCli, .cursor, .grok]
+                enabledServices: [.codexCli, .xai]
             )
         )
 
@@ -160,11 +159,11 @@ final class CardStateTransitionTests: XCTestCase {
             ProviderSnapshotBuilder.Input(
                 metrics: [
                     .codexCli: makeMetrics(service: .codexCli, weekly: 10),
-                    .cursor: makeMetrics(service: .cursor, weekly: 30)
+                    .xai: makeMetrics(service: .xai, weekly: 30)
                 ],
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [:],
-                enabledServices: [.codexCli, .cursor, .claudeCode]
+                enabledServices: [.codexCli, .xai, .claudeCode]
             )
         )
         assertRenders(HeadroomRecommendationCard(providerSnapshots: snapshots), minHeight: 0)

@@ -464,7 +464,7 @@ final class CLIJSONOutputTests: XCTestCase {
 
     func testPeriodKindIsEmittedAdditivelyAndAdditionalWindowsUseCadenceKind() throws {
         let metrics = UsageMetrics(
-            service: .grok,
+            service: .xai,
             sessionLimit: UsageLimit(
                 used: 10,
                 total: 100,
@@ -488,7 +488,7 @@ final class CLIJSONOutputTests: XCTestCase {
 
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(
-                with: UsageCLIJSONResponse(metrics: [.grok: metrics]).jsonData()
+                with: UsageCLIJSONResponse(metrics: [.xai: metrics]).jsonData()
             ) as? [String: Any]
         )
         let providers = try XCTUnwrap(object["providers"] as? [[String: Any]])

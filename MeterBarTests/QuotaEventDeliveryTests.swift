@@ -26,7 +26,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
 
         XCTAssertTrue(result.succeeded)
         XCTAssertTrue(output.contains("METERBAR_EVENT=critical"))
-        XCTAssertTrue(output.contains("METERBAR_PROVIDER=Cursor"))
+        XCTAssertTrue(output.contains("METERBAR_PROVIDER=xAI"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_ID=account-id"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_NAME=Work"))
         XCTAssertTrue(output.contains("METERBAR_WINDOW=session"))
@@ -52,7 +52,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
             )
         )
         let grokPayload = QuotaEventPayload(
-            provider: .grok,
+            provider: .xai,
             account: QuotaEventAccount(id: GrokAccount.defaultID.uuidString, name: "Work"),
             event: .exhausted,
             window: .weekly,
@@ -65,7 +65,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
                 executable: "/usr/bin/env",
                 arguments: [],
                 webhookURL: "",
-                provider: .grok,
+                provider: .xai,
                 accountID: grokPayload.account.id
             ),
             payload: grokPayload
@@ -74,7 +74,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
 
         XCTAssertTrue(result.succeeded)
         XCTAssertTrue(output.contains("METERBAR_EVENT=exhausted"))
-        XCTAssertTrue(output.contains("METERBAR_PROVIDER=Grok"))
+        XCTAssertTrue(output.contains("METERBAR_PROVIDER=xAI"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_ID=\(GrokAccount.defaultID.uuidString)"))
         XCTAssertTrue(output.contains("METERBAR_ACCOUNT_NAME=Work"))
         XCTAssertFalse(output.contains("METERBAR_PERIOD_KIND="))
@@ -102,11 +102,11 @@ final class QuotaEventDeliveryTests: XCTestCase {
                 executable: "/usr/bin/env",
                 arguments: [],
                 webhookURL: "",
-                provider: .grok,
+                provider: .xai,
                 accountID: grokAccountID
             ),
             payload: QuotaEventPayload(
-                provider: .grok,
+                provider: .xai,
                 account: QuotaEventAccount(id: grokAccountID, name: "Work"),
                 event: .exhausted,
                 window: .weekly,
@@ -161,7 +161,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
 
     private func payload() -> QuotaEventPayload {
         QuotaEventPayload(
-            provider: .cursor,
+            provider: .xai,
             account: QuotaEventAccount(id: "account-id", name: "Work"),
             event: .critical,
             window: .session,
@@ -175,7 +175,7 @@ final class QuotaEventDeliveryTests: XCTestCase {
         executable: String,
         arguments: [String],
         webhookURL: String = "",
-        provider: ServiceType = .cursor,
+        provider: ServiceType = .xai,
         accountID: String = "account-id"
     ) -> QuotaEventIntegrationConfiguration {
         QuotaEventIntegrationConfiguration(

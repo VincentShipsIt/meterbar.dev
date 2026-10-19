@@ -316,13 +316,13 @@ final class RoutingPolicyEditorTests: XCTestCase {
 
     func testMovingAProviderReordersThePreference() {
         var editor = editor()
-        editor.edit(.review) { $0.providerPreference = [.claudeCode, .codexCli, .cursor] }
+        editor.edit(.review) { $0.providerPreference = [.claudeCode, .codexCli, .xai] }
 
-        editor.moveProvider(.cursor, up: true, in: .review)
-        XCTAssertEqual(editor.draft(.review)?.providerPreference, [.claudeCode, .cursor, .codexCli])
+        editor.moveProvider(.xai, up: true, in: .review)
+        XCTAssertEqual(editor.draft(.review)?.providerPreference, [.claudeCode, .xai, .codexCli])
 
         editor.moveProvider(.claudeCode, up: true, in: .review)
-        XCTAssertEqual(editor.draft(.review)?.providerPreference, [.claudeCode, .cursor, .codexCli])
+        XCTAssertEqual(editor.draft(.review)?.providerPreference, [.claudeCode, .xai, .codexCli])
     }
 
     func testTogglingAProviderAppendsAndRemovesItFromThePreference() {

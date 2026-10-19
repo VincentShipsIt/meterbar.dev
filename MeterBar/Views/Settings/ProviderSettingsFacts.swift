@@ -59,12 +59,10 @@ struct ProviderSettingsFacts {
             "Claude CLI /usage"
         case .codexCli:
             "\(codexAuthFileDisplayPath) + ChatGPT usage API"
-        case .cursor:
-            "Cursor local state + usage API"
         case .openRouter:
             "OpenRouter credits + key APIs"
-        case .grok:
-            "Grok Build ACP billing + usage reset API"
+        case .xai:
+            "Grok Build ACP billing + Cursor usage API"
         case .kimiCode:
             "Kimi Code sign-in or API key + managed usage API"
         case .zaiCodingPlan:
@@ -90,14 +88,14 @@ struct ProviderSettingsFacts {
             return [plan, tier].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
         case .codexCli:
             return subscriptionType?.capitalized.nilIfEmpty
-        case .cursor:
-            return subscriptionType?.capitalized.nilIfEmpty
         case .openRouter:
             return nil
-        case .grok:
+        case .xai:
             // Grok's plan token is already human-facing (e.g. "SuperGrok"),
-            // so it is shown verbatim rather than title-cased.
-            return subscriptionType?.nilIfEmpty
+            // so it is shown verbatim; lowercase legacy Cursor tokens
+            // (e.g. "pro") are title-cased.
+            guard let plan = subscriptionType?.nilIfEmpty else { return nil }
+            return plan == plan.lowercased() ? plan.capitalized : plan
         case .kimiCode:
             return nil
         case .zaiCodingPlan:

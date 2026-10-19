@@ -39,7 +39,7 @@ final class UsageRefreshEngineTests: XCTestCase {
 
     func testPartialFailurePreservesCachedProvider() async {
         let report = makeReport([
-            ProviderRefreshOutcome(provider: .cursor, state: .refreshed),
+            ProviderRefreshOutcome(provider: .xai, state: .refreshed),
             ProviderRefreshOutcome(provider: .codexCli, state: .failed, servedFromCache: true)
         ])
         let response = await makeEngine(refresh: { report }).run().response
@@ -50,7 +50,7 @@ final class UsageRefreshEngineTests: XCTestCase {
 
     func testAllContactedProvidersFail() async {
         let report = makeReport([
-            ProviderRefreshOutcome(provider: .cursor, state: .failed)
+            ProviderRefreshOutcome(provider: .xai, state: .failed)
         ])
         let response = await makeEngine(refresh: { report }).run().response
 
@@ -166,7 +166,7 @@ final class UsageRefreshEngineTests: XCTestCase {
         let staleDate = Date().addingTimeInterval(-(ProviderParseHealthRecord.staleAfter + 1))
         let response = await makeEngine(
             refresh: { self.makeReport([]) },
-            cache: [.cursor: metric(service: .cursor, lastUpdated: staleDate)]
+            cache: [.xai: metric(service: .xai, lastUpdated: staleDate)]
         ).run().response
         let object = try jsonObject(response)
         let cache = try XCTUnwrap(object["cache"] as? [String: Any])

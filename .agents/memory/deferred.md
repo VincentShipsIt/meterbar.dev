@@ -15,7 +15,7 @@ Only items that are still open. Shipped audit findings belong on GitHub, not her
 
 - **R6** — three build systems (Xcode app/widget, root SwiftPM tests, CLI package).
 - **R8** — files still over 1k lines: `UsageDataManager.swift`, `CodexCostScanner.swift`, `WidgetSettingsView.swift`, `ProviderSettingsView.swift`. Split only when a feature has to touch them.
-- **R5** — `ModelPricing` is a hardcoded table. Cursor still invents a 500-request total when the API omits one.
+- **R5** — `ModelPricing` is a hardcoded table. the Cursor source of xAI still invents a 500-request total when the API omits one.
 - No crash reporting. Intentional until someone asks.
 
 ## Done — do not re-open as debt

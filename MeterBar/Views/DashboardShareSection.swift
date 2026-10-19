@@ -63,8 +63,7 @@ struct DashboardShareSection: View {
         switch service {
         case .claudeCode: return "Claude JSONL"
         case .codexCli: return "Codex logs"
-        case .grok: return "Grok JSONL"
-        case .cursor: return "Cursor local state"
+        case .xai: return "Grok JSONL, Cursor local state"
         case .openRouter: return "OpenRouter logs"
         case .kimiCode: return "Kimi Code usage polls"
         case .zaiCodingPlan: return "Z.ai Coding Plan usage polls"

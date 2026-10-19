@@ -282,7 +282,7 @@ public enum WorkloadRouter {
                 )
             }
         ).providerBlockers
-        let binding = bindingReading(readings, service: service, isBlocked: !blockers.isEmpty)
+        let binding = bindingReading(readings)
 
         if !policy.allowsEstimatedQuota, binding.limit.isEstimated {
             return reject(
@@ -356,25 +356,11 @@ public enum WorkloadRouter {
     }
 
     /// The window the route is judged on: the tightest, session winning ties —
-    /// the provider card's own rule. Cursor's included pools spill into each
-    /// other, so while one still has room the roomiest speaks for the provider.
-    private static func bindingReading(
-        _ readings: [WindowReading],
-        service: ServiceType,
-        isBlocked: Bool
-    ) -> WindowReading {
-        let pooled = service == .cursor
-            && readings.count >= 2
-            && readings.allSatisfy { ServiceType.isCursorIncludedPool(total: $0.limit.total) }
-        let useRoomiest = pooled && !isBlocked
+    /// the provider card's own rule.
+    private static func bindingReading(_ readings: [WindowReading]) -> WindowReading {
         var best = readings[0]
-        for reading in readings.dropFirst() {
-            let better = useRoomiest
-                ? reading.percentLeft > best.percentLeft
-                : reading.percentLeft < best.percentLeft
-            if better {
-                best = reading
-            }
+        for reading in readings.dropFirst() where reading.percentLeft < best.percentLeft {
+            best = reading
         }
         return best
     }

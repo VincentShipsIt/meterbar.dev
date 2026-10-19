@@ -161,7 +161,7 @@ final class ProviderReadinessTests: XCTestCase {
         let missing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: false, authFileExists: false, authFileReadable: false)
         )
-        XCTAssertEqual(missing.provider, .grok)
+        XCTAssertEqual(missing.provider, .xai)
         XCTAssertEqual(missing.check("installed")?.level, .fail)
         XCTAssertEqual(missing.check("auth")?.level, .fail)
         XCTAssertTrue((missing.check("auth")?.recovery ?? "").contains("grok login"))
@@ -490,7 +490,7 @@ final class ProviderReadinessTests: XCTestCase {
         let input = CursorReadinessInput(isInstalled: true, database: .tokenPresent, now: now)
         let report = ProviderReadinessEvaluator.cursor(input)
 
-        XCTAssertEqual(report.provider, .cursor)
+        XCTAssertEqual(report.provider, .xai)
         XCTAssertEqual(report.overall, .pass)
         XCTAssertEqual(report.check("auth")?.level, .pass)
     }
@@ -549,11 +549,12 @@ final class ProviderReadinessTests: XCTestCase {
 
     func testReadinessIdentityOmitsPathsAndNamesAccountReports() {
         let id = UUID()
-        let identity = ReadinessIdentity.account(.grok, id: id, name: "Work")
+        let identity = ReadinessIdentity.account(.xai, id: id, name: "Work")
 
         XCTAssertTrue(identity.isAccountScoped)
-        XCTAssertEqual(identity.displayTitle, "Grok · Work")
-        XCTAssertEqual(ReadinessIdentity.provider(.cursor).displayTitle, "Cursor")
+        XCTAssertEqual(identity.displayTitle, "xAI · Work")
+        XCTAssertEqual(ReadinessIdentity.provider(.xai).displayTitle, "xAI")
+        XCTAssertEqual(ReadinessIdentity.cursorSubscription.displayTitle, "xAI · Cursor")
         XCTAssertFalse(identity.displayTitle.contains("/"))
     }
 
@@ -568,17 +569,17 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertEqual(report.id, "\(ServiceType.codexCli.rawValue):\(id.uuidString)")
         XCTAssertEqual(
             ProviderReadiness(
-                provider: .cursor,
+                provider: .xai,
                 checks: [ReadinessCheck(id: "auth", title: "Signed in", level: .pass, detail: "OK")]
             ).id,
-            ServiceType.cursor.rawValue
+            ServiceType.xai.rawValue
         )
     }
 
     func testDoctorExportIncludesAccountIdentityWithoutPaths() throws {
         let id = UUID()
         let report = ProviderReadiness(
-            identity: .account(.grok, id: id, name: "Work"),
+            identity: .account(.xai, id: id, name: "Work"),
             checks: [
                 ReadinessCheck(
                     id: ReadinessCheckID.auth,
@@ -595,7 +596,7 @@ final class ProviderReadinessTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
 
-        XCTAssertEqual(object["provider"] as? String, ServiceType.grok.rawValue)
+        XCTAssertEqual(object["provider"] as? String, ServiceType.xai.rawValue)
         XCTAssertEqual(object["accountId"] as? String, id.uuidString)
         XCTAssertEqual(object["accountName"] as? String, "Work")
         XCTAssertEqual(object["overall"] as? String, "fail")
@@ -606,28 +607,29 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertFalse(json.contains("GROK_HOME"))
     }
 
-    func testDoctorExportOmitsAccountFieldsForProviderWideReports() throws {
+    func testDoctorExportOmitsAccountIDForProviderWideReports() throws {
         let report = ProviderReadinessEvaluator.cursor(
             CursorReadinessInput(isInstalled: true, database: .tokenPresent, now: now)
         )
         let data = try JSONEncoder().encode(ProviderReadinessExport(report))
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        XCTAssertEqual(object["provider"] as? String, ServiceType.cursor.rawValue)
+        XCTAssertEqual(object["provider"] as? String, ServiceType.xai.rawValue)
         XCTAssertNil(object["accountId"])
-        XCTAssertNil(object["accountName"])
+        // The Cursor sign-in has no account id but names its source.
+        XCTAssertEqual(object["accountName"] as? String, "Cursor")
     }
 
     func testAggregateIdentifiesMixedAccountFailuresWithoutHidingHealthySiblings() {
         let healthy = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: true, authFileExists: true, authFileReadable: true)
-        ).withIdentity(.account(.grok, id: UUID(), name: "Healthy"))
+        ).withIdentity(.account(.xai, id: UUID(), name: "Healthy"))
         let failing = ProviderReadinessEvaluator.grok(
             GrokReadinessInput(isCLIInstalled: true, authFileExists: false, authFileReadable: false)
-        ).withIdentity(.account(.grok, id: UUID(), name: "Missing"))
+        ).withIdentity(.account(.xai, id: UUID(), name: "Missing"))
 
         let aggregate = ProviderReadiness.aggregate(
-            provider: .grok,
+            provider: .xai,
             accountReports: [healthy, failing],
             parseHealth: ProviderReadiness.aggregatedParseHealth([
                 ReadinessCheck(
@@ -662,19 +664,19 @@ final class ProviderReadinessTests: XCTestCase {
 
     func testSetupChecklistPrefersAccountReportsOverTheProviderAggregate() {
         let aggregate = ProviderReadiness(
-            provider: .grok,
+            provider: .xai,
             checks: [
                 ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .fail, detail: "1 of 2"),
             ]
         )
         let healthy = ProviderReadiness(
-            identity: .account(.grok, id: UUID(), name: "Healthy"),
+            identity: .account(.xai, id: UUID(), name: "Healthy"),
             checks: [
                 ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .pass, detail: "OK"),
             ]
         )
         let failing = ProviderReadiness(
-            identity: .account(.grok, id: UUID(), name: "Missing"),
+            identity: .account(.xai, id: UUID(), name: "Missing"),
             checks: [
                 ReadinessCheck(id: ReadinessCheckID.auth, title: "Signed in", level: .fail, detail: "Not signed in"),
             ]
@@ -695,7 +697,7 @@ final class ProviderReadinessTests: XCTestCase {
             checks: [ReadinessCheck(id: "warning", title: "Warning", level: .warn, detail: "Warning.")]
         )
         let attention = ProviderReadiness(
-            provider: .cursor,
+            provider: .xai,
             checks: [ReadinessCheck(id: "attention", title: "Attention", level: .fail, detail: "Attention.")]
         )
 

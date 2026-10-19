@@ -29,7 +29,7 @@ final class GrokCLIUsageServiceTests: XCTestCase {
 
         let metrics = try GrokCLIUsageService.map(result, now: Date(timeIntervalSince1970: 1_000))
 
-        XCTAssertEqual(metrics.service, .grok)
+        XCTAssertEqual(metrics.service, .xai)
         // The account-wide percent is a billing-cycle number: it may back-fill the
         // weekly window, but inventing a session window from it would be the
         // fabricated zero this provider is supposed to stop reporting.

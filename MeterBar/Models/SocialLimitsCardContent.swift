@@ -23,7 +23,6 @@ struct SocialLimitsCardContent: Equatable {
         headline: Row?,
         rows: [Row],
         providerLogo: ProviderLogoKind? = nil,
-        providerQualifier: String? = nil,
         generatedAt: Date = Date()
     ) {
         self.providerName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -31,7 +30,6 @@ struct SocialLimitsCardContent: Equatable {
         self.headline = headline
         self.rows = rows
         self.providerLogo = providerLogo
-        self.providerQualifier = providerQualifier
         self.generatedAt = generatedAt
     }
 
@@ -49,7 +47,6 @@ struct SocialLimitsCardContent: Equatable {
             headline: headlineLimit ?? rows.min { $0.percentLeft < $1.percentLeft },
             rows: rows,
             providerLogo: snapshot.logoKind,
-            providerQualifier: Self.qualifier(for: snapshot),
             generatedAt: generatedAt
         )
     }
@@ -67,9 +64,6 @@ struct SocialLimitsCardContent: Equatable {
     /// The provider's own mark for the card masthead, beside MeterBar's. `nil`
     /// on the placeholder card, which speaks for no provider.
     let providerLogo: ProviderLogoKind?
-    /// Which account a sub-pool card is carved out of, when the card does not
-    /// speak for an account of its own. `nil` for ordinary provider cards.
-    let providerQualifier: String?
     let generatedAt: Date
 
     var hasQuotaData: Bool { headline != nil }
@@ -128,9 +122,8 @@ struct SocialLimitsCardContent: Equatable {
             ].joined(separator: "\n")
         }
         let reset = headline.resetText.map { " Resets in \($0)." } ?? ""
-        let attribution = providerQualifier.map { "\(providerName) on \($0)" } ?? providerName
         return [
-            "\(headline.trailingText) on \(headline.title) — \(attribution).\(reset)",
+            "\(headline.trailingText) on \(headline.title) — \(providerName).\(reset)",
             "\(tier.title): \(tier.joke)",
             SocialShareCardContent.websiteURL,
         ].joined(separator: "\n")
@@ -138,21 +131,6 @@ struct SocialLimitsCardContent: Equatable {
 
     var defaultFilename: String {
         "meterbar-limits-card-\(SocialShareCardDateFormat.filename(generatedAt)).png"
-    }
-
-    /// Names the parent account of a sub-pool card.
-    ///
-    /// Cursor Ultra's Grok Bot entitlement is branded Grok and titled "Grok
-    /// Bot", so a gallery showing it next to a real Grok account has two cards
-    /// with the same mark, near-identical names and — routinely — opposite
-    /// statuses. In the app that ambiguity is survivable because the cards sit
-    /// in a page you already understand. Posted as a standalone image it is
-    /// simply wrong: nothing on the card says which Grok is out. Only sub-pool
-    /// cards get a qualifier; an ordinary card naming its own service would be
-    /// saying the same thing twice.
-    static func qualifier(for snapshot: ProviderSnapshot) -> String? {
-        guard snapshot.cardRole == .subPool else { return nil }
-        return snapshot.service.displayName
     }
 
     /// Projects one quota window onto the card, honoring the popover's rule

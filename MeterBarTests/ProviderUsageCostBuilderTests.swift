@@ -20,11 +20,11 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
     /// nothing for it — not a zero row, not a converted one.
     func testRequestDenominatedProviderProducesNoCostRowAtAll() {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 40, at: day(0)))
-        ledger.record(observation(.cursor, unit: .requests, total: 190, at: day(1)))
+        ledger.record(observation(.xai, unit: .requests, total: 40, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 190, at: day(1)))
 
         XCTAssertNil(
-            ProviderUsageCostBuilder.makeCost(from: ledger, provider: .cursor, windowStart: day(-30), now: day(1))
+            ProviderUsageCostBuilder.makeCost(from: ledger, provider: .xai, windowStart: day(-30), now: day(1))
         )
     }
 
@@ -33,13 +33,13 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
     /// no number.
     func testRequestDenominatedProviderKeepsItsOwnSeries() {
         var ledger = ProviderUsageLedger()
-        ledger.record(observation(.cursor, unit: .requests, total: 40, at: day(0)))
-        ledger.record(observation(.cursor, unit: .requests, total: 190, at: day(1)))
+        ledger.record(observation(.xai, unit: .requests, total: 40, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 190, at: day(1)))
 
-        XCTAssertEqual(ledger.dailySeries(for: .cursor).map(\.amount), [150])
-        XCTAssertTrue(ledger.dailyUSDSeries(for: .cursor).isEmpty)
+        XCTAssertEqual(ledger.dailySeries(for: .xai).map(\.amount), [150])
+        XCTAssertTrue(ledger.dailyUSDSeries(for: .xai).isEmpty)
         XCTAssertEqual(ledger.usdProviders, [])
-        XCTAssertEqual(ledger.nonUSDProviders, [.cursor])
+        XCTAssertEqual(ledger.nonUSDProviders, [.xai])
     }
 
     // MARK: - Dollar-denominated rows
@@ -182,8 +182,8 @@ final class ProviderUsageCostBuilderTests: XCTestCase {
         var ledger = ProviderUsageLedger()
         ledger.record(observation(.openRouter, unit: .usd, total: 2, at: day(0)))
         ledger.record(observation(.openRouter, unit: .usd, total: 6, at: day(1)))
-        ledger.record(observation(.cursor, unit: .requests, total: 10, at: day(0)))
-        ledger.record(observation(.cursor, unit: .requests, total: 300, at: day(1)))
+        ledger.record(observation(.xai, unit: .requests, total: 10, at: day(0)))
+        ledger.record(observation(.xai, unit: .requests, total: 300, at: day(1)))
 
         let scan = CostSummaryBuilder.makeScan(
             days: 30,

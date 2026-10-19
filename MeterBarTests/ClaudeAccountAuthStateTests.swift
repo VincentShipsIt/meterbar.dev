@@ -202,17 +202,17 @@ final class ClaudeAccountAuthStateTests: XCTestCase {
 
     func testClaudeLoginStateDoesNotLeakOntoAFreshCursorCard() throws {
         let snapshots = ProviderSnapshotBuilder.snapshots(ProviderSnapshotBuilder.Input(
-            metrics: [.cursor: UsageMetrics(
-                service: .cursor,
+            metrics: [.xai: UsageMetrics(
+                service: .xai,
                 weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil)
             )],
             claudeAccounts: [.defaultAccount],
             claudeAccountMetrics: [:],
-            enabledServices: [.cursor],
+            enabledServices: [.xai],
             claudeAccountStates: [ClaudeCodeAccount.defaultID: .needsLogin]
         ))
 
-        let cursor = try XCTUnwrap(snapshots.first { $0.service == .cursor })
+        let cursor = try XCTUnwrap(snapshots.first { $0.service == .xai })
         XCTAssertNil(cursor.authNotice)
     }
 

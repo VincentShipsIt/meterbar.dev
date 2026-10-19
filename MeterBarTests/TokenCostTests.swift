@@ -52,8 +52,8 @@ final class TokenCostTests: XCTestCase {
         let claudeCost = makeTokenCost(provider: .claudeCode)
         XCTAssertEqual(claudeCost.id, "Claude Code")
 
-        let cursorCost = makeTokenCost(provider: .cursor)
-        XCTAssertEqual(cursorCost.id, "Cursor")
+        let xaiCost = makeTokenCost(provider: .xai)
+        XCTAssertEqual(xaiCost.id, "xAI")
     }
 
     func testCodable() throws {

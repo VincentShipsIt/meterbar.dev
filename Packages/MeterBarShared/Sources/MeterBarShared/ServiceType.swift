@@ -6,9 +6,8 @@ import Foundation
 public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     case claudeCode = "Claude Code"
     case codexCli = "Codex CLI"
-    case cursor = "Cursor"
+    case xai = "xAI"
     case openRouter = "OpenRouter"
-    case grok = "Grok"
     case kimiCode = "Kimi Code"
     case zaiCodingPlan = "Z.ai Coding Plan"
     case githubCopilot = "GitHub Copilot"
@@ -17,6 +16,33 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    /// Raw values older builds persisted for the providers xAI absorbed. Caches,
+    /// visibility, widget configuration, routing policy and iCloud payloads
+    /// written before the merge still carry them, so every decode funnels
+    /// through here instead of dropping the entry.
+    public static let legacyXAIRawValues: Set<String> = ["Grok", "Cursor"]
+
+    /// Maps the pre-merge `Grok` / `Cursor` raw values to `.xai`; every other
+    /// raw value resolves exactly as the synthesized initializer would.
+    public init?(rawValue: String) {
+        if Self.legacyXAIRawValues.contains(rawValue) {
+            self = .xai
+            return
+        }
+        switch rawValue {
+        case "Claude Code": self = .claudeCode
+        case "Codex CLI": self = .codexCli
+        case "xAI": self = .xai
+        case "OpenRouter": self = .openRouter
+        case "Kimi Code": self = .kimiCode
+        case "Z.ai Coding Plan": self = .zaiCodingPlan
+        case "GitHub Copilot": self = .githubCopilot
+        case "Muse Code": self = .museCode
+        case "Claude Platform": self = .claudePlatform
+        default: return nil
+        }
+    }
+
     /// The full product name. Use it wherever a provider is being *named*:
     /// settings section headers, sidebar rows, notification titles, CLI JSON,
     /// share cards.
@@ -24,9 +50,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return "Claude Code"
         case .codexCli: return "OpenAI Codex"
-        case .cursor: return "Cursor"
+        case .xai: return "xAI"
         case .openRouter: return "OpenRouter"
-        case .grok: return "Grok"
         case .kimiCode: return "Kimi Code"
         case .zaiCodingPlan: return "Z.ai GLM Coding Plan"
         case .githubCopilot: return "GitHub Copilot"
@@ -49,9 +74,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return "Claude"
         case .codexCli: return "Codex"
-        case .cursor: return "Cursor"
+        case .xai: return "xAI"
         case .openRouter: return "OpenRouter"
-        case .grok: return "Grok"
         case .kimiCode: return "Kimi"
         case .zaiCodingPlan: return "Z.ai"
         case .githubCopilot: return "Copilot"
@@ -65,9 +89,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return "terminal"
         case .codexCli: return "terminal.fill"
-        case .cursor: return "cursorarrow.click"
+        case .xai: return "bolt.fill"
         case .openRouter: return "point.3.connected.trianglepath.dotted"
-        case .grok: return "bolt.fill"
         case .kimiCode: return "moon.stars.fill"
         case .zaiCodingPlan: return "z.circle.fill"
         case .githubCopilot: return "sparkles"
@@ -82,9 +105,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return "ClaudeIcon"
         case .codexCli: return "CodexIcon"
-        case .cursor: return "CursorIcon"
+        case .xai: return "XAIIcon"
         case .openRouter: return "OpenRouterIcon"
-        case .grok: return "GrokIcon"
         case .kimiCode: return "KimiCodeIcon"
         case .zaiCodingPlan: return "ZaiCodingPlanIcon"
         case .githubCopilot: return "GitHubCopilotIcon"
@@ -98,9 +120,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: return 0
         case .codexCli: return 1
-        case .cursor: return 2
+        case .xai: return 2
         case .openRouter: return 3
-        case .grok: return 4
         case .kimiCode: return 5
         case .zaiCodingPlan: return 6
         case .githubCopilot: return 7
@@ -115,7 +136,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// pointed at a neighbouring product's page.
     public var hasStatusPage: Bool {
         switch self {
-        case .claudeCode, .codexCli, .cursor, .openRouter, .grok, .githubCopilot: return true
+        case .claudeCode, .codexCli, .xai, .openRouter, .githubCopilot: return true
         case .kimiCode, .zaiCodingPlan, .museCode, .claudePlatform: return false
         }
     }
@@ -125,9 +146,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode,
              .codexCli,
-             .cursor,
-             .openRouter,
-             .grok: true
+             .xai,
+             .openRouter: true
         case .kimiCode,
              .zaiCodingPlan,
              .githubCopilot,
@@ -150,7 +170,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var isOptInByDefault: Bool {
         switch self {
         case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform: return true
-        case .claudeCode, .codexCli, .cursor, .grok: return false
+        case .claudeCode, .codexCli, .xai: return false
         }
     }
 
@@ -170,8 +190,8 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// error.
     public var writesLocalTokenLogs: Bool {
         switch self {
-        case .claudeCode, .codexCli, .grok: return true
-        case .cursor, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
+        case .claudeCode, .codexCli, .xai: return true
+        case .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
             return false
         }
     }
@@ -192,9 +212,6 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case cursorModels
         case accountCredits
         case otherModels
-        /// Cursor Ultra weekly Grok Bot usage pool. Distinct from MeterBar's
-        /// `.grok` provider and from the weekly-slot **Other Models** bar.
-        case grokBot
         case monthly
         case weekly
         case daily
@@ -218,7 +235,6 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
             case .cursorModels: return "Cursor Models"
             case .accountCredits: return "Account credits"
             case .otherModels: return "Other Models"
-            case .grokBot: return "Grok Bot"
             case .monthly: return "Monthly"
             case .weekly: return "Weekly"
             case .daily: return "Daily"
@@ -247,26 +263,31 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     public func codeReviewQuotaTitleKey(modelLimitLabel: String?) -> QuotaTitleKey {
         switch self {
         case .claudeCode: return .model(label: modelLimitLabel)
-        case .cursor: return .onDemand
-        case .codexCli, .openRouter, .grok, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
+        case .xai: return .onDemand
+        case .codexCli, .openRouter, .kimiCode, .zaiCodingPlan, .githubCopilot, .museCode, .claudePlatform:
             return .codeReview
         }
     }
 
-    /// Cursor's dashboard reports each included pool as a percentage of 100
-    /// (`autoPercentUsed` / `apiPercentUsed`), not as a request count. Limits
-    /// mapped from those fields use this denominator so the popover, widget,
-    /// and notifications can tell a percent pool from the legacy request quota.
-    public static let cursorIncludedPoolTotal: Double = 100
+    /// xAI's included pools arrive as a percentage of 100 (Grok's billing
+    /// periods and Cursor's dashboard both report `used` as a percent). Limits
+    /// mapped from those fields use this denominator so the popover, widget and
+    /// notifications can tell a percent pool from Cursor's legacy request quota.
+    public static let xaiPercentPoolTotal: Double = 100
 
-    public static func isCursorIncludedPool(total: Double) -> Bool {
-        abs(total - cursorIncludedPoolTotal) < 0.000_001
+    public static func isXAIPercentPool(total: Double) -> Bool {
+        abs(total - xaiPercentPoolTotal) < 0.000_001
     }
 
+    /// Labels legacy Cursor accounts keep for their monthly included pools.
+    /// They ride in `additionalLimits` as provider data, and the title routing
+    /// below maps the exact strings back to the localized titles.
+    public static let legacyCursorModelsLabel = "Cursor Models"
+    public static let legacyOtherModelsLabel = "Other Models"
+
     /// Display title for the short ("session") quota window. OpenRouter's is a
-    /// key spend cap. Cursor's is the **Cursor Models** pool when the payload
-    /// used the percent-of-100 shape, and "Session" for the legacy on-demand
-    /// mapping.
+    /// key spend cap; every other provider's is "Session" unless the reported
+    /// cadence says otherwise.
     public func sessionQuotaTitle(
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
@@ -278,14 +299,10 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
     ) -> QuotaTitleKey {
-        // Provider-specific exceptions win first: Cursor's included pool and
-        // OpenRouter's key spend cap are never a reported cadence, so the
-        // `periodKind` override below must not eclipse them.
+        // OpenRouter's key spend cap is never a reported cadence, so the
+        // `periodKind` override below must not eclipse it.
         if self == .openRouter {
             return .keyLimit
-        }
-        if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-            return .cursorModels
         }
         if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
             return titled
@@ -294,17 +311,11 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     /// Display title for the long ("weekly") quota window. The shared window id
-    /// stays `weekly` across providers, but its real cadence does not: an
-    /// unmerged Cursor pool resets with `billingCycleEnd` (monthly), a merged
-    /// included pool is weekly, and OpenRouter's is a credit balance rather
-    /// than a window at all. Centralized here for the same reason as
-    /// `codeReviewQuotaTitle` — the popover, widget, and CLI each used to
-    /// spell out the OpenRouter exception inline.
-    ///
-    /// Pass `limitTotal` when the concrete window is known: Cursor's monthly
-    /// percent pools title as **Other Models**. A percent pool whose
-    /// `periodKind` is `.weekly` titles **Weekly**. A request-count
-    /// billing-cycle quota stays **Monthly**.
+    /// stays `weekly` across providers, but its real cadence does not: a
+    /// provider can report a monthly window there, and OpenRouter's is a credit
+    /// balance rather than a window at all. Centralized here for the same
+    /// reason as `codeReviewQuotaTitle` — the popover, widget, and CLI each
+    /// used to spell out the OpenRouter exception inline.
     public func weeklyQuotaTitle(
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
@@ -316,45 +327,33 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         limitTotal: Double?,
         periodKind: UsageLimit.PeriodKind? = nil
     ) -> QuotaTitleKey {
-        // Provider-specific exceptions win first: OpenRouter's credit balance
-        // and Cursor's monthly included pool are never a reported cadence, so
-        // the `periodKind` override below must not retitle them "Monthly".
-        // A weekly included pool is the shared allowance and keeps that name.
+        // OpenRouter's credit balance is never a reported cadence, so the
+        // `periodKind` override below must not retitle it "Monthly".
         if self == .openRouter || self == .claudePlatform {
             return .accountCredits
-        }
-        if self == .cursor, let limitTotal, Self.isCursorIncludedPool(total: limitTotal) {
-            if periodKind == .weekly {
-                return .weekly
-            }
-            return .otherModels
         }
         if let periodKind, let titled = quotaTitleKey(overridingWith: periodKind) {
             return titled
         }
-        return self == .cursor ? .monthly : .weekly
+        return .weekly
     }
 
     public var weeklyQuotaTitle: String { weeklyQuotaTitle(limitTotal: nil) }
 
     /// Title for a reported period that did not land in a named slot.
     ///
-    /// Cursor Ultra's weekly Grok Bot pool is an additional percent-of-100
-    /// bar. The weekly *slot* with the same shape stays **Other Models**.
-    ///
     /// A provider-supplied label wins over every cadence rule below: Codex's
     /// Luna reserve is a weekly window beside the plan's own weekly window, and
     /// naming it from its cadence would draw two bars both called "Weekly".
-    /// Only providers that name a pool set the field, so the Cursor and
-    /// cadence branches still decide every window that arrives without one.
+    /// The two labels legacy Cursor accounts carry map back to their localized
+    /// titles; any other label stays provider data, verbatim.
     public func additionalQuotaTitleKey(for limit: UsageLimit) -> QuotaTitleKey {
         if let label = limit.label, !label.isEmpty {
+            if self == .xai {
+                if label == Self.legacyCursorModelsLabel { return .cursorModels }
+                if label == Self.legacyOtherModelsLabel { return .otherModels }
+            }
             return .model(label: label)
-        }
-        if self == .cursor,
-           limit.periodKind == .weekly,
-           Self.isCursorIncludedPool(total: limit.total) {
-            return .grokBot
         }
         return quotaTitleKey(for: limit.periodKind, limitTotal: limit.total, unspecified: .quota)
     }

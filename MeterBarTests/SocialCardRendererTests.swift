@@ -147,7 +147,7 @@ final class SocialCardRendererTests: XCTestCase {
     /// must come back without them rather than refusing to render.
     func testContentWithoutModelAttributionStillRenders() {
         let summary = CostSummary(
-            costs: [makeCost(provider: .grok, inputTokens: 10, outputTokens: 5, sessionCount: 1)],
+            costs: [makeCost(provider: .xai, inputTokens: 10, outputTokens: 5, sessionCount: 1)],
             totalCostUSD: 1,
             totalTokens: 15,
             periodDays: 30
@@ -298,8 +298,8 @@ final class SocialCardRendererTests: XCTestCase {
                 )],
                 lastUpdated: now
             )),
-            ("cursor-out", .cursor, UsageMetrics(
-                service: .cursor,
+            ("cursor-out", .xai, UsageMetrics(
+                service: .xai,
                 sessionLimit: UsageLimit(
                     used: 100,
                     total: 100,

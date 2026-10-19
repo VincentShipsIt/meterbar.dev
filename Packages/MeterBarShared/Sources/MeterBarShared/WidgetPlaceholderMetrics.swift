@@ -22,10 +22,7 @@ public enum WidgetPlaceholderMetrics {
         case .codexCli:
             used = 38
             resetDelay = 4 * 24 * 60 * 60
-        case .cursor:
-            used = 55
-            resetDelay = 5 * 24 * 60 * 60
-        case .grok:
+        case .xai:
             used = 47
             resetDelay = 3 * 24 * 60 * 60
         case .openRouter:

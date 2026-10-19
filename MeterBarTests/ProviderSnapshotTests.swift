@@ -125,9 +125,8 @@ final class ProviderSnapshotTests: XCTestCase {
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
                 .claudeCode: makeMetrics(service: .claudeCode, weekly: 20),
-                .cursor: makeMetrics(service: .cursor, weekly: 30),
+                .xai: makeMetrics(service: .xai, weekly: 30),
                 .openRouter: makeMetrics(service: .openRouter, weekly: 40),
-                .grok: makeMetrics(service: .grok, weekly: 50),
                 .kimiCode: makeMetrics(service: .kimiCode, weekly: 60),
                 .zaiCodingPlan: makeMetrics(service: .zaiCodingPlan, weekly: 70),
                 .githubCopilot: makeMetrics(service: .githubCopilot, weekly: 80),
@@ -139,13 +138,13 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(
             snapshots.map(\.service),
             [
-                .claudeCode, .codexCli, .claudePlatform, .githubCopilot, .cursor, .grok, .kimiCode, .museCode,
-                .openRouter, .zaiCodingPlan
+                .claudeCode, .codexCli, .claudePlatform, .githubCopilot, .kimiCode, .museCode,
+                .openRouter, .xai, .zaiCodingPlan
             ]
         )
         XCTAssertEqual(
             snapshots.map(\.title),
-            ["Claude", "Codex", "Console", "Copilot", "Cursor", "Grok", "Kimi", "Muse", "OpenRouter", "Z.ai"]
+            ["Claude", "Codex", "Console", "Copilot", "Kimi", "Muse", "OpenRouter", "xAI", "Z.ai"]
         )
     }
 
@@ -175,18 +174,18 @@ final class ProviderSnapshotTests: XCTestCase {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 10),
-                .cursor: makeMetrics(service: .cursor, weekly: 30)
+                .xai: makeMetrics(service: .xai, weekly: 30)
             ],
             claudeAccounts: [work, personal],
             claudeAccountMetrics: [
                 work.id: makeMetrics(service: .claudeCode, weekly: 20),
                 personal.id: makeMetrics(service: .claudeCode, weekly: 40)
             ],
-            enabledServices: [.codexCli, .claudeCode, .cursor]
+            enabledServices: [.codexCli, .claudeCode, .xai]
         ))
 
-        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Cursor", "Personal", "Work"])
-        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .cursor, .claudeCode, .claudeCode])
+        XCTAssertEqual(snapshots.map(\.title), ["Codex", "Personal", "Work", "xAI"])
+        XCTAssertEqual(snapshots.map(\.service), [.codexCli, .claudeCode, .claudeCode, .xai])
     }
 
     func testDisplayOrderKeepsSameProviderAccountsTogetherWhenLabelsWouldOtherwiseSplit() {
@@ -208,23 +207,23 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testDisabledProvidersAreExcluded() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)],
-            enabledServices: [.cursor]
+            metrics: [.xai: makeMetrics(service: .xai, weekly: 30)],
+            enabledServices: [.xai]
         ))
 
-        XCTAssertEqual(snapshots.map(\.service), [.cursor])
+        XCTAssertEqual(snapshots.map(\.service), [.xai])
     }
 
     func testProvidersWithoutMetricsAreIncludedForThePopoverAndFilterableForTheDashboard() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeMetrics(service: .cursor, weekly: 30)]
+            metrics: [.xai: makeMetrics(service: .xai, weekly: 30)]
         ))
 
         // Popover shows every enabled provider, including empty-state cards.
-        XCTAssertEqual(snapshots.count, 10)
+        XCTAssertEqual(snapshots.count, 9)
         XCTAssertFalse(snapshots[0].hasMetrics)
         // …the dashboard filters to providers with data.
-        XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.cursor])
+        XCTAssertEqual(snapshots.filter(\.hasMetrics).map(\.service), [.xai])
     }
 
     // MARK: - Claude accounts
@@ -260,7 +259,7 @@ final class ProviderSnapshotTests: XCTestCase {
             codexAccounts: [codex],
             grokAccounts: [grok],
             claudeAccounts: [claude],
-            enabledServices: [.codexCli, .claudeCode, .grok]
+            enabledServices: [.codexCli, .claudeCode, .xai]
         ))
 
         XCTAssertEqual(snapshots.map(\.title), ["Claude Personal", "Codex Work", "Grok Studio"])
@@ -416,10 +415,10 @@ final class ProviderSnapshotTests: XCTestCase {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             grokAccounts: [.defaultAccount, work],
             grokAccountMetrics: [
-                GrokAccount.defaultID: makeMetrics(service: .grok, weekly: 14),
-                work.id: makeMetrics(service: .grok, weekly: 79)
+                GrokAccount.defaultID: makeMetrics(service: .xai, weekly: 14),
+                work.id: makeMetrics(service: .xai, weekly: 79)
             ],
-            enabledServices: [.grok]
+            enabledServices: [.xai]
         ))
 
         XCTAssertEqual(snapshots.map(\.title), [GrokAccount.defaultName, "Work"])
@@ -469,15 +468,13 @@ final class ProviderSnapshotTests: XCTestCase {
         limitTotal: Double,
         modelLimitLabel: String?
     ) -> ServiceType.QuotaTitleKey {
-        let isIncludedPool = ServiceType.isCursorIncludedPool(total: limitTotal)
         switch kind {
         case .session:
             switch service {
             case .openRouter: return .keyLimit
-            case .cursor: return isIncludedPool ? .cursorModels : .session
             case .claudeCode,
                  .codexCli,
-                 .grok,
+                 .xai,
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
@@ -487,10 +484,9 @@ final class ProviderSnapshotTests: XCTestCase {
         case .weekly:
             switch service {
             case .openRouter, .claudePlatform: return .accountCredits
-            case .cursor: return isIncludedPool ? .otherModels : .monthly
             case .claudeCode,
                  .codexCli,
-                 .grok,
+                 .xai,
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
@@ -499,10 +495,9 @@ final class ProviderSnapshotTests: XCTestCase {
         case .codeReview:
             switch service {
             case .claudeCode: return .model(label: modelLimitLabel)
-            case .cursor: return .onDemand
+            case .xai: return .onDemand
             case .codexCli,
                  .openRouter,
-                 .grok,
                  .kimiCode,
                  .zaiCodingPlan,
                  .githubCopilot,
@@ -520,7 +515,7 @@ final class ProviderSnapshotTests: XCTestCase {
     /// window without any English-language symptom.
     func testBuiltLimitsCarryTheSharedQuotaTitleRoutingKey() {
         for service in ServiceType.allCases {
-            for total in [ServiceType.cursorIncludedPoolTotal, 500] {
+            for total in [ServiceType.xaiPercentPoolTotal, 500] {
                 let metrics = UsageMetrics(
                     service: service,
                     sessionLimit: UsageLimit(used: 4, total: total, resetTime: nil),
@@ -614,61 +609,70 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
     }
 
-    // Cursor's long window resets with `billingCycleEnd`. Percent-of-100 pools
-    // match the dashboard's Cursor Models / Other Models bars; a request-count
-    // grant keeps the legacy Monthly / Session labels.
+    // A legacy Cursor account's long window resets with `billingCycleEnd`. Its
+    // percent-of-100 pools match the dashboard's Cursor Models / Other Models
+    // bars and sit beside a monthly headline gauge; a request-count grant keeps
+    // the Monthly label.
+    private func legacyPool(_ used: Double, label: String) -> UsageLimit {
+        UsageLimit(used: used, total: 100, resetTime: nil, label: label)
+    }
+
+    private func legacyPoolMetrics(autoUsed: Double, apiUsed: Double) -> UsageMetrics {
+        let roomiest = min(autoUsed, apiUsed)
+        return UsageMetrics(
+            service: .xai,
+            weeklyLimit: UsageLimit(used: roomiest, total: 100, resetTime: nil, periodKind: .monthly),
+            additionalLimits: [
+                legacyPool(autoUsed, label: ServiceType.legacyCursorModelsLabel),
+                legacyPool(apiUsed, label: ServiceType.legacyOtherModelsLabel)
+            ]
+        )
+    }
+
     func testCursorPercentPoolsUseDashboardTitles() {
         let limits = ProviderSnapshotBuilder.limits(
-            for: makeMetrics(service: .cursor, session: 4, weekly: 64),
-            service: .cursor
+            for: legacyPoolMetrics(autoUsed: 4, apiUsed: 64),
+            service: .xai
         )
 
-        XCTAssertEqual(limits.map(\.title), ["Cursor Models", "Other Models"])
-        XCTAssertEqual(limits.map(\.id), ["session", "weekly"])
+        XCTAssertEqual(limits.map(\.title), ["Monthly", "Cursor Models", "Other Models"])
+        XCTAssertEqual(limits.map(\.kind), [.weekly, .additional, .additional])
     }
 
     func testCursorLegacyRequestQuotaKeepsMonthlyLabel() {
         let metrics = UsageMetrics(
-            service: .cursor,
-            weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil)
+            service: .xai,
+            weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil, periodKind: .monthly)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertEqual(limits.map(\.title), ["Monthly"])
     }
 
-    func testCursorLegacyOnDemandKeepsSessionAndMonthlyLabels() {
-        let metrics = UsageMetrics(
-            service: .cursor,
-            sessionLimit: UsageLimit(used: 4, total: 20, resetTime: nil),
-            weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil)
-        )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
-
-        XCTAssertEqual(limits.map(\.title), ["Session", "Monthly"])
-    }
-
     func testCursorOnDemandWindowIsTitledOnDemand() {
         let metrics = UsageMetrics(
-            service: .cursor,
-            sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
-            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
-            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
+            service: .xai,
+            weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil, periodKind: .monthly),
+            codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil),
+            additionalLimits: [
+                legacyPool(4, label: ServiceType.legacyCursorModelsLabel),
+                legacyPool(64, label: ServiceType.legacyOtherModelsLabel)
+            ]
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
-        XCTAssertEqual(limits.map(\.title), ["Cursor Models", "Other Models", "On-demand"])
+        XCTAssertEqual(limits.map(\.title), ["Monthly", "On-demand", "Cursor Models", "Other Models"])
     }
 
     // Cursor spends the included pool before it touches credits, so the weekly
     // gauge says so, but only while there are credits for that to matter.
     func testCursorWeeklyRowExplainsIncludedUsageComesBeforeCredits() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
         XCTAssertEqual(
@@ -680,29 +684,29 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testCursorWeeklyRowHasNoNoteWithoutCredits() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
     }
 
     func testCursorSessionRowNeverCarriesTheCreditsNote() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertNil(limits.first { $0.id == "session" }?.footnote)
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
     }
 
-    func testOtherProvidersNeverGetTheCursorCreditsNote() {
+    func testOtherProvidersNeverGetThexAICreditsNote() {
         let metrics = UsageMetrics(
             service: .claudeCode,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
@@ -716,11 +720,11 @@ final class ProviderSnapshotTests: XCTestCase {
     // Cursor sometimes omits the pool reset; the row must not invent one.
     func testCursorWeeklyRowWithoutResetShowsNoReset() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .cursor)
+        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
             .first { $0.id == "weekly" }
 
         XCTAssertNotNil(weekly)
@@ -729,31 +733,31 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testCursorSinglePoolExhaustionDoesNotCollapseTheCard() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
-            title: "Cursor",
-            service: .cursor,
-            metrics: makeMetrics(service: .cursor, session: 4, weekly: 100),
+            title: "xAI",
+            service: .xai,
+            metrics: legacyPoolMetrics(autoUsed: 4, apiUsed: 100),
             emptyDetail: ""
         )
 
-        // Spillover: the header must reflect the pool that still has room, not
-        // the one that ran dry — Cursor is only "Out" when both are gone.
-        XCTAssertEqual(snapshot.primaryLimit?.kind, .session)
+        // Spillover: the header follows the pool that still has room, not the
+        // one that ran dry — the account is only "Out" when both are gone.
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .weekly)
         XCTAssertEqual(snapshot.band, .healthy)
         XCTAssertFalse(snapshot.hasExhaustedLimit)
         XCTAssertFalse(snapshot.hasExhaustedWeeklyLimit)
         XCTAssertTrue(snapshot.blockingLimits.isEmpty)
-        XCTAssertEqual(snapshot.detailLimits.map(\.id), ["session", "weekly"])
+        XCTAssertEqual(snapshot.detailLimits.map(\.kind), [.weekly, .additional, .additional])
     }
 
     func testCursorOtherModelsExhaustedStillReadsCursorModelsHeadroom() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
-            title: "Cursor",
-            service: .cursor,
-            metrics: makeMetrics(service: .cursor, session: 27, weekly: 100),
+            title: "xAI",
+            service: .xai,
+            metrics: legacyPoolMetrics(autoUsed: 27, apiUsed: 100),
             emptyDetail: ""
         )
 
-        XCTAssertEqual(snapshot.primaryLimit?.kind, .session)
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .weekly)
         XCTAssertEqual(snapshot.primaryLimit?.percentLeft, 73)
         XCTAssertEqual(snapshot.band, .healthy)
         XCTAssertFalse(snapshot.hasExhaustedLimit)
@@ -761,9 +765,9 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testCursorSpilloverBandTracksTheRoomiestPool() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
-            title: "Cursor",
-            service: .cursor,
-            metrics: makeMetrics(service: .cursor, session: 100, weekly: 92),
+            title: "xAI",
+            service: .xai,
+            metrics: legacyPoolMetrics(autoUsed: 100, apiUsed: 92),
             emptyDetail: ""
         )
 
@@ -775,8 +779,8 @@ final class ProviderSnapshotTests: XCTestCase {
     func testCursorLegacySinglePoolStillUsesTightestWindow() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Cursor",
-            service: .cursor,
-            metrics: makeMetrics(service: .cursor, weekly: 100),
+            service: .xai,
+            metrics: makeMetrics(service: .xai, weekly: 100),
             emptyDetail: ""
         )
 
@@ -790,14 +794,14 @@ final class ProviderSnapshotTests: XCTestCase {
         // not share a budget, so neither spills into the other. Only the
         // percent-of-100 included pools do.
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 5, total: 50, resetTime: nil),
             weeklyLimit: UsageLimit(used: 500, total: 500, resetTime: nil),
             codeReviewLimit: nil
         )
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Cursor",
-            service: .cursor,
+            service: .xai,
             metrics: metrics,
             emptyDetail: ""
         )
@@ -810,16 +814,16 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testCursorBothPoolsExhaustedBlocksTheProvider() {
         let snapshot = ProviderSnapshotBuilder.snapshot(
-            title: "Cursor",
-            service: .cursor,
-            metrics: makeMetrics(service: .cursor, session: 100, weekly: 100),
+            title: "xAI",
+            service: .xai,
+            metrics: legacyPoolMetrics(autoUsed: 100, apiUsed: 100),
             emptyDetail: ""
         )
 
         XCTAssertEqual(snapshot.band, .exhausted)
         XCTAssertTrue(snapshot.hasExhaustedLimit)
         XCTAssertTrue(snapshot.hasExhaustedWeeklyLimit)
-        XCTAssertEqual(Set(snapshot.blockingLimits.map(\.kind)), [.session, .weekly])
+        XCTAssertEqual(snapshot.blockingLimits.map(\.kind), [.weekly])
     }
 
     func testPaceContextComesFromKindNotTitle() {
@@ -836,24 +840,24 @@ final class ProviderSnapshotTests: XCTestCase {
     /// cadence-title headline) but `paceContext` still switches on `kind`, so
     /// pace copy for the session/weekly slots must stay byte-identical.
     func testPaceContextIgnoresPeriodKindForSessionAndWeeklySlots() {
-        let metrics = makeMetrics(service: .cursor, session: 10, weekly: 20)
+        let metrics = makeMetrics(service: .xai, session: 10, weekly: 20)
         let monthlyMetrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(
                 used: 10,
-                total: ServiceType.cursorIncludedPoolTotal,
+                total: ServiceType.xaiPercentPoolTotal,
                 resetTime: metrics.sessionLimit?.resetTime,
                 periodKind: .monthly
             ),
             weeklyLimit: UsageLimit(
                 used: 20,
-                total: ServiceType.cursorIncludedPoolTotal,
+                total: ServiceType.xaiPercentPoolTotal,
                 resetTime: metrics.weeklyLimit?.resetTime,
                 periodKind: .monthly
             )
         )
 
-        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, service: .cursor)
+        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, service: .xai)
 
         XCTAssertEqual(limits.map(\.kind), [.session, .weekly])
         XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly])
@@ -901,9 +905,9 @@ final class ProviderSnapshotTests: XCTestCase {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
             metrics: [
                 .codexCli: makeMetrics(service: .codexCli, weekly: 50),
-                .cursor: makeMetrics(service: .cursor, weekly: 97)
+                .xai: makeMetrics(service: .xai, weekly: 97)
             ],
-            enabledServices: [.codexCli, .cursor]
+            enabledServices: [.codexCli, .xai]
         ))
 
         let tightest = snapshots.tightestLimit
@@ -921,9 +925,9 @@ final class ProviderSnapshotTests: XCTestCase {
                     codeReview: 100,
                     modelLimitLabel: "Sonnet"
                 ),
-                .cursor: makeMetrics(service: .cursor, weekly: 80)
+                .xai: makeMetrics(service: .xai, weekly: 80)
             ],
-            enabledServices: [.claudeCode, .cursor]
+            enabledServices: [.claudeCode, .xai]
         ))
 
         XCTAssertEqual(snapshots.tightestLimit?.percentLeft, 20)
@@ -1028,7 +1032,7 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testEstimatedExhaustionDoesNotClaimProviderIsBlocked() {
         let metrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             weeklyLimit: UsageLimit(
                 used: 500,
                 total: 500,
@@ -1038,7 +1042,7 @@ final class ProviderSnapshotTests: XCTestCase {
         )
         let snapshot = ProviderSnapshotBuilder.snapshot(
             title: "Cursor",
-            service: .cursor,
+            service: .xai,
             metrics: metrics,
             emptyDetail: ""
         )
@@ -1087,10 +1091,10 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testGrokMonthlyWeeklySlotIsTitledMonthlyNeverWeekly() {
         let metrics = UsageMetrics(
-            service: .grok,
+            service: .xai,
             weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .grok)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
         let weekly = try? XCTUnwrap(limits.first { $0.id == "weekly" })
 
         XCTAssertEqual(weekly?.quotaTitleKey, .monthly)
@@ -1101,7 +1105,7 @@ final class ProviderSnapshotTests: XCTestCase {
 
     func testAdditionalLimitsBecomeExtraSnapshotRows() {
         let metrics = UsageMetrics(
-            service: .grok,
+            service: .xai,
             sessionLimit: UsageLimit(used: 10, total: 100, resetTime: nil, periodKind: .session),
             weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil, periodKind: .weekly),
             additionalLimits: [
@@ -1110,7 +1114,7 @@ final class ProviderSnapshotTests: XCTestCase {
                 UsageLimit(used: 50, total: 100, resetTime: nil, periodKind: .unknown)
             ]
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .grok)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
 
         XCTAssertEqual(limits.map(\.id), ["session", "weekly", "additional-0", "additional-1", "additional-2"])
         XCTAssertEqual(limits.map(\.quotaTitleKey), [.session, .weekly, .daily, .billingCycle, .quota])
@@ -1118,200 +1122,39 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(limits.last?.localizedTitle, "Quota")
     }
 
-    // MARK: - Cursor Grok Bot pool surfaces as its own provider card
+    // MARK: - Merged xAI card
 
-    /// Cursor Ultra's weekly Grok Bot allowance arrives as an additional
-    /// percent-of-100 pool alongside the included Cursor Models / Other Models
-    /// pools. Mirrors `CursorLocalService.mapSandUsage`'s output shape.
-    private func makeCursorMetricsWithGrokBot(
-        session: Double = 10,
-        weekly: Double = 20,
-        grokBotUsed: Double = 30,
-        grokBotResetTime: Date? = nil
-    ) -> UsageMetrics {
-        UsageMetrics(
-            service: .cursor,
-            sessionLimit: UsageLimit(
-                used: session,
-                total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: nil,
-                periodKind: .monthly
-            ),
-            weeklyLimit: UsageLimit(
-                used: weekly,
-                total: ServiceType.cursorIncludedPoolTotal,
-                resetTime: nil,
-                periodKind: .monthly
-            ),
+    /// A legacy Cursor account's monthly pools stay inside the one xAI card as
+    /// extra rows; there is no separate sub-pool card.
+    func testXAIWithLegacyCursorPoolsProducesOneSnapshot() {
+        let metrics = UsageMetrics(
+            service: .xai,
+            weeklyLimit: UsageLimit(used: 20, total: ServiceType.xaiPercentPoolTotal, resetTime: nil, periodKind: .monthly),
             additionalLimits: [
-                UsageLimit(
-                    used: grokBotUsed,
-                    total: ServiceType.cursorIncludedPoolTotal,
-                    resetTime: grokBotResetTime,
-                    periodKind: .weekly
-                )
+                UsageLimit(used: 30, total: ServiceType.xaiPercentPoolTotal, resetTime: nil, label: ServiceType.legacyCursorModelsLabel),
+                UsageLimit(used: 40, total: ServiceType.xaiPercentPoolTotal, resetTime: nil, label: ServiceType.legacyOtherModelsLabel)
             ]
         )
-    }
-
-    func testCursorGrokBotPoolBecomesItsOwnSnapshotAdjacentToCursor() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-
-        XCTAssertEqual(snapshots.map(\.service), [.cursor, .cursor])
-        XCTAssertEqual(snapshots.map(\.title), ["Cursor", "Grok Bot"])
-    }
-
-    /// The Grok Bot card borrows Cursor's `service` for data and accent color,
-    /// but the popover should show Grok's own glyph so the two cards are not
-    /// visually identical twins.
-    func testGrokBotSnapshotWearsGrokLogoWhileCursorKeepsItsOwn() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-
-        XCTAssertEqual(snapshots.map(\.logoKind), [.cursor, .grok])
-        XCTAssertEqual(snapshots.map(\.service), [.cursor, .cursor])
-    }
-
-    /// The raw limit list feeds the menu-bar candidate builder, so the Grok
-    /// Bot pool must carry the same stable id there as the popover's pin option.
-    func testCursorGrokBotLimitUsesStableIDInRawLimits() {
-        let limits = ProviderSnapshotBuilder.limits(for: makeCursorMetricsWithGrokBot(), service: .cursor)
-
-        XCTAssertEqual(limits.map(\.id), ["session", "weekly", "grokBot"])
-        XCTAssertEqual(limits.last?.quotaTitleKey, .grokBot)
-
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-        let pinIDs = snapshots.statusItemPinOptions.map(\.id)
-        XCTAssertTrue(pinIDs.contains(StatusItemPinKey.make(service: .cursor, accountID: nil, windowID: "grokBot")))
-    }
-
-    func testCursorSnapshotStaysSingularWhenNoGrokBotPoolIsReported() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],
-            enabledServices: [.cursor]
+            metrics: [.xai: metrics],
+            enabledServices: [.xai]
         ))
 
         XCTAssertEqual(snapshots.count, 1)
-        XCTAssertEqual(snapshots.first?.title, "Cursor")
+        XCTAssertEqual(snapshots.first?.title, "xAI")
+        XCTAssertEqual(snapshots.first?.service, .xai)
+        XCTAssertEqual(snapshots.first?.logoKind, .xai)
+        XCTAssertEqual(snapshots.first?.limits.map(\.quotaTitleKey), [.monthly, .cursorModels, .otherModels])
     }
 
-    func testGrokBotSnapshotHasOneWeeklyProviderBlockingLimitTitledWeekly() {
+    func testXAISnapshotStaysSingularWithoutLegacyPools() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot(grokBotUsed: 45)],
-            enabledServices: [.cursor]
-        ))
-        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
-
-        XCTAssertEqual(grokBot?.limits.count, 1)
-        XCTAssertEqual(grokBot?.limits.first?.kind, .weekly)
-        XCTAssertEqual(grokBot?.limits.first?.quotaTitleKey, .weekly)
-        XCTAssertEqual(grokBot?.limits.first?.localizedTitle, "Weekly")
-        XCTAssertEqual(grokBot?.limits.first?.isProviderBlocking, true)
-        XCTAssertEqual(grokBot?.limits.first?.usageLimit.used, 45)
-        XCTAssertEqual(grokBot?.service, .cursor)
-    }
-
-    func testGrokBotPoolNoLongerAppearsInCursorSnapshotsLimits() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
-
-        XCTAssertEqual(cursor?.limits.map(\.kind), [.session, .weekly])
-        XCTAssertFalse(cursor?.limits.contains { $0.quotaTitleKey == .grokBot } == true)
-    }
-
-    func testExhaustedGrokBotPoolMarksOnlyItsOwnSnapshotWeeklyExhausted() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot(session: 10, weekly: 20, grokBotUsed: 100)],
-            enabledServices: [.cursor]
-        ))
-        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
-        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
-
-        XCTAssertEqual(grokBot?.hasExhaustedWeeklyLimit, true)
-        XCTAssertEqual(cursor?.hasExhaustedWeeklyLimit, false)
-    }
-
-    func testGrokBotSnapshotHasStableIDDerivedFromAccountID() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
-
-        XCTAssertEqual(grokBot?.id, "cursor-grokbot-default")
-    }
-
-    func testGrokBotSnapshotSharesCursorsAuthNotice() {
-        var input = makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        )
-        input.cursorHasAccess = false
-        let snapshots = ProviderSnapshotBuilder.snapshots(input)
-        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
-        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
-
-        XCTAssertNotNil(cursor?.authNotice)
-        XCTAssertEqual(grokBot?.authNotice, cursor?.authNotice)
-    }
-
-    /// `statusItemPinOptions` flat-maps every snapshot's limits, so the split
-    /// must give the popover its own "Grok Bot" pin candidate rather than
-    /// bundling the pool under Cursor's pin options.
-    func testGrokBotPoolGainsItsOwnStatusItemPinOption() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
+            metrics: [.xai: makeMetrics(service: .xai, session: 10, weekly: 20)],
+            enabledServices: [.xai]
         ))
 
-        XCTAssertTrue(snapshots.statusItemPinOptions.contains { $0.title == "Grok Bot · Weekly" })
-    }
-
-    // MARK: - Card role: account vs. sub-pool
-
-    /// The Grok Bot split shares Cursor's `service` for branding, but it is not
-    /// a second Cursor account — `cardRole` is the property that says so, and
-    /// filters that mean "which cards are accounts" must key off it instead of
-    /// `service`.
-    func testCursorGrokBotSplitProducesOneAccountCardAndOneSubPoolCard() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
-        ))
-        let cursor = try? XCTUnwrap(snapshots.first { $0.title == "Cursor" })
-        let grokBot = try? XCTUnwrap(snapshots.first { $0.title == "Grok Bot" })
-
-        XCTAssertEqual(cursor?.cardRole, .account)
-        XCTAssertTrue(cursor?.isAccountCard == true)
-        XCTAssertEqual(grokBot?.cardRole, .subPool)
-        XCTAssertFalse(grokBot?.isAccountCard == true)
-        XCTAssertEqual(snapshots.filter(\.isAccountCard).count, 1)
-    }
-
-    /// A plain `snapshot(...)` construction (every non-Cursor-split call site,
-    /// and every existing test fixture) keeps meaning "this is an account"
-    /// without having to say so.
-    func testDefaultConstructionIsAnAccountCard() {
-        let snapshot = ProviderSnapshotBuilder.snapshot(
-            title: "Codex",
-            service: .codexCli,
-            metrics: nil,
-            emptyDetail: "Run codex login"
-        )
-
-        XCTAssertEqual(snapshot.cardRole, .account)
-        XCTAssertTrue(snapshot.isAccountCard)
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots.first?.title, "xAI")
     }
 
     func testCreditRemainderBecomesThePrimaryMeterAndHidesTheInventedPercent() throws {
@@ -1399,53 +1242,24 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(stillOnSubscription.primaryLimit?.percentLeft, 64)
     }
 
-    /// The dashboard Costs panel's per-provider selection: prefer an exhausted
-    /// card so the panel can surface that provider's reset, but a sub-pool
-    /// card can never win the selection even fully exhausted — it does not
-    /// speak for the account.
-    func testAccountSnapshotSelectionPrefersTheAccountCardOverAnExhaustedSubPool() {
+    /// The dashboard Costs panel's per-provider selection: the merged xAI card
+    /// is the only xAI snapshot, exhausted or not.
+    func testAccountSnapshotSelectionReturnsTheXAICard() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot(session: 10, weekly: 20, grokBotUsed: 100)],
-            enabledServices: [.cursor]
-        ))
-        XCTAssertTrue(
-            snapshots.first { $0.title == "Grok Bot" }?.hasExhaustedLimit == true,
-            "fixture should be exhausted"
-        )
-
-        let selected = snapshots.accountSnapshot(for: .cursor)
-
-        XCTAssertEqual(selected?.title, "Cursor")
-        XCTAssertEqual(selected?.cardRole, .account)
-    }
-
-    func testAccountSnapshotSelectionUnaffectedWithoutAGrokBotPool() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeMetrics(service: .cursor, session: 100)],
-            enabledServices: [.cursor]
+            metrics: [.xai: makeMetrics(service: .xai, session: 100)],
+            enabledServices: [.xai]
         ))
         XCTAssertTrue(snapshots.first?.hasExhaustedLimit == true, "fixture should be exhausted")
 
-        XCTAssertEqual(snapshots.accountSnapshot(for: .cursor)?.title, "Cursor")
+        XCTAssertEqual(snapshots.accountSnapshot(for: .xai)?.title, "xAI")
     }
 
-    /// The popover's account-count badge: a Cursor Ultra user with a Grok Bot
-    /// pool still has exactly one Cursor account.
-    func testAccountCardCountIsOneForCursorWhenAGrokBotPoolExists() {
+    func testAccountCardCountIsOneForXAI() {
         let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeCursorMetricsWithGrokBot()],
-            enabledServices: [.cursor]
+            metrics: [.xai: makeMetrics(service: .xai, session: 10, weekly: 20)],
+            enabledServices: [.xai]
         ))
 
-        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
-    }
-
-    func testAccountCardCountMatchesRawCountWithoutAGrokBotPool() {
-        let snapshots = ProviderSnapshotBuilder.snapshots(makeInput(
-            metrics: [.cursor: makeMetrics(service: .cursor, session: 10, weekly: 20)],
-            enabledServices: [.cursor]
-        ))
-
-        XCTAssertEqual(snapshots.accountCardCount(for: .cursor), 1)
+        XCTAssertEqual(snapshots.accountCardCount(for: .xai), 1)
     }
 }
