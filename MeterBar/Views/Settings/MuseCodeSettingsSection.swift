@@ -53,12 +53,7 @@ struct MuseCodeSettingsSection: View {
                 )
             }
 
-            Button(String(localized: "settings.muse.connect", defaultValue: "Connect Muse Code")) {
-                Task { await connect() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isConnecting)
-            .padding(.vertical, MeterBarTheme.Spacing.sm)
+            connectButton
         }
         .task { await refreshProbe() }
     }
@@ -66,6 +61,34 @@ struct MuseCodeSettingsSection: View {
     @ObservedObject private var service = MuseCodeService.shared
     @State private var probe: MuseCodeCredentialProbe?
     @State private var isConnecting = false
+
+    /// Once the sign-in reads cleanly the button is a quiet "Reconnect" for the
+    /// day a fresh `muse login` needs access allowed again. Until then it is
+    /// the prominent way forward.
+    @ViewBuilder
+    private var connectButton: some View {
+        let button = Button(Self.connectButtonTitle(for: probe)) {
+            Task { await connect() }
+        }
+        .disabled(isConnecting)
+        .padding(.vertical, MeterBarTheme.Spacing.sm)
+
+        if Self.connectIsProminent(for: probe) {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    static func connectButtonTitle(for probe: MuseCodeCredentialProbe?) -> String {
+        probe == .ready
+            ? String(localized: "settings.muse.reconnect", defaultValue: "Reconnect")
+            : String(localized: "settings.muse.connect", defaultValue: "Connect Muse Code")
+    }
+
+    static func connectIsProminent(for probe: MuseCodeCredentialProbe?) -> Bool {
+        probe != .ready
+    }
 
     private var connectionTitle: String {
         switch probe {
