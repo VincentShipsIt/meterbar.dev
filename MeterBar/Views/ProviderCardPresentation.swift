@@ -24,6 +24,15 @@ enum ProviderCardPresentation {
         }
     }
 
+    /// The only status word the expanded card and the hover header carry. A working
+    /// provider says nothing: quota health is already in its bars and charts, so a
+    /// "Healthy" or "Tight" chip is noise. The header speaks up when the connection
+    /// is broken or the data is out of date, because stale numbers that look fine are
+    /// the one thing the user cannot see for themselves.
+    static func connectionStatusText(for snapshot: ProviderSnapshot) -> String? {
+        snapshot.authNotice?.shortLabel
+    }
+
     static func statusText(for snapshot: ProviderSnapshot) -> String {
         if let notice = snapshot.authNotice { return notice.shortLabel }
         if let primary = snapshot.primaryLimit {
