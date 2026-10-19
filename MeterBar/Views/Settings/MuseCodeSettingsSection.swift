@@ -65,8 +65,7 @@ struct MuseCodeSettingsSection: View {
     /// Once the sign-in reads cleanly the button is a quiet "Reconnect" for the
     /// day a fresh `muse login` needs access allowed again. Until then it is
     /// the prominent way forward.
-    @ViewBuilder
-    private var connectButton: some View {
+    @ViewBuilder private var connectButton: some View {
         let button = Button(Self.connectButtonTitle(for: probe)) {
             Task { await connect() }
         }
