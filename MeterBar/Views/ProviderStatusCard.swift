@@ -216,7 +216,6 @@ struct ProviderStatusCard: View {
             // branches above, where centering against the whole row is useful.
             ProviderCardHeader(
                 snapshot: snapshot,
-                showsDisclosureChevron: allowsDetailNavigation,
                 showsLiveAccount: isLiveAccount
             )
 
@@ -228,19 +227,10 @@ struct ProviderStatusCard: View {
                 )
             } else {
                 // Each window resets on its own schedule, so every row shows
-                // its own countdown (`LimitRow` footer). The card is bars only;
-                // the runway charts and the seven-day sparkline live in the
-                // hover detail panel.
-                VStack(alignment: .leading, spacing: 9) {
-                    ForEach(snapshot.limits) { limit in
-                        LimitRow(
-                            limit: limit,
-                            accentColor: snapshot.accentColor,
-                            density: limitDensity,
-                            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
-                        )
-                    }
-                }
+                // its own countdown. The popover card draws Session and Weekly
+                // as donuts; the bars, runway charts and seven-day sparkline
+                // live in the hover detail panel.
+                limitRows
             }
 
             let badges = ProviderStatusBadges(snapshot: snapshot, style: badgeStyle)
@@ -251,6 +241,30 @@ struct ProviderStatusCard: View {
             if showsResetCreditAction {
                 Divider()
                 resetCreditButton(isCompact: false)
+            }
+        }
+    }
+
+    /// The popover (`.compact`) shows Session and Weekly as donuts and any other
+    /// window as a bar under them. The dashboard keeps a bar for every window.
+    @ViewBuilder private var limitRows: some View {
+        let donuts = limitDensity == .compact ? ProviderCardPresentation.donutLimits(for: snapshot) : []
+        let bars = limitDensity == .compact ? ProviderCardPresentation.barLimits(for: snapshot) : snapshot.limits
+        VStack(alignment: .leading, spacing: 9) {
+            if !donuts.isEmpty {
+                QuotaDonutRow(
+                    limits: donuts,
+                    accentColor: snapshot.accentColor,
+                    resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                )
+            }
+            ForEach(bars) { limit in
+                LimitRow(
+                    limit: limit,
+                    accentColor: snapshot.accentColor,
+                    density: limitDensity,
+                    resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                )
             }
         }
     }

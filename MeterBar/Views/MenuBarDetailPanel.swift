@@ -268,8 +268,9 @@ struct MenuBarProviderDetailContent: View {
     snapshot.detailLimits
   }
 
-  /// One line of the hover panel: a Session or Weekly window drawn as an
-  /// annotated runway chart, or any other limit as the plain detail bar.
+  /// One line of the hover panel: a Session or Weekly window drawn as its bar
+  /// with the annotated runway chart under it, or any other limit as the plain
+  /// detail bar.
   enum DetailRow {
     case runway(SnapshotLimit)
     case bar(SnapshotLimit)
@@ -357,7 +358,17 @@ struct MenuBarProviderDetailContent: View {
           ForEach(rows, id: \.limit.id) { row in
             switch row {
             case .runway(let limit):
-              RunwayView(limit: limit, accentColor: snapshot.accentColor)
+              // The popover shows this window as a donut; the hover is where
+              // its bar and its chart both live.
+              VStack(alignment: .leading, spacing: 10) {
+                LimitRow(
+                  limit: limit,
+                  accentColor: snapshot.accentColor,
+                  density: .detail,
+                  resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                )
+                RunwayView(limit: limit, accentColor: snapshot.accentColor, showsFooter: false)
+              }
             case .bar(let limit):
               LimitRow(
                 limit: limit,
