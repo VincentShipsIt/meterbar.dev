@@ -33,6 +33,16 @@ enum ProviderCardPresentation {
         snapshot.authNotice?.shortLabel
     }
 
+    /// The popover card draws Session and Weekly as donuts; everything else
+    /// (model and pool windows, credits, estimates) stays a bar below them.
+    static func donutLimits(for snapshot: ProviderSnapshot) -> [SnapshotLimit] {
+        snapshot.limits.filter { QuotaDonutContent(limit: $0) != nil }
+    }
+
+    static func barLimits(for snapshot: ProviderSnapshot) -> [SnapshotLimit] {
+        snapshot.limits.filter { QuotaDonutContent(limit: $0) == nil }
+    }
+
     static func statusText(for snapshot: ProviderSnapshot) -> String {
         if let notice = snapshot.authNotice { return notice.shortLabel }
         if let primary = snapshot.primaryLimit {

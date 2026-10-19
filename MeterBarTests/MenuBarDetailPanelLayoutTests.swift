@@ -336,62 +336,44 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(plain.fittingSize.height, withEmptySeries.fittingSize.height)
     }
 
-    func testHeaderRendersABrokenConnectionInlineWithOrWithoutDisclosureChevron() {
-        for showsChevron in [true, false] {
-            let currentSnapshot = quotaSnapshot(used: 12, notice: .loginRequired)
-            let expectedStatus = ProviderCardPresentation.statusText(for: currentSnapshot)
-            let headerHost = NSHostingView(
-                rootView: ProviderCardHeader(
-                    snapshot: currentSnapshot,
-                    showsDisclosureChevron: showsChevron
+    func testHeaderRendersABrokenConnectionInline() {
+        let currentSnapshot = quotaSnapshot(used: 12, notice: .loginRequired)
+        let expectedStatus = ProviderCardPresentation.statusText(for: currentSnapshot)
+        let headerHost = NSHostingView(rootView: ProviderCardHeader(snapshot: currentSnapshot))
+        let identityHost = NSHostingView(
+            rootView: HStack(spacing: 7) {
+                ProviderLogoView(
+                    kind: currentSnapshot.logoKind,
+                    size: 17,
+                    foregroundColor: currentSnapshot.accentColor
                 )
-            )
-            let identityHost = NSHostingView(
-                rootView: HStack(spacing: 7) {
-                    ProviderLogoView(
-                        kind: currentSnapshot.logoKind,
-                        size: 17,
-                        foregroundColor: currentSnapshot.accentColor
-                    )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(currentSnapshot.title)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                        Text(currentSnapshot.updatedText)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                    if showsChevron {
-                        CardDisclosureChevron()
-                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(currentSnapshot.title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text(currentSnapshot.updatedText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
-            )
-            let statusHost = NSHostingView(rootView: ProviderCardStatusLabel(snapshot: currentSnapshot))
+            }
+        )
+        let statusHost = NSHostingView(rootView: ProviderCardStatusLabel(snapshot: currentSnapshot))
 
-            XCTAssertEqual(
-                ProviderCardHeader.Content(snapshot: currentSnapshot).statusText,
-                expectedStatus,
-                "Provider status should render when chevron is \(showsChevron)"
-            )
-            XCTAssertGreaterThanOrEqual(
-                headerHost.fittingSize.width,
-                identityHost.fittingSize.width + statusHost.fittingSize.width,
-                "Provider header should include identity and status when chevron is \(showsChevron)"
-            )
-            XCTAssertEqual(
-                headerHost.fittingSize.height,
-                max(identityHost.fittingSize.height, statusHost.fittingSize.height),
-                accuracy: 1,
-                "Provider identity and status should stay on one row when chevron is \(showsChevron)"
-            )
-            XCTAssertGreaterThan(
-                headerHost.fittingSize.height,
-                0,
-                "ProviderCardHeader(chevron: \(showsChevron)) should keep status inline"
-            )
-        }
+        XCTAssertEqual(ProviderCardHeader.Content(snapshot: currentSnapshot).statusText, expectedStatus)
+        XCTAssertGreaterThanOrEqual(
+            headerHost.fittingSize.width,
+            identityHost.fittingSize.width + statusHost.fittingSize.width,
+            "Provider header should include identity and status"
+        )
+        XCTAssertEqual(
+            headerHost.fittingSize.height,
+            max(identityHost.fittingSize.height, statusHost.fittingSize.height),
+            accuracy: 1,
+            "Provider identity and status should stay on one row"
+        )
+        XCTAssertGreaterThan(headerHost.fittingSize.height, 0)
     }
 
     // MARK: - Runway rows

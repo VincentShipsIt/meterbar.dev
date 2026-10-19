@@ -19,6 +19,9 @@ struct RunwayView: View {
     let limit: SnapshotLimit
     let accentColor: Color
     var now = Date()
+    /// The "title … N% left" line under the chart. The hover panel draws the
+    /// window's bar right above the chart, which already says it.
+    var showsFooter = true
 
     private var content: RunwayContent? { RunwayContent(limit: limit.usageLimit, now: now) }
 
@@ -42,13 +45,15 @@ struct RunwayView: View {
                 }
                 RunwayChart(content: content, accentColor: accentColor, outlook: Self.outlookColor(content.outlook))
                     .frame(height: RunwayChart.height)
-                HStack {
-                    Text(limit.localizedTitle)
-                    Spacer()
-                    Text(LocalizedUsageFormat.percentLeft(limit.usageLimit))
+                if showsFooter {
+                    HStack {
+                        Text(limit.localizedTitle)
+                        Spacer()
+                        Text(LocalizedUsageFormat.percentLeft(limit.usageLimit))
+                    }
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 }
-                .font(.caption)
-                .fontWeight(.semibold)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(limit.localizedAccessibilityLabel)
