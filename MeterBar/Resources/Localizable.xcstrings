@@ -1216,6 +1216,17 @@
           }
         }
       }
+    },
+    "quota.footnote.included_before_credits": {
+      "comment": "Note under Cursor's included-usage gauge: the included pool is used up before credits are charged.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Included usage is spent before credits."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

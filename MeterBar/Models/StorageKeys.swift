@@ -36,6 +36,8 @@ nonisolated enum StorageKeys {
     /// Explicit opt-in for holding a user-idle system-sleep assertion while a
     /// tracked provider still has session quota. Missing means off.
     static let stayAwakeEnabled = "StayAwakeEnabled"
+    /// `RoutingTaskID` token shown in the popover routing line. Missing means Implementation.
+    static let popoverRoutingTask = "PopoverRoutingTask"
     /// Stable provider/account/window key pinned into the menu bar title. Missing means Auto.
     static let statusItemPinnedCandidate = "StatusItemPinnedCandidate"
     /// `MenuBarPresentationMode` raw value: one merged status item or one per provider.

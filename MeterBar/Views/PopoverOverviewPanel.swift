@@ -24,6 +24,9 @@ struct PopoverOverviewPanel: View {
     /// Opt-in one-line "what to use next" hint. Defaults to off so the popover
     /// keeps its pre-feature layout; the full ranking lives in the dashboard.
     let showsRecommendationHint: Bool
+    /// One-line routing recommendation at the top. Off by default so previews
+    /// and tests never read the shared routing files.
+    let showsRoutingLine: Bool
 
     @State private var setupReports: [ProviderReadiness] = []
     @StateObject private var onboarding = FirstRunOnboardingStore.shared
@@ -46,7 +49,8 @@ struct PopoverOverviewPanel: View {
         claudeAccountMetrics: [UUID: UsageMetrics] = [:],
         codexAccounts: [CodexAccount] = [.defaultAccount],
         grokAccounts: [GrokAccount] = [.defaultAccount],
-        showsRecommendationHint: Bool = false
+        showsRecommendationHint: Bool = false,
+        showsRoutingLine: Bool = false
     ) {
         self.snapshots = snapshots
         self.openDashboard = openDashboard
@@ -61,6 +65,7 @@ struct PopoverOverviewPanel: View {
         self.codexAccounts = codexAccounts
         self.grokAccounts = grokAccounts
         self.showsRecommendationHint = showsRecommendationHint
+        self.showsRoutingLine = showsRoutingLine
     }
 
     /// The enabled providers currently shown in the popover.
@@ -127,6 +132,10 @@ struct PopoverOverviewPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if showsRoutingLine {
+                PopoverRoutingLineView()
+            }
+
             if onboarding.shouldPresent {
                 firstRunCallout
                     .transition(MeterBarTheme.Motion.popoverTile)

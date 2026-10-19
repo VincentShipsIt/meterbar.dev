@@ -194,10 +194,29 @@ struct SnapshotLimit: Identifiable {
     let quotaTitleKey: ServiceType.QuotaTitleKey?
     let usageLimit: UsageLimit
     let valueStyle: ValueStyle
+    /// A short explanation drawn under the gauge on the wider surfaces.
+    var footnote: Footnote?
 
     enum ValueStyle: Equatable {
         case quota
         case currency
+    }
+
+    enum Footnote: Equatable {
+        /// Cursor spends the included pool first; credits only start once it is gone.
+        case includedBeforeCredits
+    }
+
+    var localizedFootnote: String? {
+        switch footnote {
+        case .includedBeforeCredits:
+            return String(
+                localized: "quota.footnote.included_before_credits",
+                defaultValue: "Included usage is spent before credits."
+            )
+        case nil:
+            return nil
+        }
     }
 
     /// Routed construction: the shared key decides both the English words and
@@ -207,7 +226,8 @@ struct SnapshotLimit: Identifiable {
         kind: Kind,
         quotaTitleKey: ServiceType.QuotaTitleKey,
         usageLimit: UsageLimit,
-        valueStyle: ValueStyle = .quota
+        valueStyle: ValueStyle = .quota,
+        footnote: Footnote? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -215,6 +235,7 @@ struct SnapshotLimit: Identifiable {
         self.quotaTitleKey = quotaTitleKey
         self.usageLimit = usageLimit
         self.valueStyle = valueStyle
+        self.footnote = footnote
     }
 
     /// Verbatim construction for copy that is not a routed quota window.
@@ -920,7 +941,8 @@ enum ProviderSnapshotBuilder {
                     periodKind: weekly.periodKind
                 ),
                 usageLimit: weekly,
-                valueStyle: service.usesCurrencyValueStyle ? .currency : .quota
+                valueStyle: service.usesCurrencyValueStyle ? .currency : .quota,
+                footnote: service == .cursor && metrics.codeReviewLimit != nil ? .includedBeforeCredits : nil
             ))
         }
         if let codeReview = metrics.codeReviewLimit {

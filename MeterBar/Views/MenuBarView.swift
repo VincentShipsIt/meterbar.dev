@@ -123,7 +123,8 @@ struct MenuBarView: View {
           claudeAccountMetrics: dataManager.claudeCodeAccountMetrics,
           codexAccounts: codexAccountStore.accounts,
           grokAccounts: grokAccountStore.accounts,
-          showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint
+          showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint,
+          showsRoutingLine: true
         )
 
         Divider()
