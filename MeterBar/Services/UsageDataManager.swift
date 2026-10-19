@@ -1047,7 +1047,8 @@ class UsageDataManager: ObservableObject {
             lastCursorMetrics = nil
         }
 
-        if let merged = XAIUsageMerger.merge(grok: representativeGrokMetrics(from: grokAccountMetrics), cursor: cursor) {
+        let grok = representativeGrokMetrics(from: grokAccountMetrics)
+        if let merged = XAIUsageMerger.merge(grok: grok, cursor: cursor) {
             if lastError == nil { lastError = cursorFailure }
             return merged
         }

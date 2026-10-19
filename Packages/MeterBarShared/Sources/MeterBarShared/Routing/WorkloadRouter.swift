@@ -359,10 +359,8 @@ public enum WorkloadRouter {
     /// the provider card's own rule.
     private static func bindingReading(_ readings: [WindowReading]) -> WindowReading {
         var best = readings[0]
-        for reading in readings.dropFirst() {
-            if reading.percentLeft < best.percentLeft {
-                best = reading
-            }
+        for reading in readings.dropFirst() where reading.percentLeft < best.percentLeft {
+            best = reading
         }
         return best
     }

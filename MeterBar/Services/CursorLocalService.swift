@@ -450,14 +450,14 @@ class CursorLocalService: ObservableObject {
                 // are the best read of the shared pool. The binding (higher)
                 // percent stands for it, so one weekly gauge is drawn.
                 let pools = [autoPercent, apiPercent].compactMap(plausiblePercent)
-                let weekly = pools.max().map {
+                let weekly = pools.max().flatMap {
                     percentPoolLimit(
                         $0,
                         resetTime: included.resetTime,
                         windowSeconds: included.windowSeconds,
                         periodKind: .weekly
                     )
-                } ?? nil
+                }
                 return UsageMetrics(
                     service: .xai,
                     weeklyLimit: weekly ?? sandLimit,
