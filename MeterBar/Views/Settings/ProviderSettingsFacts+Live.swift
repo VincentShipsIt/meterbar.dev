@@ -114,14 +114,19 @@ extension ProviderSettingsFacts {
         let grok = GrokCLIUsageService.shared
         let cursor = CursorLocalService.shared
         let accounts = GrokAccountStore.shared.enabledAccounts
-        let grokConnected = accounts.contains(where: grok.canAccess(account:))
-        let hasAccess = grokConnected || cursor.hasAccess
+        let summary = XAISettingsSummary(
+            grokConnected: accounts.contains(where: grok.canAccess(account:)),
+            cursorConnected: cursor.hasAccess,
+            grokPlan: grok.subscriptionType,
+            cursorPlan: cursor.subscriptionType
+        )
+        let hasAccess = summary.isConnected
         // One healthy source keeps the card quiet; a Grok-only user is never
         // flagged for a Cursor login they never had.
         let error = hasAccess
             ? nil
             : (grok.firstError(for: accounts) ?? cursor.lastError)?.localizedDescription
-        return (hasAccess, grok.subscriptionType ?? cursor.subscriptionType?.capitalized, nil, error)
+        return (hasAccess, summary.planLabel, nil, error)
     }
 
     /// OpenRouter is connected when any enabled key has its Keychain item —

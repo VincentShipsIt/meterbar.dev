@@ -78,7 +78,7 @@ final class ProviderSettingsFactsTests: XCTestCase {
         XCTAssertEqual(facts(service: .claudeCode).sourceText, "Claude CLI /usage")
         XCTAssertEqual(facts(service: .codexCli).sourceText, "~/.codex/auth.json + ChatGPT usage API")
         XCTAssertEqual(facts(service: .openRouter).sourceText, "OpenRouter credits + key APIs")
-        XCTAssertEqual(facts(service: .xai).sourceText, "Grok Build ACP billing + Cursor usage API")
+        XCTAssertEqual(facts(service: .xai).sourceText, "Grok CLI billing (ACP) + Cursor usage API")
     }
 
     // MARK: - planText

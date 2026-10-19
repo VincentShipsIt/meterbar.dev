@@ -62,7 +62,7 @@ struct ProviderSettingsFacts {
         case .openRouter:
             "OpenRouter credits + key APIs"
         case .xai:
-            "Grok Build ACP billing + Cursor usage API"
+            "Grok CLI billing (ACP) + Cursor usage API"
         case .kimiCode:
             "Kimi Code sign-in or API key + managed usage API"
         case .zaiCodingPlan:
