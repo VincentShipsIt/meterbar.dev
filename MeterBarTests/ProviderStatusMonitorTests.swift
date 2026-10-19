@@ -508,8 +508,27 @@ final class ProviderStatusMonitorTests: XCTestCase {
         XCTAssertEqual(report.summary.indicator, .unknown)
     }
 
-    func testPlainForbiddenWithoutEdgeSignalsStaysAnError() async {
-        let client = makeClient(statusCode: 403, body: "Forbidden")
+    func testOpenRouterShellWithOperationalPhraseInScriptIsStillUnreadable() async throws {
+        let client = makeClient(
+            statusCode: 200,
+            body: """
+            <html><head><title>openrouter</title></head>
+            <body><div id="root"></div><script>var s = "All Systems Operational"</script></body></html>
+            """
+        )
+
+        let report = try await client.fetchReport(for: .openRouter)
+
+        XCTAssertTrue(report.isUnreadable)
+        XCTAssertFalse(report.hasIssue)
+    }
+
+    func testPlainForbiddenWithoutChallengeStaysAnErrorEvenBehindCloudflare() async {
+        let client = makeClient(
+            statusCode: 403,
+            headers: ["cf-ray": "abc123-SJC", "Server": "cloudflare"],
+            body: "Forbidden"
+        )
 
         do {
             _ = try await client.fetchReport(for: .grok)

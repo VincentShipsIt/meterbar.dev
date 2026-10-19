@@ -317,8 +317,9 @@ struct MenuBarStatusDetailContent: View {
     }
 
     private var worstIndicator: ProviderStatusIndicator {
-        reports
-            .filter { !$0.isUnreadable }
+        let readable = reports.filter { !$0.isUnreadable }
+        if readable.isEmpty, !reports.isEmpty { return .unknown }
+        return readable
             .map(\.summary.indicator)
             .max { $0.rank < $1.rank } ?? (statusMonitor.isRefreshing ? .unknown : .none)
     }
@@ -330,6 +331,9 @@ struct MenuBarStatusDetailContent: View {
 
         let issueCount = reports.filter(\.hasIssue).count
         let unreadableCount = reports.filter(\.isUnreadable).count
+        if !reports.isEmpty, unreadableCount == reports.count {
+            return "Provider status pages couldn't be checked"
+        }
         if issueCount == 0, reports.count == ServiceType.statusPageServices.count {
             return unreadableCount == 0 ? "All provider pages operational" : "All readable provider pages operational"
         }

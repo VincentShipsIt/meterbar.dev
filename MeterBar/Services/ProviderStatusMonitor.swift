@@ -61,15 +61,10 @@ enum ProviderStatusPageGuard {
         let mitigated = http.value(forHTTPHeaderField: "cf-mitigated")?.lowercased() == "challenge"
         let body = String((String(bytes: data, encoding: .utf8) ?? "").prefix(64 * 1024)).lowercased()
         let hasChallengeMarker = challengeMarkers.contains { body.contains($0) }
-        let fromEdgeNetwork = http.value(forHTTPHeaderField: "cf-ray") != nil
-            || http.value(forHTTPHeaderField: "x-amz-cf-id") != nil
-            || (http.value(forHTTPHeaderField: "server")?.lowercased().contains("cloudflare") ?? false)
 
         let blocked: Bool
         switch http.statusCode {
-        case 403, 429:
-            blocked = mitigated || hasChallengeMarker || fromEdgeNetwork
-        case 503:
+        case 403, 429, 503:
             blocked = mitigated || hasChallengeMarker
         default:
             blocked = mitigated || (hasChallengeMarker && (200...299).contains(http.statusCode))
@@ -428,15 +423,16 @@ struct ProviderStatusClient {
         guard let html = String(data: data, encoding: .utf8) else {
             throw ServiceError.parsingError(nil)
         }
-        let operational = html.localizedCaseInsensitiveContains("All Systems Operational")
         // status.openrouter.ai now serves an empty shell that renders in the
         // browser, so there is no text to read and no public feed to fall back on.
-        if !operational, ProviderStatusPageGuard.isScriptRenderedShell(html: html) {
+        // Checked first so the phrase inside a script cannot read as healthy.
+        if ProviderStatusPageGuard.isScriptRenderedShell(html: html) {
             throw ProviderStatusPageUnreadable(
                 reason: "OpenRouter's status page only renders in a browser and publishes no feed MeterBar "
                     + "can read. Open the status page to see current status."
             )
         }
+        let operational = html.localizedCaseInsensitiveContains("All Systems Operational")
         return ProviderStatusReport(
             service: .openRouter,
             pageName: "OpenRouter",
