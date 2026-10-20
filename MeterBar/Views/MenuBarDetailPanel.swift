@@ -248,6 +248,8 @@ struct MenuBarProviderDetailContent: View {
   /// False plays the cards' exit. The hosting column clears the content once it
   /// has finished.
   let isPresented: Bool
+  /// Source card center in the hover column, including any screen-edge adjustment.
+  let revealOriginY: CGFloat
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
@@ -256,13 +258,15 @@ struct MenuBarProviderDetailContent: View {
     dailyUsage: ProviderDailyUsageSeries? = nil,
     isRefreshingUsage: Bool = false,
     costScanDate: Date? = nil,
-    isPresented: Bool = true
+    isPresented: Bool = true,
+    revealOriginY: CGFloat = 0
   ) {
     self.snapshot = snapshot
     self.dailyUsage = dailyUsage
     self.isRefreshingUsage = isRefreshingUsage
     self.costScanDate = costScanDate
     self.isPresented = isPresented
+    self.revealOriginY = revealOriginY
   }
 
   /// Distinguishes the sparkline's cost-scan freshness from the header's
@@ -353,7 +357,6 @@ struct MenuBarProviderDetailContent: View {
     return cards
   }
 
-  @State private var appeared = false
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
@@ -376,8 +379,6 @@ struct MenuBarProviderDetailContent: View {
   }
 
   var body: some View {
-    // Each card is its own glass surface. No container: morphing glass is
-    // costly and fused the cards into one outlined shape.
     ViewThatFits(in: .vertical) {
       cardStack
 
@@ -388,19 +389,24 @@ struct MenuBarProviderDetailContent: View {
       .scrollContentBackground(.hidden)
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
-    .onAppear { appeared = true }
   }
 
   private var cardStack: some View {
     let cards = orderedCards
     return VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
       ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
-        HoverCardSurface(index: index, revealed: appeared && isPresented, reduceMotion: reduceMotion) {
+        HoverCardSurface(
+          index: index,
+          revealed: isPresented,
+          originY: revealOriginY,
+          reduceMotion: reduceMotion
+        ) {
           content(for: card)
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
+    .coordinateSpace(name: "providerHover")
   }
 
   @ViewBuilder
@@ -462,31 +468,127 @@ struct MenuBarProviderDetailContent: View {
   }
 }
 
-/// A free-standing glass card of the hover. Its entrance, a short stagger of
-/// fade and short slide from the trailing edge (the side the popover is on),
-/// is driven by `revealed` and drops to an instant update under Reduce Motion.
+/// A liquid reveal whose small source stays attached to the overview card while
+/// the body grows left. The neck pinches off as the final card settles.
+struct HoverCardReveal: Shape {
+  var progress: CGFloat
+  let originY: CGFloat
+
+  var animatableData: CGFloat {
+    get { progress }
+    set { progress = newValue }
+  }
+
+  func path(in rect: CGRect) -> Path {
+    let phase = min(1, max(0, progress))
+    let sourceX = rect.maxX + MenuBarPopoverGeometry.detailGap + 6
+    let sourceY = rect.minY + originY
+    let body = CGRect(
+      x: (sourceX - 6) * (1 - phase) + rect.minX * phase,
+      y: (sourceY - 12) * (1 - phase) + rect.minY * phase,
+      width: 12 * (1 - phase) + rect.width * phase,
+      height: 24 * (1 - phase) + rect.height * phase
+    )
+    let radius = min(MeterBarTheme.Radius.card, body.width / 2, body.height / 2)
+    guard phase > 0, phase < 1, sourceX > body.maxX else {
+      return Path(roundedRect: body, cornerRadius: radius)
+    }
+
+    let halfNeck = min(12 * (1 - phase), (body.height - 2 * radius) / 2)
+    let attachmentY = min(body.maxY - radius - halfNeck, max(body.minY + radius + halfNeck, sourceY))
+    let reach = sourceX - body.maxX
+    var path = Path()
+    path.move(to: CGPoint(x: body.minX + radius, y: body.minY))
+    path.addLine(to: CGPoint(x: body.maxX - radius, y: body.minY))
+    path.addQuadCurve(
+      to: CGPoint(x: body.maxX, y: body.minY + radius),
+      control: CGPoint(x: body.maxX, y: body.minY)
+    )
+    path.addLine(to: CGPoint(x: body.maxX, y: attachmentY - halfNeck))
+    path.addCurve(
+      to: CGPoint(x: sourceX, y: sourceY - halfNeck / 4),
+      control1: CGPoint(x: body.maxX + reach * 0.65, y: attachmentY - halfNeck),
+      control2: CGPoint(x: sourceX - reach * 0.2, y: sourceY - halfNeck / 4)
+    )
+    path.addQuadCurve(
+      to: CGPoint(x: sourceX, y: sourceY + halfNeck / 4),
+      control: CGPoint(x: sourceX + halfNeck / 4, y: sourceY)
+    )
+    path.addCurve(
+      to: CGPoint(x: body.maxX, y: attachmentY + halfNeck),
+      control1: CGPoint(x: sourceX - reach * 0.2, y: sourceY + halfNeck / 4),
+      control2: CGPoint(x: body.maxX + reach * 0.65, y: attachmentY + halfNeck)
+    )
+    path.addLine(to: CGPoint(x: body.maxX, y: body.maxY - radius))
+    path.addQuadCurve(
+      to: CGPoint(x: body.maxX - radius, y: body.maxY),
+      control: CGPoint(x: body.maxX, y: body.maxY)
+    )
+    path.addLine(to: CGPoint(x: body.minX + radius, y: body.maxY))
+    path.addQuadCurve(
+      to: CGPoint(x: body.minX, y: body.maxY - radius),
+      control: CGPoint(x: body.minX, y: body.maxY)
+    )
+    path.addLine(to: CGPoint(x: body.minX, y: body.minY + radius))
+    path.addQuadCurve(
+      to: CGPoint(x: body.minX + radius, y: body.minY),
+      control: CGPoint(x: body.minX, y: body.minY)
+    )
+    path.closeSubpath()
+    return path
+  }
+}
+
 private struct HoverCardSurface<Content: View>: View {
   let index: Int
   let revealed: Bool
+  let originY: CGFloat
   let reduceMotion: Bool
   @ViewBuilder let content: Content
+  @State private var ready = false
+
+  private var expanded: Bool { (ready || reduceMotion) && revealed }
 
   var body: some View {
     content
       .padding(MeterBarTheme.CardPadding.popover.value)
       .frame(maxWidth: .infinity, alignment: .topLeading)
-      .meterBarGlassCard()
-      // Opacity and a short slide only: scaling glass re-renders its blur
-      // every frame, which is what made the hover stutter.
-      .offset(x: revealed ? 0 : 10)
-      .opacity(revealed ? 1 : 0)
+      .opacity(expanded ? 1 : 0)
+      .mask {
+        GeometryReader { proxy in
+          HoverCardReveal(
+            progress: expanded ? 1 : 0,
+            originY: originY - proxy.frame(in: .named("providerHover")).minY
+          )
+        }
+      }
+      .background {
+        GeometryReader { proxy in
+          let shape = HoverCardReveal(
+            progress: expanded ? 1 : 0,
+            originY: originY - proxy.frame(in: .named("providerHover")).minY
+          )
+          Color.clear
+            .glassEffect(.regular.tint(MeterBarTheme.companionTint), in: shape)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .opacity(reduceMotion && !revealed ? 0 : 1)
+      }
+      .allowsHitTesting(expanded)
+      .accessibilityHidden(!revealed)
       .animation(
         MeterBarTheme.Motion.resolve(
-          .easeOut(duration: 0.14).delay(Double(index) * 0.015),
+          .smooth(duration: 0.28).delay(Double(min(index, 3)) * 0.02),
           reduceMotion: reduceMotion
         ),
-        value: revealed
+        value: expanded
       )
+      .task {
+        if !reduceMotion { try? await Task.sleep(for: .milliseconds(32)) }
+        guard !Task.isCancelled else { return }
+        ready = true
+      }
   }
 }
 

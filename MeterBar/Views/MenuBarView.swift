@@ -14,7 +14,8 @@ private struct DetailPresentation {
   /// Distance from the window top to the card that opened it, so the column
   /// top-aligns with that card.
   let topInset: CGFloat
-  let make: (_ isPresented: Bool) -> AnyView
+  let sourceMidY: CGFloat
+  let make: (_ isPresented: Bool, _ originY: CGFloat) -> AnyView
 }
 
 struct MenuBarView: View {
@@ -60,9 +61,8 @@ struct MenuBarView: View {
   }
 
   var body: some View {
-    // Every card is its own glass surface with no container: inside one, the
-    // system unions cards closer than its blend distance into an outlined
-    // blob, and morphing glass every frame is what made hovering slow.
+    // Overview cards stay independent while each hover surface grows out
+    // of its source card without translating the content.
     ZStack(alignment: .topTrailing) {
       mainColumn
         .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
@@ -124,7 +124,8 @@ struct MenuBarView: View {
   /// instead of growing the window. It top-aligns with the card that opened it
   /// and moves up only as far as it must to stay on screen.
   private func detailColumn(_ detail: DetailPresentation) -> some View {
-    detail.make(detailPresented)
+    detail.make(detailPresented, detail.sourceMidY - detailTop(for: detail))
+      .id(detail.id)
       .frame(width: MenuBarPopoverGeometry.detailWidth)
       .fixedSize(horizontal: false, vertical: true)
       .background(
@@ -348,7 +349,7 @@ struct MenuBarView: View {
   }
 
   private func openStatusDetail() {
-    presentDetail(id: PopoverCardID.providerStatus) { _ in
+    presentDetail(id: PopoverCardID.providerStatus) { _, _ in
       // The status panel carries its own shell and fills the height it is
       // offered, so it takes its natural height here.
       AnyView(MenuBarStatusDetailContent().fixedSize(horizontal: false, vertical: true))
@@ -367,14 +368,15 @@ struct MenuBarView: View {
     )
     let isRefreshing = costTracker.isRefreshingMissingDays || costTracker.isScanning
     let scanDate = costTracker.lastScanDate
-    presentDetail(id: snapshot.id) { isPresented in
+    presentDetail(id: snapshot.id) { isPresented, originY in
       AnyView(
         MenuBarProviderDetailContent(
           snapshot: snapshot,
           dailyUsage: series,
           isRefreshingUsage: isRefreshing,
           costScanDate: scanDate,
-          isPresented: isPresented
+          isPresented: isPresented,
+          revealOriginY: originY
         )
       )
     }
@@ -424,7 +426,7 @@ struct MenuBarView: View {
 
   /// Presents (or toggles off) the hover column, top-aligned with the popover
   /// card that opened it.
-  private func presentDetail(id: String, make: @escaping (Bool) -> AnyView) {
+  private func presentDetail(id: String, make: @escaping (Bool, CGFloat) -> AnyView) {
     if detail?.id == id, detailPresented {
       closeDetail()
       return
@@ -436,6 +438,7 @@ struct MenuBarView: View {
     detail = DetailPresentation(
       id: id,
       topInset: max(0, source?.minY ?? 0),
+      sourceMidY: source?.midY ?? 0,
       make: make
     )
     detailPresented = true
@@ -447,7 +450,7 @@ struct MenuBarView: View {
     detailPresented = false
     removeTask?.cancel()
     removeTask = Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 300_000_000)
+      try? await Task.sleep(nanoseconds: 400_000_000)
       guard !Task.isCancelled else { return }
       detail = nil
       detailHeight = 0
