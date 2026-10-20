@@ -151,3 +151,7 @@ Against that it buys a new invalidation surface — archive schema drift, a corr
 - Axis ticks are hourly for windows of a day or less and local midnights for longer ones, thinned to `RunwayContent.maxTicks`.
 - The chart is two points joined by a line (average burn since the window opened), not a sampled history. Do not draw it as one.
 - A provider that "Finish setup" already lists is not drawn again as an offline card (`PopoverOverviewPanel.visibleSnapshots`), only when it has a single card. With several accounts the checklist is per provider, so the offline account's card stays.
+
+## The hover is a stack of free-standing glass cards
+
+**Accepted 2026-10-20** (owner request, from a design prototype). The hover detail panel no longer draws one glass shell with flat rows inside it. Each block is its own glass card inside one `GlassEffectContainer`, with no surface behind the cards: the provider header, one card per limit window (bar, pace line, and the runway chart for Session and Weekly), the status badges (Extra usage), and the seven-day strip. The shared `RunwayLegend` sits under the last runway card. The ordering is `MenuBarProviderDetailContent.cards(...)`. Cards slide, scale and fade in from the trailing edge (the popover side) with a 30 ms stagger; Reduce Motion makes it instant. The gap to the popover is 8pt. This supersedes the earlier rule that the panel must look like the card it expands: it is now its own set of cards, and the header (`ProviderCardHeader`) stays identical to the card's. The popover is unchanged.
