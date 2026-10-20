@@ -200,9 +200,8 @@ enum MeterBarMenuDetailPanelLayout {
   static let detailWidth: CGFloat = 340
   static let cornerRadius = MeterBarTheme.companionShellRadius
   static let minDetailHeight: CGFloat = 120
-  /// Kept small so the cards read as an extension of the popover card that
-  /// opened them rather than a second window. The deferred dismiss in
-  /// `reconcileHoverDismissal` still covers the crossing.
+  /// Gap of the standalone panel frame; the live hover now shares the popover
+  /// window and uses `MenuBarPopoverGeometry.detailGap`.
   static let panelGap: CGFloat = 8
   static let screenPadding: CGFloat = 8
 
@@ -246,6 +245,9 @@ struct MenuBarProviderDetailContent: View {
   /// independent of the quota poll `snapshot.updatedAt` reflects. `nil` means
   /// no cost scan has ever run. See `CostScanFreshnessNote` (#530).
   let costScanDate: Date?
+  /// False plays the cards' exit. The hosting column clears the content once it
+  /// has finished.
+  let isPresented: Bool
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
@@ -253,12 +255,14 @@ struct MenuBarProviderDetailContent: View {
     snapshot: ProviderSnapshot,
     dailyUsage: ProviderDailyUsageSeries? = nil,
     isRefreshingUsage: Bool = false,
-    costScanDate: Date? = nil
+    costScanDate: Date? = nil,
+    isPresented: Bool = true
   ) {
     self.snapshot = snapshot
     self.dailyUsage = dailyUsage
     self.isRefreshingUsage = isRefreshingUsage
     self.costScanDate = costScanDate
+    self.isPresented = isPresented
   }
 
   /// Distinguishes the sparkline's cost-scan freshness from the header's
@@ -350,7 +354,7 @@ struct MenuBarProviderDetailContent: View {
     return cards
   }
 
-  @State private var revealed = false
+  @State private var appeared = false
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
 
@@ -372,29 +376,29 @@ struct MenuBarProviderDetailContent: View {
   }
 
   var body: some View {
-    // The glass container lets neighbouring cards blend while they slide in and
-    // settle apart once the gaps open, which is what makes the stack read as
-    // budding out of the popover card instead of fading in.
-    GlassEffectContainer(spacing: MeterBarTheme.Spacing.sm) {
-      ViewThatFits(in: .vertical) {
-        cardStack
+    // This column shares the popover window's glass container, so its cards
+    // blend with the popover cards as they slide in and settle apart once the
+    // gaps open, which is what makes the stack read as budding out of the card
+    // that opened it. A standalone hosting (tests) has no container and simply
+    // draws separate glass cards.
+    ViewThatFits(in: .vertical) {
+      cardStack
 
-        ScrollView(showsIndicators: false) {
-          cardStack
-        }
-        .scrollIndicators(.hidden)
-        .scrollContentBackground(.hidden)
+      ScrollView(showsIndicators: false) {
+        cardStack
       }
+      .scrollIndicators(.hidden)
+      .scrollContentBackground(.hidden)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .onAppear { revealed = true }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .onAppear { appeared = true }
   }
 
   private var cardStack: some View {
     let cards = orderedCards
     return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
       ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
-        HoverCardSurface(index: index, revealed: revealed, reduceMotion: reduceMotion) {
+        HoverCardSurface(index: index, revealed: appeared && isPresented, reduceMotion: reduceMotion) {
           content(for: card)
         }
       }
@@ -465,10 +469,7 @@ private struct HoverCardSurface<Content: View>: View {
     content
       .padding(MeterBarTheme.CardPadding.popover.value)
       .frame(maxWidth: .infinity, alignment: .topLeading)
-      .glassEffect(
-        .regular.tint(MeterBarTheme.companionTint),
-        in: .rect(cornerRadius: MeterBarTheme.Radius.card, style: .continuous)
-      )
+      .meterBarGlassCard()
       .scaleEffect(revealed ? 1 : 0.72, anchor: .trailing)
       .offset(x: revealed ? 0 : 36)
       .opacity(revealed ? 1 : 0)

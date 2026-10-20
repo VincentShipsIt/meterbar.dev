@@ -165,7 +165,10 @@ final class MeterBarMenuPanelController {
               let panel,
               let button = statusButtonProvider(),
               let frame = targetFrame(anchoredTo: button, size: size) else { return }
-        applyFrame(frame, to: panel, animated: motionEnabled)
+        // Growing or shrinking for a hover is instant: the window is transparent
+        // there, and the cards animate themselves inside it.
+        let widthChanged = abs(frame.width - panel.frame.width) > 0.5
+        applyFrame(frame, to: panel, animated: motionEnabled && !widthChanged)
     }
 
     private func ensurePanel() -> NSPanel {
@@ -193,7 +196,8 @@ final class MeterBarMenuPanelController {
             }
         )
         panel.contentViewController = hostingController
-        panel.applyCompanionClipping()
+        // No shell clipping: the popover and its hover are free-standing glass
+        // cards, and a corner mask on the window would shave the outer ones.
 
         self.panel = panel
         return panel
@@ -211,12 +215,16 @@ final class MeterBarMenuPanelController {
         let visibleFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? buttonRect
         let padding: CGFloat = 8
 
-        let x = min(
-            max(buttonRect.midX - (size.width / 2), visibleFrame.minX + padding),
-            visibleFrame.maxX - size.width - padding
+        // The popover keeps its own centred, clamped position; a hover only adds
+        // width on the left, so the popover never shifts when it opens.
+        let popoverWidth = MenuBarPopoverGeometry.width
+        let detailExtension = max(0, size.width - popoverWidth)
+        let popoverX = min(
+            max(buttonRect.midX - (popoverWidth / 2), visibleFrame.minX + padding),
+            visibleFrame.maxX - popoverWidth - padding
         )
         let y = max(visibleFrame.minY + padding, buttonRect.minY - size.height - 6)
-        return NSRect(x: x, y: y, width: size.width, height: size.height)
+        return NSRect(x: popoverX - detailExtension, y: y, width: size.width, height: size.height)
     }
 
     private func applyFrame(_ frame: NSRect, to panel: NSPanel, animated: Bool) {

@@ -11,6 +11,54 @@ import XCTest
 /// sizing math, status copy, and reset-credit error mapping directly testable.
 @MainActor
 final class MenuBarPopoverGeometryTests: XCTestCase {
+    // MARK: - Window with a hover open
+
+    func testWindowIsJustThePopoverWhileNoHoverIsOpen() {
+        let popover = NSSize(width: 390, height: 500)
+        let size = MenuBarPopoverGeometry.windowSize(
+            popover: popover,
+            hasDetail: false,
+            detailBottom: 900,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(size, popover)
+    }
+
+    func testOpenHoverWidensTheWindowOnTheLeftOnly() {
+        let size = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 300,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(size.width, 390 + MenuBarPopoverGeometry.detailExtension)
+        XCTAssertEqual(size.height, 500)
+    }
+
+    func testTallHoverGrowsTheWindowDownToTheScreenCeiling() {
+        let tall = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 650,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(tall.height, 650)
+
+        let clamped = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 2000,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(clamped.height, 760)
+    }
+
+    /// The hover column is narrower apart from the popover than the glass blend
+    /// distance, so it reads as one melted surface rather than two windows.
+    func testHoverColumnSitsCloserToThePopoverThanTheCardGap() {
+        XCTAssertLessThan(MenuBarPopoverGeometry.detailGap, MeterBarTheme.Spacing.md)
+    }
+
     func testMaximumHeightClampsToTheHardCapOnTallScreens() {
         XCTAssertEqual(MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: 2000), 760)
     }

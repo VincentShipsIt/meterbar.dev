@@ -14,6 +14,8 @@ struct DashboardTile<Content: View>: View {
   let maxHeight: CGFloat?
   let alignment: Alignment
   @ViewBuilder let content: Content
+  @Environment(\.meterBarTileSurface)
+  private var surface
 
   init(
     cornerRadius: CGFloat = MeterBarTheme.Radius.card,
@@ -32,10 +34,15 @@ struct DashboardTile<Content: View>: View {
   }
 
   var body: some View {
-    content
+    let framed = content
       .padding(padding.value)
       .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight, alignment: alignment)
-      .meterBarCardSurface(cornerRadius: cornerRadius)
+    switch surface {
+    case .content:
+      framed.meterBarCardSurface(cornerRadius: cornerRadius)
+    case .glass:
+      framed.meterBarGlassCard(cornerRadius: cornerRadius)
+    }
   }
 }
 
