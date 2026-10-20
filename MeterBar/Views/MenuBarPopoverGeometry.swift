@@ -24,8 +24,10 @@ enum MenuBarPopoverGeometry {
     static let detailWidth: CGFloat = 340
     /// Inset of the popover cards from the popover's own edges (`Spacing.md`).
     static let cardInset: CGFloat = 12
+    /// Space between neighbouring cards, in the popover and the hover alike.
+    static let cardGap: CGFloat = 6
     /// Visible space between the hover column and the popover cards.
-    static let detailGap: CGFloat = 6
+    static let detailGap: CGFloat = cardGap
     /// How far the window grows to the left while a hover is open. The column
     /// tucks into the popover's own card inset so the visible gap is `detailGap`.
     static let detailExtension: CGFloat = detailWidth + detailGap - cardInset
@@ -62,6 +64,13 @@ enum MenuBarPopoverGeometry {
             width: popover.width + detailExtension,
             height: min(max(popover.height, detailBottom), maximumHeight)
         )
+    }
+
+    /// Top of the hover column, from the window top: level with the card that
+    /// opened it, raised just enough to keep a tall column on screen, never
+    /// above the window top.
+    static func detailTop(sourceTop: CGFloat, detailHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
+        max(0, min(sourceTop, maximumHeight - detailHeight))
     }
 
     /// The size handed to the menu-bar window controller. Derived from the same

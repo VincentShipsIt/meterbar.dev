@@ -388,10 +388,11 @@ struct MenuBarProviderDetailContent: View {
     ViewThatFits(in: .vertical) {
       cardStack
 
-      ScrollView(showsIndicators: false) {
+      ScrollView {
         cardStack
+          .background(PopoverNativeScrollerHider())
       }
-      .scrollIndicators(.hidden)
+      .scrollIndicators(.never)
       .scrollContentBackground(.hidden)
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -400,7 +401,7 @@ struct MenuBarProviderDetailContent: View {
 
   private var cardStack: some View {
     let cards = orderedCards
-    return VStack(alignment: .leading, spacing: MeterBarTheme.Spacing.md) {
+    return VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
       ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
         HoverCardSurface(index: index, revealed: appeared && isPresented, reduceMotion: reduceMotion) {
           content(for: card)

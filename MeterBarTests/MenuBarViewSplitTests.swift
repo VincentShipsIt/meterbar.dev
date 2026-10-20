@@ -60,6 +60,14 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         XCTAssertEqual(gap, MenuBarPopoverGeometry.detailGap)
     }
 
+    /// The hover lines up with its card, and a tall hover for a low card moves
+    /// up just enough to stay whole instead of being cut at the bottom.
+    func testHoverColumnStaysLevelWithItsCardUnlessItWouldOverflow() {
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 120, detailHeight: 300, maximumHeight: 760), 120)
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 600, detailHeight: 300, maximumHeight: 760), 460)
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 600, detailHeight: 900, maximumHeight: 760), 0)
+    }
+
     func testMaximumHeightClampsToTheHardCapOnTallScreens() {
         XCTAssertEqual(MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: 2000), 760)
     }

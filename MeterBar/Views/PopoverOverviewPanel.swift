@@ -159,7 +159,7 @@ struct PopoverOverviewPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
             if showsRoutingLine {
                 PopoverRoutingLineView()
             }
@@ -179,7 +179,7 @@ struct PopoverOverviewPanel: View {
                     .transition(MeterBarTheme.Motion.popoverTile)
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: MenuBarPopoverGeometry.cardGap) {
                 ForEach(visibleSnapshots) { snapshot in
                     ProviderStatusCard(
                         snapshot: snapshot,

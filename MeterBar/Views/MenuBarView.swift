@@ -43,8 +43,8 @@ struct MenuBarView: View {
   @State private var detail: DetailPresentation?
   /// False while the open hover plays its exit, before `detail` is cleared.
   @State private var detailPresented = false
-  /// The open hover's bottom edge, from the window top.
-  @State private var detailBottom: CGFloat = 0
+  /// The open hover column's natural height.
+  @State private var detailHeight: CGFloat = 0
   @State private var sourceIsHovered = false
   @State private var detailIsHovered = false
   @State private var dismissTask: Task<Void, Never>?
@@ -100,9 +100,9 @@ struct MenuBarView: View {
     .onPreferenceChange(PopoverCardFramesPreferenceKey.self) { frames in
       cardFrameBox.frames = frames
     }
-    .onPreferenceChange(DetailBottomPreferenceKey.self) { bottom in
-      guard abs(bottom - detailBottom) > 1 else { return }
-      detailBottom = bottom
+    .onPreferenceChange(DetailHeightPreferenceKey.self) { height in
+      guard abs(height - detailHeight) > 1 else { return }
+      detailHeight = height
       notifyContentSize()
     }
   }
@@ -119,26 +119,35 @@ struct MenuBarView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
   }
 
+  /// The column takes its natural height, never the window's: proposed the
+  /// window height, it scrolled and cut its cards at the popover's bottom edge
+  /// instead of growing the window. It top-aligns with the card that opened it
+  /// and moves up only as far as it must to stay on screen.
   private func detailColumn(_ detail: DetailPresentation) -> some View {
     detail.make(detailPresented)
       .frame(width: MenuBarPopoverGeometry.detailWidth)
-      .frame(
-        maxHeight: max(
-          MenuBarPopoverGeometry.minimumScrollHeight,
-          maximumPopoverHeight - detail.topInset
-        ),
-        alignment: .top
-      )
+      .fixedSize(horizontal: false, vertical: true)
       .background(
         GeometryReader { proxy in
-          Color.clear.preference(
-            key: DetailBottomPreferenceKey.self,
-            value: detail.topInset + proxy.size.height
-          )
+          Color.clear.preference(key: DetailHeightPreferenceKey.self, value: proxy.size.height)
         }
       )
-      .padding(.top, detail.topInset)
+      .padding(.top, detailTop(for: detail))
       .onHover { setDetailHovered($0) }
+  }
+
+  private func detailTop(for detail: DetailPresentation) -> CGFloat {
+    MenuBarPopoverGeometry.detailTop(
+      sourceTop: detail.topInset,
+      detailHeight: detailHeight,
+      maximumHeight: maximumPopoverHeight
+    )
+  }
+
+  /// The open hover's bottom edge, from the window top.
+  private var detailBottom: CGFloat {
+    guard let detail else { return 0 }
+    return detailTop(for: detail) + detailHeight
   }
 
   /// The provider cards the popover draws.
@@ -174,7 +183,7 @@ struct MenuBarView: View {
     // system draw its soft scroll-edge fade where cards slide underneath, in
     // place of the hard rule the old header-plus-Divider stack drew.
     ScrollView {
-      VStack(spacing: MeterBarTheme.Spacing.md) {
+      VStack(spacing: MenuBarPopoverGeometry.cardGap) {
         PopoverOverviewPanel(
           snapshots: snapshots,
           openDashboard: openDashboard,
@@ -439,7 +448,7 @@ struct MenuBarView: View {
       try? await Task.sleep(nanoseconds: 300_000_000)
       guard !Task.isCancelled else { return }
       detail = nil
-      detailBottom = 0
+      detailHeight = 0
       notifyContentSize()
     }
   }
@@ -449,7 +458,7 @@ struct MenuBarView: View {
     removeTask?.cancel()
     detail = nil
     detailPresented = false
-    detailBottom = 0
+    detailHeight = 0
     sourceIsHovered = false
     detailIsHovered = false
     notifyContentSize()
@@ -467,7 +476,7 @@ private enum MenuBarOverlayIcons {
   static let dashboard = "rectangle.split.2x1"
 }
 
-private struct DetailBottomPreferenceKey: PreferenceKey {
+private struct DetailHeightPreferenceKey: PreferenceKey {
   static var defaultValue: CGFloat = 0
 
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
