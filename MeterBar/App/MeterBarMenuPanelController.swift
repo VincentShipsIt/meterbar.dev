@@ -186,7 +186,9 @@ final class MeterBarMenuPanelController {
         panel.isFloatingPanel = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // The window is transparent around free-standing glass cards: a system
+        // shadow would trace each card's silhouette as a hard dark outline.
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]

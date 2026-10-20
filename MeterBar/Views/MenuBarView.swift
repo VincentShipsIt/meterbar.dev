@@ -426,7 +426,7 @@ struct MenuBarView: View {
     guard let window else { return }
     window.isOpaque = false
     window.backgroundColor = .clear
-    window.hasShadow = true
+    window.hasShadow = false
   }
 }
 
