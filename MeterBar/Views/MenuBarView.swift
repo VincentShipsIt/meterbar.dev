@@ -55,6 +55,9 @@ struct MenuBarView: View {
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
   @State private var menuWindow: NSWindow?
+  @State private var scrollMetrics = PopoverScrollMetrics()
+  @State private var scrollIsActive = false
+  @State private var scrollIdleTask: Task<Void, Never>?
 
   init(onContentSizeChange: @escaping (NSSize) -> Void = { _ in }) {
     self.onContentSizeChange = onContentSizeChange
@@ -216,8 +219,29 @@ struct MenuBarView: View {
           )
         }
       )
+      .background(PopoverNativeScrollerHider())
     }
     .scrollIndicators(.hidden)
+    .onScrollGeometryChange(for: PopoverScrollMetrics.self) { geometry in
+      PopoverScrollMetrics(
+        offset: geometry.contentOffset.y + geometry.contentInsets.top,
+        content: geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
+        viewport: geometry.containerSize.height
+      )
+    } action: { oldValue, newValue in
+      scrollMetrics = newValue
+      if abs(oldValue.offset - newValue.offset) > 0.5 { flashScrollIndicator() }
+    }
+    .overlay(alignment: .topTrailing) {
+      PopoverScrollIndicator(metrics: scrollMetrics, isActive: scrollIsActive)
+        .padding(.top, MenuBarPopoverGeometry.chromeHeight + MeterBarTheme.Spacing.xs)
+        .padding(.bottom, MeterBarTheme.Spacing.xs)
+        .padding(.trailing, MeterBarTheme.Spacing.xs)
+        .animation(
+          MeterBarTheme.Motion.resolve(.smooth(duration: 0.25), reduceMotion: reduceMotion),
+          value: scrollIsActive
+        )
+    }
     .scrollContentBackground(.hidden)
     .safeAreaBar(edge: .top, spacing: 0) {
       popoverHeader
@@ -225,6 +249,16 @@ struct MenuBarView: View {
     }
     .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
     .frame(height: scrollHeight + MenuBarPopoverGeometry.chromeHeight)
+  }
+
+  private func flashScrollIndicator() {
+    scrollIsActive = true
+    scrollIdleTask?.cancel()
+    scrollIdleTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(900))
+      guard !Task.isCancelled else { return }
+      scrollIsActive = false
+    }
   }
 
   private var scrollHeight: CGFloat {
