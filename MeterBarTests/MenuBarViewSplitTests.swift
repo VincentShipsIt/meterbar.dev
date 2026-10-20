@@ -53,47 +53,11 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         XCTAssertEqual(clamped.height, 760)
     }
 
-    /// The hover's blend distance stays below every resting gap (between hover
-    /// cards, and between the column and the popover card), or the system
-    /// unions them into one outlined blob.
-    func testHoverBlendDistanceIsBelowEveryRestingGap() {
-        XCTAssertLessThan(MenuBarPopoverGeometry.blendDistance, MenuBarPopoverGeometry.detailGap)
-        XCTAssertLessThan(MenuBarPopoverGeometry.blendDistance, MeterBarTheme.Spacing.md)
-    }
-
     /// The column tucks into the popover's card inset: the visible gap between
-    /// the hover and the card that opened it is `detailGap`, not 18pt.
+    /// the hover and the popover cards is `detailGap`, not 18pt.
     func testHoverSitsOneGapFromThePopoverCards() {
-        let gap = MenuBarPopoverGeometry.liftedCardMinX - MenuBarPopoverGeometry.detailWidth
+        let gap = MenuBarPopoverGeometry.popoverCardMinX - MenuBarPopoverGeometry.detailWidth
         XCTAssertEqual(gap, MenuBarPopoverGeometry.detailGap)
-    }
-
-    /// The neck reaches into both the hover column and the lifted card, so all
-    /// three melt into one glass surface.
-    func testBridgeOverlapsTheColumnAndTheCard() {
-        let bridge = MenuBarPopoverGeometry.bridgeFrame(columnTop: 120)
-        XCTAssertLessThan(bridge.minX, MenuBarPopoverGeometry.detailWidth)
-        XCTAssertGreaterThan(bridge.maxX, MenuBarPopoverGeometry.liftedCardMinX)
-        XCTAssertEqual(bridge.minY, 120 + MenuBarPopoverGeometry.bridgeTopOffset)
-    }
-
-    func testLiftedCardMatchesThePopoverCard() {
-        let frame = MenuBarPopoverGeometry.liftedCardFrame(sourceMinY: 100, sourceHeight: 150, popoverHeight: 600)
-        XCTAssertEqual(frame, CGRect(x: MenuBarPopoverGeometry.liftedCardMinX, y: 100, width: 366, height: 150))
-    }
-
-    /// A card scrolled partly under the header bar is only lifted where it is
-    /// visible, and not at all once it has scrolled away.
-    func testLiftedCardIsClippedToTheScrollViewport() {
-        let chrome = MenuBarPopoverGeometry.chromeHeight
-        let underHeader = MenuBarPopoverGeometry.liftedCardFrame(sourceMinY: 10, sourceHeight: 100, popoverHeight: 600)
-        XCTAssertEqual(underHeader?.minY, chrome)
-        XCTAssertEqual(underHeader?.maxY, 110)
-
-        let belowFold = MenuBarPopoverGeometry.liftedCardFrame(sourceMinY: 550, sourceHeight: 100, popoverHeight: 600)
-        XCTAssertEqual(belowFold?.maxY, 600)
-
-        XCTAssertNil(MenuBarPopoverGeometry.liftedCardFrame(sourceMinY: -200, sourceHeight: 100, popoverHeight: 600))
     }
 
     func testMaximumHeightClampsToTheHardCapOnTallScreens() {

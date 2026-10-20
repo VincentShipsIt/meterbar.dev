@@ -197,6 +197,12 @@ final class MeterBarMenuPanelController {
                 self?.resize(to: size)
             }
         )
+        // The window's frame is driven only by `resize(to:)`, which keeps the
+        // top pinned under the menu bar. Left to size itself, the hosting
+        // controller grew the window from its bottom-left origin whenever a
+        // hover column came out taller than the popover, so the whole popover
+        // jumped up on hover.
+        hostingController.sizingOptions = []
         panel.contentViewController = hostingController
         // No shell clipping: the popover and its hover are free-standing glass
         // cards, and a corner mask on the window would shave the outer ones.

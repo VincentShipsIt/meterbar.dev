@@ -18,6 +18,47 @@ struct PopoverScrollMetrics: Equatable {
   }
 }
 
+/// The thumb's live state, kept out of `MenuBarView`.
+///
+/// Scroll geometry changes on every frame of a scroll. Held as `@State` on the
+/// popover it re-ran the whole popover body (every provider snapshot rebuilt,
+/// every card diffed) per frame. Observable, it is written by the popover but
+/// only read by the thumb, so only the thumb redraws.
+@MainActor
+@Observable
+final class PopoverScrollModel {
+  var metrics = PopoverScrollMetrics()
+  var isActive = false
+  @ObservationIgnored private var idleTask: Task<Void, Never>?
+
+  func update(from oldValue: PopoverScrollMetrics, to newValue: PopoverScrollMetrics) {
+    metrics = newValue
+    guard abs(oldValue.offset - newValue.offset) > 0.5 else { return }
+    if !isActive { isActive = true }
+    idleTask?.cancel()
+    idleTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .milliseconds(900))
+      guard !Task.isCancelled else { return }
+      self?.isActive = false
+    }
+  }
+}
+
+/// Reads `PopoverScrollModel` so its per-frame changes redraw only the thumb.
+struct PopoverScrollThumb: View {
+  let model: PopoverScrollModel
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
+  var body: some View {
+    PopoverScrollIndicator(metrics: model.metrics, isActive: model.isActive)
+      .animation(
+        MeterBarTheme.Motion.resolve(.smooth(duration: 0.25), reduceMotion: reduceMotion),
+        value: model.isActive
+      )
+  }
+}
+
 /// A slim, free-floating thumb in the gutter beside the cards.
 ///
 /// The popover has no shell to hang a scroller on, so the system's legacy bar

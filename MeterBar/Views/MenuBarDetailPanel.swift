@@ -383,11 +383,8 @@ struct MenuBarProviderDetailContent: View {
   }
 
   var body: some View {
-    // This column shares the popover window's glass container, so its cards
-    // blend with the popover cards as they slide in and settle apart once the
-    // gaps open, which is what makes the stack read as budding out of the card
-    // that opened it. A standalone hosting (tests) has no container and simply
-    // draws separate glass cards.
+    // Each card is its own glass surface. No container: morphing glass is
+    // costly and fused the cards into one outlined shape.
     ViewThatFits(in: .vertical) {
       cardStack
 
@@ -475,7 +472,7 @@ struct MenuBarProviderDetailContent: View {
 }
 
 /// A free-standing glass card of the hover. Its entrance, a short stagger of
-/// slide, scale and fade from the trailing edge (the side the popover is on),
+/// fade and short slide from the trailing edge (the side the popover is on),
 /// is driven by `revealed` and drops to an instant update under Reduce Motion.
 private struct HoverCardSurface<Content: View>: View {
   let index: Int
@@ -488,12 +485,13 @@ private struct HoverCardSurface<Content: View>: View {
       .padding(MeterBarTheme.CardPadding.popover.value)
       .frame(maxWidth: .infinity, alignment: .topLeading)
       .meterBarGlassCard()
-      .scaleEffect(revealed ? 1 : 0.72, anchor: .trailing)
-      .offset(x: revealed ? 0 : 36)
+      // Opacity and a short slide only: scaling glass re-renders its blur
+      // every frame, which is what made the hover stutter.
+      .offset(x: revealed ? 0 : 10)
       .opacity(revealed ? 1 : 0)
       .animation(
         MeterBarTheme.Motion.resolve(
-          .smooth(duration: 0.24).delay(Double(index) * 0.03),
+          .easeOut(duration: 0.14).delay(Double(index) * 0.015),
           reduceMotion: reduceMotion
         ),
         value: revealed

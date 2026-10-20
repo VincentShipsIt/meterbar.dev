@@ -29,16 +29,11 @@ struct PopoverOverviewPanel: View {
     /// One-line routing recommendation at the top. Off by default so previews
     /// and tests never read the shared routing files.
     let showsRoutingLine: Bool
-    /// The card whose glass the open hover has taken over, so the hover can
-    /// melt out of it. That card draws no surface of its own meanwhile.
-    let liftedCardID: String?
 
     @State private var setupReports: [ProviderReadiness] = []
     @StateObject private var onboarding = FirstRunOnboardingStore.shared
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
-    @Environment(\.meterBarTileSurface)
-    private var tileSurface
 
     // Explicit initializer: the private `@State`/`@StateObject` storage would lower
     // the synthesized memberwise initializer to file-private, so this keeps the
@@ -57,8 +52,7 @@ struct PopoverOverviewPanel: View {
         codexAccounts: [CodexAccount] = [.defaultAccount],
         grokAccounts: [GrokAccount] = [.defaultAccount],
         showsRecommendationHint: Bool = false,
-        showsRoutingLine: Bool = false,
-        liftedCardID: String? = nil
+        showsRoutingLine: Bool = false
     ) {
         self.snapshots = snapshots
         self.openDashboard = openDashboard
@@ -74,7 +68,6 @@ struct PopoverOverviewPanel: View {
         self.grokAccounts = grokAccounts
         self.showsRecommendationHint = showsRecommendationHint
         self.showsRoutingLine = showsRoutingLine
-        self.liftedCardID = liftedCardID
     }
 
     /// The enabled providers currently shown in the popover.
@@ -193,7 +186,6 @@ struct PopoverOverviewPanel: View {
                         onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
                         onSelect: { openProviderOverview(snapshot) }
                     )
-                    .environment(\.meterBarTileSurface, snapshot.id == liftedCardID ? .lifted : tileSurface)
                     .reportPopoverCardFrame(id: snapshot.id)
                     .transition(MeterBarTheme.Motion.popoverTile)
                 }
