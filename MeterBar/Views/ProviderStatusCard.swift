@@ -227,7 +227,7 @@ struct ProviderStatusCard: View {
                 )
             } else {
                 // Each window resets on its own schedule, so every row shows
-                // its own countdown. The popover card draws Session and Weekly
+                // its own countdown. The popover card draws quota windows
                 // as donuts; the bars, runway charts and seven-day sparkline
                 // live in the hover detail panel.
                 limitRows
@@ -245,8 +245,8 @@ struct ProviderStatusCard: View {
         }
     }
 
-    /// The popover (`.compact`) shows Session and Weekly as donuts and any other
-    /// window as a bar under them. The dashboard keeps a bar for every window.
+    /// The popover (`.compact`) shows every measured quota window as a donut and
+    /// any other window as a bar under them. The dashboard keeps a bar for every window.
     @ViewBuilder private var limitRows: some View {
         let donuts = limitDensity == .compact ? ProviderCardPresentation.donutLimits(for: snapshot) : []
         let bars = limitDensity == .compact ? ProviderCardPresentation.barLimits(for: snapshot) : snapshot.limits
