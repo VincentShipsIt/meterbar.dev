@@ -2,10 +2,6 @@ import AppKit
 import MeterBarShared
 import SwiftUI
 
-private final class CardFrameBox {
-  var frames: [String: CGRect] = [:]
-}
-
 /// The hover column that is open beside the popover. `make` builds the content
 /// for the current `isPresented`, so closing can play the cards' exit before the
 /// column is removed.
@@ -14,8 +10,9 @@ private struct DetailPresentation {
   /// Distance from the window top to the card that opened it, so the column
   /// top-aligns with that card.
   let topInset: CGFloat
-  /// Height of that card, so the glass bridge meets it at its middle.
-  let sourceHeight: CGFloat
+  /// True when the hover takes over the source card's glass and melts out of
+  /// it. Only provider cards are lifted; the header status dots are not cards.
+  let liftsSource: Bool
   let make: (_ isPresented: Bool) -> AnyView
 }
 
@@ -51,7 +48,9 @@ struct MenuBarView: View {
   @State private var detailIsHovered = false
   @State private var dismissTask: Task<Void, Never>?
   @State private var removeTask: Task<Void, Never>?
-  @State private var cardFrameBox = CardFrameBox()
+  /// Popover card frames, in window coordinates. State rather than a plain
+  /// box because the lifted card's glass follows its card while it scrolls.
+  @State private var cardFrames: [String: CGRect] = [:]
   @Environment(\.accessibilityReduceMotion)
   private var reduceMotion
   @State private var menuWindow: NSWindow?
@@ -66,10 +65,13 @@ struct MenuBarView: View {
   var body: some View {
     // The popover cards are separate glass surfaces with no container: inside
     // one, the system unions every card closer than the blend distance into a
-    // single outlined blob. Only the hover column blends, with its own bridge.
-    HStack(alignment: .top, spacing: MenuBarPopoverGeometry.detailGap) {
+    // single outlined blob. The open hover is the one container: it draws the
+    // hovered card's glass itself (that card draws none meanwhile), the hover
+    // cards and the neck between them, so they melt into one surface. It sits
+    // behind the popover so the card's own content stays on top of its glass.
+    ZStack(alignment: .topTrailing) {
       if let detail {
-        detailColumn(detail)
+        hoverLayer(detail)
       }
 
       mainColumn
@@ -102,7 +104,7 @@ struct MenuBarView: View {
       notifyContentSize(height: height)
     }
     .onPreferenceChange(PopoverCardFramesPreferenceKey.self) { frames in
-      cardFrameBox.frames = frames
+      cardFrames = frames
     }
     .onPreferenceChange(DetailBottomPreferenceKey.self) { bottom in
       guard abs(bottom - detailBottom) > 1 else { return }
@@ -111,16 +113,47 @@ struct MenuBarView: View {
     }
   }
 
-  private func detailColumn(_ detail: DetailPresentation) -> some View {
-    // Blend distance below the 12pt card gap: hover cards stay apart at rest
-    // and only melt together while they overlap on the way in, and the bridge
-    // melts into the card it overlaps.
-    GlassEffectContainer(spacing: MenuBarPopoverGeometry.detailGap) {
-      detail.make(detailPresented)
-        .overlay(alignment: .topTrailing) {
+  /// The hover's single glass container, laid out in window coordinates from
+  /// the window's leading edge (the layer is exactly as wide as the window with
+  /// a hover open, pinned trailing, so before the window grows the column sits
+  /// off screen rather than over the popover).
+  private func hoverLayer(_ detail: DetailPresentation) -> some View {
+    GlassEffectContainer(spacing: MenuBarPopoverGeometry.blendDistance) {
+      ZStack(alignment: .topLeading) {
+        if detail.liftsSource {
+          liftedCard(for: detail)
           detailBridge(for: detail)
         }
+        detailColumn(detail)
+      }
+      .frame(
+        width: MenuBarPopoverGeometry.detailExtension + MenuBarPopoverGeometry.width,
+        alignment: .topLeading
+      )
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+  }
+
+  /// The hovered card's glass, drawn here instead of by the card so the hover
+  /// cards and the neck can melt into it.
+  @ViewBuilder
+  private func liftedCard(for detail: DetailPresentation) -> some View {
+    if let source = cardFrames[detail.id],
+       let frame = MenuBarPopoverGeometry.liftedCardFrame(
+         sourceMinY: source.minY,
+         sourceHeight: source.height,
+         popoverHeight: popoverHeight
+       ) {
+      Color.clear
+        .frame(width: frame.width, height: frame.height)
+        .meterBarGlassCard()
+        .offset(x: frame.minX, y: frame.minY)
+        .allowsHitTesting(false)
+    }
+  }
+
+  private func detailColumn(_ detail: DetailPresentation) -> some View {
+    detail.make(detailPresented)
       .frame(width: MenuBarPopoverGeometry.detailWidth)
       .frame(
         maxHeight: max(
@@ -193,7 +226,8 @@ struct MenuBarView: View {
           codexAccounts: codexAccountStore.accounts,
           grokAccounts: grokAccountStore.accounts,
           showsRecommendationHint: menuBarDisplayPreferences.showsRecommendationHint,
-          showsRoutingLine: true
+          showsRoutingLine: true,
+          liftedCardID: detail?.liftsSource == true ? detail?.id : nil
         )
 
         DashboardTile(padding: .popover) {
@@ -371,7 +405,7 @@ struct MenuBarView: View {
     )
     let isRefreshing = costTracker.isRefreshingMissingDays || costTracker.isScanning
     let scanDate = costTracker.lastScanDate
-    presentDetail(id: snapshot.id) { isPresented in
+    presentDetail(id: snapshot.id, liftsSource: true) { isPresented in
       AnyView(
         MenuBarProviderDetailContent(
           snapshot: snapshot,
@@ -410,23 +444,21 @@ struct MenuBarView: View {
     openStatusDetail()
   }
 
-  /// A short glass neck from the hover column across the gap to the card that
-  /// opened it, so the hover reads as grown out of that card.
+  /// A short glass neck from the hover's header card across the gap into the
+  /// card that opened it. It overlaps both, so inside the hover's container the
+  /// three read as one surface. It grows out of the card as the hover opens.
   private func detailBridge(for detail: DetailPresentation) -> some View {
-    let height = min(MenuBarPopoverGeometry.bridgeHeight, max(0, detail.sourceHeight - 24))
+    let frame = MenuBarPopoverGeometry.bridgeFrame(columnTop: detail.topInset)
     return Color.clear
-      .frame(width: MenuBarPopoverGeometry.bridgeWidth, height: height)
-      .meterBarGlassCard(cornerRadius: height / 2)
-      .scaleEffect(x: detailPresented ? 1 : 0.2, y: 1, anchor: .trailing)
+      .frame(width: frame.width, height: frame.height)
+      .meterBarGlassCard(cornerRadius: frame.height / 2)
+      .scaleEffect(x: detailPresented ? 1 : 0.3, y: detailPresented ? 1 : 0.6, anchor: .trailing)
       .opacity(detailPresented ? 1 : 0)
-      .offset(
-        x: MenuBarPopoverGeometry.detailGap,
-        y: max(0, detail.sourceHeight / 2 - height / 2)
-      )
       .animation(
         MeterBarTheme.Motion.resolve(.smooth(duration: 0.2), reduceMotion: reduceMotion),
         value: detailPresented
       )
+      .offset(x: frame.minX, y: frame.minY)
       .allowsHitTesting(false)
   }
 
@@ -448,7 +480,7 @@ struct MenuBarView: View {
 
   /// Presents (or toggles off) the hover column, top-aligned with the popover
   /// card that opened it.
-  private func presentDetail(id: String, make: @escaping (Bool) -> AnyView) {
+  private func presentDetail(id: String, liftsSource: Bool = false, make: @escaping (Bool) -> AnyView) {
     if detail?.id == id, detailPresented {
       closeDetail()
       return
@@ -456,11 +488,11 @@ struct MenuBarView: View {
 
     removeTask?.cancel()
     removeTask = nil
-    let source = cardFrameBox.frames[id]
+    let source = cardFrames[id]
     detail = DetailPresentation(
       id: id,
       topInset: max(0, source?.minY ?? 0),
-      sourceHeight: source?.height ?? 0,
+      liftsSource: liftsSource,
       make: make
     )
     detailPresented = true

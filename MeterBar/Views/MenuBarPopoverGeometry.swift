@@ -22,14 +22,26 @@ enum MenuBarPopoverGeometry {
     static let minimumScrollHeight: CGFloat = 80
     /// Width of the hover column that opens to the left of the popover.
     static let detailWidth: CGFloat = 340
-    /// Space between the hover column and the popover, bridged by a glass neck.
+    /// Inset of the popover cards from the popover's own edges (`Spacing.md`).
+    static let cardInset: CGFloat = 12
+    /// Visible space between the hover column and the popover card that opened
+    /// it, bridged by a glass neck.
     static let detailGap: CGFloat = 6
-    /// The glass neck joining the hover column to the card that opened it: it
-    /// overlaps the column by `bridgeWidth - detailGap` and touches the card.
-    static let bridgeWidth: CGFloat = 26
+    /// Glass shapes in the hover's container closer than this melt into one.
+    /// Below every resting gap, so cards only fuse where they touch: the bridge
+    /// with both ends, and the hover cards with the source card on the way in.
+    static let blendDistance: CGFloat = 4
+    /// The glass neck reaches this far into the hover column and into the card.
+    static let bridgeOverlap: CGFloat = 10
     static let bridgeHeight: CGFloat = 36
-    /// How far the window grows to the left while a hover is open.
-    static let detailExtension: CGFloat = detailWidth + detailGap
+    /// Where the bridge sits below the column top: level with the header card.
+    static let bridgeTopOffset: CGFloat = 8
+    /// How far the window grows to the left while a hover is open. The column
+    /// tucks into the popover's own card inset so the visible gap is `detailGap`.
+    static let detailExtension: CGFloat = detailWidth + detailGap - cardInset
+    /// Leading edge of the popover cards, in window coordinates, while a hover
+    /// is open.
+    static let liftedCardMinX: CGFloat = detailExtension + cardInset
     /// Used when neither the popover's own screen nor the main screen is known.
     static let fallbackVisibleScreenHeight: CGFloat = 720
 
@@ -60,6 +72,30 @@ enum MenuBarPopoverGeometry {
             width: popover.width + detailExtension,
             height: min(max(popover.height, detailBottom), maximumHeight)
         )
+    }
+
+    /// The glass neck from the hover column to the card that opened it, in
+    /// window coordinates. It overlaps both by `bridgeOverlap` and sits level
+    /// with the hover's header card, `columnTop` being the column's top edge.
+    static func bridgeFrame(columnTop: CGFloat) -> CGRect {
+        let minX = detailWidth - bridgeOverlap
+        let maxX = liftedCardMinX + bridgeOverlap
+        return CGRect(x: minX, y: columnTop + bridgeTopOffset, width: maxX - minX, height: bridgeHeight)
+    }
+
+    /// The part of the source card's glass the hover draws, in window
+    /// coordinates: the card's vertical extent clipped to the scroll viewport,
+    /// so a card scrolled under the header bar is not drawn over it. `nil` once
+    /// the card has scrolled out of sight.
+    static func liftedCardFrame(
+        sourceMinY: CGFloat,
+        sourceHeight: CGFloat,
+        popoverHeight: CGFloat
+    ) -> CGRect? {
+        let top = max(sourceMinY, chromeHeight)
+        let bottom = min(sourceMinY + sourceHeight, popoverHeight)
+        guard bottom - top >= 1 else { return nil }
+        return CGRect(x: liftedCardMinX, y: top, width: width - cardInset * 2, height: bottom - top)
     }
 
     /// The size handed to the menu-bar window controller. Derived from the same

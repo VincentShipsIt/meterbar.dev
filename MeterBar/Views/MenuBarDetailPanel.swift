@@ -319,6 +319,9 @@ struct MenuBarProviderDetailContent: View {
   /// the sections separate cleanly and no card nests inside another surface.
   enum DetailCard: Equatable {
     case header
+    /// The provider's failing and warning readiness checks, in full, with the
+    /// way to fix each. The popover card only says "Action needed".
+    case issues
     /// A limit window. `showsLegend` is true on exactly one runway card, the
     /// last, so the three-line key appears once under the final chart.
     case limit(id: String, isRunway: Bool, showsLegend: Bool)
@@ -335,11 +338,14 @@ struct MenuBarProviderDetailContent: View {
     hasExhaustedLimit: Bool,
     hasBadges: Bool,
     showsDailyUsage: Bool,
+    hasIssues: Bool = false,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = [.header]
+    if hasIssues { cards.append(.issues) }
     if limits.isEmpty {
-      cards.append(.empty)
+      // With issues listed, they already say why there is no data.
+      if !hasIssues { cards.append(.empty) }
     } else if hasExhaustedLimit {
       cards.append(.blockingReset)
     } else {
@@ -371,7 +377,8 @@ struct MenuBarProviderDetailContent: View {
       limits: detailLimits,
       hasExhaustedLimit: snapshot.hasExhaustedLimit,
       hasBadges: badges.hasContent,
-      showsDailyUsage: showsDailyUsage
+      showsDailyUsage: showsDailyUsage,
+      hasIssues: !snapshot.issues.isEmpty
     )
   }
 
@@ -411,6 +418,17 @@ struct MenuBarProviderDetailContent: View {
     switch card {
     case .header:
       ProviderCardHeader(snapshot: snapshot)
+    case .issues:
+      VStack(alignment: .leading, spacing: 9) {
+        // Two reports can share a check id, so rows are keyed by position.
+        ForEach(Array(snapshot.issues.enumerated()), id: \.offset) { _, check in
+          ReadinessCheckRow(
+            check: check,
+            compact: true,
+            recoveryAction: { UsageDashboardWindowController.shared.showSettings(.providers) }
+          )
+        }
+      }
     case .limit(let id, let isRunway, let showsLegend):
       if let limit = detailLimits.first(where: { $0.id == id }) {
         VStack(alignment: .leading, spacing: 10) {

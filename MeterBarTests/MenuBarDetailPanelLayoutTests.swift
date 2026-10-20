@@ -440,15 +440,30 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         _ limits: [SnapshotLimit],
         exhausted: Bool = false,
         badges: Bool = false,
-        dailyUsage: Bool = false
+        dailyUsage: Bool = false,
+        issues: Bool = false
     ) -> [MenuBarProviderDetailContent.DetailCard] {
         MenuBarProviderDetailContent.cards(
             limits: limits,
             hasExhaustedLimit: exhausted,
             hasBadges: badges,
             showsDailyUsage: dailyUsage,
+            hasIssues: issues,
             now: rowsNow
         )
+    }
+
+    /// Errors read first, right under the header, before any numbers.
+    func testIssuesCardFollowsTheHeader() {
+        let result = cards([rowLimit("session", kind: .session)], issues: true)
+        XCTAssertEqual(Array(result.prefix(2)), [.header, .issues])
+    }
+
+    /// A provider with no data and issues shows the issues, not a vague
+    /// "Waiting for refresh" card under them.
+    func testIssuesReplaceTheEmptyCard() {
+        XCTAssertEqual(cards([], issues: true), [.header, .issues])
+        XCTAssertEqual(cards([]), [.header, .empty])
     }
 
     /// Every block is its own card, header first, the week last.

@@ -42,6 +42,8 @@ struct DashboardTile<Content: View>: View {
       framed.meterBarCardSurface(cornerRadius: cornerRadius)
     case .glass:
       framed.meterBarGlassCard(cornerRadius: cornerRadius)
+    case .lifted:
+      framed
     }
   }
 }

@@ -466,6 +466,9 @@ extension NSPanel {
 enum MeterBarTileSurface {
   case content
   case glass
+  /// No surface of its own: an open hover draws this card's glass in its own
+  /// container so the hover can melt out of it.
+  case lifted
 }
 
 private struct MeterBarTileSurfaceKey: EnvironmentKey {
