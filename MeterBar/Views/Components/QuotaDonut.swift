@@ -4,9 +4,10 @@ import SwiftUI
 /// Display rules for one quota window drawn as a donut, with no SwiftUI
 /// attached so each rule is directly assertable.
 ///
-/// Only a Session or Weekly window that reports a measured percent qualifies.
-/// Credits, estimated totals, currency windows and model or pool windows have
-/// nothing a ring can honestly show, so they stay bars.
+/// Any window that reports a measured percent qualifies: Session, Weekly and
+/// the model or pool windows (a Fable or Sonnet limit). Credits, estimated
+/// totals and currency windows have nothing a ring can honestly show, so they
+/// stay bars.
 struct QuotaDonutContent: Equatable {
     enum Tone: Equatable {
         case healthy
@@ -21,8 +22,7 @@ struct QuotaDonutContent: Equatable {
 
     init?(limit: SnapshotLimit) {
         let usage = limit.usageLimit
-        guard limit.kind == .session || limit.kind == .weekly,
-              limit.valueStyle == .quota,
+        guard limit.valueStyle == .quota,
               usage.reading == .measured,
               !usage.isEstimated,
               usage.total > 0
@@ -42,8 +42,7 @@ struct QuotaDonutContent: Equatable {
     }
 }
 
-/// A Session or Weekly window as a ring with its title and reset countdown
-/// beside it. The popover shows this; the hover panel behind it has the bar,
+/// A quota window as a ring with its title and reset countdown beside it. The popover shows this; the hover panel behind it has the bar,
 /// the runway chart and the week of usage.
 struct QuotaDonut: View {
     static let diameter: CGFloat = 46
@@ -120,14 +119,20 @@ struct QuotaDonut: View {
     }
 }
 
-/// The popover card's Session and Weekly donuts, side by side.
+/// The popover card's donuts, two to a row so a card with Session, Weekly and a
+/// model window wraps instead of squeezing the labels.
 struct QuotaDonutRow: View {
     let limits: [SnapshotLimit]
     let accentColor: Color
     var resetTimeFormat: ResetTimeFormat = .countdown
 
+    private let columns = [
+        GridItem(.flexible(), spacing: 10, alignment: .leading),
+        GridItem(.flexible(), spacing: 10, alignment: .leading)
+    ]
+
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
             ForEach(limits) { limit in
                 QuotaDonut(limit: limit, accentColor: accentColor, resetTimeFormat: resetTimeFormat)
                     .frame(maxWidth: .infinity, alignment: .leading)

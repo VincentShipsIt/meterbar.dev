@@ -79,8 +79,30 @@ struct PopoverOverviewPanel: View {
     /// *warning* must not keep "Finish setup" pinned open forever. The section
     /// collapses (renders nothing) once no enabled provider has a real setup gap.
     private var providersNeedingSetup: [ProviderReadiness] {
-        ProviderReadiness.setupChecklistReports(from: setupReports)
-            .filter { enabledProviders.contains($0.provider) }
+        Self.checklistReports(from: setupReports, snapshots: snapshots)
+    }
+
+    /// The checklist rows for the enabled providers. Cursor is a second source
+    /// of the xAI subscription, so while an xAI card already shows live usage a
+    /// locked or unreadable Cursor database is not a setup gap: it would name
+    /// xAI twice, once as "Action needed" and once as a working card. Settings
+    /// and Diagnostics still list the Cursor source.
+    static func checklistReports(
+        from reports: [ProviderReadiness],
+        snapshots: [ProviderSnapshot]
+    ) -> [ProviderReadiness] {
+        let enabled = Set(snapshots.map(\.service))
+        let xaiHasUsage = snapshots.contains { $0.service == .xai && $0.hasMetrics }
+        return ProviderReadiness.setupChecklistReports(from: reports)
+            .filter { enabled.contains($0.provider) }
+            .filter { !(xaiHasUsage && $0.identity == .cursorSubscription) }
+    }
+
+    /// What each card currently says about itself. A refresh that changes it
+    /// (Muse Code connected in Settings, a provider recovering) must re-run the
+    /// readiness checks, or the checklist keeps reporting the old failure.
+    static func cardStateKey(_ snapshots: [ProviderSnapshot]) -> [String] {
+        snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)" }
     }
 
     /// The cards the stack draws. A provider the setup checklist already names
@@ -129,6 +151,7 @@ struct PopoverOverviewPanel: View {
         let claudeMetricFreshness: [Bool]
         let enabledCodexAccountIDs: [UUID]
         let enabledGrokAccountIDs: [UUID]
+        let cardStates: [String]
     }
 
     private var structuralKey: StructuralKey {
@@ -151,7 +174,8 @@ struct PopoverOverviewPanel: View {
                 ProviderReadinessInspector.hasRecentClaudeUsageFetch(metrics: $0, now: now)
             },
             enabledCodexAccountIDs: codexAccounts.filter(\.isEnabled).map(\.id),
-            enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id)
+            enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id),
+            cardStates: Self.cardStateKey(snapshots)
         )
     }
 
