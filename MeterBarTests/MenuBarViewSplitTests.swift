@@ -53,10 +53,16 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         XCTAssertEqual(clamped.height, 760)
     }
 
-    /// The hover column is narrower apart from the popover than the glass blend
-    /// distance, so it reads as one melted surface rather than two windows.
-    func testHoverColumnSitsCloserToThePopoverThanTheCardGap() {
+    /// The hover's glass blend distance (the column gap) stays below the gap
+    /// between its cards, or the system unions them into one outlined blob.
+    func testHoverBlendDistanceIsBelowTheCardGap() {
         XCTAssertLessThan(MenuBarPopoverGeometry.detailGap, MeterBarTheme.Spacing.md)
+    }
+
+    /// The bridge crosses the gap and overlaps the column, so it melts into the
+    /// hover card and touches the popover card.
+    func testBridgeSpansTheGapAndOverlapsTheColumn() {
+        XCTAssertGreaterThan(MenuBarPopoverGeometry.bridgeWidth, MenuBarPopoverGeometry.detailGap * 2)
     }
 
     func testMaximumHeightClampsToTheHardCapOnTallScreens() {

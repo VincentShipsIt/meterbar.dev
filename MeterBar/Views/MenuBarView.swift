@@ -14,6 +14,8 @@ private struct DetailPresentation {
   /// Distance from the window top to the card that opened it, so the column
   /// top-aligns with that card.
   let topInset: CGFloat
+  /// Height of that card, so the glass bridge meets it at its middle.
+  let sourceHeight: CGFloat
   let make: (_ isPresented: Bool) -> AnyView
 }
 
@@ -50,6 +52,8 @@ struct MenuBarView: View {
   @State private var dismissTask: Task<Void, Never>?
   @State private var removeTask: Task<Void, Never>?
   @State private var cardFrameBox = CardFrameBox()
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
   @State private var menuWindow: NSWindow?
 
   init(onContentSizeChange: @escaping (NSSize) -> Void = { _ in }) {
@@ -57,19 +61,17 @@ struct MenuBarView: View {
   }
 
   var body: some View {
-    // One window, one glass container: the hover column and the popover cards
-    // are neighbours, so the glass blends where they come close and the hover
-    // cards visibly bud out of the card that opened them.
-    GlassEffectContainer(spacing: MeterBarTheme.Spacing.sm + 2) {
-      HStack(alignment: .top, spacing: MenuBarPopoverGeometry.detailGap) {
-        if let detail {
-          detailColumn(detail)
-        }
-
-        mainColumn
-          .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
-          .environment(\.meterBarTileSurface, .glass)
+    // The popover cards are separate glass surfaces with no container: inside
+    // one, the system unions every card closer than the blend distance into a
+    // single outlined blob. Only the hover column blends, with its own bridge.
+    HStack(alignment: .top, spacing: MenuBarPopoverGeometry.detailGap) {
+      if let detail {
+        detailColumn(detail)
       }
+
+      mainColumn
+        .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
+        .environment(\.meterBarTileSurface, .glass)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     .background(
@@ -107,7 +109,15 @@ struct MenuBarView: View {
   }
 
   private func detailColumn(_ detail: DetailPresentation) -> some View {
-    detail.make(detailPresented)
+    // Blend distance below the 12pt card gap: hover cards stay apart at rest
+    // and only melt together while they overlap on the way in, and the bridge
+    // melts into the card it overlaps.
+    GlassEffectContainer(spacing: MenuBarPopoverGeometry.detailGap) {
+      detail.make(detailPresented)
+        .overlay(alignment: .topTrailing) {
+          detailBridge(for: detail)
+        }
+    }
       .frame(width: MenuBarPopoverGeometry.detailWidth)
       .frame(
         maxHeight: max(
@@ -213,7 +223,7 @@ struct MenuBarView: View {
       popoverHeader
         .frame(height: MenuBarPopoverGeometry.chromeHeight)
     }
-    .scrollEdgeEffectStyle(.soft, for: .top)
+    .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
     .frame(height: scrollHeight + MenuBarPopoverGeometry.chromeHeight)
   }
 
@@ -366,6 +376,26 @@ struct MenuBarView: View {
     openStatusDetail()
   }
 
+  /// A short glass neck from the hover column across the gap to the card that
+  /// opened it, so the hover reads as grown out of that card.
+  private func detailBridge(for detail: DetailPresentation) -> some View {
+    let height = min(MenuBarPopoverGeometry.bridgeHeight, max(0, detail.sourceHeight - 24))
+    return Color.clear
+      .frame(width: MenuBarPopoverGeometry.bridgeWidth, height: height)
+      .meterBarGlassCard(cornerRadius: height / 2)
+      .scaleEffect(x: detailPresented ? 1 : 0.2, y: 1, anchor: .trailing)
+      .opacity(detailPresented ? 1 : 0)
+      .offset(
+        x: MenuBarPopoverGeometry.detailGap,
+        y: max(0, detail.sourceHeight / 2 - height / 2)
+      )
+      .animation(
+        MeterBarTheme.Motion.resolve(.smooth(duration: 0.2), reduceMotion: reduceMotion),
+        value: detailPresented
+      )
+      .allowsHitTesting(false)
+  }
+
   private func setDetailHovered(_ isHovered: Bool) {
     detailIsHovered = isHovered
     reconcileDetailDismissal()
@@ -392,8 +422,13 @@ struct MenuBarView: View {
 
     removeTask?.cancel()
     removeTask = nil
-    let inset = max(0, cardFrameBox.frames[id]?.minY ?? 0)
-    detail = DetailPresentation(id: id, topInset: inset, make: make)
+    let source = cardFrameBox.frames[id]
+    detail = DetailPresentation(
+      id: id,
+      topInset: max(0, source?.minY ?? 0),
+      sourceHeight: source?.height ?? 0,
+      make: make
+    )
     detailPresented = true
     notifyContentSize()
   }

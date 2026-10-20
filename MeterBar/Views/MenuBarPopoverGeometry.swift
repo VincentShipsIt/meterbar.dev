@@ -22,9 +22,12 @@ enum MenuBarPopoverGeometry {
     static let minimumScrollHeight: CGFloat = 80
     /// Width of the hover column that opens to the left of the popover.
     static let detailWidth: CGFloat = 340
-    /// Space between the hover column and the popover. Smaller than the glass
-    /// container's blend distance, so the two read as one melted surface.
+    /// Space between the hover column and the popover, bridged by a glass neck.
     static let detailGap: CGFloat = 6
+    /// The glass neck joining the hover column to the card that opened it: it
+    /// overlaps the column by `bridgeWidth - detailGap` and touches the card.
+    static let bridgeWidth: CGFloat = 26
+    static let bridgeHeight: CGFloat = 36
     /// How far the window grows to the left while a hover is open.
     static let detailExtension: CGFloat = detailWidth + detailGap
     /// Used when neither the popover's own screen nor the main screen is known.
