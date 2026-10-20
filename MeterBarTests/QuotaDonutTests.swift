@@ -200,8 +200,15 @@ final class QuotaDonutTests: XCTestCase {
 
     private func account(_ id: String, accountID: UUID?) -> ProviderSnapshot {
         ProviderSnapshot(
-            id: id, title: id, service: .codexCli, updatedAt: nil, limits: [],
-            emptyDetail: "", extraUsage: nil, resetCreditsAvailable: nil, accountID: accountID
+            id: id,
+            title: id,
+            service: .codexCli,
+            updatedAt: nil,
+            limits: [],
+            emptyDetail: "",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: accountID
         )
     }
 }
