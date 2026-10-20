@@ -3,6 +3,22 @@ import XCTest
 @testable import MeterBar
 
 final class PopoverScrollIndicatorTests: XCTestCase {
+    @MainActor
+    func testIdleLayoutChangesDoNotRevealTheScrollThumb() {
+        let model = PopoverScrollModel()
+        model.update(PopoverScrollMetrics(offset: 20, content: 800, viewport: 400))
+        model.update(PopoverScrollMetrics(offset: 36, content: 800, viewport: 400))
+        XCTAssertFalse(model.isActive)
+    }
+
+    @MainActor
+    func testActualScrollingRevealsTheThumb() {
+        let model = PopoverScrollModel()
+        model.setScrolling(true)
+        model.update(PopoverScrollMetrics(offset: 36, content: 800, viewport: 400))
+        XCTAssertTrue(model.isActive)
+    }
+
     func testShortContentHasNoThumb() {
         let metrics = PopoverScrollMetrics(offset: 0, content: 300, viewport: 400)
         XCTAssertFalse(metrics.isScrollable)

@@ -2,7 +2,7 @@ import MeterBarShared
 import XCTest
 @testable import MeterBar
 
-/// The popover card shows Session and Weekly as donuts. The pure
+/// The popover card shows every measured quota window as a donut. The pure
 /// `QuotaDonutContent` carries which limits qualify, how full the ring is, and
 /// which tone it takes, so every rule is asserted without hosting a view.
 final class QuotaDonutTests: XCTestCase {
@@ -38,9 +38,11 @@ final class QuotaDonutTests: XCTestCase {
         XCTAssertNotNil(QuotaDonutContent(limit: limit(.weekly, used: 55)))
     }
 
-    func testModelAndPoolWindowsStayBars() {
-        XCTAssertNil(QuotaDonutContent(limit: limit(.codeReview, used: 14)))
-        XCTAssertNil(QuotaDonutContent(limit: limit(.additional, used: 14)))
+    /// A Fable or Sonnet window is a quota like any other, so it is a ring
+    /// too. The popover has no progress bars for measured windows.
+    func testModelAndPoolWindowsGetADonutToo() {
+        XCTAssertNotNil(QuotaDonutContent(limit: limit(.codeReview, used: 14)))
+        XCTAssertNotNil(QuotaDonutContent(limit: limit(.additional, used: 14)))
     }
 
     func testCreditsEstimatesAndCurrencyStayBars() {
@@ -93,7 +95,7 @@ final class QuotaDonutTests: XCTestCase {
         )
     }
 
-    func testCardSplitsDonutsFromBarsInTheirOwnOrder() {
+    func testCardDrawsEveryMeasuredWindowAsADonutInOrder() {
         let card = snapshot([
             limit(.session, used: 14),
             limit(.weekly, used: 55),
@@ -101,15 +103,22 @@ final class QuotaDonutTests: XCTestCase {
             limit(.additional, used: 10)
         ])
 
-        XCTAssertEqual(ProviderCardPresentation.donutLimits(for: card).map(\.id), ["session", "weekly"])
-        XCTAssertEqual(ProviderCardPresentation.barLimits(for: card).map(\.id), ["codeReview", "additional"])
+        XCTAssertEqual(
+            ProviderCardPresentation.donutLimits(for: card).map(\.id),
+            ["session", "weekly", "codeReview", "additional"]
+        )
+        XCTAssertTrue(ProviderCardPresentation.barLimits(for: card).isEmpty)
     }
 
-    func testProviderWithOnlyPoolsKeepsAllBars() {
-        let card = snapshot([limit(.additional, used: 10)])
+    func testOnlyWindowsARingCannotShowStayBars() {
+        let card = snapshot([
+            limit(.weekly, used: 55),
+            limit(.additional, used: 5, reading: .remainder),
+            limit(.additional, used: 5, isEstimated: true)
+        ])
 
-        XCTAssertTrue(ProviderCardPresentation.donutLimits(for: card).isEmpty)
-        XCTAssertEqual(ProviderCardPresentation.barLimits(for: card).count, 1)
+        XCTAssertEqual(ProviderCardPresentation.donutLimits(for: card).count, 1)
+        XCTAssertEqual(ProviderCardPresentation.barLimits(for: card).count, 2)
     }
 
     // MARK: - Readiness issues ride on the cards
@@ -209,6 +218,65 @@ final class QuotaDonutTests: XCTestCase {
             extraUsage: nil,
             resetCreditsAvailable: nil,
             accountID: accountID
+        )
+    }
+
+    // MARK: - Checklist freshness and the Cursor source
+
+    private func cursorReport(_ probe: CursorDatabaseProbe) -> ProviderReadiness {
+        ProviderReadinessEvaluator.cursor(CursorReadinessInput(isInstalled: true, database: probe))
+    }
+
+    private func xaiCard(limits: [SnapshotLimit]) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: "xai",
+            title: "shipshitdev",
+            service: .xai,
+            updatedAt: Date(),
+            limits: limits,
+            emptyDetail: "",
+            extraUsage: nil,
+            resetCreditsAvailable: nil,
+            accountID: nil
+        )
+    }
+
+    func testCursorFailureStaysOnTheSingleXAICardWhenUsageExists() {
+        let cards = PopoverOverviewPanel.attachingIssues(
+            to: [xaiCard(limits: [limit(.weekly, used: 100)])],
+            from: [cursorReport(.unreadable)]
+        )
+
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertFalse(cards[0].issues.isEmpty)
+    }
+
+    func testCursorFailureStaysOnTheSingleXAICardWithoutUsage() {
+        let cards = PopoverOverviewPanel.attachingIssues(
+            to: [offline(.xai, title: "xAI")],
+            from: [cursorReport(.unreadable)]
+        )
+
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertFalse(cards[0].issues.isEmpty)
+    }
+
+    func testCardStateKeyChangesWhenACardStartsSayingSomethingElse() {
+        let before = offline(.museCode, title: "Muse")
+        let after = ProviderSnapshotBuilder.snapshot(
+            title: "Muse",
+            service: .museCode,
+            metrics: nil,
+            emptyDetail: "Window idle, usage not reported"
+        )
+
+        XCTAssertNotEqual(
+            PopoverOverviewPanel.cardStateKey([before]),
+            PopoverOverviewPanel.cardStateKey([after])
+        )
+        XCTAssertEqual(
+            PopoverOverviewPanel.cardStateKey([before]),
+            PopoverOverviewPanel.cardStateKey([before])
         )
     }
 }

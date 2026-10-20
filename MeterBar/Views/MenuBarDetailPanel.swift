@@ -267,7 +267,7 @@ struct MenuBarProviderDetailContent: View {
 
   /// Distinguishes the sparkline's cost-scan freshness from the header's
   /// quota-poll freshness. Exposed (not private) so it can be asserted
-  /// directly against the wiring, matching `headerContent`.
+  /// directly against the cost-scan wiring.
   var costScanFreshnessNote: CostScanFreshnessNote {
     CostScanFreshnessNote(quotaPollUpdatedAt: snapshot.updatedAt, costScanDate: costScanDate)
   }
@@ -306,19 +306,12 @@ struct MenuBarProviderDetailContent: View {
     rows.contains { $0.isRunway }
   }
 
-  /// The identity row this panel shows, exposed so it can be asserted equal to
-  /// the card's.
-  var headerContent: ProviderCardHeader.Content {
-    ProviderCardHeader.Content(snapshot: snapshot)
-  }
-
   /// One free-standing card of the hover, in reading order.
   ///
   /// The hover used to be a single glass shell with the header, every window and
   /// the weekly strip drawn flat inside it. Each block is now its own card so
   /// the sections separate cleanly and no card nests inside another surface.
   enum DetailCard: Equatable {
-    case header
     /// The provider's failing and warning readiness checks, in full, with the
     /// way to fix each. The popover card only says "Action needed".
     case issues
@@ -341,7 +334,7 @@ struct MenuBarProviderDetailContent: View {
     hasIssues: Bool = false,
     now: Date = Date()
   ) -> [DetailCard] {
-    var cards: [DetailCard] = [.header]
+    var cards: [DetailCard] = []
     if hasIssues { cards.append(.issues) }
     if limits.isEmpty {
       // With issues listed, they already say why there is no data.
@@ -390,7 +383,6 @@ struct MenuBarProviderDetailContent: View {
 
       ScrollView {
         cardStack
-          .background(PopoverNativeScrollerHider())
       }
       .scrollIndicators(.never)
       .scrollContentBackground(.hidden)
@@ -414,8 +406,6 @@ struct MenuBarProviderDetailContent: View {
   @ViewBuilder
   private func content(for card: DetailCard) -> some View {
     switch card {
-    case .header:
-      ProviderCardHeader(snapshot: snapshot)
     case .issues:
       VStack(alignment: .leading, spacing: 9) {
         // Two reports can share a check id, so rows are keyed by position.

@@ -228,17 +228,19 @@ struct MenuBarView: View {
           )
         }
       )
-      .background(PopoverNativeScrollerHider())
     }
-    .scrollIndicators(.hidden)
+    .scrollIndicators(.never)
     .onScrollGeometryChange(for: PopoverScrollMetrics.self) { geometry in
       PopoverScrollMetrics(
         offset: geometry.contentOffset.y + geometry.contentInsets.top,
         content: geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
         viewport: geometry.containerSize.height
       )
-    } action: { oldValue, newValue in
-      scrollModel.update(from: oldValue, to: newValue)
+    } action: { _, newValue in
+      scrollModel.update(newValue)
+    }
+    .onScrollPhaseChange { _, phase in
+      scrollModel.setScrolling(phase.isScrolling)
     }
     .overlay(alignment: .topTrailing) {
       PopoverScrollThumb(model: scrollModel)

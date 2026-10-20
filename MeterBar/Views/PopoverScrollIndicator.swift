@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// Where a scroll view sits, in the units the thumb needs.
@@ -31,11 +30,16 @@ final class PopoverScrollModel {
   var isActive = false
   @ObservationIgnored private var idleTask: Task<Void, Never>?
 
-  func update(from oldValue: PopoverScrollMetrics, to newValue: PopoverScrollMetrics) {
+  func update(_ newValue: PopoverScrollMetrics) {
     metrics = newValue
-    guard abs(oldValue.offset - newValue.offset) > 0.5 else { return }
-    if !isActive { isActive = true }
+  }
+
+  func setScrolling(_ isScrolling: Bool) {
     idleTask?.cancel()
+    if isScrolling {
+      isActive = true
+      return
+    }
     idleTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .milliseconds(900))
       guard !Task.isCancelled else { return }
@@ -81,30 +85,5 @@ struct PopoverScrollIndicator: View {
       .opacity(metrics.isScrollable && isActive ? 1 : 0)
       .allowsHitTesting(false)
       .accessibilityHidden(true)
-  }
-}
-
-/// Switches off the enclosing `NSScrollView`'s own scroller.
-///
-/// SwiftUI's `.scrollIndicators(.hidden)` is not honoured when the system is set
-/// to always show scroll bars, so the legacy track kept appearing. Placed inside
-/// the scroll content, this reaches the AppKit scroll view and removes it.
-struct PopoverNativeScrollerHider: NSViewRepresentable {
-  func makeNSView(context: Context) -> NSView {
-    let view = NSView()
-    DispatchQueue.main.async { Self.hide(from: view) }
-    return view
-  }
-
-  func updateNSView(_ nsView: NSView, context: Context) {
-    DispatchQueue.main.async { Self.hide(from: nsView) }
-  }
-
-  private static func hide(from view: NSView) {
-    guard let scrollView = view.enclosingScrollView else { return }
-    scrollView.hasVerticalScroller = false
-    scrollView.hasHorizontalScroller = false
-    scrollView.autohidesScrollers = true
-    scrollView.scrollerStyle = .overlay
   }
 }

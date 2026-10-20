@@ -162,17 +162,6 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         )
     }
 
-    /// The parity that matters: both surfaces derive their identity row from the
-    /// same component, so neither can quietly start showing a different field.
-    func testDetailPanelHeaderMatchesTheCardHeader() {
-        let snapshot = snapshot()
-
-        XCTAssertEqual(
-            MenuBarProviderDetailContent(snapshot: snapshot).headerContent,
-            ProviderStatusCard(snapshot: snapshot).headerContent
-        )
-    }
-
     /// The panel used to label itself with the service name, which the card
     /// already shows as its title. The refresh time is the field that adds
     /// something.
@@ -453,20 +442,20 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         )
     }
 
-    /// Errors read first, right under the header, before any numbers.
-    func testIssuesCardFollowsTheHeader() {
+    /// Errors read first, before any numbers.
+    func testIssuesAreTheFirstHoverCard() {
         let result = cards([rowLimit("session", kind: .session)], issues: true)
-        XCTAssertEqual(Array(result.prefix(2)), [.header, .issues])
+        XCTAssertEqual(result.first, .issues)
     }
 
     /// A provider with no data and issues shows the issues, not a vague
     /// "Waiting for refresh" card under them.
     func testIssuesReplaceTheEmptyCard() {
-        XCTAssertEqual(cards([], issues: true), [.header, .issues])
-        XCTAssertEqual(cards([]), [.header, .empty])
+        XCTAssertEqual(cards([], issues: true), [.issues])
+        XCTAssertEqual(cards([]), [.empty])
     }
 
-    /// Every block is its own card, header first, the week last.
+    /// Each detail block has its own card, with no repeated provider header.
     func testHoverIsOneCardPerBlockInReadingOrder() {
         let result = cards(
             [rowLimit("session", kind: .session), rowLimit("weekly", kind: .weekly, window: 604_800)],
@@ -475,7 +464,6 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         )
 
         XCTAssertEqual(result, [
-            .header,
             .limit(id: "session", isRunway: true, showsLegend: false),
             .limit(id: "weekly", isRunway: true, showsLegend: true),
             .badges,
@@ -500,18 +488,18 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
     func testBarsOnlyHoverCarriesNoLegendCard() {
         let result = cards([rowLimit("model", kind: .additional)])
 
-        XCTAssertEqual(result, [.header, .limit(id: "model", isRunway: false, showsLegend: false)])
+        XCTAssertEqual(result, [.limit(id: "model", isRunway: false, showsLegend: false)])
     }
 
-    func testEmptyProviderShowsTheHeaderAndTheEmptyNote() {
-        XCTAssertEqual(cards([]), [.header, .empty])
+    func testEmptyProviderShowsOnlyTheEmptyNote() {
+        XCTAssertEqual(cards([]), [.empty])
     }
 
     /// An exhausted provider shows the reset counter instead of the charts.
     func testExhaustedProviderReplacesTheWindowsWithTheResetCounter() {
         let result = cards([rowLimit("session", kind: .session)], exhausted: true, dailyUsage: true)
 
-        XCTAssertEqual(result, [.header, .blockingReset, .dailyUsage])
+        XCTAssertEqual(result, [.blockingReset, .dailyUsage])
     }
 
     /// The hover sits against the popover, so the gap stays small.

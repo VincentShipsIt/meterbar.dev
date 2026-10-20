@@ -75,7 +75,12 @@ struct PopoverOverviewPanel: View {
         Set(snapshots.map(\.service))
     }
 
+    static func cardStateKey(_ snapshots: [ProviderSnapshot]) -> [String] {
+        snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)" }
+    }
+
     /// The cards the stack draws, each carrying its readiness issues.
+
     private var visibleSnapshots: [ProviderSnapshot] {
         Self.attachingIssues(to: snapshots, from: setupReports)
     }
@@ -132,6 +137,7 @@ struct PopoverOverviewPanel: View {
         let claudeMetricFreshness: [Bool]
         let enabledCodexAccountIDs: [UUID]
         let enabledGrokAccountIDs: [UUID]
+        let cardStates: [String]
     }
 
     private var structuralKey: StructuralKey {
@@ -154,7 +160,8 @@ struct PopoverOverviewPanel: View {
                 ProviderReadinessInspector.hasRecentClaudeUsageFetch(metrics: $0, now: now)
             },
             enabledCodexAccountIDs: codexAccounts.filter(\.isEnabled).map(\.id),
-            enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id)
+            enabledGrokAccountIDs: grokAccounts.filter(\.isEnabled).map(\.id),
+            cardStates: Self.cardStateKey(snapshots)
         )
     }
 
