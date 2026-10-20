@@ -333,13 +333,14 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
         resetCreditsAvailable: Int? = nil,
         accountID: UUID? = nil,
         hasResetTime: Bool = true,
-        kind: SnapshotLimit.Kind = .weekly
+        isEstimated: Bool = false
     ) -> ProviderSnapshot {
         let weekly = UsageLimit(
             used: exhausted ? 100 : 40,
             total: 100,
             resetTime: hasResetTime ? Date().addingTimeInterval(exhausted ? 7200 : 3600) : nil,
-            windowSeconds: 604_800
+            windowSeconds: 604_800,
+            isEstimated: isEstimated
         )
         return ProviderSnapshot(
             id: "codex",
@@ -347,7 +348,7 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
             service: .codexCli,
             updatedAt: Date(),
             limits: [
-                SnapshotLimit(id: "weekly", kind: kind, title: "Weekly", usageLimit: weekly)
+                SnapshotLimit(id: "weekly", kind: .weekly, title: "Weekly", usageLimit: weekly)
             ],
             emptyDetail: "Waiting for refresh",
             extraUsage: nil,
@@ -386,15 +387,15 @@ final class ProviderStatusCardSmokeTests: XCTestCase {
 
     /// Each `.compact` bar row carries its own reset countdown, so a card whose
     /// bars report a reset time must be taller than one whose bars don't. An
-    /// `.additional` window is used because Session and Weekly draw as donuts,
-    /// which keep the countdown inside a fixed-height ring row.
+    /// estimated window is used because measured windows draw as donuts, which
+    /// keep the countdown inside a fixed-height ring row.
     func testCompactCardGrowsForPerRowResetWhenAResetTimeExists() {
         let withReset = ProviderStatusCard(
-            snapshot: snapshot(exhausted: false, kind: .additional),
+            snapshot: snapshot(exhausted: false, isEstimated: true),
             limitDensity: .compact
         )
         let withoutReset = ProviderStatusCard(
-            snapshot: snapshot(exhausted: false, hasResetTime: false, kind: .additional),
+            snapshot: snapshot(exhausted: false, hasResetTime: false, isEstimated: true),
             limitDensity: .compact
         )
         let withResetHost = NSHostingView(rootView: withReset.frame(width: 320))
