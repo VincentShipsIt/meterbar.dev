@@ -6,6 +6,18 @@ private final class CardFrameBox {
   var frames: [String: CGRect] = [:]
 }
 
+/// The hover column that is open beside the popover. `make` builds the content
+/// for the current `isPresented`, so closing can play the cards' exit before the
+/// column is removed.
+private struct DetailPresentation {
+  let id: String
+  /// Distance from the window top to the card that opened it, so the column
+  /// top-aligns with that card.
+  let topInset: CGFloat
+  let sourceMidY: CGFloat
+  let make: (_ isPresented: Bool, _ originY: CGFloat) -> AnyView
+}
+
 struct MenuBarView: View {
   let onContentSizeChange: (NSSize) -> Void
 
@@ -29,19 +41,38 @@ struct MenuBarView: View {
   @StateObject private var parseHealthStore = ProviderParseHealthStore.shared
 
   @State private var contentHeight: CGFloat = 320
-  @State private var expandedDetailID: String?
+  @State private var detail: DetailPresentation?
+  /// False while the open hover plays its exit, before `detail` is cleared.
+  @State private var detailPresented = false
+  /// The open hover column's natural height.
+  @State private var detailHeight: CGFloat = 0
+  @State private var sourceIsHovered = false
+  @State private var detailIsHovered = false
+  @State private var dismissTask: Task<Void, Never>?
+  @State private var removeTask: Task<Void, Never>?
+  /// Popover card frames, in window coordinates. A plain box, not state: the
+  /// frames change on every scroll frame and only matter when a hover opens.
   @State private var cardFrameBox = CardFrameBox()
   @State private var menuWindow: NSWindow?
+  @State private var scrollModel = PopoverScrollModel()
 
   init(onContentSizeChange: @escaping (NSSize) -> Void = { _ in }) {
     self.onContentSizeChange = onContentSizeChange
   }
 
   var body: some View {
-    mainColumn
-    .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
-    .background(MeterBarTheme.Surface.chrome(radius: MeterBarTheme.companionShellRadius))
-    .clipShape(RoundedRectangle(cornerRadius: MeterBarTheme.companionShellRadius, style: .continuous))
+    // Overview cards stay independent while each hover surface grows out
+    // of its source card without translating the content.
+    ZStack(alignment: .topTrailing) {
+      mainColumn
+        .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
+        .environment(\.meterBarTileSurface, .glass)
+
+      if let detail {
+        hoverLayer(detail)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     .background(
       MeterBarMenuWindowAccessor { window in
         menuWindow = window
@@ -59,8 +90,7 @@ struct MenuBarView: View {
       await costTracker.refreshMissingDaysInBackground()
     }
     .onDisappear {
-      expandedDetailID = nil
-      MeterBarMenuDetailPanel.shared.dismiss()
+      resetDetail()
     }
     .onPreferenceChange(MenuContentHeightPreferenceKey.self) { height in
       guard height > 0, abs(height - contentHeight) > 1 else { return }
@@ -70,6 +100,55 @@ struct MenuBarView: View {
     .onPreferenceChange(PopoverCardFramesPreferenceKey.self) { frames in
       cardFrameBox.frames = frames
     }
+    .onPreferenceChange(DetailHeightPreferenceKey.self) { height in
+      guard abs(height - detailHeight) > 1 else { return }
+      detailHeight = height
+      notifyContentSize()
+    }
+  }
+
+  /// The hover column, laid out from the window's leading edge. The layer is
+  /// exactly as wide as the window with a hover open and pinned trailing, so
+  /// before the window grows the column sits off screen, not over the popover.
+  private func hoverLayer(_ detail: DetailPresentation) -> some View {
+    detailColumn(detail)
+      .frame(
+        width: MenuBarPopoverGeometry.detailExtension + MenuBarPopoverGeometry.width,
+        alignment: .topLeading
+      )
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+  }
+
+  /// The column takes its natural height, never the window's: proposed the
+  /// window height, it scrolled and cut its cards at the popover's bottom edge
+  /// instead of growing the window. It top-aligns with the card that opened it
+  /// and moves up only as far as it must to stay on screen.
+  private func detailColumn(_ detail: DetailPresentation) -> some View {
+    detail.make(detailPresented, detail.sourceMidY - detailTop(for: detail))
+      .id(detail.id)
+      .frame(width: MenuBarPopoverGeometry.detailWidth)
+      .fixedSize(horizontal: false, vertical: true)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(key: DetailHeightPreferenceKey.self, value: proxy.size.height)
+        }
+      )
+      .padding(.top, detailTop(for: detail))
+      .onHover { setDetailHovered($0) }
+  }
+
+  private func detailTop(for detail: DetailPresentation) -> CGFloat {
+    MenuBarPopoverGeometry.detailTop(
+      sourceTop: detail.topInset,
+      detailHeight: detailHeight,
+      maximumHeight: maximumPopoverHeight
+    )
+  }
+
+  /// The open hover's bottom edge, from the window top.
+  private var detailBottom: CGFloat {
+    guard let detail else { return 0 }
+    return detailTop(for: detail) + detailHeight
   }
 
   /// The provider cards the popover draws.
@@ -105,7 +184,7 @@ struct MenuBarView: View {
     // system draw its soft scroll-edge fade where cards slide underneath, in
     // place of the hard rule the old header-plus-Divider stack drew.
     ScrollView {
-      VStack(spacing: 10) {
+      VStack(spacing: MenuBarPopoverGeometry.cardGap) {
         PopoverOverviewPanel(
           snapshots: snapshots,
           openDashboard: openDashboard,
@@ -127,16 +206,18 @@ struct MenuBarView: View {
           showsRoutingLine: true
         )
 
-        Divider()
-        StayAwakeMenuControl()
+        DashboardTile(padding: .popover) {
+          StayAwakeMenuControl()
+        }
 
         if SessionWakeMenuControl.shouldShow(
           featureEnabled: sessionWakeStore.featureEnabled,
           isOn: sessionWakeStore.isOn,
           canTurnOn: sessionWakeStore.canTurnOn
         ) {
-          Divider()
-          SessionWakeMenuControl()
+          DashboardTile(padding: .popover) {
+            SessionWakeMenuControl()
+          }
         }
       }
       .padding(MeterBarTheme.Spacing.md)
@@ -149,13 +230,31 @@ struct MenuBarView: View {
         }
       )
     }
-    .scrollIndicators(.hidden)
+    .scrollIndicators(.never)
+    .onScrollGeometryChange(for: PopoverScrollMetrics.self) { geometry in
+      PopoverScrollMetrics(
+        offset: geometry.contentOffset.y + geometry.contentInsets.top,
+        content: geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
+        viewport: geometry.containerSize.height
+      )
+    } action: { _, newValue in
+      scrollModel.update(newValue)
+    }
+    .onScrollPhaseChange { _, phase in
+      scrollModel.setScrolling(phase.isScrolling)
+    }
+    .overlay(alignment: .topTrailing) {
+      PopoverScrollThumb(model: scrollModel)
+        .padding(.top, MenuBarPopoverGeometry.chromeHeight + MeterBarTheme.Spacing.xs)
+        .padding(.bottom, MeterBarTheme.Spacing.xs)
+        .padding(.trailing, MeterBarTheme.Spacing.xs)
+    }
     .scrollContentBackground(.hidden)
     .safeAreaBar(edge: .top, spacing: 0) {
       popoverHeader
         .frame(height: MenuBarPopoverGeometry.chromeHeight)
     }
-    .scrollEdgeEffectStyle(.soft, for: .top)
+    .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
     .frame(height: scrollHeight + MenuBarPopoverGeometry.chromeHeight)
   }
 
@@ -185,8 +284,13 @@ struct MenuBarView: View {
   /// its own content.
   private func notifyContentSize(height: CGFloat? = nil) {
     onContentSizeChange(
-      MenuBarPopoverGeometry.contentSize(
-        contentHeight: height ?? contentHeight,
+      MenuBarPopoverGeometry.windowSize(
+        popover: MenuBarPopoverGeometry.contentSize(
+          contentHeight: height ?? contentHeight,
+          maximumHeight: maximumPopoverHeight
+        ),
+        hasDetail: detail != nil,
+        detailBottom: detailBottom,
         maximumHeight: maximumPopoverHeight
       )
     )
@@ -240,38 +344,42 @@ struct MenuBarView: View {
   }
 
   private func openDashboard() {
-    expandedDetailID = nil
-    MeterBarMenuDetailPanel.shared.dismiss()
+    resetDetail()
     UsageDashboardWindowController.shared.show()
   }
 
   private func openStatusDetail() {
-    presentDetail(
-      id: PopoverCardID.providerStatus,
-      content: AnyView(MenuBarStatusDetailContent())
-    )
+    presentDetail(id: PopoverCardID.providerStatus) { _, _ in
+      // The status panel carries its own shell and fills the height it is
+      // offered, so it takes its natural height here.
+      AnyView(MenuBarStatusDetailContent().fixedSize(horizontal: false, vertical: true))
+    }
   }
 
   private func openProviderDetail(_ snapshot: ProviderSnapshot) {
-    presentDetail(
-      id: snapshot.id,
-      content: AnyView(
+    // Bucketed here, at hover time, rather than inside the panel: the panel's
+    // `body` re-runs on every hover tick, and it is hosted in tests that must
+    // not stand up the cost scanner.
+    let series = ProviderDailyUsageSeries.make(
+      service: snapshot.service,
+      dailyUsage: costTracker.costSummary?.dailyUsage ?? [],
+      ledger: costTracker.usageLedger,
+      accountCount: accountCardCount(for: snapshot.service)
+    )
+    let isRefreshing = costTracker.isRefreshingMissingDays || costTracker.isScanning
+    let scanDate = costTracker.lastScanDate
+    presentDetail(id: snapshot.id) { isPresented, originY in
+      AnyView(
         MenuBarProviderDetailContent(
           snapshot: snapshot,
-          // Bucketed here, at hover time, rather than inside the panel: the
-          // panel's `body` re-runs on every hover tick, and it is hosted in
-          // tests that must not stand up the cost scanner.
-          dailyUsage: ProviderDailyUsageSeries.make(
-            service: snapshot.service,
-            dailyUsage: costTracker.costSummary?.dailyUsage ?? [],
-            ledger: costTracker.usageLedger,
-            accountCount: accountCardCount(for: snapshot.service)
-          ),
-          isRefreshingUsage: costTracker.isRefreshingMissingDays || costTracker.isScanning,
-          costScanDate: costTracker.lastScanDate
+          dailyUsage: series,
+          isRefreshingUsage: isRefreshing,
+          costScanDate: scanDate,
+          isPresented: isPresented,
+          revealOriginY: originY
         )
       )
-    )
+    }
   }
 
   /// How many cards the popover is currently drawing for one provider. Anything
@@ -283,60 +391,102 @@ struct MenuBarView: View {
     snapshots.accountCardCount(for: service)
   }
 
-  /// Provider-card hover owns the detail panel together with the detail panel's
-  /// own hover region. Leaving both closes it; crossing the inter-panel gap is
-  /// covered by the detail panel's short deferred-dismiss window.
+  /// Provider-card hover owns the hover column together with the column's own
+  /// hover region. Leaving both closes it; crossing the small gap between them
+  /// is covered by a short deferred dismiss.
   private func hoverProviderDetailChanged(_ snapshot: ProviderSnapshot, isHovered: Bool) {
-    MeterBarMenuDetailPanel.shared.setSourceHovered(isHovered) {
-      guard expandedDetailID == snapshot.id else { return }
-      expandedDetailID = nil
+    sourceIsHovered = isHovered
+    if isHovered, !(detail?.id == snapshot.id && detailPresented) {
+      openProviderDetail(snapshot)
     }
-
-    guard isHovered, expandedDetailID != snapshot.id else { return }
-    openProviderDetail(snapshot)
+    reconcileDetailDismissal()
   }
 
   /// Hover-driven open for the header status cluster (same non-toggling rule).
   private func hoverOpenStatusDetail() {
-    guard expandedDetailID != PopoverCardID.providerStatus else { return }
+    guard !(detail?.id == PopoverCardID.providerStatus && detailPresented) else { return }
     openStatusDetail()
   }
 
-  /// Presents (or toggles off) the secondary detail card, top-aligned with the
-  /// popover card that opened it.
-  private func presentDetail(id: String, content: AnyView) {
-    if expandedDetailID == id {
-      expandedDetailID = nil
-      MeterBarMenuDetailPanel.shared.dismiss()
+  private func setDetailHovered(_ isHovered: Bool) {
+    detailIsHovered = isHovered
+    reconcileDetailDismissal()
+  }
+
+  private func reconcileDetailDismissal() {
+    dismissTask?.cancel()
+    dismissTask = nil
+    guard detailPresented, !sourceIsHovered, !detailIsHovered else { return }
+    dismissTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 140_000_000)
+      guard !Task.isCancelled, !sourceIsHovered, !detailIsHovered else { return }
+      closeDetail()
+    }
+  }
+
+  /// Presents (or toggles off) the hover column, top-aligned with the popover
+  /// card that opened it.
+  private func presentDetail(id: String, make: @escaping (Bool, CGFloat) -> AnyView) {
+    if detail?.id == id, detailPresented {
+      closeDetail()
       return
     }
 
-    guard let menuWindow else { return }
-    expandedDetailID = id
-    MeterBarMenuDetailPanel.shared.present(
-      anchor: menuWindow,
-      content: content,
-      preferredTopY: screenTopY(forCardID: id)
+    removeTask?.cancel()
+    removeTask = nil
+    let source = cardFrameBox.frames[id]
+    detail = DetailPresentation(
+      id: id,
+      topInset: max(0, source?.minY ?? 0),
+      sourceMidY: source?.midY ?? 0,
+      make: make
     )
+    detailPresented = true
+    notifyContentSize()
   }
 
-  /// Converts a card's SwiftUI global frame (top-left origin, window space)
-  /// into the card top's AppKit screen Y so the detail panel can align to it.
-  private func screenTopY(forCardID id: String) -> CGFloat? {
-    guard let menuWindow, let frame = cardFrameBox.frames[id] else { return nil }
-    return menuWindow.frame.maxY - frame.minY
+  /// Plays the cards' exit, then drops the column and gives the width back.
+  private func closeDetail() {
+    detailPresented = false
+    removeTask?.cancel()
+    removeTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 400_000_000)
+      guard !Task.isCancelled else { return }
+      detail = nil
+      detailHeight = 0
+      notifyContentSize()
+    }
+  }
+
+  private func resetDetail() {
+    dismissTask?.cancel()
+    removeTask?.cancel()
+    detail = nil
+    detailPresented = false
+    detailHeight = 0
+    sourceIsHovered = false
+    detailIsHovered = false
+    notifyContentSize()
   }
 
   private func configureMenuWindow(_ window: NSWindow?) {
     guard let window else { return }
     window.isOpaque = false
     window.backgroundColor = .clear
-    window.hasShadow = true
+    window.hasShadow = false
   }
 }
 
 private enum MenuBarOverlayIcons {
   static let dashboard = "rectangle.split.2x1"
+}
+
+private struct DetailHeightPreferenceKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
 }
 
 private struct MenuContentHeightPreferenceKey: PreferenceKey {

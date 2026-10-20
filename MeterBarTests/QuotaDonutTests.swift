@@ -121,7 +121,7 @@ final class QuotaDonutTests: XCTestCase {
         XCTAssertEqual(ProviderCardPresentation.barLimits(for: card).count, 2)
     }
 
-    // MARK: - Setup checklist owns an unconfigured provider
+    // MARK: - Readiness issues ride on the cards
 
     private func offline(_ service: ServiceType, title: String) -> ProviderSnapshot {
         ProviderSnapshotBuilder.snapshot(
@@ -132,50 +132,93 @@ final class QuotaDonutTests: XCTestCase {
         )
     }
 
-    func testOfflineCardIsHiddenWhileTheSetupChecklistNamesItsProvider() {
-        let muse = offline(.museCode, title: "Muse")
-        let claude = snapshot([limit(.session, used: 14)])
-
-        let visible = PopoverOverviewPanel.visibleSnapshots([claude, muse], setupProviders: [.museCode])
-
-        XCTAssertEqual(visible.map(\.id), [claude.id])
+    private func check(_ id: String, _ level: ReadinessLevel, detail: String = "Detail") -> ReadinessCheck {
+        ReadinessCheck(id: id, title: id, level: level, detail: detail, recovery: nil)
     }
 
-    func testOfflineCardStaysWhenNothingElseNamesIt() {
+    /// An unconfigured provider keeps its one card; the issues travel with it
+    /// instead of filling a "Finish setup" block above the stack.
+    func testOfflineCardKeepsItsSetupIssues() {
         let muse = offline(.museCode, title: "Muse")
-
-        XCTAssertEqual(PopoverOverviewPanel.visibleSnapshots([muse], setupProviders: []).map(\.id), [muse.id])
-        XCTAssertEqual(PopoverOverviewPanel.visibleSnapshots([muse], setupProviders: [.xai]).map(\.id), [muse.id])
-    }
-
-    func testCardsWithDataAreNeverHiddenBySetup() {
         let claude = snapshot([limit(.session, used: 14)])
-
-        XCTAssertEqual(
-            PopoverOverviewPanel.visibleSnapshots([claude], setupProviders: [.claudeCode]).map(\.id),
-            [claude.id]
+        let report = ProviderReadiness(
+            provider: .museCode,
+            checks: [check("installed", .pass), check("auth", .fail), check("data", .fail)]
         )
+
+        let cards = PopoverOverviewPanel.attachingIssues(to: [claude, muse], from: [report])
+
+        XCTAssertEqual(cards.map(\.id), [claude.id, muse.id])
+        XCTAssertTrue(cards[0].issues.isEmpty)
+        XCTAssertEqual(cards[1].issues.map(\.id), ["auth", "data"])
+        XCTAssertEqual(cards[1].issueLevel, .fail)
     }
 
-    /// With several accounts on one provider the checklist is per provider, so
-    /// hiding by provider would hide an account the checklist does not name.
-    func testOfflineAccountCardStaysWhenTheProviderHasSeveralCards() {
-        let signedOut = offline(.codexCli, title: "Work")
-        let signedIn = ProviderSnapshot(
-            id: "codex-personal",
-            title: "Personal",
+    func testFailingCardSaysActionNeededAndOpensItsHover() {
+        var muse = offline(.museCode, title: "Muse")
+        XCTAssertFalse(ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: muse))
+
+        muse.issues = [check("auth", .fail)]
+
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: muse), "Action needed")
+        XCTAssertTrue(ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: muse))
+    }
+
+    /// A warning alone (a slow refresh) is listed in the hover but does not put
+    /// a status word on a working card.
+    func testWarningsStayOutOfThePopoverCard() {
+        var claude = snapshot([limit(.session, used: 14)])
+        claude.issues = [check("refresh", .warn)]
+
+        XCTAssertNil(ProviderCardPresentation.connectionStatusText(for: claude))
+        XCTAssertTrue(ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: claude))
+    }
+
+    /// An account report lands only on that account's card, and the
+    /// provider-wide rollup of those accounts is not repeated on top of it.
+    func testIssuesFollowTheirAccount() {
+        let work = UUID()
+        let workCard = account("codex-work", accountID: work)
+        let homeCard = account("codex-home", accountID: UUID())
+        let reports = [
+            ProviderReadiness(identity: .account(.codexCli, id: work, name: "Work"), checks: [check("auth", .fail)]),
+            ProviderReadiness(provider: .codexCli, checks: [check("auth", .fail, detail: "1 of 2 signed out")])
+        ]
+
+        let cards = PopoverOverviewPanel.attachingIssues(to: [workCard, homeCard], from: reports)
+
+        XCTAssertEqual(cards[0].issues.map(\.detail), ["Detail"])
+        XCTAssertTrue(cards[1].issues.isEmpty)
+    }
+
+    /// A provider-wide report lands on every card of the provider, and a check
+    /// stated twice the same way is listed once.
+    func testProviderWideIssuesReachEveryCardOnce() {
+        let reports = [
+            ProviderReadiness(provider: .codexCli, checks: [check("installed", .warn)]),
+            ProviderReadiness(provider: .codexCli, checks: [check("installed", .warn)])
+        ]
+
+        let cards = PopoverOverviewPanel.attachingIssues(
+            to: [account("codex-a", accountID: nil), account("codex-b", accountID: nil)],
+            from: reports
+        )
+
+        XCTAssertEqual(cards.map { $0.issues.map(\.id) }, [["installed"], ["installed"]])
+    }
+
+    private func account(_ id: String, accountID: UUID?) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: id,
+            title: id,
             service: .codexCli,
-            updatedAt: Date(),
-            limits: [limit(.weekly, used: 15)],
+            updatedAt: nil,
+            limits: [],
             emptyDetail: "",
             extraUsage: nil,
             resetCreditsAvailable: nil,
-            accountID: nil
+            accountID: accountID
         )
-
-        let visible = PopoverOverviewPanel.visibleSnapshots([signedIn, signedOut], setupProviders: [.codexCli])
-
-        XCTAssertEqual(visible.count, 2)
     }
 
     // MARK: - Checklist freshness and the Cursor source
@@ -198,25 +241,24 @@ final class QuotaDonutTests: XCTestCase {
         )
     }
 
-    func testLockedCursorDatabaseDoesNotNameXAIWhileAGrokCardHasUsage() {
-        let locked = cursorReport(.unreadable)
-        XCTAssertTrue(locked.needsSetup)
-
-        let reports = PopoverOverviewPanel.checklistReports(
-            from: [locked],
-            snapshots: [xaiCard(limits: [limit(.weekly, used: 100)])]
+    func testCursorFailureStaysOnTheSingleXAICardWhenUsageExists() {
+        let cards = PopoverOverviewPanel.attachingIssues(
+            to: [xaiCard(limits: [limit(.weekly, used: 100)])],
+            from: [cursorReport(.unreadable)]
         )
 
-        XCTAssertTrue(reports.isEmpty)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertFalse(cards[0].issues.isEmpty)
     }
 
-    func testCursorFailureStaysWhenXAIHasNoUsage() {
-        let reports = PopoverOverviewPanel.checklistReports(
-            from: [cursorReport(.unreadable)],
-            snapshots: [offline(.xai, title: "xAI")]
+    func testCursorFailureStaysOnTheSingleXAICardWithoutUsage() {
+        let cards = PopoverOverviewPanel.attachingIssues(
+            to: [offline(.xai, title: "xAI")],
+            from: [cursorReport(.unreadable)]
         )
 
-        XCTAssertEqual(reports.count, 1)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertFalse(cards[0].issues.isEmpty)
     }
 
     func testCardStateKeyChangesWhenACardStartsSayingSomethingElse() {

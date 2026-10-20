@@ -14,6 +14,9 @@ enum ProviderCardPresentation {
     /// overlay exists to prevent. Login/attention borrow the warning colour;
     /// stale and not-connected go subdued rather than shouting.
     static func statusColor(for snapshot: ProviderSnapshot) -> Color {
+        if snapshot.issueLevel == .fail {
+            return ReadinessLevel.fail.tint
+        }
         switch snapshot.authNotice {
         case .loginRequired, .attention:
             return MeterBarTheme.warning
@@ -30,7 +33,14 @@ enum ProviderCardPresentation {
     /// is broken or the data is out of date, because stale numbers that look fine are
     /// the one thing the user cannot see for themselves.
     static func connectionStatusText(for snapshot: ProviderSnapshot) -> String? {
-        snapshot.authNotice?.shortLabel
+        setupStatusText(for: snapshot) ?? snapshot.authNotice?.shortLabel
+    }
+
+    /// A failing readiness check, reduced to the one word the popover shows.
+    /// The checks themselves, with their recovery steps, live in the hover. It
+    /// outranks the auth notice, which names the same problem less precisely.
+    static func setupStatusText(for snapshot: ProviderSnapshot) -> String? {
+        snapshot.issueLevel == .fail ? ReadinessLevel.fail.badgeLabel : nil
     }
 
     /// The popover card draws every measured quota window as a donut; only
@@ -45,6 +55,7 @@ enum ProviderCardPresentation {
     }
 
     static func statusText(for snapshot: ProviderSnapshot) -> String {
+        if let setup = setupStatusText(for: snapshot) { return setup }
         if let notice = snapshot.authNotice { return notice.shortLabel }
         if let primary = snapshot.primaryLimit {
             switch primary.usageLimit.reading {
@@ -101,8 +112,11 @@ enum ProviderCardPresentation {
         snapshot: ProviderSnapshot,
         now: Date = Date()
     ) -> Bool {
-        hasSelectionHandler
-            && snapshot.hasMetrics
+        guard hasSelectionHandler else { return false }
+        // A card with problems always opens its hover: that is where the
+        // full error text and the way to fix it are.
+        if !snapshot.issues.isEmpty { return true }
+        return snapshot.hasMetrics
             && !snapshot.hasExhaustedLimit
             && !collapsesToLoginRow(snapshot: snapshot, now: now)
     }

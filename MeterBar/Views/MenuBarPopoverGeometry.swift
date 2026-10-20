@@ -20,6 +20,20 @@ enum MenuBarPopoverGeometry {
     /// Absolute ceiling, independent of how tall the display is.
     static let maximumHeightCap: CGFloat = 760
     static let minimumScrollHeight: CGFloat = 80
+    /// Width of the hover column that opens to the left of the popover.
+    static let detailWidth: CGFloat = 340
+    /// Inset of the popover cards from the popover's own edges (`Spacing.md`).
+    static let cardInset: CGFloat = 12
+    /// Space between neighbouring cards, in the popover and the hover alike.
+    static let cardGap: CGFloat = 6
+    /// Visible space between the hover column and the popover cards.
+    static let detailGap: CGFloat = cardGap
+    /// How far the window grows to the left while a hover is open. The column
+    /// tucks into the popover's own card inset so the visible gap is `detailGap`.
+    static let detailExtension: CGFloat = detailWidth + detailGap - cardInset
+    /// Leading edge of the popover cards, in window coordinates, while a hover
+    /// is open.
+    static let popoverCardMinX: CGFloat = detailExtension + cardInset
     /// Used when neither the popover's own screen nor the main screen is known.
     static let fallbackVisibleScreenHeight: CGFloat = 720
 
@@ -33,6 +47,30 @@ enum MenuBarPopoverGeometry {
 
     static func popoverHeight(scrollHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
         min(max(chromeHeight + scrollHeight, minimumHeight), maximumHeight)
+    }
+
+    /// The whole window while a hover may be open: the popover pinned to the
+    /// trailing edge, `detailExtension` more width on the left when a hover is
+    /// open, and tall enough for whichever column ends lower. `detailBottom` is
+    /// the hover's bottom edge measured from the window top.
+    static func windowSize(
+        popover: NSSize,
+        hasDetail: Bool,
+        detailBottom: CGFloat,
+        maximumHeight: CGFloat
+    ) -> NSSize {
+        guard hasDetail else { return popover }
+        return NSSize(
+            width: popover.width + detailExtension,
+            height: min(max(popover.height, detailBottom), maximumHeight)
+        )
+    }
+
+    /// Top of the hover column, from the window top: level with the card that
+    /// opened it, raised just enough to keep a tall column on screen, never
+    /// above the window top.
+    static func detailTop(sourceTop: CGFloat, detailHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
+        max(0, min(sourceTop, maximumHeight - detailHeight))
     }
 
     /// The size handed to the menu-bar window controller. Derived from the same

@@ -34,6 +34,16 @@ struct ProviderSnapshot: Identifiable {
     /// Defaulted so existing memberwise construction keeps the relative stamp.
     var freshnessNote: String?
 
+    /// Readiness checks that are not passing for this card's provider or
+    /// account. The popover reduces them to one status word; the hover card
+    /// lists them in full. Defaulted for the same memberwise reason as above.
+    var issues: [ReadinessCheck] = []
+
+    /// The worst level across `issues`, or `nil` when there are none.
+    var issueLevel: ReadinessLevel? {
+        issues.map(\.level).max(by: { $0.severity < $1.severity })
+    }
+
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
 

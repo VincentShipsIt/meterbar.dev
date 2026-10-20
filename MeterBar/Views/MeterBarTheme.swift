@@ -460,7 +460,35 @@ extension NSPanel {
   }
 }
 
+/// Which fill a `DashboardTile` draws. The menu-bar popover has no shell behind
+/// its cards, so each one is its own glass surface; everywhere else a tile is a
+/// neutral wash over the chrome it sits on.
+enum MeterBarTileSurface {
+  case content
+  case glass
+}
+
+private struct MeterBarTileSurfaceKey: EnvironmentKey {
+  static let defaultValue: MeterBarTileSurface = .content
+}
+
+extension EnvironmentValues {
+  var meterBarTileSurface: MeterBarTileSurface {
+    get { self[MeterBarTileSurfaceKey.self] }
+    set { self[MeterBarTileSurfaceKey.self] = newValue }
+  }
+}
+
 extension View {
+  /// The free-standing glass card: its own Liquid Glass surface, for use inside a
+  /// `GlassEffectContainer` where neighbours blend as they come close.
+  func meterBarGlassCard(cornerRadius: CGFloat = MeterBarTheme.Radius.card) -> some View {
+    glassEffect(
+      .regular.tint(MeterBarTheme.companionTint),
+      in: .rect(cornerRadius: cornerRadius, style: .continuous)
+    )
+  }
+
   func meterBarCardSurface(cornerRadius: CGFloat = MeterBarTheme.Radius.card) -> some View {
     modifier(MeterBarCardSurfaceModifier(cornerRadius: cornerRadius))
   }

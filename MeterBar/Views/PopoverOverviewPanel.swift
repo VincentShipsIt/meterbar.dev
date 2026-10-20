@@ -2,8 +2,10 @@ import Foundation
 import MeterBarShared
 import SwiftUI
 
-/// The popover's scrolling body: first-run callout, empty state, setup
-/// checklist, and the provider card stack.
+/// The popover's scrolling body: first-run callout, empty state, and the
+/// provider card stack. Setup problems are not drawn as their own block: each
+/// card carries its readiness issues, says "Action needed" when one fails, and
+/// lists them in full in its hover.
 struct PopoverOverviewPanel: View {
     let snapshots: [ProviderSnapshot]
     let openDashboard: () -> Void
@@ -73,60 +75,44 @@ struct PopoverOverviewPanel: View {
         Set(snapshots.map(\.service))
     }
 
-    /// Enabled providers that still need setup — drives the first-run checklist.
-    /// Keyed on `needsSetup` (a genuine install/auth/data failure), NOT `!isHealthy`:
-    /// a working provider whose only blemish is a transient refresh or format-health
-    /// *warning* must not keep "Finish setup" pinned open forever. The section
-    /// collapses (renders nothing) once no enabled provider has a real setup gap.
-    private var providersNeedingSetup: [ProviderReadiness] {
-        Self.checklistReports(from: setupReports, snapshots: snapshots)
-    }
-
-    /// The checklist rows for the enabled providers. Cursor is a second source
-    /// of the xAI subscription, so while an xAI card already shows live usage a
-    /// locked or unreadable Cursor database is not a setup gap: it would name
-    /// xAI twice, once as "Action needed" and once as a working card. Settings
-    /// and Diagnostics still list the Cursor source.
-    static func checklistReports(
-        from reports: [ProviderReadiness],
-        snapshots: [ProviderSnapshot]
-    ) -> [ProviderReadiness] {
-        let enabled = Set(snapshots.map(\.service))
-        let xaiHasUsage = snapshots.contains { $0.service == .xai && $0.hasMetrics }
-        return ProviderReadiness.setupChecklistReports(from: reports)
-            .filter { enabled.contains($0.provider) }
-            .filter { !(xaiHasUsage && $0.identity == .cursorSubscription) }
-    }
-
-    /// What each card currently says about itself. A refresh that changes it
-    /// (Muse Code connected in Settings, a provider recovering) must re-run the
-    /// readiness checks, or the checklist keeps reporting the old failure.
     static func cardStateKey(_ snapshots: [ProviderSnapshot]) -> [String] {
         snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)" }
     }
 
-    /// The cards the stack draws. A provider the setup checklist already names
-    /// is not drawn a second time as an "Offline" row.
+    /// The cards the stack draws, each carrying its readiness issues.
+
     private var visibleSnapshots: [ProviderSnapshot] {
-        Self.visibleSnapshots(snapshots, setupProviders: Set(providersNeedingSetup.map(\.provider)))
+        Self.attachingIssues(to: snapshots, from: setupReports)
     }
 
-    /// Drops the offline row of a provider that "Finish setup" lists, so a
-    /// single unconfigured provider reads once ("Muse Code · Action needed")
-    /// instead of twice ("Muse Code" in the checklist, "Muse · Offline" below it).
+    /// Hands each card the failing and warning checks that apply to it: an
+    /// account report to that account's card, a provider-wide report to every
+    /// card of the provider. Passing checks are dropped, since they need no
+    /// attention, and a check two reports state the same way is listed once.
     ///
-    /// Only a provider with exactly one card qualifies. The checklist is per
-    /// provider, so with several accounts an offline account's card may be the
-    /// only place that names it.
-    static func visibleSnapshots(
-        _ snapshots: [ProviderSnapshot],
-        setupProviders: Set<ServiceType>
+    /// When a provider has account reports, its provider-wide report is only
+    /// their rollup and is skipped, as the old setup checklist did; the Cursor
+    /// sign-in beside Grok is provider-wide but its own source, so it stays.
+    static func attachingIssues(
+        to snapshots: [ProviderSnapshot],
+        from reports: [ProviderReadiness]
     ) -> [ProviderSnapshot] {
-        snapshots.filter { snapshot in
-            guard !snapshot.hasMetrics,
-                  setupProviders.contains(snapshot.service)
-            else { return true }
-            return snapshots.filter { $0.service == snapshot.service }.count > 1
+        let accountScopedProviders = Set(reports.filter(\.identity.isAccountScoped).map(\.provider))
+        return snapshots.map { snapshot in
+            var annotated = snapshot
+            annotated.issues = reports
+                .filter { report in
+                    guard report.provider == snapshot.service else { return false }
+                    if let accountID = report.identity.accountID {
+                        return accountID == snapshot.accountID
+                    }
+                    return report.identity == .cursorSubscription
+                        || !accountScopedProviders.contains(report.provider)
+                }
+                .flatMap(\.checks)
+                .filter { $0.level != .pass }
+                .uniqued()
+            return annotated
         }
     }
 
@@ -140,7 +126,7 @@ struct PopoverOverviewPanel: View {
         let showsFirstRun: Bool
         let showsRecommendationHint: Bool
         let isEmpty: Bool
-        let setupProviders: [ServiceType]
+        let issueCards: [String]
         let snapshotIDs: [String]
     }
 
@@ -159,7 +145,7 @@ struct PopoverOverviewPanel: View {
             showsFirstRun: onboarding.shouldPresent,
             showsRecommendationHint: showsRecommendationHint,
             isEmpty: snapshots.isEmpty,
-            setupProviders: providersNeedingSetup.map(\.provider),
+            issueCards: visibleSnapshots.filter { $0.issueLevel != nil }.map(\.id),
             snapshotIDs: visibleSnapshots.map(\.id)
         )
     }
@@ -180,7 +166,7 @@ struct PopoverOverviewPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
             if showsRoutingLine {
                 PopoverRoutingLineView()
             }
@@ -200,12 +186,7 @@ struct PopoverOverviewPanel: View {
                     .transition(MeterBarTheme.Motion.popoverTile)
             }
 
-            if !providersNeedingSetup.isEmpty {
-                setupChecklist
-                    .transition(MeterBarTheme.Motion.popoverTile)
-            }
-
-            VStack(spacing: 8) {
+            VStack(spacing: MenuBarPopoverGeometry.cardGap) {
                 ForEach(visibleSnapshots) { snapshot in
                     ProviderStatusCard(
                         snapshot: snapshot,
@@ -289,28 +270,6 @@ struct PopoverOverviewPanel: View {
         }
     }
 
-    /// First-run/empty-state checklist: per-provider readiness checks with
-    /// recovery actions for enabled providers that aren't healthy yet. Collapses
-    /// automatically once every enabled provider reports healthy.
-    private var setupChecklist: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "checklist")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(MeterBarTheme.appAccent)
-                Text("Finish setup")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Spacer(minLength: 0)
-            }
-            ReadinessChecklist(
-                reports: providersNeedingSetup,
-                compact: true,
-                recoveryAction: { UsageDashboardWindowController.shared.showSettings(.providers) }
-            )
-        }
-    }
-
     private var firstRunCallout: some View {
         DashboardTile(padding: .popover) {
             VStack(alignment: .leading, spacing: 9) {
@@ -362,5 +321,12 @@ struct PopoverOverviewPanel: View {
         }.value
         guard !Task.isCancelled else { return }
         setupReports = reports
+    }
+}
+
+private extension Array where Element == ReadinessCheck {
+    func uniqued() -> [ReadinessCheck] {
+        var seen = Set<String>()
+        return filter { seen.insert("\($0.id)\u{1F}\($0.detail)").inserted }
     }
 }

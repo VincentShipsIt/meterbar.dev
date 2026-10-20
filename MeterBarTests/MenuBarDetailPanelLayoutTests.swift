@@ -10,6 +10,32 @@ final class MenuBarDetailPanelLayoutTests: XCTestCase {
     private let visibleFrame = CGRect(x: 0, y: 0, width: 1512, height: 950)
     private let anchorFrame = CGRect(x: 1100, y: 300, width: 390, height: 600)
 
+    func testLiquidRevealStartsAtSourceEdgeAndGrowsLeft() {
+        let bounds = CGRect(x: 0, y: 0, width: 340, height: 220)
+        let seed = HoverCardReveal(progress: 0, originY: 100).path(in: bounds).boundingRect
+        let halfway = HoverCardReveal(progress: 0.5, originY: 100).path(in: bounds).boundingRect
+        let final = HoverCardReveal(progress: 1, originY: 100).path(in: bounds).boundingRect
+
+        XCTAssertEqual(seed.midY, 100)
+        XCTAssertEqual(seed.minX, bounds.maxX + MenuBarPopoverGeometry.detailGap)
+        XCTAssertLessThan(halfway.minX, seed.minX)
+        XCTAssertGreaterThan(halfway.minX, final.minX)
+        XCTAssertGreaterThan(halfway.maxX, bounds.maxX, "Glass stays attached until the neck pinches off")
+        XCTAssertEqual(final, bounds)
+    }
+
+    func testLiquidRevealUsesTheSourceWhenTheColumnMovesAboveIt() {
+        let bounds = CGRect(x: 0, y: 0, width: 340, height: 44)
+        let origin: CGFloat = 260
+        let seed = HoverCardReveal(progress: 0, originY: origin).path(in: bounds)
+        let halfway = HoverCardReveal(progress: 0.5, originY: origin).path(in: bounds)
+
+        XCTAssertEqual(seed.boundingRect.midY, origin)
+        XCTAssertGreaterThan(halfway.boundingRect.maxY, origin)
+        XCTAssertGreaterThan(halfway.boundingRect.maxX, bounds.maxX)
+        XCTAssertEqual(HoverCardReveal(progress: 1, originY: origin).path(in: bounds).boundingRect, bounds)
+    }
+
     func testHoverPolicyDismissesOnlyAfterLeavingBothPanels() {
         XCTAssertFalse(MeterBarMenuDetailHoverPolicy.shouldDismiss(
             sourceIsHovered: true,
@@ -159,17 +185,6 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             extraUsage: nil,
             resetCreditsAvailable: nil,
             accountID: nil
-        )
-    }
-
-    /// The parity that matters: both surfaces derive their identity row from the
-    /// same component, so neither can quietly start showing a different field.
-    func testDetailPanelHeaderMatchesTheCardHeader() {
-        let snapshot = snapshot()
-
-        XCTAssertEqual(
-            MenuBarProviderDetailContent(snapshot: snapshot).headerContent,
-            ProviderStatusCard(snapshot: snapshot).headerContent
         )
     }
 
@@ -432,5 +447,89 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertTrue(MenuBarProviderDetailContent.showsRunwayLegend(for: charted))
         XCTAssertFalse(MenuBarProviderDetailContent.showsRunwayLegend(for: barsOnly))
         XCTAssertFalse(MenuBarProviderDetailContent.showsRunwayLegend(for: []))
+    }
+
+    // MARK: - Card stack
+
+    private func cards(
+        _ limits: [SnapshotLimit],
+        exhausted: Bool = false,
+        badges: Bool = false,
+        dailyUsage: Bool = false,
+        issues: Bool = false
+    ) -> [MenuBarProviderDetailContent.DetailCard] {
+        MenuBarProviderDetailContent.cards(
+            limits: limits,
+            hasExhaustedLimit: exhausted,
+            hasBadges: badges,
+            showsDailyUsage: dailyUsage,
+            hasIssues: issues,
+            now: rowsNow
+        )
+    }
+
+    /// Errors read first, before any numbers.
+    func testIssuesAreTheFirstHoverCard() {
+        let result = cards([rowLimit("session", kind: .session)], issues: true)
+        XCTAssertEqual(result.first, .issues)
+    }
+
+    /// A provider with no data and issues shows the issues, not a vague
+    /// "Waiting for refresh" card under them.
+    func testIssuesReplaceTheEmptyCard() {
+        XCTAssertEqual(cards([], issues: true), [.issues])
+        XCTAssertEqual(cards([]), [.empty])
+    }
+
+    /// Each detail block has its own card, with no repeated provider header.
+    func testHoverIsOneCardPerBlockInReadingOrder() {
+        let result = cards(
+            [rowLimit("session", kind: .session), rowLimit("weekly", kind: .weekly, window: 604_800)],
+            badges: true,
+            dailyUsage: true
+        )
+
+        XCTAssertEqual(result, [
+            .limit(id: "session", isRunway: true, showsLegend: false),
+            .limit(id: "weekly", isRunway: true, showsLegend: true),
+            .badges,
+            .dailyUsage
+        ])
+    }
+
+    /// The key is printed once, under the last chart, even when bars follow it.
+    func testLegendSitsOnTheLastRunwayCardOnly() {
+        let result = cards([
+            rowLimit("session", kind: .session),
+            rowLimit("weekly", kind: .weekly, window: 604_800),
+            rowLimit("model", kind: .additional)
+        ])
+
+        let legends = result.compactMap { card -> String? in
+            if case .limit(let id, _, true) = card { id } else { nil }
+        }
+        XCTAssertEqual(legends, ["weekly"])
+    }
+
+    func testBarsOnlyHoverCarriesNoLegendCard() {
+        let result = cards([rowLimit("model", kind: .additional)])
+
+        XCTAssertEqual(result, [.limit(id: "model", isRunway: false, showsLegend: false)])
+    }
+
+    func testEmptyProviderShowsOnlyTheEmptyNote() {
+        XCTAssertEqual(cards([]), [.empty])
+    }
+
+    /// An exhausted provider shows the reset counter instead of the charts.
+    func testExhaustedProviderReplacesTheWindowsWithTheResetCounter() {
+        let result = cards([rowLimit("session", kind: .session)], exhausted: true, dailyUsage: true)
+
+        XCTAssertEqual(result, [.blockingReset, .dailyUsage])
+    }
+
+    /// The hover sits against the popover, so the gap stays small.
+    func testPanelSitsCloseToThePopover() {
+        XCTAssertLessThanOrEqual(MeterBarMenuDetailPanelLayout.panelGap, 8)
     }
 }

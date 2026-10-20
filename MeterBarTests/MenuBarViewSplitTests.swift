@@ -11,6 +11,63 @@ import XCTest
 /// sizing math, status copy, and reset-credit error mapping directly testable.
 @MainActor
 final class MenuBarPopoverGeometryTests: XCTestCase {
+    // MARK: - Window with a hover open
+
+    func testWindowIsJustThePopoverWhileNoHoverIsOpen() {
+        let popover = NSSize(width: 390, height: 500)
+        let size = MenuBarPopoverGeometry.windowSize(
+            popover: popover,
+            hasDetail: false,
+            detailBottom: 900,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(size, popover)
+    }
+
+    func testOpenHoverWidensTheWindowOnTheLeftOnly() {
+        let size = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 300,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(size.width, 390 + MenuBarPopoverGeometry.detailExtension)
+        XCTAssertEqual(size.height, 500)
+    }
+
+    func testTallHoverGrowsTheWindowDownToTheScreenCeiling() {
+        let tall = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 650,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(tall.height, 650)
+
+        let clamped = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500),
+            hasDetail: true,
+            detailBottom: 2000,
+            maximumHeight: 760
+        )
+        XCTAssertEqual(clamped.height, 760)
+    }
+
+    /// The column tucks into the popover's card inset: the visible gap between
+    /// the hover and the popover cards is `detailGap`, not 18pt.
+    func testHoverSitsOneGapFromThePopoverCards() {
+        let gap = MenuBarPopoverGeometry.popoverCardMinX - MenuBarPopoverGeometry.detailWidth
+        XCTAssertEqual(gap, MenuBarPopoverGeometry.detailGap)
+    }
+
+    /// The hover lines up with its card, and a tall hover for a low card moves
+    /// up just enough to stay whole instead of being cut at the bottom.
+    func testHoverColumnStaysLevelWithItsCardUnlessItWouldOverflow() {
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 120, detailHeight: 300, maximumHeight: 760), 120)
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 600, detailHeight: 300, maximumHeight: 760), 460)
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 600, detailHeight: 900, maximumHeight: 760), 0)
+    }
+
     func testMaximumHeightClampsToTheHardCapOnTallScreens() {
         XCTAssertEqual(MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: 2000), 760)
     }
