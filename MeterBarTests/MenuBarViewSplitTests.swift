@@ -18,7 +18,6 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         let size = MenuBarPopoverGeometry.windowSize(
             popover: popover,
             hasDetail: false,
-            detailBottom: 900,
             maximumHeight: 760
         )
         XCTAssertEqual(size, popover)
@@ -28,29 +27,26 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         let size = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 300,
             maximumHeight: 760
         )
         XCTAssertEqual(size.width, 390 + MenuBarPopoverGeometry.detailExtension)
-        XCTAssertEqual(size.height, 500)
+        XCTAssertEqual(size.height, 760)
     }
 
-    func testTallHoverGrowsTheWindowDownToTheScreenCeiling() {
+    func testHoverCanvasReservesTheScreenCeiling() {
         let tall = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 650,
             maximumHeight: 760
         )
-        XCTAssertEqual(tall.height, 650)
+        XCTAssertEqual(tall.height, 760)
 
         let clamped = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 2000,
-            maximumHeight: 760
+            maximumHeight: 584
         )
-        XCTAssertEqual(clamped.height, 760)
+        XCTAssertEqual(clamped.height, 584)
     }
 
     /// The column tucks into the popover's card inset: the visible gap between
@@ -97,7 +93,7 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
 
     func testPopoverHeightAddsChromeAndClampsToTheMinimum() {
         let height = MenuBarPopoverGeometry.popoverHeight(scrollHeight: 80, maximumHeight: 760)
-        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "46 + 80 is below the 180 floor")
+        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "The compact footer plus 80 is below the 180 floor")
     }
 
     func testPopoverHeightClampsToTheMaximum() {
@@ -365,5 +361,78 @@ final class MenuBarViewSplitSmokeTests: XCTestCase {
         PopoverCardFramesPreferenceKey.reduce(value: &frames) { ["b": CGRect(x: 1, y: 2, width: 3, height: 4)] }
         XCTAssertEqual(frames.count, 2)
         XCTAssertEqual(frames["b"]?.width, 3)
+    }
+}
+
+@MainActor
+final class PopoverInteractionTests: XCTestCase {
+    func testEnteringAnotherSourceDismissesPreviousDetailsEvenInsidePopover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.isOverPopover = true
+        ownership.updateSource(id: "codex", isHovered: true)
+        ownership.updateDetail(id: "codex", isHovered: true)
+        ownership.updateSource(id: "terminal-cursor", isHovered: true)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "codex"))
+    }
+
+    func testGapBetweenSourceCardsKeepsCurrentDetailsOpen() {
+        var ownership = PopoverHoverOwnership()
+        ownership.isOverPopover = true
+        ownership.updateSource(id: "first", isHovered: true)
+        ownership.updateSource(id: "first", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "first"))
+        ownership.updateSource(id: "second", isHovered: true)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "second"))
+        ownership.updateSource(id: "second", isHovered: false)
+        ownership.isOverPopover = false
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "second"))
+    }
+
+    func testLateExitFromOldCardDoesNotDismissNewHover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateSource(id: "old", isHovered: true)
+        ownership.updateSource(id: "new", isHovered: true)
+        ownership.updateSource(id: "old", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "new"))
+        ownership.updateSource(id: "new", isHovered: false)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "new"))
+    }
+
+    func testEnteringDetailKeepsItOpenAfterLeavingSource() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateSource(id: "provider", isHovered: true)
+        ownership.updateDetail(id: "provider", isHovered: true)
+        ownership.updateSource(id: "provider", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "provider"))
+        ownership.updateDetail(id: "provider", isHovered: false)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "provider"))
+    }
+
+    func testLateDetailExitDoesNotDismissAReplacementHover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateDetail(id: "old", isHovered: true)
+        ownership.updateDetail(id: "new", isHovered: true)
+        ownership.updateDetail(id: "old", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "new"))
+    }
+
+    func testConnectionFailuresAreGroupedButQuotaAndStalenessAreNot() {
+        func snapshot(_ title: String, notice: ProviderAuthNotice? = nil) -> ProviderSnapshot {
+            ProviderSnapshotBuilder.snapshot(
+                title: title, service: .codexCli,
+                metrics: UsageMetrics(service: .codexCli, weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil)),
+                emptyDetail: "No data", authNotice: notice
+            )
+        }
+        let login = snapshot("Login", notice: .loginRequired)
+        var failure = snapshot("Failed")
+        failure.issues = [.init(id: "auth", title: "Credentials", level: .fail, detail: "Login needed")]
+        let stale = snapshot("Stale", notice: .stale(since: Date()))
+        let exhausted = snapshot("Out")
+        let unavailable = snapshot("Missing", notice: .notConnected)
+        XCTAssertEqual(
+            PopoverOverviewPanel.errorSnapshots(in: [login, failure, stale, exhausted, unavailable]).map(\.id),
+            [login.id, failure.id, unavailable.id]
+        )
     }
 }

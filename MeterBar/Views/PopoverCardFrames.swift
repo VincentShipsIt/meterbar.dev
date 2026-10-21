@@ -2,6 +2,7 @@ import SwiftUI
 
 /// IDs for popover cards that are not provider snapshots.
 enum PopoverCardID {
+    static let providerErrors = "popover-provider-errors"
     static let providerStatus = "popover-provider-status"
 }
 

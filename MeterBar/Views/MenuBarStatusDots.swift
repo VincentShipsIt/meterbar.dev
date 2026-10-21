@@ -1,7 +1,7 @@
 import MeterBarShared
 import SwiftUI
 
-/// Accessibility copy for the header status pill.
+/// Accessibility copy for the footer status pill.
 ///
 /// Lifted out of the view so the singular/plural rule is assertable without a
 /// live `ProviderStatusMonitor`. Deliberately *not* merged with
@@ -16,16 +16,16 @@ enum ProviderStatusDotsSummary {
     }
 }
 
-/// The provider-status indicator, promoted from a full popover card into the top
-/// bar: just the per-provider dots in a glass pill (matching the header's other
+/// The provider-status indicator, promoted from a full popover card into the footer
+/// bar: just the per-provider dots in a glass pill (matching the footer's other
 /// glass controls). Tap — or hover — to open the status detail panel.
-struct PopoverHeaderStatusDots: View {
+struct PopoverStatusDots: View {
     @StateObject private var statusMonitor = ProviderStatusMonitor.shared
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
     let openDetail: () -> Void
-    var hoverOpenDetail: (() -> Void)?
+    var hoverChanged: ((Bool) -> Void)?
 
     private var summaryText: String {
         let issues = ServiceType.statusPageServices
@@ -61,7 +61,7 @@ struct PopoverHeaderStatusDots: View {
         .accessibilityLabel("Provider status")
         .accessibilityValue(summaryText)
         .accessibilityHint("Show provider status details")
-        .onHover { if $0 { hoverOpenDetail?() } }
+        .onHover { hoverChanged?($0) }
         .task { await statusMonitor.refreshAllIfNeeded() }
     }
 }

@@ -248,8 +248,6 @@ struct MenuBarProviderDetailContent: View {
   /// False plays the cards' exit. The hosting column clears the content once it
   /// has finished.
   let isPresented: Bool
-  /// Source card center in the hover column, including any screen-edge adjustment.
-  let revealOriginY: CGFloat
 
   @ObservedObject private var menuBarDisplayPreferences = MenuBarDisplayPreferencesStore.shared
 
@@ -258,15 +256,13 @@ struct MenuBarProviderDetailContent: View {
     dailyUsage: ProviderDailyUsageSeries? = nil,
     isRefreshingUsage: Bool = false,
     costScanDate: Date? = nil,
-    isPresented: Bool = true,
-    revealOriginY: CGFloat = 0
+    isPresented: Bool = true
   ) {
     self.snapshot = snapshot
     self.dailyUsage = dailyUsage
     self.isRefreshingUsage = isRefreshingUsage
     self.costScanDate = costScanDate
     self.isPresented = isPresented
-    self.revealOriginY = revealOriginY
   }
 
   /// Distinguishes the sparkline's cost-scan freshness from the header's
@@ -315,7 +311,7 @@ struct MenuBarProviderDetailContent: View {
   /// The hover used to be a single glass shell with the header, every window and
   /// the weekly strip drawn flat inside it. Each block is now its own card so
   /// the sections separate cleanly and no card nests inside another surface.
-  enum DetailCard: Equatable {
+  enum DetailCard: Hashable {
     /// The provider's failing and warning readiness checks, in full, with the
     /// way to fix each. The popover card only says "Action needed".
     case issues
@@ -352,8 +348,8 @@ struct MenuBarProviderDetailContent: View {
         .limit(id: row.limit.id, isRunway: row.isRunway, showsLegend: row.limit.id == lastRunwayID)
       }
     }
-    if hasBadges { cards.append(.badges) }
     if showsDailyUsage { cards.append(.dailyUsage) }
+    if hasBadges { cards.append(.badges) }
     return cards
   }
 
@@ -394,19 +390,17 @@ struct MenuBarProviderDetailContent: View {
   private var cardStack: some View {
     let cards = orderedCards
     return VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
-      ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
+      ForEach(cards, id: \.self) { card in
         HoverCardSurface(
-          index: index,
           revealed: isPresented,
-          originY: revealOriginY,
-          reduceMotion: reduceMotion
+          reduceMotion: reduceMotion,
+          compact: card == .badges
         ) {
           content(for: card)
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
-    .coordinateSpace(name: "providerHover")
   }
 
   @ViewBuilder
@@ -468,127 +462,67 @@ struct MenuBarProviderDetailContent: View {
   }
 }
 
-/// A liquid reveal whose small source stays attached to the overview card while
-/// the body grows left. The neck pinches off as the final card settles.
-struct HoverCardReveal: Shape {
-  var progress: CGFloat
-  let originY: CGFloat
-
-  var animatableData: CGFloat {
-    get { progress }
-    set { progress = newValue }
-  }
-
-  func path(in rect: CGRect) -> Path {
-    let phase = min(1, max(0, progress))
-    let sourceX = rect.maxX + MenuBarPopoverGeometry.detailGap + 6
-    let sourceY = rect.minY + originY
-    let body = CGRect(
-      x: (sourceX - 6) * (1 - phase) + rect.minX * phase,
-      y: (sourceY - 12) * (1 - phase) + rect.minY * phase,
-      width: 12 * (1 - phase) + rect.width * phase,
-      height: 24 * (1 - phase) + rect.height * phase
-    )
-    let radius = min(MeterBarTheme.Radius.card, body.width / 2, body.height / 2)
-    guard phase > 0, phase < 1, sourceX > body.maxX else {
-      return Path(roundedRect: body, cornerRadius: radius)
-    }
-
-    let halfNeck = min(12 * (1 - phase), (body.height - 2 * radius) / 2)
-    let attachmentY = min(body.maxY - radius - halfNeck, max(body.minY + radius + halfNeck, sourceY))
-    let reach = sourceX - body.maxX
-    var path = Path()
-    path.move(to: CGPoint(x: body.minX + radius, y: body.minY))
-    path.addLine(to: CGPoint(x: body.maxX - radius, y: body.minY))
-    path.addQuadCurve(
-      to: CGPoint(x: body.maxX, y: body.minY + radius),
-      control: CGPoint(x: body.maxX, y: body.minY)
-    )
-    path.addLine(to: CGPoint(x: body.maxX, y: attachmentY - halfNeck))
-    path.addCurve(
-      to: CGPoint(x: sourceX, y: sourceY - halfNeck / 4),
-      control1: CGPoint(x: body.maxX + reach * 0.65, y: attachmentY - halfNeck),
-      control2: CGPoint(x: sourceX - reach * 0.2, y: sourceY - halfNeck / 4)
-    )
-    path.addQuadCurve(
-      to: CGPoint(x: sourceX, y: sourceY + halfNeck / 4),
-      control: CGPoint(x: sourceX + halfNeck / 4, y: sourceY)
-    )
-    path.addCurve(
-      to: CGPoint(x: body.maxX, y: attachmentY + halfNeck),
-      control1: CGPoint(x: sourceX - reach * 0.2, y: sourceY + halfNeck / 4),
-      control2: CGPoint(x: body.maxX + reach * 0.65, y: attachmentY + halfNeck)
-    )
-    path.addLine(to: CGPoint(x: body.maxX, y: body.maxY - radius))
-    path.addQuadCurve(
-      to: CGPoint(x: body.maxX - radius, y: body.maxY),
-      control: CGPoint(x: body.maxX, y: body.maxY)
-    )
-    path.addLine(to: CGPoint(x: body.minX + radius, y: body.maxY))
-    path.addQuadCurve(
-      to: CGPoint(x: body.minX, y: body.maxY - radius),
-      control: CGPoint(x: body.minX, y: body.maxY)
-    )
-    path.addLine(to: CGPoint(x: body.minX, y: body.minY + radius))
-    path.addQuadCurve(
-      to: CGPoint(x: body.minX + radius, y: body.minY),
-      control: CGPoint(x: body.minX, y: body.minY)
-    )
-    path.closeSubpath()
-    return path
-  }
-}
-
-private struct HoverCardSurface<Content: View>: View {
-  let index: Int
+/// Stable glass cards with a brief fade and no geometry animation.
+struct HoverCardSurface<Content: View>: View {
   let revealed: Bool
-  let originY: CGFloat
   let reduceMotion: Bool
+  var compact = false
   @ViewBuilder let content: Content
-  @State private var ready = false
-
-  private var expanded: Bool { (ready || reduceMotion) && revealed }
 
   var body: some View {
     content
-      .padding(MeterBarTheme.CardPadding.popover.value)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
-      .opacity(expanded ? 1 : 0)
-      .mask {
-        GeometryReader { proxy in
-          HoverCardReveal(
-            progress: expanded ? 1 : 0,
-            originY: originY - proxy.frame(in: .named("providerHover")).minY
-          )
-        }
-      }
-      .background {
-        GeometryReader { proxy in
-          let shape = HoverCardReveal(
-            progress: expanded ? 1 : 0,
-            originY: originY - proxy.frame(in: .named("providerHover")).minY
-          )
-          Color.clear
-            .glassEffect(.regular.tint(MeterBarTheme.companionTint), in: shape)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .opacity(reduceMotion && !revealed ? 0 : 1)
-      }
-      .allowsHitTesting(expanded)
+      .padding(.horizontal, MeterBarTheme.CardPadding.popover.value)
+      .padding(.vertical, compact ? 6 : MeterBarTheme.CardPadding.popover.value)
+      .frame(maxWidth: .infinity, minHeight: compact ? 30 : nil, alignment: .topLeading)
+      .meterBarGlassCard()
+      .opacity(revealed ? 1 : 0)
+      .allowsHitTesting(revealed)
       .accessibilityHidden(!revealed)
-      .animation(
-        MeterBarTheme.Motion.resolve(
-          .smooth(duration: 0.28).delay(Double(min(index, 3)) * 0.02),
-          reduceMotion: reduceMotion
-        ),
-        value: expanded
-      )
-      .task {
-        if !reduceMotion { try? await Task.sleep(for: .milliseconds(32)) }
-        guard !Task.isCancelled else { return }
-        ready = true
+      .animation(MeterBarTheme.Motion.resolve(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: revealed)
+  }
+}
+
+struct MenuBarErrorDetailContent: View {
+  let snapshots: [ProviderSnapshot]
+  let isPresented: Bool
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
+
+  var body: some View {
+    ViewThatFits(in: .vertical) {
+      cards
+      ScrollView { cards }.scrollIndicators(.never)
+    }
+  }
+
+  private var cards: some View {
+    VStack(spacing: MenuBarPopoverGeometry.cardGap) {
+      ForEach(snapshots) { snapshot in
+        HoverCardSurface(revealed: isPresented, reduceMotion: reduceMotion) {
+          VStack(alignment: .leading, spacing: 10) {
+            ProviderCardHeader(snapshot: snapshot)
+            if snapshot.hasExhaustedLimit {
+              BlockingLimitResetCounter(
+                windows: snapshot.resetWindows,
+                accentColor: snapshot.accentColor,
+                format: MenuBarDisplayPreferencesStore.shared.resetTimeFormat
+              )
+            }
+            if snapshot.issues.isEmpty {
+              Text(snapshot.emptyDetail).font(.caption).foregroundStyle(.secondary)
+              Button("Open provider settings") { UsageDashboardWindowController.shared.showSettings(.providers) }
+                .font(.caption)
+            } else {
+              ForEach(Array(snapshot.issues.enumerated()), id: \.offset) { _, check in
+                ReadinessCheckRow(check: check, compact: true) {
+                  UsageDashboardWindowController.shared.showSettings(.providers)
+                }
+              }
+            }
+          }
+        }
       }
+    }
   }
 }
 

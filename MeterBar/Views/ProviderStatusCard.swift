@@ -67,6 +67,7 @@ struct ProviderStatusCard: View {
 
     var body: some View {
         selectableCard
+            .onHover { onHoverChange?($0) }
             .providerCardContextMenu(ProviderCardCommands.standard(snapshot: snapshot))
             .task(id: snapshot.updatedAt) {
                 await refreshResetCreditAuthenticationState()
@@ -106,7 +107,6 @@ struct ProviderStatusCard: View {
             }
             .buttonStyle(ProviderCardButtonStyle())
             .accessibilityHint("Open \(snapshot.title) provider details")
-            .onHover { onHoverChange?($0) }
         } else {
             cardContent
         }
