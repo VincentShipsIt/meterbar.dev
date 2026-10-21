@@ -894,7 +894,9 @@ enum ProviderSnapshotBuilder {
             title: title,
             service: service,
             updatedAt: metrics?.lastUpdated,
-            limits: limits(for: metrics, service: service),
+            limits: limits(for: metrics, account: ProviderAccount(
+                service: service, scope: accountID.map { .account(AccountID($0)) } ?? .providerWide
+            )),
             emptyDetail: emptyDetail,
             extraUsage: metrics?.extraUsage,
             resetCreditsAvailable: metrics?.resetCreditsAvailable,
@@ -933,12 +935,13 @@ enum ProviderSnapshotBuilder {
         return (grokError ?? cursorError, probed)
     }
 
-    static func limits(for metrics: UsageMetrics?, service: ServiceType) -> [SnapshotLimit] {
-        guard let metrics else { return [] }
+    static func limits(for metrics: UsageMetrics?, account: ProviderAccount) -> [SnapshotLimit] {
+        guard let metrics, metrics.service == account.service else { return [] }
+        let service = account.service
 
         var result: [SnapshotLimit] = []
         let creditMeterIsActive = metrics.additionalLimits.contains { $0.reading != .measured }
-        if let session = metrics.sessionLimit,
+        if let session = metrics.quotaReading(for: .session, account: account).window?.limit,
            !Self.hidesExhaustedSubscription(session, creditMeterIsActive: creditMeterIsActive) {
             result.append(SnapshotLimit(
                 id: "session",
@@ -951,7 +954,7 @@ enum ProviderSnapshotBuilder {
                 valueStyle: service.usesCurrencyValueStyle ? .currency : .quota
             ))
         }
-        if let weekly = metrics.weeklyLimit,
+        if let weekly = metrics.quotaReading(for: .weekly, account: account).window?.limit,
            !Self.hidesExhaustedSubscription(weekly, creditMeterIsActive: creditMeterIsActive) {
             result.append(SnapshotLimit(
                 id: "weekly",
@@ -965,7 +968,7 @@ enum ProviderSnapshotBuilder {
                 footnote: service == .xai && metrics.codeReviewLimit != nil ? .includedBeforeCredits : nil
             ))
         }
-        if let codeReview = metrics.codeReviewLimit {
+        if let codeReview = metrics.quotaReading(for: .codeReview, account: account).window?.limit {
             // Claude's third window is model-scoped and has changed names
             // across CLI releases. Preserve the parsed label instead of
             // relabeling Fable as Sonnet; legacy caches use a neutral fallback.
@@ -976,7 +979,10 @@ enum ProviderSnapshotBuilder {
                 usageLimit: codeReview
             ))
         }
-        for (index, additional) in metrics.additionalLimits.enumerated() {
+        for index in metrics.additionalQuotaReadings.indices {
+            guard let additional = metrics.quotaReading(
+                for: .additional(UInt(index)), account: account
+            ).window?.limit else { continue }
             let quotaTitleKey = service.additionalQuotaTitleKey(for: additional)
             result.append(SnapshotLimit(
                 id: additionalLimitID(for: additional, index: index),

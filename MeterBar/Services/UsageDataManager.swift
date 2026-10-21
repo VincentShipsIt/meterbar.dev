@@ -688,6 +688,7 @@ class UsageDataManager: ObservableObject {
                 group.addTask { @MainActor in
                     do {
                         let metrics = try await body(index)
+                        guard !metrics.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
                         return IndexedFetch(index: index, metrics: metrics, error: nil)
                     } catch {
                         return IndexedFetch(index: index, metrics: nil, error: error)
@@ -1771,6 +1772,7 @@ class UsageDataManager: ObservableObject {
             case .claudeCode, .codexCli, .openRouter:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }
+            guard !result.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
             parseHealthStore.recordSuccess(service)
             return result
         } catch {

@@ -56,8 +56,29 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     /// A second weekly window, a daily allowance next to session/weekly, or a
     /// monthly period that arrived after `weeklyLimit` was already filled.
     /// Missing on older cached payloads; decodes as empty.
-    public let additionalLimits: [UsageLimit]
+    public let additionalQuotaReadings: [QuotaReading]
+    public var additionalLimits: [UsageLimit] { additionalQuotaReadings.compactMap { $0.window?.limit } }
     public let lastUpdated: Date
+    private let invalidQuotaWindows: Set<QuotaWindowID>
+
+    public var hasInvalidQuota: Bool {
+        !invalidQuotaWindows.isEmpty || additionalQuotaReadings.contains(.unavailable(.parseDrift))
+    }
+    public var hasInvalidBlockingQuota: Bool {
+        invalidQuotaWindows.contains(.session) || invalidQuotaWindows.contains(.weekly)
+    }
+
+    private static func invalidWindows(
+        session: UsageLimit?, weekly: UsageLimit?, codeReview: UsageLimit?
+    ) -> Set<QuotaWindowID> {
+        var result: Set<QuotaWindowID> = []
+        for (id, limit): (QuotaWindowID, UsageLimit?) in [
+            (.session, session), (.weekly, weekly), (.codeReview, codeReview)
+        ] {
+            if let limit, !QuotaWindow.isValid(limit) { result.insert(id) }
+        }
+        return result
+    }
 
     public init(
         service: ServiceType,
@@ -72,13 +93,19 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     ) {
         self.id = UUID()
         self.service = service
-        self.sessionLimit = sessionLimit
-        self.weeklyLimit = weeklyLimit
-        self.codeReviewLimit = codeReviewLimit
+        self.invalidQuotaWindows = Self.invalidWindows(
+            session: sessionLimit, weekly: weeklyLimit, codeReview: codeReviewLimit
+        )
+        self.sessionLimit = QuotaReading.validated(sessionLimit)
+        self.weeklyLimit = QuotaReading.validated(weeklyLimit)
+        self.codeReviewLimit = QuotaReading.validated(codeReviewLimit)
         self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
-        self.additionalLimits = additionalLimits
+        let account = ProviderAccount(service: service, scope: .providerWide)
+        self.additionalQuotaReadings = additionalLimits.enumerated().map { index, limit in
+            QuotaReading(limit: limit, account: account, id: .additional(UInt(index)))
+        }
         self.lastUpdated = lastUpdated
     }
 
@@ -91,18 +118,20 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         modelLimitLabel: String?,
         extraUsage: ExtraUsageStatus?,
         resetCreditsAvailable: Int?,
-        additionalLimits: [UsageLimit],
-        lastUpdated: Date
+        additionalQuotaReadings: [QuotaReading],
+        lastUpdated: Date,
+        invalidQuotaWindows: Set<QuotaWindowID>
     ) {
         self.id = id
         self.service = service
-        self.sessionLimit = sessionLimit
-        self.weeklyLimit = weeklyLimit
-        self.codeReviewLimit = codeReviewLimit
+        self.invalidQuotaWindows = invalidQuotaWindows
+        self.sessionLimit = QuotaReading.validated(sessionLimit)
+        self.weeklyLimit = QuotaReading.validated(weeklyLimit)
+        self.codeReviewLimit = QuotaReading.validated(codeReviewLimit)
         self.modelLimitLabel = modelLimitLabel
         self.extraUsage = extraUsage
         self.resetCreditsAvailable = resetCreditsAvailable
-        self.additionalLimits = additionalLimits
+        self.additionalQuotaReadings = additionalQuotaReadings
         self.lastUpdated = lastUpdated
     }
 
@@ -123,17 +152,34 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         service = try container.decode(ServiceType.self, forKey: .service)
-        sessionLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .sessionLimit)
-        weeklyLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .weeklyLimit)
-        codeReviewLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .codeReviewLimit)
+        let rawSessionLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .sessionLimit)
+        sessionLimit = QuotaReading.validated(rawSessionLimit)
+        let rawWeeklyLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .weeklyLimit)
+        weeklyLimit = QuotaReading.validated(rawWeeklyLimit)
+        let rawCodeReviewLimit = try container.decodeIfPresent(UsageLimit.self, forKey: .codeReviewLimit)
+        codeReviewLimit = QuotaReading.validated(rawCodeReviewLimit)
         modelLimitLabel = try container.decodeIfPresent(String.self, forKey: .modelLimitLabel)
         extraUsage = try container.decodeIfPresent(ExtraUsageStatus.self, forKey: .extraUsage)
         resetCreditsAvailable = try container.decodeIfPresent(Int.self, forKey: .resetCreditsAvailable)
-        additionalLimits = try container.decodeIfPresent([UsageLimit].self, forKey: .additionalLimits) ?? []
+        let rawAdditional = try container.decodeIfPresent([UsageLimit].self, forKey: .additionalLimits) ?? []
+        let account = ProviderAccount(service: service, scope: .providerWide)
+        additionalQuotaReadings = rawAdditional.enumerated().map { index, limit in
+            QuotaReading(limit: limit, account: account, id: .additional(UInt(index)))
+        }
+        invalidQuotaWindows = Self.invalidWindows(
+            session: rawSessionLimit, weekly: rawWeeklyLimit, codeReview: rawCodeReviewLimit
+        )
         lastUpdated = try container.decode(Date.self, forKey: .lastUpdated)
     }
 
     public func encode(to encoder: Encoder) throws {
+        // Older readers know only the optional limit fields. Omitting a bad
+        // blocking window would let them route using only its healthy sibling.
+        guard !hasInvalidBlockingQuota else {
+            throw EncodingError.invalidValue(service.rawValue, .init(
+                codingPath: encoder.codingPath, debugDescription: "Unavailable blocking quota cannot be cached"
+            ))
+        }
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(service, forKey: .service)
@@ -149,6 +195,25 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
         try container.encode(lastUpdated, forKey: .lastUpdated)
     }
 
+    /// A caller must name the provider/account and window it intends to read.
+    /// Provider-wide snapshots cannot silently satisfy a different service.
+    public func quotaReading(for id: QuotaWindowID, account: ProviderAccount) -> QuotaReading {
+        guard account.service == service else { return .unavailable(.parseDrift) }
+        if invalidQuotaWindows.contains(id) { return .unavailable(.parseDrift) }
+        let limit: UsageLimit?
+        switch id {
+        case .session: limit = sessionLimit
+        case .weekly: limit = weeklyLimit
+        case .codeReview: limit = codeReviewLimit
+        case let .additional(index):
+            guard index < UInt(additionalQuotaReadings.count) else { return .unavailable(.unsupported) }
+            let reading = additionalQuotaReadings[Int(index)]
+            guard let window = reading.window else { return reading }
+            limit = window.limit
+        }
+        return QuotaReading(limit: limit, account: account, id: id)
+    }
+
     /// Returns a copy with the given reset-credit count, preserving identity,
     /// limits, extra usage, and timestamp.
     public func withResetCreditsAvailable(_ count: Int?) -> UsageMetrics {
@@ -161,8 +226,9 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
             modelLimitLabel: modelLimitLabel,
             extraUsage: extraUsage,
             resetCreditsAvailable: count,
-            additionalLimits: additionalLimits,
-            lastUpdated: lastUpdated
+            additionalQuotaReadings: additionalQuotaReadings,
+            lastUpdated: lastUpdated,
+            invalidQuotaWindows: invalidQuotaWindows
         )
     }
 
@@ -178,8 +244,9 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
             modelLimitLabel: modelLimitLabel,
             extraUsage: status,
             resetCreditsAvailable: resetCreditsAvailable,
-            additionalLimits: additionalLimits,
-            lastUpdated: lastUpdated
+            additionalQuotaReadings: additionalQuotaReadings,
+            lastUpdated: lastUpdated,
+            invalidQuotaWindows: invalidQuotaWindows
         )
     }
 

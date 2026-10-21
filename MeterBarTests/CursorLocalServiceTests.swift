@@ -46,7 +46,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.service, .xai)
         XCTAssertEqual(metrics.weeklyLimit?.used, 137)
@@ -70,7 +70,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 750)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
     }
@@ -85,7 +85,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 600)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
     }
@@ -100,7 +100,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
     }
@@ -115,7 +115,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
     }
@@ -125,7 +125,7 @@ final class CursorLocalServiceTests: XCTestCase {
         let json = """
         { "individualUsage": { "plan": { "used": 137, "included": 500, "bonus": 0, "total": 500 } } }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.used, 137)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, false)
@@ -137,7 +137,7 @@ final class CursorLocalServiceTests: XCTestCase {
         let json = """
         { "individualUsage": { "plan": { "used": 50 } } }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.used, 50)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
@@ -153,7 +153,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
     }
@@ -167,7 +167,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertNil(metrics.sessionLimit)
     }
 
@@ -181,7 +181,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(metrics.codeReviewLimit?.used, 8)
         XCTAssertEqual(metrics.codeReviewLimit?.total ?? 0, 12, accuracy: 0.0001)
         XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, true)
@@ -196,7 +196,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertNil(metrics.sessionLimit)
     }
 
@@ -208,7 +208,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 340)
         XCTAssertEqual(metrics.weeklyLimit?.total, 1200)
@@ -223,7 +223,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 85)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
@@ -243,7 +243,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 40)
         XCTAssertEqual(metrics.weeklyLimit?.total, 500)
@@ -264,7 +264,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 240)
         XCTAssertEqual(metrics.codeReviewLimit?.used, 18)
@@ -278,7 +278,7 @@ final class CursorLocalServiceTests: XCTestCase {
         // shape; `mapSummary` must follow it instead of defaulting the missing
         // counter to 0 and reporting a confident "0% used, 500 left".
         let json = #"{"individualUsage":{"plan":{"limit":500}}}"#
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertNil(metrics.weeklyLimit, "A missing counter must yield no weekly window, not a confident 0/500")
     }
@@ -300,7 +300,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.additionalLimits.first?.used, 4)
         XCTAssertEqual(metrics.additionalLimits.first?.total, 100)
@@ -327,7 +327,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.additionalLimits.first?.periodKind, .monthly)
         XCTAssertEqual(metrics.weeklyLimit?.periodKind, .monthly)
@@ -347,7 +347,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         let expectedWindow = 31 * 24 * 3_600.0
         let reset = FlexibleISO8601.date(from: "2026-09-10T00:00:00Z")
 
@@ -374,7 +374,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.resetTime, FlexibleISO8601.date(from: "2026-09-10T00:00:00Z"))
         XCTAssertNil(metrics.weeklyLimit?.windowSeconds)
@@ -390,7 +390,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.weeklyLimit?.used, 4)
         XCTAssertNotEqual(metrics.weeklyLimit?.used, 99)
@@ -406,7 +406,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.additionalLimits.first?.used, 4)
         XCTAssertEqual(metrics.weeklyLimit?.used, 4)
@@ -423,7 +423,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.additionalLimits.first?.used, 0)
         XCTAssertEqual(metrics.weeklyLimit?.used, 0)
@@ -441,7 +441,7 @@ final class CursorLocalServiceTests: XCTestCase {
         let json = #"""
         { "individualUsage": { "plan": { "autoPercentUsed": 150, "apiPercentUsed": 40 } } }
         """#
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
 
         XCTAssertEqual(metrics.additionalLimits.count, 1, "An out-of-range percent must be reported unknown, not clamped")
         XCTAssertEqual(metrics.additionalLimits.first?.label, ServiceType.legacyOtherModelsLabel)
@@ -456,7 +456,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(try decodeSummary(json))
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
         XCTAssertEqual(
             metrics.additionalLimits.map(\.label),
             [ServiceType.legacyCursorModelsLabel, ServiceType.legacyOtherModelsLabel]
@@ -515,7 +515,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -568,7 +568,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "isUnified": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -618,7 +618,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "planInfo": { "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY" }
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand),
             planInfo: try decodePlan(plan)
@@ -660,7 +660,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand),
             planInfo: try decodePlan(plan)
@@ -699,7 +699,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -734,7 +734,7 @@ final class CursorLocalServiceTests: XCTestCase {
           }
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             planInfo: try decodePlan(plan)
         )
@@ -794,13 +794,13 @@ final class CursorLocalServiceTests: XCTestCase {
     func testMembershipPrefersNonEmptyPlanName() throws {
         let named = #"{ "planInfo": { "planName": " Ultra " } }"#
         XCTAssertEqual(
-            CursorLocalService.membershipType(summary: "unified_ultra", planInfo: try decodePlan(named)),
+            CursorUsageParser.membershipType(summary: "unified_ultra", planInfo: try decodePlan(named)),
             "Ultra"
         )
 
         let blank = #"{ "planInfo": { "planName": "  " } }"#
         XCTAssertEqual(
-            CursorLocalService.membershipType(summary: "unified_ultra", planInfo: try decodePlan(blank)),
+            CursorUsageParser.membershipType(summary: "unified_ultra", planInfo: try decodePlan(blank)),
             "unified_ultra"
         )
     }
@@ -814,7 +814,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -843,7 +843,7 @@ final class CursorLocalServiceTests: XCTestCase {
         """
 
         for sand in [equal, inverted] {
-            let metrics = CursorLocalService.mapSummary(
+            let metrics = CursorUsageParser.metrics(
                 try decodeSummary(summary),
                 sandStatus: try decodeSand(sand)
             )
@@ -862,7 +862,7 @@ final class CursorLocalServiceTests: XCTestCase {
               "hasNonZeroIncludedLimit": true
             }
             """
-            XCTAssertNil(CursorLocalService.mapSandUsage(try decodeSand(sand)))
+            XCTAssertNil(CursorUsageParser.mapSandUsage(try decodeSand(sand)))
         }
     }
 
@@ -875,7 +875,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -893,7 +893,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "usesPooledEnterpriseAllowance": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -908,7 +908,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": false
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -924,7 +924,7 @@ final class CursorLocalServiceTests: XCTestCase {
           "hasNonZeroIncludedLimit": true
         }
         """
-        let metrics = CursorLocalService.mapSummary(
+        let metrics = CursorUsageParser.metrics(
             try decodeSummary(summary),
             sandStatus: try decodeSand(sand)
         )
@@ -965,7 +965,7 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let observedAt = Date(timeIntervalSince1970: 1_780_000_000)
 
-        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: observedAt))
+        let observation = try XCTUnwrap(CursorUsageParser.observation(try decodeSummary(json), at: observedAt))
 
         XCTAssertEqual(observation.provider, .xai)
         XCTAssertEqual(observation.unit, .requests)
@@ -987,7 +987,7 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
 
-        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
+        let observation = try XCTUnwrap(CursorUsageParser.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertEqual(observation.runningTotal, 100)
     }
@@ -997,7 +997,7 @@ final class CursorLocalServiceTests: XCTestCase {
     func testSummaryPublishesNoAuthoritativeDailyTotal() throws {
         let json = #"{ "individualUsage": { "plan": { "used": 3, "limit": 500 } } }"#
 
-        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
+        let observation = try XCTUnwrap(CursorUsageParser.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertNil(observation.authoritativeDailyTotal)
     }
@@ -1007,14 +1007,14 @@ final class CursorLocalServiceTests: XCTestCase {
     /// re-baselines, so the next complete poll would charge the whole
     /// cycle-to-date count to a single day.
     func testMissingPlanCounterYieldsNoObservationRatherThanZero() throws {
-        XCTAssertNil(CursorLocalService.observation(try decodeSummary("{}"), at: Date()))
+        XCTAssertNil(CursorUsageParser.observation(try decodeSummary("{}"), at: Date()))
         XCTAssertNil(
-            CursorLocalService.observation(try decodeSummary(#"{ "individualUsage": {} }"#), at: Date())
+            CursorUsageParser.observation(try decodeSummary(#"{ "individualUsage": {} }"#), at: Date())
         )
     }
 
     func testEmptySummaryStillYieldsNoObservationWithTeamFallback() throws {
-        XCTAssertNil(CursorLocalService.observation(try decodeSummary("{}"), at: Date()))
+        XCTAssertNil(CursorUsageParser.observation(try decodeSummary("{}"), at: Date()))
     }
 
     func testSummaryObservesTeamPlanRunningTotal() throws {
@@ -1027,7 +1027,7 @@ final class CursorLocalServiceTests: XCTestCase {
         """
         let observedAt = Date(timeIntervalSince1970: 1_780_000_000)
 
-        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: observedAt))
+        let observation = try XCTUnwrap(CursorUsageParser.observation(try decodeSummary(json), at: observedAt))
 
         XCTAssertEqual(observation.runningTotal, 612)
         XCTAssertEqual(observation.unit, .requests)
@@ -1039,7 +1039,7 @@ final class CursorLocalServiceTests: XCTestCase {
     func testExplicitZeroPlanCounterIsStillObserved() throws {
         let json = #"{ "individualUsage": { "plan": { "used": 0, "limit": 500 } } }"#
 
-        let observation = try XCTUnwrap(CursorLocalService.observation(try decodeSummary(json), at: Date()))
+        let observation = try XCTUnwrap(CursorUsageParser.observation(try decodeSummary(json), at: Date()))
 
         XCTAssertEqual(observation.runningTotal, 0)
         XCTAssertEqual(observation.unit, .requests)
@@ -1059,7 +1059,7 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
 
-        XCTAssertNil(CursorLocalService.observation(try decodeSummary(json), at: Date()))
+        XCTAssertNil(CursorUsageParser.observation(try decodeSummary(json), at: Date()))
     }
 
     // MARK: - JWT userId extraction

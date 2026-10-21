@@ -65,7 +65,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
                 service: .xai,
                 weeklyLimit: UsageLimit(used: 35, total: 100, resetTime: now.addingTimeInterval(3_600))
             ),
-            service: .xai
+            account: ProviderAccount(service: .xai, scope: .providerWide)
         )
 
         let seeds = StatusItemLimitCandidateBuilder.seeds(
@@ -95,7 +95,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
                     )
                 ]
             ),
-            service: .codexCli
+            account: ProviderAccount(service: .codexCli, scope: .providerWide)
         )
 
         let seeds = StatusItemLimitCandidateBuilder.seeds(
@@ -127,7 +127,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
     func testLegacyCursorPoolsDoNotBecomeSeparateAutomaticCandidates() {
         let limits = ProviderSnapshotBuilder.limits(
             for: legacyCursorPoolMetrics(weeklyUsed: 100, poolUsed: 17),
-            service: .xai
+            account: ProviderAccount(service: .xai, scope: .providerWide)
         )
         let seeds = StatusItemLimitCandidateBuilder.seeds(
             service: .xai,
@@ -156,7 +156,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
                 service: .codexCli,
                 weeklyLimit: UsageLimit(used: 19, total: 100, resetTime: now.addingTimeInterval(3_600))
             ),
-            service: .codexCli
+            account: ProviderAccount(service: .codexCli, scope: .providerWide)
         )
         let seeds = StatusItemLimitCandidateBuilder.seeds(
             service: .codexCli,
@@ -200,7 +200,7 @@ final class StatusItemLimitSelectorTests: XCTestCase {
             accountID: nil,
             autoSelectionKey: nil,
             displayName: ServiceType.openRouter.displayName,
-            limits: ProviderSnapshotBuilder.limits(for: metrics, service: .openRouter)
+            limits: ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .openRouter, scope: .providerWide))
         )
         let candidates = seeds.map { seed in
             StatusLimitCandidate(

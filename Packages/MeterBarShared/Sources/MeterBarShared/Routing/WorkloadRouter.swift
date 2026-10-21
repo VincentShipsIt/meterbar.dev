@@ -239,7 +239,6 @@ public enum WorkloadRouter {
         guard let metrics = candidate.metrics else {
             return reject(.snapshotMissing, "No usage cached yet for \(subject(candidate))")
         }
-
         let freshness = RoutingFreshness(
             lastUpdated: metrics.lastUpdated,
             now: context.now,
@@ -255,7 +254,7 @@ public enum WorkloadRouter {
         }
 
         let blockingLimits = [metrics.sessionLimit, metrics.weeklyLimit].compactMap { $0 }
-        guard blockingLimits.allSatisfy(isUsableBlockingLimit) else {
+        guard !metrics.hasInvalidBlockingQuota, blockingLimits.allSatisfy(isUsableBlockingLimit) else {
             return reject(
                 .noQuotaWindow,
                 "\(subject(candidate)) reported a malformed session or weekly quota window",

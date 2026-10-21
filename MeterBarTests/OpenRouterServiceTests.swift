@@ -47,6 +47,8 @@ final class OpenRouterServiceTests: XCTestCase {
         XCTAssertNotNil(metrics.weeklyLimit)
         XCTAssertEqual(metrics.weeklyLimit?.used, 0)
         XCTAssertEqual(metrics.weeklyLimit?.total, 0)
+        XCTAssertEqual(metrics.weeklyLimit?.reading, .remainder)
+        XCTAssertEqual(metrics.weeklyLimit?.hasDepletingMeter, false)
     }
 
     func testDailyKeyLimitMapsToNextUTCReset() throws {
