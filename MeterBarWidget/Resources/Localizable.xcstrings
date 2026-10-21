@@ -443,6 +443,50 @@
           }
         }
       }
+    },
+    "quota.paired_value": {
+      "comment": "VoiceOver quota summary. The first variable is remaining or out; the second is used or spent.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "quota.estimated_label": {
+      "comment": "VoiceOver quota title. The variable is the quota window name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, estimated"
+          }
+        }
+      }
+    },
+    "quota.out": {
+      "comment": "Quota is exhausted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Out"
+          }
+        }
+      }
+    },
+    "duration.less_than_one_minute": {
+      "comment": "Compact duration shorter than one minute.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "<1m"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

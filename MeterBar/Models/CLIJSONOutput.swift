@@ -445,7 +445,7 @@ nonisolated public struct CostCLIJSONResponse: CLIJSONDocument {
             cacheCreationTokens = SafeAccumulate.add(cacheCreationTokens, other.cacheCreationTokens)
             cacheReadTokens = SafeAccumulate.add(cacheReadTokens, other.cacheReadTokens)
             totalTokens = SafeAccumulate.add(totalTokens, other.totalTokens)
-            estimatedCostUSD += other.estimatedCostUSD
+            SafeAccumulate.accumulate(&estimatedCostUSD, other.estimatedCostUSD)
             sessionCount = SafeAccumulate.add(sessionCount, other.sessionCount)
         }
     }
