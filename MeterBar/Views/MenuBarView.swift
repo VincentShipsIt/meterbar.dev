@@ -390,7 +390,9 @@ struct MenuBarView: View {
   /// is covered by a short deferred dismiss.
   private func hoverProviderDetailChanged(_ snapshot: ProviderSnapshot, isHovered: Bool) {
     hoverOwnership.updateSource(id: snapshot.id, isHovered: isHovered)
-    if isHovered, !(detail?.id == snapshot.id && detailPresented) {
+    if isHovered,
+       ProviderCardPresentation.allowsDetailNavigation(hasSelectionHandler: true, snapshot: snapshot),
+       !(detail?.id == snapshot.id && detailPresented) {
       openProviderDetail(snapshot)
     }
     reconcileDetailDismissal()

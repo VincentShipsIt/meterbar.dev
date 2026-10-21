@@ -366,6 +366,15 @@ final class MenuBarViewSplitSmokeTests: XCTestCase {
 
 @MainActor
 final class PopoverInteractionTests: XCTestCase {
+    func testEnteringAnotherSourceDismissesPreviousDetailsEvenInsidePopover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.isOverPopover = true
+        ownership.updateSource(id: "codex", isHovered: true)
+        ownership.updateDetail(id: "codex", isHovered: true)
+        ownership.updateSource(id: "terminal-cursor", isHovered: true)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "codex"))
+    }
+
     func testGapBetweenSourceCardsKeepsCurrentDetailsOpen() {
         var ownership = PopoverHoverOwnership()
         ownership.isOverPopover = true

@@ -104,6 +104,7 @@ struct PopoverHoverOwnership {
     }
 
     func shouldDismiss(detailID: String) -> Bool {
-        !isOverPopover && sourceID != detailID && hoveredDetailID != detailID
+        if let sourceID { return sourceID != detailID }
+        return !isOverPopover && hoveredDetailID != detailID
     }
 }

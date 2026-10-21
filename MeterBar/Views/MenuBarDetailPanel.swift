@@ -348,8 +348,8 @@ struct MenuBarProviderDetailContent: View {
         .limit(id: row.limit.id, isRunway: row.isRunway, showsLegend: row.limit.id == lastRunwayID)
       }
     }
-    if hasBadges { cards.append(.badges) }
     if showsDailyUsage { cards.append(.dailyUsage) }
+    if hasBadges { cards.append(.badges) }
     return cards
   }
 
@@ -393,7 +393,8 @@ struct MenuBarProviderDetailContent: View {
       ForEach(cards, id: \.self) { card in
         HoverCardSurface(
           revealed: isPresented,
-          reduceMotion: reduceMotion
+          reduceMotion: reduceMotion,
+          compact: card == .badges
         ) {
           content(for: card)
         }
@@ -465,12 +466,14 @@ struct MenuBarProviderDetailContent: View {
 struct HoverCardSurface<Content: View>: View {
   let revealed: Bool
   let reduceMotion: Bool
+  var compact = false
   @ViewBuilder let content: Content
 
   var body: some View {
     content
-      .padding(MeterBarTheme.CardPadding.popover.value)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
+      .padding(.horizontal, MeterBarTheme.CardPadding.popover.value)
+      .padding(.vertical, compact ? 6 : MeterBarTheme.CardPadding.popover.value)
+      .frame(maxWidth: .infinity, minHeight: compact ? 30 : nil, alignment: .topLeading)
       .meterBarGlassCard()
       .opacity(revealed ? 1 : 0)
       .allowsHitTesting(revealed)

@@ -466,8 +466,8 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(result, [
             .limit(id: "session", isRunway: true, showsLegend: false),
             .limit(id: "weekly", isRunway: true, showsLegend: true),
-            .badges,
-            .dailyUsage
+            .dailyUsage,
+            .badges
         ])
     }
 
