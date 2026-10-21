@@ -26,7 +26,8 @@ enum PlanLabel {
         case .codexCli:
             return token.lowercased() == "prolite" ? "Pro Lite" : words(token)
         case .museCode:
-            return words(token).replacingOccurrences(of: "Muse Code ", with: "", options: .anchored)
+            let name = words(token).replacingOccurrences(of: "Muse Code ", with: "", options: .anchored)
+            return name.hasSuffix(" Usage") ? String(name.dropLast(" Usage".count)) : name
         case .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot, .claudePlatform:
             return words(token)
         }
