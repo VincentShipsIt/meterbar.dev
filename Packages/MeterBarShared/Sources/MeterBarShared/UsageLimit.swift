@@ -83,7 +83,7 @@ public struct UsageLimit: Codable, Equatable, Sendable {
 
     /// A percent exists only when the payload supplied the denominator.
     public var hasDepletingMeter: Bool {
-        reading == .measured || reading == .allowance
+        (reading == .measured || reading == .allowance) && QuotaWindow.isValid(self)
     }
 
     /// Leftover credits for a remainder or allowance. Not a currency string.
@@ -129,8 +129,9 @@ public struct UsageLimit: Codable, Equatable, Sendable {
     }
 
     public var rawPercentage: Double {
-        guard total > 0 else { return 0 }
-        return max(0, (used / total) * 100)
+        guard used.isFinite, used >= 0, total.isFinite, total > 0 else { return 0 }
+        let ratio = used / total * 100
+        return ratio.isFinite ? max(0, ratio) : .greatestFiniteMagnitude
     }
 
     public var percentage: Double {

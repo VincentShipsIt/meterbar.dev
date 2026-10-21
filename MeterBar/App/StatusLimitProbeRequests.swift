@@ -171,7 +171,10 @@ nonisolated enum StatusLimitProbeRequestBuilder {
             accountKey: source.accountKey,
             autoSelectionKey: source.autoSelectionKey,
             displayName: source.displayName,
-            limits: ProviderSnapshotBuilder.limits(for: source.metrics, service: source.service),
+            limits: ProviderSnapshotBuilder.limits(for: source.metrics, account: ProviderAccount(
+                service: source.service,
+                scope: source.accountID.map { .account(AccountID($0)) } ?? .providerWide
+            )),
             lastUpdated: source.metrics.lastUpdated
         )
         return StatusLimitProbeRequest(seeds: seeds, probe: probe)
