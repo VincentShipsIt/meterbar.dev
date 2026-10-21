@@ -367,3 +367,54 @@ final class MenuBarViewSplitSmokeTests: XCTestCase {
         XCTAssertEqual(frames["b"]?.width, 3)
     }
 }
+
+@MainActor
+final class PopoverInteractionTests: XCTestCase {
+    func testLateExitFromOldCardDoesNotDismissNewHover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateSource(id: "old", isHovered: true)
+        ownership.updateSource(id: "new", isHovered: true)
+        ownership.updateSource(id: "old", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "new"))
+        ownership.updateSource(id: "new", isHovered: false)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "new"))
+    }
+
+    func testEnteringDetailKeepsItOpenAfterLeavingSource() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateSource(id: "provider", isHovered: true)
+        ownership.updateDetail(id: "provider", isHovered: true)
+        ownership.updateSource(id: "provider", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "provider"))
+        ownership.updateDetail(id: "provider", isHovered: false)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "provider"))
+    }
+
+    func testLateDetailExitDoesNotDismissAReplacementHover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.updateDetail(id: "old", isHovered: true)
+        ownership.updateDetail(id: "new", isHovered: true)
+        ownership.updateDetail(id: "old", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "new"))
+    }
+
+    func testConnectionFailuresAreGroupedButQuotaAndStalenessAreNot() {
+        func snapshot(_ title: String, notice: ProviderAuthNotice? = nil) -> ProviderSnapshot {
+            ProviderSnapshotBuilder.snapshot(
+                title: title, service: .codexCli,
+                metrics: UsageMetrics(service: .codexCli, weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: nil)),
+                emptyDetail: "No data", authNotice: notice
+            )
+        }
+        let login = snapshot("Login", notice: .loginRequired)
+        var failure = snapshot("Failed")
+        failure.issues = [.init(id: "auth", title: "Credentials", level: .fail, detail: "Login needed")]
+        let stale = snapshot("Stale", notice: .stale(since: Date()))
+        let exhausted = snapshot("Out")
+        let unavailable = snapshot("Missing", notice: .notConnected)
+        XCTAssertEqual(
+            PopoverOverviewPanel.errorSnapshots(in: [login, failure, stale, exhausted, unavailable]).map(\.id),
+            [login.id, failure.id, unavailable.id]
+        )
+    }
+}

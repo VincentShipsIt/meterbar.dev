@@ -3,19 +3,21 @@ import MeterBarShared
 import SwiftUI
 
 /// The popover's scrolling body: first-run callout, empty state, and the
-/// provider card stack. Setup problems are not drawn as their own block: each
-/// card carries its readiness issues, says "Action needed" when one fails, and
-/// lists them in full in its hover.
+/// provider card stack. Connection failures share a first "Needs attention"
+/// card and one hover with all affected providers; quota exhaustion and usage
+/// warnings stay on their provider cards.
 struct PopoverOverviewPanel: View {
     let snapshots: [ProviderSnapshot]
     let openDashboard: () -> Void
-    // Provider status now lives in the popover's top bar, so the panel no longer
+    // Provider status lives in the footer, so the panel no longer
     // renders a status card; `openStatusDetail` is retained for source/test compat.
     let openStatusDetail: () -> Void
     let openProviderOverview: (ProviderSnapshot) -> Void
     /// Hover-driven open for a provider card (opens its detail panel on pointer
     /// enter). Optional so existing/test call sites stay valid.
     var hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)?
+    var openProviderErrors: (([ProviderSnapshot]) -> Void)?
+    var hoverProviderErrors: (([ProviderSnapshot], Bool) -> Void)?
     let claudeDefaultAccountEnabled: Bool
     let claudeEnabledCustomAccountIDs: [UUID]
     let claudeEnabledAccountMetrics: [UsageMetrics]
@@ -44,6 +46,8 @@ struct PopoverOverviewPanel: View {
         openStatusDetail: @escaping () -> Void,
         openProviderOverview: @escaping (ProviderSnapshot) -> Void,
         hoverProviderOverview: ((ProviderSnapshot, Bool) -> Void)? = nil,
+        openProviderErrors: (([ProviderSnapshot]) -> Void)? = nil,
+        hoverProviderErrors: (([ProviderSnapshot], Bool) -> Void)? = nil,
         claudeDefaultAccountEnabled: Bool = true,
         claudeEnabledCustomAccountIDs: [UUID] = [],
         claudeEnabledAccountMetrics: [UsageMetrics] = [],
@@ -59,6 +63,8 @@ struct PopoverOverviewPanel: View {
         self.openStatusDetail = openStatusDetail
         self.openProviderOverview = openProviderOverview
         self.hoverProviderOverview = hoverProviderOverview
+        self.openProviderErrors = openProviderErrors
+        self.hoverProviderErrors = hoverProviderErrors
         self.claudeDefaultAccountEnabled = claudeDefaultAccountEnabled
         self.claudeEnabledCustomAccountIDs = claudeEnabledCustomAccountIDs
         self.claudeEnabledAccountMetrics = claudeEnabledAccountMetrics
@@ -75,6 +81,16 @@ struct PopoverOverviewPanel: View {
         Set(snapshots.map(\.service))
     }
 
+    static func errorSnapshots(in snapshots: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        snapshots.filter { snapshot in
+            if snapshot.issueLevel == .fail { return true }
+            switch snapshot.authNotice {
+            case .loginRequired, .attention, .notConnected: return true
+            case .none, .stale: return false
+            }
+        }
+    }
+
     static func cardStateKey(_ snapshots: [ProviderSnapshot]) -> [String] {
         snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)" }
     }
@@ -83,6 +99,13 @@ struct PopoverOverviewPanel: View {
 
     private var visibleSnapshots: [ProviderSnapshot] {
         Self.attachingIssues(to: snapshots, from: setupReports)
+    }
+
+    private var errorSnapshots: [ProviderSnapshot] { Self.errorSnapshots(in: visibleSnapshots) }
+
+    private var normalSnapshots: [ProviderSnapshot] {
+        let errors = Set(errorSnapshots.map(\.id))
+        return visibleSnapshots.filter { !errors.contains($0.id) }
     }
 
     /// Hands each card the failing and warning checks that apply to it: an
@@ -145,7 +168,7 @@ struct PopoverOverviewPanel: View {
             showsFirstRun: onboarding.shouldPresent,
             showsRecommendationHint: showsRecommendationHint,
             isEmpty: snapshots.isEmpty,
-            issueCards: visibleSnapshots.filter { $0.issueLevel != nil }.map(\.id),
+            issueCards: errorSnapshots.map(\.id),
             snapshotIDs: visibleSnapshots.map(\.id)
         )
     }
@@ -167,6 +190,9 @@ struct PopoverOverviewPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
+            if !errorSnapshots.isEmpty {
+                errorGroup
+            }
             if showsRoutingLine {
                 PopoverRoutingLineView()
             }
@@ -187,7 +213,7 @@ struct PopoverOverviewPanel: View {
             }
 
             VStack(spacing: MenuBarPopoverGeometry.cardGap) {
-                ForEach(visibleSnapshots) { snapshot in
+                ForEach(normalSnapshots) { snapshot in
                     ProviderStatusCard(
                         snapshot: snapshot,
                         onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
@@ -205,6 +231,33 @@ struct PopoverOverviewPanel: View {
         .task(id: readinessInputKey) {
             await loadSetupReports()
         }
+    }
+
+    private var errorGroup: some View {
+        let errors = errorSnapshots
+        return Button {
+            openProviderErrors?(errors)
+        } label: {
+            DashboardTile(padding: .popover) {
+                HStack(spacing: 9) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(MeterBarTheme.warning)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Needs attention").font(.subheadline).fontWeight(.semibold)
+                        Text(errors.map(\.title).joined(separator: " · "))
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Text("\(errors.count)").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Needs attention: \(errors.map(\.title).joined(separator: ", "))")
+        .accessibilityHint("Show all provider connection errors")
+        .onHover { hoverProviderErrors?(errors, $0) }
+        .reportPopoverCardFrame(id: PopoverCardID.providerErrors)
     }
 
     /// The opt-in one-line "what to use next" row.

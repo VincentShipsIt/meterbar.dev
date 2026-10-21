@@ -15,7 +15,7 @@ private struct DetailPresentation {
   /// top-aligns with that card.
   let topInset: CGFloat
   let sourceMidY: CGFloat
-  let make: (_ isPresented: Bool, _ originY: CGFloat) -> AnyView
+  let make: (_ isPresented: Bool) -> AnyView
 }
 
 struct MenuBarView: View {
@@ -46,8 +46,9 @@ struct MenuBarView: View {
   @State private var detailPresented = false
   /// The open hover column's natural height.
   @State private var detailHeight: CGFloat = 0
-  @State private var sourceIsHovered = false
-  @State private var detailIsHovered = false
+  @State private var hoverOwnership = PopoverHoverOwnership()
+  @Environment(\.accessibilityReduceMotion)
+  private var reduceMotion
   @State private var dismissTask: Task<Void, Never>?
   @State private var removeTask: Task<Void, Never>?
   /// Popover card frames, in window coordinates. A plain box, not state: the
@@ -61,8 +62,8 @@ struct MenuBarView: View {
   }
 
   var body: some View {
-    // Overview cards stay independent while each hover surface grows out
-    // of its source card without translating the content.
+    // Card surfaces and content keep their geometry; the brief connection
+    // between columns is isolated from the hover itself.
     ZStack(alignment: .topTrailing) {
       mainColumn
         .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
@@ -111,7 +112,14 @@ struct MenuBarView: View {
   /// exactly as wide as the window with a hover open and pinned trailing, so
   /// before the window grows the column sits off screen, not over the popover.
   private func hoverLayer(_ detail: DetailPresentation) -> some View {
-    detailColumn(detail)
+    ZStack(alignment: .topLeading) {
+      if !reduceMotion {
+        HoverGlassConnection(isPresented: detailPresented)
+          .id(detail.id)
+          .offset(x: MenuBarPopoverGeometry.detailWidth, y: max(0, detail.sourceMidY - 18))
+      }
+      detailColumn(detail)
+    }
       .frame(
         width: MenuBarPopoverGeometry.detailExtension + MenuBarPopoverGeometry.width,
         alignment: .topLeading
@@ -124,9 +132,10 @@ struct MenuBarView: View {
   /// instead of growing the window. It top-aligns with the card that opened it
   /// and moves up only as far as it must to stay on screen.
   private func detailColumn(_ detail: DetailPresentation) -> some View {
-    detail.make(detailPresented, detail.sourceMidY - detailTop(for: detail))
+    detail.make(detailPresented)
       .id(detail.id)
       .frame(width: MenuBarPopoverGeometry.detailWidth)
+      .frame(maxHeight: maximumPopoverHeight, alignment: .top)
       .fixedSize(horizontal: false, vertical: true)
       .background(
         GeometryReader { proxy in
@@ -134,7 +143,7 @@ struct MenuBarView: View {
         }
       )
       .padding(.top, detailTop(for: detail))
-      .onHover { setDetailHovered($0) }
+      .onHover { setDetailHovered($0, id: detail.id) }
   }
 
   private func detailTop(for detail: DetailPresentation) -> CGFloat {
@@ -179,10 +188,7 @@ struct MenuBarView: View {
   }
 
   private var mainColumn: some View {
-    // The header is a floating glass bar over the scroll view, not a strip above
-    // it: `safeAreaBar` insets the content by the bar's height and lets the
-    // system draw its soft scroll-edge fade where cards slide underneath, in
-    // place of the hard rule the old header-plus-Divider stack drew.
+    // The footer reserves its own space beneath the scrolling cards.
     ScrollView {
       VStack(spacing: MenuBarPopoverGeometry.cardGap) {
         PopoverOverviewPanel(
@@ -191,6 +197,8 @@ struct MenuBarView: View {
           openStatusDetail: openStatusDetail,
           openProviderOverview: openProviderDetail,
           hoverProviderOverview: hoverProviderDetailChanged,
+          openProviderErrors: openProviderErrors,
+          hoverProviderErrors: hoverProviderErrorsChanged,
           claudeDefaultAccountEnabled: claudeAccountStore.defaultAccountIsEnabled,
           claudeEnabledCustomAccountIDs: claudeAccountStore.enabledAccounts
             .filter { !$0.isDefault }
@@ -245,13 +253,13 @@ struct MenuBarView: View {
     }
     .overlay(alignment: .topTrailing) {
       PopoverScrollThumb(model: scrollModel)
-        .padding(.top, MenuBarPopoverGeometry.chromeHeight + MeterBarTheme.Spacing.xs)
-        .padding(.bottom, MeterBarTheme.Spacing.xs)
+        .padding(.top, MeterBarTheme.Spacing.xs)
+        .padding(.bottom, MenuBarPopoverGeometry.chromeHeight + MeterBarTheme.Spacing.xs)
         .padding(.trailing, MeterBarTheme.Spacing.xs)
     }
     .scrollContentBackground(.hidden)
-    .safeAreaBar(edge: .top, spacing: 0) {
-      popoverHeader
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      popoverFooter
         .frame(height: MenuBarPopoverGeometry.chromeHeight)
     }
     .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
@@ -296,17 +304,18 @@ struct MenuBarView: View {
     )
   }
 
-  private var popoverHeader: some View {
+  private var popoverFooter: some View {
     HStack(spacing: 8) {
-      PopoverHeaderStatusDots(
+      PopoverStatusDots(
         openDetail: openStatusDetail,
-        hoverOpenDetail: hoverOpenStatusDetail
+        hoverChanged: hoverStatusDetailChanged
       )
+      .reportPopoverCardFrame(id: PopoverCardID.providerStatus)
 
       Spacer()
 
       // Dashboard + Refresh fused into one glass capsule (were two separate glass
-      // circles) so the header actions read as a single pill, matching the
+      // circles) so the footer actions read as a single pill, matching the
       // status-dots pill on the left.
       HStack(spacing: 2) {
         Button(action: openDashboard) {
@@ -339,7 +348,7 @@ struct MenuBarView: View {
       .glassEffect(.regular.interactive(), in: .capsule)
     }
     .font(.body)
-    .padding(.horizontal, MeterBarTheme.Spacing.lg)
+    .padding(.horizontal, MenuBarPopoverGeometry.cardInset)
     .padding(.vertical, MeterBarTheme.Spacing.sm)
   }
 
@@ -349,7 +358,7 @@ struct MenuBarView: View {
   }
 
   private func openStatusDetail() {
-    presentDetail(id: PopoverCardID.providerStatus) { _, _ in
+    presentDetail(id: PopoverCardID.providerStatus) { _ in
       // The status panel carries its own shell and fills the height it is
       // offered, so it takes its natural height here.
       AnyView(MenuBarStatusDetailContent().fixedSize(horizontal: false, vertical: true))
@@ -368,15 +377,14 @@ struct MenuBarView: View {
     )
     let isRefreshing = costTracker.isRefreshingMissingDays || costTracker.isScanning
     let scanDate = costTracker.lastScanDate
-    presentDetail(id: snapshot.id) { isPresented, originY in
+    presentDetail(id: snapshot.id) { isPresented in
       AnyView(
         MenuBarProviderDetailContent(
           snapshot: snapshot,
           dailyUsage: series,
           isRefreshingUsage: isRefreshing,
           costScanDate: scanDate,
-          isPresented: isPresented,
-          revealOriginY: originY
+          isPresented: isPresented
         )
       )
     }
@@ -395,42 +403,52 @@ struct MenuBarView: View {
   /// hover region. Leaving both closes it; crossing the small gap between them
   /// is covered by a short deferred dismiss.
   private func hoverProviderDetailChanged(_ snapshot: ProviderSnapshot, isHovered: Bool) {
-    sourceIsHovered = isHovered
+    hoverOwnership.updateSource(id: snapshot.id, isHovered: isHovered)
     if isHovered, !(detail?.id == snapshot.id && detailPresented) {
       openProviderDetail(snapshot)
     }
     reconcileDetailDismissal()
   }
 
-  /// Hover-driven open for the header status cluster (same non-toggling rule).
-  private func hoverOpenStatusDetail() {
-    guard !(detail?.id == PopoverCardID.providerStatus && detailPresented) else { return }
-    openStatusDetail()
+  private func openProviderErrors(_ snapshots: [ProviderSnapshot]) {
+    presentDetail(id: PopoverCardID.providerErrors) { isPresented in
+      AnyView(MenuBarErrorDetailContent(snapshots: snapshots, isPresented: isPresented))
+    }
   }
 
-  private func setDetailHovered(_ isHovered: Bool) {
-    detailIsHovered = isHovered
+  private func hoverProviderErrorsChanged(_ snapshots: [ProviderSnapshot], isHovered: Bool) {
+    hoverOwnership.updateSource(id: PopoverCardID.providerErrors, isHovered: isHovered)
+    if isHovered { openProviderErrors(snapshots) }
+    reconcileDetailDismissal()
+  }
+
+  private func hoverStatusDetailChanged(_ isHovered: Bool) {
+    hoverOwnership.updateSource(id: PopoverCardID.providerStatus, isHovered: isHovered)
+    if isHovered { openStatusDetail() }
+    reconcileDetailDismissal()
+  }
+
+  private func setDetailHovered(_ isHovered: Bool, id: String) {
+    guard detail?.id == id else { return }
+    hoverOwnership.updateDetail(id: id, isHovered: isHovered)
     reconcileDetailDismissal()
   }
 
   private func reconcileDetailDismissal() {
     dismissTask?.cancel()
     dismissTask = nil
-    guard detailPresented, !sourceIsHovered, !detailIsHovered else { return }
+    guard detailPresented, let id = detail?.id, hoverOwnership.shouldDismiss(detailID: id) else { return }
     dismissTask = Task { @MainActor in
       try? await Task.sleep(nanoseconds: 140_000_000)
-      guard !Task.isCancelled, !sourceIsHovered, !detailIsHovered else { return }
+      guard !Task.isCancelled, detail?.id == id, hoverOwnership.shouldDismiss(detailID: id) else { return }
       closeDetail()
     }
   }
 
-  /// Presents (or toggles off) the hover column, top-aligned with the popover
+  /// Opens the hover column idempotently, top-aligned with the popover
   /// card that opened it.
-  private func presentDetail(id: String, make: @escaping (Bool, CGFloat) -> AnyView) {
-    if detail?.id == id, detailPresented {
-      closeDetail()
-      return
-    }
+  private func presentDetail(id: String, make: @escaping (Bool) -> AnyView) {
+    if detail?.id == id, detailPresented { return }
 
     removeTask?.cancel()
     removeTask = nil
@@ -450,7 +468,7 @@ struct MenuBarView: View {
     detailPresented = false
     removeTask?.cancel()
     removeTask = Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 400_000_000)
+      try? await Task.sleep(nanoseconds: 160_000_000)
       guard !Task.isCancelled else { return }
       detail = nil
       detailHeight = 0
@@ -464,8 +482,7 @@ struct MenuBarView: View {
     detail = nil
     detailPresented = false
     detailHeight = 0
-    sourceIsHovered = false
-    detailIsHovered = false
+    hoverOwnership = PopoverHoverOwnership()
     notifyContentSize()
   }
 

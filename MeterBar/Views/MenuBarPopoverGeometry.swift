@@ -12,7 +12,7 @@ import Foundation
 enum MenuBarPopoverGeometry {
     static let width: CGFloat = 390
     static let minimumHeight: CGFloat = 180
-    /// The header bar that floats over the top of the scroll area: a 30pt glass
+    /// The footer bar below the scroll area: a 30pt glass
     /// capsule plus `Spacing.sm` above and below.
     static let chromeHeight: CGFloat = 46
     /// Breathing room kept between the popover and each screen edge.
@@ -82,5 +82,31 @@ enum MenuBarPopoverGeometry {
             width: width,
             height: popoverHeight(scrollHeight: scroll, maximumHeight: maximumHeight)
         )
+    }
+}
+
+/// Source ownership survives out-of-order exit events while switching cards.
+struct PopoverHoverOwnership {
+    var sourceID: String?
+    var hoveredDetailID: String?
+
+    mutating func updateSource(id: String, isHovered: Bool) {
+        if isHovered {
+            sourceID = id
+        } else if sourceID == id {
+            sourceID = nil
+        }
+    }
+
+    mutating func updateDetail(id: String, isHovered: Bool) {
+        if isHovered {
+            hoveredDetailID = id
+        } else if hoveredDetailID == id {
+            hoveredDetailID = nil
+        }
+    }
+
+    func shouldDismiss(detailID: String) -> Bool {
+        sourceID != detailID && hoveredDetailID != detailID
     }
 }
