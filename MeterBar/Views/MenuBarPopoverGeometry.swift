@@ -12,9 +12,8 @@ import Foundation
 enum MenuBarPopoverGeometry {
     static let width: CGFloat = 390
     static let minimumHeight: CGFloat = 180
-    /// The footer bar below the scroll area: a 30pt glass
-    /// capsule plus `Spacing.sm` above and below.
-    static let chromeHeight: CGFloat = 46
+    /// A 30pt control row with 6pt breathing room below.
+    static let chromeHeight: CGFloat = 36
     /// Breathing room kept between the popover and each screen edge.
     static let screenPadding: CGFloat = 8
     /// Absolute ceiling, independent of how tall the display is.
@@ -49,20 +48,17 @@ enum MenuBarPopoverGeometry {
         min(max(chromeHeight + scrollHeight, minimumHeight), maximumHeight)
     }
 
-    /// The whole window while a hover may be open: the popover pinned to the
-    /// trailing edge, `detailExtension` more width on the left when a hover is
-    /// open, and tall enough for whichever column ends lower. `detailBottom` is
-    /// the hover's bottom edge measured from the window top.
+    /// Reserve one transparent hover canvas while details are open. Switching
+    /// between short errors and tall charts never resizes the native window.
     static func windowSize(
         popover: NSSize,
         hasDetail: Bool,
-        detailBottom: CGFloat,
         maximumHeight: CGFloat
     ) -> NSSize {
         guard hasDetail else { return popover }
         return NSSize(
             width: popover.width + detailExtension,
-            height: min(max(popover.height, detailBottom), maximumHeight)
+            height: maximumHeight
         )
     }
 
@@ -87,6 +83,7 @@ enum MenuBarPopoverGeometry {
 
 /// Source ownership survives out-of-order exit events while switching cards.
 struct PopoverHoverOwnership {
+    var isOverPopover = false
     var sourceID: String?
     var hoveredDetailID: String?
 
@@ -107,6 +104,6 @@ struct PopoverHoverOwnership {
     }
 
     func shouldDismiss(detailID: String) -> Bool {
-        sourceID != detailID && hoveredDetailID != detailID
+        !isOverPopover && sourceID != detailID && hoveredDetailID != detailID
     }
 }

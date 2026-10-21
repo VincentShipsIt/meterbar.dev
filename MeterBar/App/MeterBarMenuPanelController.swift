@@ -165,10 +165,9 @@ final class MeterBarMenuPanelController {
               let panel,
               let button = statusButtonProvider(),
               let frame = targetFrame(anchoredTo: button, size: size) else { return }
-        // Growing or shrinking for a hover is instant: the window is transparent
-        // there, and the cards animate themselves inside it.
-        let widthChanged = abs(frame.width - panel.frame.width) > 0.5
-        applyFrame(frame, to: panel, animated: motionEnabled && !widthChanged)
+        // Native frame interpolation clips hosted content and rebuilds hover
+        // tracking mid-transition. Only the content may fade, never its window.
+        applyFrame(frame, to: panel, animated: false)
     }
 
     private func ensurePanel() -> NSPanel {

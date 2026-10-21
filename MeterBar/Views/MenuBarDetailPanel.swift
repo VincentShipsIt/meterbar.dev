@@ -461,68 +461,21 @@ struct MenuBarProviderDetailContent: View {
   }
 }
 
-/// Stable glass surfaces. Only opacity changes; content, masks, and blur bounds
-/// stay fixed while the small connection between columns animates separately.
+/// Stable glass cards with a brief fade and no geometry animation.
 struct HoverCardSurface<Content: View>: View {
   let revealed: Bool
   let reduceMotion: Bool
   @ViewBuilder let content: Content
-  @State private var ready = false
-
-  private var visible: Bool { (ready || reduceMotion) && revealed }
 
   var body: some View {
     content
       .padding(MeterBarTheme.CardPadding.popover.value)
       .frame(maxWidth: .infinity, alignment: .topLeading)
       .meterBarGlassCard()
-      .opacity(visible ? 1 : 0)
-      .allowsHitTesting(visible)
+      .opacity(revealed ? 1 : 0)
+      .allowsHitTesting(revealed)
       .accessibilityHidden(!revealed)
-      .animation(MeterBarTheme.Motion.resolve(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: visible)
-      .task {
-        await Task.yield()
-        guard !Task.isCancelled else { return }
-        ready = true
-      }
-  }
-}
-
-/// A single background-only connection. Its mask borrows the reference's
-/// blur/threshold union; clipping confines it to the gap between the columns.
-struct HoverGlassConnection: View {
-  let isPresented: Bool
-  @State private var cycle = 0
-
-  var body: some View {
-    Color.clear
-      .glassEffect(.regular.tint(MeterBarTheme.companionTint), in: .rect)
-      .mask {
-        Canvas { context, size in
-          context.addFilter(.alphaThreshold(min: 0.5, color: .white))
-          context.addFilter(.blur(radius: 4))
-          context.drawLayer { layer in
-            for centerX in [-6.0, size.width + 6] {
-              let circle = CGRect(x: centerX - 18, y: 0, width: 36, height: 36)
-              layer.fill(Path(ellipseIn: circle), with: .color(.white))
-            }
-          }
-        }
-      }
-      .frame(width: MenuBarPopoverGeometry.detailGap, height: 36)
-      .clipped()
-      .phaseAnimator([false, true, false], trigger: cycle) { view, connected in
-        view.opacity(connected ? 1 : 0).scaleEffect(x: 1, y: connected ? 1 : 0.25)
-      } animation: { connected in
-        connected ? .easeOut(duration: 0.10) : .easeIn(duration: 0.16)
-      }
-      .task { cycle += 1 }
-      .onChange(of: isPresented) { _, presented in
-        if presented { cycle += 1 }
-      }
-      .opacity(isPresented ? 1 : 0)
-      .allowsHitTesting(false)
-      .accessibilityHidden(true)
+      .animation(MeterBarTheme.Motion.resolve(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: revealed)
   }
 }
 

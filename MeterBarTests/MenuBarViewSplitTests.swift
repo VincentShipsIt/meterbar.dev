@@ -18,7 +18,6 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         let size = MenuBarPopoverGeometry.windowSize(
             popover: popover,
             hasDetail: false,
-            detailBottom: 900,
             maximumHeight: 760
         )
         XCTAssertEqual(size, popover)
@@ -28,29 +27,26 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         let size = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 300,
             maximumHeight: 760
         )
         XCTAssertEqual(size.width, 390 + MenuBarPopoverGeometry.detailExtension)
-        XCTAssertEqual(size.height, 500)
+        XCTAssertEqual(size.height, 760)
     }
 
-    func testTallHoverGrowsTheWindowDownToTheScreenCeiling() {
+    func testHoverCanvasReservesTheScreenCeiling() {
         let tall = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 650,
             maximumHeight: 760
         )
-        XCTAssertEqual(tall.height, 650)
+        XCTAssertEqual(tall.height, 760)
 
         let clamped = MenuBarPopoverGeometry.windowSize(
             popover: NSSize(width: 390, height: 500),
             hasDetail: true,
-            detailBottom: 2000,
-            maximumHeight: 760
+            maximumHeight: 584
         )
-        XCTAssertEqual(clamped.height, 760)
+        XCTAssertEqual(clamped.height, 584)
     }
 
     /// The column tucks into the popover's card inset: the visible gap between
@@ -97,7 +93,7 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
 
     func testPopoverHeightAddsChromeAndClampsToTheMinimum() {
         let height = MenuBarPopoverGeometry.popoverHeight(scrollHeight: 80, maximumHeight: 760)
-        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "46 + 80 is below the 180 floor")
+        XCTAssertEqual(height, MenuBarPopoverGeometry.minimumHeight, "The compact footer plus 80 is below the 180 floor")
     }
 
     func testPopoverHeightClampsToTheMaximum() {
@@ -370,6 +366,19 @@ final class MenuBarViewSplitSmokeTests: XCTestCase {
 
 @MainActor
 final class PopoverInteractionTests: XCTestCase {
+    func testGapBetweenSourceCardsKeepsCurrentDetailsOpen() {
+        var ownership = PopoverHoverOwnership()
+        ownership.isOverPopover = true
+        ownership.updateSource(id: "first", isHovered: true)
+        ownership.updateSource(id: "first", isHovered: false)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "first"))
+        ownership.updateSource(id: "second", isHovered: true)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "second"))
+        ownership.updateSource(id: "second", isHovered: false)
+        ownership.isOverPopover = false
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "second"))
+    }
+
     func testLateExitFromOldCardDoesNotDismissNewHover() {
         var ownership = PopoverHoverOwnership()
         ownership.updateSource(id: "old", isHovered: true)

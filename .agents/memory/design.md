@@ -26,7 +26,7 @@ Glass is the **chrome** layer (menu bar, popover, toolbar, sidebar, occasional f
 ## Shape and hierarchy
 
 - Concentric corners: `Radius.shell` (24) minus the popover inset (`Spacing.md`, 12) equals `Radius.card` (12). Change one, change the others.
-- Popover status dots and dashboard/refresh actions sit in a bottom `safeAreaInset`, aligned to the provider cards through `MenuBarPopoverGeometry.cardInset`. `chromeHeight` is the footer height; scroll feedback ends above it.
+- Popover status dots, Stay Awake, and dashboard/refresh actions share one 30pt row in a bottom `safeAreaInset`, aligned to the provider cards through `MenuBarPopoverGeometry.cardInset`. `chromeHeight` is the footer height; scroll feedback ends above it.
 - Labels, section headers, table column headers and status chips are sentence case, never `.uppercased()` / `.textCase(.uppercase)`. Share-card artwork is the exception.
 
 ## Color

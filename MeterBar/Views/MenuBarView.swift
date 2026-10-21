@@ -14,7 +14,6 @@ private struct DetailPresentation {
   /// Distance from the window top to the card that opened it, so the column
   /// top-aligns with that card.
   let topInset: CGFloat
-  let sourceMidY: CGFloat
   let make: (_ isPresented: Bool) -> AnyView
 }
 
@@ -47,8 +46,6 @@ struct MenuBarView: View {
   /// The open hover column's natural height.
   @State private var detailHeight: CGFloat = 0
   @State private var hoverOwnership = PopoverHoverOwnership()
-  @Environment(\.accessibilityReduceMotion)
-  private var reduceMotion
   @State private var dismissTask: Task<Void, Never>?
   @State private var removeTask: Task<Void, Never>?
   /// Popover card frames, in window coordinates. A plain box, not state: the
@@ -62,8 +59,7 @@ struct MenuBarView: View {
   }
 
   var body: some View {
-    // Card surfaces and content keep their geometry; the brief connection
-    // between columns is isolated from the hover itself.
+    // Hover cards keep their geometry and the popover stays pinned trailing.
     ZStack(alignment: .topTrailing) {
       mainColumn
         .frame(width: MenuBarPopoverGeometry.width, height: popoverHeight)
@@ -104,7 +100,6 @@ struct MenuBarView: View {
     .onPreferenceChange(DetailHeightPreferenceKey.self) { height in
       guard abs(height - detailHeight) > 1 else { return }
       detailHeight = height
-      notifyContentSize()
     }
   }
 
@@ -112,14 +107,7 @@ struct MenuBarView: View {
   /// exactly as wide as the window with a hover open and pinned trailing, so
   /// before the window grows the column sits off screen, not over the popover.
   private func hoverLayer(_ detail: DetailPresentation) -> some View {
-    ZStack(alignment: .topLeading) {
-      if !reduceMotion {
-        HoverGlassConnection(isPresented: detailPresented)
-          .id(detail.id)
-          .offset(x: MenuBarPopoverGeometry.detailWidth, y: max(0, detail.sourceMidY - 18))
-      }
-      detailColumn(detail)
-    }
+    detailColumn(detail)
       .frame(
         width: MenuBarPopoverGeometry.detailExtension + MenuBarPopoverGeometry.width,
         alignment: .topLeading
@@ -152,12 +140,6 @@ struct MenuBarView: View {
       detailHeight: detailHeight,
       maximumHeight: maximumPopoverHeight
     )
-  }
-
-  /// The open hover's bottom edge, from the window top.
-  private var detailBottom: CGFloat {
-    guard let detail else { return 0 }
-    return detailTop(for: detail) + detailHeight
   }
 
   /// The provider cards the popover draws.
@@ -214,10 +196,6 @@ struct MenuBarView: View {
           showsRoutingLine: true
         )
 
-        DashboardTile(padding: .popover) {
-          StayAwakeMenuControl()
-        }
-
         if SessionWakeMenuControl.shouldShow(
           featureEnabled: sessionWakeStore.featureEnabled,
           isOn: sessionWakeStore.isOn,
@@ -228,7 +206,8 @@ struct MenuBarView: View {
           }
         }
       }
-      .padding(MeterBarTheme.Spacing.md)
+      .padding([.horizontal, .top], MenuBarPopoverGeometry.cardInset)
+      .padding(.bottom, MenuBarPopoverGeometry.cardGap)
       .background(
         GeometryReader { proxy in
           Color.clear.preference(
@@ -264,6 +243,10 @@ struct MenuBarView: View {
     }
     .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
     .frame(height: scrollHeight + MenuBarPopoverGeometry.chromeHeight)
+    .onHover {
+      hoverOwnership.isOverPopover = $0
+      reconcileDetailDismissal()
+    }
   }
 
   private var scrollHeight: CGFloat {
@@ -298,7 +281,6 @@ struct MenuBarView: View {
           maximumHeight: maximumPopoverHeight
         ),
         hasDetail: detail != nil,
-        detailBottom: detailBottom,
         maximumHeight: maximumPopoverHeight
       )
     )
@@ -312,7 +294,11 @@ struct MenuBarView: View {
       )
       .reportPopoverCardFrame(id: PopoverCardID.providerStatus)
 
-      Spacer()
+      Spacer(minLength: 0)
+
+      StayAwakeMenuControl()
+
+      Spacer(minLength: 0)
 
       // Dashboard + Refresh fused into one glass capsule (were two separate glass
       // circles) so the footer actions read as a single pill, matching the
@@ -349,7 +335,7 @@ struct MenuBarView: View {
     }
     .font(.body)
     .padding(.horizontal, MenuBarPopoverGeometry.cardInset)
-    .padding(.vertical, MeterBarTheme.Spacing.sm)
+    .padding(.bottom, MenuBarPopoverGeometry.cardGap)
   }
 
   private func openDashboard() {
@@ -456,7 +442,6 @@ struct MenuBarView: View {
     detail = DetailPresentation(
       id: id,
       topInset: max(0, source?.minY ?? 0),
-      sourceMidY: source?.midY ?? 0,
       make: make
     )
     detailPresented = true

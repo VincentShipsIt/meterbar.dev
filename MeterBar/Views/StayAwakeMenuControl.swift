@@ -17,29 +17,21 @@ struct StayAwakeMenuControl: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Label {
-                Text("Stay Awake")
-            } icon: {
-                Image(systemName: manager.isAssertionHeld ? "flame.fill" : "flame")
-                    .foregroundStyle(manager.isAssertionHeld ? MeterBarTheme.warning : .secondary)
-            }
-
-            Spacer()
-
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(manager.isAssertionHeld ? MeterBarTheme.warning : .secondary)
-                .accessibilityHidden(true)
-
-            Toggle("Stay Awake", isOn: Binding(
-                get: { store.isEnabled },
-                set: { store.setEnabled($0) }
-            ))
-            .labelsHidden()
-            .meterBarSwitch()
-            .accessibilityValue(statusText)
+        Button {
+            store.setEnabled(!store.isEnabled)
+        } label: {
+            Label("Stay Awake", systemImage: store.isEnabled ? "flame.fill" : "flame")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(manager.isAssertionHeld ? MeterBarTheme.warning : .primary)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .help("Stay Awake: \(statusText)")
+        .accessibilityLabel("Stay Awake")
+        .accessibilityValue(statusText)
     }
 
     private var statusText: String {
