@@ -429,7 +429,8 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         exhausted: Bool = false,
         badges: Bool = false,
         dailyUsage: Bool = false,
-        issues: Bool = false
+        issues: Bool = false,
+        providerStatus: Bool = false
     ) -> [MenuBarProviderDetailContent.DetailCard] {
         MenuBarProviderDetailContent.cards(
             limits: limits,
@@ -437,6 +438,7 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             hasBadges: badges,
             showsDailyUsage: dailyUsage,
             hasIssues: issues,
+            hasProviderStatus: providerStatus,
             now: rowsNow
         )
     }
@@ -459,14 +461,16 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         let result = cards(
             [rowLimit("session", kind: .session), rowLimit("weekly", kind: .weekly, window: 604_800)],
             badges: true,
-            dailyUsage: true
+            dailyUsage: true,
+            providerStatus: true
         )
 
         XCTAssertEqual(result, [
             .limit(id: "session", isRunway: true, showsLegend: false),
             .limit(id: "weekly", isRunway: true, showsLegend: true),
             .dailyUsage,
-            .badges
+            .badges,
+            .providerStatus
         ])
     }
 

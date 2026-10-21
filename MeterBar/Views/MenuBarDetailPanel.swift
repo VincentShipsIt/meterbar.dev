@@ -322,6 +322,7 @@ struct MenuBarProviderDetailContent: View {
     case empty
     case badges
     case dailyUsage
+    case providerStatus
   }
 
   /// The ordered cards for a snapshot. Pure so the layout rules are asserted
@@ -332,6 +333,7 @@ struct MenuBarProviderDetailContent: View {
     hasBadges: Bool,
     showsDailyUsage: Bool,
     hasIssues: Bool = false,
+    hasProviderStatus: Bool = false,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = []
@@ -350,6 +352,7 @@ struct MenuBarProviderDetailContent: View {
     }
     if showsDailyUsage { cards.append(.dailyUsage) }
     if hasBadges { cards.append(.badges) }
+    if hasProviderStatus { cards.append(.providerStatus) }
     return cards
   }
 
@@ -370,7 +373,8 @@ struct MenuBarProviderDetailContent: View {
       hasExhaustedLimit: snapshot.hasExhaustedLimit,
       hasBadges: badges.hasContent,
       showsDailyUsage: showsDailyUsage,
-      hasIssues: !snapshot.issues.isEmpty
+      hasIssues: !snapshot.issues.isEmpty,
+      hasProviderStatus: snapshot.service.hasStatusPage
     )
   }
 
@@ -394,7 +398,7 @@ struct MenuBarProviderDetailContent: View {
         HoverCardSurface(
           revealed: isPresented,
           reduceMotion: reduceMotion,
-          compact: card == .badges
+          compact: card == .badges || card == .providerStatus
         ) {
           content(for: card)
         }
@@ -447,6 +451,8 @@ struct MenuBarProviderDetailContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     case .badges:
       badges
+    case .providerStatus:
+      MenuBarProviderStatusFooter(service: snapshot.service)
     case .dailyUsage:
       if let dailyUsage {
         // The week behind the windows above: reading top to bottom is now, then

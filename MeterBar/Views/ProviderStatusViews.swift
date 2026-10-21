@@ -44,6 +44,37 @@ struct ProviderStatusBadge: View {
     }
 }
 
+/// The usage hover's final row shares the popover's provider-status source.
+struct MenuBarProviderStatusFooter: View {
+    let service: ServiceType
+    @ObservedObject private var statusMonitor = ProviderStatusMonitor.shared
+
+    var body: some View {
+        let report = statusMonitor.reports[service]
+        let error = statusMonitor.errors[service]
+        let indicator = report?.summary.indicator ?? (error == nil ? .unknown : .critical)
+        let headline = report?.headline ?? (error == nil ? "Loading" : "Unavailable")
+
+        HStack(spacing: 8) {
+            Text("Service status")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            ProviderStatusBadge(indicator: indicator, label: headline)
+            Button {
+                if let url = service.statusPageURL { NSWorkspace.shared.open(url) }
+            } label: {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("Open \(service.statusPageDisplayName) status page")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(service.statusPageDisplayName) service status")
+    }
+}
+
 /// Dashboard Status section: one row per provider, collapsed to a summary
 /// line and expandable in place to show the component details.
 struct ProviderStatusTable: View {
