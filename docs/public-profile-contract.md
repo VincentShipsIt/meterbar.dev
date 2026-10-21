@@ -74,8 +74,10 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
 
 - `provider` is the app's exact `ServiceType.rawValue`: `Claude Code`,
   `Codex CLI`, `xAI`, `OpenRouter`, `Kimi Code`, `Z.ai Coding Plan`,
-  or `GitHub Copilot`. The site maps it to a logo and color. Unknown ids
-  should render with a neutral mark. Only quota windows are published;
+  `GitHub Copilot`, `Muse Code`, or `Claude Platform`. The site validates
+  these wire identities; older `Cursor` and `Grok` uploads remain accepted.
+  Providers without a dedicated color render with a neutral mark. Unknown
+  wire identities are rejected rather than stored. Only quota windows are published;
   currency budgets are omitted, including Copilot's monthly dollar budget.
   A currency-only provider does not acquire an invented quota window.
 - `name` is the provider's display name, with an ordinal for a second account

@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-29
+last_verified: 2026-10-21
 status: active
 ---
 
@@ -15,7 +15,8 @@ Link index plus hard facts. Auto-loaded at session start. Open a topic file for 
 - [distribution.md](distribution.md) — signing, notarization, Sparkle, Homebrew
 - [design.md](design.md) — Liquid Glass / native chrome
 - [decisions.md](decisions.md) — live ADRs
-- [deferred.md](deferred.md) — open debt only
+- [deferred.md](deferred.md) — structural debt and integration boundaries
+- [verify-meterbar](../../skills/verify-meterbar/SKILL.md) — quota/cache/cost/routing/UI/CLI verification
 
 User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs/localization.md`, `docs/quota-event-webhooks.md`, `docs/session-wake-migration.md`, `docs/sparkle-updates.md`.
 
@@ -23,9 +24,9 @@ User contracts (not agent memory): `README.md`, `docs/cli-json-schema.md`, `docs
 
 - Repo: `VincentShipsIt/meterbar.dev`. Public. Default branch `master`.
 - Product: native **macOS 26** menu bar app + WidgetKit widgets + bundled `meterbar` CLI. No backend. No database server. The one opt-in exception is **Public profile** (#594): the app publishes to the site, which lives in `VincentShipsIt/landings`. See `decisions.md`.
-- Latest release tag at last verify: **v1.8.46** (`d79fe53`); master at `d79fe53`. Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**.
-- The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` therefore lags the tags (1.8.41 while v1.8.46 shipped) and is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
-- Providers: Claude Code, Codex CLI, xAI (Grok CLI + Cursor, one merged provider), OpenRouter, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, and Claude Platform (Console API credit) (all opt-in), plus optional Anthropic/OpenAI admin keys. The 2026-09-12 new-provider deferral was lifted on 2026-09-29; The three backlog providers are implemented but unlanded, pending required smoke checks and protected merges; Antigravity is on hold and Gemini CLI is out. See `deferred.md`.
+- Releases after **v1.6.1** are Developer ID signed and notarized. Sparkle 2 from **v1.7.1**. Read current release and trunk state from GitHub; delivery history is not cached here.
+- The shipped version comes from the **git tag**, not the project file. `release.yml` derives it via `scripts/validate-release-tag.sh` and passes it to the signed build, which overrides `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `MARKETING_VERSION` in `MeterBar.xcodeproj` is a build default; being behind a release tag is **not** a bug to fix. Cutting a release = push a `vMAJOR.MINOR.PATCH` tag.
+- Providers: Claude Code, Codex CLI, xAI (Grok CLI + Cursor, one merged provider), OpenRouter, Kimi Code, Z.ai GLM Coding Plan, GitHub Copilot, Muse Code, and Claude Platform. Opt-in behavior comes from `ServiceType`. Provider source/risk contracts and integration boundaries live in [providers.md](providers.md).
 - Shared models live in `Packages/MeterBarShared`. App group `group.dev.meterbar.app`.
 - Release bundle ids `dev.meterbar.app` / `dev.meterbar.app.Widget`. Debug uses `dev.meterbar.app.debug` so local builds cannot shadow the installed app.
 - The **app is not sandboxed** (must read other tools’ logs/credentials and spawn CLIs). The widget is sandboxed. Hardened runtime on both.

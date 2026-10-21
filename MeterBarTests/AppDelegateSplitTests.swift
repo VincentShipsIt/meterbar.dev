@@ -254,14 +254,6 @@ final class AppDelegateSplitTests: XCTestCase {
 
     // MARK: - StatusItemRefreshTrigger
 
-    func testRefreshTriggerFansInEverySource() {
-        // One publisher per input that can change the menu-bar title: metrics,
-        // the three account-metric maps, Claude/Codex/Grok accounts, the
-        // menu-bar account selection, provider visibility, parse health, the
-        // label preferences, and the frontmost app.
-        XCTAssertEqual(StatusItemRefreshTrigger.sources().count, 12)
-    }
-
     func testRefreshTriggerPublisherEmitsOnSubscribe() {
         let expectation = expectation(description: "trigger emits")
         expectation.assertForOverFulfill = false

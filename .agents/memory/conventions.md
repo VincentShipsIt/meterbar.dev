@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-16
+last_verified: 2026-10-21
 status: active
 ---
 
@@ -36,7 +36,7 @@ CLI human output may stay English. `--json` keys, enum tokens, and exit codes ar
 
 ## Errors
 
-- Map provider failures to `ServiceError` and update `@Published lastError` / `hasAccess` on the main actor.
+- Map provider failures to `ServiceError`. `UsageDataManager` commits `refreshFailures` under `ProviderAccount` keys on the main actor; a pending refresh retains the previous failure until its result arrives.
 - Keep cached metrics on fetch failure. Do not blank the UI.
 - Unparseable tokens are not treated as expired — [decisions.md](decisions.md).
 
@@ -47,6 +47,19 @@ CLI human output may stay English. `--json` keys, enum tokens, and exit codes ar
 - Network tests `XCTSkip` without credentials (`APIIntegrationTests`).
 - Pure logic must be testable offline.
 
+## Enforced invariants
+
+For quota, cache, cost, routing, native UI, or CLI changes, use [verify-meterbar](../../skills/verify-meterbar/SKILL.md). The checks, rather than a second provider registry, define the required evidence.
+
+| Risk | Interface | Enforcement |
+|---|---|---|
+| A malformed quota becomes a measured zero | `QuotaReading` / validated `QuotaWindow` | `QuotaReadingTests`; invalid blocking entries cannot reach legacy cache readers |
+| One account reads another account's quota or error | `ProviderAccount` / `UsageCache`; display summaries are projections | `UsageCacheTests`, `UsageDataManagerTests` |
+| Token/cost addition traps or poisons JSON | `TokenCount` / `SafeAccumulate` | `NumericSafetyTests`, `CostAccumulationSafetyTests`, `check-agent-invariants.sh` |
+| A provider is added without a drift witness | Exhaustive `ServiceType` switch over readable/mutated controls | `ProviderPayloadDriftTests`; required test job |
+| A parser reads an implicit clock | Inject `now` and calendar | `check-agent-invariants.sh` checks parser files; fixture tests use fixed dates |
+| Localized fallback copy has no target entry | Literal `String(localized:)` key in its target catalog | `check-agent-invariants.sh`; shared formatting keys need both catalogs |
+
 ## Git
 
 ```text
@@ -54,5 +67,5 @@ type(scope): description
 ```
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`.  
-Branches: `feature/…`, `fix/…`, `chore/…`, `docs/…`.  
+Branches: use the active agent’s configured prefix.
 No `Co-Authored-By` trailer.

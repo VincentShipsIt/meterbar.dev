@@ -116,6 +116,18 @@ final class GitHubCopilotBillingParserTests: XCTestCase {
         }
     }
 
+    func testRecognizedUsageRowWithRenamedCounterIsDriftNotAnEmptyReport() {
+        for item in [
+            #"{"unitType":"credits","renamedGrossQuantity":12}"#,
+            #"{"unitType":"credits","grossQuantity":"unknown"}"#,
+            #"{"unitType":"credits","grossQuantity":-1}"#,
+            #"{"renamedUnitType":"credits","grossQuantity":12}"#,
+            #""not-an-object""#,
+        ] {
+            XCTAssertThrowsError(try usage(#"{"usageItems":[\#(item)]}"#), item)
+        }
+    }
+
     // MARK: - Budgets
 
     func testBudgetsPageParsesEffectiveBudgetAndPaginationFlag() throws {

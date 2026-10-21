@@ -62,12 +62,16 @@ struct RoutingPolicyEditorCard: View {
         editor.draft(task) ?? RoutingPolicyDefaults.policy(for: task)
     }
 
+    private var selectableAccounts: [RoutingPolicyEditor.AccountOption] {
+        RoutingPolicyEditor.accountOptions(available: accounts, saved: policy.accounts)
+    }
+
     var body: some View {
         DashboardCard(title: policy.name, trailing: editor.isCustomized(task) ? "Customized" : nil) {
             VStack(alignment: .leading, spacing: 14) {
                 Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 12) {
                     providersRow
-                    if policy.accountSelection != .automatic || !accounts.isEmpty {
+                    if policy.accountSelection != .automatic || !selectableAccounts.isEmpty {
                         accountRows
                     }
                     modelRows
@@ -120,11 +124,11 @@ struct RoutingPolicyEditorCard: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 help(policy.accountSelection.help)
-                if policy.accountSelection != .automatic {
+                if policy.accountSelection != .automatic || !policy.accounts.isEmpty {
                     if accounts.isEmpty {
                         help("No connected accounts yet. Connect a provider to choose one.")
                     }
-                    ForEach(accounts) { account in
+                    ForEach(selectableAccounts) { account in
                         Toggle(
                             "\(account.ref.provider.displayName) · \(account.label)",
                             isOn: accountBinding(account.ref)

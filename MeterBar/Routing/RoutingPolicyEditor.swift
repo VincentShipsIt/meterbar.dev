@@ -195,6 +195,19 @@ nonisolated struct RoutingPolicyEditor: Equatable {
         }
     }
 
+    /// Retain saved references in the editor even after an account disappears.
+    static func accountOptions(available: [AccountOption], saved: [RoutingAccountRef]) -> [AccountOption] {
+        var options = available
+        var seen = Set(available.map(\.ref))
+        for ref in saved where seen.insert(ref).inserted {
+            options.append(AccountOption(
+                ref: ref,
+                label: "\(RoutingLabel.fallbackAccountLabel(id: ref.accountID)) (unavailable)"
+            ))
+        }
+        return options
+    }
+
     // MARK: Private
 
     private static func defaultPolicy(for task: RoutingTaskID) -> RoutingPolicy {

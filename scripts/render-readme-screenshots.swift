@@ -21,9 +21,8 @@ struct ScreenshotProviderMark: View {
         switch service {
         case .claudeCode: return "ProviderIcon-claude"
         case .codexCli: return "ProviderIcon-codex"
-        case .cursor: return "ProviderIcon-cursor"
+        case .xai: return "ProviderIcon-xai"
         case .openRouter: return "ProviderIcon-openrouter"
-        case .grok: return "ProviderIcon-grok"
         case .kimiCode: return "ProviderIcon-kimi"
         case .zaiCodingPlan: return "ProviderIcon-zai"
         case .githubCopilot: return "ProviderIcon-copilot"
@@ -502,22 +501,15 @@ func makeWindow<V: View>(
 
 @MainActor
 func captureWindow(_ window: NSWindow, to url: URL) throws {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    process.arguments = [
-        "-l", "\(window.windowNumber)",
-        "-t", "png",
-        "-o",
-        "-x",
-        url.path
-    ]
-
-    try process.run()
-    process.waitUntilExit()
-
-    if process.terminationStatus != 0 {
-        throw SnapshotError.outputFailed("screencapture failed for \(url.lastPathComponent)")
+    guard let view = window.contentView,
+          let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+        throw SnapshotError.outputFailed("Could not render \(url.lastPathComponent)")
     }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        throw SnapshotError.outputFailed("Could not encode \(url.lastPathComponent)")
+    }
+    try png.write(to: url, options: .atomic)
 }
 
 // Caseless enum, not a struct: this type only hosts `main`, so making it
@@ -565,7 +557,7 @@ enum SnapshotRenderer {
         )
 
         let cursorMetrics = UsageMetrics(
-            service: .cursor,
+            service: .xai,
             sessionLimit: UsageLimit(used: 2, total: 20, resetTime: nil),
             weeklyLimit: UsageLimit(used: 205, total: 500, resetTime: nil),
             codeReviewLimit: nil,

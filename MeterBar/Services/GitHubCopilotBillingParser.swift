@@ -86,11 +86,14 @@ nonisolated enum GitHubCopilotBillingParser {
             throw ServiceError.parsingError(nil)
         }
         var totals = UsageTotals()
-        for case let item as [String: Any] in items {
-            guard let unitType = (item["unitType"] as? String)?.lowercased(),
-                  unit.accepted.contains(unitType),
-                  let gross = number(item["grossQuantity"]), gross >= 0 else {
-                continue
+        for raw in items {
+            guard let item = raw as? [String: Any],
+                  let unitType = (item["unitType"] as? String)?.lowercased() else {
+                throw ServiceError.parsingError(nil)
+            }
+            guard unit.accepted.contains(unitType) else { continue }
+            guard let gross = number(item["grossQuantity"]), gross >= 0 else {
+                throw ServiceError.parsingError(nil)
             }
             totals.grossQuantity += gross
             totals.discountQuantity += max(0, number(item["discountQuantity"]) ?? 0)

@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-29
+last_verified: 2026-10-21
 status: active
 ---
 
@@ -43,14 +43,19 @@ App, widget, and CLI decode `ServiceType` / `UsageLimit` / `UsageMetrics` from `
 
 `UsageMetrics.modelLimitLabel` is additive optional. Older payloads decode as `nil`.
 
+Quota ingress validates numeric windows through `QuotaReading` / `QuotaWindow`. Measured zero, estimates, and unavailable data are different states. An invalid blocking window remains marked unavailable after copying; the router rejects it and the legacy cache omits that provider entry rather than making an older reader infer availability from its healthy sibling. Valid cache fields and date encoding remain unchanged.
+
+`UsageCache` stores only `ProviderAccount` keys, with explicit account or provider-wide scope. Account UUIDs cannot collide across providers. Its provider/account maps are display projections, not fallback lookups. `MetricsCodec` validates the provider key against the payload, tolerates individual bad account pairs, and resolves duplicate account snapshots by freshness.
+
 CLI `--json` is a separate version-1 DTO with ISO-8601 dates (`docs/cli-json-schema.md`).
 
 ## Orchestration
 
-- `UsageDataManager` (`@MainActor`, `ObservableObject`) — provider refresh, per-account isolation for Claude/Codex/xAI (Grok profiles), UserDefaults cache, app-group mirror, `ProviderParseHealthStore`, non-overlapping timer (default 10 min; Adaptive 1–30 min; wake catch-up). Cross-process lock shared with `meterbar refresh`.
+- `UsageDataManager` (`@MainActor`, `ObservableObject`) — provider refresh and the main-actor owner of `UsageCache` / account-scoped `refreshFailures`, UserDefaults cache, app-group mirror, `ProviderParseHealthStore`, non-overlapping timer (default 10 min; Adaptive 1–30 min; wake catch-up). Cross-process lock shared with `meterbar refresh`.
 - Services are `.shared` singletons. New services follow that until a DI refactor (not planned).
 - Single-account providers (the Cursor source of xAI, Kimi Code, Z.ai, GitHub Copilot) are one table, `UsageDataManager.simpleProviders`, behind `SimpleUsageProviding`; a new one is a table entry, a `ServiceType` case, and its exhaustive-switch arms. Their cards come from `ServiceType.simpleProviderCases` in `ProviderSnapshotBuilder` (access in `Input.simpleProviderAccess`, errors in `LastErrors.simpleProviders`); their Keychain key goes through `ProviderAPIKeyStore`; their Settings panel wraps `SingleKeyProviderSettingsSection`. Opt-in providers (`ServiceType.isOptInByDefault`) stay hidden until `ProviderVisibilityStore` sees their own preference key. Providers with no verified status page set `hasStatusPage = false`. CLI-visible provider settings (Z.ai region, Copilot account and classification token) live in `ProviderSharedSettings`, an app-group JSON file; credentials never do.
-- Cost: `CostTracker` + provider scanners. Cache `~/Library/Application Support/MeterBar/cost-summary-v2.json`. Pricing from `MeterBarShared.ModelPricing`.
+- Quota parsing: `CursorUsageParser` owns Cursor response DTOs and pure mapping with an injected clock; credential/network access stays in `CursorLocalService`. Every provider crosses the same shared quota validation seam.
+- Cost: `CostTracker` + provider scanners. Cache `~/Library/Application Support/MeterBar/cost-summary-v2.json`. Pricing from `MeterBarShared.ModelPricing`. API token counters use saturating `TokenCount`; scanner/CLI folds use `SafeAccumulate`, including finite non-negative USD sums.
 - Workload routing (#513 Phase 1): `WorkloadRouter` + policy/decision contracts in `Packages/MeterBarShared/.../Routing/`; `RoutingCandidateAssembler`, `RoutingPolicyStore` (`routing-policies.json` in the App Group container), and `WorkloadRouteCLI` in `MeterBar/Routing/`; `meterbar route` in `MeterBarCLI/Sources/Route.swift`. Recommendation only. See [decisions.md](decisions.md).
 - Session Wake: `SessionWakeController` + signed `meterbar wake-agent` via `SMAppService.agent`. Debug without the injected CLI uses the in-process fallback.
 - Quota events: `QuotaEventService` + coordinator. Off by default. Contract: `docs/quota-event-webhooks.md`.

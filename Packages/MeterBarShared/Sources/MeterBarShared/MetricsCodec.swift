@@ -13,7 +13,7 @@ import Foundation
 public enum MetricsCodec {
     public static func encode(_ metrics: [ServiceType: UsageMetrics]) -> Data? {
         let keyed = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
-            guard !pair.value.hasInvalidBlockingQuota else { return }
+            guard pair.key == pair.value.service, !pair.value.hasInvalidBlockingQuota else { return }
             result[pair.key.rawValue] = pair.value
         }
         return try? JSONEncoder().encode(keyed)
@@ -26,8 +26,9 @@ public enum MetricsCodec {
 
         var decoded: [String: UsageMetrics] = [:]
         for (key, box) in keyed {
-            guard ServiceType(rawValue: key) != nil,
-                  let metrics = box.value, !metrics.hasInvalidBlockingQuota else { continue }
+            guard let service = ServiceType(rawValue: key),
+                  let metrics = box.value, metrics.service == service,
+                  !metrics.hasInvalidBlockingQuota else { continue }
             decoded[key] = metrics
         }
 
@@ -51,7 +52,7 @@ public enum MetricsCodec {
     }
 
     public static func encodeAccounts(_ snapshots: [AccountUsageSnapshot]) -> Data? {
-        try? JSONEncoder().encode(snapshots.filter { !$0.metrics.hasInvalidBlockingQuota })
+        try? JSONEncoder().encode(uniqueAccounts(snapshots))
     }
 
     /// Decodes the account-scoped cache with the same per-entry tolerance the
@@ -65,6 +66,20 @@ public enum MetricsCodec {
         guard let boxed = try? JSONDecoder().decode([FailableBox<AccountUsageSnapshot>].self, from: data) else {
             return []
         }
-        return boxed.compactMap(\.value).filter { !$0.metrics.hasInvalidBlockingQuota }
+        return uniqueAccounts(boxed.compactMap(\.value))
+    }
+
+    private static func uniqueAccounts(_ snapshots: [AccountUsageSnapshot]) -> [AccountUsageSnapshot] {
+        var result: [AccountUsageSnapshot] = []
+        var positions: [ProviderAccount: Int] = [:]
+        for snapshot in snapshots where !snapshot.metrics.hasInvalidBlockingQuota {
+            if let index = positions[snapshot.account] {
+                if snapshot.metrics.lastUpdated > result[index].metrics.lastUpdated { result[index] = snapshot }
+            } else {
+                positions[snapshot.account] = result.count
+                result.append(snapshot)
+            }
+        }
+        return result
     }
 }

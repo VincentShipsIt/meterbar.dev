@@ -34,6 +34,8 @@ by itself once a limit resets.
   >
 </p>
 
+Screenshot generation and the separate website-asset publishing step are documented in [the screenshot guide](docs/readme-screenshots.md).
+
 ## Features
 
 ### Monitoring

@@ -314,6 +314,25 @@ final class RoutingPolicyEditorTests: XCTestCase {
         XCTAssertEqual(editor.draft(.implementation)?.accounts, [])
     }
 
+    func testUnavailableSavedAccountsRemainRemovableWithoutConnectedAccounts() throws {
+        let ref = RoutingAccountRef(provider: .claudeCode, accountID: UUID())
+        var editor = editor()
+        editor.setAccount(ref, included: true, in: .implementation)
+        let saved = try XCTUnwrap(editor.draft(.implementation)).accounts
+        let options = RoutingPolicyEditor.accountOptions(available: [], saved: saved)
+        XCTAssertEqual(options.map(\.ref), [ref])
+        XCTAssertTrue(try XCTUnwrap(options.first).label.contains("unavailable"))
+        editor.setAccount(try XCTUnwrap(options.first).ref, included: false, in: .implementation)
+        XCTAssertEqual(editor.draft(.implementation)?.accounts, [])
+        XCTAssertTrue(RoutingPolicyEditor.accountOptions(available: [], saved: []).isEmpty)
+    }
+
+    func testSavedAccountKeepsItsConnectedLabelAndAppearsOnlyOnce() {
+        let ref = RoutingAccountRef(provider: .codexCli, accountID: UUID())
+        let available = [RoutingPolicyEditor.AccountOption(ref: ref, label: "Work")]
+        XCTAssertEqual(RoutingPolicyEditor.accountOptions(available: available, saved: [ref, ref]), available)
+    }
+
     func testMovingAProviderReordersThePreference() {
         var editor = editor()
         editor.edit(.review) { $0.providerPreference = [.claudeCode, .codexCli, .xai] }
