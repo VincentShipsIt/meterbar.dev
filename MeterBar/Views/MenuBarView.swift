@@ -344,10 +344,8 @@ struct MenuBarView: View {
   }
 
   private func openStatusDetail() {
-    presentDetail(id: PopoverCardID.providerStatus) { _ in
-      // The status panel carries its own shell and fills the height it is
-      // offered, so it takes its natural height here.
-      AnyView(MenuBarStatusDetailContent().fixedSize(horizontal: false, vertical: true))
+    presentDetail(id: PopoverCardID.providerStatus) { isPresented in
+      AnyView(MenuBarStatusDetailContent(isPresented: isPresented))
     }
   }
 

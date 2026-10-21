@@ -35,6 +35,8 @@ struct ProviderSettingsFacts {
     /// labelled Healthy. `nil` when cards disagree (one failed custom must not
     /// paint a healthy sibling) or when nothing is overlayed.
     var authNotice: ProviderAuthNotice?
+    /// A successful answer without quota, shared with the provider card.
+    var emptyStatusLabel: String?
 
     /// Overlay shown on the Settings row only when every metered card carries
     /// the same notice. Distinct overlays (stale vs attention) must not collapse
@@ -134,6 +136,7 @@ struct ProviderSettingsFacts {
         if errorText != nil {
             return "Refresh failed"
         }
+        if let emptyStatusLabel { return emptyStatusLabel }
         if let worstBand {
             return worstBand.shortLabel
         }

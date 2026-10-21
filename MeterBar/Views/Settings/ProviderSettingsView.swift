@@ -254,11 +254,15 @@ struct ProviderSettingsView: View {
             let snapshots = providerSnapshots(for: service).filter(\.hasMetrics)
             if snapshots.isEmpty {
                 if providerVisibility.isEnabled(service) {
-                    EmptyStateCard(
-                        systemImage: "chart.bar",
-                        title: "No usage yet",
-                        message: "Refresh after signing in to see \(service.displayName) usage."
-                    )
+                    if let idle = providerSnapshots(for: service).first(where: { $0.emptyStatusLabel != nil }) {
+                        EmptyStateCard(systemImage: "clock", title: "Window idle", message: idle.emptyDetail)
+                    } else {
+                        EmptyStateCard(
+                            systemImage: "chart.bar",
+                            title: "No usage yet",
+                            message: "Refresh after signing in to see \(service.displayName) usage."
+                        )
+                    }
                 } else {
                     EmptyStateCard(
                         systemImage: "eye.slash",

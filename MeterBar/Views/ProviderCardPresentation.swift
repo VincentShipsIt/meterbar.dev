@@ -27,13 +27,11 @@ enum ProviderCardPresentation {
         }
     }
 
-    /// The only status word the expanded card and the hover header carry. A working
-    /// provider says nothing: quota health is already in its bars and charts, so a
-    /// "Healthy" or "Tight" chip is noise. The header speaks up when the connection
-    /// is broken or the data is out of date, because stale numbers that look fine are
-    /// the one thing the user cannot see for themselves.
+    /// With readable quota, a working provider needs no status word: its gauges
+    /// already show health. A successful answer without quota may explain its
+    /// state (Idle); errors and stale data take precedence.
     static func connectionStatusText(for snapshot: ProviderSnapshot) -> String? {
-        setupStatusText(for: snapshot) ?? snapshot.authNotice?.shortLabel
+        setupStatusText(for: snapshot) ?? snapshot.authNotice?.shortLabel ?? snapshot.emptyStatusLabel
     }
 
     /// A failing readiness check, reduced to the one word the popover shows.
@@ -57,6 +55,7 @@ enum ProviderCardPresentation {
     static func statusText(for snapshot: ProviderSnapshot) -> String {
         if let setup = setupStatusText(for: snapshot) { return setup }
         if let notice = snapshot.authNotice { return notice.shortLabel }
+        if let empty = snapshot.emptyStatusLabel { return empty }
         if let primary = snapshot.primaryLimit {
             switch primary.usageLimit.reading {
             case .remainder, .allowance:

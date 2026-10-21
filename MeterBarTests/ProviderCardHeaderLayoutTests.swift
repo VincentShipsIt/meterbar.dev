@@ -13,6 +13,6 @@ final class ProviderCardHeaderLayoutTests: XCTestCase {
     func testMetricsStayOnTheFourPointGrid() {
         typealias Layout = ProviderCardHeader.Layout
         XCTAssertGreaterThan(Layout.logoSize, 0)
-        XCTAssertLessThanOrEqual(Layout.rowSpacing, Layout.titleSpacing)
+        XCTAssertLessThanOrEqual(Layout.rowSpacing, Layout.badgeSpacing)
     }
 }

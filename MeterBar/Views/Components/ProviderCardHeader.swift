@@ -11,8 +11,8 @@ import SwiftUI
 /// landed on it. One component keeps them identical. The card carries no
 /// disclosure chevron: the whole card is the control, and hovering it opens the
 /// panel. The status chip appears only for a broken or out-of-date connection (see
-/// `ProviderCardPresentation.connectionStatusText`); a working provider shows
-/// none. It stays beside the provider identity when present; only compact
+/// `ProviderCardPresentation.connectionStatusText`); a successful answer without
+/// quota can instead show a neutral idle state. It stays beside the provider identity when present; only compact
 /// terminal summaries center it against a card.
 struct ProviderCardHeader: View {
     /// Display strings for the header, with no SwiftUI attached so each rule is
@@ -21,7 +21,7 @@ struct ProviderCardHeader: View {
     struct Content: Equatable {
         let title: String
         let subtitle: String
-        /// `nil` while the connection is fine, so a working provider carries no chip.
+        /// No chip for working quota; an idle answer may carry a neutral state.
         let statusText: String?
         let planLabel: String?
 
@@ -38,17 +38,12 @@ struct ProviderCardHeader: View {
 
     var content: Content { Content(snapshot: snapshot) }
 
-    /// Fixed metrics for the header grid. The identity column is the name over
-    /// the refresh subtitle, so the subtitle's leading edge is the title's x
-    /// (logo column + gap) and lines up with the rows under the card. Status
-    /// and the live chip stay in that same row, top-aligned with
-    /// the name. Hanging the subtitle under the whole row wraps the name and
-    /// status onto a second line and drops the wider refresh text out of the
-    /// row's width.
+    /// Name and badges share the top row. The subtitle spans the row below,
+    /// indented to the name, so a long plan cannot truncate the explanation.
     enum Layout {
         static let logoSize: CGFloat = 17
         static let columnSpacing: CGFloat = 7
-        static let titleSpacing: CGFloat = 5
+        static let badgeSpacing: CGFloat = 5
         /// Gap between the provider name and the refresh subtitle.
         static let rowSpacing: CGFloat = 1
         /// Subtitle indent: the logo column plus its gap, i.e. the title's x.
@@ -56,38 +51,39 @@ struct ProviderCardHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: Layout.columnSpacing) {
-            ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
+        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+            HStack(alignment: .top, spacing: Layout.columnSpacing) {
+                ProviderLogoView(
+                    kind: snapshot.logoKind,
+                    size: Layout.logoSize,
+                    foregroundColor: snapshot.accentColor
+                )
+                Text(content.title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                HStack(spacing: Layout.titleSpacing) {
-                    Text(content.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
+                Spacer(minLength: 0)
+
+                HStack(alignment: .top, spacing: Layout.badgeSpacing) {
                     if let plan = content.planLabel {
                         MeterBarChip(plan, tint: snapshot.accentColor)
                             .accessibilityLabel("\(plan) plan")
                     }
+                    if showsLiveAccount {
+                        MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                            .accessibilityLabel("Live CLI account")
+                    }
+                    if content.statusText != nil {
+                        ProviderCardStatusLabel(snapshot: snapshot)
+                    }
                 }
-
-                Text(content.subtitle)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
             }
-            .layoutPriority(1)
-
-            Spacer(minLength: 0)
-
-            if showsLiveAccount {
-                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
-                    .accessibilityLabel("Live CLI account")
-            }
-
-            if content.statusText != nil {
-                ProviderCardStatusLabel(snapshot: snapshot)
-            }
+            Text(content.subtitle)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .padding(.leading, Layout.subtitleInset)
         }
     }
 }

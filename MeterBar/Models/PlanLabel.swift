@@ -25,7 +25,9 @@ enum PlanLabel {
             return "\(base) \(multiplier)"
         case .codexCli:
             return token.lowercased() == "prolite" ? "Pro Lite" : words(token)
-        case .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot, .museCode, .claudePlatform:
+        case .museCode:
+            return words(token).replacingOccurrences(of: "Muse Code ", with: "", options: .anchored)
+        case .zaiCodingPlan, .openRouter, .kimiCode, .githubCopilot, .claudePlatform:
             return words(token)
         }
     }

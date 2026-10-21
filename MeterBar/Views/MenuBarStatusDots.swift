@@ -5,8 +5,7 @@ import SwiftUI
 ///
 /// Lifted out of the view so the singular/plural rule is assertable without a
 /// live `ProviderStatusMonitor`. Deliberately *not* merged with
-/// `MenuBarStatusDetailContent.summaryText` or `DashboardStatusSection.summary`:
-/// all three read similarly but answer different questions (this one has no
+/// `DashboardStatusSection.summary`: the two answer different questions (this one has no
 /// "checking" state and no partial-sweep guard), so folding them together would
 /// change behaviour rather than remove duplication.
 enum ProviderStatusDotsSummary {

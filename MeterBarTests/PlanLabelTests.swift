@@ -19,6 +19,7 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(PlanLabel.make(service: .codexCli, token: "plus"), "Plus")
         XCTAssertEqual(PlanLabel.make(service: .xai, token: "pro_plus"), "Pro Plus")
         XCTAssertEqual(PlanLabel.make(service: .xai, token: "SuperGrok"), "SuperGrok")
+        XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code High Usage"), "High Usage")
     }
 
     func testEmptyTokenYieldsNoLabel() {

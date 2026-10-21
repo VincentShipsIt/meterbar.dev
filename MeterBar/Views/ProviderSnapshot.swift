@@ -33,6 +33,8 @@ struct ProviderSnapshot: Identifiable {
     /// Replaces "Updated …" when a retained reading must say when it was taken.
     /// Defaulted so existing memberwise construction keeps the relative stamp.
     var freshnessNote: String?
+    /// A successful answer without a quota reading, distinct from being offline.
+    var emptyStatusLabel: String?
 
     /// Readiness checks that are not passing for this card's provider or
     /// account. The popover reduces them to one status word; the hover card
@@ -55,7 +57,7 @@ struct ProviderSnapshot: Identifiable {
         if let freshnessNote, !freshnessNote.isEmpty {
             return freshnessNote
         }
-        guard let updatedAt else { return "No data" }
+        guard let updatedAt else { return emptyStatusLabel == nil ? "No data" : emptyDetail }
         return "Updated \(UsageFormat.relative(updatedAt))"
     }
 
@@ -160,7 +162,7 @@ struct ProviderSnapshot: Identifiable {
     /// The notice leads when present: reading a stale cache's band aloud as
     /// "Healthy" is exactly the failure this overlay exists to prevent.
     var accessibilityLabel: String {
-        let status = authNotice?.shortLabel ?? band?.shortLabel ?? "No data"
+        let status = authNotice?.shortLabel ?? emptyStatusLabel ?? band?.shortLabel ?? "No data"
         return "\(title), \(status), \(updatedText)"
     }
 
@@ -716,7 +718,7 @@ enum ProviderSnapshotBuilder {
             // documented allowance) have nothing to draw: the card stays a
             // status row and says why, rather than expanding to nothing.
             let metrics = input.metrics[service].flatMap { $0.hasData ? $0 : nil }
-            result.append(snapshot(
+            var card = snapshot(
                 title: service.shortName,
                 service: service,
                 metrics: metrics,
@@ -727,7 +729,15 @@ enum ProviderSnapshotBuilder {
                 accountID: nil,
                 authNotice: notice(for: service, accountID: nil, metrics: metrics, input: input),
                 freshnessNote: metrics == nil ? nil : input.simpleProviderFreshness[service]
-            ))
+            )
+            if service == .museCode, metrics == nil,
+               input.simpleProviderAccess[service] == true,
+               input.simpleProviderNotes[service] == MuseCodeCopy.idle,
+               input.lastErrors.simpleProviders[service] == nil,
+               input.parseHealth[service]?.isSustainedOrParseFailure != true {
+                card.emptyStatusLabel = "Idle"
+            }
+            result.append(card)
         }
 
         return orderedForDisplay(applyingPlanLabels(to: result, input: input))

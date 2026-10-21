@@ -92,7 +92,7 @@ struct PopoverOverviewPanel: View {
     }
 
     static func cardStateKey(_ snapshots: [ProviderSnapshot]) -> [String] {
-        snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)" }
+        snapshots.map { "\($0.id)|\($0.hasMetrics)|\($0.emptyDetail)|\($0.emptyStatusLabel ?? "")" }
     }
 
     /// The cards the stack draws, each carrying its readiness issues.
