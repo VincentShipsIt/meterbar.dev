@@ -30,11 +30,15 @@ Choices that are easy to reverse but should not drift by accident:
 - **Data problems and known restrictions are different exit codes** (12 vs 11), as in `guard`. A capability, enablement, policy or quota restriction yields 11 even when other candidates have missing data; only all-data rejections or no candidates yield 12.
 - **The policy file stores only overrides.** Built-ins with no entry use the shipped default, so better defaults reach everyone who never customised. A file from a newer schema is never interpreted or overwritten; a read-only caller (the CLI) never rewrites a migrated file.
 - **Free text is gated.** Account and task names pass `RoutingLabel`; anything shaped like an email or a path is replaced, so `route --json` cannot leak either whatever a user typed.
-- **The original five providers support routing.** Shared `ServiceType.supportsWorkloadRouting` rejects Kimi, Z.ai and Copilot as `provider_unsupported` immediately after enablement, before policy, quota or cost checks. They remain tracked, are provider-wide with no account identity, and cannot enter recommendations or fallbacks. Missing or unreadable configuration keeps these opt-in candidates disabled; cached snapshots cannot enable them. Known hidden providers are omitted.
-- **`ServiceType.cliIdentifier` moved into `MeterBarShared`** so the decision contract and every CLI document share one eight-provider token mapping.
+- **Four providers support routing: Claude Code, Codex, xAI, and OpenRouter.** Shared `ServiceType.supportsWorkloadRouting` rejects Kimi, Z.ai, Copilot, Muse, and Claude Platform as `provider_unsupported` immediately after enablement, before policy, quota or cost checks. They remain tracked, are provider-wide with no account identity, and cannot enter recommendations or fallbacks. Missing or unreadable configuration keeps these opt-in candidates disabled; cached snapshots cannot enable them. Known hidden providers are omitted.
+- **`ServiceType.cliIdentifier` moved into `MeterBarShared`** so the decision contract and every CLI document share one provider token mapping.
 - **Policy saves preserve unreadable entries and dangling links.** Only confirmed absence permits creation. Explicit saves may replace readable malformed JSON, while future schemas remain protected. A malformed non-null deficit field falls back to the task default; only explicit null clears the cap.
 
-Execution (`meterbar run`), HTTP, and MCP exposure are out of scope until the recommendation contract is proven and separately approved.
+Execution (`meterbar run`), routing over HTTP, and routing over MCP remain outside the recommendation contract.
+
+**Extension evaluation 2026-10-22** (epic #513): retain recommendation-only delivery. `meterbar route --json` already supplies a versioned decision to shell and agent consumers without access to prompts or execution credentials. An execution adapter would additionally need a verified per-provider account-selection contract, explicit invocation preview, cancellation and exit propagation, and an approved product gate; a recommendation is not authorization to launch a paid workload. No execution adapters are enabled by this release.
+
+The existing authenticated `meterbar serve` exposes cached usage and cost, not routing. A routing HTTP endpoint would need task validation and privacy parity with the CLI while preserving its no-refresh/no-write contract. MCP would add a second transport and lifecycle without improving the current CLI integration. Neither transport is needed to complete recommendation-only routing; retain the CLI as the integration surface and require a concrete consumer and separate approval before adding either endpoint.
 
 ## Public profile is the one opt-in exception to "no backend"
 
