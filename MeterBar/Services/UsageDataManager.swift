@@ -984,7 +984,8 @@ class UsageDataManager: ObservableObject {
     /// value instead of overwriting it with its now-stale result — see
     /// `mergeAccountMetrics`.
     func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
-        guard !demoMode, refreshedMetrics.service == .codexCli, !refreshedMetrics.hasInvalidQuota else { return }
+        guard !demoMode, refreshedMetrics.service == .codexCli,
+              !refreshedMetrics.hasInvalidBlockingQuota else { return }
         codexAccountMetrics[accountID] = refreshedMetrics
         codexAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
@@ -998,7 +999,7 @@ class UsageDataManager: ObservableObject {
     /// used by the popover, dashboard, widget, and CLI. See
     /// `applyCodexResetCreditRefresh` for why the generation bump matters.
     func applyGrokResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
-        guard !demoMode, refreshedMetrics.service == .xai, !refreshedMetrics.hasInvalidQuota else { return }
+        guard !demoMode, refreshedMetrics.service == .xai, !refreshedMetrics.hasInvalidBlockingQuota else { return }
         grokAccountMetrics[accountID] = refreshedMetrics
         grokAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeGrokMetrics(from: grokAccountMetrics) {
@@ -1268,7 +1269,7 @@ class UsageDataManager: ObservableObject {
     }
 
     private static func validatedProviderMetrics(_ metrics: UsageMetrics, for service: ServiceType) throws -> UsageMetrics {
-        guard metrics.service == service, !metrics.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
+        guard metrics.service == service, !metrics.hasInvalidBlockingQuota else { throw ServiceError.parsingError(nil) }
         return metrics
     }
 

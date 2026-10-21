@@ -1839,6 +1839,47 @@ final class UsageDataManagerTests: XCTestCase {
         )] as? TaggedError)?.tag, "codex")
     }
 
+    func testRefreshCommitsHealthyBlockingWindowsWhenOptionalQuotaIsMalformed() async {
+        let refreshed = UsageMetrics(
+            service: .codexCli,
+            weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+            codeReviewLimit: UsageLimit(used: -1, total: 100, resetTime: nil),
+            additionalLimits: [UsageLimit(used: .nan, total: 100, resetTime: nil)]
+        )
+        let provider = StubProvider(hasAccess: true, result: .success(refreshed))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, store) = makeManager(codex: provider, cursor: cursor)
+        await manager.refresh(service: .codexCli)
+        XCTAssertEqual(manager.metrics[.codexCli]?.weeklyLimit?.used, 20)
+        XCTAssertNil(manager.metrics[.codexCli]?.codeReviewLimit)
+        XCTAssertTrue(manager.refreshFailures.isEmpty)
+        store.flushPendingWrites()
+        XCTAssertEqual(store.loadMetrics()[.codexCli]?.weeklyLimit?.used, 20)
+    }
+
+    func testResetRefreshCommitsHealthyQuotaAndStillRejectsMalformedBlockingWindows() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        for service in [ServiceType.codexCli, .xai] {
+            for malformedBlocking in [false, true] {
+                let refreshed = UsageMetrics(
+                    service: service,
+                    weeklyLimit: UsageLimit(used: malformedBlocking ? -1 : 20, total: 100, resetTime: nil),
+                    codeReviewLimit: UsageLimit(used: -1, total: 100, resetTime: nil),
+                    additionalLimits: [UsageLimit(used: .nan, total: 100, resetTime: nil)]
+                )
+                if service == .codexCli {
+                    manager.applyCodexResetCreditRefresh(refreshed, accountID: CodexAccount.defaultID)
+                    XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.weeklyLimit?.used, 20)
+                } else {
+                    manager.applyGrokResetCreditRefresh(refreshed, accountID: GrokAccount.defaultID)
+                    XCTAssertEqual(manager.grokAccountMetrics[GrokAccount.defaultID]?.weeklyLimit?.used, 20)
+                }
+            }
+        }
+    }
+
     func testResetRefreshClearsOnlyTheRedeemedAccountFailure() async throws {
         let (manager, _) = try makeAllPhasesFailingManager(
             claudeResult: .failure(TaggedError(tag: "claude")),
