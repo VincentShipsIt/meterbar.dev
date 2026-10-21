@@ -430,7 +430,8 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         badges: Bool = false,
         dailyUsage: Bool = false,
         issues: Bool = false,
-        providerStatus: Bool = false
+        providerStatus: Bool = false,
+        extraUsage: Bool = false
     ) -> [MenuBarProviderDetailContent.DetailCard] {
         MenuBarProviderDetailContent.cards(
             limits: limits,
@@ -439,6 +440,7 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             showsDailyUsage: dailyUsage,
             hasIssues: issues,
             hasProviderStatus: providerStatus,
+            hasExtraUsage: extraUsage,
             now: rowsNow
         )
     }
@@ -462,7 +464,8 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             [rowLimit("session", kind: .session), rowLimit("weekly", kind: .weekly, window: 604_800)],
             badges: true,
             dailyUsage: true,
-            providerStatus: true
+            providerStatus: true,
+            extraUsage: true
         )
 
         XCTAssertEqual(result, [
@@ -470,8 +473,15 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             .limit(id: "weekly", isRunway: true, showsLegend: true),
             .dailyUsage,
             .badges,
-            .providerStatus
+            .footer
         ])
+    }
+
+    func testFooterIsSingleAndOmittedOnlyWhenBothStatesAreAbsent() {
+        XCTAssertEqual(cards([], providerStatus: true, extraUsage: true), [.empty, .footer])
+        XCTAssertEqual(cards([], providerStatus: true), [.empty, .footer])
+        XCTAssertEqual(cards([], extraUsage: true), [.empty, .footer])
+        XCTAssertEqual(cards([]), [.empty])
     }
 
     /// The key is printed once, under the last chart, even when bars follow it.

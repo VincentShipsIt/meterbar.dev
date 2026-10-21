@@ -24,9 +24,9 @@ struct ProviderStatusBadges: View {
 
     /// Convenience initializer from a `ProviderSnapshot`, which already carries
     /// every field these badges need.
-    init(snapshot: ProviderSnapshot, style: Style = .compact) {
+    init(snapshot: ProviderSnapshot, style: Style = .compact, includesExtraUsage: Bool = true) {
         self.resetCreditsAvailable = snapshot.resetCreditsAvailable
-        self.extraUsage = snapshot.displayedExtraUsage
+        self.extraUsage = includesExtraUsage ? snapshot.displayedExtraUsage : nil
         self.accentColor = snapshot.accentColor
         self.style = style
         self.showsPeakStatus = snapshot.service == .zaiCodingPlan && snapshot.hasMetrics
@@ -96,16 +96,7 @@ struct ProviderStatusBadges: View {
             }
 
             if showsExtraUsage, let extraUsage {
-                HStack(spacing: 4) {
-                    Image(systemName: "creditcard")
-                        .font(.system(size: iconSize, weight: .semibold))
-                        .foregroundColor(.secondary)
-                    Text("Extra usage")
-                        .font(textFont)
-                        .foregroundColor(.secondary)
-                    Spacer(minLength: 4)
-                    ExtraUsageStatusToggle(status: extraUsage)
-                }
+                ExtraUsageStatusRow(status: extraUsage, compact: style == .compact)
             }
         }
     }
