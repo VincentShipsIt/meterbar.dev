@@ -154,7 +154,7 @@ final class UsageDataManagerTests: XCTestCase {
     private enum StubError: Error { case fetchFailed }
 
     /// Carries a phase label so a test can assert *which* leg's failure ended up
-    /// in `lastError`, rather than merely that some failure did.
+    /// under its account key, rather than merely that some failure did.
     private struct TaggedError: Error { let tag: String }
 
     private final class MultiAccountCodexProvider: CodexUsageProviding {
@@ -1541,7 +1541,7 @@ final class UsageDataManagerTests: XCTestCase {
         // Codex refreshed; Cursor degraded gracefully to its cached value.
         XCTAssertEqual(Set(manager.metrics.keys), [.codexCli, .xai])
         XCTAssertEqual(manager.metrics[.xai]?.weeklyLimit?.used, 999)
-        XCTAssertNotNil(manager.lastError)
+        XCTAssertNotNil(manager.refreshFailures[ProviderAccount(service: .xai, scope: .providerWide)])
         XCTAssertEqual(report.outcome(for: .codexCli)?.state, .refreshed)
         XCTAssertEqual(report.outcome(for: .xai)?.state, .failed)
         XCTAssertEqual(report.outcome(for: .xai)?.servedFromCache, true)
@@ -1806,40 +1806,50 @@ final class UsageDataManagerTests: XCTestCase {
         )
     }
 
-    /// `lastError` must be a property of the inputs, not of scheduling. The
-    /// three phases race, so whichever finishes last must not get to claim the
-    /// surfaced error: Claude outranks Codex outranks the simple providers,
-    /// every run.
-    func testRefreshAllSurfacesClaudeFailureAheadOfConcurrentPhases() async throws {
+    func testRefreshAllRetainsEveryConcurrentPhaseFailureUnderItsOwnScope() async throws {
         let (manager, _) = try makeAllPhasesFailingManager(
             claudeResult: .failure(TaggedError(tag: "claude")),
             codexResult: .failure(TaggedError(tag: "codex"))
         )
-
         await manager.refreshAll()
-
-        XCTAssertEqual(
-            (manager.lastError as? TaggedError)?.tag,
-            "claude",
-            "the Claude phase outranks the others regardless of completion order"
-        )
+        XCTAssertEqual(manager.refreshFailures.count, 3)
+        XCTAssertEqual((manager.refreshFailures[ProviderAccount(
+            service: .claudeCode, scope: .account(AccountID(ClaudeCodeAccount.defaultID))
+        )] as? TaggedError)?.tag, "claude")
+        XCTAssertEqual((manager.refreshFailures[ProviderAccount(
+            service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID))
+        )] as? TaggedError)?.tag, "codex")
+        XCTAssertEqual((manager.refreshFailures[ProviderAccount(
+            service: .xai, scope: .providerWide
+        )] as? TaggedError)?.tag, "simple")
     }
 
-    /// Same ordering guarantee one rung down: with Claude healthy, the Codex
-    /// phase's failure wins over the simple providers'.
-    func testRefreshAllSurfacesCodexFailureAheadOfSimpleProviders() async throws {
+    func testHealthyAccountDoesNotHideOtherProviderFailures() async throws {
         let (manager, _) = try makeAllPhasesFailingManager(
             claudeResult: .success(MetricsFixtures.claudeCode()),
             codexResult: .failure(TaggedError(tag: "codex"))
         )
-
         await manager.refreshAll()
+        XCTAssertEqual(manager.refreshFailures.count, 2)
+        XCTAssertNil(manager.refreshFailures[ProviderAccount(
+            service: .claudeCode, scope: .account(AccountID(ClaudeCodeAccount.defaultID))
+        )])
+        XCTAssertEqual((manager.refreshFailures[ProviderAccount(
+            service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID))
+        )] as? TaggedError)?.tag, "codex")
+    }
 
-        XCTAssertEqual(
-            (manager.lastError as? TaggedError)?.tag,
-            "codex",
-            "the Codex phase outranks the simple providers regardless of completion order"
+    func testResetRefreshClearsOnlyTheRedeemedAccountFailure() async throws {
+        let (manager, _) = try makeAllPhasesFailingManager(
+            claudeResult: .failure(TaggedError(tag: "claude")),
+            codexResult: .failure(TaggedError(tag: "codex"))
         )
+        await manager.refreshAll()
+        manager.applyCodexResetCreditRefresh(MetricsFixtures.codexCli(), accountID: CodexAccount.defaultID)
+        XCTAssertNil(manager.refreshFailures[ProviderAccount(
+            service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID))
+        )])
+        XCTAssertEqual(manager.refreshFailures.count, 2)
     }
 
     /// Builds a manager whose three refresh phases all run — and whose simple
@@ -1867,7 +1877,7 @@ final class UsageDataManagerTests: XCTestCase {
             cursor: cursor,
             claude: claude,
             claudeCodeAccountStore: ClaudeCodeAccountStore(userDefaults: accountDefaults),
-            hidden: [.openRouter, .xai]
+            hidden: [.openRouter]
         )
     }
 
@@ -2101,6 +2111,91 @@ final class UsageDataManagerTests: XCTestCase {
         // re-offer the credit just as badly as a stale in-memory value would.
         sharedStore.flushPendingWrites()
         XCTAssertEqual(sharedStore.loadMetrics()[.codexCli]?.resetCreditsAvailable, 0)
+    }
+
+    func testStatusItemRefreshStreamObservesProviderAndEveryAccountProjection() {
+        let codex = StubProvider(hasAccess: false, result: .success(MetricsFixtures.codexCli()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        var events = 0
+        let subscription = StatusItemRefreshTrigger.publisher(dataManager: manager).sink { events += 1 }
+        defer { subscription.cancel() }
+        let id = UUID()
+        let updates: [() -> Void] = [
+            { manager.metrics[.codexCli] = MetricsFixtures.codexCli() },
+            { manager.claudeCodeAccountMetrics[id] = MetricsFixtures.claudeCode() },
+            { manager.codexAccountMetrics[id] = MetricsFixtures.codexCli() },
+            { manager.grokAccountMetrics[id] = MetricsFixtures.grok() },
+            { manager.openRouterAccountMetrics[id] = UsageMetrics(service: .openRouter) },
+        ]
+        for update in updates {
+            let previous = events
+            update()
+            XCTAssertGreaterThan(events, previous, "Every changed cache scope must refresh the menu bar")
+        }
+    }
+
+    func testPendingRefreshKeepsThePreviousAccountFailureUntilItCompletes() async {
+        let codex = StubProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        await manager.refreshAll()
+        let account = ProviderAccount(service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID)))
+        XCTAssertNotNil(manager.refreshFailures[account])
+        codex.result = .success(MetricsFixtures.codexCli())
+        codex.suspendsFetch = true
+        let started = fetchStartSignal("second Codex fetch reached")
+        codex.fetchStarted = started
+        let task = Task { await manager.refreshAll() }
+        await waitForFetchStart(started)
+        guard codex.fetchCount == 2, manager.isLoading else {
+            codex.resumeFetch()
+            _ = await task.value
+            return XCTFail("The second fetch must be suspended before checking its pending failure")
+        }
+        XCTAssertNotNil(manager.refreshFailures[account], "Pending is not a successful refresh")
+        codex.resumeFetch()
+        _ = await task.value
+        XCTAssertNil(manager.refreshFailures[account])
+    }
+
+    func testDelayedFailureCannotResurrectTheRedeemedAccountsError() async {
+        let codex = StubProvider(hasAccess: true, result: .failure(StubError.fetchFailed))
+        codex.suspendsFetch = true
+        let started = fetchStartSignal("failing Codex fetch reached")
+        codex.fetchStarted = started
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        let task = Task { await manager.refreshAll() }
+        await waitForFetchStart(started)
+        guard codex.fetchCount == 1, manager.isLoading else {
+            codex.resumeFetch()
+            _ = await task.value
+            return XCTFail("The failing fetch must be suspended before applying the reset")
+        }
+        manager.applyCodexResetCreditRefresh(
+            MetricsFixtures.codexCli(sessionUsedPercent: 0, resetCreditsAvailable: 0),
+            accountID: CodexAccount.defaultID
+        )
+        codex.resumeFetch()
+        _ = await task.value
+        XCTAssertEqual(manager.codexAccountMetrics[CodexAccount.defaultID]?.resetCreditsAvailable, 0)
+        XCTAssertNil(manager.refreshFailures[ProviderAccount(
+            service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID))
+        )])
+        XCTAssertTrue(manager.accountFailures(for: .codexCli).isEmpty)
+    }
+
+    func testWrongProviderResponseCannotEnterAnAccountsCache() async {
+        let codex = StubProvider(hasAccess: true, result: .success(MetricsFixtures.claudeCode()))
+        let cursor = StubProvider(hasAccess: false, result: .success(MetricsFixtures.cursor()))
+        let (manager, _) = makeManager(codex: codex, cursor: cursor)
+        let report = await manager.refreshAll()
+        XCTAssertEqual(report.outcome(for: .codexCli)?.state, .failed)
+        XCTAssertTrue(manager.codexAccountMetrics.isEmpty)
+        XCTAssertNotNil(manager.refreshFailures[ProviderAccount(
+            service: .codexCli, scope: .account(AccountID(CodexAccount.defaultID))
+        )])
     }
 
     /// Same race, on the Grok path: `applyGrokResetCreditRefresh` and the

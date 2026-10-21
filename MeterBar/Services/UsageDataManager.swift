@@ -94,20 +94,37 @@ extension OpenRouterService: OpenRouterUsageProviding {}
 class UsageDataManager: ObservableObject {
     static let shared = UsageDataManager(demoMode: DemoMode.isActive)
 
-    @Published var metrics: [ServiceType: UsageMetrics] = [:]
-    @Published var claudeCodeAccountMetrics: [UUID: UsageMetrics] = [:]
+    @Published private(set) var usageCache = UsageCache()
+    /// Display-only projections. All stored entries use ProviderAccount keys.
+    var metrics: [ServiceType: UsageMetrics] {
+        get { usageCache.providerMetrics }
+        set { usageCache.replaceProviderMetrics(newValue) }
+    }
+    var claudeCodeAccountMetrics: [UUID: UsageMetrics] {
+        get { usageCache.accounts(for: .claudeCode) }
+        set { usageCache.replaceAccounts(newValue, for: .claudeCode) }
+    }
     /// Per-account auth/staleness, resolved once per refresh cycle. Drives the
     /// card overlay so a failed leg that falls back to cached numbers cannot
     /// render a green band as if it had just refreshed.
     @Published private(set) var claudeCodeAccountStates: [UUID: ClaudeCodeAuthState] = [:]
-    @Published var codexAccountMetrics: [UUID: UsageMetrics] = [:]
-    @Published var grokAccountMetrics: [UUID: UsageMetrics] = [:]
+    var codexAccountMetrics: [UUID: UsageMetrics] {
+        get { usageCache.accounts(for: .codexCli) }
+        set { usageCache.replaceAccounts(newValue, for: .codexCli) }
+    }
+    var grokAccountMetrics: [UUID: UsageMetrics] {
+        get { usageCache.accounts(for: .xai) }
+        set { usageCache.replaceAccounts(newValue, for: .xai) }
+    }
     /// Last good reading from the Cursor dashboard leg of xAI, kept so a transient
     /// failure does not drop legacy Cursor rows from the merged card.
     private var lastCursorMetrics: UsageMetrics?
-    @Published var openRouterAccountMetrics: [UUID: UsageMetrics] = [:]
+    var openRouterAccountMetrics: [UUID: UsageMetrics] {
+        get { usageCache.accounts(for: .openRouter) }
+        set { usageCache.replaceAccounts(newValue, for: .openRouter) }
+    }
     @Published var isLoading: Bool = false
-    @Published var lastError: Error?
+    @Published private(set) var refreshFailures: [ProviderAccount: Error] = [:]
     /// Human-readable explanation for the interval currently installed. The
     /// Diagnostics page reads this value; no activity timestamps are exposed.
     private(set) var effectiveRefreshReason = "Fixed interval selected."
@@ -273,7 +290,7 @@ class UsageDataManager: ObservableObject {
     ///
     /// Returns a per-provider report. UI call sites can ignore it; `meterbar
     /// refresh` uses it to report refreshed/failed/skipped state without
-    /// re-deriving truth from `lastError`, which only holds the last failure.
+    /// re-deriving truth from an aggregate failure.
     @discardableResult
     func refreshForExplicitAction(
         _ action: AdaptiveRefreshTrigger
@@ -327,8 +344,6 @@ class UsageDataManager: ObservableObject {
 
         isLoading = true
         defer { isLoading = false }
-        lastError = nil
-
         var newMetrics: [ServiceType: UsageMetrics] = [:]
         var states: [ServiceType: (state: ProviderRefreshState, reason: String?)] = [:]
 
@@ -363,14 +378,16 @@ class UsageDataManager: ObservableObject {
         let openRouterResult = await openRouterFetch
         let simpleResults = await simpleFetch
 
-        // Rank the phases here, in a fixed order, rather than letting each one
-        // assign `lastError` as it finishes: the three race, so completion order
-        // is arbitrary and the surfaced error would otherwise change run to run.
-        lastError = claudeResult?.firstFailure
-            ?? codexResult?.firstFailure
-            ?? grokResult?.firstFailure
-            ?? openRouterResult?.firstFailure
-            ?? simpleResults.firstFailure
+        for service: ServiceType in [.claudeCode, .codexCli, .openRouter] {
+            refreshFailures.removeValue(forKey: ProviderAccount(service: service, scope: .providerWide))
+        }
+        installAccountFailures(claudeResult, for: .claudeCode)
+        installAccountFailures(codexResult, for: .codexCli)
+        installAccountFailures(grokResult, for: .xai)
+        installAccountFailures(openRouterResult, for: .openRouter)
+        for service in simpleServices {
+            refreshFailures[ProviderAccount(service: service, scope: .providerWide)] = simpleResults.failures[service]
+        }
 
         // Claude Code metrics (local files). Its auth states and skip reason
         // differ; Codex, Grok, and OpenRouter share `foldUniformAccountPhase`.
@@ -688,7 +705,6 @@ class UsageDataManager: ObservableObject {
                 group.addTask { @MainActor in
                     do {
                         let metrics = try await body(index)
-                        guard !metrics.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
                         return IndexedFetch(index: index, metrics: metrics, error: nil)
                     } catch {
                         return IndexedFetch(index: index, metrics: nil, error: error)
@@ -707,10 +723,10 @@ class UsageDataManager: ObservableObject {
     private struct SimpleProviderRefresh: @unchecked Sendable {
         let metrics: [ServiceType: UsageMetrics]
         let states: [ServiceType: (state: ProviderRefreshState, reason: String?)]
-        /// First failure in provider order. Reported back rather than written
-        /// straight to `lastError` so the caller — not the scheduler — decides
-        /// how this phase ranks against the ones racing alongside it.
+        /// First failure for the provider-wide refresh report; all failures
+        /// are committed separately under their provider/account keys.
         let firstFailure: Error?
+        let failures: [ServiceType: Error]
     }
 
     private func refreshSimpleProviders() async -> SimpleProviderRefresh {
@@ -740,6 +756,7 @@ class UsageDataManager: ObservableObject {
         // Fold in the original provider order so the reported failure stays
         // deterministic rather than reflecting whichever leg finished last.
         var firstFailure: Error?
+        var failures: [ServiceType: Error] = [:]
         var refreshed: [ServiceType] = []
         for (service, leg) in zip(pending, legs) {
             if let fetched = leg.metrics {
@@ -747,6 +764,7 @@ class UsageDataManager: ObservableObject {
                 states[service] = (.refreshed, nil)
                 refreshed.append(service)
             } else if let error = leg.error {
+                failures[service] = error
                 if firstFailure == nil { firstFailure = error }
                 let safeMessage = ServiceSupport.safeErrorMessage(for: error)
                 let detail = "Failed to fetch \(service.rawValue) metrics: \(safeMessage)"
@@ -757,7 +775,7 @@ class UsageDataManager: ObservableObject {
 
         recordUsageObservations(for: refreshed)
 
-        return SimpleProviderRefresh(metrics: metrics, states: states, firstFailure: firstFailure)
+        return SimpleProviderRefresh(metrics: metrics, states: states, firstFailure: firstFailure, failures: failures)
     }
 
     /// Folds this refresh's polled counters into the persisted ledger.
@@ -857,9 +875,8 @@ class UsageDataManager: ObservableObject {
         defer { refreshLock?.release() }
         isLoading = true
         defer { isLoading = false }
-        lastError = nil
-
         guard providerVisibilityStore.isEnabled(service) else {
+            clearFailures(for: service)
             metrics.removeValue(forKey: service)
             clearAccountState(for: service)
             publishMetrics()
@@ -869,6 +886,7 @@ class UsageDataManager: ObservableObject {
         // Every account-aware provider with zero enabled accounts has nothing
         // to fetch; xAI counts its Cursor source and the single-account providers never take this early-out.
         if enabledAccountCount(for: service) == 0 {
+            clearFailures(for: service)
             clearAccountState(for: service)
             metrics.removeValue(forKey: service)
             publishMetrics()
@@ -881,8 +899,8 @@ class UsageDataManager: ObservableObject {
             metrics[service] = newMetrics
             publishMetrics()
         } catch {
-            if lastError == nil {
-                lastError = error
+            if !refreshFailures.keys.contains(where: { $0.service == service }) {
+                refreshFailures[ProviderAccount(service: service, scope: .providerWide)] = error
             }
             if service == .codexCli || service == .openRouter {
                 // Account-aware aggregate metrics carry no account identity. Scoped
@@ -918,8 +936,6 @@ class UsageDataManager: ObservableObject {
 
         isLoading = true
         defer { isLoading = false }
-        lastError = nil
-
         let fetch = await fetchClaudeCodeAccountMetrics(
             accounts: [account],
             trigger: .userInitiated,
@@ -938,7 +954,7 @@ class UsageDataManager: ObservableObject {
             claudeCodeAccountStates.removeValue(forKey: id)
         }
 
-        lastError = fetch.firstFailure
+        installAccountFailures(fetch, for: .claudeCode, only: [id])
         if let representative = representativeClaudeCodeMetrics(from: claudeCodeAccountMetrics) {
             metrics[.claudeCode] = representative
         } else {
@@ -968,13 +984,13 @@ class UsageDataManager: ObservableObject {
     /// value instead of overwriting it with its now-stale result — see
     /// `mergeAccountMetrics`.
     func applyCodexResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
-        guard !demoMode else { return }
+        guard !demoMode, refreshedMetrics.service == .codexCli, !refreshedMetrics.hasInvalidQuota else { return }
         codexAccountMetrics[accountID] = refreshedMetrics
         codexAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeCodexMetrics(from: codexAccountMetrics) {
             metrics[.codexCli] = representative
         }
-        lastError = nil
+        refreshFailures.removeValue(forKey: ProviderAccount(service: .codexCli, scope: .account(AccountID(accountID))))
         publishMetrics()
     }
 
@@ -982,13 +998,13 @@ class UsageDataManager: ObservableObject {
     /// used by the popover, dashboard, widget, and CLI. See
     /// `applyCodexResetCreditRefresh` for why the generation bump matters.
     func applyGrokResetCreditRefresh(_ refreshedMetrics: UsageMetrics, accountID: UUID) {
-        guard !demoMode else { return }
+        guard !demoMode, refreshedMetrics.service == .xai, !refreshedMetrics.hasInvalidQuota else { return }
         grokAccountMetrics[accountID] = refreshedMetrics
         grokAccountMetricsGeneration[accountID, default: 0] &+= 1
         if let representative = representativeGrokMetrics(from: grokAccountMetrics) {
             metrics[.xai] = XAIUsageMerger.merge(grok: representative, cursor: lastCursorMetrics)
         }
-        lastError = nil
+        refreshFailures.removeValue(forKey: ProviderAccount(service: .xai, scope: .account(AccountID(accountID))))
         publishMetrics()
     }
 
@@ -1011,10 +1027,12 @@ class UsageDataManager: ObservableObject {
     private func refreshedSimpleMetrics(for service: ServiceType) async throws -> UsageMetrics {
         guard hasProviderAccess(service) else { throw ServiceError.notAuthenticated }
         do {
-            return try await fetchSimpleProviderMetrics(service)
+            let refreshed = try await fetchSimpleProviderMetrics(service)
+            refreshFailures.removeValue(forKey: ProviderAccount(service: service, scope: .providerWide))
+            return refreshed
         } catch {
             if let cachedMetric = metrics[service] {
-                lastError = error
+                refreshFailures[ProviderAccount(service: service, scope: .providerWide)] = error
                 return cachedMetric
             }
             throw error
@@ -1031,13 +1049,14 @@ class UsageDataManager: ObservableObject {
             startGenerations: fetch.metricsGenerationAtStart,
             currentGenerations: grokAccountMetricsGeneration
         )
-        if let failure = fetch.firstFailure { lastError = failure }
+        installAccountFailures(fetch, for: .xai)
 
         var cursor: UsageMetrics?
         var cursorFailure: Error?
         if hasProviderAccess(.xai) {
             do {
                 cursor = try await fetchSimpleProviderMetrics(.xai)
+                refreshFailures.removeValue(forKey: ProviderAccount(service: .xai, scope: .providerWide))
                 lastCursorMetrics = cursor
                 recordUsageObservations(for: [.xai])
             } catch {
@@ -1050,7 +1069,9 @@ class UsageDataManager: ObservableObject {
 
         let grok = representativeGrokMetrics(from: grokAccountMetrics)
         if let merged = XAIUsageMerger.merge(grok: grok, cursor: cursor) {
-            if lastError == nil { lastError = cursorFailure }
+            if let cursorFailure {
+                refreshFailures[ProviderAccount(service: .xai, scope: .providerWide)] = cursorFailure
+            }
             return merged
         }
         if let cursorFailure { throw cursorFailure }
@@ -1058,15 +1079,15 @@ class UsageDataManager: ObservableObject {
     }
 
     /// The account-aware providers' per-service refresh. Each account fetcher
-    /// reports its first failure instead of writing `lastError` itself (see
-    /// `refreshAll`), so this path surfaces it.
+    /// returns account-scoped failures for this path to commit.
     private func refreshedAccountAwareMetrics(for service: ServiceType) async throws -> UsageMetrics {
         switch service {
         case .claudeCode:
             let fetch = await fetchClaudeCodeAccountMetrics(trigger: .userInitiated)
             claudeCodeAccountMetrics = fetch.metrics
             claudeCodeAccountStates = fetch.accountStates
-            if let failure = fetch.firstFailure { lastError = failure }
+            refreshFailures.removeValue(forKey: ProviderAccount(service: service, scope: .providerWide))
+            installAccountFailures(fetch, for: service)
             if let representative = representativeClaudeCodeMetrics(from: fetch.metrics) { return representative }
         case .codexCli:
             let fetch = await fetchCodexAccountMetrics()
@@ -1076,13 +1097,15 @@ class UsageDataManager: ObservableObject {
                 startGenerations: fetch.metricsGenerationAtStart,
                 currentGenerations: codexAccountMetricsGeneration
             )
-            if let failure = fetch.firstFailure { lastError = failure }
+            refreshFailures.removeValue(forKey: ProviderAccount(service: service, scope: .providerWide))
+            installAccountFailures(fetch, for: service)
             if let representative = representativeCodexMetrics(from: codexAccountMetrics) { return representative }
             throw ServiceError.notAuthenticated
         case .openRouter:
             let fetch = await fetchOpenRouterAccountMetrics()
             openRouterAccountMetrics = fetch.metrics
-            if let failure = fetch.firstFailure { lastError = failure }
+            refreshFailures.removeValue(forKey: ProviderAccount(service: service, scope: .providerWide))
+            installAccountFailures(fetch, for: service)
             if let representative = representativeOpenRouterMetrics(from: fetch.metrics) { return representative }
             throw ServiceError.notAuthenticated
         case .xai,
@@ -1146,16 +1169,16 @@ class UsageDataManager: ObservableObject {
 
     private func loadCachedAccountMetrics() {
         claudeCodeAccountMetrics = Self.decodedAccountCache(
-            StorageKeys.cachedClaudeCodeAccountMetrics, in: cacheDefaults
+            StorageKeys.cachedClaudeCodeAccountMetrics, service: .claudeCode, in: cacheDefaults
         ) ?? claudeCodeAccountMetrics
         codexAccountMetrics = Self.decodedAccountCache(
-            StorageKeys.cachedCodexAccountMetrics, in: cacheDefaults
+            StorageKeys.cachedCodexAccountMetrics, service: .codexCli, in: cacheDefaults
         ) ?? codexAccountMetrics
         grokAccountMetrics = Self.decodedAccountCache(
-            StorageKeys.cachedGrokAccountMetrics, in: cacheDefaults
+            StorageKeys.cachedGrokAccountMetrics, service: .xai, in: cacheDefaults
         ) ?? grokAccountMetrics
         openRouterAccountMetrics = Self.decodedAccountCache(
-            StorageKeys.cachedOpenRouterAccountMetrics, in: cacheDefaults
+            StorageKeys.cachedOpenRouterAccountMetrics, service: .openRouter, in: cacheDefaults
         ) ?? openRouterAccountMetrics
 
         guard claudeCodeAccountMetrics.isEmpty
@@ -1181,34 +1204,36 @@ class UsageDataManager: ObservableObject {
 
     private static func decodedAccountCache(
         _ key: String,
+        service: ServiceType,
         in defaults: UserDefaults
     ) -> [UUID: UsageMetrics]? {
         guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode([UUID: UsageMetrics].self, from: data)
+        return MetricsCodec.decodeAccountMap(data, service: service)
     }
 
     private static func sharedFallback(
         _ service: ServiceType,
         from snapshots: [AccountUsageSnapshot]
     ) -> [UUID: UsageMetrics] {
-        Dictionary(
-            uniqueKeysWithValues: snapshots
-                .filter { $0.metrics.service == service }
-                .map { ($0.id, $0.metrics) }
-        )
+        var result: [UUID: UsageMetrics] = [:]
+        for snapshot in snapshots where snapshot.metrics.service == service {
+            if let previous = result[snapshot.id], previous.lastUpdated >= snapshot.metrics.lastUpdated { continue }
+            result[snapshot.id] = snapshot.metrics
+        }
+        return result
     }
 
     private func saveCachedAccountMetrics() {
-        if let data = try? JSONEncoder().encode(claudeCodeAccountMetrics) {
+        if let data = MetricsCodec.encodeAccountMap(claudeCodeAccountMetrics, service: .claudeCode) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedClaudeCodeAccountMetrics)
         }
-        if let data = try? JSONEncoder().encode(codexAccountMetrics) {
+        if let data = MetricsCodec.encodeAccountMap(codexAccountMetrics, service: .codexCli) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedCodexAccountMetrics)
         }
-        if let data = try? JSONEncoder().encode(grokAccountMetrics) {
+        if let data = MetricsCodec.encodeAccountMap(grokAccountMetrics, service: .xai) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedGrokAccountMetrics)
         }
-        if let data = try? JSONEncoder().encode(openRouterAccountMetrics) {
+        if let data = MetricsCodec.encodeAccountMap(openRouterAccountMetrics, service: .openRouter) {
             cacheDefaults.set(data, forKey: StorageKeys.cachedOpenRouterAccountMetrics)
         }
     }
@@ -1233,6 +1258,45 @@ class UsageDataManager: ObservableObject {
         }
         let accountSnapshots = claudeSnapshots + codexSnapshots + grokSnapshots + openRouterSnapshots
         sharedStore.saveAccountMetrics(accountSnapshots)
+    }
+
+    func accountFailures(for service: ServiceType) -> [UUID: ServiceError] {
+        refreshFailures.reduce(into: [:]) { result, entry in
+            guard entry.key.service == service, case let .account(id) = entry.key.scope else { return }
+            result[id.value] = ServiceSupport.serviceError(from: entry.value)
+        }
+    }
+
+    private static func validatedProviderMetrics(_ metrics: UsageMetrics, for service: ServiceType) throws -> UsageMetrics {
+        guard metrics.service == service, !metrics.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
+        return metrics
+    }
+
+    private func clearFailures(for service: ServiceType) {
+        refreshFailures = refreshFailures.filter { $0.key.service != service }
+    }
+
+    private func installAccountFailures(
+        _ result: AccountFetchResult?, for service: ServiceType, only accountIDs: Set<UUID>? = nil
+    ) {
+        let currentGenerations: [UUID: UInt64]
+        switch service {
+        case .codexCli: currentGenerations = codexAccountMetricsGeneration
+        case .xai: currentGenerations = grokAccountMetricsGeneration
+        default: currentGenerations = [:]
+        }
+        func canCommit(_ id: UUID) -> Bool {
+            guard accountIDs?.contains(id) ?? true else { return false }
+            guard let start = result?.metricsGenerationAtStart else { return true }
+            return start[id, default: 0] == currentGenerations[id, default: 0]
+        }
+        refreshFailures = refreshFailures.filter { entry in
+            guard entry.key.service == service, case let .account(id) = entry.key.scope else { return true }
+            return !canCommit(id.value)
+        }
+        for (id, failure) in result?.failures ?? [:] where canCommit(id) {
+            refreshFailures[ProviderAccount(service: service, scope: .account(AccountID(id)))] = failure
+        }
     }
 
     private func setupAutoRefresh() {
@@ -1409,6 +1473,7 @@ class UsageDataManager: ObservableObject {
         let metrics: [UUID: UsageMetrics]
         let successCount: Int
         let firstFailure: Error?
+        var failures: [UUID: Error] = [:]
         var successfulAccountIDs: Set<UUID> = []
         /// Claude-only; defaulted because the Codex path shares this type and
         /// has no per-account auth state of its own.
@@ -1462,14 +1527,15 @@ class UsageDataManager: ObservableObject {
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var accountStates: [UUID: ClaudeCodeAuthState] = [:]
         var firstFailure: Error?
+        var failures: [UUID: Error] = [:]
         var successCount = 0
         var successfulAccountIDs: Set<UUID> = []
 
         let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
-            try await self.claudeCodeService.fetchUsageMetrics(
+            try Self.validatedProviderMetrics(try await self.claudeCodeService.fetchUsageMetrics(
                 account: enabledAccounts[index],
                 trigger: trigger
-            )
+            ), for: .claudeCode)
         }
 
         let serviceStates = claudeCodeService.accountAuthStates
@@ -1484,6 +1550,7 @@ class UsageDataManager: ObservableObject {
                 successCount += 1
                 successfulAccountIDs.insert(account.id)
             } else if let error = leg.error {
+                failures[account.id] = error
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = claudeCodeAccountMetrics[account.id] {
                     // Keeping the numbers is deliberate — an empty card is worse
@@ -1516,6 +1583,7 @@ class UsageDataManager: ObservableObject {
             metrics: refreshedMetrics,
             successCount: successCount,
             firstFailure: firstFailure,
+            failures: failures,
             successfulAccountIDs: successfulAccountIDs,
             accountStates: accountStates
         )
@@ -1538,6 +1606,7 @@ class UsageDataManager: ObservableObject {
         let metricsGenerationAtStart = codexAccountMetricsGeneration
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
+        var failures: [UUID: Error] = [:]
         var successCount = 0
         var successfulAccountIDs: Set<UUID> = []
 
@@ -1548,7 +1617,9 @@ class UsageDataManager: ObservableObject {
             guard await self.codexCliService.canAccess(account: account) else {
                 throw CodexAccountUnreachable()
             }
-            return try await self.codexCliService.fetchUsageMetrics(account: account)
+            return try Self.validatedProviderMetrics(
+                try await self.codexCliService.fetchUsageMetrics(account: account), for: .codexCli
+            )
         }
 
         for (account, leg) in zip(enabledAccounts, legs) {
@@ -1560,6 +1631,7 @@ class UsageDataManager: ObservableObject {
                 // Matches the previous `continue`: an inaccessible account is a
                 // skip, not a failure, and must not resurrect a stale cache.
                 if error is CodexAccountUnreachable { continue }
+                failures[account.id] = error
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = codexAccountMetrics[account.id] {
                     refreshedMetrics[account.id] = cachedMetrics
@@ -1577,6 +1649,7 @@ class UsageDataManager: ObservableObject {
             metrics: refreshedMetrics,
             successCount: successCount,
             firstFailure: firstFailure,
+            failures: failures,
             successfulAccountIDs: successfulAccountIDs,
             metricsGenerationAtStart: metricsGenerationAtStart
         )
@@ -1596,6 +1669,7 @@ class UsageDataManager: ObservableObject {
         let metricsGenerationAtStart = grokAccountMetricsGeneration
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
+        var failures: [UUID: Error] = [:]
         var successCount = 0
 
         let legs = await fanOut(count: enabledAccounts.count) { [enabledAccounts] index in
@@ -1603,7 +1677,9 @@ class UsageDataManager: ObservableObject {
             guard self.grokService.canAccess(account: account) else {
                 throw GrokAccountUnreachable()
             }
-            return try await self.grokService.fetchUsageMetrics(account: account)
+            return try Self.validatedProviderMetrics(
+                try await self.grokService.fetchUsageMetrics(account: account), for: .xai
+            )
         }
 
         for (account, leg) in zip(enabledAccounts, legs) {
@@ -1612,6 +1688,7 @@ class UsageDataManager: ObservableObject {
                 successCount += 1
             } else if let error = leg.error {
                 if error is GrokAccountUnreachable { continue }
+                failures[account.id] = error
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = grokAccountMetrics[account.id] {
                     refreshedMetrics[account.id] = cachedMetrics
@@ -1629,6 +1706,7 @@ class UsageDataManager: ObservableObject {
             metrics: refreshedMetrics,
             successCount: successCount,
             firstFailure: firstFailure,
+            failures: failures,
             metricsGenerationAtStart: metricsGenerationAtStart
         )
     }
@@ -1645,6 +1723,7 @@ class UsageDataManager: ObservableObject {
         let enabledAccounts = openRouterAccountStore.enabledAccounts
         var refreshedMetrics: [UUID: UsageMetrics] = [:]
         var firstFailure: Error?
+        var failures: [UUID: Error] = [:]
         var successCount = 0
         // Keys that succeeded *this poll*. Only their observations fold into
         // the ledger — a key that failed keeps a stale counter from an earlier
@@ -1656,7 +1735,9 @@ class UsageDataManager: ObservableObject {
             guard self.openRouterService.canAccess(account: account) else {
                 throw OpenRouterKeyUnreachable()
             }
-            return try await self.openRouterService.fetchUsageMetrics(account: account)
+            return try Self.validatedProviderMetrics(
+                try await self.openRouterService.fetchUsageMetrics(account: account), for: .openRouter
+            )
         }
 
         for (account, leg) in zip(enabledAccounts, legs) {
@@ -1670,6 +1751,7 @@ class UsageDataManager: ObservableObject {
                 // A keyless account is a skip, not a failure, and must not
                 // resurrect a stale cache — same semantics as Codex/Grok.
                 if error is OpenRouterKeyUnreachable { continue }
+                failures[account.id] = error
                 if firstFailure == nil { firstFailure = error }
                 if let cachedMetrics = openRouterAccountMetrics[account.id] {
                     refreshedMetrics[account.id] = cachedMetrics
@@ -1691,7 +1773,8 @@ class UsageDataManager: ObservableObject {
         return AccountFetchResult(
             metrics: refreshedMetrics,
             successCount: successCount,
-            firstFailure: firstFailure
+            firstFailure: firstFailure,
+            failures: failures
         )
     }
 
@@ -1772,7 +1855,7 @@ class UsageDataManager: ObservableObject {
             case .claudeCode, .codexCli, .openRouter:
                 preconditionFailure("Account-aware providers use dedicated fetch paths")
             }
-            guard !result.hasInvalidQuota else { throw ServiceError.parsingError(nil) }
+            _ = try Self.validatedProviderMetrics(result, for: service)
             parseHealthStore.recordSuccess(service)
             return result
         } catch {

@@ -100,7 +100,7 @@ final class PowerAssertionManager: ObservableObject {
         let providerVisibility = providerVisibility ?? .shared
         Publishers.CombineLatest3(
             store.$isEnabled,
-            dataManager.$metrics,
+            dataManager.$usageCache.map(\.providerMetrics),
             providerVisibility.$hiddenServices
         )
         .sink { [weak self] isEnabled, metrics, hiddenServices in

@@ -531,9 +531,9 @@ enum ProviderSnapshotBuilder {
                 ].compactMapValues { $0 },
                 lastErrors: ProviderPresentationHealth.LastErrors(
                     cursor: stores.cursorService.lastError,
-                    codexAccounts: stores.codexCliService.accountErrors,
-                    grokAccounts: stores.grokService.accountErrors,
-                    openRouterAccounts: stores.openRouterService.accountLastErrors,
+                    codexAccounts: stores.dataManager.accountFailures(for: .codexCli),
+                    grokAccounts: stores.dataManager.accountFailures(for: .xai),
+                    openRouterAccounts: stores.dataManager.accountFailures(for: .openRouter),
                     simpleProviders: [
                         .kimiCode: stores.kimiCodeService.lastError,
                         .zaiCodingPlan: stores.zaiCodingPlanService.lastError,

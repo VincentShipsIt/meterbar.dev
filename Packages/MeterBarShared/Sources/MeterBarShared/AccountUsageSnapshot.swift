@@ -6,6 +6,9 @@ public struct AccountUsageSnapshot: Codable, Identifiable, Sendable {
     public let id: UUID
     public let name: String
     public let metrics: UsageMetrics
+    public var account: ProviderAccount {
+        ProviderAccount(service: metrics.service, scope: .account(AccountID(id)))
+    }
 
     public init(id: UUID, name: String, metrics: UsageMetrics) {
         self.id = id

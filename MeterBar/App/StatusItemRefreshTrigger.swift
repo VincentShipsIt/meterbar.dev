@@ -13,9 +13,9 @@ import Foundation
 /// `Void` stream is therefore behaviour-preserving, and the subscriber count
 /// stays the same because `MergeMany` subscribes to each upstream.
 enum StatusItemRefreshTrigger {
-    /// The individual upstreams, exposed so tests can assert none were dropped
-    /// in the collapse.
-    static func sources() -> [AnyPublisher<Void, Never>] {
+    /// Keep upstream bookkeeping private; tests drive real cache changes
+    /// through the same stream the status-item controller subscribes to.
+    private static func sources(dataManager: UsageDataManager) -> [AnyPublisher<Void, Never>] {
         let claudeAccountChanges = Publishers.Merge3(
             ClaudeCodeAccountStore.shared.$customAccounts.map { _ in () },
             ClaudeCodeAccountStore.shared.$defaultAccountConfigDirectory.map { _ in () },
@@ -70,18 +70,12 @@ enum StatusItemRefreshTrigger {
             MenuBarAccountSelectionStore.shared.$mergedAccountKey.map { _ in () }
         )
 
-        let metricsChanges = UsageDataManager.shared.$metrics.map { _ in () }
-        let claudeMetricsChanges = UsageDataManager.shared.$claudeCodeAccountMetrics.map { _ in () }
-        let codexMetricsChanges = UsageDataManager.shared.$codexAccountMetrics.map { _ in () }
-        let grokMetricsChanges = UsageDataManager.shared.$grokAccountMetrics.map { _ in () }
+        let metricsChanges = dataManager.$usageCache.map { _ in () }
         let visibilityChanges = ProviderVisibilityStore.shared.$hiddenServices.map { _ in () }
         let parseHealthChanges = ProviderParseHealthStore.shared.$records.map { _ in () }
 
         return [
             metricsChanges.eraseToAnyPublisher(),
-            claudeMetricsChanges.eraseToAnyPublisher(),
-            codexMetricsChanges.eraseToAnyPublisher(),
-            grokMetricsChanges.eraseToAnyPublisher(),
             claudeAccountChanges.eraseToAnyPublisher(),
             codexAccountChanges.eraseToAnyPublisher(),
             grokAccountChanges.eraseToAnyPublisher(),
@@ -96,8 +90,8 @@ enum StatusItemRefreshTrigger {
     /// One stream to subscribe to. Every `@Published` upstream replays its
     /// current value on subscribe, so this fires once immediately — which is
     /// what the trailing direct `updateStatusItem(...)` call used to do.
-    static func publisher() -> AnyPublisher<Void, Never> {
-        let merged = Publishers.MergeMany(sources())
+    static func publisher(dataManager: UsageDataManager = .shared) -> AnyPublisher<Void, Never> {
+        let merged = Publishers.MergeMany(sources(dataManager: dataManager))
         return merged.eraseToAnyPublisher()
     }
 }
