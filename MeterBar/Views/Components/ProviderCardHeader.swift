@@ -38,13 +38,8 @@ struct ProviderCardHeader: View {
 
     var content: Content { Content(snapshot: snapshot) }
 
-    /// Fixed metrics for the header grid. The identity column is the name over
-    /// the refresh subtitle, so the subtitle's leading edge is the title's x
-    /// (logo column + gap) and lines up with the rows under the card. Status
-    /// and the live chip stay in that same row, top-aligned with
-    /// the name. Hanging the subtitle under the whole row wraps the name and
-    /// status onto a second line and drops the wider refresh text out of the
-    /// row's width.
+    /// Name and badges share the top row. The subtitle spans the row below,
+    /// indented to the name, so a long plan cannot truncate the explanation.
     enum Layout {
         static let logoSize: CGFloat = 17
         static let columnSpacing: CGFloat = 7
@@ -56,37 +51,39 @@ struct ProviderCardHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: Layout.columnSpacing) {
-            ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
-
-            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+            HStack(alignment: .top, spacing: Layout.columnSpacing) {
+                ProviderLogoView(
+                    kind: snapshot.logoKind,
+                    size: Layout.logoSize,
+                    foregroundColor: snapshot.accentColor
+                )
                 Text(content.title)
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
 
-                Text(content.subtitle)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            .layoutPriority(1)
+                Spacer(minLength: 0)
 
-            Spacer(minLength: 0)
-
-            HStack(alignment: .top, spacing: Layout.badgeSpacing) {
-                if let plan = content.planLabel {
-                    MeterBarChip(plan, tint: snapshot.accentColor)
-                        .accessibilityLabel("\(plan) plan")
-                }
-                if showsLiveAccount {
-                    MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
-                        .accessibilityLabel("Live CLI account")
-                }
-                if content.statusText != nil {
-                    ProviderCardStatusLabel(snapshot: snapshot)
+                HStack(alignment: .top, spacing: Layout.badgeSpacing) {
+                    if let plan = content.planLabel {
+                        MeterBarChip(plan, tint: snapshot.accentColor)
+                            .accessibilityLabel("\(plan) plan")
+                    }
+                    if showsLiveAccount {
+                        MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                            .accessibilityLabel("Live CLI account")
+                    }
+                    if content.statusText != nil {
+                        ProviderCardStatusLabel(snapshot: snapshot)
+                    }
                 }
             }
+            Text(content.subtitle)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .padding(.leading, Layout.subtitleInset)
         }
     }
 }

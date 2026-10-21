@@ -353,14 +353,13 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(ProviderCardHeader.Content(snapshot: currentSnapshot).statusText, expectedStatus)
         XCTAssertGreaterThanOrEqual(
             headerHost.fittingSize.width,
-            identityHost.fittingSize.width + statusHost.fittingSize.width,
-            "Provider header should include identity and status"
+            max(identityHost.fittingSize.width, statusHost.fittingSize.width),
+            "Provider header should fit identity and status"
         )
-        XCTAssertEqual(
+        XCTAssertGreaterThanOrEqual(
             headerHost.fittingSize.height,
             max(identityHost.fittingSize.height, statusHost.fittingSize.height),
-            accuracy: 1,
-            "Provider identity and status should stay on one row"
+            "Header rows must fit the identity, subtitle, and status"
         )
         XCTAssertGreaterThan(headerHost.fittingSize.height, 0)
     }
