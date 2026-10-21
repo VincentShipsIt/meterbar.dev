@@ -44,6 +44,19 @@ nonisolated enum SafeAccumulate {
         lhs = add(lhs, rhs)
     }
 
+    /// Non-negative amounts (USD or token proportions). Invalid source values
+    /// contribute nothing; finite overflow saturates and remains JSON-encodable.
+    static func add(_ lhs: Double, _ rhs: Double) -> Double {
+        let left = lhs.isFinite ? max(0, lhs) : 0
+        let right = rhs.isFinite ? max(0, rhs) : 0
+        let sum = left + right
+        return sum.isFinite ? sum : .greatestFiniteMagnitude
+    }
+
+    static func accumulate(_ lhs: inout Double, _ rhs: Double) {
+        lhs = add(lhs, rhs)
+    }
+
     /// Sums a sequence without trapping, regardless of how many terms are
     /// already saturated or how many partial sums would otherwise overflow.
     static func sum(_ values: some Sequence<Int>) -> Int {

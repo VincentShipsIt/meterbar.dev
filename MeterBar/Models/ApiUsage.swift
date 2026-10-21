@@ -85,7 +85,7 @@ nonisolated struct ApiModelUsage: Identifiable, Sendable {
     /// that row; distinguishing this from a genuine zero is the point (#537).
     var hasIncompleteInputData = false
 
-    var totalTokens: Int { inputTokens + outputTokens }
+    var totalTokens: Int { (TokenCount(inputTokens) + TokenCount(outputTokens)).value }
 }
 
 // MARK: - ApiUsage
@@ -107,7 +107,7 @@ nonisolated struct ApiUsage: Sendable {
     /// as `ApiModelUsage`'s markers above.
     var isTruncated = false
 
-    var totalTokens: Int { inputTokens + outputTokens }
+    var totalTokens: Int { (TokenCount(inputTokens) + TokenCount(outputTokens)).value }
 
     var hasData: Bool { totalTokens > 0 }
 
@@ -181,7 +181,7 @@ nonisolated enum ApiUsagePricing {
             return TokenCostMath.calculateClaudeCost(
                 input: tokens.uncachedInput,
                 output: tokens.output,
-                cacheCreation: tokens.cacheCreationFiveMinute + tokens.cacheCreationOneHour,
+                cacheCreation: SafeAccumulate.add(tokens.cacheCreationFiveMinute, tokens.cacheCreationOneHour),
                 cacheCreationOneHour: tokens.cacheCreationOneHour,
                 cacheRead: tokens.cacheRead,
                 pricing: pricing

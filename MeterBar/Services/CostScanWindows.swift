@@ -233,7 +233,7 @@ nonisolated struct ClaudeSessionTotals: Sendable, Codable, CostScanBreakdowns {
         SafeAccumulate.accumulate(&output, other.output)
         SafeAccumulate.accumulate(&cacheCreation, other.cacheCreation)
         SafeAccumulate.accumulate(&cacheRead, other.cacheRead)
-        estimatedCost += other.estimatedCost
+        SafeAccumulate.accumulate(&estimatedCost, other.estimatedCost)
         sessions += other.sessions
 
         for (day, tokens) in other.daily {
@@ -586,7 +586,7 @@ nonisolated struct TokenAccumulator: Sendable, Codable {
         SafeAccumulate.accumulate(&self.cacheCreation, cacheCreation)
         SafeAccumulate.accumulate(&self.cacheRead, cacheRead)
         SafeAccumulate.accumulate(&self.reasoning, reasoning)
-        self.estimatedCostUSD += estimatedCostUSD
+        SafeAccumulate.accumulate(&self.estimatedCostUSD, estimatedCostUSD)
         self.events += events
     }
 

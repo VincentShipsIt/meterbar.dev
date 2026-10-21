@@ -1227,6 +1227,192 @@
           }
         }
       }
+    },
+    "settings.muse.notice": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MeterBar reads the Muse CLI sign-in read-only and asks api.meta.ai for the Muse Code \\\nquota. The Muse CLI owns login and refresh. The first Connect may show a Keychain \\\nprompt — choose Always Allow. Background refresh never prompts. A fresh `muse login` \\\ncan require allowing access again."
+          }
+        }
+      }
+    },
+    "settings.muse.connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection"
+          }
+        }
+      }
+    },
+    "settings.muse.plan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plan"
+          }
+        }
+      }
+    },
+    "settings.muse.plan.unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        }
+      }
+    },
+    "settings.muse.status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status"
+          }
+        }
+      }
+    },
+    "settings.muse.error_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not connected"
+          }
+        }
+      }
+    },
+    "settings.muse.reconnect": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect"
+          }
+        }
+      }
+    },
+    "settings.muse.connect": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect Muse Code"
+          }
+        }
+      }
+    },
+    "settings.muse.connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        }
+      }
+    },
+    "settings.muse.keychain": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain access needed"
+          }
+        }
+      }
+    },
+    "settings.muse.signed_out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not signed in"
+          }
+        }
+      }
+    },
+    "settings.muse.no_subscription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No subscription"
+          }
+        }
+      }
+    },
+    "settings.muse.attention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs attention"
+          }
+        }
+      }
+    },
+    "settings.muse.not_connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not connected"
+          }
+        }
+      }
+    },
+    "count.more_rows": {
+      "comment": "Widget overflow label. The variable is the hidden row count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "count.more_usage_rows": {
+      "comment": "VoiceOver widget overflow label. The variable is the hidden usage-row count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more usage row"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more usage rows"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "version": "1.0"
