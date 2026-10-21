@@ -12,14 +12,26 @@ public enum XAIUsageMerger {
     /// - Parameters:
     ///   - grok: Metrics from the Grok CLI billing source, already `.xai`.
     ///   - cursor: Metrics from the Cursor dashboard source, already `.xai`.
-    /// - Returns: `nil` only when neither source produced metrics.
-    public static func merge(grok: UsageMetrics?, cursor: UsageMetrics?) -> UsageMetrics? {
+    ///   - stalenessThreshold: Maximum lag behind Cursor before its shared weekly read takes priority.
+    /// - Returns: `nil` only when neither source produced metrics. Freshness is the oldest retained quota reading.
+    public static func merge(
+        grok: UsageMetrics?,
+        cursor: UsageMetrics?,
+        stalenessThreshold: TimeInterval = ProviderRecommendationPlanner.defaultStalenessThreshold
+    ) -> UsageMetrics? {
         guard let grok else { return cursor }
         guard let cursor else { return grok }
 
-        // Grok's billing read is authoritative for the shared pool; Cursor
-        // fills a window only when Grok reported nothing for it.
-        let weekly = grok.weeklyLimit ?? cursor.weeklyLimit
+        // Grok remains authoritative for polls in the same freshness window.
+        // A newer read of the same weekly pool can replace its retained cache,
+        // never a legacy monthly pool describing a different allowance. Compare
+        // source dates so decoding the same cache stays deterministic.
+        let cursorIsNewer = cursor.lastUpdated.timeIntervalSince(grok.lastUpdated) > stalenessThreshold
+        let useCursorWeekly = grok.weeklyLimit == nil
+            || (grok.weeklyLimit?.periodKind == .weekly && cursor.weeklyLimit?.periodKind == .weekly
+                && cursorIsNewer)
+        let weeklySource = useCursorWeekly ? cursor : grok
+        let weekly = weeklySource.weeklyLimit
         let session = grok.sessionLimit ?? cursor.sessionLimit
         let onDemand = cursor.codeReviewLimit ?? grok.codeReviewLimit
 
@@ -36,6 +48,18 @@ public enum XAIUsageMerger {
             additional.append(limit)
         }
 
+        // One snapshot has one freshness date. It cannot be newer than any
+        // quota reading it retains; an unrelated successful poll cannot make
+        // a cached session, pool, or allowance safe to route over again.
+        var observedAt: [Date] = []
+        if session != nil { observedAt.append(grok.sessionLimit != nil ? grok.lastUpdated : cursor.lastUpdated) }
+        if weekly != nil { observedAt.append(weeklySource.lastUpdated) }
+        if onDemand != nil {
+            observedAt.append(cursor.codeReviewLimit != nil ? cursor.lastUpdated : grok.lastUpdated)
+        }
+        if !grok.additionalLimits.isEmpty { observedAt.append(grok.lastUpdated) }
+        if !cursor.additionalLimits.isEmpty || !demoted.isEmpty { observedAt.append(cursor.lastUpdated) }
+
         return UsageMetrics(
             service: .xai,
             sessionLimit: session,
@@ -45,7 +69,7 @@ public enum XAIUsageMerger {
             extraUsage: grok.extraUsage ?? cursor.extraUsage,
             resetCreditsAvailable: grok.resetCreditsAvailable ?? cursor.resetCreditsAvailable,
             additionalLimits: additional,
-            lastUpdated: max(grok.lastUpdated, cursor.lastUpdated)
+            lastUpdated: observedAt.min() ?? max(grok.lastUpdated, cursor.lastUpdated)
         )
     }
 }
