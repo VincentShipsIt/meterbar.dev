@@ -311,105 +311,33 @@ private struct ProviderStatusComponentRow: View {
 /// next to the popover like the provider detail card.
 struct MenuBarStatusDetailContent: View {
     @StateObject private var statusMonitor = ProviderStatusMonitor.shared
-
-    private var reports: [ProviderStatusReport] {
-        ServiceType.statusPageServices.compactMap { statusMonitor.reports[$0] }
-    }
-
-    private var worstIndicator: ProviderStatusIndicator {
-        let readable = reports.filter { !$0.isUnreadable }
-        if readable.isEmpty, !reports.isEmpty { return .unknown }
-        return readable
-            .map(\.summary.indicator)
-            .max { $0.rank < $1.rank } ?? (statusMonitor.isRefreshing ? .unknown : .none)
-    }
-
-    private var summaryText: String {
-        if statusMonitor.isRefreshing, reports.isEmpty {
-            return "Checking provider status"
-        }
-
-        let issueCount = reports.filter(\.hasIssue).count
-        let unreadableCount = reports.filter(\.isUnreadable).count
-        if !reports.isEmpty, unreadableCount == reports.count {
-            return "Provider status pages couldn't be checked"
-        }
-        if issueCount == 0, reports.count == ServiceType.statusPageServices.count {
-            return unreadableCount == 0 ? "All provider pages operational" : "All readable provider pages operational"
-        }
-        if issueCount == 1 {
-            return "1 provider needs attention"
-        }
-        if issueCount > 1 {
-            return "\(issueCount) providers need attention"
-        }
-        return "Status pages available"
-    }
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+    var isPresented = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.bottom, MeterBarTheme.Spacing.md)
-
-            Divider()
-
-            ViewThatFits(in: .vertical) {
-                detailRows
-
-                ScrollView(showsIndicators: false) {
-                    detailRows
-                }
-                .scrollIndicators(.hidden)
+        ViewThatFits(in: .vertical) {
+            detailRows
+            ScrollView { detailRows }
+                .scrollIndicators(.never)
                 .scrollContentBackground(.hidden)
-            }
         }
-        .padding(MeterBarTheme.Spacing.lg)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(MeterBarTheme.Surface.chrome(radius: MeterBarMenuDetailPanelLayout.cornerRadius))
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: MeterBarMenuDetailPanelLayout.cornerRadius,
-                style: .continuous
-            )
-        )
-        .task {
-            await statusMonitor.refreshAllIfNeeded()
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "waveform.path.ecg")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(worstIndicator.tint)
-                .frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Provider Status")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                Text(summaryText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .task { await statusMonitor.refreshAllIfNeeded() }
     }
 
     private var detailRows: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
             ForEach(ServiceType.statusPageServices) { service in
-                MenuBarStatusDetailProviderSection(
-                    service: service,
-                    report: statusMonitor.reports[service],
-                    error: statusMonitor.errors[service]
-                )
+                HoverCardSurface(revealed: isPresented, reduceMotion: reduceMotion) {
+                    MenuBarStatusDetailProviderSection(
+                        service: service,
+                        report: statusMonitor.reports[service],
+                        error: statusMonitor.errors[service]
+                    )
+                }
             }
         }
-        .padding(.top, MeterBarTheme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
@@ -444,16 +372,16 @@ private struct MenuBarStatusDetailProviderSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .top, spacing: ProviderCardHeader.Layout.columnSpacing) {
                 ProviderLogoView(
                     kind: .forService(service),
-                    size: 15,
+                    size: ProviderCardHeader.Layout.logoSize,
                     foregroundColor: MeterBarTheme.accent(for: service)
                 )
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(service.statusPageDisplayName)
-                        .font(.caption)
+                        .font(.subheadline)
                         .fontWeight(.semibold)
                         .lineLimit(1)
                     if let subtitle {
@@ -502,7 +430,5 @@ private struct MenuBarStatusDetailProviderSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(MeterBarTheme.Spacing.md)
-        .meterBarCardSurface(cornerRadius: MeterBarTheme.Radius.card)
     }
 }

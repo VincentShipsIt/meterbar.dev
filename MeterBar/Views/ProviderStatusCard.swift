@@ -120,7 +120,9 @@ struct ProviderStatusCard: View {
     }
 
     @ViewBuilder private var cardBody: some View {
-        if !snapshot.hasMetrics {
+        if !snapshot.hasMetrics, snapshot.emptyStatusLabel != nil {
+            ProviderCardHeader(snapshot: snapshot, showsLiveAccount: isLiveAccount)
+        } else if !snapshot.hasMetrics {
             offlineRow
         } else if ProviderCardPresentation.collapsesToLoginRow(snapshot: snapshot) {
             staleLoginRow

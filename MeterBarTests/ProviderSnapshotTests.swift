@@ -90,6 +90,38 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertTrue(empty.limits.isEmpty)
     }
 
+    @MainActor
+    func testConnectedIdleMuseCardSaysIdleAndExplainsMissingQuota() throws {
+        var input = makeInput(
+            metrics: [.museCode: UsageMetrics(service: .museCode)],
+            enabledServices: [.museCode]
+        )
+        input.simpleProviderAccess[.museCode] = true
+        input.simpleProviderNotes[.museCode] = MuseCodeCopy.idle
+        input.planLabels[.museCode] = "High Usage"
+        let snapshot = try XCTUnwrap(ProviderSnapshotBuilder.snapshots(input).first)
+        XCTAssertFalse(snapshot.hasMetrics)
+        XCTAssertTrue(snapshot.limits.isEmpty, "An idle answer must not invent a percentage")
+        XCTAssertNil(snapshot.authNotice)
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: snapshot), "Idle")
+        XCTAssertEqual(ProviderCardHeader.Content(snapshot: snapshot).statusText, "Idle")
+        XCTAssertEqual(ProviderCardHeader.Content(snapshot: snapshot).subtitle, MuseCodeCopy.idle)
+        XCTAssertEqual(ProviderCardHeader.Content(snapshot: snapshot).planLabel, "High Usage")
+        XCTAssertTrue(snapshot.accessibilityLabel.contains("Idle"))
+        XCTAssertTrue(PopoverOverviewPanel.errorSnapshots(in: [snapshot]).isEmpty)
+    }
+
+    @MainActor
+    func testIdleMuseNoteDoesNotMaskALaterRefreshFailure() throws {
+        var input = makeInput(enabledServices: [.museCode])
+        input.simpleProviderAccess[.museCode] = true
+        input.simpleProviderNotes[.museCode] = MuseCodeCopy.idle
+        input.lastErrors.simpleProviders[.museCode] = .apiError("HTTP 503")
+        let snapshot = try XCTUnwrap(ProviderSnapshotBuilder.snapshots(input).first)
+        XCTAssertNil(snapshot.emptyStatusLabel)
+        XCTAssertNotEqual(ProviderCardPresentation.statusText(for: snapshot), "Idle")
+    }
+
     // MARK: - Codex empty-state honesty (issue #304)
 
     /// A signed-in custom `CODEX_HOME` profile with no metrics yet is waiting on

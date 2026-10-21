@@ -11,8 +11,8 @@ import SwiftUI
 /// landed on it. One component keeps them identical. The card carries no
 /// disclosure chevron: the whole card is the control, and hovering it opens the
 /// panel. The status chip appears only for a broken or out-of-date connection (see
-/// `ProviderCardPresentation.connectionStatusText`); a working provider shows
-/// none. It stays beside the provider identity when present; only compact
+/// `ProviderCardPresentation.connectionStatusText`); a successful answer without
+/// quota can instead show a neutral idle state. It stays beside the provider identity when present; only compact
 /// terminal summaries center it against a card.
 struct ProviderCardHeader: View {
     /// Display strings for the header, with no SwiftUI attached so each rule is
@@ -21,7 +21,7 @@ struct ProviderCardHeader: View {
     struct Content: Equatable {
         let title: String
         let subtitle: String
-        /// `nil` while the connection is fine, so a working provider carries no chip.
+        /// No chip for working quota; an idle answer may carry a neutral state.
         let statusText: String?
         let planLabel: String?
 
@@ -48,7 +48,7 @@ struct ProviderCardHeader: View {
     enum Layout {
         static let logoSize: CGFloat = 17
         static let columnSpacing: CGFloat = 7
-        static let titleSpacing: CGFloat = 5
+        static let badgeSpacing: CGFloat = 5
         /// Gap between the provider name and the refresh subtitle.
         static let rowSpacing: CGFloat = 1
         /// Subtitle indent: the logo column plus its gap, i.e. the title's x.
@@ -60,16 +60,10 @@ struct ProviderCardHeader: View {
             ProviderLogoView(kind: snapshot.logoKind, size: Layout.logoSize, foregroundColor: snapshot.accentColor)
 
             VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                HStack(spacing: Layout.titleSpacing) {
-                    Text(content.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    if let plan = content.planLabel {
-                        MeterBarChip(plan, tint: snapshot.accentColor)
-                            .accessibilityLabel("\(plan) plan")
-                    }
-                }
+                Text(content.title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
                 Text(content.subtitle)
                     .font(.caption2)
@@ -80,13 +74,18 @@ struct ProviderCardHeader: View {
 
             Spacer(minLength: 0)
 
-            if showsLiveAccount {
-                MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
-                    .accessibilityLabel("Live CLI account")
-            }
-
-            if content.statusText != nil {
-                ProviderCardStatusLabel(snapshot: snapshot)
+            HStack(alignment: .top, spacing: Layout.badgeSpacing) {
+                if let plan = content.planLabel {
+                    MeterBarChip(plan, tint: snapshot.accentColor)
+                        .accessibilityLabel("\(plan) plan")
+                }
+                if showsLiveAccount {
+                    MeterBarChip("Live", tint: snapshot.accentColor, style: .glass)
+                        .accessibilityLabel("Live CLI account")
+                }
+                if content.statusText != nil {
+                    ProviderCardStatusLabel(snapshot: snapshot)
+                }
             }
         }
     }

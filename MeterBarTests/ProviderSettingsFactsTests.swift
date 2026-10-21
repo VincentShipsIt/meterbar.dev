@@ -111,6 +111,15 @@ final class ProviderSettingsFactsTests: XCTestCase {
         XCTAssertNil(facts(service: .xai, subscriptionType: "").planText)
     }
 
+    func testMuseIdleStatusMatchesItsCardWhileFailuresStillWin() {
+        var idle = facts(service: .museCode)
+        idle.emptyStatusLabel = "Idle"
+        XCTAssertEqual(idle.statusText, "Idle")
+        var failed = facts(service: .museCode, errorText: "HTTP 503")
+        failed.emptyStatusLabel = "Idle"
+        XCTAssertEqual(failed.statusText, "Refresh failed")
+    }
+
     // MARK: - statusText
 
     func testStatusTextDisabledBeatsEverything() {
