@@ -28,7 +28,7 @@ Glass is the **chrome** layer (menu bar, popover, toolbar, sidebar, occasional f
 - Concentric corners: `Radius.shell` (24) minus the popover inset (`Spacing.md`, 12) equals `Radius.card` (12). Change one, change the others.
 - Popover status dots, Stay Awake, and dashboard/refresh actions share one 30pt row in a bottom `safeAreaInset`, aligned to the provider cards through `MenuBarPopoverGeometry.cardInset`. `chromeHeight` is the footer height; scroll feedback ends above it.
 - Provider card headers keep name and freshness on the left; plan and status badges align at the trailing edge.
-- Usage hovers end with a compact service-status footer after Extra usage, using the popover status monitor. Providers without a verified status page omit this footer.
+- Usage hovers end with one compact footer: Extra usage and its read-only switch on the left, service health and its status-page link on the right, using the popover status monitor. Either side can appear alone; omit the footer when neither exists. Banked resets and peak/off-peak information remain above it.
 - Labels, section headers, table column headers and status chips are sentence case, never `.uppercased()` / `.textCase(.uppercase)`. Share-card artwork is the exception.
 
 ## Color

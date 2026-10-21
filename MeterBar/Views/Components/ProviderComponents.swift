@@ -183,6 +183,27 @@ enum ProviderLogoImageCache {
     }
 }
 
+/// Shared label and read-only switch; compact footers keep the switch beside its label.
+struct ExtraUsageStatusRow: View {
+    let status: ExtraUsageStatus
+    var compact = true
+    var fillsWidth = true
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "creditcard")
+                .font(.system(size: compact ? 9 : 11, weight: .semibold))
+                .foregroundColor(.secondary)
+            Text("Extra usage")
+                .font(compact ? .caption2 : .caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            if fillsWidth { Spacer(minLength: 4) }
+            ExtraUsageStatusToggle(status: status)
+        }
+    }
+}
+
 /// Read-only switch showing whether paid "extra usage" / overage is enabled.
 ///
 /// MeterBar reads this from provider APIs — it is not togglable in-app. A native

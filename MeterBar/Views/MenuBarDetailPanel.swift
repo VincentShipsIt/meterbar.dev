@@ -322,7 +322,7 @@ struct MenuBarProviderDetailContent: View {
     case empty
     case badges
     case dailyUsage
-    case providerStatus
+    case footer
   }
 
   /// The ordered cards for a snapshot. Pure so the layout rules are asserted
@@ -334,6 +334,7 @@ struct MenuBarProviderDetailContent: View {
     showsDailyUsage: Bool,
     hasIssues: Bool = false,
     hasProviderStatus: Bool = false,
+    hasExtraUsage: Bool = false,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = []
@@ -352,7 +353,7 @@ struct MenuBarProviderDetailContent: View {
     }
     if showsDailyUsage { cards.append(.dailyUsage) }
     if hasBadges { cards.append(.badges) }
-    if hasProviderStatus { cards.append(.providerStatus) }
+    if hasExtraUsage || hasProviderStatus { cards.append(.footer) }
     return cards
   }
 
@@ -360,7 +361,7 @@ struct MenuBarProviderDetailContent: View {
   private var reduceMotion
 
   private var badges: ProviderStatusBadges {
-    ProviderStatusBadges(snapshot: snapshot, style: .compact)
+    ProviderStatusBadges(snapshot: snapshot, style: .compact, includesExtraUsage: false)
   }
 
   private var showsDailyUsage: Bool {
@@ -374,7 +375,8 @@ struct MenuBarProviderDetailContent: View {
       hasBadges: badges.hasContent,
       showsDailyUsage: showsDailyUsage,
       hasIssues: !snapshot.issues.isEmpty,
-      hasProviderStatus: snapshot.service.hasStatusPage
+      hasProviderStatus: snapshot.service.hasStatusPage,
+      hasExtraUsage: snapshot.displayedExtraUsage != nil
     )
   }
 
@@ -398,7 +400,7 @@ struct MenuBarProviderDetailContent: View {
         HoverCardSurface(
           revealed: isPresented,
           reduceMotion: reduceMotion,
-          compact: card == .badges || card == .providerStatus
+          compact: card == .badges || card == .footer
         ) {
           content(for: card)
         }
@@ -451,8 +453,8 @@ struct MenuBarProviderDetailContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     case .badges:
       badges
-    case .providerStatus:
-      MenuBarProviderStatusFooter(service: snapshot.service)
+    case .footer:
+      MenuBarProviderDetailFooter(service: snapshot.service, extraUsage: snapshot.displayedExtraUsage)
     case .dailyUsage:
       if let dailyUsage {
         // The week behind the windows above: reading top to bottom is now, then
