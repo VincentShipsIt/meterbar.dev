@@ -51,4 +51,31 @@ final class PopoverRoutingLineTests: XCTestCase {
     func testPickerOptionsAreEveryTaskInTheCatalog() {
         XCTAssertEqual(PopoverRoutingLine.options(in: catalog).map(\.id), RoutingTaskID.builtIn)
     }
+
+    @MainActor
+    func testReadsRunOffMainThreadAndCancelledResultsAreDiscarded() async {
+        let started = expectation(description: "background read started")
+        let unblock = DispatchSemaphore(value: 0)
+        let expected = PopoverRoutingLine(taskName: "Implementation", route: "Codex")
+        let request = Task {
+            await PopoverRoutingLine.load(for: .implementation) { task in
+                XCTAssertFalse(Thread.isMainThread)
+                XCTAssertEqual(task, .implementation)
+                started.fulfill()
+                _ = unblock.wait(timeout: .now() + 5)
+                return expected
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        request.cancel()
+        unblock.signal()
+        let result = await request.value
+        XCTAssertNil(result)
+    }
+
+    func testCurrentRequestReturnsItsRecommendation() async {
+        let expected = PopoverRoutingLine(taskName: "Planning", route: "Codex")
+        let result = await PopoverRoutingLine.load(for: .planning) { _ in expected }
+        XCTAssertEqual(result, expected)
+    }
 }

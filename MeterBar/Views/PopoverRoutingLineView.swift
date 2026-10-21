@@ -13,9 +13,17 @@ struct PopoverRoutingLineView: View {
     var body: some View {
         content
             .task(id: settings.task) {
+                let requestedTask = settings.task
+                line = nil
                 while !Task.isCancelled {
-                    line = Self.currentLine(for: settings.task)
-                    try? await Task.sleep(for: Self.refreshInterval)
+                    let refreshed = await PopoverRoutingLine.load(for: requestedTask)
+                    guard !Task.isCancelled, settings.task == requestedTask else { return }
+                    line = refreshed
+                    do {
+                        try await Task.sleep(for: Self.refreshInterval)
+                    } catch {
+                        return
+                    }
                 }
             }
     }
@@ -42,15 +50,6 @@ struct PopoverRoutingLineView: View {
             }
             .transition(MeterBarTheme.Motion.popoverTile)
         }
-    }
-
-    private static func currentLine(for task: RoutingTaskID) -> PopoverRoutingLine? {
-        PopoverRoutingLine.make(
-            task: task,
-            catalog: RoutingPolicyStore.load().catalog,
-            candidates: WorkloadRouteCLI.loadCandidates(),
-            now: Date()
-        )
     }
 }
 
