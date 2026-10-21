@@ -436,7 +436,12 @@ struct MenuBarView: View {
   /// Opens the hover column idempotently, top-aligned with the popover
   /// card that opened it.
   private func presentDetail(id: String, make: @escaping (Bool) -> AnyView) {
-    if detail?.id == id, detailPresented { return }
+    dismissTask?.cancel()
+    dismissTask = nil
+    if let current = detail, current.id == id, detailPresented {
+      detail = DetailPresentation(id: id, topInset: current.topInset, make: make)
+      return
+    }
 
     removeTask?.cancel()
     removeTask = nil

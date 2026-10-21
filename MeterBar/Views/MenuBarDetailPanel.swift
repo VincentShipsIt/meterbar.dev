@@ -501,6 +501,13 @@ struct MenuBarErrorDetailContent: View {
         HoverCardSurface(revealed: isPresented, reduceMotion: reduceMotion) {
           VStack(alignment: .leading, spacing: 10) {
             ProviderCardHeader(snapshot: snapshot)
+            if snapshot.hasExhaustedLimit {
+              BlockingLimitResetCounter(
+                windows: snapshot.resetWindows,
+                accentColor: snapshot.accentColor,
+                format: MenuBarDisplayPreferencesStore.shared.resetTimeFormat
+              )
+            }
             if snapshot.issues.isEmpty {
               Text(snapshot.emptyDetail).font(.caption).foregroundStyle(.secondary)
               Button("Open provider settings") { UsageDashboardWindowController.shared.showSettings(.providers) }
