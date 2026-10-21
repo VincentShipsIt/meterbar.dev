@@ -460,7 +460,7 @@ final class CodexLunaReserveTests: XCTestCase {
             additionalLimits: [reserve]
         )
 
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .codexCli)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .codexCli, scope: .providerWide))
         let row = limits.first { $0.kind == .additional }
 
         XCTAssertEqual(row?.id, "luna-reserve")

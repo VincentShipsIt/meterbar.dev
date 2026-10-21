@@ -555,7 +555,7 @@ final class ProviderSnapshotTests: XCTestCase {
                     codeReviewLimit: UsageLimit(used: 12, total: total, resetTime: nil),
                     modelLimitLabel: service == .claudeCode ? "Fable" : nil
                 )
-                let limits = ProviderSnapshotBuilder.limits(for: metrics, service: service)
+                let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: service, scope: .providerWide))
                 XCTAssertEqual(limits.count, 3, "\(service) total \(total)")
 
                 for limit in limits {
@@ -579,14 +579,14 @@ final class ProviderSnapshotTests: XCTestCase {
     func testClaudeModelWindowKeepsTheParsedLabelVerbatim() {
         let labeled = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, codeReview: 10, modelLimitLabel: "Fable"),
-            service: .claudeCode
+            account: ProviderAccount(service: .claudeCode, scope: .providerWide)
         )
         XCTAssertEqual(labeled.map(\.quotaTitleKey), [.model(label: "Fable")])
         XCTAssertEqual(labeled.map(\.localizedTitle), ["Fable"])
 
         let unlabeled = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, codeReview: 10),
-            service: .claudeCode
+            account: ProviderAccount(service: .claudeCode, scope: .providerWide)
         )
         XCTAssertEqual(unlabeled.map(\.quotaTitleKey), [.model(label: nil)])
     }
@@ -611,11 +611,11 @@ final class ProviderSnapshotTests: XCTestCase {
     func testThirdLimitUsesReportedClaudeModelLabelAndCodeReviewForCodex() {
         let claudeLimits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, codeReview: 10, modelLimitLabel: "Fable"),
-            service: .claudeCode
+            account: ProviderAccount(service: .claudeCode, scope: .providerWide)
         )
         let codexLimits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .codexCli, codeReview: 10),
-            service: .codexCli
+            account: ProviderAccount(service: .codexCli, scope: .providerWide)
         )
 
         XCTAssertEqual(claudeLimits.map(\.title), ["Fable"])
@@ -625,7 +625,7 @@ final class ProviderSnapshotTests: XCTestCase {
     func testLegacyClaudeModelLimitUsesNeutralLabel() {
         let limits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, codeReview: 10),
-            service: .claudeCode
+            account: ProviderAccount(service: .claudeCode, scope: .providerWide)
         )
 
         XCTAssertEqual(limits.map(\.title), ["Model"])
@@ -634,7 +634,7 @@ final class ProviderSnapshotTests: XCTestCase {
     func testOpenRouterUsesCurrencyCreditLabels() {
         let limits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .openRouter, session: 10, weekly: 20),
-            service: .openRouter
+            account: ProviderAccount(service: .openRouter, scope: .providerWide)
         )
 
         XCTAssertEqual(limits.map(\.title), ["Key limit", "Account credits"])
@@ -664,7 +664,7 @@ final class ProviderSnapshotTests: XCTestCase {
     func testCursorPercentPoolsUseDashboardTitles() {
         let limits = ProviderSnapshotBuilder.limits(
             for: legacyPoolMetrics(autoUsed: 4, apiUsed: 64),
-            service: .xai
+            account: ProviderAccount(service: .xai, scope: .providerWide)
         )
 
         XCTAssertEqual(limits.map(\.title), ["Monthly", "Cursor Models", "Other Models"])
@@ -676,7 +676,7 @@ final class ProviderSnapshotTests: XCTestCase {
             service: .xai,
             weeklyLimit: UsageLimit(used: 137, total: 500, resetTime: nil, periodKind: .monthly)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertEqual(limits.map(\.title), ["Monthly"])
     }
@@ -691,7 +691,7 @@ final class ProviderSnapshotTests: XCTestCase {
                 legacyPool(64, label: ServiceType.legacyOtherModelsLabel)
             ]
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertEqual(limits.map(\.title), ["Monthly", "On-demand", "Cursor Models", "Other Models"])
     }
@@ -704,7 +704,7 @@ final class ProviderSnapshotTests: XCTestCase {
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
         XCTAssertEqual(
@@ -720,7 +720,7 @@ final class ProviderSnapshotTests: XCTestCase {
             sessionLimit: UsageLimit(used: 4, total: 100, resetTime: nil),
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
     }
@@ -732,7 +732,7 @@ final class ProviderSnapshotTests: XCTestCase {
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertNil(limits.first { $0.id == "session" }?.footnote)
         XCTAssertEqual(limits.first { $0.id == "weekly" }?.footnote, .includedBeforeCredits)
@@ -744,7 +744,7 @@ final class ProviderSnapshotTests: XCTestCase {
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .claudeCode)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .claudeCode, scope: .providerWide))
 
         XCTAssertTrue(limits.allSatisfy { $0.footnote == nil })
     }
@@ -756,7 +756,7 @@ final class ProviderSnapshotTests: XCTestCase {
             weeklyLimit: UsageLimit(used: 64, total: 100, resetTime: nil),
             codeReviewLimit: UsageLimit(used: 12, total: 40, resetTime: nil)
         )
-        let weekly = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let weekly = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
             .first { $0.id == "weekly" }
 
         XCTAssertNotNil(weekly)
@@ -861,7 +861,7 @@ final class ProviderSnapshotTests: XCTestCase {
     func testPaceContextComesFromKindNotTitle() {
         let limits = ProviderSnapshotBuilder.limits(
             for: makeMetrics(service: .claudeCode, session: 10, weekly: 20, codeReview: 30),
-            service: .claudeCode
+            account: ProviderAccount(service: .claudeCode, scope: .providerWide)
         )
 
         XCTAssertEqual(limits.map(\.kind), [.session, .weekly, .codeReview])
@@ -889,7 +889,7 @@ final class ProviderSnapshotTests: XCTestCase {
             )
         )
 
-        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: monthlyMetrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertEqual(limits.map(\.kind), [.session, .weekly])
         XCTAssertEqual(limits.map(\.paceContext), [.session, .weekly])
@@ -1126,7 +1126,7 @@ final class ProviderSnapshotTests: XCTestCase {
             service: .xai,
             weeklyLimit: UsageLimit(used: 41, total: 100, resetTime: nil, periodKind: .monthly)
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
         let weekly = try? XCTUnwrap(limits.first { $0.id == "weekly" })
 
         XCTAssertEqual(weekly?.quotaTitleKey, .monthly)
@@ -1146,7 +1146,7 @@ final class ProviderSnapshotTests: XCTestCase {
                 UsageLimit(used: 50, total: 100, resetTime: nil, periodKind: .unknown)
             ]
         )
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .xai)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .xai, scope: .providerWide))
 
         XCTAssertEqual(limits.map(\.id), ["session", "weekly", "additional-0", "additional-1", "additional-2"])
         XCTAssertEqual(limits.map(\.quotaTitleKey), [.session, .weekly, .daily, .billingCycle, .quota])
