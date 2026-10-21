@@ -183,6 +183,11 @@ jobs:
           unzip -o /tmp/swiftlint.zip -d /tmp/swiftlint
           chmod +x /tmp/swiftlint/swiftlint
 
+      - name: Verify agent invariants
+        run: |
+          python3 scripts/test-agent-invariants.py
+          scripts/check-agent-invariants.sh
+
       - name: Lint
         # --strict: the tree is currently violation-free, so any new warning fails.
         run: /tmp/swiftlint/swiftlint lint --strict

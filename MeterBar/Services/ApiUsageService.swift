@@ -1,4 +1,5 @@
 import Foundation
+import MeterBarShared
 
 /// Fetches organization API usage (per-model token counts) from the Anthropic
 /// and OpenAI admin usage endpoints, aggregates it over a window, and prices it
@@ -176,7 +177,7 @@ enum ApiUsageService {
             ApiModelUsage(
                 model: model,
                 inputTokens: accumulator.totalInput,
-                outputTokens: accumulator.output,
+                outputTokens: accumulator.output.value,
                 estimatedCostUSD: ApiUsagePricing.cost(provider: provider, model: model, tokens: accumulator.tokens),
                 isPricingUnverified: ApiUsagePricing.isPricingUnverified(provider: provider, model: model),
                 hasIncompleteInputData: accumulator.hasIncompleteInputData
@@ -189,9 +190,9 @@ enum ApiUsageService {
             provider: provider,
             windowStart: start,
             windowEnd: end,
-            inputTokens: breakdowns.reduce(0) { $0 + $1.inputTokens },
-            outputTokens: breakdowns.reduce(0) { $0 + $1.outputTokens },
-            estimatedCostUSD: breakdowns.reduce(0) { $0 + $1.estimatedCostUSD },
+            inputTokens: SafeAccumulate.sum(breakdowns.map(\.inputTokens)),
+            outputTokens: SafeAccumulate.sum(breakdowns.map(\.outputTokens)),
+            estimatedCostUSD: breakdowns.reduce(0) { SafeAccumulate.add($0, $1.estimatedCostUSD) },
             models: breakdowns,
             isTruncated: isTruncated
         )
@@ -205,32 +206,32 @@ enum ApiUsageService {
 /// cache-creation token is never folded into the uncached input count before
 /// it reaches pricing (#537).
 private struct ModelTokenAccumulator {
-    private(set) var uncachedInput = 0
-    private(set) var cacheRead = 0
-    private(set) var cacheCreationFiveMinute = 0
-    private(set) var cacheCreationOneHour = 0
-    private(set) var output = 0
+    private(set) var uncachedInput = TokenCount(0)
+    private(set) var cacheRead = TokenCount(0)
+    private(set) var cacheCreationFiveMinute = TokenCount(0)
+    private(set) var cacheCreationOneHour = TokenCount(0)
+    private(set) var output = TokenCount(0)
     /// At least one usage row contributed no input-token fields at all.
     private(set) var hasIncompleteInputData = false
 
-    var totalInput: Int { uncachedInput + cacheRead + cacheCreationFiveMinute + cacheCreationOneHour }
+    var totalInput: Int { (uncachedInput + cacheRead + cacheCreationFiveMinute + cacheCreationOneHour).value }
 
     var tokens: ApiUsagePricing.TokenBreakdown {
         ApiUsagePricing.TokenBreakdown(
-            uncachedInput: uncachedInput,
-            cacheRead: cacheRead,
-            cacheCreationFiveMinute: cacheCreationFiveMinute,
-            cacheCreationOneHour: cacheCreationOneHour,
-            output: output
+            uncachedInput: uncachedInput.value,
+            cacheRead: cacheRead.value,
+            cacheCreationFiveMinute: cacheCreationFiveMinute.value,
+            cacheCreationOneHour: cacheCreationOneHour.value,
+            output: output.value
         )
     }
 
     mutating func addAnthropic(_ result: AnthropicUsageResult) {
-        uncachedInput += result.uncachedInputTokens ?? 0
-        cacheRead += result.cacheReadInputTokens ?? 0
-        cacheCreationFiveMinute += result.cacheCreation?.ephemeral5MinuteInputTokens ?? 0
-        cacheCreationOneHour += result.cacheCreation?.ephemeral1HourInputTokens ?? 0
-        output += result.outputTokens ?? 0
+        uncachedInput += TokenCount(result.uncachedInputTokens ?? 0)
+        cacheRead += TokenCount(result.cacheReadInputTokens ?? 0)
+        cacheCreationFiveMinute += TokenCount(result.cacheCreation?.ephemeral5MinuteInputTokens ?? 0)
+        cacheCreationOneHour += TokenCount(result.cacheCreation?.ephemeral1HourInputTokens ?? 0)
+        output += TokenCount(result.outputTokens ?? 0)
         if result.hasNoInputTokenData { hasIncompleteInputData = true }
     }
 
@@ -240,9 +241,9 @@ private struct ModelTokenAccumulator {
         // counted as both uncached input and a cache read (#537).
         let cached = max(0, result.inputCachedTokens ?? 0)
         let total = result.inputTokens ?? 0
-        uncachedInput += max(0, total - cached)
-        cacheRead += cached
-        output += result.outputTokens ?? 0
+        uncachedInput += TokenCount(SafeAccumulate.clampedNonNegativeDifference(total, cached))
+        cacheRead += TokenCount(cached)
+        output += TokenCount(result.outputTokens ?? 0)
         if result.inputTokens == nil { hasIncompleteInputData = true }
     }
 }
@@ -273,10 +274,10 @@ nonisolated struct AnthropicUsageResult: Codable {
     let model: String?
 
     var totalInputTokens: Int {
-        (uncachedInputTokens ?? 0)
-            + (cacheReadInputTokens ?? 0)
-            + (cacheCreation?.ephemeral1HourInputTokens ?? 0)
-            + (cacheCreation?.ephemeral5MinuteInputTokens ?? 0)
+        (TokenCount(uncachedInputTokens ?? 0)
+            + TokenCount(cacheReadInputTokens ?? 0)
+            + TokenCount(cacheCreation?.ephemeral1HourInputTokens ?? 0)
+            + TokenCount(cacheCreation?.ephemeral5MinuteInputTokens ?? 0)).value
     }
 
     /// True when every input-token source is absent — as opposed to present

@@ -113,10 +113,10 @@ nonisolated struct TokenComposition: Equatable, Sendable {
     }
 
     mutating func add(_ other: TokenComposition) {
-        input += other.input
-        output += other.output
-        cacheWrite += other.cacheWrite
-        cacheRead += other.cacheRead
+        SafeAccumulate.accumulate(&input, other.input)
+        SafeAccumulate.accumulate(&output, other.output)
+        SafeAccumulate.accumulate(&cacheWrite, other.cacheWrite)
+        SafeAccumulate.accumulate(&cacheRead, other.cacheRead)
     }
 
     /// Bound over-attributed components to the authoritative row, preserving

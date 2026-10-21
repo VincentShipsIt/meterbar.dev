@@ -587,7 +587,7 @@ enum ClaudeCostScanner {
             SafeAccumulate.accumulate(&totals.output, event.output)
             SafeAccumulate.accumulate(&totals.cacheCreation, event.cacheCreation)
             SafeAccumulate.accumulate(&totals.cacheRead, event.cacheRead)
-            totals.estimatedCost += eventCost
+            SafeAccumulate.accumulate(&totals.estimatedCost, eventCost)
             totals.note(event.timestamp)
             totals.record(
                 CostScanEventTotals(
