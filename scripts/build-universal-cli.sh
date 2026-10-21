@@ -50,6 +50,10 @@ done
 
 lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_path"
 chmod 755 "$output_path"
-lipo "$output_path" -verify_arch arm64 x86_64
+# Verify each required slice separately: some toolchain versions parse a
+# multi-architecture -verify_arch invocation as multiple input files.
+for architecture in arm64 x86_64; do
+  lipo "$output_path" -verify_arch "$architecture"
+done
 
 echo "Universal CLI architectures: $(lipo -archs "$output_path")"

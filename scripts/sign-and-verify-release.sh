@@ -122,7 +122,7 @@ verify_universal_binary() {
   local binary="$1"
   local label="$2"
 
-  if ! lipo "$binary" -verify_arch arm64 x86_64; then
+  if ! lipo "$binary" -verify_arch arm64 || ! lipo "$binary" -verify_arch x86_64; then
     echo "$label is not universal arm64+x86_64: $(file "$binary")" >&2
     exit 1
   fi

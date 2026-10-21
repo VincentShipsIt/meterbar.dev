@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-08-30
+last_verified: 2026-10-21
 status: active
 ---
 
@@ -21,7 +21,7 @@ Automatic Sparkle checks stay off until the user opts in. **Check Now** is alway
 
 ## Local vs CI
 
-This Mac Studio (`$HOME` `/Users/decod3rslabs`) may run `swift test` / `xcodebuild`. Do not treat Command Line Tools-only hosts as able to run XCTest.
+Run `swift test` / `xcodebuild` on the configured execution host with full Xcode. Command Line Tools alone cannot run XCTest. Record the actual local toolchain; the pinned CI toolchain remains the distribution gate. Universal checks verify each required architecture separately for compatibility across tool versions.
 
 ## CloudKit release gate
 
