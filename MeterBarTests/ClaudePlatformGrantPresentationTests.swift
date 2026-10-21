@@ -23,7 +23,7 @@ final class ClaudePlatformGrantPresentationTests: XCTestCase {
         XCTAssertTrue(text.contains("$37.50 spent / $100.75 credits"), text)
         XCTAssertTrue(text.contains("$1.25 spent / $12.75 credits"), text)
 
-        let limits = ProviderSnapshotBuilder.limits(for: metrics, service: .claudePlatform)
+        let limits = ProviderSnapshotBuilder.limits(for: metrics, account: ProviderAccount(service: .claudePlatform, scope: .providerWide))
         XCTAssertEqual(limits.count, 3)
         XCTAssertTrue(limits.allSatisfy { $0.valueStyle == .currency })
         XCTAssertEqual(limits.map(\.accessibilityValue), [

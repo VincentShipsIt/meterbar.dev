@@ -154,7 +154,8 @@ final class OpenRouterService: ObservableObject {
         let accountCredits = UsageLimit(
             used: credits.totalUsage,
             total: credits.totalCredits,
-            resetTime: nil
+            resetTime: nil,
+            reading: credits.totalCredits == 0 ? .remainder : .measured
         )
 
         let keyLimit: UsageLimit? = {

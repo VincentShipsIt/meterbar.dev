@@ -13,6 +13,7 @@ import Foundation
 public enum MetricsCodec {
     public static func encode(_ metrics: [ServiceType: UsageMetrics]) -> Data? {
         let keyed = metrics.reduce(into: [String: UsageMetrics]()) { result, pair in
+            guard !pair.value.hasInvalidBlockingQuota else { return }
             result[pair.key.rawValue] = pair.value
         }
         return try? JSONEncoder().encode(keyed)
@@ -25,7 +26,8 @@ public enum MetricsCodec {
 
         var decoded: [String: UsageMetrics] = [:]
         for (key, box) in keyed {
-            guard ServiceType(rawValue: key) != nil, let metrics = box.value else { continue }
+            guard ServiceType(rawValue: key) != nil,
+                  let metrics = box.value, !metrics.hasInvalidBlockingQuota else { continue }
             decoded[key] = metrics
         }
 
@@ -49,7 +51,7 @@ public enum MetricsCodec {
     }
 
     public static func encodeAccounts(_ snapshots: [AccountUsageSnapshot]) -> Data? {
-        try? JSONEncoder().encode(snapshots)
+        try? JSONEncoder().encode(snapshots.filter { !$0.metrics.hasInvalidBlockingQuota })
     }
 
     /// Decodes the account-scoped cache with the same per-entry tolerance the
@@ -63,6 +65,6 @@ public enum MetricsCodec {
         guard let boxed = try? JSONDecoder().decode([FailableBox<AccountUsageSnapshot>].self, from: data) else {
             return []
         }
-        return boxed.compactMap(\.value)
+        return boxed.compactMap(\.value).filter { !$0.metrics.hasInvalidBlockingQuota }
     }
 }
