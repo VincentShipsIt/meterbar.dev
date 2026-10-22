@@ -83,11 +83,11 @@ final class QuotaDonutTests: XCTestCase {
 
     // MARK: - Card split
 
-    private func snapshot(_ limits: [SnapshotLimit]) -> ProviderSnapshot {
+    private func snapshot(_ limits: [SnapshotLimit], service: ServiceType = .claudeCode) -> ProviderSnapshot {
         ProviderSnapshot(
             id: "test",
             title: "Claude",
-            service: .claudeCode,
+            service: service,
             updatedAt: Date(),
             limits: limits,
             emptyDetail: "Waiting for refresh",
@@ -97,7 +97,7 @@ final class QuotaDonutTests: XCTestCase {
         )
     }
 
-    func testCardDrawsEveryMeasuredWindowAsADonutInOrder() {
+    func testClaudeModelDonutsPrecedeTheAdjacentSessionAndWeeklyWindows() {
         let card = snapshot([
             limit(.session, used: 14),
             limit(.weekly, used: 55),
@@ -107,9 +107,16 @@ final class QuotaDonutTests: XCTestCase {
 
         XCTAssertEqual(
             ProviderCardPresentation.donutLimits(for: card).map(\.id),
-            ["session", "weekly", "codeReview", "additional"]
+            ["codeReview", "additional", "session", "weekly"]
         )
         XCTAssertTrue(ProviderCardPresentation.barLimits(for: card).isEmpty)
+    }
+
+    func testOtherProvidersRetainTheirDonutOrder() {
+        let card = snapshot([
+            limit(.session, used: 14), limit(.weekly, used: 55), limit(.codeReview, used: 20)
+        ], service: .codexCli)
+        XCTAssertEqual(ProviderCardPresentation.donutLimits(for: card).map(\.id), ["session", "weekly", "codeReview"])
     }
 
     func testOnlyWindowsARingCannotShowStayBars() {
