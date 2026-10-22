@@ -64,6 +64,7 @@ struct QuotaDonut: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                     .lineLimit(1)
+                    .help(limit.localizedTitle)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(limit.localizedAccessibilityLabel)
