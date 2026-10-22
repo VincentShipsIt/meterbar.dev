@@ -42,15 +42,14 @@ struct QuotaDonutContent: Equatable {
     }
 }
 
-/// A quota window as a ring with its title and reset countdown beside it. The popover shows this; the hover panel behind it has the bar,
-/// the runway chart and the week of usage.
+/// A quota window as a ring and short label. Reset details live in the hover
+/// panel alongside the bar, runway chart and week of usage.
 struct QuotaDonut: View {
     static let diameter: CGFloat = 46
     static let lineWidth: CGFloat = 6
 
     let limit: SnapshotLimit
     let accentColor: Color
-    var resetTimeFormat: ResetTimeFormat = .countdown
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -59,24 +58,13 @@ struct QuotaDonut: View {
 
     var body: some View {
         if let content {
-            HStack(spacing: 8) {
+            VStack(spacing: 4) {
                 ring(content)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(limit.localizedTitle)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    if limit.usageLimit.resetTime != nil {
-                        ResetCountdownLabel(
-                            title: nil,
-                            limit: limit.usageLimit,
-                            font: .caption2,
-                            foregroundColor: .secondary,
-                            iconSize: 9,
-                            format: resetTimeFormat
-                        )
-                    }
-                }
+                Text(limit.localizedTitle)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .help(limit.localizedTitle)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(limit.localizedAccessibilityLabel)
@@ -119,23 +107,16 @@ struct QuotaDonut: View {
     }
 }
 
-/// The popover card's donuts, two to a row so a card with Session, Weekly and a
-/// model window wraps instead of squeezing the labels.
+/// Measured quota windows share one row; their short labels sit below the rings.
 struct QuotaDonutRow: View {
     let limits: [SnapshotLimit]
     let accentColor: Color
-    var resetTimeFormat: ResetTimeFormat = .countdown
-
-    private let columns = [
-        GridItem(.flexible(), spacing: 10, alignment: .leading),
-        GridItem(.flexible(), spacing: 10, alignment: .leading)
-    ]
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             ForEach(limits) { limit in
-                QuotaDonut(limit: limit, accentColor: accentColor, resetTimeFormat: resetTimeFormat)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                QuotaDonut(limit: limit, accentColor: accentColor)
+                    .frame(maxWidth: .infinity)
             }
         }
     }

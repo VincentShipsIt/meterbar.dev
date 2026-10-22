@@ -62,7 +62,7 @@ final class MeterBarMenuDetailPanel {
     )
 
     panel.contentView = NSHostingView(
-      rootView: content
+      rootView: HoverColumnViewport(maximumHeight: frame.height) { content }
         .frame(width: frame.width, height: frame.height)
         .onHover { [weak self] isHovered in
           self?.setDetailHovered(isHovered)
@@ -381,16 +381,7 @@ struct MenuBarProviderDetailContent: View {
   }
 
   var body: some View {
-    ViewThatFits(in: .vertical) {
-      cardStack
-
-      ScrollView {
-        cardStack
-      }
-      .scrollIndicators(.never)
-      .scrollContentBackground(.hidden)
-    }
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    cardStack.frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private var cardStack: some View {
@@ -490,6 +481,43 @@ struct HoverCardSurface<Content: View>: View {
   }
 }
 
+/// One scrolling boundary for every hover surface. Content is measured inside
+/// the scroll view so a screen-sized viewport never clips an oversized footer.
+struct HoverColumnViewport<Content: View>: View {
+  let maximumHeight: CGFloat
+  @ViewBuilder let content: Content
+  @State private var contentHeight: CGFloat?
+
+  static func height(contentHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
+    max(1, min(contentHeight, maximumHeight))
+  }
+
+  var body: some View {
+    ScrollView {
+      content
+        .fixedSize(horizontal: false, vertical: true)
+        .background(GeometryReader { proxy in
+          Color.clear.preference(key: HoverContentHeightPreferenceKey.self, value: proxy.size.height)
+        })
+    }
+    .scrollContentBackground(.hidden)
+    .scrollDisabled((contentHeight ?? 0) <= maximumHeight)
+    .frame(height: Self.height(contentHeight: contentHeight ?? maximumHeight, maximumHeight: maximumHeight))
+    .onPreferenceChange(HoverContentHeightPreferenceKey.self) { height in
+      guard height > 0, contentHeight == nil || abs(height - (contentHeight ?? 0)) > 1 else { return }
+      contentHeight = height
+    }
+  }
+}
+
+private struct HoverContentHeightPreferenceKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
+}
+
 struct MenuBarErrorDetailContent: View {
   let snapshots: [ProviderSnapshot]
   let isPresented: Bool
@@ -497,10 +525,7 @@ struct MenuBarErrorDetailContent: View {
   private var reduceMotion
 
   var body: some View {
-    ViewThatFits(in: .vertical) {
-      cards
-      ScrollView { cards }.scrollIndicators(.never)
-    }
+    cards
   }
 
   private var cards: some View {

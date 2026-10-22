@@ -16,7 +16,7 @@ enum MenuBarPopoverGeometry {
     static let chromeHeight: CGFloat = 36
     /// Breathing room kept between the popover and each screen edge.
     static let screenPadding: CGFloat = 8
-    /// Absolute ceiling, independent of how tall the display is.
+    /// Main provider stack ceiling. Hover details use the available screen height.
     static let maximumHeightCap: CGFloat = 760
     static let minimumScrollHeight: CGFloat = 80
     /// Width of the hover column that opens to the left of the popover.
@@ -38,6 +38,10 @@ enum MenuBarPopoverGeometry {
 
     static func maximumHeight(visibleScreenHeight: CGFloat) -> CGFloat {
         max(minimumHeight, min(maximumHeightCap, visibleScreenHeight - (screenPadding * 2)))
+    }
+
+    static func maximumDetailHeight(visibleScreenHeight: CGFloat) -> CGFloat {
+        max(1, visibleScreenHeight - (screenPadding * 2))
     }
 
     static func scrollHeight(contentHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {

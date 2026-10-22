@@ -45,7 +45,11 @@ enum ProviderCardPresentation {
     /// windows a ring cannot honestly show (credits, estimates, currency) stay a
     /// bar below them.
     static func donutLimits(for snapshot: ProviderSnapshot) -> [SnapshotLimit] {
-        snapshot.limits.filter { QuotaDonutContent(limit: $0) != nil }
+        let measured = snapshot.limits.filter { QuotaDonutContent(limit: $0) != nil }
+        guard snapshot.service == .claudeCode else { return measured }
+        let sharedWindows: Set<SnapshotLimit.Kind> = [.session, .weekly]
+        return measured.filter { !sharedWindows.contains($0.kind) }
+            + measured.filter { sharedWindows.contains($0.kind) }
     }
 
     static func barLimits(for snapshot: ProviderSnapshot) -> [SnapshotLimit] {

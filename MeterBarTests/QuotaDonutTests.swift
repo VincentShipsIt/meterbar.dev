@@ -1,4 +1,6 @@
+import AppKit
 import MeterBarShared
+import SwiftUI
 import XCTest
 @testable import MeterBar
 
@@ -81,11 +83,11 @@ final class QuotaDonutTests: XCTestCase {
 
     // MARK: - Card split
 
-    private func snapshot(_ limits: [SnapshotLimit]) -> ProviderSnapshot {
+    private func snapshot(_ limits: [SnapshotLimit], service: ServiceType = .claudeCode) -> ProviderSnapshot {
         ProviderSnapshot(
             id: "test",
             title: "Claude",
-            service: .claudeCode,
+            service: service,
             updatedAt: Date(),
             limits: limits,
             emptyDetail: "Waiting for refresh",
@@ -95,7 +97,7 @@ final class QuotaDonutTests: XCTestCase {
         )
     }
 
-    func testCardDrawsEveryMeasuredWindowAsADonutInOrder() {
+    func testClaudeModelDonutsPrecedeTheAdjacentSessionAndWeeklyWindows() {
         let card = snapshot([
             limit(.session, used: 14),
             limit(.weekly, used: 55),
@@ -105,9 +107,16 @@ final class QuotaDonutTests: XCTestCase {
 
         XCTAssertEqual(
             ProviderCardPresentation.donutLimits(for: card).map(\.id),
-            ["session", "weekly", "codeReview", "additional"]
+            ["codeReview", "additional", "session", "weekly"]
         )
         XCTAssertTrue(ProviderCardPresentation.barLimits(for: card).isEmpty)
+    }
+
+    func testOtherProvidersRetainTheirDonutOrder() {
+        let card = snapshot([
+            limit(.session, used: 14), limit(.weekly, used: 55), limit(.codeReview, used: 20)
+        ], service: .codexCli)
+        XCTAssertEqual(ProviderCardPresentation.donutLimits(for: card).map(\.id), ["session", "weekly", "codeReview"])
     }
 
     func testOnlyWindowsARingCannotShowStayBars() {
@@ -119,6 +128,50 @@ final class QuotaDonutTests: XCTestCase {
 
         XCTAssertEqual(ProviderCardPresentation.donutLimits(for: card).count, 1)
         XCTAssertEqual(ProviderCardPresentation.barLimits(for: card).count, 2)
+    }
+
+    @MainActor
+    func testThreeRenderedDonutsStayOnOneRow() throws {
+        try assertSingleRenderedRow(count: 3)
+    }
+
+    @MainActor
+    func testFiveRenderedDonutsStayOnOneRow() throws {
+        try assertSingleRenderedRow(count: 5)
+    }
+
+    @MainActor
+    private func assertSingleRenderedRow(count: Int) throws {
+        let limits = (0..<count).map { index in
+            SnapshotLimit(
+                id: "window-\(index)", kind: .additional, title: "Pool \(index + 1)",
+                usageLimit: UsageLimit(used: 0, total: 100, resetTime: Date(timeIntervalSince1970: 2_000_000_000))
+            )
+        }
+        for scheme: ColorScheme in [.light, .dark] {
+            for width: CGFloat in [300, 340] {
+                let renderer = ImageRenderer(content: QuotaDonutRow(limits: limits, accentColor: .red)
+                    .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .environment(\.colorScheme, scheme))
+                let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(renderer.cgImage))
+                var bands = 0
+                var inBand = false
+                for y in 0..<bitmap.pixelsHigh {
+                    let containsRing = (0..<bitmap.pixelsWide).contains { x in
+                        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                            return false
+                        }
+                        return color.alphaComponent > 0.5 && color.redComponent > 0.6
+                            && color.greenComponent < 0.4 && color.blueComponent < 0.4
+                    }
+                    if containsRing && !inBand { bands += 1 }
+                    inBand = containsRing
+                }
+                XCTAssertEqual(bands, 1, "Quota rings must share one row at width \(width)")
+                XCTAssertLessThanOrEqual(bitmap.pixelsHigh, 80, "Reset text must stay in hover details")
+            }
+        }
     }
 
     // MARK: - Readiness issues ride on the cards

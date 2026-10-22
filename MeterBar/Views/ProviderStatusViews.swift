@@ -354,12 +354,7 @@ struct MenuBarStatusDetailContent: View {
     var isPresented = true
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            detailRows
-            ScrollView { detailRows }
-                .scrollIndicators(.never)
-                .scrollContentBackground(.hidden)
-        }
+        detailRows
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .task { await statusMonitor.refreshAllIfNeeded() }
     }

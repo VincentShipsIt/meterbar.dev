@@ -115,16 +115,14 @@ struct MenuBarView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
   }
 
-  /// The column takes its natural height, never the window's: proposed the
-  /// window height, it scrolled and cut its cards at the popover's bottom edge
-  /// instead of growing the window. It top-aligns with the card that opened it
-  /// and moves up only as far as it must to stay on screen.
+  /// The column grows to its measured content height, bounded by the screen.
+  /// It aligns with the source card and moves up only when needed to fit.
   private func detailColumn(_ detail: DetailPresentation) -> some View {
-    detail.make(detailPresented)
+    HoverColumnViewport(maximumHeight: maximumDetailHeight) {
+      detail.make(detailPresented)
+    }
       .id(detail.id)
       .frame(width: MenuBarPopoverGeometry.detailWidth)
-      .frame(maxHeight: maximumPopoverHeight, alignment: .top)
-      .fixedSize(horizontal: false, vertical: true)
       .background(
         GeometryReader { proxy in
           Color.clear.preference(key: DetailHeightPreferenceKey.self, value: proxy.size.height)
@@ -138,7 +136,7 @@ struct MenuBarView: View {
     MenuBarPopoverGeometry.detailTop(
       sourceTop: detail.topInset,
       detailHeight: detailHeight,
-      maximumHeight: maximumPopoverHeight
+      maximumHeight: maximumDetailHeight
     )
   }
 
@@ -263,11 +261,18 @@ struct MenuBarView: View {
     )
   }
 
-  private var maximumPopoverHeight: CGFloat {
-    let visibleHeight = menuWindow?.screen?.visibleFrame.height
+  private var visibleScreenHeight: CGFloat {
+    menuWindow?.screen?.visibleFrame.height
       ?? NSScreen.main?.visibleFrame.height
       ?? MenuBarPopoverGeometry.fallbackVisibleScreenHeight
-    return MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: visibleHeight)
+  }
+
+  private var maximumPopoverHeight: CGFloat {
+    MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: visibleScreenHeight)
+  }
+
+  private var maximumDetailHeight: CGFloat {
+    MenuBarPopoverGeometry.maximumDetailHeight(visibleScreenHeight: visibleScreenHeight)
   }
 
   /// Reports the popover size to the menu-bar window controller through the same
@@ -281,7 +286,7 @@ struct MenuBarView: View {
           maximumHeight: maximumPopoverHeight
         ),
         hasDetail: detail != nil,
-        maximumHeight: maximumPopoverHeight
+        maximumHeight: maximumDetailHeight
       )
     )
   }

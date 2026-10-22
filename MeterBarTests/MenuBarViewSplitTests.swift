@@ -68,6 +68,46 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
         XCTAssertEqual(MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: 2000), 760)
     }
 
+    func testHoverUsesScreenSpaceBeyondTheMainPopoverCap() {
+        let ceiling = MenuBarPopoverGeometry.maximumDetailHeight(visibleScreenHeight: 1200)
+        XCTAssertEqual(ceiling, 1184)
+        let size = MenuBarPopoverGeometry.windowSize(
+            popover: NSSize(width: 390, height: 500), hasDetail: true, maximumHeight: ceiling
+        )
+        XCTAssertEqual(size.height, 1184)
+        XCTAssertEqual(MenuBarPopoverGeometry.detailTop(sourceTop: 400, detailHeight: 900, maximumHeight: ceiling), 284)
+    }
+
+    func testHoverViewportFitsContentAndScrollsOnlyAtTheScreenBoundary() {
+        typealias Viewport = HoverColumnViewport<EmptyView>
+        XCTAssertEqual(Viewport.height(contentHeight: 900, maximumHeight: 1184), 900)
+        XCTAssertEqual(Viewport.height(contentHeight: 1400, maximumHeight: 1184), 1184)
+        XCTAssertEqual(Viewport.height(contentHeight: 300, maximumHeight: 584), 300)
+        XCTAssertEqual(MenuBarPopoverGeometry.maximumDetailHeight(visibleScreenHeight: 100), 84)
+    }
+
+    func testTallHoverRendersItsFooterBelowTheOldCeiling() throws {
+        let host = NSHostingView(rootView: HoverColumnViewport(maximumHeight: 1184) {
+            VStack(spacing: 0) {
+                Color.red.frame(height: 900)
+                Color.green.frame(height: 30)
+            }
+        }.frame(width: 340))
+        host.frame = NSRect(x: 0, y: 0, width: 340, height: 1184)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        XCTAssertGreaterThan(bitmap.pixelsHigh, 760)
+        let footerIsVisible = (0..<bitmap.pixelsHigh).contains { y in
+            guard let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: y)?.usingColorSpace(.deviceRGB) else {
+                return false
+            }
+            return color.alphaComponent > 0.5 && color.greenComponent > 0.6
+                && color.redComponent < 0.4 && color.blueComponent < 0.4
+        }
+        XCTAssertTrue(footerIsVisible, "The footer below 900 points must render instead of being clipped at 760")
+    }
+
     func testMaximumHeightSubtractsScreenPaddingOnBothEdges() {
         // 600 - (8 * 2) = 584, below the 760 cap and above the 180 floor.
         XCTAssertEqual(MenuBarPopoverGeometry.maximumHeight(visibleScreenHeight: 600), 584)
