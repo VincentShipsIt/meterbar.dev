@@ -9,7 +9,8 @@ import SwiftUI
 
 struct DashboardRoutingSection: View {
     @State private var preview: RoutingPreview?
-    @State private var editor: RoutingPolicyEditor?
+    @State private var editor = RoutingPolicyEditor(catalog: RoutingPolicyCatalog())
+    @State private var isEditing = false
     @State private var accountOptions: [RoutingPolicyEditor.AccountOption] = []
     @State private var saveError: String?
 
@@ -25,16 +26,16 @@ struct DashboardRoutingSection: View {
                 }
             }
 
-            if let editing = Binding($editor) {
+            if isEditing {
                 RoutingPolicyEditorBar(
-                    editor: editing.wrappedValue,
+                    editor: editor,
                     saveError: saveError,
                     onSave: save,
                     onCancel: cancelEditing,
-                    onResetAll: { editor?.resetAll() }
+                    onResetAll: { editor.resetAll() }
                 )
                 ForEach(RoutingTaskID.builtIn, id: \.self) { task in
-                    RoutingPolicyEditorCard(task: task, editor: editing, accounts: accountOptions)
+                    RoutingPolicyEditorCard(task: task, editor: $editor, accounts: accountOptions)
                 }
             } else if let preview {
                 HStack {
@@ -75,19 +76,21 @@ struct DashboardRoutingSection: View {
     private func startEditing() {
         saveError = nil
         editor = RoutingPolicyEditor(catalog: RoutingPolicyStore.load().catalog)
+        isEditing = true
     }
 
     private func cancelEditing() {
         saveError = nil
-        editor = nil
+        isEditing = false
     }
 
     private func save() {
-        guard var draft = editor else { return }
+        guard isEditing else { return }
+        var draft = editor
         do {
             try draft.save()
             saveError = nil
-            editor = nil
+            isEditing = false
             reload()
         } catch RoutingPolicyEditor.SaveError.blocked(let reason) {
             saveError = reason
