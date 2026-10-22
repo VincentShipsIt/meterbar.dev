@@ -256,8 +256,7 @@ struct ProviderStatusCard: View {
             if !donuts.isEmpty {
                 QuotaDonutRow(
                     limits: donuts,
-                    accentColor: snapshot.accentColor,
-                    resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                    accentColor: snapshot.accentColor
                 )
             }
             ForEach(bars) { limit in
