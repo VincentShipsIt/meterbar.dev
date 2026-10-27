@@ -127,6 +127,7 @@ struct ProviderSettingsView: View {
     @State private var isAddingOpenRouterKey = false
     @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
+    @State private var isConnectingCursor = false
 
     /// Same key ClaudeCodeLocalService reads. OAuth (`/api/oauth/usage`) is the
     /// primary Claude Code usage source and is on by default; turning this off
@@ -860,8 +861,8 @@ struct ProviderSettingsView: View {
         return SettingsPanelSection(title: "Connection", logoKind: .xai, color: MeterBarTheme.xaiAccent) {
             SettingsNotice(
                 text: "MeterBar asks the official Grok CLI for billing data over ACP and reads the Cursor "
-                    + "IDE login for the same subscription. The CLI owns authentication; MeterBar never "
-                    + "reads or stores the cached token.",
+                    + "IDE login for the same subscription. Each app owns sign-in and refresh. Cursor's "
+                    + "encrypted login is decrypted locally in memory; credentials are never cached in plaintext.",
                 color: .secondary
             )
 
@@ -885,6 +886,39 @@ struct ProviderSettingsView: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                }
+            }
+
+            SettingsRowView(title: "Cursor", detail: "Allow local access to Cursor's saved sign-in") {
+                Button("Connect Cursor") {
+                    isConnectingCursor = true
+                    Task {
+                        defer { isConnectingCursor = false }
+                        let cursor = cursorService
+                        await Task.detached(priority: .userInitiated) {
+                            cursor.checkAccess(forceRescan: true, mode: .interactive)
+                        }.value
+                        await dataManager.refresh(service: .xai)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isConnectingCursor || dataManager.isLoading)
+            }
+
+            SettingsNotice(
+                text: "Connect Cursor may ask for access to Cursor Safe Storage in Keychain. Choose Always Allow "
+                    + "to keep future refreshes silent. Background refresh never prompts.",
+                color: .secondary
+            )
+            if let probe = cursorService.credentialProbe, probe != .tokenPresent, probe != .notFound {
+                let report = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
+                    isInstalled: true, database: probe, now: Date()
+                ))
+                if let check = report.checks.first(where: { $0.id == ReadinessCheckID.auth }) {
+                    SettingsNotice(
+                        text: [check.detail, check.recovery].compactMap { $0 }.joined(separator: " "),
+                        color: MeterBarTheme.warning
+                    )
                 }
             }
 

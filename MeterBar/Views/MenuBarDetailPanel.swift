@@ -534,7 +534,7 @@ struct MenuBarErrorDetailContent: View {
         HoverCardSurface(revealed: isPresented, reduceMotion: reduceMotion) {
           VStack(alignment: .leading, spacing: 10) {
             ProviderCardHeader(snapshot: snapshot)
-            if snapshot.hasExhaustedLimit {
+            if snapshot.hasExhaustedLimit, snapshot.showsQuotaReset {
               BlockingLimitResetCounter(
                 windows: snapshot.resetWindows,
                 accentColor: snapshot.accentColor,
