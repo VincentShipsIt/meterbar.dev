@@ -177,8 +177,8 @@ class CursorLocalService: ObservableObject {
     func fetchUsageMetrics() async throws -> UsageMetrics {
         // SQLite read (plus a recursive directory scan on a miss) is blocking
         // I/O; the app target runs async bodies on the main actor (default
-        // MainActor isolation), so hop off explicitly. Try without rescan first
-        // (faster), then with rescan if needed.
+        // MainActor isolation), so hop off explicitly. The path resolver checks
+        // known locations before falling back to a recursive rescan.
         let credentials = await Task.detached(priority: .userInitiated) { [self] in
             readCredentials(forceRescan: true)
         }.value

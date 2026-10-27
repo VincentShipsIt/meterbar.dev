@@ -138,7 +138,11 @@ final class CursorCredentialReaderTests: XCTestCase {
 
     // Independent fixture: OpenSSL AES-128-CBC / Python hashlib.pbkdf2_hmac.
     // Every value here is synthetic; no real credentials or Keychain reads.
-    private let token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhdXRoMHxzeW50aGV0aWMtdXNlciJ9.sig"
+    private var token: String {
+        let header = Data(#"{"alg":"none"}"#.utf8).base64EncodedString()
+        let payload = Data(#"{"sub":"auth0|synthetic-user"}"#.utf8).base64EncodedString()
+        return [header, payload, "sig"].map { $0.replacingOccurrences(of: "=", with: "") }.joined(separator: ".")
+    }
     private let encrypted = "cursor-safe-storage:v1:djEwSqvFXSUCdQkQVWOBHvdaERg/jBPiXjcP1+Qm5r4W+0oZk3O7GMtPetZ7QG3u7L7uNGbnvn8leTLnFLuycevU52+URSs67nV3WXsdok9Tvyw="
     private let password = Data("synthetic-password".utf8)
 

@@ -12,3 +12,8 @@
 # The literal was replaced in the following commit; this scopes the ignore to
 # the one historical finding so a real future secret is still caught.
 ed155d8c663ad0fda9135822f31170f0524823ea:MeterBarTests/ZaiCodingPlanServiceTests.swift:generic-api-key:166
+
+# Synthetic alg=none JWT subject used to assert the independent Cursor
+# decryption fixture. Replaced by runtime fixture construction afterward;
+# ignore only this original historical literal, not future credentials.
+6f55a07900bd713f369e1474c718179e1cf6d4a2:MeterBarTests/CursorCredentialReaderTests.swift:generic-api-key:141
