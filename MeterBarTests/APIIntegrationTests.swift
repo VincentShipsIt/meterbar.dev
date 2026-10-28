@@ -200,14 +200,17 @@ final class APIIntegrationTests: XCTestCase {
 
         let cursorService = CursorLocalService.shared
 
-        // Check if access token exists
-        guard cursorService.hasAccess else {
-            print("⚠️  SKIPPED: No Cursor access token found")
-            print("   To test: Ensure Cursor is installed and logged in")
-            throw XCTSkip("Cursor access token not found")
+        // The service's launch probe is asynchronous. Await the credential
+        // read itself rather than mistaking its initial hasAccess=false for
+        // a missing login. This read never allows Keychain UI.
+        let probe = await Task.detached {
+            cursorService.readCredentials(forceRescan: true).probe
+        }.value
+        guard probe == .tokenPresent else {
+            throw XCTSkip("Cursor credential state: \(probe.rawValue)")
         }
 
-        print("✓ Cursor access token found")
+        print("✓ Cursor access token resolved")
 
         // Attempt to fetch usage metrics
         do {

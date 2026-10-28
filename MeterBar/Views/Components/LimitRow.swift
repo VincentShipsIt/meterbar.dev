@@ -31,11 +31,12 @@ struct LimitRow: View {
     /// the same division of responsibility `BlockingLimitResetCounter.format`
     /// uses — so the row never observes the store itself.
     var resetTimeFormat: ResetTimeFormat = .countdown
+    var showsReset: Bool = true
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
-    private var content: RowContent { RowContent(limit: limit) }
+    private var content: RowContent { RowContent(limit: limit, allowsReset: showsReset) }
 
     /// The combined VoiceOver label/value applied to the row's single
     /// accessibility element. Sourced from the shared `SnapshotLimit` helpers and
@@ -200,6 +201,7 @@ extension LimitRow {
     /// is directly testable.
     struct RowContent {
         let limit: SnapshotLimit
+        var allowsReset: Bool = true
 
         private var isEstimated: Bool { limit.usageLimit.isEstimated }
         private var isOut: Bool { limit.percentLeft <= 0 }
@@ -246,7 +248,7 @@ extension LimitRow {
             isEstimated ? nil : limit.usageLimit.pace()
         }
 
-        var showsReset: Bool { limit.usageLimit.resetTime != nil }
+        var showsReset: Bool { allowsReset && limit.usageLimit.resetTime != nil }
 
         /// Right-of-title value. Currency limits show money remaining; quota
         /// limits show "Out" only for a real (non-estimated) exhaustion,

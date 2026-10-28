@@ -152,7 +152,7 @@ open MeterBar.xcodeproj
 xAI tiers share one pool of AI usage across Grok and Cursor, refreshed weekly, so MeterBar shows a single xAI card. It reads two sources and merges them; either one is enough.
 
 1. Install [Grok Build](https://x.ai/cli) and log in: `grok login`
-2. Optional: install and log into Cursor IDE. MeterBar reads Cursor's local database, so Cursor accounts on legacy monthly plans keep their "Cursor Models" / "Other Models" pools and on-demand spend as extra rows on the same card.
+2. Optional: install and log into Cursor IDE. MeterBar reads Cursor's local database, so Cursor accounts on legacy monthly plans keep their "Cursor Models" / "Other Models" pools and on-demand spend as extra rows on the same card. For encrypted sign-ins, choose **Connect Cursor** in xAI settings and allow access to **Cursor Safe Storage** in Keychain. Background refresh never prompts, and decrypted credentials stay in memory. See [Cursor credential access](docs/cursor-credentials.md).
 3. Enable xAI under **Settings → General → Tracked Providers**
 4. MeterBar asks the official Grok CLI for weekly billing over ACP; that call has not been re-verified against a live merged-plan account. Usage-limit resets are read from grok.com with the cached login token (never logged), the same way Codex reset credits work.
 

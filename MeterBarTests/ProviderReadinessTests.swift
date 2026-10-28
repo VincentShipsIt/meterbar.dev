@@ -505,6 +505,31 @@ final class ProviderReadinessTests: XCTestCase {
         XCTAssertEqual(report.overall, .fail)
     }
 
+    func testCursorCredentialFailuresKeepDatabaseReadableAndExplainRecovery() {
+        for probe in [CursorDatabaseProbe.needsKeychainAccess, .encryptedCredentialUnavailable, .invalidToken] {
+            let report = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
+                isInstalled: true, database: probe, now: now
+            ))
+            XCTAssertEqual(report.check("auth")?.level, .fail)
+            XCTAssertEqual(report.check("data")?.level, .pass)
+            XCTAssertFalse((report.check("auth")?.detail ?? "").contains("database"))
+            XCTAssertNotNil(report.check("auth")?.recovery)
+        }
+        let unreadable = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
+            isInstalled: true, database: .unreadable, now: now
+        ))
+        XCTAssertFalse((unreadable.check("auth")?.recovery ?? "").contains("locks while running"))
+    }
+
+    func testCursorAPIRejectionIsARefreshFailureWithReadableCredentials() {
+        let report = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
+            isInstalled: true, database: .tokenPresent, refreshError: "Not authenticated", now: now
+        ))
+        XCTAssertEqual(report.check("auth")?.level, .pass)
+        XCTAssertEqual(report.check("data")?.level, .pass)
+        XCTAssertEqual(report.check("refresh")?.level, .fail)
+    }
+
     func testCursorNotFoundFailsInstalled() {
         let input = CursorReadinessInput(isInstalled: false, database: .notFound, now: now)
         let report = ProviderReadinessEvaluator.cursor(input)

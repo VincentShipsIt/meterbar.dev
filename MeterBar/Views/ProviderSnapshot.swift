@@ -107,12 +107,21 @@ struct ProviderSnapshot: Identifiable {
     /// simultaneous secondary-quota reset from being presented as the time at
     /// which normal provider usage resumes.
     var resetWindows: [ResetCountdownWindow] {
-        blockingLimits.map {
+        guard showsQuotaReset else { return [] }
+        return blockingLimits.map {
             ResetCountdownWindow(
                 id: "\(id)-\($0.title)",
                 title: $0.localizedTitle,
                 limit: $0.usageLimit
             )
+        }
+    }
+
+    /// A quota reset cannot repair sign-in or local credential access.
+    var showsQuotaReset: Bool {
+        guard authNotice == nil else { return false }
+        return !issues.contains {
+            $0.level == .fail && ($0.id == ReadinessCheckID.auth || $0.id == ReadinessCheckID.data)
         }
     }
 

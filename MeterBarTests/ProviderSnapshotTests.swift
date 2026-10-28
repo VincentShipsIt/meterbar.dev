@@ -54,6 +54,30 @@ final class ProviderSnapshotTests: XCTestCase {
         )
     }
 
+    func testCredentialFailureSuppressesResetCountdownWithoutDiscardingCachedQuota() throws {
+        let metrics = UsageMetrics(
+            service: .xai,
+            weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: Date(timeIntervalSince1970: 1_900_000_000))
+        )
+        var snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "xAI", service: .xai, metrics: metrics, emptyDetail: "", authNotice: nil
+        )
+        XCTAssertFalse(snapshot.resetWindows.isEmpty)
+        for notice in [ProviderAuthNotice.loginRequired, .attention("Credential access failed"), .notConnected] {
+            snapshot.authNotice = notice
+            XCTAssertFalse(snapshot.showsQuotaReset)
+            XCTAssertTrue(snapshot.resetWindows.isEmpty)
+            XCTAssertTrue(snapshot.hasExhaustedLimit)
+            XCTAssertEqual(snapshot.limits.count, 1)
+        }
+        snapshot.authNotice = nil
+        snapshot.issues = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
+            isInstalled: true, database: .needsKeychainAccess, now: Date(timeIntervalSince1970: 1_800_000_000)
+        )).checks.filter { $0.level == .fail }
+        XCTAssertFalse(snapshot.showsQuotaReset)
+        XCTAssertTrue(snapshot.resetWindows.isEmpty)
+    }
+
     func testTokenOnlyProvidersUseKeyNoticesWhileKimiKeepsLoginGuidance() throws {
         for service in [ServiceType.zaiCodingPlan, .githubCopilot, .kimiCode] {
             for rejected in [false, true] {

@@ -4,7 +4,6 @@ import os
 import AppKit
 import Combine
 import Network
-import SQLite3
 
 /// Service for fetching Cursor usage data using the cursor-stats approach.
 /// Reads authentication token from Cursor's local SQLite database and calls dashboard APIs.
@@ -36,6 +35,7 @@ class CursorLocalService: ObservableObject {
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
     @Published private(set) var lastError: ServiceError?
+    @Published private(set) var credentialProbe: CursorDatabaseProbe?
 
     /// The running request counter from the last successful poll.
     ///
@@ -112,105 +112,27 @@ class CursorLocalService: ObservableObject {
         return nil
     }
 
-    /// Read access token from Cursor's SQLite database.
-    /// `nonisolated`: opens and queries `state.vscdb` (often large and actively
-    /// WAL-written by Cursor) — never call synchronously from the main actor.
-    /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
+    nonisolated func readCredentials(
+        forceRescan: Bool = false,
+        mode: ClaudeKeychainAccessMode = .background
+    ) -> CursorCredentialReader.Result {
+        CursorCredentialReader.read(
+            databasePath: getCursorDatabasePath(forceRescan: forceRescan), mode: mode
+        )
+    }
+
     nonisolated func getAccessTokenFromDatabase(forceRescan: Bool = false) -> (userId: String, token: String)? {
-        guard let dbPath = getCursorDatabasePath(forceRescan: forceRescan) else {
-            // Database not found - Cursor may not be installed, which is okay
-            return nil
-        }
-
-        // Verify file exists and is readable before attempting to open
-        let isReadable = FileManager.default.isReadableFile(atPath: dbPath)
-        if !isReadable {
-            AppLog.usage.error("Cursor database not readable (sandbox)")
-            return nil
-        }
-
-        var db: OpaquePointer?
-        let result = sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil)
-        guard result == SQLITE_OK else {
-            AppLog.usage.error("Cursor SQLite open failed: \(result, privacy: .public)")
-            sqlite3_close(db)
-            return nil
-        }
-        defer { sqlite3_close(db) }
-
-        let query = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
-        var statement: OpaquePointer?
-
-        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-            AppLog.usage.error("Cursor query prepare failed")
-            return nil
-        }
-        defer { sqlite3_finalize(statement) }
-
-        guard sqlite3_step(statement) == SQLITE_ROW else {
-            return nil
-        }
-
-        guard let tokenCString = sqlite3_column_text(statement, 0) else {
-            AppLog.usage.error("Cursor token value unreadable")
-            return nil
-        }
-
-        let token = String(cString: tokenCString)
-
-        // Decode JWT to extract userId from 'sub' claim
-        guard let userId = Self.extractUserIdFromJWT(token) else {
-            AppLog.usage.error("Cursor JWT userId extraction failed")
-            return nil
-        }
-
-        return (userId: userId, token: token)
+        guard case let .credentials(userID, token) = readCredentials(forceRescan: forceRescan) else { return nil }
+        return (userID, token)
     }
 
-    /// Provider-issued subject for cross-Mac quota deduplication. Only the
-    /// subject is returned; the token read from Cursor's database remains local.
+    /// Only the subject leaves the credential reader; tokens stay in memory.
     nonisolated func externalAccountIdentity() -> String? {
-        (
-            getAccessTokenFromDatabase(forceRescan: false)
-                ?? getAccessTokenFromDatabase(forceRescan: true)
-        )?.userId
+        getAccessTokenFromDatabase(forceRescan: true)?.userId
     }
 
-    /// Probe the Cursor state database for provider-readiness diagnostics,
-    /// mapping the SQLite read onto the shared `CursorDatabaseProbe` states.
-    /// Uses the same path scan and read-only open as `getAccessTokenFromDatabase`,
-    /// but reports *why* auth is unavailable (not found / unreadable / no token)
-    /// instead of just a token, and never returns the token value itself.
     nonisolated func probeReadinessDatabase() -> CursorDatabaseProbe {
-        guard let dbPath = getCursorDatabasePath(forceRescan: false)
-            ?? getCursorDatabasePath(forceRescan: true) else {
-            return .notFound
-        }
-
-        guard FileManager.default.isReadableFile(atPath: dbPath) else {
-            return .unreadable
-        }
-
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return .unreadable
-        }
-        defer { sqlite3_close(db) }
-
-        let query = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-            return .unreadable
-        }
-        defer { sqlite3_finalize(statement) }
-
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              let tokenCString = sqlite3_column_text(statement, 0) else {
-            return .missingToken
-        }
-
-        return String(cString: tokenCString).isEmpty ? .missingToken : .tokenPresent
+        readCredentials(forceRescan: true).probe
     }
 
     /// Extract userId from JWT token's 'sub' claim.
@@ -237,13 +159,19 @@ class CursorLocalService: ObservableObject {
     /// `nonisolated`: reads the Cursor SQLite DB (and recursively scans the
     /// Cursor directory when `forceRescan`) — call from a detached task.
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
-    nonisolated func checkAccess(forceRescan: Bool = false) {
-        let hasToken = getAccessTokenFromDatabase(forceRescan: forceRescan) != nil
+    @discardableResult
+    nonisolated func checkAccess(
+        forceRescan: Bool = false,
+        mode: ClaudeKeychainAccessMode = .background
+    ) -> Bool {
+        let result = readCredentials(forceRescan: forceRescan, mode: mode)
         ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
-            self.hasAccess = hasToken
-            if !hasToken { self.subscriptionType = nil }
+            self.hasAccess = result.probe == .tokenPresent
+            self.credentialProbe = result.probe
+            if !self.hasAccess { self.subscriptionType = nil }
         }
+        return result.probe == .tokenPresent
     }
 
     // MARK: - Usage Fetching
@@ -251,15 +179,14 @@ class CursorLocalService: ObservableObject {
     func fetchUsageMetrics() async throws -> UsageMetrics {
         // SQLite read (plus a recursive directory scan on a miss) is blocking
         // I/O; the app target runs async bodies on the main actor (default
-        // MainActor isolation), so hop off explicitly. Try without rescan first
-        // (faster), then with rescan if needed.
+        // MainActor isolation), so hop off explicitly. The path resolver checks
+        // known locations before falling back to a recursive rescan.
         let credentials = await Task.detached(priority: .userInitiated) { [self] in
-            getAccessTokenFromDatabase(forceRescan: false)
-                ?? getAccessTokenFromDatabase(forceRescan: true)
+            readCredentials(forceRescan: true)
         }.value
-
-        guard let (userId, token) = credentials else {
-            let error = ServiceError.notAuthenticated
+        await MainActor.run { self.credentialProbe = credentials.probe }
+        guard case let .credentials(userId, token) = credentials else {
+            let error = Self.credentialError(for: credentials.probe)
             await MainActor.run {
                 self.lastError = error
                 self.hasAccess = false
@@ -267,9 +194,7 @@ class CursorLocalService: ObservableObject {
             throw error
         }
 
-        await MainActor.run {
-            self.hasAccess = true
-        }
+        await MainActor.run { self.hasAccess = true }
 
         do {
             let fetched = try await Self.fetchRemotely(
@@ -293,6 +218,19 @@ class CursorLocalService: ObservableObject {
                 }
             }
             throw serviceError
+        }
+    }
+
+    nonisolated static func credentialError(for probe: CursorDatabaseProbe) -> ServiceError {
+        switch probe {
+        case .notFound, .missingToken, .invalidToken, .tokenPresent:
+            return .notAuthenticated
+        case .unreadable:
+            return .apiError("Cursor's local database could not be read. Check file access and rescan.")
+        case .needsKeychainAccess:
+            return .apiError("Cursor Keychain access is needed. Open xAI settings and choose Connect Cursor.")
+        case .encryptedCredentialUnavailable:
+            return .apiError("Cursor's encrypted sign-in could not be decrypted. Open Cursor and sign in again.")
         }
     }
 

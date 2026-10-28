@@ -335,6 +335,7 @@ struct MenuBarProviderDetailContent: View {
     hasIssues: Bool = false,
     hasProviderStatus: Bool = false,
     hasExtraUsage: Bool = false,
+    showsQuotaReset: Bool = true,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = []
@@ -342,13 +343,13 @@ struct MenuBarProviderDetailContent: View {
     if limits.isEmpty {
       // With issues listed, they already say why there is no data.
       if !hasIssues { cards.append(.empty) }
-    } else if hasExhaustedLimit {
+    } else if hasExhaustedLimit && showsQuotaReset {
       cards.append(.blockingReset)
     } else {
       let rows = Self.rows(for: limits, now: now)
-      let lastRunwayID = rows.last(where: { $0.isRunway })?.limit.id
+      let lastRunwayID = showsQuotaReset ? rows.last(where: { $0.isRunway })?.limit.id : nil
       cards += rows.map { row in
-        .limit(id: row.limit.id, isRunway: row.isRunway, showsLegend: row.limit.id == lastRunwayID)
+        .limit(id: row.limit.id, isRunway: showsQuotaReset && row.isRunway, showsLegend: row.limit.id == lastRunwayID)
       }
     }
     if showsDailyUsage { cards.append(.dailyUsage) }
@@ -376,7 +377,8 @@ struct MenuBarProviderDetailContent: View {
       showsDailyUsage: showsDailyUsage,
       hasIssues: !snapshot.issues.isEmpty,
       hasProviderStatus: snapshot.service.hasStatusPage,
-      hasExtraUsage: snapshot.displayedExtraUsage != nil
+      hasExtraUsage: snapshot.displayedExtraUsage != nil,
+      showsQuotaReset: snapshot.showsQuotaReset
     )
   }
 
@@ -421,7 +423,8 @@ struct MenuBarProviderDetailContent: View {
             limit: limit,
             accentColor: snapshot.accentColor,
             density: .detail,
-            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat,
+            showsReset: snapshot.showsQuotaReset
           )
           if isRunway {
             RunwayView(limit: limit, accentColor: snapshot.accentColor, showsFooter: false)
@@ -534,7 +537,7 @@ struct MenuBarErrorDetailContent: View {
         HoverCardSurface(revealed: isPresented, reduceMotion: reduceMotion) {
           VStack(alignment: .leading, spacing: 10) {
             ProviderCardHeader(snapshot: snapshot)
-            if snapshot.hasExhaustedLimit {
+            if snapshot.hasExhaustedLimit, snapshot.showsQuotaReset {
               BlockingLimitResetCounter(
                 windows: snapshot.resetWindows,
                 accentColor: snapshot.accentColor,

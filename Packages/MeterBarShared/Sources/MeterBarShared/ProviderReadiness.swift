@@ -388,17 +388,23 @@ public struct ProviderReadinessSummary: Sendable, Equatable {
 // MARK: - Inputs
 
 /// Outcome of probing Cursor's local SQLite state database. Modeled as an enum
-/// because the database read (SQLite, on a file that locks while Cursor runs)
+/// because database and Keychain access
 /// cannot be exercised purely — the impure inspector maps the real read onto
 /// one of these cases and the evaluator turns it into checks.
 public enum CursorDatabaseProbe: String, Codable, Sendable, Equatable {
     /// No `state.vscdb` found in any known location.
     case notFound
-    /// Found, but the file could not be opened/read (permissions or Cursor lock).
+    /// Found, but the file could not be opened/read (permissions, a busy writer, or journal access).
     case unreadable
     /// Readable, but no `cursorAuth/accessToken` row — not signed in.
     case missingToken
-    /// Readable and a session token is present.
+    /// Readable, but the encrypted credential needs explicit Keychain access.
+    case needsKeychainAccess
+    /// Unsupported encrypted format, missing encryption key, or decryption failure.
+    case encryptedCredentialUnavailable
+    /// Readable, but the token is not a usable JWT.
+    case invalidToken
+    /// Readable and a usable session JWT was resolved.
     case tokenPresent
 }
 
@@ -861,7 +867,7 @@ public enum ProviderReadinessEvaluator {
 
         let auth = cursorAuthCheck(input.database)
 
-        let dataReadable = input.database == .tokenPresent || input.database == .missingToken
+        let dataReadable = input.database != .notFound && input.database != .unreadable
         let data = ReadinessCheck(
             id: ReadinessCheckID.data,
             title: "Data readable",
@@ -906,7 +912,33 @@ public enum ProviderReadinessEvaluator {
                 title: title,
                 level: .fail,
                 detail: "Cursor's local database could not be read.",
-                recovery: "Quit Cursor (its database locks while running), then rescan."
+                recovery: "Check access to Cursor's local database, then rescan. "
+                    + "If the problem persists, restart Cursor."
+            )
+        case .needsKeychainAccess:
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: title,
+                level: .fail,
+                detail: "Cursor's encrypted sign-in needs Keychain access.",
+                recovery: "Open xAI settings and choose Connect Cursor to allow access. "
+                    + "Background refresh never prompts."
+            )
+        case .encryptedCredentialUnavailable:
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: title,
+                level: .fail,
+                detail: "Cursor's encrypted sign-in could not be decrypted.",
+                recovery: "Open Cursor and sign in again, then choose Connect Cursor in xAI settings."
+            )
+        case .invalidToken:
+            return ReadinessCheck(
+                id: ReadinessCheckID.auth,
+                title: title,
+                level: .fail,
+                detail: "Cursor's stored sign-in is invalid.",
+                recovery: "Open Cursor and sign in again."
             )
         }
     }

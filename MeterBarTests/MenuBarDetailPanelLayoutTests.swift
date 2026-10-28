@@ -515,6 +515,19 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
         XCTAssertEqual(result, [.blockingReset, .dailyUsage])
     }
 
+    func testCredentialFailureKeepsQuotaRowsInsteadOfAnEmptyResetCounter() {
+        let result = MenuBarProviderDetailContent.cards(
+            limits: [rowLimit("session", kind: .session)],
+            hasExhaustedLimit: true,
+            hasBadges: false,
+            showsDailyUsage: false,
+            hasIssues: true,
+            showsQuotaReset: false,
+            now: rowsNow
+        )
+        XCTAssertEqual(result, [.issues, .limit(id: "session", isRunway: false, showsLegend: false)])
+    }
+
     /// The hover sits against the popover, so the gap stays small.
     func testPanelSitsCloseToThePopover() {
         XCTAssertLessThanOrEqual(MeterBarMenuDetailPanelLayout.panelGap, 8)
