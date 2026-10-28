@@ -126,7 +126,7 @@ struct ProviderStatusCard: View {
             offlineRow
         } else if ProviderCardPresentation.collapsesToLoginRow(snapshot: snapshot) {
             staleLoginRow
-        } else if snapshot.hasExhaustedWeeklyLimit {
+        } else if snapshot.hasExhaustedWeeklyLimit, snapshot.showsQuotaReset {
             weeklyExhaustedRow
         } else {
             expandedCardBody
@@ -221,7 +221,7 @@ struct ProviderStatusCard: View {
                 showsLiveAccount: isLiveAccount
             )
 
-            if snapshot.hasExhaustedLimit {
+            if snapshot.hasExhaustedLimit, snapshot.showsQuotaReset {
                 BlockingLimitResetCounter(
                     windows: snapshot.resetWindows,
                     accentColor: snapshot.accentColor,

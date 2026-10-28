@@ -335,6 +335,7 @@ struct MenuBarProviderDetailContent: View {
     hasIssues: Bool = false,
     hasProviderStatus: Bool = false,
     hasExtraUsage: Bool = false,
+    showsQuotaReset: Bool = true,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = []
@@ -342,7 +343,7 @@ struct MenuBarProviderDetailContent: View {
     if limits.isEmpty {
       // With issues listed, they already say why there is no data.
       if !hasIssues { cards.append(.empty) }
-    } else if hasExhaustedLimit {
+    } else if hasExhaustedLimit && showsQuotaReset {
       cards.append(.blockingReset)
     } else {
       let rows = Self.rows(for: limits, now: now)
@@ -376,7 +377,8 @@ struct MenuBarProviderDetailContent: View {
       showsDailyUsage: showsDailyUsage,
       hasIssues: !snapshot.issues.isEmpty,
       hasProviderStatus: snapshot.service.hasStatusPage,
-      hasExtraUsage: snapshot.displayedExtraUsage != nil
+      hasExtraUsage: snapshot.displayedExtraUsage != nil,
+      showsQuotaReset: snapshot.showsQuotaReset
     )
   }
 

@@ -277,7 +277,7 @@ struct ProviderSettingsView: View {
                         // Blocking exhaustion matches the popover card: status +
                         // reset countdown only. A full red bar that reads
                         // "100% / Out of quota" just repeats the same fact.
-                        if snapshot.hasExhaustedLimit {
+                        if snapshot.hasExhaustedLimit, snapshot.showsQuotaReset {
                             ProviderBlockedUsageSummary(
                                 snapshot: snapshot,
                                 density: .settings,
@@ -293,7 +293,7 @@ struct ProviderSettingsView: View {
                             )
                         }
 
-                        if !snapshot.hasExhaustedLimit {
+                        if !snapshot.hasExhaustedLimit || !snapshot.showsQuotaReset {
                             if snapshot.detailLimits.isEmpty {
                                 EmptyStateCard(
                                     systemImage: "clock.badge.questionmark",
