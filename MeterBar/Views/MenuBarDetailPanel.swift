@@ -347,9 +347,9 @@ struct MenuBarProviderDetailContent: View {
       cards.append(.blockingReset)
     } else {
       let rows = Self.rows(for: limits, now: now)
-      let lastRunwayID = rows.last(where: { $0.isRunway })?.limit.id
+      let lastRunwayID = showsQuotaReset ? rows.last(where: { $0.isRunway })?.limit.id : nil
       cards += rows.map { row in
-        .limit(id: row.limit.id, isRunway: row.isRunway, showsLegend: row.limit.id == lastRunwayID)
+        .limit(id: row.limit.id, isRunway: showsQuotaReset && row.isRunway, showsLegend: row.limit.id == lastRunwayID)
       }
     }
     if showsDailyUsage { cards.append(.dailyUsage) }
@@ -423,7 +423,8 @@ struct MenuBarProviderDetailContent: View {
             limit: limit,
             accentColor: snapshot.accentColor,
             density: .detail,
-            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat,
+            showsReset: snapshot.showsQuotaReset
           )
           if isRunway {
             RunwayView(limit: limit, accentColor: snapshot.accentColor, showsFooter: false)

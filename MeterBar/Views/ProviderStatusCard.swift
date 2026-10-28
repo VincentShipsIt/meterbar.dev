@@ -264,7 +264,8 @@ struct ProviderStatusCard: View {
                     limit: limit,
                     accentColor: snapshot.accentColor,
                     density: limitDensity,
-                    resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat
+                    resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat,
+                    showsReset: snapshot.showsQuotaReset
                 )
             }
         }

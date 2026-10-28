@@ -525,7 +525,7 @@ final class MenuBarProviderDetailParityTests: XCTestCase {
             showsQuotaReset: false,
             now: rowsNow
         )
-        XCTAssertEqual(result, [.issues, .limit(id: "session", isRunway: true, showsLegend: true)])
+        XCTAssertEqual(result, [.issues, .limit(id: "session", isRunway: false, showsLegend: false)])
     }
 
     /// The hover sits against the popover, so the gap stays small.

@@ -47,6 +47,20 @@ final class LimitRowTests: XCTestCase {
 
     // MARK: - Footnote
 
+    func testCredentialFailureHidesResetForSightedAndVoiceOverUsers() {
+        let limit = quotaLimit(used: 40, resetTime: Date(timeIntervalSince1970: 1_900_000_000))
+        let content = LimitRow.RowContent(limit: limit, allowsReset: false)
+        XCTAssertFalse(content.showsReset)
+        XCTAssertEqual(content.usedText, LimitRow.RowContent(limit: limit).usedText)
+        for density in [LimitRow.Density.compact, .detail, .regular] {
+            let row = LimitRow(limit: limit, accentColor: .blue, density: density, showsReset: false)
+            XCTAssertEqual(
+                row.accessibilityValueText(now: Date(timeIntervalSince1970: 1_800_000_000)),
+                limit.localizedAccessibilityValue
+            )
+        }
+    }
+
     func testFootnoteShowsOnWiderDensitiesOnly() {
         var limit = quotaLimit(used: 40)
         limit.footnote = .includedBeforeCredits

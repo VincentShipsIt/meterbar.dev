@@ -159,10 +159,11 @@ class CursorLocalService: ObservableObject {
     /// `nonisolated`: reads the Cursor SQLite DB (and recursively scans the
     /// Cursor directory when `forceRescan`) — call from a detached task.
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
+    @discardableResult
     nonisolated func checkAccess(
         forceRescan: Bool = false,
         mode: ClaudeKeychainAccessMode = .background
-    ) {
+    ) -> Bool {
         let result = readCredentials(forceRescan: forceRescan, mode: mode)
         ServiceSupport.applyOnMain { [weak self] in
             guard let self else { return }
@@ -170,6 +171,7 @@ class CursorLocalService: ObservableObject {
             self.credentialProbe = result.probe
             if !self.hasAccess { self.subscriptionType = nil }
         }
+        return result.probe == .tokenPresent
     }
 
     // MARK: - Usage Fetching

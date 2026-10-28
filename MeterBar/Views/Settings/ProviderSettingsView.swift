@@ -305,7 +305,8 @@ struct ProviderSettingsView: View {
                                     LimitRow(
                                         limit: limit,
                                         accentColor: snapshot.accentColor,
-                                        density: .regular
+                                        density: .regular,
+                                        showsReset: snapshot.showsQuotaReset
                                     )
                                 }
                             }
@@ -895,10 +896,10 @@ struct ProviderSettingsView: View {
                     Task {
                         defer { isConnectingCursor = false }
                         let cursor = cursorService
-                        await Task.detached(priority: .userInitiated) {
+                        let connected = await Task.detached(priority: .userInitiated) {
                             cursor.checkAccess(forceRescan: true, mode: .interactive)
                         }.value
-                        await dataManager.refresh(service: .xai)
+                        if connected { await dataManager.refresh(service: .xai) }
                     }
                 }
                 .buttonStyle(.bordered)
@@ -910,7 +911,8 @@ struct ProviderSettingsView: View {
                     + "to keep future refreshes silent. Background refresh never prompts.",
                 color: .secondary
             )
-            if let probe = cursorService.credentialProbe, probe != .tokenPresent, probe != .notFound {
+            if let probe = cursorService.credentialProbe, probe != .tokenPresent,
+               probe != .notFound || !summary.isConnected {
                 let report = ProviderReadinessEvaluator.cursor(CursorReadinessInput(
                     isInstalled: true, database: probe, now: Date()
                 ))
@@ -920,6 +922,13 @@ struct ProviderSettingsView: View {
                         color: MeterBarTheme.warning
                     )
                 }
+            }
+
+            if cursorService.credentialProbe == .tokenPresent, case .notAuthenticated = cursorService.lastError {
+                SettingsNotice(
+                    text: "Cursor rejected its saved sign-in. Open Cursor and sign in again, then refresh.",
+                    color: MeterBarTheme.warning
+                )
             }
 
             if !summary.isConnected {
