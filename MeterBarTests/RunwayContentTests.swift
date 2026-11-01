@@ -153,4 +153,47 @@ final class RunwayContentTests: XCTestCase {
         XCTAssertFalse(RunwayContent.isEligible(snapshotLimit(.session, window: nil), now: now))
         XCTAssertFalse(RunwayContent.isEligible(snapshotLimit(.weekly, window: week, isEstimated: true), now: now))
     }
+
+    // MARK: - DST
+
+    /// A Claude-style weekly window that spans the 2026-10-25 EU fall-back:
+    /// opened Fri Oct 23 12:00 CEST, resets Fri Oct 30 11:00 CET (both 10:00 UTC).
+    private func parisWeekAcrossFallBack(used: Double) throws -> RunwayContent {
+        var paris = Calendar(identifier: .gregorian)
+        paris.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Paris"))
+        let iso = ISO8601DateFormatter()
+        let reset = try XCTUnwrap(iso.date(from: "2026-10-30T10:00:00Z"))
+        let now = try XCTUnwrap(iso.date(from: "2026-10-27T10:00:00Z"))
+        let limit = UsageLimit(used: used, total: 100, resetTime: reset, windowSeconds: week, periodKind: .weekly)
+        return try XCTUnwrap(RunwayContent(limit: limit, now: now, calendar: paris, locale: en))
+    }
+
+    func testDailyAxisPlacesMidnightsAcrossTheFallBack() throws {
+        let runway = try parisWeekAcrossFallBack(used: 20)
+
+        XCTAssertEqual(runway.ticks.map(\.label), ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"])
+        // Sat 00:00 CEST is 12h in; Sunday has 25 hours, so Mon 00:00 CET is 61h in.
+        let hoursIn = runway.ticks.map { Double($0.x) * 168 }
+        XCTAssertEqual(hoursIn[0], 12, accuracy: 0.001)
+        XCTAssertEqual(hoursIn[1], 36, accuracy: 0.001)
+        XCTAssertEqual(hoursIn[2], 61, accuracy: 0.001)
+        XCTAssertEqual(hoursIn[6], 157, accuracy: 0.001)
+    }
+
+    /// The headline and detail name the reset in the calendar's zone, the same
+    /// one the axis uses, whatever zone the process runs in.
+    func testResetClockUsesTheCalendarZone() throws {
+        let runway = try parisWeekAcrossFallBack(used: 20)
+
+        XCTAssertTrue(runway.detail.hasPrefix("Resets Fri 11"), runway.detail)
+    }
+
+    func testShortfallHeadlineUsesTheCalendarZone() throws {
+        // 90% used 96h in: empty 96 * 10 / 90 ≈ 10.67h later, Tue Oct 27 21:40 CET.
+        let runway = try parisWeekAcrossFallBack(used: 90)
+
+        XCTAssertEqual(runway.outlook, .shortfall)
+        XCTAssertTrue(runway.headline.hasPrefix("Out by Tue 9"), runway.headline)
+        XCTAssertTrue(runway.detail.hasPrefix("Resets Fri 11"), runway.detail)
+    }
 }

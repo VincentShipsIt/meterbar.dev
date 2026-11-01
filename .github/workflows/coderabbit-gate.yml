@@ -58,10 +58,16 @@ jobs:
       - name: Test trusted base review evidence evaluator offline
         run: scripts/test-coderabbit-review.sh
 
-      - name: Require completed CodeRabbit review on the exact head
+      # Informational only: the free CodeRabbit plan rate-limits reviews, so a
+      # missing or incomplete review is reported as a warning and never blocks
+      # a merge.
+      - name: Report CodeRabbit review status on the exact head
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python3 scripts/verify-coderabbit-review.py --live
+        run: |
+          if ! python3 scripts/verify-coderabbit-review.py --live; then
+            echo "::warning::No completed CodeRabbit review on this head (often the free-plan rate limit). Informational only; not blocking."
+          fi
