@@ -199,7 +199,7 @@ struct MenuBarView: View {
         PopoverControlTiles(
           openStatusDetail: openStatusDetail,
           hoverStatusDetail: hoverStatusDetailChanged,
-          hoverControl: hoverControlsChanged
+          hoverControl: { hoverControlChanged(id: PopoverCardID.stayAwake, isHovered: $0) }
         )
 
         if SessionWakeMenuControl.shouldShow(
@@ -210,7 +210,7 @@ struct MenuBarView: View {
           DashboardTile(padding: .popover) {
             SessionWakeMenuControl()
           }
-          .onHover(perform: hoverControlsChanged)
+          .onHover { hoverControlChanged(id: PopoverCardID.sessionWake, isHovered: $0) }
         }
       }
       .padding([.horizontal, .top], MenuBarPopoverGeometry.cardInset)
@@ -308,7 +308,7 @@ struct MenuBarView: View {
       refresh: { Task { await dataManager.refreshForExplicitAction(.manualRefresh) } },
       openDashboard: openDashboard
     )
-    .onHover(perform: hoverControlsChanged)
+    .onHover { hoverControlChanged(id: PopoverCardID.footer, isHovered: $0) }
     .padding(.horizontal, MenuBarPopoverGeometry.cardInset + MeterBarTheme.Spacing.xs)
     .padding(.bottom, MenuBarPopoverGeometry.cardGap)
   }
@@ -385,8 +385,8 @@ struct MenuBarView: View {
 
   /// Stay Awake, Session Wake and the footer own no detail panel, so pointing at
   /// one closes whichever panel is open (after the usual short grace period).
-  private func hoverControlsChanged(_ isHovered: Bool) {
-    hoverOwnership.updateSource(id: PopoverCardID.controls, isHovered: isHovered)
+  private func hoverControlChanged(id: String, isHovered: Bool) {
+    hoverOwnership.updateSource(id: id, isHovered: isHovered)
     reconcileDetailDismissal()
   }
 
